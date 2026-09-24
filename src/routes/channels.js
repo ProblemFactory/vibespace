@@ -59,39 +59,112 @@ function fail(res, e) {
     else if (code === 'auth-expired') status = 401;
     else status = 502;
   }
-  return res.status(status || 500).json({ error: String((e && e.message) || e), code, detail: detail && typeof detail === 'object' ? { missing: detail.missing || undefined, needsCredentials: detail.needsCredentials || undefined, code: detail.code || undefined } : null });
+  // `detail` is WHITELISTED: the refusal's structure the client words (the
+  // missing fields, a custom client's per-field complaints — field → rule,
+  // never a value — and the named references a Remove is refused for)
+  return res.status(status || 500).json({ error: String((e && e.message) || e), code, detail: detail && typeof detail === 'object' ? { missing: detail.missing || undefined, needsCredentials: detail.needsCredentials || undefined, code: detail.code || undefined, errors: detail.errors || undefined, refs: detail.refs || undefined, key: detail.key || undefined, offered: detail.offered || undefined } : null });
 }
 
+/** The client choice a body names (r4 §2.4): `credentialKey` (`cluster:<k>`
+ *  | `custom`), `clientPreset` (the storage dialog's spelling), `credential
+ *  {appId, appSecret}` / `clientId` + `clientSecret` (a custom client — the
+ *  plaintext reaches the engine, is sealed there and is never echoed). */
+function choiceOf(b) {
+  const out = {};
+  if (typeof b.credentialKey === 'string') out.credentialKey = b.credentialKey;
+  if (typeof b.clientPreset === 'string') out.clientPreset = b.clientPreset;
+  if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out.credential = { appId: b.credential.appId, appSecret: b.credential.appSecret };
+  if (typeof b.clientId === 'string') out.clientId = b.clientId;
+  if (typeof b.clientSecret === 'string') out.clientSecret = b.clientSecret;
+  return out;
+}
+
+// ── r4: THE ACCOUNT DIALOG'S SIGN-IN (design-integrations-per-account §2.4) ──
+/** The storage dialog's consent shape (`/api/mounts/gdrive-auth/*`) for an
+ *  account that does not exist yet: START `{kind, clientPreset |
+ *  credentialKey | clientId + clientSecret | credential, options?}` →
+ *  `{flowId, url, flow}`; STATUS `?flowId=` (omitted = the latest) →
+ *  `{running, done, ok, error, user, token}` where `token` is the FLOW ID
+ *  once signed in (the handle the shared block writes into its field and
+ *  Connect submits — never a credential); CALLBACK `{url, flowId?}` = the
+ *  paste-back. The record is created only by `connect {flowId}`. Declared
+ *  BEFORE `GET /api/channels/:adapterId/:convId`, which would match. */
+router.post('/api/channels/oauth/start', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options })) });
+  } catch (e) { fail(res, e); }
+});
+router.get('/api/channels/oauth/status', (req, res) => {
+  try { forHost(req); res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null)); } catch (e) { fail(res, e); }
+});
+router.post('/api/channels/oauth/callback', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    const r = await engine().oauthCallback({ url: b.url, flowId: typeof b.flowId === 'string' ? b.flowId : null });
+    if (!r.ok) return bad(res, 400, r.error || 'the consent flow failed', { code: 'auth-failed' });
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
+
 // ── P1: connect / re-authorize / paste-back / cancel / disconnect / options ──
-/** CONNECT: mints a NEW account of a kind (`{credentialKey?, newAccount?}`,
- *  2026-09-22 — `credentialKey` = `cluster:<presetKey>` | `own`, validated
- *  against what the integration offers right now, `400 unknown-credential`
- *  by name otherwise; omitted = the row's own pick; `newAccount:true` mints
- *  a further account even when one exists) and begins its consent flow.
- *  Without `newAccount` on a kind that already has an account: the P1a
- *  path, re-authorizing the FIRST account — a `credentialKey` there is judged
- *  as by `/reauthorize` (a token-less first account re-binds, a bound one
- *  `400 credential-bound`). `409 needs-credentials` when the account's key
- *  resolves to none — the client opens that card FIRST. */
+/** CONNECT (r4): `{flowId, name?, options?}` = the account dialog's Connect
+ *  — the record is created here from a finished sign-in (`404 no-flow`,
+ *  `409 flow-not-done` / `flow-failed`, `400 flow-client-mismatch`). Without
+ *  `flowId` (the pre-r4 wizard): a NEW account under the body's client
+ *  choice (`cluster:<k>` | `custom` + credential — `400 unknown-credential`
+ *  / `invalid-client` / `own-retired` by name; omitted = the row's pick)
+ *  whose consent begins at once; without `newAccount` on a type that has an
+ *  account the FIRST account is re-authorized. `409 needs-credentials` when
+ *  the chosen client resolves to none. */
 router.post('/api/channels/adapters/:kind/connect', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    res.json(await engine().connect(req.params.kind, { credentialKey: typeof b.credentialKey === 'string' ? b.credentialKey : null, newAccount: b.newAccount === true }));
+    // r4: `{flowId, name?, options?}` = the account dialog's Connect (the
+    // record is created HERE from a finished sign-in); a client choice in
+    // the same body must be the flow's (`400 flow-client-mismatch`)
+    res.json(await engine().connect(req.params.kind, { ...choiceOf(b), newAccount: b.newAccount === true, flowId: typeof b.flowId === 'string' ? b.flowId : null, name: typeof b.name === 'string' ? b.name : null, options: b.options }));
   } catch (e) { fail(res, e); }
 });
-/** RE-AUTHORIZE one ACCOUNT by its adapter id (never by kind): begins its
- *  consent flow under ITS credential. `{credentialKey?}` RE-BINDS a
- *  TOKEN-LESS account (never authenticated / disconnected — nothing is
- *  minted under its key) after validation (`400 unknown-credential`); on an
- *  account that HOLDS a token bound to another credential it is refused BY
- *  NAME (`400 credential-bound`), never dropped. `404 no-such-adapter`. */
+/** RE-AUTHORIZE one ACCOUNT by its adapter id (never by kind), the mount
+ *  semantics (r4 §2.4): the same client (or none named) ⇒ its consent
+ *  begins; a DIFFERENT client in the body IS a re-authorization under it —
+ *  `{rebind:true}`, and the account's client and token are replaced
+ *  together when that consent lands (until then it keeps both). The pre-r4
+ *  `400 credential-bound` refusal is gone. `404 no-such-adapter`. */
 router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
   try {
     forHost(req);
-    const b = req.body || {};
-    res.json(await engine().reauthorize(req.params.id, { credentialKey: typeof b.credentialKey === 'string' ? b.credentialKey : null }));
+    res.json(await engine().reauthorize(req.params.id, choiceOf(req.body || {})));
   } catch (e) { fail(res, e); }
+});
+/** DUPLICATE (r4 §8.1 #2): `{name?}` → `{adapter}` — a NEW, UNAUTHORIZED
+ *  account carrying exactly the engine's declared `DUPLICATE_FIELDS`; the
+ *  client then runs its own consent (reauthorize). */
+router.post('/api/channels/adapters/:id/duplicate', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    res.json(await engine().duplicate(req.params.id, { name: typeof b.name === 'string' ? b.name : null }));
+  } catch (e) { fail(res, e); }
+});
+/** REMOVE (r4 §8.1 #5): `409 account-referenced {detail.refs:[{kind:
+ *  'assignment'|'reach'|'outbox', …}]}` BY NAME while anything points at the
+ *  account; otherwise the record and its index rows go. Disconnect is not
+ *  this verb (it only drops the token). */
+router.delete('/api/channels/adapters/:id', async (req, res) => {
+  try { forHost(req); res.json(await engine().remove(req.params.id)); } catch (e) { fail(res, e); }
+});
+/** THE OWNER'S CONFIG (D3 — the storage `GET /api/mounts/:id/config` rule):
+ *  every parameter the Edit dialog prefills, the custom client's secret in
+ *  the clear. Cookie-auth only, never broadcast, never logged, never an
+ *  agent route (the agent surface is /api/agent/channels/* and does not
+ *  reach this). */
+router.get('/api/channels/adapters/:id/config', (req, res) => {
+  try { forHost(req); res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }
 });
 /** PASTE-BACK: the user pastes the redirect URL their browser landed on. */
 router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {
@@ -126,6 +199,11 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     // P4 (§9.5): the per-channel sender honesty switch — true / false / null
     // (= follow the instance setting `channels.senderHonestyLine`).
     if (b.senderHonestyLine !== undefined) out = { ...out, ...(await engine().setSenderHonesty(req.params.id, b.senderHonestyLine)) };
+    // r4 (the Edit dialog's in-place saves): the account's name, and a custom
+    // client's SECRET for the SAME id (another id / a preset = a client
+    // switch = `409 client-change-needs-reauth`: use Re-authorize)
+    if (typeof b.label === 'string') out = { ...out, ...(await engine().setLabel(req.params.id, b.label)) };
+    if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out = { ...out, ...(await engine().setCustomSecret(req.params.id, { appId: b.credential.appId, appSecret: b.credential.appSecret })) };
     res.json(out);
   } catch (e) { fail(res, e); }
 });

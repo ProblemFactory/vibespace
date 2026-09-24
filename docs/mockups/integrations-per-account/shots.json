@@ -1,0 +1,2890 @@
+{
+ "account-card": {
+  "file": "account-card.png",
+  "probes": [
+   {
+    "sel": "#panel",
+    "name": "the Communication panel",
+    "x": 12,
+    "y": 12,
+    "w": 300,
+    "h": 492,
+    "text": "3 个账号 · 3 个会话被跟踪 Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 ·"
+   },
+   {
+    "sel": "#sec-gmail",
+    "name": "account card: Gmail (credential-first)",
+    "x": 21,
+    "y": 53,
+    "w": 282,
+    "h": 158,
+    "text": "Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 · label:INBOX · 上次"
+   },
+   {
+    "sel": "#sec-gmail .chan-dot",
+    "name": "its status dot",
+    "x": 219,
+    "y": 65,
+    "w": 6,
+    "h": 6,
+    "text": ""
+   },
+   {
+    "sel": "#health-gmail",
+    "name": "its health line",
+    "x": 21,
+    "y": 83,
+    "w": 282,
+    "h": 32,
+    "text": "Gmail已连接 · label:INBOX · 上次轮询 2 分钟前 · 推送: 独占"
+   },
+   {
+    "sel": "#sec-gmail .chan-cred-chip",
+    "name": "its client chip (Preset: …)",
+    "x": 111,
+    "y": 61,
+    "w": 103,
+    "h": 15,
+    "text": "预设：Google (Drive/Gmail)"
+   },
+   {
+    "sel": "#menu-gmail",
+    "name": "the OPEN ⋯ menu (verb order = the mount row)",
+    "x": 319,
+    "y": 41,
+    "w": 176,
+    "h": 284,
+    "text": "打开会话窗口 跟踪… 选项 推送… 重新授权 创建副本… 断开 移除… 禁用"
+   },
+   {
+    "sel": "#menu-gmail .mock-menu-item:nth-child(1)",
+    "name": "verb 1: 打开",
+    "x": 320,
+    "y": 48,
+    "w": 174,
+    "h": 28,
+    "text": "打开会话窗口"
+   },
+   {
+    "sel": "#mi-duplicate",
+    "name": "verb: 创建副本…",
+    "x": 320,
+    "y": 197,
+    "w": 174,
+    "h": 28,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#mi-remove",
+    "name": "verb: 移除…",
+    "x": 320,
+    "y": 253,
+    "w": 174,
+    "h": 28,
+    "text": "移除…"
+   },
+   {
+    "sel": "#tracked-1",
+    "name": "↳ tracked conversation 1",
+    "x": 43,
+    "y": 117,
+    "w": 260,
+    "h": 46,
+    "text": "↳供应商报价5 分钟内最近 · 报价单 v3 · 分配给: 采购 agent"
+   },
+   {
+    "sel": "#tracked-2",
+    "name": "↳ tracked conversation 2",
+    "x": 43,
+    "y": 165,
+    "w": 260,
+    "h": 46,
+    "text": "↳面试安排5 分钟内最近 · 周四 15:00 可以吗"
+   },
+   {
+    "sel": "#sec-lark",
+    "name": "account card: Lark (dead token)",
+    "x": 21,
+    "y": 217,
+    "w": 282,
+    "h": 134,
+    "text": "Lark / 飞书 · 张三 预设：Lark (VibeSpace 自建 app) 1/5 ⋯ 连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓"
+   },
+   {
+    "sel": "#err-lark",
+    "name": "the error line (mounts wording)",
+    "x": 21,
+    "y": 247,
+    "w": 282,
+    "h": 56,
+    "text": "连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓取都失败; 重新授权以修复重新授权 Lark…"
+   },
+   {
+    "sel": "#reauth-lark",
+    "name": "the inline 重新授权 Lark… button",
+    "x": 45,
+    "y": 279,
+    "w": 99,
+    "h": 24,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#sec-empty",
+    "name": "an account tracking nothing (credential-only style wording)",
+    "x": 21,
+    "y": 357,
+    "w": 282,
+    "h": 102,
+    "text": "Gmail · team@example.com 自定义客户端 0/7 ⋯ 仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下"
+   },
+   {
+    "sel": "#empty-hint",
+    "name": "its empty wording",
+    "x": 21,
+    "y": 387,
+    "w": 282,
+    "h": 72,
+    "text": "仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下挑选会话。跟踪…"
+   },
+   {
+    "sel": "#connect-more",
+    "name": "the entry: 连接账号",
+    "x": 21,
+    "y": 465,
+    "w": 282,
+    "h": 30,
+    "text": "连接账号（Gmail、Lark / 飞书…）"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 490,
+   "clientHeight": 490,
+   "x": 12,
+   "y": 12,
+   "w": 300,
+   "h": 492
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "account-card.full": {
+  "file": "account-card.full.png",
+  "probes": [
+   {
+    "sel": "#panel",
+    "name": "the Communication panel",
+    "x": 12,
+    "y": 12,
+    "w": 300,
+    "h": 492,
+    "text": "3 个账号 · 3 个会话被跟踪 Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 ·"
+   },
+   {
+    "sel": "#sec-gmail",
+    "name": "account card: Gmail (credential-first)",
+    "x": 21,
+    "y": 53,
+    "w": 282,
+    "h": 158,
+    "text": "Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 · label:INBOX · 上次"
+   },
+   {
+    "sel": "#sec-gmail .chan-dot",
+    "name": "its status dot",
+    "x": 219,
+    "y": 65,
+    "w": 6,
+    "h": 6,
+    "text": ""
+   },
+   {
+    "sel": "#health-gmail",
+    "name": "its health line",
+    "x": 21,
+    "y": 83,
+    "w": 282,
+    "h": 32,
+    "text": "Gmail已连接 · label:INBOX · 上次轮询 2 分钟前 · 推送: 独占"
+   },
+   {
+    "sel": "#sec-gmail .chan-cred-chip",
+    "name": "its client chip (Preset: …)",
+    "x": 111,
+    "y": 61,
+    "w": 103,
+    "h": 15,
+    "text": "预设：Google (Drive/Gmail)"
+   },
+   {
+    "sel": "#menu-gmail",
+    "name": "the OPEN ⋯ menu (verb order = the mount row)",
+    "x": 319,
+    "y": 41,
+    "w": 176,
+    "h": 284,
+    "text": "打开会话窗口 跟踪… 选项 推送… 重新授权 创建副本… 断开 移除… 禁用"
+   },
+   {
+    "sel": "#menu-gmail .mock-menu-item:nth-child(1)",
+    "name": "verb 1: 打开",
+    "x": 320,
+    "y": 48,
+    "w": 174,
+    "h": 28,
+    "text": "打开会话窗口"
+   },
+   {
+    "sel": "#mi-duplicate",
+    "name": "verb: 创建副本…",
+    "x": 320,
+    "y": 197,
+    "w": 174,
+    "h": 28,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#mi-remove",
+    "name": "verb: 移除…",
+    "x": 320,
+    "y": 253,
+    "w": 174,
+    "h": 28,
+    "text": "移除…"
+   },
+   {
+    "sel": "#tracked-1",
+    "name": "↳ tracked conversation 1",
+    "x": 43,
+    "y": 117,
+    "w": 260,
+    "h": 46,
+    "text": "↳供应商报价5 分钟内最近 · 报价单 v3 · 分配给: 采购 agent"
+   },
+   {
+    "sel": "#tracked-2",
+    "name": "↳ tracked conversation 2",
+    "x": 43,
+    "y": 165,
+    "w": 260,
+    "h": 46,
+    "text": "↳面试安排5 分钟内最近 · 周四 15:00 可以吗"
+   },
+   {
+    "sel": "#sec-lark",
+    "name": "account card: Lark (dead token)",
+    "x": 21,
+    "y": 217,
+    "w": 282,
+    "h": 134,
+    "text": "Lark / 飞书 · 张三 预设：Lark (VibeSpace 自建 app) 1/5 ⋯ 连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓"
+   },
+   {
+    "sel": "#err-lark",
+    "name": "the error line (mounts wording)",
+    "x": 21,
+    "y": 247,
+    "w": 282,
+    "h": 56,
+    "text": "连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓取都失败; 重新授权以修复重新授权 Lark…"
+   },
+   {
+    "sel": "#reauth-lark",
+    "name": "the inline 重新授权 Lark… button",
+    "x": 45,
+    "y": 279,
+    "w": 99,
+    "h": 24,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#sec-empty",
+    "name": "an account tracking nothing (credential-only style wording)",
+    "x": 21,
+    "y": 357,
+    "w": 282,
+    "h": 102,
+    "text": "Gmail · team@example.com 自定义客户端 0/7 ⋯ 仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下"
+   },
+   {
+    "sel": "#empty-hint",
+    "name": "its empty wording",
+    "x": 21,
+    "y": 387,
+    "w": 282,
+    "h": 72,
+    "text": "仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下挑选会话。跟踪…"
+   },
+   {
+    "sel": "#connect-more",
+    "name": "the entry: 连接账号",
+    "x": 21,
+    "y": 465,
+    "w": 282,
+    "h": 30,
+    "text": "连接账号（Gmail、Lark / 飞书…）"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 490,
+   "clientHeight": 490,
+   "x": 12,
+   "y": 12,
+   "w": 300,
+   "h": 492
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "account-card.phone": {
+  "file": "account-card.phone.png",
+  "probes": [
+   {
+    "sel": "#panel",
+    "name": "the Communication panel",
+    "x": 0,
+    "y": 0,
+    "w": 390,
+    "h": 844,
+    "text": "3 个账号 · 3 个会话被跟踪 Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 ·"
+   },
+   {
+    "sel": "#sec-gmail",
+    "name": "account card: Gmail (credential-first)",
+    "x": 9,
+    "y": 41,
+    "w": 372,
+    "h": 143,
+    "text": "Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 · label:INBOX · 上次"
+   },
+   {
+    "sel": "#sec-gmail .chan-dot",
+    "name": "its status dot",
+    "x": 297,
+    "y": 53,
+    "w": 6,
+    "h": 6,
+    "text": ""
+   },
+   {
+    "sel": "#health-gmail",
+    "name": "its health line",
+    "x": 9,
+    "y": 71,
+    "w": 372,
+    "h": 17,
+    "text": "Gmail已连接 · label:INBOX · 上次轮询 2 分钟前 · 推送: 独占"
+   },
+   {
+    "sel": "#sec-gmail .chan-cred-chip",
+    "name": "its client chip (Preset: …)",
+    "x": 164,
+    "y": 49,
+    "w": 127,
+    "h": 15,
+    "text": "预设：Google (Drive/Gmail)"
+   },
+   {
+    "sel": "#menu-gmail",
+    "name": "the OPEN ⋯ menu (verb order = the mount row)",
+    "x": 205,
+    "y": 41,
+    "w": 176,
+    "h": 284,
+    "text": "打开会话窗口 跟踪… 选项 推送… 重新授权 创建副本… 断开 移除… 禁用"
+   },
+   {
+    "sel": "#menu-gmail .mock-menu-item:nth-child(1)",
+    "name": "verb 1: 打开",
+    "x": 206,
+    "y": 48,
+    "w": 174,
+    "h": 28,
+    "text": "打开会话窗口"
+   },
+   {
+    "sel": "#mi-duplicate",
+    "name": "verb: 创建副本…",
+    "x": 206,
+    "y": 197,
+    "w": 174,
+    "h": 28,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#mi-remove",
+    "name": "verb: 移除…",
+    "x": 206,
+    "y": 253,
+    "w": 174,
+    "h": 28,
+    "text": "移除…"
+   },
+   {
+    "sel": "#tracked-1",
+    "name": "↳ tracked conversation 1",
+    "x": 31,
+    "y": 90,
+    "w": 350,
+    "h": 46,
+    "text": "↳供应商报价5 分钟内最近 · 报价单 v3 · 分配给: 采购 agent"
+   },
+   {
+    "sel": "#tracked-2",
+    "name": "↳ tracked conversation 2",
+    "x": 31,
+    "y": 138,
+    "w": 350,
+    "h": 46,
+    "text": "↳面试安排5 分钟内最近 · 周四 15:00 可以吗"
+   },
+   {
+    "sel": "#sec-lark",
+    "name": "account card: Lark (dead token)",
+    "x": 9,
+    "y": 190,
+    "w": 372,
+    "h": 134,
+    "text": "Lark / 飞书 · 张三 预设：Lark (VibeSpace 自建 app) 1/5 ⋯ 连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓"
+   },
+   {
+    "sel": "#err-lark",
+    "name": "the error line (mounts wording)",
+    "x": 9,
+    "y": 220,
+    "w": 372,
+    "h": 56,
+    "text": "连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓取都失败; 重新授权以修复重新授权 Lark…"
+   },
+   {
+    "sel": "#reauth-lark",
+    "name": "the inline 重新授权 Lark… button",
+    "x": 33,
+    "y": 252,
+    "w": 99,
+    "h": 24,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#sec-empty",
+    "name": "an account tracking nothing (credential-only style wording)",
+    "x": 9,
+    "y": 330,
+    "w": 372,
+    "h": 102,
+    "text": "Gmail · team@example.com 自定义客户端 0/7 ⋯ 仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下"
+   },
+   {
+    "sel": "#empty-hint",
+    "name": "its empty wording",
+    "x": 9,
+    "y": 360,
+    "w": 372,
+    "h": 72,
+    "text": "仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下挑选会话。跟踪…"
+   },
+   {
+    "sel": "#connect-more",
+    "name": "the entry: 连接账号",
+    "x": 9,
+    "y": 438,
+    "w": 372,
+    "h": 30,
+    "text": "连接账号（Gmail、Lark / 飞书…）"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 842,
+   "clientHeight": 842,
+   "x": 0,
+   "y": 0,
+   "w": 390,
+   "h": 844
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "account-card.phone.full": {
+  "file": "account-card.phone.full.png",
+  "probes": [
+   {
+    "sel": "#panel",
+    "name": "the Communication panel",
+    "x": 0,
+    "y": 0,
+    "w": 390,
+    "h": 848,
+    "text": "3 个账号 · 3 个会话被跟踪 Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 ·"
+   },
+   {
+    "sel": "#sec-gmail",
+    "name": "account card: Gmail (credential-first)",
+    "x": 9,
+    "y": 41,
+    "w": 372,
+    "h": 143,
+    "text": "Gmail · me@example.com 预设：Google (Drive/Gmail) 2/2 ⋯ Gmail已连接 · label:INBOX · 上次"
+   },
+   {
+    "sel": "#sec-gmail .chan-dot",
+    "name": "its status dot",
+    "x": 297,
+    "y": 53,
+    "w": 6,
+    "h": 6,
+    "text": ""
+   },
+   {
+    "sel": "#health-gmail",
+    "name": "its health line",
+    "x": 9,
+    "y": 71,
+    "w": 372,
+    "h": 17,
+    "text": "Gmail已连接 · label:INBOX · 上次轮询 2 分钟前 · 推送: 独占"
+   },
+   {
+    "sel": "#sec-gmail .chan-cred-chip",
+    "name": "its client chip (Preset: …)",
+    "x": 164,
+    "y": 49,
+    "w": 127,
+    "h": 15,
+    "text": "预设：Google (Drive/Gmail)"
+   },
+   {
+    "sel": "#menu-gmail",
+    "name": "the OPEN ⋯ menu (verb order = the mount row)",
+    "x": 205,
+    "y": 41,
+    "w": 176,
+    "h": 284,
+    "text": "打开会话窗口 跟踪… 选项 推送… 重新授权 创建副本… 断开 移除… 禁用"
+   },
+   {
+    "sel": "#menu-gmail .mock-menu-item:nth-child(1)",
+    "name": "verb 1: 打开",
+    "x": 206,
+    "y": 48,
+    "w": 174,
+    "h": 28,
+    "text": "打开会话窗口"
+   },
+   {
+    "sel": "#mi-duplicate",
+    "name": "verb: 创建副本…",
+    "x": 206,
+    "y": 197,
+    "w": 174,
+    "h": 28,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#mi-remove",
+    "name": "verb: 移除…",
+    "x": 206,
+    "y": 253,
+    "w": 174,
+    "h": 28,
+    "text": "移除…"
+   },
+   {
+    "sel": "#tracked-1",
+    "name": "↳ tracked conversation 1",
+    "x": 31,
+    "y": 90,
+    "w": 350,
+    "h": 46,
+    "text": "↳供应商报价5 分钟内最近 · 报价单 v3 · 分配给: 采购 agent"
+   },
+   {
+    "sel": "#tracked-2",
+    "name": "↳ tracked conversation 2",
+    "x": 31,
+    "y": 138,
+    "w": 350,
+    "h": 46,
+    "text": "↳面试安排5 分钟内最近 · 周四 15:00 可以吗"
+   },
+   {
+    "sel": "#sec-lark",
+    "name": "account card: Lark (dead token)",
+    "x": 9,
+    "y": 190,
+    "w": 372,
+    "h": 134,
+    "text": "Lark / 飞书 · 张三 预设：Lark (VibeSpace 自建 app) 1/5 ⋯ 连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓"
+   },
+   {
+    "sel": "#err-lark",
+    "name": "the error line (mounts wording)",
+    "x": 9,
+    "y": 220,
+    "w": 372,
+    "h": 56,
+    "text": "连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓取都失败; 重新授权以修复重新授权 Lark…"
+   },
+   {
+    "sel": "#reauth-lark",
+    "name": "the inline 重新授权 Lark… button",
+    "x": 33,
+    "y": 252,
+    "w": 99,
+    "h": 24,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#sec-empty",
+    "name": "an account tracking nothing (credential-only style wording)",
+    "x": 9,
+    "y": 330,
+    "w": 372,
+    "h": 102,
+    "text": "Gmail · team@example.com 自定义客户端 0/7 ⋯ 仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下"
+   },
+   {
+    "sel": "#empty-hint",
+    "name": "its empty wording",
+    "x": 9,
+    "y": 360,
+    "w": 372,
+    "h": 72,
+    "text": "仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下挑选会话。跟踪…"
+   },
+   {
+    "sel": "#connect-more",
+    "name": "the entry: 连接账号",
+    "x": 9,
+    "y": 438,
+    "w": 372,
+    "h": 30,
+    "text": "连接账号（Gmail、Lark / 飞书…）"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 846,
+   "clientHeight": 846,
+   "x": 0,
+   "y": 0,
+   "w": 390,
+   "h": 848
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog": {
+  "file": "connect-dialog.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog (the storage dialog shell)",
+    "x": 280,
+    "y": 108,
+    "w": 440,
+    "h": 705,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端 预设：Google (Drive/Gmail)自定义（自己的 client id/sec"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Gmail / Lark)",
+    "x": 295,
+    "y": 187,
+    "w": 410,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 309,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#client-hint",
+    "name": "its hint",
+    "x": 295,
+    "y": 350,
+    "w": 410,
+    "h": 28,
+    "text": "Gmail 没有内置兜底客户端 —— 选择预设或提供自己的。客户端需要 gmail.readonly 与 gmail.send scope。"
+   },
+   {
+    "sel": "#connect-block",
+    "name": "the consent block",
+    "x": 295,
+    "y": 420,
+    "w": 410,
+    "h": 172,
+    "text": "连接 Google 已打开 Google 登录页面。批准访问后回到这里。 账号在另一个浏览器里登录？复制此链接到那里打开：复制 如果最后的页面无法加载（地址以 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Google",
+    "x": 295,
+    "y": 420,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable consent link",
+    "x": 295,
+    "y": 488,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 295,
+    "y": 561,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#query",
+    "name": "the kind-specific field (when:)",
+    "x": 295,
+    "y": 627,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 651,
+    "y": 769,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 658,
+   "clientHeight": 658,
+   "x": 281,
+   "y": 154,
+   "w": 438,
+   "h": 658
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog.full": {
+  "file": "connect-dialog.full.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog (the storage dialog shell)",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 705,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端 预设：Google (Drive/Gmail)自定义（自己的 client id/sec"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Gmail / Lark)",
+    "x": 295,
+    "y": 95,
+    "w": 410,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 217,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#client-hint",
+    "name": "its hint",
+    "x": 295,
+    "y": 258,
+    "w": 410,
+    "h": 28,
+    "text": "Gmail 没有内置兜底客户端 —— 选择预设或提供自己的。客户端需要 gmail.readonly 与 gmail.send scope。"
+   },
+   {
+    "sel": "#connect-block",
+    "name": "the consent block",
+    "x": 295,
+    "y": 328,
+    "w": 410,
+    "h": 172,
+    "text": "连接 Google 已打开 Google 登录页面。批准访问后回到这里。 账号在另一个浏览器里登录？复制此链接到那里打开：复制 如果最后的页面无法加载（地址以 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Google",
+    "x": 295,
+    "y": 328,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable consent link",
+    "x": 295,
+    "y": 396,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 295,
+    "y": 469,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#query",
+    "name": "the kind-specific field (when:)",
+    "x": 295,
+    "y": 535,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 651,
+    "y": 677,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 658,
+   "clientHeight": 658,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 658
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog.phone": {
+  "file": "connect-dialog.phone.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog (the storage dialog shell)",
+    "x": 0,
+    "y": 84,
+    "w": 390,
+    "h": 675,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端 预设：Google (Drive/Gmail)自定义（自己的 client id/sec"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Gmail / Lark)",
+    "x": 15,
+    "y": 163,
+    "w": 360,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 285,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#client-hint",
+    "name": "its hint",
+    "x": 15,
+    "y": 326,
+    "w": 360,
+    "h": 28,
+    "text": "Gmail 没有内置兜底客户端 —— 选择预设或提供自己的。客户端需要 gmail.readonly 与 gmail.send scope。"
+   },
+   {
+    "sel": "#connect-block",
+    "name": "the consent block",
+    "x": 15,
+    "y": 396,
+    "w": 360,
+    "h": 172,
+    "text": "连接 Google 已打开 Google 登录页面。批准访问后回到这里。 账号在另一个浏览器里登录？复制此链接到那里打开：复制 如果最后的页面无法加载（地址以 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Google",
+    "x": 15,
+    "y": 396,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable consent link",
+    "x": 15,
+    "y": 464,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 15,
+    "y": 537,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#query",
+    "name": "the kind-specific field (when:)",
+    "x": 15,
+    "y": 603,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 321,
+    "y": 745,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 658,
+   "clientHeight": 628,
+   "x": 1,
+   "y": 130,
+   "w": 388,
+   "h": 628
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog.phone.full": {
+  "file": "connect-dialog.phone.full.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog (the storage dialog shell)",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 705,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端 预设：Google (Drive/Gmail)自定义（自己的 client id/sec"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Gmail / Lark)",
+    "x": 15,
+    "y": 95,
+    "w": 360,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 217,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#client-hint",
+    "name": "its hint",
+    "x": 15,
+    "y": 258,
+    "w": 360,
+    "h": 28,
+    "text": "Gmail 没有内置兜底客户端 —— 选择预设或提供自己的。客户端需要 gmail.readonly 与 gmail.send scope。"
+   },
+   {
+    "sel": "#connect-block",
+    "name": "the consent block",
+    "x": 15,
+    "y": 328,
+    "w": 360,
+    "h": 172,
+    "text": "连接 Google 已打开 Google 登录页面。批准访问后回到这里。 账号在另一个浏览器里登录？复制此链接到那里打开：复制 如果最后的页面无法加载（地址以 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Google",
+    "x": 15,
+    "y": 328,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable consent link",
+    "x": 15,
+    "y": 396,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 15,
+    "y": 469,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#query",
+    "name": "the kind-specific field (when:)",
+    "x": 15,
+    "y": 535,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 321,
+    "y": 677,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 658,
+   "clientHeight": 658,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 658
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog-custom": {
+  "file": "connect-dialog-custom.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 92,
+    "w": 440,
+    "h": 736,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/s"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Lark)",
+    "x": 295,
+    "y": 171,
+    "w": 410,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select (自定义)",
+    "x": 295,
+    "y": 293,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "自定义 App ID (inline)",
+    "x": 295,
+    "y": 397,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "自定义 App Secret (inline)",
+    "x": 295,
+    "y": 485,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#cb-url",
+    "name": "the callback URL row",
+    "x": 295,
+    "y": 582,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#prereq",
+    "name": "the three facts",
+    "x": 295,
+    "y": 651,
+    "w": 410,
+    "h": 48,
+    "text": "上面的重定向 URL 已登记在那个列表里已授予 im:message 与 im:message.send_as_user 权限应用已有一个已发布的版本 —— 缺"
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Lark",
+    "x": 295,
+    "y": 741,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Lark"
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 651,
+    "y": 832,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 737,
+   "clientHeight": 689,
+   "x": 281,
+   "y": 138,
+   "w": 438,
+   "h": 689
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog-custom.full": {
+  "file": "connect-dialog-custom.full.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 784,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/s"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Lark)",
+    "x": 295,
+    "y": 95,
+    "w": 410,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select (自定义)",
+    "x": 295,
+    "y": 217,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "自定义 App ID (inline)",
+    "x": 295,
+    "y": 321,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "自定义 App Secret (inline)",
+    "x": 295,
+    "y": 409,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#cb-url",
+    "name": "the callback URL row",
+    "x": 295,
+    "y": 506,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#prereq",
+    "name": "the three facts",
+    "x": 295,
+    "y": 575,
+    "w": 410,
+    "h": 48,
+    "text": "上面的重定向 URL 已登记在那个列表里已授予 im:message 与 im:message.send_as_user 权限应用已有一个已发布的版本 —— 缺"
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Lark",
+    "x": 295,
+    "y": 665,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Lark"
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 651,
+    "y": 756,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 737,
+   "clientHeight": 737,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 737
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog-custom.phone": {
+  "file": "connect-dialog-custom.phone.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 84,
+    "w": 390,
+    "h": 675,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/s"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Lark)",
+    "x": 15,
+    "y": 163,
+    "w": 360,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select (自定义)",
+    "x": 15,
+    "y": 285,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "自定义 App ID (inline)",
+    "x": 15,
+    "y": 389,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "自定义 App Secret (inline)",
+    "x": 15,
+    "y": 477,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#cb-url",
+    "name": "the callback URL row",
+    "x": 15,
+    "y": 574,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#prereq",
+    "name": "the three facts",
+    "x": 15,
+    "y": 643,
+    "w": 360,
+    "h": 48,
+    "text": "上面的重定向 URL 已登记在那个列表里已授予 im:message 与 im:message.send_as_user 权限应用已有一个已发布的版本 —— 缺"
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Lark",
+    "x": 15,
+    "y": 733,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Lark"
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 321,
+    "y": 824,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 737,
+   "clientHeight": 628,
+   "x": 1,
+   "y": 130,
+   "w": 388,
+   "h": 628
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "connect-dialog-custom.phone.full": {
+  "file": "connect-dialog-custom.phone.full.png",
+  "probes": [
+   {
+    "sel": "#chan-connect-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 784,
+    "text": "连接账号✕ 类型GmailLark / 飞书 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/s"
+   },
+   {
+    "sel": "#kind",
+    "name": "the TYPE-FIRST select (Lark)",
+    "x": 15,
+    "y": 95,
+    "w": 360,
+    "h": 33,
+    "text": "GmailLark / 飞书"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select (自定义)",
+    "x": 15,
+    "y": 217,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "自定义 App ID (inline)",
+    "x": 15,
+    "y": 321,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "自定义 App Secret (inline)",
+    "x": 15,
+    "y": 409,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#cb-url",
+    "name": "the callback URL row",
+    "x": 15,
+    "y": 506,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#prereq",
+    "name": "the three facts",
+    "x": 15,
+    "y": 575,
+    "w": 360,
+    "h": 48,
+    "text": "上面的重定向 URL 已登记在那个列表里已授予 im:message 与 im:message.send_as_user 权限应用已有一个已发布的版本 —— 缺"
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "连接 Lark",
+    "x": 15,
+    "y": 665,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Lark"
+   },
+   {
+    "sel": "#submit",
+    "name": "连接",
+    "x": 321,
+    "y": 756,
+    "w": 54,
+    "h": 29,
+    "text": "连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 737,
+   "clientHeight": 737,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 737
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "duplicate-dialog": {
+  "file": "duplicate-dialog.png",
+  "probes": [
+   {
+    "sel": "#dup-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 148,
+    "w": 440,
+    "h": 625,
+    "text": "创建副本 \"Gmail · me@example.com\"✕ 名称 类型 OAuth 客户端预设：Google (Drive/Gmail)自定义（自己的 cli"
+   },
+   {
+    "sel": "#dup-name",
+    "name": "the prefilled name (副本)",
+    "x": 295,
+    "y": 227,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-kind",
+    "name": "kind (read-only, copied)",
+    "x": 295,
+    "y": 287,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-client",
+    "name": "the OAuth client (copied)",
+    "x": 295,
+    "y": 347,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#dup-query",
+    "name": "the filter (copied)",
+    "x": 295,
+    "y": 437,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-push",
+    "name": "the push claim (copied)",
+    "x": 295,
+    "y": 497,
+    "w": 410,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#dup-note",
+    "name": "what is NEVER copied: the token",
+    "x": 295,
+    "y": 540,
+    "w": 410,
+    "h": 62,
+    "text": "复制的是设置: 类型、OAuth 客户端、查询、推送声明、发送者说明行。不复制 token（登录是一个人的一次同意）、已跟踪的会话、分配、可见性授权与消息记录 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "its OWN consent",
+    "x": 295,
+    "y": 637,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#submit",
+    "name": "创建并连接",
+    "x": 615,
+    "y": 728,
+    "w": 90,
+    "h": 29,
+    "text": "创建并连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 578,
+   "clientHeight": 578,
+   "x": 281,
+   "y": 194,
+   "w": 438,
+   "h": 578
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "duplicate-dialog.full": {
+  "file": "duplicate-dialog.full.png",
+  "probes": [
+   {
+    "sel": "#dup-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 625,
+    "text": "创建副本 \"Gmail · me@example.com\"✕ 名称 类型 OAuth 客户端预设：Google (Drive/Gmail)自定义（自己的 cli"
+   },
+   {
+    "sel": "#dup-name",
+    "name": "the prefilled name (副本)",
+    "x": 295,
+    "y": 95,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-kind",
+    "name": "kind (read-only, copied)",
+    "x": 295,
+    "y": 155,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-client",
+    "name": "the OAuth client (copied)",
+    "x": 295,
+    "y": 215,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#dup-query",
+    "name": "the filter (copied)",
+    "x": 295,
+    "y": 305,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-push",
+    "name": "the push claim (copied)",
+    "x": 295,
+    "y": 365,
+    "w": 410,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#dup-note",
+    "name": "what is NEVER copied: the token",
+    "x": 295,
+    "y": 408,
+    "w": 410,
+    "h": 62,
+    "text": "复制的是设置: 类型、OAuth 客户端、查询、推送声明、发送者说明行。不复制 token（登录是一个人的一次同意）、已跟踪的会话、分配、可见性授权与消息记录 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "its OWN consent",
+    "x": 295,
+    "y": 506,
+    "w": 410,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#submit",
+    "name": "创建并连接",
+    "x": 615,
+    "y": 597,
+    "w": 90,
+    "h": 29,
+    "text": "创建并连接"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 578,
+   "clientHeight": 578,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 578
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "duplicate-dialog.phone": {
+  "file": "duplicate-dialog.phone.png",
+  "probes": [
+   {
+    "sel": "#dup-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 110,
+    "w": 390,
+    "h": 625,
+    "text": "创建副本 \"Gmail · me@example.com\"✕ 名称 类型 OAuth 客户端预设：Google (Drive/Gmail)自定义（自己的 cli"
+   },
+   {
+    "sel": "#dup-name",
+    "name": "the prefilled name (副本)",
+    "x": 15,
+    "y": 189,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-kind",
+    "name": "kind (read-only, copied)",
+    "x": 15,
+    "y": 249,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-client",
+    "name": "the OAuth client (copied)",
+    "x": 15,
+    "y": 309,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#dup-query",
+    "name": "the filter (copied)",
+    "x": 15,
+    "y": 399,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-push",
+    "name": "the push claim (copied)",
+    "x": 15,
+    "y": 459,
+    "w": 360,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#dup-note",
+    "name": "what is NEVER copied: the token",
+    "x": 15,
+    "y": 502,
+    "w": 360,
+    "h": 62,
+    "text": "复制的是设置: 类型、OAuth 客户端、查询、推送声明、发送者说明行。不复制 token（登录是一个人的一次同意）、已跟踪的会话、分配、可见性授权与消息记录 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "its OWN consent",
+    "x": 15,
+    "y": 599,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#submit",
+    "name": "创建并连接",
+    "x": 285,
+    "y": 690,
+    "w": 90,
+    "h": 29,
+    "text": "创建并连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 578,
+   "clientHeight": 578,
+   "x": 1,
+   "y": 156,
+   "w": 388,
+   "h": 578
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "duplicate-dialog.phone.full": {
+  "file": "duplicate-dialog.phone.full.png",
+  "probes": [
+   {
+    "sel": "#dup-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 625,
+    "text": "创建副本 \"Gmail · me@example.com\"✕ 名称 类型 OAuth 客户端预设：Google (Drive/Gmail)自定义（自己的 cli"
+   },
+   {
+    "sel": "#dup-name",
+    "name": "the prefilled name (副本)",
+    "x": 15,
+    "y": 95,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-kind",
+    "name": "kind (read-only, copied)",
+    "x": 15,
+    "y": 155,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-client",
+    "name": "the OAuth client (copied)",
+    "x": 15,
+    "y": 215,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Google (Drive/Gmail)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#dup-query",
+    "name": "the filter (copied)",
+    "x": 15,
+    "y": 305,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#dup-push",
+    "name": "the push claim (copied)",
+    "x": 15,
+    "y": 365,
+    "w": 360,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#dup-note",
+    "name": "what is NEVER copied: the token",
+    "x": 15,
+    "y": 408,
+    "w": 360,
+    "h": 62,
+    "text": "复制的是设置: 类型、OAuth 客户端、查询、推送声明、发送者说明行。不复制 token（登录是一个人的一次同意）、已跟踪的会话、分配、可见性授权与消息记录 "
+   },
+   {
+    "sel": "#connect-btn",
+    "name": "its OWN consent",
+    "x": 15,
+    "y": 506,
+    "w": 360,
+    "h": 24,
+    "text": "连接 Google"
+   },
+   {
+    "sel": "#submit",
+    "name": "创建并连接",
+    "x": 285,
+    "y": 597,
+    "w": 90,
+    "h": 29,
+    "text": "创建并连接"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 578,
+   "clientHeight": 578,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 578
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "reauth-dialog": {
+  "file": "reauth-dialog.png",
+  "probes": [
+   {
+    "sel": "#chan-reauth-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 266,
+    "w": 440,
+    "h": 389,
+    "text": "重新授权 \"张三 (Lark)\"✕ Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。 OAuth 客户端预设："
+   },
+   {
+    "sel": "#why",
+    "name": "who reported the death",
+    "x": 295,
+    "y": 324,
+    "w": 410,
+    "h": 28,
+    "text": "Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 387,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#signin",
+    "name": "用 Lark 登录",
+    "x": 295,
+    "y": 458,
+    "w": 410,
+    "h": 24,
+    "text": "用 Lark 登录"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable link",
+    "x": 295,
+    "y": 538,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 295,
+    "y": 609,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 342,
+   "clientHeight": 342,
+   "x": 281,
+   "y": 312,
+   "w": 438,
+   "h": 342
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "reauth-dialog.full": {
+  "file": "reauth-dialog.full.png",
+  "probes": [
+   {
+    "sel": "#chan-reauth-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 389,
+    "text": "重新授权 \"张三 (Lark)\"✕ Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。 OAuth 客户端预设："
+   },
+   {
+    "sel": "#why",
+    "name": "who reported the death",
+    "x": 295,
+    "y": 74,
+    "w": 410,
+    "h": 28,
+    "text": "Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 137,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#signin",
+    "name": "用 Lark 登录",
+    "x": 295,
+    "y": 208,
+    "w": 410,
+    "h": 24,
+    "text": "用 Lark 登录"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable link",
+    "x": 295,
+    "y": 288,
+    "w": 364,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 295,
+    "y": 359,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 342,
+   "clientHeight": 342,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 342
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "reauth-dialog.phone": {
+  "file": "reauth-dialog.phone.png",
+  "probes": [
+   {
+    "sel": "#chan-reauth-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 214,
+    "w": 390,
+    "h": 417,
+    "text": "重新授权 \"张三 (Lark)\"✕ Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。 OAuth 客户端预设："
+   },
+   {
+    "sel": "#why",
+    "name": "who reported the death",
+    "x": 15,
+    "y": 272,
+    "w": 360,
+    "h": 28,
+    "text": "Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 335,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#signin",
+    "name": "用 Lark 登录",
+    "x": 15,
+    "y": 420,
+    "w": 360,
+    "h": 24,
+    "text": "用 Lark 登录"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable link",
+    "x": 15,
+    "y": 500,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 15,
+    "y": 585,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 370,
+   "clientHeight": 370,
+   "x": 1,
+   "y": 260,
+   "w": 388,
+   "h": 370
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "reauth-dialog.phone.full": {
+  "file": "reauth-dialog.phone.full.png",
+  "probes": [
+   {
+    "sel": "#chan-reauth-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 417,
+    "text": "重新授权 \"张三 (Lark)\"✕ Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。 OAuth 客户端预设："
+   },
+   {
+    "sel": "#why",
+    "name": "who reported the death",
+    "x": 15,
+    "y": 74,
+    "w": 360,
+    "h": 28,
+    "text": "Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。"
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 137,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#signin",
+    "name": "用 Lark 登录",
+    "x": 15,
+    "y": 222,
+    "w": 360,
+    "h": 24,
+    "text": "用 Lark 登录"
+   },
+   {
+    "sel": "#oauth-link input",
+    "name": "the copyable link",
+    "x": 15,
+    "y": 302,
+    "w": 314,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#paste-input",
+    "name": "paste-back",
+    "x": 15,
+    "y": 387,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 370,
+   "clientHeight": 370,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 370
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "edit-dialog": {
+  "file": "edit-dialog.png",
+  "probes": [
+   {
+    "sel": "#chan-edit-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 116,
+    "w": 440,
+    "h": 688,
+    "text": "编辑 \"张三 (Lark)\"✕ 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret） "
+   },
+   {
+    "sel": "#name",
+    "name": "name",
+    "x": 295,
+    "y": 195,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 255,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "custom App ID (prefilled)",
+    "x": 295,
+    "y": 359,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "custom App Secret (prefilled, 2.108.8)",
+    "x": 295,
+    "y": 419,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#auth-fact",
+    "name": "the auth fact",
+    "x": 295,
+    "y": 528,
+    "w": 410,
+    "h": 46,
+    "text": "已授权 · 张三 · refresh token 到期 2026-10-21 · 权限 im:message, im:message.send_as_user,"
+   },
+   {
+    "sel": "#query",
+    "name": "the filter",
+    "x": 295,
+    "y": 603,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#push-claim",
+    "name": "the push claim",
+    "x": 295,
+    "y": 663,
+    "w": 410,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#reauth",
+    "name": "重新授权 Lark…",
+    "x": 400,
+    "y": 760,
+    "w": 99,
+    "h": 29,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#duplicate",
+    "name": "创建副本…",
+    "x": 507,
+    "y": 760,
+    "w": 75,
+    "h": 29,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#remove",
+    "name": "移除…",
+    "x": 590,
+    "y": 760,
+    "w": 53,
+    "h": 29,
+    "text": "移除…"
+   },
+   {
+    "sel": "#save",
+    "name": "保存",
+    "x": 651,
+    "y": 760,
+    "w": 54,
+    "h": 29,
+    "text": "保存"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 641,
+   "clientHeight": 641,
+   "x": 281,
+   "y": 162,
+   "w": 438,
+   "h": 641
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "edit-dialog.full": {
+  "file": "edit-dialog.full.png",
+  "probes": [
+   {
+    "sel": "#chan-edit-dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 688,
+    "text": "编辑 \"张三 (Lark)\"✕ 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret） "
+   },
+   {
+    "sel": "#name",
+    "name": "name",
+    "x": 295,
+    "y": 95,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 295,
+    "y": 155,
+    "w": 410,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "custom App ID (prefilled)",
+    "x": 295,
+    "y": 259,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "custom App Secret (prefilled, 2.108.8)",
+    "x": 295,
+    "y": 319,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#auth-fact",
+    "name": "the auth fact",
+    "x": 295,
+    "y": 428,
+    "w": 410,
+    "h": 46,
+    "text": "已授权 · 张三 · refresh token 到期 2026-10-21 · 权限 im:message, im:message.send_as_user,"
+   },
+   {
+    "sel": "#query",
+    "name": "the filter",
+    "x": 295,
+    "y": 503,
+    "w": 410,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#push-claim",
+    "name": "the push claim",
+    "x": 295,
+    "y": 563,
+    "w": 410,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#reauth",
+    "name": "重新授权 Lark…",
+    "x": 400,
+    "y": 660,
+    "w": 99,
+    "h": 29,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#duplicate",
+    "name": "创建副本…",
+    "x": 507,
+    "y": 660,
+    "w": 75,
+    "h": 29,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#remove",
+    "name": "移除…",
+    "x": 590,
+    "y": 660,
+    "w": 53,
+    "h": 29,
+    "text": "移除…"
+   },
+   {
+    "sel": "#save",
+    "name": "保存",
+    "x": 651,
+    "y": 660,
+    "w": 54,
+    "h": 29,
+    "text": "保存"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 641,
+   "clientHeight": 641,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 641
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "edit-dialog.phone": {
+  "file": "edit-dialog.phone.png",
+  "probes": [
+   {
+    "sel": "#chan-edit-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 84,
+    "w": 390,
+    "h": 675,
+    "text": "编辑 \"张三 (Lark)\"✕ 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret） "
+   },
+   {
+    "sel": "#name",
+    "name": "name",
+    "x": 15,
+    "y": 163,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 223,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "custom App ID (prefilled)",
+    "x": 15,
+    "y": 327,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "custom App Secret (prefilled, 2.108.8)",
+    "x": 15,
+    "y": 387,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#auth-fact",
+    "name": "the auth fact",
+    "x": 15,
+    "y": 496,
+    "w": 360,
+    "h": 46,
+    "text": "已授权 · 张三 · refresh token 到期 2026-10-21 · 权限 im:message, im:message.send_as_user,"
+   },
+   {
+    "sel": "#query",
+    "name": "the filter",
+    "x": 15,
+    "y": 571,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#push-claim",
+    "name": "the push claim",
+    "x": 15,
+    "y": 631,
+    "w": 360,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#reauth",
+    "name": "重新授权 Lark…",
+    "x": 70,
+    "y": 728,
+    "w": 99,
+    "h": 29,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#duplicate",
+    "name": "创建副本…",
+    "x": 177,
+    "y": 728,
+    "w": 75,
+    "h": 29,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#remove",
+    "name": "移除…",
+    "x": 260,
+    "y": 728,
+    "w": 53,
+    "h": 29,
+    "text": "移除…"
+   },
+   {
+    "sel": "#save",
+    "name": "保存",
+    "x": 321,
+    "y": 728,
+    "w": 54,
+    "h": 29,
+    "text": "保存"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 641,
+   "clientHeight": 628,
+   "x": 1,
+   "y": 130,
+   "w": 388,
+   "h": 628
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "edit-dialog.phone.full": {
+  "file": "edit-dialog.phone.full.png",
+  "probes": [
+   {
+    "sel": "#chan-edit-dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 688,
+    "text": "编辑 \"张三 (Lark)\"✕ 名称 OAuth 客户端预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret） "
+   },
+   {
+    "sel": "#name",
+    "name": "name",
+    "x": 15,
+    "y": 95,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#oauth-client",
+    "name": "the OAuth client select",
+    "x": 15,
+    "y": 155,
+    "w": 360,
+    "h": 33,
+    "text": "预设：Lark (VibeSpace 自建 app)自定义（自己的 client id/secret）"
+   },
+   {
+    "sel": "#custom-id",
+    "name": "custom App ID (prefilled)",
+    "x": 15,
+    "y": 259,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#custom-secret",
+    "name": "custom App Secret (prefilled, 2.108.8)",
+    "x": 15,
+    "y": 319,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#auth-fact",
+    "name": "the auth fact",
+    "x": 15,
+    "y": 428,
+    "w": 360,
+    "h": 46,
+    "text": "已授权 · 张三 · refresh token 到期 2026-10-21 · 权限 im:message, im:message.send_as_user,"
+   },
+   {
+    "sel": "#query",
+    "name": "the filter",
+    "x": 15,
+    "y": 503,
+    "w": 360,
+    "h": 31,
+    "text": ""
+   },
+   {
+    "sel": "#push-claim",
+    "name": "the push claim",
+    "x": 15,
+    "y": 563,
+    "w": 360,
+    "h": 33,
+    "text": "未知 —— 只做游标 kick（默认）独占 —— 携带内容，15 分钟对账共用 —— 只做游标 kick"
+   },
+   {
+    "sel": "#reauth",
+    "name": "重新授权 Lark…",
+    "x": 70,
+    "y": 660,
+    "w": 99,
+    "h": 29,
+    "text": "重新授权 Lark…"
+   },
+   {
+    "sel": "#duplicate",
+    "name": "创建副本…",
+    "x": 177,
+    "y": 660,
+    "w": 75,
+    "h": 29,
+    "text": "创建副本…"
+   },
+   {
+    "sel": "#remove",
+    "name": "移除…",
+    "x": 260,
+    "y": 660,
+    "w": 53,
+    "h": 29,
+    "text": "移除…"
+   },
+   {
+    "sel": "#save",
+    "name": "保存",
+    "x": 321,
+    "y": 660,
+    "w": 54,
+    "h": 29,
+    "text": "保存"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 641,
+   "clientHeight": 641,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 641
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "remove-refused": {
+  "file": "remove-refused.png",
+  "probes": [
+   {
+    "sel": ".dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 327,
+    "w": 440,
+    "h": 267,
+    "text": "无法移除 \"Gmail · me@example.com\"✕ 这个账号还被引用着 —— 先解除, 再移除: · 分配: 「供应商报价」→ 采购 agent（每条"
+   },
+   {
+    "sel": "#refusal",
+    "name": "the refusal line",
+    "x": 295,
+    "y": 387,
+    "w": 410,
+    "h": 19,
+    "text": "这个账号还被引用着 —— 先解除, 再移除:"
+   },
+   {
+    "sel": "#refs",
+    "name": "the references named",
+    "x": 295,
+    "y": 416,
+    "w": 410,
+    "h": 78,
+    "text": "· 分配: 「供应商报价」→ 采购 agent（每条消息唤醒） · 分配: 「面试安排」→ 任务组「招聘」（每日摘要） · 可见性授权: 任务组「招聘」可见整个"
+   },
+   {
+    "sel": ".dialog-hint",
+    "name": "the remedy",
+    "x": 295,
+    "y": 503,
+    "w": 410,
+    "h": 32,
+    "text": "「断开」只丢弃 token 并保留这些; 「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。"
+   }
+  ],
+  "vw": 1000,
+  "vh": 920,
+  "docH": 920,
+  "innerScroll": {
+   "scrollHeight": 220,
+   "clientHeight": 220,
+   "x": 281,
+   "y": 373,
+   "w": 438,
+   "h": 220
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "remove-refused.full": {
+  "file": "remove-refused.full.png",
+  "probes": [
+   {
+    "sel": ".dialog",
+    "name": "the dialog",
+    "x": 280,
+    "y": 16,
+    "w": 440,
+    "h": 267,
+    "text": "无法移除 \"Gmail · me@example.com\"✕ 这个账号还被引用着 —— 先解除, 再移除: · 分配: 「供应商报价」→ 采购 agent（每条"
+   },
+   {
+    "sel": "#refusal",
+    "name": "the refusal line",
+    "x": 295,
+    "y": 76,
+    "w": 410,
+    "h": 19,
+    "text": "这个账号还被引用着 —— 先解除, 再移除:"
+   },
+   {
+    "sel": "#refs",
+    "name": "the references named",
+    "x": 295,
+    "y": 105,
+    "w": 410,
+    "h": 78,
+    "text": "· 分配: 「供应商报价」→ 采购 agent（每条消息唤醒） · 分配: 「面试安排」→ 任务组「招聘」（每日摘要） · 可见性授权: 任务组「招聘」可见整个"
+   },
+   {
+    "sel": ".dialog-hint",
+    "name": "the remedy",
+    "x": 295,
+    "y": 193,
+    "w": 410,
+    "h": 32,
+    "text": "「断开」只丢弃 token 并保留这些; 「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。"
+   }
+  ],
+  "vw": 1000,
+  "vh": 924,
+  "docH": 924,
+  "innerScroll": {
+   "scrollHeight": 220,
+   "clientHeight": 220,
+   "x": 281,
+   "y": 62,
+   "w": 438,
+   "h": 220
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "remove-refused.phone": {
+  "file": "remove-refused.phone.png",
+  "probes": [
+   {
+    "sel": ".dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 289,
+    "w": 390,
+    "h": 267,
+    "text": "无法移除 \"Gmail · me@example.com\"✕ 这个账号还被引用着 —— 先解除, 再移除: · 分配: 「供应商报价」→ 采购 agent（每条"
+   },
+   {
+    "sel": "#refusal",
+    "name": "the refusal line",
+    "x": 15,
+    "y": 349,
+    "w": 360,
+    "h": 19,
+    "text": "这个账号还被引用着 —— 先解除, 再移除:"
+   },
+   {
+    "sel": "#refs",
+    "name": "the references named",
+    "x": 15,
+    "y": 378,
+    "w": 360,
+    "h": 78,
+    "text": "· 分配: 「供应商报价」→ 采购 agent（每条消息唤醒） · 分配: 「面试安排」→ 任务组「招聘」（每日摘要） · 可见性授权: 任务组「招聘」可见整个"
+   },
+   {
+    "sel": ".dialog-hint",
+    "name": "the remedy",
+    "x": 15,
+    "y": 465,
+    "w": 360,
+    "h": 32,
+    "text": "「断开」只丢弃 token 并保留这些; 「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。"
+   }
+  ],
+  "vw": 390,
+  "vh": 844,
+  "docH": 844,
+  "innerScroll": {
+   "scrollHeight": 220,
+   "clientHeight": 220,
+   "x": 1,
+   "y": 335,
+   "w": 388,
+   "h": 220
+  },
+  "bg": "rgb(17, 17, 34)"
+ },
+ "remove-refused.phone.full": {
+  "file": "remove-refused.phone.full.png",
+  "probes": [
+   {
+    "sel": ".dialog",
+    "name": "the dialog",
+    "x": 0,
+    "y": 16,
+    "w": 390,
+    "h": 267,
+    "text": "无法移除 \"Gmail · me@example.com\"✕ 这个账号还被引用着 —— 先解除, 再移除: · 分配: 「供应商报价」→ 采购 agent（每条"
+   },
+   {
+    "sel": "#refusal",
+    "name": "the refusal line",
+    "x": 15,
+    "y": 76,
+    "w": 360,
+    "h": 19,
+    "text": "这个账号还被引用着 —— 先解除, 再移除:"
+   },
+   {
+    "sel": "#refs",
+    "name": "the references named",
+    "x": 15,
+    "y": 105,
+    "w": 360,
+    "h": 78,
+    "text": "· 分配: 「供应商报价」→ 采购 agent（每条消息唤醒） · 分配: 「面试安排」→ 任务组「招聘」（每日摘要） · 可见性授权: 任务组「招聘」可见整个"
+   },
+   {
+    "sel": ".dialog-hint",
+    "name": "the remedy",
+    "x": 15,
+    "y": 193,
+    "w": 360,
+    "h": 32,
+    "text": "「断开」只丢弃 token 并保留这些; 「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。"
+   }
+  ],
+  "vw": 390,
+  "vh": 848,
+  "docH": 848,
+  "innerScroll": {
+   "scrollHeight": 220,
+   "clientHeight": 220,
+   "x": 1,
+   "y": 62,
+   "w": 388,
+   "h": 220
+  },
+  "bg": "rgb(17, 17, 34)"
+ }
+}

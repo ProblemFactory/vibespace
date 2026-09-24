@@ -422,8 +422,11 @@ try {
     const root9 = path.join(tmp, 'inst9'); const d9 = path.join(root9, 'data'); fs.mkdirSync(path.join(d9, 'channels'), { recursive: true });
     const adaptersFile = path.join(d9, 'channels', 'adapters.json');
     fs.writeFileSync(adaptersFile, JSON.stringify({ v: 1, adapters: [legacyRec('gmail', 'gmail'), legacyRec('fake-poll', 'fake-poll'), legacyRec('gmail:0badcafe', 'gmail', { credentialKey: 'cluster:channels' })] }));
-    const integrations = STORE.create({ dataDir: d9, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
-    integrations.setClusterKey('gmail', 'org1');   // the row's pick at the upgrade boot
+    // r4: an account-bound row has no card any more — its keyless pick is the
+    // cluster's (`prefer` > the only one), so the pick is driven by the preset
+    // LIST: org1 alone at the upgrade boot, both (⇒ prefer `channels`) after
+    const presets9 = { list: [PRESETS[0]] };
+    const integrations = STORE.create({ dataDir: d9, env: {}, broadcast: () => {}, drivePresets: () => presets9.list, log: quiet });
     const eng = ENG.create({ dataDir: d9, env: {}, integrations, log: quiet });   // never started: no scheduler, no flows
     const m9 = create({ rootDir: root9, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eng });
     const disk = () => JSON.parse(fs.readFileSync(adaptersFile, 'utf-8')).adapters;
@@ -434,7 +437,8 @@ try {
     ok(!('credentialKey' in disk().find((r) => r.id === 'fake-poll')), 'a record with no integration row is left alone');
     ok(disk().find((r) => r.id === 'gmail:0badcafe').credentialKey === 'cluster:channels', 'an already-stamped further account keeps ITS key');
     ok(eng.adapterRecords().adapters.find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'the LIVE record carries the stamp (an adapter built from now on reads it)');
-    integrations.setClusterKey('gmail', 'channels');   // the pick flips before the next boot
+    presets9.list = PRESETS.slice();   // the pick flips (prefer channels) before the next boot
+    ok(integrations.resolveIntegration('gmail').credentialKey === 'cluster:channels', 'FIXTURE: the row\'s pick is now channels');
     const res9b = m9.runLocalMigrations().find((r) => r.id === '2026-09-channel-credential-key');
     await drain();
     ok(res9b?.status === 'already' && disk().find((r) => r.id === 'gmail').credentialKey === 'cluster:org1', 'idempotent: the next boot skips it by ledger and the stamp stays org1 whatever the pick says now');
@@ -479,7 +483,7 @@ try {
       legacyRec('gmail:00000004', 'gmail', { auth: { tokenEnc: 'not-a-blob', expiresAt: null, scopes: [], user: null } }),   // undecryptable
     ] }));
     const s13 = STORE.create({ dataDir: d13, env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'tA', label: 'Tenant A', values: { appId: 'cli_a', appSecret: 'fs-a' } }]) }, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
-    s13.setClusterKey('gmail', 'channels');   // the pick flipped BEFORE the upgrade — the pre-fix symptom
+    // the row's pick is `channels` (both presets, prefer) — flipped BEFORE the upgrade, the pre-fix symptom
     const larkPick = s13.resolveIntegration('lark').credentialKey;
     ok(s13.resolveIntegration('gmail').credentialKey === 'cluster:channels' && larkPick === 'cluster:tA', `FIXTURE: the gmail row's pick is channels, the lark row's is its one tenant (${larkPick})`);
     const e13 = ENG.create({ dataDir: d13, env: {}, integrations: s13, log: quiet });
@@ -494,15 +498,122 @@ try {
     const box14 = SB.secretBox(path.join(d14, ENG.KEY_FILE));
     const held14 = (id, tok) => legacyRec(id, 'gmail', { auth: { tokenEnc: box14.enc(JSON.stringify({ access_token: 'at-y', expiresAt: 1, refresh_token: 'rt-y', scopes: ['s'], ...tok })), expiresAt: null, scopes: ['s'], user: null } });
     fs.writeFileSync(path.join(d14, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [held14('gmail', { clusterKey: null }), held14('gmail:00000005', { clusterKey: 'org1' }), held14('gmail:00000006', { clusterKey: 'gone' })] }));
+    // the retired card's own values, as a pre-r4 instance left them in
+    // integrations.json (the card that wrote them is gone — r4 — so they are
+    // written here the way the store sealed them: under `.integrations-key`)
+    fs.writeFileSync(path.join(d14, 'integrations.json'), JSON.stringify({ version: 1, integrations: { gmail: { values: { clientId: 'own.apps.googleusercontent.com', clientSecret: SB.secretBox(path.join(d14, STORE.KEY_FILE)).enc('own-sec-01') }, clusterKey: null } } }));
     const s14 = STORE.create({ dataDir: d14, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
-    s14.setIntegration('gmail', { clientId: 'own.apps.googleusercontent.com', clientSecret: 'own-sec-01' });   // the user's own values: the row's pick is `own`, and `own` is OFFERED
     const e14 = ENG.create({ dataDir: d14, env: {}, integrations: s14, log: quiet });
     const rep14 = e14.stampCredentialKeys(); await rep14.write;
     const by14 = Object.fromEntries(rep14.stamped.map((r) => [r.id, r]));
-    ok(by14.gmail && by14.gmail.key === 'own' && by14.gmail.evidence === 'token' && by14.gmail.tokenKey === 'own', `a token minted under the user's own values is stamped \`own\` with evidence 'token' once the values are complete (${JSON.stringify(by14.gmail)})`);
-    ok(by14['gmail:00000005'] && by14['gmail:00000005'].key === 'cluster:org1' && by14['gmail:00000005'].evidence === 'token', 'an org1-minted token is stamped org1 with evidence \'token\' even while the row\'s pick is own');
-    ok(by14['gmail:00000006'] && by14['gmail:00000006'].key === 'own' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
+    ok(by14.gmail && by14.gmail.key === 'own' && by14.gmail.evidence === 'token' && by14.gmail.tokenKey === 'own', `a token minted under the user's own values is stamped \`own\` with evidence 'token' while those values are complete (r4: \`own\` is no longer OFFERED, but a token minted under it stays bound to it — the own → custom copy below moves the values onto the record) (${JSON.stringify(by14.gmail)})`);
+    ok(by14['gmail:00000005'] && by14['gmail:00000005'].key === 'cluster:org1' && by14['gmail:00000005'].evidence === 'token', 'an org1-minted token is stamped org1 with evidence \'token\'');
+    ok(by14['gmail:00000006'] && by14['gmail:00000006'].key === 'cluster:channels' && by14['gmail:00000006'].evidence === 'row-pick' && by14['gmail:00000006'].tokenKey === 'cluster:gone', 'a withdrawn key falls to the row\'s pick (r4: the cluster\'s — the saved own values are never a pick) with evidence \'row-pick\' and the token\'s own key NAMED beside it', JSON.stringify(by14['gmail:00000006']));
     try { eng.stop(); e12.stop(); e13.stop(); e14.stop(); } catch { }
+  }
+
+  // ── 2026-09-channel-custom-client-inline (r4, docs/design-integrations-per-account.zh.md §2.6) ──
+  // A channel account still naming `own` gets the retired card's values
+  // (`.integrations-key`) RE-SEALED under `.channels-key` onto its OWN record,
+  // stamped `custom` only after that write landed — reader-side (the engine
+  // runs it when the record is read) AND at boot through this migration (the
+  // same function). Idempotent twice; a missing integration key fails BY NAME
+  // and mints no key; the PRE-FIX engine (348aa226) as the control: under the
+  // r4 store its `own` account resolves to NOTHING (own-retired) — the account
+  // would be dead without the copy.
+  {
+    const ENG = require('../src/server/channels-engine.js');
+    const STORE = require('../src/server/integration-store.js');
+    const SB = require('../src/secret-box.js');
+    const quiet = { log() {}, warn() {}, error() {} };
+    const ID = '2026-09-channel-custom-client-inline';
+    const OWN_SECRET = 'own-client-SECRET-9q8w7e';
+    const PRESETS = [{ key: 'channels', label: 'Channels', clientId: 'ch.apps.googleusercontent.com', clientSecret: 'channels-secret-0000' }];
+    const legacyOwn = (d, extra = {}) => {
+      fs.mkdirSync(path.join(d, 'channels'), { recursive: true });
+      const ch = SB.secretBox(path.join(d, ENG.KEY_FILE));
+      const rec = { id: 'gmail', kind: 'gmail', label: 'Gmail', enabled: true, credentialKey: 'own', auth: { tokenEnc: ch.enc(JSON.stringify({ access_token: 'at', expiresAt: 1, refresh_token: 'rt', scopes: ['s'], clusterKey: null })), expiresAt: null, scopes: ['s'], user: 'member.o@example.com' }, options: { query: 'label:INBOX' }, state: {}, lastPass: null, consecutiveFailures: 0, failureItem: null, lastAuthError: null, lastAuthAt: null, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null, ...extra };
+      fs.writeFileSync(path.join(d, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [rec, { ...rec, id: 'gmail:0000cafe', credentialKey: 'cluster:channels', auth: { tokenEnc: null, expiresAt: null, scopes: [], user: null } }] }));
+      const ib = SB.secretBox(path.join(d, STORE.KEY_FILE));
+      fs.writeFileSync(path.join(d, 'integrations.json'), JSON.stringify({ version: 1, integrations: { gmail: { values: { clientId: 'own.apps.googleusercontent.com', clientSecret: ib.enc(OWN_SECRET) }, clusterKey: null } } }));
+      return { ch, ib };
+    };
+    const disk = (d) => JSON.parse(fs.readFileSync(path.join(d, 'channels', 'adapters.json'), 'utf-8')).adapters;
+    // ① the migration: copy + stamp, in that order, idempotent twice
+    const root15 = path.join(tmp, 'inst15'); const d15 = path.join(root15, 'data');
+    const { ch: ch15, ib: ib15 } = legacyOwn(d15);
+    const s15 = STORE.create({ dataDir: d15, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    const e15 = ENG.create({ dataDir: d15, env: {}, integrations: s15, log: quiet });
+    const writes15 = [];
+    const upd = e15.store.adapters.update;
+    e15.store.adapters.update = (fn) => upd(fn).then((r) => { const g = disk(d15).find((x) => x.id === 'gmail'); writes15.push({ key: g.credentialKey, copied: !!(g.credential && g.credential.appSecretEnc) }); return r; });
+    const m15 = create({ rootDir: root15, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e15 });
+    const res15 = m15.runLocalMigrations().find((r) => r.id === ID);
+    await e15.inlineLegacyClient(e15.adapterRecords().adapters.find((x) => x.id === 'gmail'));   // the in-flight copy (single-flight: THIS call returns it)
+    const g15 = disk(d15).find((x) => x.id === 'gmail');
+    ok(res15?.status === 'ran' && g15.credentialKey === 'custom' && g15.credential.appId === 'own.apps.googleusercontent.com', 'the legacy `own` account now names `custom` with the saved client id ON its record', JSON.stringify({ res15, key: g15.credentialKey, cred: g15.credential && g15.credential.appId }));
+    ok(ch15.dec(g15.credential.appSecretEnc) === OWN_SECRET, 'the secret is RE-SEALED under `.channels-key` (it opens with the channels key)…');
+    let openedByIntegrationsKey = true; try { ib15.dec(g15.credential.appSecretEnc); } catch { openedByIntegrationsKey = false; }
+    ok(!openedByIntegrationsKey && !fs.readFileSync(path.join(d15, 'channels', 'adapters.json'), 'utf-8').includes(OWN_SECRET), '…and NOT under `.integrations-key` (a new seal, not a copied blob); no plaintext on disk');
+    ok(writes15.length >= 2 && writes15[0].key === 'own' && writes15[0].copied === true && writes15.slice(-1)[0].key === 'custom', `the client landed FIRST (own + credential) and the \`custom\` stamp AFTER it (${JSON.stringify(writes15)})`);
+    ok(disk(d15).find((x) => x.id === 'gmail:0000cafe').credentialKey === 'cluster:channels' && !disk(d15).find((x) => x.id === 'gmail:0000cafe').credential, 'a preset account is untouched');
+    ok(JSON.parse(fs.readFileSync(path.join(d15, 'integrations.json'), 'utf-8')).integrations.gmail.values.clientId === 'own.apps.googleusercontent.com', 'integrations.json\'s values stay in place (no reader, never deleted)');
+    const again15 = e15.inlineLegacyClients(); await again15.write;
+    const res15b = m15.runLocalMigrations().find((r) => r.id === ID);
+    ok(again15.copied.length === 0 && again15.failed.length === 0 && res15b?.status === 'already' && disk(d15).find((x) => x.id === 'gmail').credentialKey === 'custom', 'idempotent twice: the function finds nothing to copy and the ledger skips the row');
+    ok(e15.clientFor(e15.adapterRecords().adapters.find((x) => x.id === 'gmail')).values.clientSecret === OWN_SECRET, 'the account resolves its OWN client from the record now');
+    // ② reader-side: no migration at all, the record is merely READ
+    const root16 = path.join(tmp, 'inst16'); const d16 = path.join(root16, 'data');
+    legacyOwn(d16);
+    const s16 = STORE.create({ dataDir: d16, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    const e16 = ENG.create({ dataDir: d16, env: {}, integrations: s16, log: quiet });
+    const live16 = e16.adapterRecords().adapters.find((x) => x.id === 'gmail');
+    const served = e16.clientFor(live16);
+    ok(served.source === 'user' && served.values.clientId === 'own.apps.googleusercontent.com' && served.credentialKey === 'own', 'reader-side: a read of the `own` record is SERVED from the legacy values…');
+    await e16.inlineLegacyClient(live16);
+    ok(disk(d16).find((x) => x.id === 'gmail').credentialKey === 'custom', '…and the read itself scheduled the copy: the record is `custom` without any migration having run');
+    // ③ a missing integration key fails BY NAME and mints no key
+    const root17 = path.join(tmp, 'inst17'); const d17 = path.join(root17, 'data');
+    legacyOwn(d17);
+    fs.unlinkSync(path.join(d17, STORE.KEY_FILE));
+    const s17 = STORE.create({ dataDir: d17, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+    const e17 = ENG.create({ dataDir: d17, env: {}, integrations: s17, log: quiet });
+    const res17 = create({ rootDir: root17, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e17 }).runLocalMigrations().find((r) => r.id === ID);
+    const led17 = JSON.parse(fs.readFileSync(path.join(d17, 'migrations.json'), 'utf-8'));
+    ok(res17?.status === 'failed' && /gmail \(integration-key-missing/.test(res17.error) && /\.integrations-key is missing/.test(res17.error) && !led17.applied[ID], 'a missing `.integrations-key` FAILS the run BY NAME (the account, the code, the file) — never recorded, retried next boot', JSON.stringify(res17));
+    ok(!fs.existsSync(path.join(d17, STORE.KEY_FILE)) && disk(d17).find((x) => x.id === 'gmail').credentialKey === 'own', 'no key was minted over the missing one, and the account keeps `own`');
+    // no engine: an `own` record fails the run by name; none is a success
+    const root18 = path.join(tmp, 'inst18'); const d18 = path.join(root18, 'data'); legacyOwn(d18);
+    const res18 = create({ rootDir: root18, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(res18?.status === 'failed' && /no channels engine/.test(res18.error) && /gmail/.test(res18.error), 'without an engine an `own` record FAILS the run by name');
+    const root19 = path.join(tmp, 'inst19'); fs.mkdirSync(path.join(root19, 'data'), { recursive: true });
+    ok(create({ rootDir: root19, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID)?.status === 'ran', 'CONTROL: a fresh instance (no adapters.json) is a dry run — a success (this instance: zero `own` accounts)');
+    // ④ THE PRE-FIX CONTROL: the base engine under the r4 store — its `own` account resolves to nothing
+    const __dirname_ = path.dirname(new URL(import.meta.url).pathname);
+    const { gitEnvFrom } = await import('./git-env.mjs');   // a pre-push hook exports GIT_DIR — the one sanitized git env
+    let preSrc = null;
+    try { preSrc = require('node:child_process').execFileSync('git', ['show', '348aa226:src/server/channels-engine.js'], { cwd: path.join(__dirname_, '..'), env: gitEnvFrom(process.env), encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { preSrc = null; }
+    if (!preSrc) console.log('  … SKIP the pre-fix engine control (git history for 348aa226 not present — a shallow clone)');
+    else {
+      // the copy lives OUTSIDE the tree (scripts/mutant-copy.mjs, B-0220 — `require`
+      // re-bound to the real engine's path, so its relative requires resolve as a
+      // sibling's); the scratch dir goes at exit
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const MUTM = mutantCopies('migrations', path.join(__dirname_, '..'));
+      const copy = MUTM.write(path.join(__dirname_, '..', 'src', 'server', 'channels-engine.js'), preSrc, 'pre-r4');
+      ok(!path.relative(path.join(__dirname_, '..'), copy).startsWith('src'), 'the pre-fix engine copy is written outside the tree');
+      try {
+        const PRE = require(copy);
+        const root20 = path.join(tmp, 'inst20'); const d20 = path.join(root20, 'data'); legacyOwn(d20);
+        const s20 = STORE.create({ dataDir: d20, env: {}, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+        const e20 = PRE.create({ dataDir: d20, env: {}, integrations: s20, log: quiet });
+        const res20 = create({ rootDir: root20, homeDir: scratchHomeDir, serverNotice: () => { }, channels: e20 }).runLocalMigrations().find((r) => r.id === ID);
+        const f20 = e20.adapterView(e20.adapterRecords().adapters.find((x) => x.id === 'gmail')).credential;
+        ok(res20?.status === 'failed' && disk(d20).find((x) => x.id === 'gmail').credentialKey === 'own' && f20.source === 'none' && f20.whyCode === 'own-retired', `PRE-FIX CONTROL: the pre-r4 engine has no copy (the run fails "no channels engine" — it lacks the function) and its \`own\` account resolves to NOTHING under the r4 store (${f20.whyCode}) — the account the copy keeps alive`);
+        e20.stop();
+      } finally { try { fs.rmSync(MUTM.dir, { recursive: true, force: true }); } catch { } }
+    }
+    try { e15.stop(); e16.stop(); e17.stop(); } catch { }
   }
 
   // ── 2026-09-spend-notices-expire (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS") ──

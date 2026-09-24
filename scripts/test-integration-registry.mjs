@@ -104,6 +104,15 @@ console.log('§1 the PURE table');
   ok(R.ROWS.filter((r) => r.clusterEnv).every((r) => storeMod.envFieldName(r.id, 'x').startsWith(r.clusterEnv.prefix)), 'every declared prefix IS what the store derives from the row id (one declaration, one derivation)');
   ok(R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).length === 6 && R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).every((r) => r.consumers.length === 1 && r.consumers[0] === 'src/server/browser-backend.js' && !r.wiredIn && !r.setup), 'the agent-browser track contributes six pure-key rows (cloak + five cloud:*), each consumed by its ONE key module, none declaring a setup block (design-agent-browser-v2 §7.5)');
   ok(R.rowById('cloak').test.kind === 'shape-only' && R.ROWS.filter((r) => r.id.startsWith('cloud:')).every((r) => r.test.kind === 'credential-exchange'), 'cloak\'s Test is shape-only (zero network), the five cloud:* Tests are credential-exchange (§7.5\'s Test-contract table)');
+  // r4 (2.369.165, design-integrations-per-account §2.3): the ACCOUNT-BOUND rows
+  ok(R.ROWS.filter((r) => r.bindsPerAccount).map((r) => r.id).join() === 'fake,lark,gmail', 'bindsPerAccount = exactly fake, lark, gmail (their OAuth client is chosen per account)');
+  ok(R.ROWS.filter((r) => r.bindsPerAccount).every((r) => typeof r.clientHint === 'string' && r.clientHint.length > 20) && R.ROWS.filter((r) => !r.bindsPerAccount).every((r) => r.clientHint === undefined && r.bindsPerAccount === undefined), 'each account-bound row declares ONE clientHint; the six browser rows declare neither (untouched)');
+  ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']) && R.clientFieldsOf('lark').id.label === 'App ID' && R.clientFieldsOf('gmail').secret.label === 'OAuth client secret', 'clientFieldsOf maps each row\'s custom client onto its declared fields (Lark App ID / App Secret, Google client id / secret) with the row\'s own labels');
+  ok(R.bindsPerAccount('gmail') === true && R.bindsPerAccount('cloak') === false && R.bindsPerAccount('nope') === false, 'bindsPerAccount(id) answers by the row');
+  ok(R.checkRow({ ...lark, clientHint: '' }).some((e) => /clientHint/.test(e)), 'CONTROL: an account-bound row without its hint is refused');
+  ok(R.checkRow({ ...lark, fields: lark.fields.map((f) => ({ ...f, secret: true })) }).some((e) => /non-secret field/.test(e)) && R.checkRow({ ...lark, fields: [...lark.fields, { ...lark.fields[1], key: 'x' }] }).some((e) => /exactly ONE secret/.test(e)), 'CONTROL: an account-bound row needs exactly one secret field and a non-secret one (the custom client\'s id + secret)');
+  ok(R.checkRow({ ...cloak, clientHint: 'x' }).some((e) => /bindsPerAccount row only/.test(e)) && R.checkRow({ ...cloak, bindsPerAccount: 'yes' }).some((e) => /boolean/.test(e)), 'CONTROL: a hint on a card row, or a non-boolean flag, is refused');
+  ok(R.credentialWhyText({ whyCode: 'own-retired' }) !== 'own-retired' && /per account/.test(R.credentialWhyText({ whyCode: 'own-retired' })) && /\(clientSecret\)/.test(R.credentialWhyText({ whyCode: 'custom-missing', whyParams: { fields: ['clientSecret'] } })) && /decrypted/.test(R.credentialWhyText({ whyCode: 'custom-undecryptable' })), 'credentialWhyText words the r4 codes (own-retired / custom-missing / custom-undecryptable)');
 }
 
 // ═══ §2 masking + validation ═══════════════════════════════════════════════
@@ -177,124 +186,166 @@ const api = async (method, p, body) => {
 };
 const allBodies = [];
 const get = async (p) => { const r = await api('GET', p); allBodies.push(r.text); return r; };
+// THE CARD the store legs walk (r4, 2.369.165): the fake / lark / gmail rows
+// are ACCOUNT-BOUND now (`bindsPerAccount` — their OAuth client is chosen per
+// account, test-channels-accounts), so the card mechanics are walked on a
+// browser key row with the same shape: one secret field (`apiKey`) and one
+// optional plain field (`stealth`, where the fake row had `region`). Its Test
+// is the fake adapter's own zero-network runner, registered by THIS suite
+// (browser-backend registers the real, network-making one in §6 (f)).
+const CARD = 'cloud:browserless';
+const CARDP = `/api/integrations/${encodeURIComponent(CARD)}`;
+const { integrationTest: shapeRunner } = require(path.join(REPO, 'src/channels/fake.js'));
+store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.length === R.ROWS.length, 'GET /api/integrations lists every row');
-  const f0 = r0.json.integrations.find((x) => x.id === 'fake');
-  ok(f0.source === 'none' && f0.missing.join() === 'apiKey' && /no default/.test(f0.why), `fake starts as none, names the missing field, says why (${f0.why})`);
-  ok(f0.fields.every((f) => !('validate' in f)) && f0.setup.callbackUrl === 'http://127.0.0.1:17865/fake/cb' && f0.testButton === 'Check format (no network)', 'the wire carries declarations only (no validate fns), the setup block and the button wording');
+  const cards = R.ROWS.filter((r) => !r.bindsPerAccount).map((r) => r.id);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 6, `GET /api/integrations lists the six browser key rows ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
+  // every card verb on an account-bound row: 404 BY NAME
+  for (const id of ['fake', 'lark', 'gmail']) {
+    const g = await api('GET', `/api/integrations/${id}`);
+    const p = await api('PUT', `/api/integrations/${id}`, { values: { apiKey: 'x-12345678' } });
+    const pc = await api('PUT', `/api/integrations/${id}`, { clusterKey: null });
+    const pu = await api('PUT', `/api/integrations/${id}`, { use: 'cluster' });
+    const d = await api('DELETE', `/api/integrations/${id}`);
+    const t = await api('POST', `/api/integrations/${id}/test`);
+    const all = [g, p, pc, pu, d, t];
+    ok(all.every((x) => x.status === 404 && x.json && x.json.code === 'binds-per-account' && /chosen per account where the account is added/.test(x.json.error) && /Connect an account/.test(x.json.error)), `${id}: GET / PUT {values|clusterKey|use} / DELETE / test are each 404 binds-per-account BY NAME (${all.map((x) => x.status).join(',')})`);
+  }
+  ok(!fs.existsSync(path.join(dataDir, 'integrations.json')), 'and none of those refusals wrote anything');
+  const f0 = r0.json.integrations.find((x) => x.id === CARD);
+  ok(f0.source === 'none' && f0.missing.join() === 'apiKey,apiUrl' && /no default/.test(f0.why), `the card starts as none, names the missing fields, says why (${f0.why})`);
+  ok(f0.fields.every((f) => !('validate' in f)) && f0.setup === null && f0.testButton === 'Test connection', 'the wire carries declarations only (no validate fns), no setup block, and the button wording its kind decides');
   ok(!('values' in f0) || Object.keys(f0.values).every((k) => !f0.fields.find((x) => x.key === k).secret), 'no secret key appears under `values` on the wire');
 
   // PUT a 40-char secret ⇒ user; masked; plaintext nowhere
-  const put = await api('PUT', '/api/integrations/fake', { values: { apiKey: `  ${SECRET40}\n`, region: 'eu' } });
+  const put = await api('PUT', CARDP, { values: { apiKey: `  ${SECRET40}\n`, stealth: 'true' } });
   ok(put.status === 200 && put.json.ok && put.json.integration.source === 'user', 'PUT {values} ⇒ source user');
   const v1 = put.json.integration;
-  ok(v1.set.apiKey === true && v1.masked.apiKey === '••••ZZ99' && v1.values.region === 'eu', 'the secret is SET and masked with its last 4; the non-secret is plain');
+  ok(v1.set.apiKey === true && v1.masked.apiKey === '••••ZZ99' && v1.values.stealth === 'true', 'the secret is SET and masked with its last 4; the non-secret is plain');
   ok(!put.text.includes(SECRET40), 'the PUT response body does not carry the plaintext');
-  const g1 = await get('/api/integrations/fake');
+  const g1 = await get(CARDP);
   ok(!g1.text.includes(SECRET40) && g1.json.integration.masked.apiKey === '••••ZZ99', 'GET one: masked, never the plaintext');
   const onDisk = fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8');
-  ok(!onDisk.includes(SECRET40) && /"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(onDisk) && onDisk.includes('"region": "eu"'), 'on disk: the secret is `iv.tag.data` ciphertext, the non-secret is plain, no `source` field');
+  ok(!onDisk.includes(SECRET40) && /"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(onDisk) && onDisk.includes('"stealth": "true"'), 'on disk: the secret is `iv.tag.data` ciphertext, the non-secret is plain, no `source` field');
   ok(!/"source"/.test(onDisk), '`source` is NEVER stored — it is derived at read time');
+  ok((fs.statSync(path.join(dataDir, 'integrations.json')).mode & 0o777) === 0o600, 'integrations.json is 0600 (encrypted secrets inside — owner-only like the key file, 2.369.165)');
   ok(fs.existsSync(path.join(dataDir, '.integrations-key')) && (fs.statSync(path.join(dataDir, '.integrations-key')).mode & 0o777) === 0o600, 'the store has its OWN 0600 key file (decision 24)');
-  const res1 = store.resolveIntegration('fake');
-  ok(res1.source === 'user' && res1.values.apiKey === SECRET40 && res1.values.region === 'eu', 'resolveIntegration (the consumer\'s call) hands back the TRIMMED plaintext');
+  const res1 = store.resolveIntegration(CARD);
+  ok(res1.source === 'user' && res1.values.apiKey === SECRET40 && res1.values.stealth === 'true', 'resolveIntegration (the consumer\'s call) hands back the TRIMMED plaintext');
 
   // omit vs ''
-  const put2 = await api('PUT', '/api/integrations/fake', { values: { region: 'us' } });
-  ok(put2.json.integration.set.apiKey === true && put2.json.integration.values.region === 'us', 'an OMITTED secret is untouched while a sibling field changes');
-  const put3 = await api('PUT', '/api/integrations/fake', { values: { apiKey: '' } });
-  ok(put3.json.integration.set.apiKey === false && put3.json.integration.values.region === 'us', "'' CLEARS the secret and leaves the sibling");
+  const put2 = await api('PUT', CARDP, { values: { stealth: 'false' } });
+  ok(put2.json.integration.set.apiKey === true && put2.json.integration.values.stealth === 'false', 'an OMITTED secret is untouched while a sibling field changes');
+  const put3 = await api('PUT', CARDP, { values: { apiKey: '' } });
+  ok(put3.json.integration.set.apiKey === false && put3.json.integration.values.stealth === 'false', "'' CLEARS the secret and leaves the sibling");
   // named refusal on a bad value, nothing written
-  const bad = await api('PUT', '/api/integrations/lark', { values: { appId: 'nope' } });
-  ok(bad.status === 400 && /appId: .*cli_/.test(bad.json.error) && bad.json.code === 'invalid-values', `a bad value is a 400 with the field NAMED (${bad.json.error})`);
-  ok(store.resolveIntegration('lark').source === 'none', 'and nothing was written for it');
+  const bad = await api('PUT', CARDP, { values: { apiUrl: 'ftp:nohost' } });
+  ok(bad.status === 400 && /apiUrl: .*http/.test(bad.json.error) && bad.json.code === 'invalid-values', `a bad value is a 400 with the field NAMED (${bad.json.error})`);
+  ok(!store.resolveIntegration(CARD).values.apiUrl, 'and nothing was written for it');
   const unk = await api('PUT', '/api/integrations/nope', { values: {} });
-  ok(unk.status === 404, 'an unknown id is 404');
+  ok(unk.status === 404 && unk.json.code === 'unknown-integration', 'an unknown id is 404 unknown-integration (a different refusal from binds-per-account)');
 
   // restore the user secret for the walk
-  await api('PUT', '/api/integrations/fake', { values: { apiKey: SECRET40 } });
+  await api('PUT', CARDP, { values: { apiKey: SECRET40 } });
   // inject a cluster default ⇒ the user's value SURVIVES
-  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', label: 'Cluster fake', values: { apiKey: 'cluster-fake-key-000000', region: 'cluster' } }]);
-  const g2 = await get('/api/integrations/fake');
+  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, label: 'Cluster browserless', values: { apiKey: 'cluster-fake-key-000000', apiUrl: 'https://cluster.example.net' } }]);
+  const g2 = await get(CARDP);
   ok(g2.json.integration.source === 'user' && g2.json.integration.clusterAvailable === true, 'USER > CLUSTER: injecting an env default does not displace the user\'s own key');
   // DELETE ⇒ lands on cluster
-  const del = await api('DELETE', '/api/integrations/fake');
-  ok(del.json.integration.source === 'cluster' && del.json.integration.clusterKey === 'default' && del.json.integration.clusterLabel === 'Cluster fake' && del.json.integration.fromEnv === true, 'DELETE ("drop my keys") lands on the CLUSTER default when one exists, chip = cluster · <label>');
+  const del = await api('DELETE', CARDP);
+  ok(del.json.integration.source === 'cluster' && del.json.integration.clusterKey === 'default' && del.json.integration.clusterLabel === 'Cluster browserless' && del.json.integration.fromEnv === true, 'DELETE ("drop my keys") lands on the CLUSTER default when one exists, chip = cluster · <label>');
   ok(!del.text.includes('cluster-fake-key-000000') && del.json.integration.masked.apiKey === '••••0000', 'the cluster secret is masked on the wire too');
-  ok(store.resolveIntegration('fake').values.apiKey === 'cluster-fake-key-000000', 'the consumer resolves the CLUSTER value, read from env at the moment of the question');
+  ok(store.resolveIntegration(CARD).values.apiKey === 'cluster-fake-key-000000', 'the consumer resolves the CLUSTER value, read from env at the moment of the question');
   ok(!fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8').includes('cluster-fake-key'), 'the cluster value is NEVER copied into data/integrations.json');
   // use:'cluster' explicitly; then withdraw the env ⇒ none WITH the reason
-  const use = await api('PUT', '/api/integrations/fake', { use: 'cluster' });
+  const use = await api('PUT', CARDP, { use: 'cluster' });
   ok(use.status === 200 && use.json.integration.source === 'cluster', "PUT {use:'cluster'} keeps it on the cluster");
   delete env.VIBESPACE_INTEGRATIONS;
-  const g3 = await get('/api/integrations/fake');
+  const g3 = await get(CARDP);
   ok(g3.json.integration.source === 'none' && /no longer provided/.test(g3.json.integration.why) && g3.json.integration.set.apiKey === false,
     `INJECT-THEN-REMOVE: the row answers none WITH THE REASON, never the old value (${g3.json.integration.why})`);
-  ok(store.resolveIntegration('fake').source === 'none', 'and the consumer is told none too (an adapter is never quietly handed a dead credential)');
+  ok(store.resolveIntegration(CARD).source === 'none', 'and the consumer is told none too (a consumer is never quietly handed a dead credential)');
   // use:'cluster' now REFUSES BY NAME
-  const refuse = await api('PUT', '/api/integrations/fake', { use: 'cluster' });
+  const refuse = await api('PUT', CARDP, { use: 'cluster' });
   ok(refuse.status === 409 && refuse.json.code === 'no-cluster-default' && /no longer provided|no default/.test(refuse.json.error), `useClusterDefault with no default is a NAMED refusal (${refuse.json.code})`);
-  const del2 = await api('DELETE', '/api/integrations/fake');
+  const del2 = await api('DELETE', CARDP);
   ok(del2.status === 200 && del2.json.integration.source === 'none', 'DELETE with no default is ALWAYS allowed and lands on none');
   // the single-field env form
-  env.VIBESPACE_INTEGRATION_FAKE_APIKEY = 'prefix-form-key-12345678';
-  ok(store.resolveIntegration('fake').source === 'cluster' && store.resolveIntegration('fake').values.apiKey === 'prefix-form-key-12345678', 'the single-field form VIBESPACE_INTEGRATION_FAKE_APIKEY is a cluster default too');
-  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: 'json-form-key-12345678' } }]);
-  ok(store.resolveIntegration('fake').values.apiKey === 'json-form-key-12345678', 'when both forms name the row the JSON form wins');
-  delete env.VIBESPACE_INTEGRATIONS; delete env.VIBESPACE_INTEGRATION_FAKE_APIKEY;
+  env.VIBESPACE_INTEGRATION_CLOUD_BROWSERLESS_APIKEY = 'prefix-form-key-12345678';
+  ok(store.resolveIntegration(CARD).source === 'cluster' && store.resolveIntegration(CARD).values.apiKey === 'prefix-form-key-12345678', 'the single-field form VIBESPACE_INTEGRATION_CLOUD_BROWSERLESS_APIKEY is a cluster default too');
+  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, values: { apiKey: 'json-form-key-12345678' } }]);
+  ok(store.resolveIntegration(CARD).values.apiKey === 'json-form-key-12345678', 'when both forms name the row the JSON form wins');
+  delete env.VIBESPACE_INTEGRATIONS; delete env.VIBESPACE_INTEGRATION_CLOUD_BROWSERLESS_APIKEY;
   env.VIBESPACE_INTEGRATIONS = '{not json';
-  ok(store.resolveIntegration('fake').source === 'none', 'an unparseable VIBESPACE_INTEGRATIONS is "no cluster default", never a throw');
+  ok(store.resolveIntegration(CARD).source === 'none', 'an unparseable VIBESPACE_INTEGRATIONS is "no cluster default", never a throw');
   delete env.VIBESPACE_INTEGRATIONS;
 
-  // the delegating row
+  // THE DELEGATING ROW IS A PRESET READER NOW (r4): gmail's presets come from
+  // the ONE reader of VIBESPACE_GDRIVE_CLIENTS (drivePresets) as `{key,label}`,
+  // its keyless pick is the cluster's (`prefer` > the only one), a SAVED
+  // clusterKey or saved values from the retired card are never read.
   drivePresetsHolder.list = [{ key: 'org1', label: 'Org 1', clientId: 'org1.apps.googleusercontent.com', clientSecret: 'org1-secret-000000' }, { key: 'channels', label: 'Channels', clientId: 'ch.apps.googleusercontent.com', clientSecret: 'channels-secret-0000' }];
-  const gm = await get('/api/integrations/gmail');
-  ok(gm.json.integration.source === 'cluster' && gm.json.integration.clusterKey === 'channels' && gm.json.integration.clusterLabel === 'Channels', 'gmail on org1 + channels (no default) resolves to `prefer` = channels');
-  ok(gm.json.integration.clusterOptions.length === 2 && gm.json.integration.clusterOptions.every((o) => Object.keys(o).sort().join() === 'key,label') && gm.json.integration.delegate.multi === true, 'clusterOptions carry key + label ONLY, and the row says multi');
-  ok(!gm.text.includes('org1-secret') && !gm.text.includes('channels-secret'), 'no preset secret is on the wire');
-  const pick = await api('PUT', '/api/integrations/gmail', { clusterKey: 'org1' });
-  ok(pick.json.integration.source === 'cluster' && pick.json.integration.clusterKey === 'org1', 'a SAVED selector beats prefer: clusterKey org1');
-  ok(store.resolveIntegration('gmail').values.clientId === 'org1.apps.googleusercontent.com', 'and the consumer gets org1\'s client');
-  const disk2 = JSON.parse(fs.readFileSync(path.join(dataDir, 'integrations.json'), 'utf-8'));
-  ok(disk2.integrations.gmail.clusterKey === 'org1' && Object.keys(disk2.integrations.gmail.values).length === 0 && !('source' in disk2.integrations.gmail), 'a selector-only record: clusterKey and NO values, NO source');
-  ok(store.publicView('gmail').source === 'cluster', "a selector-only record answers source 'cluster', NOT 'user' (the chip must not lie, and the export must carry a key not a credential)");
-  drivePresetsHolder.list = [drivePresetsHolder.list[1]];   // org1 withdrawn
-  const gm2 = await get('/api/integrations/gmail');
-  ok(gm2.json.integration.source === 'none' && /org1/.test(gm2.json.integration.why), `the saved preset vanished ⇒ none naming org1 (${gm2.json.integration.why}) — never a silent swap to prefer`);
-  const badKey = await api('PUT', '/api/integrations/gmail', { clusterKey: 'ghost' });
-  ok(badKey.status === 400 && badKey.json.code === 'no-such-preset', 'choosing a preset the cluster does not provide is refused by name');
-  await api('PUT', '/api/integrations/gmail', { clusterKey: null });
+  ok(JSON.stringify(store.presetsFor('gmail')) === JSON.stringify([{ key: 'org1', label: 'Org 1' }, { key: 'channels', label: 'Channels' }]), 'presetsFor(gmail) = key + label ONLY, from the drive presets (the storage dialog\'s reader)');
+  ok(store.resolveIntegration('gmail').clusterKey === 'channels' && store.resolveIntegration('gmail', { credentialKey: 'cluster:org1' }).values.clientId === 'org1.apps.googleusercontent.com', 'the keyless pick is `prefer` (channels); the account rung `cluster:org1` resolves org1');
+  ok(store.offeredCredentials('gmail').map((o) => o.key).join() === 'cluster:org1,cluster:channels', 'offeredCredentials(gmail) = the presets only (no `own`)');
+  const retiredCard = path.join(ROOT, 'retired-card'); fs.mkdirSync(retiredCard, { recursive: true });
+  const { secretBox } = require(path.join(REPO, 'src/secret-box.js'));
+  fs.writeFileSync(path.join(retiredCard, 'integrations.json'), JSON.stringify({ version: 1, integrations: { gmail: { values: { clientId: 'me.apps.googleusercontent.com', clientSecret: secretBox(path.join(retiredCard, '.integrations-key')).enc('my-google-secret-1') }, clusterKey: 'org1' } } }));
+  const sr = storeMod.create({ dataDir: retiredCard, env: {}, drivePresets: () => drivePresetsHolder.list, log: { log() {}, warn() {}, error() {} } });
+  const kp = sr.resolveIntegration('gmail');
+  ok(kp.source === 'cluster' && kp.clusterKey === 'channels' && kp.savedClusterKey === 'org1', 'a pre-r4 card\'s saved values AND saved clusterKey are NOT read by the keyless pick (it is the cluster\'s: channels) — they stay in the file');
+  ok(sr.resolveIntegration('gmail', { credentialKey: 'own' }).whyCode === 'own-retired', 'the `own` rung answers own-retired for the account-bound row');
+  const lv = sr.legacyOwnValues('gmail');
+  ok(lv.ok === true && lv.values.clientId === 'me.apps.googleusercontent.com' && lv.values.clientSecret === 'my-google-secret-1', 'legacyOwnValues is their ONE reader (the engine\'s own → custom copy)');
+  ok(storeMod.create({ dataDir: dataDir, env: {}, drivePresets: () => [], log: { log() {}, warn() {}, error() {} } }).legacyOwnValues('gmail').code === 'own-missing', 'legacyOwnValues names `own-missing` when nothing was saved');
+  // the lark row's presets come from the store's own env reader
+  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'lark', key: 'tA', label: 'Tenant A', values: { appId: 'cli_a1', appSecret: 'lark-secret-a1' } }]);
+  ok(JSON.stringify(store.presetsFor('lark')) === JSON.stringify([{ key: 'tA', label: 'Tenant A' }]), 'presetsFor(lark) = the keyed VIBESPACE_INTEGRATIONS entries, key + label only');
+  delete env.VIBESPACE_INTEGRATIONS;
   drivePresetsHolder.list = [];
-  const gmNone = await api('PUT', '/api/integrations/gmail', { use: 'cluster' });
-  ok(gmNone.status === 409 && gmNone.json.code === 'no-cluster-default', 'gmail with NO presets: use:cluster refuses by name');
-  const own = await api('PUT', '/api/integrations/gmail', { values: { clientId: 'me.apps.googleusercontent.com', clientSecret: 'my-google-secret-1' } });
-  ok(own.json.integration.source === 'user' && own.json.integration.masked.clientSecret === '••••et-1', 'gmail with my own client ⇒ user, secret masked');
-  drivePresetsHolder.list = [{ key: 'channels', label: 'Channels', clientId: 'ch.apps.googleusercontent.com', clientSecret: 'channels-secret-0000' }];
-  ok(store.publicView('gmail').source === 'user', 'and a preset appearing later does not displace it');
-  await api('DELETE', '/api/integrations/gmail');
-  ok(store.publicView('gmail').source === 'cluster' && store.publicView('gmail').clusterKey === 'channels', 'DELETE lands on the only preset');
 
   // NEGATIVE CONTROL: a copy that COPIES the cluster values into the record
   const copyPath = patchCopy(STORE_PATH, 'prefix', [[
     "    r.values = {};\n    r.clusterKey = cluster.def.key;\n    r.updatedAt = now();\n    save();\n    return changed(id, 'use-cluster');",
     "    r.values = Object.fromEntries(Object.entries(cluster.def.values).map(([k, val]) => [k, encField(row, k, val)]));\n    r.clusterKey = cluster.def.key;\n    r.updatedAt = now();\n    save();\n    return changed(id, 'use-cluster');",
   ]]);
-  const env2 = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'fake', values: { apiKey: 'rotated-away-key-000' } }]) };
+  const env2 = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: CARD, values: { apiKey: 'rotated-away-key-000' } }]) };
   const d2 = path.join(ROOT, 'data-copy'); fs.mkdirSync(d2, { recursive: true });
   const badStore = require(copyPath).create({ dataDir: d2, env: env2, log: { log() {}, warn() {}, error() {} } });
-  badStore.useClusterDefault('fake');
+  badStore.useClusterDefault(CARD);
   delete env2.VIBESPACE_INTEGRATIONS;
-  const stale = badStore.resolveIntegration('fake');
+  const stale = badStore.resolveIntegration(CARD);
   ok(stale.source === 'user' && stale.values.apiKey === 'rotated-away-key-000', 'PRE-FIX CONTROL: a store that copies the cluster value keeps serving it after the env is rotated away (as "user"!) — the exact defect §14.3 forbids');
   ok(/"apiKey": "[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+\.[A-Za-z0-9+/=]+"/.test(fs.readFileSync(path.join(d2, 'integrations.json'), 'utf-8')), 'PRE-FIX CONTROL: …and wrote the cluster credential to disk (encrypted, but a rotated-away credential all the same)');
+  // CONTROL: a copy WITHOUT the card guard lets PUT write an account-bound row again
+  const noGuard = patchCopy(STORE_PATH, 'prefix', [[
+    "    if (bindsPer(row)) throw new IntegrationError('binds-per-account',",
+    "    if (false) throw new IntegrationError('binds-per-account',",
+  ]]);
+  const dG = path.join(ROOT, 'data-noguard'); fs.mkdirSync(dG, { recursive: true });
+  const ng = require(noGuard).create({ dataDir: dG, env: {}, log: { log() {}, warn() {}, error() {} } });
+  let ngWrote = true; try { ng.setIntegration('lark', { appId: 'cli_abc123', appSecret: 'lark-secret-000000' }); } catch { ngWrote = false; }
+  ok(ngWrote && fs.readFileSync(path.join(dG, 'integrations.json'), 'utf-8').includes('"lark"'), 'CONTROL: a store copy without the card guard writes a Lark card again — the 404s above are the guard, not an accident');
 
-  // Test: dispatch to the consumer's runner (registered by the channels engine below), refusal by name, single flight
+  // Test: dispatch to the consumer's runner, refusal by name, single flight
   const notWired = await api('POST', '/api/integrations/cloak/test');
-  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `cloak's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below); lark and gmail are WIRED since P1 (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
+  ok(notWired.status === 501 && notWired.json.code === 'no-test-runner' && /registered a runner/.test(notWired.json.error), `cloak's Test in a harness with NO browser wiring is a NAMED no-test-runner refusal — its runner is src/server/browser-backend.js's, registered at boot (proved through the real store below) (${notWired.status} ${notWired.json.code}: ${notWired.json.error})`);
   ok(store.publicView('cloak').testedAt === null, 'a refusal is not a verdict — nothing was recorded');
+  await api('PUT', CARDP, { values: { apiKey: 'good-key-12345678', apiUrl: 'https://chrome.example.net' } });
+  const t1 = await api('POST', `${CARDP}/test`);
+  ok(t1.status === 200 && t1.json.ok === true && t1.json.caveat && t1.json.kind === 'credential-exchange', 'Test dispatched to the registered runner: ok, WITH the caveat and the kind');
+  ok(store.publicView(CARD).lastOk === true && store.publicView(CARD).testedAt === clock, 'the verdict + its instant are recorded');
+  await api('PUT', CARDP, { values: { apiKey: 'this-will-fail-key' } });
+  const t2 = await api('POST', `${CARDP}/test`);
+  ok(t2.json.ok === false && /fail/.test(t2.json.error) && t2.json.caveat, `a failing runner is said with its words and the caveat (${t2.json.error})`);
+  const [c1, c2] = await Promise.all([store.test(CARD), store.test(CARD)]);
+  ok(c1 === c2 || (c1.testedAt === c2.testedAt), 'two concurrent Tests share ONE flight');
+  await api('DELETE', CARDP);
   const before = frames.length;
   ok(frames.length > 0 && frames.every((f) => f.type === 'integrations-updated' && f.integration && f.id), `every write broadcast integrations-updated with publicView (${frames.length} frames so far)`);
+  ok(!frames.some((f) => ['fake', 'lark', 'gmail'].includes(f.id)), 'no frame ever named an account-bound row (they are not cards)');
   ok(!frames.some((f) => JSON.stringify(f).includes(SECRET40) || JSON.stringify(f).includes('cluster-fake-key') || JSON.stringify(f).includes('org1-secret')), 'no broadcast frame ever carried a plaintext secret');
   ok(!allBodies.some((b) => b.includes(SECRET40)), `the 40-char secret is absent from all ${allBodies.length} GET bodies`);
   // the LOG is the third channel a secret could leave through (the boot line
@@ -320,47 +371,46 @@ const get = async (p) => { const r = await api('GET', p); allBodies.push(r.text)
   // verifier's MEDIUM: a user secret the current key cannot open used to fall
   // through to the CLUSTER rung (source cluster, why null, hasOwnValues false,
   // Clear hidden, Test passing on the cluster credential, zero log lines).
-  // Through the REAL route, with the REAL fake runner on the rotated instance.
+  // Through the REAL route, with the zero-network runner on the rotated instance.
   {
-    const { integrationTest } = require(path.join(REPO, 'src/channels/fake.js'));
     const OWN = 'user-own-fake-key-ABCDEFGHIJKLMNOP';
     const CLUSTER = 'cluster-tenant-fake-key-000000IJKL';
-    await api('PUT', '/api/integrations/fake', { values: { apiKey: OWN } });   // written under the ORIGINAL key
+    await api('PUT', CARDP, { values: { apiKey: OWN } });   // written under the ORIGINAL key
     fs.writeFileSync(keyFile, '0123456789abcdef'.repeat(4));                  // a restored-from-elsewhere / rotated key
-    env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', key: 'tenantA', label: 'Tenant A', values: { apiKey: CLUSTER } }]);
+    env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', label: 'Tenant A', values: { apiKey: CLUSTER, apiUrl: 'https://tenant.example.net' } }]);
     const lines = [];
     const cap = (lvl) => (...a) => lines.push(lvl + ' ' + a.map((x) => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '));
     const s2 = storeMod.create({ dataDir, env, now: () => clock, drivePresets: () => [], log: { log: cap('log'), warn: cap('warn'), error: cap('error') } });
-    s2.registerTest('fake', integrationTest);
+    s2.registerTest(CARD, shapeRunner);
     routes.setup({ getStore: () => s2 });
-    const g = await get('/api/integrations/fake');
+    const g = await get(CARDP);
     const rv = g.json.integration;
     ok(g.status === 200 && rv.source === 'none' && rv.clusterAvailable === true && rv.clusterKey === null && rv.fromEnv === false, `ROTATED KEY + CLUSTER DEFAULT: the row answers none, NOT cluster, while the env offers tenantA (source ${rv.source}, clusterAvailable ${rv.clusterAvailable})`);
     ok(/could not be decrypted \(apiKey\)/.test(rv.why) && /not the one they were written with/.test(rv.why), `the why names the field and the reason (${rv.why})`);
     ok(rv.hasOwnValues === true, 'hasOwnValues is a fact about the RECORD — "Clear my keys" is reachable for the orphaned ciphertext');
     ok(rv.storeError && rv.storeError.code === 'values-undecryptable' && /restore the \.integrations-key/.test(rv.storeError.message) && /clear the keys/.test(rv.storeError.message) && rv.storeError.fields.join() === 'apiKey', `the view carries a typed values-undecryptable storeError with the remedy (${rv.storeError && rv.storeError.message})`);
     ok(rv.set.apiKey === false && rv.masked.apiKey === null && !g.text.includes('IJKL') && !g.text.includes('MNOP'), "no value is SET on the wire — neither the cluster secret's tail nor the user's");
-    const res = s2.resolveIntegration('fake');
-    ok(res.source === 'none' && Object.keys(res.values).length === 0 && res.missing.join() === 'apiKey', 'the CONSUMER is told none with apiKey missing — it is never handed the cluster credential');
-    const tr = await api('POST', '/api/integrations/fake/test');
+    const res = s2.resolveIntegration(CARD);
+    ok(res.source === 'none' && Object.keys(res.values).length === 0 && res.missing.join() === 'apiKey,apiUrl', 'the CONSUMER is told none with apiKey missing — it is never handed the cluster credential');
+    const tr = await api('POST', `${CARDP}/test`);
     ok(tr.status === 200 && tr.json.ok === false && /no key resolved/.test(tr.json.error) && !(tr.json.detail && tr.json.detail.source === 'cluster'), `Test does NOT pass on the cluster credential (${tr.json.error})`);
-    await get('/api/integrations/fake'); await get('/api/integrations');
+    await get(CARDP); await get('/api/integrations');
     const said = lines.filter((l) => /could not be decrypted \(apiKey\)/.test(l));
-    ok(said.length === 1 && /fake:/.test(said[0]) && /cluster default is NOT consulted/.test(said[0]), `logged ONCE per row per transition over five reads (${said.length} line(s) of ${lines.length})`);
-    ok(s2.list().storeError === null && s2.list().integrations.find((x) => x.id === 'fake').storeError.code === 'values-undecryptable', 'list(): the store-level storeError stays null (the key FILE is fine) while the row carries its own');
+    ok(said.length === 1 && said[0].includes(`${CARD}:`) && /cluster default is NOT consulted/.test(said[0]), `logged ONCE per row per transition over five reads (${said.length} line(s) of ${lines.length})`);
+    ok(s2.list().storeError === null && s2.list().integrations.find((x) => x.id === CARD).storeError.code === 'values-undecryptable', 'list(): the store-level storeError stays null (the key FILE is fine) while the row carries its own');
     // the way out the card offers: Clear my keys ⇒ lands on the cluster default (the user decided, not the fall-through)
-    const del = await api('DELETE', '/api/integrations/fake');
+    const del = await api('DELETE', CARDP);
     ok(del.status === 200 && del.json.integration.source === 'cluster' && del.json.integration.clusterKey === 'tenantA' && del.json.integration.hasOwnValues === false && del.json.integration.storeError === null, 'DELETE ("Clear my keys") discards the orphaned ciphertext and lands on the cluster default');
     ok(!lines.some((l) => l.includes(OWN) || l.includes(CLUSTER)), 'no log line carried either plaintext');
-    await api('PUT', '/api/integrations/fake', { values: { apiKey: 'rotated-era-key-QRSTUVWXYZ' } });
-    ok(s2.publicView('fake').source === 'user' && lines.filter((l) => /could not be decrypted \(apiKey\)/.test(l)).length === 1, 'a value written under the CURRENT key is `user` again, and no new line was said');
+    await api('PUT', CARDP, { values: { apiKey: 'rotated-era-key-QRSTUVWXYZ' } });
+    ok(s2.publicView(CARD).source === 'user' && lines.filter((l) => /could not be decrypted \(apiKey\)/.test(l)).length === 1, 'a value written under the CURRENT key is `user` again, and no new line was said');
     // the original key back ⇒ the rotated-era value is the orphan now: a NEW transition, said once
     fs.writeFileSync(keyFile, keyBytes);
     const lines3 = []; const cap3 = (lvl) => (...a) => lines3.push(lvl + ' ' + a.map(String).join(' '));
     const s3 = storeMod.create({ dataDir, env, now: () => clock, drivePresets: () => [], log: { log: cap3('log'), warn: cap3('warn'), error: cap3('error') } });
-    const v3 = s3.publicView('fake');
+    const v3 = s3.publicView(CARD);
     ok(v3.source === 'none' && v3.storeError && v3.storeError.code === 'values-undecryptable' && lines3.filter((l) => /could not be decrypted \(apiKey\)/.test(l)).length === 1, 'the original key restored ⇒ the rotated-era value is the orphan: none, typed, said once on the new instance');
-    s3.clearUserValues('fake');                    // leave the record decryptable for the legs below
+    s3.clearUserValues(CARD);                    // leave the record decryptable for the legs below
     delete env.VIBESPACE_INTEGRATIONS;
     routes.setup({ getStore: () => store });
   }
@@ -376,7 +426,7 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
   // unrelated write replaced the file — every stored credential gone.
   const d = path.join(ROOT, 'unreadable'); fs.mkdirSync(d, { recursive: true });
   const life1 = storeMod.create({ dataDir: d, env: {}, log: quietLog });
-  life1.setIntegration('lark', { appId: 'cli_abc123', appSecret: 'lark-secret-000000' });
+  life1.setIntegration(CARD, { apiKey: 'lark-secret-000000', apiUrl: 'https://chrome.example.net' });
   const f = path.join(d, 'integrations.json');
   fs.chmodSync(f, 0o000);
   let stillReadable = true; try { fs.readFileSync(f); } catch { stillReadable = false; }
@@ -385,31 +435,31 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
   } else {
     const cap = captured();
     const life2 = storeMod.create({ dataDir: d, env: {}, log: cap.log });
-    const v = life2.publicView('lark');
+    const v = life2.publicView(CARD);
     ok(v.storeError && v.storeError.code === 'store-unreadable' && /cannot be read/.test(v.storeError.message), `the unreadable file is a TYPED storeError on the view (${v.storeError && v.storeError.code})`);
     ok(v.source === 'none' && /cannot be read/.test(v.why), `and the row's why says the real reason, not "no user values" (${v.why})`);
     ok(life2.list().storeError && life2.list().storeError.code === 'store-unreadable', 'list() carries it too');
     ok(cap.lines.some((l) => /store-unreadable|cannot be read/.test(l)) && cap.lines.filter((l) => /cannot be read/.test(l)).length === 1, `it is LOGGED once per transition, not once per poll (${cap.lines.filter((l) => /cannot be read/.test(l)).length} line(s) over 3 reads)`);
     const refused = (fn) => { try { fn(); return null; } catch (e) { return e; } };
-    const e1 = refused(() => life2.setIntegration('fake', { apiKey: 'fake-key-0123456789' }));
+    const e1 = refused(() => life2.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' }));
     ok(e1 && e1.code === 'store-unreadable' && e1.status === 500, 'setIntegration REFUSES with the typed error (500 store-unreadable)');
-    ok(refused(() => life2.useClusterDefault('fake'))?.code === 'store-unreadable' && refused(() => life2.setClusterKey('gmail', null))?.code === 'store-unreadable' && refused(() => life2.clearUserValues('lark'))?.code === 'store-unreadable', 'useClusterDefault / setClusterKey / clearUserValues refuse too');
-    life2.registerTest('fake', async () => ({ ok: true }));
-    const eT = await life2.test('fake').then(() => null, (e) => e);
+    ok(refused(() => life2.useClusterDefault('cloud:browserbase'))?.code === 'store-unreadable' && refused(() => life2.setClusterKey('cloud:browserbase', null))?.code === 'store-unreadable' && refused(() => life2.clearUserValues(CARD))?.code === 'store-unreadable', 'useClusterDefault / setClusterKey / clearUserValues refuse too');
+    life2.registerTest('cloud:browserbase', async () => ({ ok: true }));
+    const eT = await life2.test('cloud:browserbase').then(() => null, (e) => e);
     ok(eT && eT.code === 'store-unreadable', 'test() refuses BEFORE running (its verdict is recorded, and the record cannot land)');
     // through the REAL route: the typed error reaches the wire with its status
     routes.setup({ getStore: () => life2 });
-    const put = await api('PUT', '/api/integrations/fake', { values: { apiKey: 'fake-key-0123456789' } });
+    const put = await api('PUT', '/api/integrations/cloud%3Abrowserbase', { values: { apiKey: 'fake-key-0123456789' } });
     ok(put.status === 500 && put.json && put.json.code === 'store-unreadable', `PUT answers 500 {code:'store-unreadable'} on the wire (${put.status} ${put.json && put.json.code})`);
     const g = await api('GET', '/api/integrations');
     ok(g.status === 200 && g.json.storeError && g.json.storeError.code === 'store-unreadable', 'GET still answers 200 with the storeError beside the rows (a card can say it)');
     routes.setup({ getStore: () => store });
     fs.chmodSync(f, 0o600);
-    const back = life2.publicView('lark');
-    ok(!back.storeError && back.source === 'user' && back.set.appSecret === true, 'the moment the file is readable again the SAME store instance recovers (nothing was cached over it) and lark is intact');
-    life2.setIntegration('fake', { apiKey: 'fake-key-0123456789' });
+    const back = life2.publicView(CARD);
+    ok(!back.storeError && back.source === 'user' && back.set.apiKey === true, 'the moment the file is readable again the SAME store instance recovers (nothing was cached over it) and the first row is intact');
+    life2.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' });
     const disk = JSON.parse(fs.readFileSync(f, 'utf-8')).integrations;
-    ok(Object.keys(disk).sort().join() === 'fake,lark' && !!disk.lark.values.appSecret, 'a write after recovery keeps every earlier credential on disk');
+    ok(Object.keys(disk).sort().join() === ['cloud:browserbase', CARD].sort().join() && !!disk[CARD].values.apiKey, 'a write after recovery keeps every earlier credential on disk');
     // PRE-FIX CONTROL: a copy that reads "unreadable" as "fresh" (the shipped bare catch, one mechanism) destroys lark on the next write
     const preFix = patchCopy(STORE_PATH, 'prefix', [[
       "return unreadable('exists but cannot be read', e);",
@@ -417,16 +467,16 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     ]]);
     const d2 = path.join(ROOT, 'unreadable-prefix'); fs.mkdirSync(d2, { recursive: true });
     const pre1 = require(preFix).create({ dataDir: d2, env: {}, log: quietLog });
-    pre1.setIntegration('lark', { appId: 'cli_abc123', appSecret: 'lark-secret-000000' });
+    pre1.setIntegration(CARD, { apiKey: 'lark-secret-000000', apiUrl: 'https://chrome.example.net' });
     const f2 = path.join(d2, 'integrations.json');
     fs.chmodSync(f2, 0o000);
     const pre2 = require(preFix).create({ dataDir: d2, env: {}, log: quietLog });
-    const pv = pre2.publicView('lark');
+    const pv = pre2.publicView(CARD);
     ok(pv.source === 'none' && !pv.storeError, 'PRE-FIX CONTROL: the bare-catch copy answers none with NO storeError');
-    let preAccepted = true; try { pre2.setIntegration('fake', { apiKey: 'fake-key-0123456789' }); } catch { preAccepted = false; }
+    let preAccepted = true; try { pre2.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' }); } catch { preAccepted = false; }
     fs.chmodSync(f2, 0o600);
     const preDisk = JSON.parse(fs.readFileSync(f2, 'utf-8')).integrations;
-    ok(preAccepted && Object.keys(preDisk).join() === 'fake' && !preDisk.lark, 'PRE-FIX CONTROL: …accepts the next write and the file now holds ONLY fake — lark\'s secret is destroyed (the defect, kept as the control)');
+    ok(preAccepted && Object.keys(preDisk).join() === 'cloud:browserbase' && !preDisk[CARD], 'PRE-FIX CONTROL: …accepts the next write and the file now holds ONLY the second row — the first row\'s secret is destroyed (the defect, kept as the control)');
   }
 
   // (ii) A FILE THAT IS NOT A STORE IS ARCHIVED, NEVER OVERWRITTEN (archive-never-destroy)
@@ -435,11 +485,11 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
     fs.writeFileSync(path.join(d3, 'integrations.json'), bytes);
     const cap = captured();
     const s = storeMod.create({ dataDir: d3, env: {}, log: cap.log });
-    const v = s.publicView('fake');
+    const v = s.publicView('cloud:browserbase');
     const archived = fs.readdirSync(d3).filter((n) => /^integrations\.json\.corrupt-/.test(n));
     ok(v.source === 'none' && !v.storeError && archived.length === 1 && fs.readFileSync(path.join(d3, archived[0]), 'utf-8') === bytes, `${label}: the bytes are ARCHIVED beside the file (${archived[0]}) and the store starts fresh with no storeError`);
     ok(cap.lines.some((l) => /not a valid store/.test(l) && l.includes(archived[0])), `${label}: …and the archive is logged by name`);
-    s.setIntegration('fake', { apiKey: 'fake-key-0123456789' });
+    s.setIntegration('cloud:browserbase', { apiKey: 'fake-key-0123456789' });
     ok(fs.existsSync(path.join(d3, 'integrations.json')) && fs.existsSync(path.join(d3, archived[0])), `${label}: the next write lands in a fresh file and the archive is untouched`);
   }
 
@@ -482,20 +532,20 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
   // (two presets, or the delegating dropdown) still refuses by name.
   {
     const d5 = path.join(ROOT, 'rebind'); fs.mkdirSync(d5, { recursive: true });
-    const env5 = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'fake', values: { apiKey: 'cluster-key-000000000' } }]) };
+    const env5 = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: CARD, values: { apiKey: 'cluster-key-000000000' } }]) };
     const s5 = storeMod.create({ dataDir: d5, env: env5, log: quietLog });
-    s5.useClusterDefault('fake');
-    ok(s5.publicView('fake').source === 'cluster' && s5.publicView('fake').savedClusterKey === 'default', 'the radio stores the implicit selector `default`');
-    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', key: 'tenantA', label: 'Tenant A', values: { apiKey: 'cluster-key-000000000' } }]);
-    const v5 = s5.publicView('fake');
+    s5.useClusterDefault(CARD);
+    ok(s5.publicView(CARD).source === 'cluster' && s5.publicView(CARD).savedClusterKey === 'default', 'the radio stores the implicit selector `default`');
+    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', label: 'Tenant A', values: { apiKey: 'cluster-key-000000000' } }]);
+    const v5 = s5.publicView(CARD);
     ok(v5.source === 'cluster' && v5.clusterKey === 'tenantA' && v5.savedClusterKey === 'default' && v5.clusterAvailable === true && /re-keyed to tenantA/.test(v5.why), `the admin re-keys the ONLY default ⇒ the row still resolves cluster, on tenantA, and SAYS the re-bind (${v5.why})`);
-    ok(s5.resolveIntegration('fake').values.apiKey === 'cluster-key-000000000', 'and the consumer gets the value');
-    s5.useClusterDefault('fake');
-    ok(s5.publicView('fake').savedClusterKey === 'tenantA' && !s5.publicView('fake').why, 'clicking the radio again re-saves the live key and the why clears');
-    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', key: 'tenantA', values: { apiKey: 'a-000000000' } }, { id: 'fake', key: 'tenantB', values: { apiKey: 'b-000000000' } }]);
-    s5.setClusterKey('fake', 'tenantB');
-    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', key: 'tenantA', values: { apiKey: 'a-000000000' } }, { id: 'fake', key: 'tenantC', values: { apiKey: 'c-000000000' } }]);
-    const v5b = s5.publicView('fake');
+    ok(s5.resolveIntegration(CARD).values.apiKey === 'cluster-key-000000000', 'and the consumer gets the value');
+    s5.useClusterDefault(CARD);
+    ok(s5.publicView(CARD).savedClusterKey === 'tenantA' && !s5.publicView(CARD).why, 'clicking the radio again re-saves the live key and the why clears');
+    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', values: { apiKey: 'a-000000000' } }, { id: CARD, key: 'tenantB', values: { apiKey: 'b-000000000' } }]);
+    s5.setClusterKey(CARD, 'tenantB');
+    env5.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: CARD, key: 'tenantA', values: { apiKey: 'a-000000000' } }, { id: CARD, key: 'tenantC', values: { apiKey: 'c-000000000' } }]);
+    const v5b = s5.publicView(CARD);
     ok(v5b.source === 'none' && /tenantB/.test(v5b.why) && v5b.clusterOptions.length === 2, `CONTROL: with TWO presets offered a vanished saved key is a picker's question — none naming tenantB (${v5b.why})`);
     // PURE: the rule and its boundary
     const one = [{ key: 'tenantA', label: 'A', values: {} }], two = [...one, { key: 'tenantB', label: 'B', values: {} }];
@@ -515,44 +565,41 @@ const captured = () => { const lines = []; const cap = (lvl) => (...a) => lines.
 }
 
 // ═══ §5 THE ADAPTERS ROW FLIPS (real engine + real store) ═════════════════
+// r4: the fake row is ACCOUNT-BOUND — no card, no Test verb (D7) — so its
+// credential is the cluster's (the keyless pick) and the flip is walked on
+// the ENV: a default injected, then withdrawn; the next pass re-asks the
+// adapter and the Adapters row says it.
 console.log('§5 the Adapters row flips');
 {
   const engMod = require(ENGINE_PATH);
   const mk = (mod, dir, integrations) => mod.create({ dataDir: dir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, integrations });
   const d = path.join(ROOT, 'eng'); fs.mkdirSync(d, { recursive: true });
   const eng = mk(engMod, d, store);
-  ok(store.hasTestRunner('fake'), 'constructing the engine with the store registered the fake row\'s Test runner (the consumer owns it)');
-  await api('PUT', '/api/integrations/fake', { values: { apiKey: 'good-key-12345678' } });
+  ok(!store.hasTestRunner('fake') && !store.hasTestRunner('lark') && !store.hasTestRunner('gmail'), 'D7: constructing the engine registers NO Test runner for an account-bound row (fake / lark / gmail)');
+  const t0 = await api('POST', '/api/integrations/fake/test');
+  ok(t0.status === 404 && t0.json.code === 'binds-per-account', 'and the fake row\'s Test is 404 binds-per-account BY NAME');
+  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: 'good-key-12345678' } }]);
   await eng.pass('fake-poll', { force: true });
   const a1 = eng.digest().adapters.find((a) => a.id === 'fake-poll');
-  ok(a1 && a1.auth.state === 'unknown' && a1.auth.why === 'never-authenticated', `with a key resolved the digest says what the RECORD proves — unknown/never-authenticated (the fake talks to nothing; its own 'connected' is a stub the r2 rule refuses) — and NOT needs-credentials (${JSON.stringify(a1 && a1.auth)})`);
-  const t1 = await api('POST', '/api/integrations/fake/test');
-  ok(t1.status === 200 && t1.json.ok === true && t1.json.caveat && t1.json.kind === 'shape-only', 'Test dispatched to the runner: ok, WITH the caveat and the kind');
-  ok(store.publicView('fake').lastOk === true && store.publicView('fake').testedAt === clock, 'the verdict + its instant are recorded');
-  await api('PUT', '/api/integrations/fake', { values: { apiKey: 'this-will-fail-key' } });
-  const t2 = await api('POST', '/api/integrations/fake/test');
-  ok(t2.json.ok === false && /fail/.test(t2.json.error) && t2.json.caveat, `the fixture switch: a key containing "fail" fails, with the words and the caveat (${t2.json.error})`);
-  const [c1, c2] = await Promise.all([store.test('fake'), store.test('fake')]);
-  ok(c1 === c2 || (c1.testedAt === c2.testedAt), 'two concurrent Tests share ONE flight');
-  // withdraw the credential ⇒ the ADAPTERS ROW flips, without a pass
-  await api('DELETE', '/api/integrations/fake');
-  await sleep(20);
+  ok(a1 && a1.auth.state === 'unknown' && a1.auth.why === 'never-authenticated', `with a cluster key resolved the digest says what the RECORD proves — unknown/never-authenticated — and NOT needs-credentials (${JSON.stringify(a1 && a1.auth)})`);
+  delete env.VIBESPACE_INTEGRATIONS;   // the env withdraws the default
+  await eng.pass('fake-poll', { force: true });
   const a2 = eng.digest().adapters.find((a) => a.id === 'fake-poll');
-  ok(a2.auth.state === 'needs-credentials' && a2.auth.missing.join() === 'apiKey' && /no longer provided|no default|no user/.test(a2.auth.why), `THE ADAPTERS ROW FLIPS on the store's change edge: needs-credentials, naming apiKey and the reason (${JSON.stringify(a2.auth)})`);
-  await api('PUT', '/api/integrations/fake', { values: { apiKey: 'back-again-12345678' } });
-  await sleep(20);
-  ok(eng.digest().adapters.find((a) => a.id === 'fake-poll').auth.state === 'unknown', "and flips back (to the record's honest unknown) when a key is saved");
+  ok(a2.auth.state === 'needs-credentials' && a2.auth.missing.join() === 'apiKey' && /no default|no preset|no longer provided|no user/.test(a2.auth.why), `THE ADAPTERS ROW FLIPS on the next pass: needs-credentials, naming apiKey and the reason (${JSON.stringify(a2.auth)})`);
+  env.VIBESPACE_INTEGRATIONS = JSON.stringify([{ id: 'fake', values: { apiKey: 'back-again-12345678' } }]);
+  await eng.pass('fake-poll', { force: true });
+  ok(eng.digest().adapters.find((a) => a.id === 'fake-poll').auth.state === 'unknown', "and flips back (to the record's honest unknown) when the env offers a key again");
   // CONTROL: a card-only copy — an engine whose adapters get no resolver — never flips
   const cardOnly = patchCopy(ENGINE_PATH, 'prefix', [[
-    'registry.create(rec.kind, rec, { now, resolveIntegration, ...adapterDeps })', 'registry.create(rec.kind, rec, { now, ...adapterDeps })',
+    'registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps })', 'registry.create(rec.kind, rec, { now, ...adapterDeps })',
   ]]);
   const d2 = path.join(ROOT, 'eng2'); fs.mkdirSync(d2, { recursive: true });
   const eng2 = mk(require(cardOnly), d2, store);
   await eng2.pass('fake-poll', { force: true });
-  await api('DELETE', '/api/integrations/fake');
-  await sleep(20);
+  delete env.VIBESPACE_INTEGRATIONS;
+  await eng2.pass('fake-poll', { force: true });
   const c = eng2.digest().adapters.find((a) => a.id === 'fake-poll');
-  ok(c.auth.state !== 'needs-credentials', `CONTROL: a copy that hands adapters no resolver flips only the card — the Adapters row still says ${c.auth.state}`);
+  ok(c.auth.state !== 'needs-credentials', `CONTROL: a copy that hands adapters no resolver never flips — the Adapters row still says ${c.auth.state}`);
   eng.stop(); eng2.stop();
   // the contract suite's shape: an adapter created BARE still answers connected
   const { fakePoll } = require(path.join(REPO, 'src/channels/fake.js'));
@@ -588,7 +635,10 @@ const ENV_ALLOW = new Map([
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the Secret into the env'],
   ['deploy/README.md', 'documents the two forms'],
 ]);
-const isDoc = (f) => /^docs\/.*\.md$/.test(f) || f === 'CLAUDE.md' || f === 'CHANGELOG.md' || f === 'README.md';
+// docs/mockups/** = static design drawings (HTML + CSS + the shooter/checker
+// that renders them) — never shipped, never run by the product; the r4
+// integrations mockups draw the Lark callback URL on purpose (2.369.165).
+const isDoc = (f) => /^docs\/.*\.md$/.test(f) || /^docs\/mockups\//.test(f) || f === 'CLAUDE.md' || f === 'CHANGELOG.md' || f === 'README.md';
 function envNameCensus(files, read) {
   const hits = [];
   for (const f of files) {
@@ -664,7 +714,7 @@ if (tracked.length) {
 // (`ID_RE.test(req.params.id)` is a validator, not a probe); a bare `X.test(id)`
 // on an untraced receiver (`hosts.test(req.params.id)`) is not flagged either —
 // `id` alone says nothing about the store.
-const TEST_ALLOW = new Set(['src/routes/integrations.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs', 'scripts/test-browser-backend.mjs' /* drives the six agent-browser runners through the real store (design-agent-browser-v2 §9 v/vi/vii) */]);
+const TEST_ALLOW = new Set(['src/routes/integrations.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs', 'scripts/test-browser-backend.mjs' /* drives the six agent-browser runners through the real store (design-agent-browser-v2 §9 v/vi/vii) */, 'scripts/test-channels-gmail-shape.mjs' /* asserts the store REFUSES test('gmail') by name (r4 D7: an account-bound row has no Test verb) */]);
 const STORE_HANDLE_NAMES = new Set(['integrations', 'integrationStore', 'integStore', 'integrationsStore']);
 const HANDLE_RHS_RE = /integrationsWiring\.store\b|integrationStore\.create\(|integration-store(?:\.js)?['"]\)\.create\(|\.getStore\(\)|\bstore\(\)|\b(?:deps|ctx|opts)\.integrations\b/;
 const STORE_ACCESSOR_RE = /(?:^|\.)(?:store|getStore|integrations|integrationStore)\(\)$/;
@@ -808,6 +858,8 @@ if (tracked.length) {
   ok(registered.length === 6 && registered.includes('cloak') && registered.includes('cloud:agentcore'), `browser-backend registered its six rows' runners through the real store (${registered.join(', ')})`);
   for (const row of R.ROWS) {
     if (row.wiredIn) continue;
+    // D7 (r4): an account-bound row is not a card — no Test verb, no runner (the store refuses test() by name)
+    if (row.bindsPerAccount) { ok(!store.hasTestRunner(row.id), `${row.id}: account-bound — NO Test runner (D7)`); continue; }
     ok(store.hasTestRunner(row.id), `${row.id}: declares a test and its consumer registered the runner`);
   }
 }

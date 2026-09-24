@@ -11,7 +11,23 @@
  * value). A ROW carries no value, ever.
  *
  * A ROW = { id, label, fields[], clusterEnv | delegate, setup?, test, consumers,
- *           wiredIn?, docs }
+ *           wiredIn?, docs, bindsPerAccount?, clientHint?, signinName? }
+ *
+ *  · `bindsPerAccount` (2.369.165, docs/design-integrations-per-account.zh.md
+ *    r4 §2.3): the row's credential is an OAuth CLIENT that each ACCOUNT picks
+ *    where the account is added — exactly like a storage mount's `OAuth
+ *    client` field — never a card in the Integrations window. The store
+ *    serves such a row's PRESETS to the account dialog and refuses every
+ *    card verb on it by name; the account record holds its own choice
+ *    (`cluster:<key>` or `custom` + its own id/secret). `clientHint` is the
+ *    one hint line the dialog draws under that field. The row's `fields`
+ *    still DECLARE the custom client's two inputs (`clientFieldsOf`: the
+ *    first non-secret field = the id, the first secret field = the secret).
+ *    `signinName` (chunk 3) = the brand the SIGN-IN page belongs to when it
+ *    is not the row's own (Gmail signs in with Google) — the account dialogs'
+ *    `{provider} authorization` / `Connect {provider}` / `Sign in with
+ *    {provider}` words, the storage dialog's `signin` name; absent = the
+ *    row's label before its ` / ` twin. A brand, never translated.
  *
  *  · `fields[].validate` is a PURE function returning `{ok:true}` or
  *    `{ok:false, why}` — a NAMED complaint, never a silent refusal, and never a
@@ -166,6 +182,8 @@ const ROWS = Object.freeze([
     },
     consumers: ['src/channels/fake.js'],
     usedBy: i18nKey('Used by the test channel'),
+    bindsPerAccount: true,
+    clientHint: i18nKey('The test channel talks to nothing; any key of at least 4 characters works.'),
     docs: 'docs/design-communication-panel.zh.md',
   },
 
@@ -196,6 +214,8 @@ const ROWS = Object.freeze([
     },
     consumers: ['src/channels/lark.js'],
     usedBy: i18nKey('Used by the Lark / 飞书 channel'),
+    bindsPerAccount: true,
+    clientHint: i18nKey('The tenant app this account signs in through. A token is bound to the app it was issued under — switching the app means signing in again.'),
     docs: 'https://open.feishu.cn/document/',
   },
 
@@ -224,6 +244,9 @@ const ROWS = Object.freeze([
     },
     consumers: ['src/channels/gmail.js'],
     usedBy: i18nKey('Used by the Gmail channel'),
+    bindsPerAccount: true,
+    signinName: 'Google',
+    clientHint: i18nKey('The Google OAuth client this account signs in through. A refresh token is bound to the client it was issued under — switching the client means signing in again.'),
     docs: 'docs/design-communication-panel.zh.md',
   },
 
@@ -445,6 +468,10 @@ function credentialWhyText({ whyCode = null, whyParams = null, why = null } = {}
     case 'own-missing': return t('no keys of your own are saved for this integration');
     case 'unknown-credential': return t('the credential key ({key}) is not one this instance offers', { key: p.key || '?' });
     case 'lookup-failed': return t('the integration lookup failed');
+    case 'own-retired': return t('this integration\'s client is chosen per account — edit the account to choose one');
+    case 'custom-missing': return t('this account\'s own client is incomplete ({fields}) — edit the account', { fields: Array.isArray(p.fields) ? p.fields.join(', ') : '' });
+    case 'custom-undecryptable': return t('this account\'s own client secret cannot be decrypted with the current key file — edit the account and enter it again');
+    case 'legacy-copy-failed': return t('this account\'s client could not be moved onto the account ({why})', { why: p.why || '?' });
     case '': return why ? String(why) : '';
     default: return why ? String(why) : String(whyCode);
   }
@@ -487,9 +514,30 @@ function fieldDecls(row) {
   return row.fields.map(({ key, label, secret, required, placeholder, help }) => ({ key, label, secret: !!secret, required: !!required, placeholder: placeholder || '', help: help || '' }));
 }
 
+/** A `bindsPerAccount` row's CUSTOM client, as its two declared fields: the
+ *  first non-secret field is the client's id, the first secret field its
+ *  secret. The account record stores them as `credential {appId, appSecretEnc}`
+ *  whatever the vendor calls them (Lark appId/appSecret, Google
+ *  clientId/clientSecret) — this is the ONE mapping. */
+function clientFieldsOf(row) {
+  const r = typeof row === 'string' ? rowById(row) : row;
+  if (!r) return null;
+  const idF = r.fields.find((f) => !f.secret) || null;
+  const secF = r.fields.find((f) => f.secret) || null;
+  return { idKey: idF ? idF.key : null, secretKey: secF ? secF.key : null, id: idF ? { key: idF.key, label: idF.label, placeholder: idF.placeholder || '', help: idF.help || '', required: !!idF.required } : null, secret: secF ? { key: secF.key, label: secF.label, placeholder: secF.placeholder || '', help: secF.help || '', required: !!secF.required } : null };
+}
+const bindsPerAccount = (id) => { const r = rowById(id); return !!(r && r.bindsPerAccount === true); };
+
 /** Registry-level self-checks the suite runs; kept here so the rules are one place. */
 function checkRow(row) {
   const errs = [];
+  if (row.bindsPerAccount !== undefined && typeof row.bindsPerAccount !== 'boolean') errs.push('bindsPerAccount must be a boolean');
+  if (row.bindsPerAccount === true) {
+    if (typeof row.clientHint !== 'string' || !row.clientHint.trim()) errs.push('a bindsPerAccount row declares its clientHint (the one hint line under the account dialog\'s OAuth client field)');
+    if ((row.fields || []).filter((f) => f.secret).length !== 1) errs.push('a bindsPerAccount row declares exactly ONE secret field: the custom client\'s secret');
+    if (!(row.fields || []).some((f) => !f.secret)) errs.push('a bindsPerAccount row declares a non-secret field: the custom client\'s id');
+  } else if (row.clientHint !== undefined) errs.push('clientHint belongs to a bindsPerAccount row only (a card has no account dialog)');
+  if (row.signinName !== undefined && (row.bindsPerAccount !== true || typeof row.signinName !== 'string' || !row.signinName.trim())) errs.push('signinName is a non-empty brand on a bindsPerAccount row only');
   if (!row.id || !/^[a-z][a-z0-9:-]*$/.test(row.id)) errs.push('id must be lowercase [a-z0-9:-]');
   if (!row.label) errs.push('label required');
   if (!Array.isArray(row.fields) || !row.fields.length) errs.push('fields required');
@@ -508,5 +556,5 @@ function checkRow(row) {
 module.exports = {
   ROWS, TEST_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
-  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText,
+  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount,
 };

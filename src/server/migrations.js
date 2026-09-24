@@ -284,6 +284,28 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-channel-custom-client-inline',
+      note: "an account's OAuth client lives ON the account (docs/design-integrations-per-account.zh.md r4 §2.3/§2.6, 2.369.165): a channel account still naming `own` — the retired Integrations card's values — gets those values decrypted (`.integrations-key`, through the store's ONE legacy reader) and RE-SEALED under `.channels-key` onto its own record as `credential {appId, appSecretEnc}`, and is stamped `custom` only AFTER that atomic write landed. The SAME function the engine runs reader-side when such a record is read (`inlineLegacyClient`), so this row only makes the copy happen at boot and names it. A record whose values cannot be read (the key file missing — never minted here —, the values undecryptable or incomplete) FAILS the run BY NAME and keeps `own`: retried next boot, never re-pointed at a preset. integrations.json's lark / gmail values stay in place. Idempotent: a `custom` record is skipped; this instance had zero `own` accounts, so here it is a dry run.",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.inlineLegacyClients !== 'function') {
+          // No engine on this boot: a record naming `own` makes the run FAIL by
+          // name (retried on a boot that has one); none is a success.
+          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'adapters.json'), 'utf-8')); } catch { return; }
+          const pending = (doc && Array.isArray(doc.adapters) ? doc.adapters : []).filter((r) => r && r.credentialKey === 'own');
+          if (pending.length) throw new Error(`no channels engine to move the saved client onto ${pending.length} account(s) (${pending.map((r) => r.id).join(', ')}) — retried on a boot that has one`);
+          return;
+        }
+        const rep = eng.inlineLegacyClients();
+        // The shared runner is synchronous: the copies land through the engine's
+        // serialized door (client first, stamp after); a failed write is logged
+        // by the engine and the record keeps `own` — served and retried reader-side.
+        rep.write.catch((err) => console.error(`[migrate] channel-custom-client-inline: a copy's write failed (the record keeps 'own' and is retried when read): ${(err && err.message) || err}`));
+        console.log('[migrate] channel-custom-client-inline:', JSON.stringify({ copied: rep.copied, failed: rep.failed.map((f) => ({ id: f.id, code: f.code })), skipped: rep.skipped }));
+        if (rep.failed.length) throw new Error(`the saved client could not be moved onto ${rep.failed.map((f) => `${f.id} (${f.code}: ${f.why})`).join('; ')} — retried next boot`);
+      },
+    },
+    {
       id: '2026-09-spend-notices-expire',
       note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
       run() {

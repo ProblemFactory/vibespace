@@ -17,6 +17,13 @@
  *   PUT    /api/integrations/:id        — {values} | {use:'cluster'} | {clusterKey}
  *   POST   /api/integrations/:id/test   — the human's click; bounded
  *   DELETE /api/integrations/:id        — "drop my keys"; always allowed
+ *
+ * AN ACCOUNT-BOUND ROW IS NOT A CARD (2.369.165, design-integrations-per-
+ * account r4 §2.4): `GET /api/integrations` leaves every `bindsPerAccount`
+ * row out (lark / gmail / fake — their OAuth client is chosen where the
+ * account is added), and GET / PUT / DELETE / test on one answer
+ * `404 binds-per-account` BY NAME — the store refuses, this file only
+ * relays. The window keeps the six browser key rows.
  */
 const express = require('express');
 const router = express.Router();

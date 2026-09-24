@@ -297,7 +297,12 @@ let flowState = null;
 {
   const t1 = await gmail.integrationTest({ resolved: integrations.resolveIntegration('gmail') });
   ok(t1.ok === true && t1.detail.source === 'cluster' && t1.detail.clusterKey === 'channels' && t1.detail.authHost === 'accounts.google.com', 'with the cluster preset: ok, naming the preset and the consent host');
-  ok(integrations.hasTestRunner('gmail') && integrations.hasTestRunner('lark'), 'constructing the engine registered both real rows\' Test runners on the store (the consumer owns the runner)');
+  // D7 (design-integrations-per-account r4): an account-bound row has NO Test
+  // verb — the engine registers no runner for it and the store refuses the
+  // verb by name; the module's own `integrationTest` stays this suite's
+  ok(!integrations.hasTestRunner('gmail') && !integrations.hasTestRunner('lark'), 'constructing the engine registers NO Test runner for the account-bound rows (D7: not a card, no Test verb)');
+  const refusedTest = await integrations.test('gmail').then(() => null, (e) => e);
+  ok(refusedTest && refusedTest.code === 'binds-per-account' && refusedTest.status === 404, 'the store refuses test(\'gmail\') BY NAME: 404 binds-per-account', refusedTest && refusedTest.message);
   const t2 = await gmail.integrationTest({ resolved: { source: 'user', values: { clientId: 'not-a-google-id', clientSecret: 'x' } } });
   ok(t2.ok === false && /apps\.googleusercontent\.com/.test(t2.error), 'a mis-shaped client id is a named failure');
   const t3 = await gmail.integrationTest({ resolved: { source: 'none', values: {}, missing: ['clientId', 'clientSecret'], why: 'the cluster provides no preset' } });

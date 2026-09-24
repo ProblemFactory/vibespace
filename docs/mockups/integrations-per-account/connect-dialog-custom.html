@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 连接账号: 类型 = Lark, OAuth 客户端 = 自定义 ⇒ 自定义字段与回调 URL 就地 (when:)</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- The same dialog with Type = Lark and OAuth client = Custom: the custom
+     fields unfold in place (the storage dialog's "Custom OAuth client ID /
+     secret" grammar with the registry's labels), the callback URL as the
+     oauthLinkRow shape, the three console facts as hint lines. -->
+<div class="dialog-overlay">
+  <div class="dialog" id="chan-connect-dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">连接账号</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <label>类型<select id="kind" aria-label="类型"><option>Gmail</option><option selected>Lark / 飞书</option></select></label>
+      <label>名称<input placeholder="张三（留空 = 授权后的用户名）" aria-label="名称"></label>
+      <label>OAuth 客户端<select id="oauth-client" aria-label="OAuth 客户端"><option>预设：Lark (VibeSpace 自建 app)</option><option selected>自定义（自己的 client id/secret）</option></select></label>
+      <div class="mounts-field-hint">选择与你所在 Lark 租户匹配的预设; 自建应用只能在它自己的租户里用 —— 跨租户的账号请选「自定义」。</div>
+      <label>自定义 App ID<input placeholder="cli_…" aria-label="自定义 App ID" id="custom-id"></label>
+      <div class="mounts-field-hint">开发者后台 → 凭证与基础信息。</div>
+      <label>自定义 App Secret<input type="password" value="••••••••••••" aria-label="自定义 App Secret" id="custom-secret"></label>
+      <div class="mounts-field-hint">同一页面。只会在这里写入，永远不会回显。</div>
+      <label>回调 URL（先登记到你的应用）</label>
+      <div class="mounts-oauth-link"><div class="mounts-oauth-line"><input readonly value="http://127.0.0.1:17865/lark/cb" aria-label="回调 URL" id="cb-url"><button type="button" class="mounts-btn">复制</button></div></div>
+      <div class="mounts-field-hint">开发者后台 → 安全设置 → 重定向 URL。必须逐字节一致。</div>
+      <ul class="chan-prereq" id="prereq"><li>上面的重定向 URL 已登记在那个列表里</li><li>已授予 im:message 与 im:message.send_as_user 权限</li><li>应用已有一个已发布的版本 —— 缺任何一件，会在授权页上失败，而不在这里</li></ul>
+      <label>Lark 授权</label>
+      <div class="mounts-drive-connect"><button type="button" class="mounts-btn mounts-btn-primary" id="connect-btn">连接 Lark</button><div class="mounts-field-hint">点「连接 Lark」—— 无需终端。</div></div>
+      <div class="cfg-err"></div>
+      <div class="dialog-actions"><button type="button" class="btn-create" id="submit">连接</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

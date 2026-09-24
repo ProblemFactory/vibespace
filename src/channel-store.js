@@ -154,9 +154,12 @@ const OUTBOX_KEEP = 500;
 const EMPTY_INDEX = () => ({ v: 1, conversations: {}, updatedAt: 0 });
 
 /** Atomic JSON write (tmp + rename). `_`-prefixed keys are runtime-only. */
-function writeJsonAtomic(file, obj) {
+function writeJsonAtomic(file, obj, { mode = null } = {}) {
   const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1));
+  fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1), mode == null ? undefined : { mode });
+  // `mode` only applies when the tmp file is CREATED; a leftover tmp from a
+  // crashed write keeps its old bits, so the file that lands is chmod-ed too.
+  if (mode != null) { try { fs.chmodSync(tmp, mode); } catch { /* a filesystem without modes */ } }
   fs.renameSync(tmp, file);
 }
 
@@ -617,7 +620,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
   let adChain = Promise.resolve();
   function adaptersUpdate(fn) {
     if (adLoad.blocked) return Promise.reject(blockedError(adLoad.blocked));
-    const run = adChain.then(() => fn(ad)).then((r) => { writeJsonAtomic(adaptersFile, ad); return r; });
+    // 0600 (2.369.165): the records carry sealed tokens AND an account's own
+    // client secret (`credential.appSecretEnc`) — owner-only like the key file.
+    const run = adChain.then(() => fn(ad)).then((r) => { writeJsonAtomic(adaptersFile, ad, { mode: 0o600 }); return r; });
     adChain = run.then(() => {}, () => {});
     return run;
   }

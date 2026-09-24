@@ -469,9 +469,11 @@ app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
     res.json(mountId ? await mounts.startDriveAuthForMount(mountId) : await mounts.startDriveAuth(opts));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Write a minted token back into an existing Drive record + bounce its mounts
+// Write a minted token back into an existing Drive record + bounce its mounts.
+// `client` = the OAuth client it was minted under (D2: a client switch lands
+// WITH its token — never a new client beside the old token)
 app.post('/api/mounts/:id/drive-token', async (req, res) => {
-  try { await mounts.applyDriveToken(req.params.id, req.body?.token); res.json({ success: true, mounts: mounts.list() }); }
+  try { await mounts.applyDriveToken(req.params.id, req.body?.token, req.body?.client); res.json({ success: true, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/mounts/gdrive-auth/status', (req, res) => res.json(mounts.driveAuthStatus()));
@@ -537,9 +539,12 @@ app.get('/api/mounts/:id/config', (req, res) => {
   try { res.json(mounts.config(req.params.id)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
+// D2: a bare client switch beside a held token is refused 409 by name
+// (`client-change-needs-reauth`) — the client lands WITH its token through
+// drive-token {token, client} or a PATCH that carries `token`
 app.patch('/api/mounts/:id', async (req, res) => {
   try { await mounts.update(req.params.id, req.body || {}); res.json({ success: true, mounts: mounts.list() }); }
-  catch (e) { res.status(400).json({ error: e.message, mounts: mounts.list() }); }
+  catch (e) { res.status(e.code === 'client-change-needs-reauth' ? 409 : 400).json({ error: e.message, ...(e.code ? { code: e.code } : {}), mounts: mounts.list() }); }
 });
 // Credentials (2.108.0): mount points under a credential + manual convert
 app.post('/api/mounts/:id/children', (req, res) => {

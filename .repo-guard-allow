@@ -35,3 +35,12 @@ alice:s3cr3t@127.0.0.1
 BROWSERBASE_API_KEY
 BROWSERLESS_API_KEY
 BROWSER_USE_API_KEY
+# integrations per account (2.369.165): synthetic custom-client secrets in test-channels-accounts / test-migrations, not real
+GOCSPX-cust0m-SECRET-7f3Q9zZ
+GOCSPX-second-SECRET-0000aaa
+shh-DO-NOT-ECHO-1234
+own-client-SECRET-9q8w7e
+# integrations per account chunk 3 (2.369.165): synthetic fixture values in test-integrations-ui / dbg-comm-surfaces, not real
+team-google-secret-0000
+cluster-bb-key-12345678
+dup-custom-secret-000000

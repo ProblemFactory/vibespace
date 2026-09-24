@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 编辑 "张三 (Lark)" (= 挂载编辑对话框语法: 预设下拉 / 自定义值预填含密钥 (2.108.8) / 重新授权 · 创建副本 · 移除 在对话框里)</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- §8 pattern 4 (r4): the mount edit dialog's grammar on the CHANNEL side —
+     every parameter prefilled, the custom client's secret included (2.108.8),
+     the OAuth client select; switching the client = re-authorize (Save opens
+     it); the kind's own fields; Re-authorize / Duplicate / Remove in the
+     dialog (mounts keep Remove here: fewer per-row icons). -->
+<div class="dialog-overlay">
+  <div class="dialog" id="chan-edit-dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">编辑 "张三 (Lark)"</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <label>名称<input value="张三 (Lark)" aria-label="名称" id="name"></label>
+      <label>OAuth 客户端<select id="oauth-client" aria-label="OAuth 客户端"><option>预设：Lark (VibeSpace 自建 app)</option><option selected>自定义（自己的 client id/secret）</option></select></label>
+      <div class="mounts-field-hint">这个账号的 token 是用这个客户端铸出的。换一个客户端就要重新授权 —— 保存时会直接打开「重新授权」。</div>
+      <label>自定义 App ID<input value="cli_yyyyyyyyyyyy" aria-label="自定义 App ID" id="custom-id"></label>
+      <label>自定义 App Secret<input value="s3cr3t-ExAmPlE-value-000" aria-label="自定义 App Secret" id="custom-secret"></label>
+      <div class="mounts-field-hint">与挂载的编辑对话框同一条规则: 真实当前值预填, 密钥在内 (单用户实例); 只保存改了的字段。</div>
+      <label>授权状态</label>
+      <div class="chan-fact" id="auth-fact">已授权 · 张三 · refresh token 到期 2026-10-21 · 权限 im:message, im:message.send_as_user, im:chat:readonly</div>
+      <label>包含的群（可选）<input value="" placeholder="留空 = 发现全部群; 或群名关键字" aria-label="包含的群" id="query"></label>
+      <label>推送通道（独占声明）<select id="push-claim" aria-label="推送通道"><option>未知 —— 只做游标 kick（默认）</option><option selected>独占 —— 携带内容，15 分钟对账</option><option>共用 —— 只做游标 kick</option></select></label>
+      <div class="mounts-note">保存即生效 —— 已连接的账号会用新设置重建; 换客户端会先打开重新授权。</div>
+      <div class="cfg-err"></div>
+      <div class="dialog-actions">
+        <button type="button" class="mounts-btn" id="reauth">重新授权 Lark…</button>
+        <button type="button" class="mounts-btn" id="duplicate">创建副本…</button>
+        <button type="button" class="mounts-btn mounts-btn-danger" id="remove">移除…</button>
+        <button type="button" class="btn-create" id="save">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

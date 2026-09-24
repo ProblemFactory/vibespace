@@ -53,6 +53,22 @@
  * The env NAME the single-field form is read under is BUILT here and only
  * here (`envFieldName`) — a builder exported from the PURE registry was a
  * second resolver in disguise that the env-name census could not see.
+ *
+ * A `bindsPerAccount` ROW IS NOT A CARD (2.369.165, docs/design-integrations-
+ * per-account.zh.md r4 §2.3/§2.4): its OAuth client is chosen per ACCOUNT
+ * where the account is added, exactly like a storage mount's `OAuth client`
+ * field. For such a row this store is only the PRESET READER (`presetsFor`:
+ * `{key,label}`, the ONE env reader both features share — Google through
+ * the injected `drivePresets`, Lark through `VIBESPACE_INTEGRATIONS`) and the
+ * `cluster:<k>` rung: `list()` leaves it out, every card verb (`publicView`,
+ * `setIntegration`, `setClusterKey`, `useClusterDefault`, `clearUserValues`,
+ * `test`) refuses it `404 binds-per-account` BY NAME, the `own` rung answers
+ * `own-retired`, `offeredCredentials` lists presets only, and the keyless
+ * pick is the cluster's (`prefer` > the only one) — the values and the saved
+ * `clusterKey` a pre-r4 card left in integrations.json stay in place with ONE
+ * reader: `legacyOwnValues(id)`, the engine's one-shot copy of a legacy `own`
+ * account's client onto its own record (the channels engine re-seals it
+ * under `.channels-key`). The six browser key rows are untouched.
  */
 const fs = require('fs');
 const path = require('path');
@@ -70,6 +86,9 @@ const CLUSTER_PREFIX = 'cluster:';
  *  Lives in THE resolver (r3): the registry DECLARES a row's prefix, this
  *  module is the only thing that turns it into a name it reads. */
 const envFieldName = (rowId, fieldKey) => `VIBESPACE_INTEGRATION_${String(rowId).toUpperCase().replace(/[-:]/g, '_')}_${String(fieldKey).toUpperCase().replace(/[-:]/g, '_')}`;
+
+/** A row whose client each ACCOUNT picks (never a card). */
+const bindsPer = (row) => !!(row && row.bindsPerAccount === true);
 
 class IntegrationError extends Error {
   constructor(code, message, { status = 400, detail = null } = {}) {
@@ -148,7 +167,7 @@ function create(deps = {}) {
   function save() {
     assertWritable();                 // belt — every writer already asked
     fs.mkdirSync(dataDir, { recursive: true });
-    writeJsonAtomic(file, state);
+    writeJsonAtomic(file, state, { mode: 0o600 });   // encrypted secrets inside: owner-only, like the key file
   }
   function rec(id, { create = false } = {}) {
     const s = load();
@@ -175,8 +194,12 @@ function create(deps = {}) {
       return undefined;
     }
   }
-  /** The user's own values, decrypted. `undecryptable` names fields the key could not open. */
+  /** The user's own values, decrypted. `undecryptable` names fields the key could not open.
+   *  A `bindsPerAccount` row has NO user values any more (r4): its client
+   *  lives on each account; the pre-r4 bytes are read only by
+   *  `legacyOwnValues`. */
   function userValues(row) {
+    if (bindsPer(row)) return { values: {}, undecryptable: [] };
     const r = rec(row.id);
     const out = {};
     const undecryptable = [];
@@ -246,8 +269,15 @@ function create(deps = {}) {
   }
   /** What the environment offers this row RIGHT NOW: `{key,label,values}` or null. */
   function clusterDefaultFor(row) {
-    const r = rec(row.id);
     const presets = clusterPresetsFor(row);
+    if (bindsPer(row)) {
+      // THE KEYLESS PICK of an account-bound row (r4): the cluster's own —
+      // `prefer` > the only one. A saved `clusterKey` from the retired card
+      // is not read (nothing can write it any more; an account names its key).
+      const pick = R.pickPreset(presets, { savedKey: null, prefer: (row.delegate && row.delegate.prefer) || null });
+      return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options: presets.map((p) => ({ key: p.key, label: p.label })) };
+    }
+    const r = rec(row.id);
     if (row.delegate) {
       const pick = R.pickPreset(presets, { savedKey: r && r.clusterKey, prefer: row.delegate.prefer });
       return { def: pick.preset, why: pick.why, whyCode: pick.whyCode || null, whyParams: pick.whyParams || null, options: presets.map((p) => ({ key: p.key, label: p.label })) };
@@ -306,6 +336,10 @@ function create(deps = {}) {
     };
     const none = (why, whyCode, whyParams = null) => ({ ...base, source: 'none', values: {}, whyCode, whyParams, clusterKey: null, clusterLabel: null, fromEnv: false, missing: R.missingFields(row, {}), why });
     if (key === OWN_KEY) {
+      // RETIRED for an account-bound row (r4): the account carries its own
+      // client (`custom`); a legacy `own` account is copied onto its record by
+      // the channels engine through `legacyOwnValues`, never resolved here.
+      if (bindsPer(row)) return none(`${row.label}'s client is chosen per account — the saved values are no longer an account's client`, 'own-retired');
       const { values: own, undecryptable } = userValues(row);
       noteUndecryptable(row, undecryptable);
       if (undecryptable.length) return none(undecryptableWhy(undecryptable), 'undecryptable', { fields: undecryptable.slice() });
@@ -331,6 +365,7 @@ function create(deps = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
     const out = clusterPresetsFor(row).map((p) => ({ key: CLUSTER_PREFIX + p.key, label: p.label || null, source: 'cluster', presetKey: p.key }));
+    if (bindsPer(row)) return out;       // r4: presets only — `custom` lives on the account, `own` is retired
     const { values: own, undecryptable } = userValues(row);
     // `own` is ALWAYS offered (2.369.147 r3, owner: "为啥没有自定义选项"): available when the user's
     // values are complete, else listed with what is missing — the wizard draws it and sends
@@ -339,6 +374,44 @@ function create(deps = {}) {
     out.push({ key: OWN_KEY, label: null, source: 'user', presetKey: null, available: !missing.length, missing });
     return out;
   }
+  /** THE PRESETS an account-bound row offers the account dialog RIGHT NOW —
+   *  `[{key, label}]`, the wire shape (never a value). The same ONE reader
+   *  the storage dialog's `drivePresets()` is for Google. */
+  function presetsFor(id) {
+    const row = R.rowById(id);
+    if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    return clusterPresetsFor(row).map((p) => ({ key: String(p.key), label: String(p.label || p.key) }));
+  }
+  /** THE ONE READER of a pre-r4 card's own values (r4 §2.6): the engine's
+   *  one-shot copy of a legacy `own` account's client onto the account
+   *  record. `{ok:true, values}` (plaintext — handed to the engine only,
+   *  never a route, never a log) or `{ok:false, code, why, missing?}` BY NAME:
+   *  `integration-key-missing` (the key file is gone — never minted here:
+   *  a fresh key cannot open old ciphertext and would only hide that),
+   *  `values-undecryptable`, `own-missing`, `store-unreadable`. */
+  function legacyOwnValues(id) {
+    const row = R.rowById(id);
+    if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    const r = rec(row.id);
+    if (loadError) return { ok: false, code: 'store-unreadable', why: loadError.message };
+    const stored = (r && r.values) || {};
+    if (!Object.keys(stored).length) return { ok: false, code: 'own-missing', why: `no keys of your own were saved for ${row.label}`, missing: row.fields.filter((f) => f.required).map((f) => f.key) };
+    if (row.fields.some((f) => f.secret && stored[f.key]) && !box.hasKey()) return { ok: false, code: 'integration-key-missing', why: `${KEY_FILE} is missing — the saved ${row.label} secret cannot be decrypted (restore the key file this instance had when it was entered)` };
+    const values = {}; const undecryptable = [];
+    for (const [k, v] of Object.entries(stored)) {
+      const p = decField(row, k, v);
+      if (p === undefined) undecryptable.push(k); else if (p !== '') values[k] = p;
+    }
+    if (undecryptable.length) return { ok: false, code: 'values-undecryptable', why: undecryptableWhy(undecryptable), fields: undecryptable };
+    const missing = R.missingFields(row, values);
+    if (missing.length) return { ok: false, code: 'own-missing', why: `the saved ${row.label} values lack ${missing.join(', ')}`, missing };
+    return { ok: true, values };
+  }
+  /** Every card verb asks this first: an account-bound row is not a card. */
+  function assertCard(row) {
+    if (bindsPer(row)) throw new IntegrationError('binds-per-account', `${row.label}'s OAuth client is chosen per account where the account is added (Communication panel → Connect an account) — it is not an Integrations card`, { status: 404, detail: { id: row.id } });
+  }
+
   function resolveIntegration(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
@@ -382,6 +455,7 @@ function create(deps = {}) {
   function publicView(id) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);
     const r = rec(row.id);
     const res = resolveIntegration(id);
     const { undecryptable } = userValues(row);
@@ -415,7 +489,7 @@ function create(deps = {}) {
     };
   }
   function list() {
-    return { integrations: R.rowIds().map(publicView), storeError: storeErrorView() };
+    return { integrations: R.ROWS.filter((r) => !bindsPer(r)).map((r) => publicView(r.id)), storeError: storeErrorView() };
   }
 
   // ── change notification (the cache-invalidation law: ONE entry point) ────
@@ -432,6 +506,7 @@ function create(deps = {}) {
   function setIntegration(id, patch) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);
     if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new IntegrationError('bad-request', 'values must be an object');
     assertWritable();
     const v = R.validateValues(row, patch);
@@ -458,6 +533,7 @@ function create(deps = {}) {
   function setClusterKey(id, key) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);
     assertWritable();
     const cluster = clusterDefaultFor(row);
     const k = key == null ? null : String(key);
@@ -478,6 +554,7 @@ function create(deps = {}) {
   function useClusterDefault(id) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);
     assertWritable();
     const r = rec(row.id, { create: true });
     // "Would the cluster serve this row?" — asked of the env, never of the record's values.
@@ -494,6 +571,7 @@ function create(deps = {}) {
   function clearUserValues(id) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);
     assertWritable();                 // "nothing to clear" is a claim about the FILE, unanswerable while it cannot be read
     const r = rec(row.id);
     if (!r || !Object.keys(r.values || {}).length) return publicView(id);
@@ -512,6 +590,7 @@ function create(deps = {}) {
   async function test(id, { credentialKey = null } = {}) {
     const row = R.rowById(id);
     if (!row) throw new IntegrationError('unknown-integration', `unknown integration '${id}'`, { status: 404 });
+    assertCard(row);                  // D7: no Test verb on an account-bound row
     const runner = runners.get(id);
     if (!runner) {
       if (row.wiredIn) throw new IntegrationError('not-wired', `${row.label}'s consumer is not wired until ${row.wiredIn} — nothing here can test it yet`, { status: 501, detail: { wiredIn: row.wiredIn } });
@@ -544,7 +623,7 @@ function create(deps = {}) {
   }
 
   return {
-    resolveIntegration, offeredCredentials, publicView, list,
+    resolveIntegration, offeredCredentials, presetsFor, legacyOwnValues, publicView, list,
     setIntegration, setClusterKey, useClusterDefault, clearUserValues,
     test, registerTest, hasTestRunner: (id) => runners.has(id),
     onChange, file, keyFile: box.keyFile,

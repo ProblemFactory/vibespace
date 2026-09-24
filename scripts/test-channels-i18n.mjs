@@ -6,7 +6,7 @@
 // WHAT IT ASSERTS: under zh AND under ja, every one of the eight surfaces —
 // the Channels rail panel, the conversation window, the composer + inline
 // approval cards + the Outbox window, the Assign & filter editor, the Reach &
-// policy editor, the connect wizard (flow dialog + port-busy refusal), the
+// policy editor, the account dialogs (r4: connect type-first incl. a custom Lark client, re-authorize with the port-busy notice, edit, duplicate, remove refused), the
 // Options / Push / Track dialogs, and ⚙ → Integrations — renders ZERO visible
 // text nodes (and title/placeholder attributes) whose letters are Latin-only,
 // except a PRINTED allowlist: proper nouns (Lark, 飞书's Latin twin, Gmail,
@@ -68,7 +68,7 @@ export const ALLOWED_PATTERNS = [
   /^[\w.+-]+@[\w-]+(\.[\w-]+)+$/,      // an email
   /^v?\d+(\.\d+)+([.-]\w+)?$/,         // a version string
   /^[\w.-]*[•]{2,}[\w.-]*$/,           // a masked secret
-  /^(cli_|cb_|fake_|GOCSPX-|sk-)[\w…-]*$/, // key-shaped placeholders / ids
+  /^(cli_|cb_|fake_|GOCSPX-|sk-|bb_live_)[\w…-]*$/, // key-shaped placeholders / ids (bb_live_: the Browserbase key row, the window's card since r4)
   /^vibespace-[a-z-]+$/,               // an agent CLI's name
   /^[a-z0-9]+(-[a-z0-9]+)+$/,          // a hyphenated id / code shown as a value (fake-poll, send-not-available)
   /^\[\[fake:[a-z]+\]\]$/,             // the fixture's own directives
@@ -86,7 +86,7 @@ export const DATA_PATH_CLASSES = [
   'integ-test-error',  // a Test verdict's words are the RUNNER'S / VENDOR'S own (our refusal sentence is `.integ-test-refusal`, censused)
   'window-title', 'win-title', 'titlebar', 'taskbar', 'rail-badge',
   'chan-reach-who',   // the principal's own name (a session / group title)
-  'chan-cred-label',  // a credential's NAME is the cluster's / the user's own label (2.369.148: the wizard's credential step is always drawn, so the preset label reaches the census)
+  'chan-cred-chip',   // r4: the account's client chip carries a PRESET's label (the cluster's own words) after the translated "Preset:"
   // g3 (design §22, the IM-first panel): an agent GROUP's name, its last line and a source's label are
   // AGENT / vendor data; so are member names (the detail + the New group picker), an invite's context,
   // a system record's names and an @-autocomplete candidate
@@ -136,7 +136,14 @@ export const SURFACES = [
   ['outbox', /^outbox-window$/],
   ['assign-filter', /^dialog-assign-filter$/],
   ['reach', /^dialog-reach$/],
-  ['wizard', /^wizard-01-flow$/],
+  // r4 (design-integrations-per-account, chunk 3): the account dialogs are the storage dialog
+  // component — connect (type-first, Lark + Custom), re-authorize, edit, duplicate, remove refused
+  ['account dialogs', /^wizard-01-connect$/],
+  ['account dialogs (Lark, custom client)', /^wizard-02-connect-lark-custom$/],
+  ['re-authorize', /^wizard-04-reauth-port-busy$/],
+  ['edit', /^wizard-05-edit$/],
+  ['duplicate', /^wizard-06-duplicate$/],
+  ['remove refused', /^wizard-07-remove-refused$/],
   ['options/push/track', /^dialog-(options-lark|push|track)$/],
   ['integrations', /^integ-01-window$/],
 ];
@@ -150,7 +157,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const planted = census([{ text: 'Nothing is fetched yet', paths: ['div.chan-empty < div.chan-list'], surfaces: ['panel-01-fresh'] }]);
   ok(planted.violations.length === 1 && /latin:/.test(planted.violations[0].why), 'NEGATIVE CONTROL: one planted English literal on a chrome path is a violation', JSON.stringify(planted));
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
-  const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-tracked'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.chan-flow-note'], surfaces: ['wizard-01-flow'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-tracked'] }]);
+  const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-tracked'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-tracked'] }]);
   ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
   console.log('  … allowed words: ' + ALLOWED_WORDS.join(', '));
   console.log('  … allowed patterns: ' + ALLOWED_PATTERNS.map((r) => r.source).join('  |  '));

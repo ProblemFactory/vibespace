@@ -1783,6 +1783,29 @@ WhatsApp 与 WeChat adapter 是 **P6**: `'ui'` 那一半门控在决定 19 与 a
 
 ## 14. 集成密钥与配置界面
 
+> **SHIPPED 更新 (2.369.165, integrations chunk 2 —— 以 `docs/design-integrations-per-account.zh.md` r4 为准):**
+> lark / gmail / fake 三行成为 `bindsPerAccount` —— 它们的 OAuth 客户端**在添加账号的地方按账号选择**
+> (与存储挂载的 `OAuth 客户端` 字段同一语法), 不再是 Integrations 窗口里的卡片: `GET /api/integrations`
+> 只剩浏览器六行, 对这三行的 GET / PUT / DELETE / test 一律 `404 binds-per-account` 点名; `own` rung
+> 对这三行退役 (`own-retired`); 选择存在账号记录上 (`cluster:<k>` 不变, 或 `custom` + `credential
+> {appId, appSecretEnc}` 由 `.channels-key` 封存); 预设 `{key,label}` 来自两个功能共用的那一个 env 读者;
+> 旧 `own` 账号的值由引擎一次性复制到账号上 (读取时 + 迁移 `2026-09-channel-custom-client-inline`),
+> integrations.json 里的旧值原地保留。本节下文描述的 lark / gmail 卡片、单选 / 下拉、Test 按钮是
+> **被取代的** r0 形态; 浏览器六行 (§14 的其余内容) 不变。
+>
+> **SHIPPED 更新 (2.369.165, integrations chunk 3 —— 客户端):** Accounts 部分底部只剩一个 `连接账号`
+> (类型优先的存储对话框, `src/lib/mounts-dialog.js` 共用组件, 对话框本身在 `src/lib/channel-account-dialogs.js`);
+> 账号 = 凭据优先的卡 (状态点 / 客户端芯片 / 存储明细行语法的健康行 / auth 死亡时存储的 `.mounts-errline`
+> 句子 + why 码 + `重新授权 {产品}…` / 仅登录措辞 + `跟踪…` / 被跟踪会话 = ↳ 子行), ⋯ 按存储行顺序 (D6);
+> 编辑 (自定义密钥预填, 换客户端 = 打开重新授权) / 创建副本 / 重新授权 (存储的重新授权对话框 + 顶上的客户端下拉) /
+> 移除被拒点名。本节下文的连接向导、三条拷贝路径、自有流程对话框、凭据步与 "添加账号…" 均已**删除**。
+>
+> **SHIPPED (2.369.165, integrations chunk 4 —— r4 整体落地):** 存储侧也采用"换客户端 = 重新授权" (D2, 独立
+> commit: 编辑里换 Drive / Gmail 的 OAuth 客户端, 保存其余字段后在新客户端下打开重新授权, token 与客户端一起写入);
+> `scripts/test-oauth-field-parity.mjs` 普查两个功能共有的一切 (一个组件、两侧都断言的共用拼写、重新授权、编辑按钮顺序、
+> 移除的位置、D8 借用的句子、从设计文档本身解析出的 §4 i18n 键表)。本节的配置界面以
+> `docs/design-integrations-per-account.zh.md` r4 (SHIPPED) 为准; Integrations 窗口只剩浏览器六行。
+
 > **Owner 指示(2026-09-11, 原话):** "对于指纹浏览器和 communication panel 这种可能需要配置
 > 自己的 key 的情况, 要考虑怎么提供配置界面, 让我们集群里的用户可以自行配置(当然 lark 这种
 > 集群里能提供默认 oauth client 的就提供默认)"。

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 创建副本 "Gmail · me@example.com": 同类型 / 同客户端 / 同过滤与推送声明, 自己的授权 (token 永不复制)</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- §8 pattern 2 (r4): Duplicate = a SIBLING account prefilled with the same
+     kind, OAuth client, filters and options, needing its OWN consent. Copied:
+     kind, client choice (preset key, or the custom id + secret), the include
+     query, the push claim, the sender-honesty setting. NEVER copied: the
+     token (a login is one person's consent), the tracked list, assignments,
+     reach grants, the conversation log. The mounts' ⧉ (2.107.0) had the same
+     rule: derive a new standalone record from an existing connection. -->
+<div class="dialog-overlay">
+  <div class="dialog" id="dup-dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">创建副本 "Gmail · me@example.com"</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <label>名称<input value="Gmail · me@example.com (副本)" aria-label="名称" id="dup-name"></label>
+      <label>类型<input value="Gmail" readonly aria-label="类型" id="dup-kind"></label>
+      <label>OAuth 客户端<select id="dup-client" aria-label="OAuth 客户端"><option selected>预设：Google (Drive/Gmail)</option><option>自定义（自己的 client id/secret）</option></select></label>
+      <div class="mounts-field-hint">从原账号复制; 可以改。</div>
+      <label>包含查询（Gmail 搜索语法）<input value="label:INBOX" aria-label="包含查询" id="dup-query"></label>
+      <label>推送通道（独占声明）<select id="dup-push" aria-label="推送通道"><option>未知 —— 只做游标 kick（默认）</option><option selected>独占 —— 携带内容，15 分钟对账</option><option>共用 —— 只做游标 kick</option></select></label>
+      <div class="chan-fact" id="dup-note">复制的是设置: 类型、OAuth 客户端、查询、推送声明、发送者说明行。<b>不复制</b> token（登录是一个人的一次同意）、已跟踪的会话、分配、可见性授权与消息记录 —— 副本用自己的登录授权。</div>
+      <label>Google 授权</label>
+      <div class="mounts-drive-connect"><button type="button" class="mounts-btn mounts-btn-primary" id="connect-btn">连接 Google</button><div class="mounts-field-hint">这个副本需要自己的登录 —— 用另一个 Google 账号, 或同一个账号再授权一次。</div></div>
+      <div class="cfg-err"></div>
+      <div class="dialog-actions"><button type="button" class="btn-create" id="submit">创建并连接</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

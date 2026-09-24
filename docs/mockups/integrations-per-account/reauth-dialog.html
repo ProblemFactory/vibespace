@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 重新授权 "张三 (Lark)" (= _showDriveReauthDialog 逐字: 谁报的死亡 / 用 {provider} 登录 / 跨浏览器链接行 / 粘回)</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- §8 pattern 3 (r4): the mount's re-authorize dialog reused verbatim for a
+     channel account — the hint naming who reported the death, "用 {provider}
+     登录", the status hint, oauthLinkRow, the paste box. One addition (D-r2):
+     the OAuth client select on top, pre-filled with the account's own client
+     — switching clients happens HERE, because a switch IS a re-authorization. -->
+<div class="dialog-overlay">
+  <div class="dialog" id="chan-reauth-dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">重新授权 "张三 (Lark)"</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <div class="mounts-field-hint" id="why">Lark 报告已保存的登录已过期或被撤销。重新登录以获取新 token —— 账号的其他设置不变。</div>
+      <label>OAuth 客户端<select id="oauth-client" aria-label="OAuth 客户端"><option selected>预设：Lark (VibeSpace 自建 app)</option><option>自定义（自己的 client id/secret）</option></select></label>
+      <div class="mounts-field-hint">默认用这个账号原来的客户端；换一个也可以 —— 新 token 会在新客户端下铸出。</div>
+      <button type="button" class="mounts-btn mounts-btn-primary" id="signin">用 Lark 登录</button>
+      <div class="mounts-field-hint" id="status">已打开 Lark 登录页面。批准访问后回到这里。</div>
+      <div class="mounts-oauth-link" id="oauth-link"><div class="mounts-field-hint">账号在另一个浏览器里登录？复制此链接到那里打开：</div><div class="mounts-oauth-line"><input readonly value="https://open.feishu.cn/open-apis/authen/v1/authorize?app_id=cli_…&redirect_uri=http%3A%2F%2F127.0.0.1%3A17865%2Flark%2Fcb&state=…" aria-label="授权链接"><button type="button" class="mounts-btn">复制</button></div></div>
+      <div class="mounts-field-hint">如果最后的页面无法加载（地址以 127.0.0.1:17865 开头），复制那个地址粘贴到这里：</div>
+      <input placeholder="http://127.0.0.1:17865/lark/cb?state=…&code=…" aria-label="粘贴回调地址" id="paste-input">
+    </div>
+  </div>
+</div>
+</body>
+</html>

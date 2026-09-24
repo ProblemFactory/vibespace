@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — Communication 面板: 账号卡 = 凭据优先 (状态点 / 健康行 / 错误行 + 重新授权), ⋯ 动词顺序 = 存储行, ↳ 被跟踪的会话, 空账号的"仅凭据"式措辞</title>
+<link rel="stylesheet" href="mockup.css">
+<style>
+  body { padding: 12px; }
+  .panel { width: min(300px, 100%); background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; position: relative; }
+  /* the open ⋯ menu is drawn BESIDE the card on a wide frame so the card stays readable; on a phone it overlays as the product would */
+  .mock-menu { left: calc(100% + 8px); top: 28px; }
+  @media (max-width: 768px) { .mock-menu { left: auto; right: 8px; top: 40px; } }
+  @media (max-width: 768px) { body { padding: 0; } .panel { width: 100%; border-radius: 0; min-height: 100vh; } }
+</style>
+</head>
+<body>
+<!-- §8 patterns 1 / 2 / 3 / 5 / 6 / 7 / 10 (r4): the account section IS the
+     login (credential-first): the status dot, a HEALTH line in the storage
+     row's detail-line grammar, the mounts' auth-death sentence + inline
+     re-authorize button; the ⋯ verbs in the mount row's order (Open → Connect/
+     Disconnect → Add… → Edit; Duplicate + Remove where mounts keep Remove —
+     the edit dialog — and in the ⋯); tracked conversations render as ↳ rows
+     (the child-row grammar, no submount dialog); an account tracking nothing
+     says so in the "credential only — add … under it" register. -->
+<div class="panel" id="panel">
+  <div class="chan-bar"><span class="chan-summary">3 个账号 · 3 个会话被跟踪</span></div>
+
+  <div class="chan-sec" id="sec-gmail">
+    <div class="chan-sec-head folder-header">
+      <span class="chan-ic chan-sec-chev"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span class="chan-ic chan-sec-kind"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 4h12v9H2zM2 4l6 5 6-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+      <b class="chan-sec-name">Gmail · me@example.com</b>
+      <span class="chan-chip chan-cred-chip">预设：Google (Drive/Gmail)</span>
+      <span class="chan-dot chan-dot-ok" title="已连接"></span>
+      <span class="chan-sec-count">2/2</span>
+      <button type="button" class="mounts-icon-btn" title="编辑连接（客户端、过滤、推送）" aria-label="编辑"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path d="M11 2l3 3-8 8H3v-3l8-8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+      <button type="button" class="icon-btn chan-sec-more" title="更多操作" aria-label="更多操作">⋯</button>
+    </div>
+    <div class="chan-sec-health" id="health-gmail"><span class="mounts-typetag">Gmail</span><span>已连接 · label:INBOX · 上次轮询 2 分钟前 · 推送: 独占</span></div>
+    <!-- the OPEN ⋯ menu, verb order = the storage row's action order -->
+    <div class="taskbar-context-menu mock-menu" id="menu-gmail">
+      <div class="mock-menu-item">打开会话窗口</div>
+      <div class="mock-menu-item">跟踪…</div>
+      <div class="mock-menu-item">选项</div>
+      <div class="mock-menu-item">推送…</div>
+      <div class="mock-menu-sep"></div>
+      <div class="mock-menu-item">重新授权</div>
+      <div class="mock-menu-item" id="mi-duplicate">创建副本…</div>
+      <div class="mock-menu-item">断开</div>
+      <div class="mock-menu-item danger" id="mi-remove">移除…</div>
+      <div class="mock-menu-sep"></div>
+      <div class="mock-menu-item">禁用</div>
+    </div>
+    <div class="chan-rows">
+      <div class="chan-row chan-row-tracked" id="tracked-1"><div class="chan-row-line"><span class="chan-child-arrow" style="color:var(--text-dim);font-size:11px">↳</span><span class="chan-row-title">供应商报价</span><span class="chan-chip chan-chip-live">5 分钟内</span></div><div class="chan-row-sub"><span class="chan-row-who">最近 · 报价单 v3 · 分配给: 采购 agent</span></div></div>
+      <div class="chan-row chan-row-tracked" id="tracked-2"><div class="chan-row-line"><span style="color:var(--text-dim);font-size:11px">↳</span><span class="chan-row-title">面试安排</span><span class="chan-chip chan-chip-live">5 分钟内</span></div><div class="chan-row-sub"><span class="chan-row-who">最近 · 周四 15:00 可以吗</span></div></div>
+    </div>
+  </div>
+
+  <div class="chan-sec" id="sec-lark">
+    <div class="chan-sec-head folder-header">
+      <span class="chan-ic chan-sec-chev"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span class="chan-ic chan-sec-kind"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 3h12v8H6l-3 3v-3H2z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+      <b class="chan-sec-name">Lark / 飞书 · 张三</b>
+      <span class="chan-chip chan-cred-chip">预设：Lark (VibeSpace 自建 app)</span>
+      <span class="chan-dot chan-dot-bad" title="登录已过期或被撤销"></span>
+      <span class="chan-sec-count">1/5</span>
+      <button type="button" class="mounts-icon-btn" title="编辑" aria-label="编辑"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path d="M11 2l3 3-8 8H3v-3l8-8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+      <button type="button" class="icon-btn chan-sec-more" title="更多操作" aria-label="更多操作">⋯</button>
+    </div>
+    <div class="mounts-errline" id="err-lark">连接失败: 登录已过期或被撤销 —— 会话列表来自缓存, 每次抓取都失败; 重新授权以修复<button type="button" class="mounts-btn mounts-btn-primary mounts-reauth-btn" id="reauth-lark">重新授权 Lark…</button></div>
+    <div class="chan-rows">
+      <div class="chan-row chan-row-tracked"><div class="chan-row-line"><span style="color:var(--text-dim);font-size:11px">↳</span><span class="chan-row-title">产品讨论群</span><span class="chan-chip chan-chip-off">未轮询</span></div><div class="chan-row-sub"><span class="chan-row-who">最近 · 李四: 明天的评审改到 3 点</span></div></div>
+    </div>
+  </div>
+
+  <div class="chan-sec" id="sec-empty">
+    <div class="chan-sec-head folder-header">
+      <span class="chan-ic chan-sec-chev"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 6l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+      <span class="chan-ic chan-sec-kind"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M2 4h12v9H2zM2 4l6 5 6-5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+      <b class="chan-sec-name">Gmail · team@example.com</b>
+      <span class="chan-chip chan-cred-chip">自定义客户端</span>
+      <span class="chan-dot chan-dot-idle" title="已连接 · 未跟踪任何会话"></span>
+      <span class="chan-sec-count">0/7</span>
+      <button type="button" class="mounts-icon-btn" title="编辑" aria-label="编辑"><svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false"><path d="M11 2l3 3-8 8H3v-3l8-8z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></button>
+      <button type="button" class="icon-btn chan-sec-more" title="更多操作" aria-label="更多操作">⋯</button>
+    </div>
+    <div class="chan-sec-note chan-sec-empty" id="empty-hint"><span class="chan-ic"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true" focusable="false"><circle cx="5" cy="8" r="3"/><path d="M8 8h6M11.5 8v2.5M14 8v2"/></svg></span><span>仅登录 —— 尚未跟踪任何会话; 跟踪之前不会抓取任何内容。用「跟踪…」在这个账号下挑选会话。</span><button type="button" class="mounts-btn chan-sec-verb">跟踪…</button></div>
+  </div>
+
+  <div class="chan-sec chan-connect" id="sec-connect">
+    <button type="button" class="mounts-btn chan-connect-btn" id="connect-more"><span class="chan-ic"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2"/></svg></span><span class="chan-connect-label">连接账号（Gmail、Lark / 飞书…）</span></button>
+  </div>
+</div>
+</body>
+</html>

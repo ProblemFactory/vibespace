@@ -2,35 +2,11 @@
 // Third tab next to Folders | Groups: my-storage card (env-provisioned),
 // mount list with live status, share-a-folder minting, import-a-link.
 import { createModalShell, showToast, showConfirmDialog, showContextMenu, copyText, escHtml, hostStateChip, getInstanceUrl } from './utils.js';
-import { setupDirAutocomplete } from './autocomplete.js';
 import { protoChip } from './sidebar-rail.js'; // http/https/tcp chip (override menu = this._portProtoMenu, same prototype)
 import { t as tr } from './i18n.js'; // sidebar cluster convention: local `t` is pervasively a task var
+import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from './mounts-dialog.js'; // D1: the ONE dialog component (storage + channel accounts)
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 
-
-// OAuth cross-browser affordance (2.226.2, real report: the target Google
-// account lived in ANOTHER browser and the flow force-opened the consent page
-// in THIS one with the URL never shown). Always render the auth URL as a
-// copyable row — ANY browser can complete the consent, and the paste-back
-// relay doesn't care where the 127.0.0.1 redirect failed.
-function oauthLinkRow(url) {
-  const row = document.createElement('div');
-  row.className = 'mounts-oauth-link';
-  const hint = document.createElement('div');
-  hint.className = 'mounts-field-hint';
-  hint.textContent = tr('Account signed in on ANOTHER browser? Copy this link and open it there:');
-  const line = document.createElement('div');
-  line.style.cssText = 'display:flex;gap:4px;align-items:center;margin:2px 0;';
-  const inp = document.createElement('input');
-  inp.readOnly = true; inp.value = url; inp.style.flex = '1'; inp.style.minWidth = '0';
-  inp.onfocus = () => inp.select();
-  const cp = document.createElement('button');
-  cp.type = 'button'; cp.className = 'mounts-btn'; cp.textContent = tr('Copy');
-  cp.onclick = () => copyText(url).then(() => showToast(tr('Copied')));
-  line.append(inp, cp);
-  row.append(hint, line);
-  return row;
-}
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
@@ -61,16 +37,6 @@ const MI = {
   termNew: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.5 2L4 10M8.5 10.5h3.5"/></svg>',
   key: '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6M11.5 8v2.5M14 8v2"/></svg>',
 };
-
-// fetch wrapper that THROWS on HTTP/{error} responses (utils fetchJson swallows)
-async function api(url, opts = {}) {
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  const d = await res.json().catch(() => ({}));
-  // carry the server's machine-readable `code` (the key-import flow maps it to
-  // localized text — a bare message string can't be translated)
-  if (!res.ok || d.error) { const e = new Error(d.error || `HTTP ${res.status}`); e.code = d.code; throw e; }
-  return d;
-}
 
 // Private-key import errors: the SERVER sends a stable code, the CLIENT renders
 // the localized prose (server strings are for logs / non-browser callers).
@@ -499,67 +465,86 @@ export function installSidebarMounts(Sidebar) {
     // mount's own OAuth client), but the minted token writes back into the
     // record (+ its children) instead of a form field.
     _showDriveReauthDialog(m) {
+      // the dialog's shape lives in the shared component (chunk 3 of the
+      // integrations lane: the channel accounts' re-authorize is the SAME
+      // dialog); the three storage calls are its parameters
       const prov = this._oauthProviderNames(m);
-      const { body, close } = createModalShell({ id: 'mount-reauth-dialog', title: tr('Re-authorize "{name}"', { name: m.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
-      const hint = document.createElement('div');
-      hint.className = 'mounts-field-hint';
-      hint.textContent = tr('{provider} reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.', { provider: prov.signin });
-      const btn = document.createElement('button');
-      btn.className = 'mounts-btn mounts-btn-primary';
-      btn.textContent = tr('Sign in with {provider}', { provider: prov.signin });
-      const status = document.createElement('div');
-      status.className = 'mounts-field-hint';
-      body.append(hint, btn, status);
-      let pasteBox = null, poll = null;
-      const stopPoll = () => { clearInterval(poll); poll = null; };
-      const finish = async (token) => {
-        stopPoll();
-        status.textContent = tr('Saving token & reconnecting…');
-        try {
+      return reauthDialog({
+        title: tr('Re-authorize "{name}"', { name: m.name }),
+        hint: tr('{provider} reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.', { provider: prov.signin }),
+        signinLabel: tr('Sign in with {provider}', { provider: prov.signin }),
+        provider: prov.signin,
+        start: () => api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify({ mountId: m.id }) }),
+        status: () => api('/api/mounts/gdrive-auth/status'),
+        callback: (url) => api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url }) }),
+        finish: async (token, { close }) => {
           await api(`/api/mounts/${m.id}/drive-token`, { method: 'POST', body: JSON.stringify({ token }) });
           showToast(tr('{provider} re-authorized', { provider: prov.product }));
           close(); this._renderMounts();
-        } catch (e) { status.textContent = e.message || 'Failed'; btn.disabled = false; }
+        },
+      });
+    },
+
+    // D2 (docs/design-integrations-per-account.zh.md §6 — the storage side
+    // adopts the channel accounts' rule: switching the client IS a
+    // re-authorization). The client a Drive / Gmail record RESOLVES to, the
+    // way the server resolves it (MountManager._driveClient / gmail-sync
+    // _client): a custom id wins (Gmail: id + secret), else the preset key,
+    // else the resolver's own fallback (the only preset, else `default`, else
+    // rclone's built-in). The SECRET is not the identity — a rotated secret of
+    // the same client keeps its tokens and saves directly. Returns null when
+    // the Save does not switch the client, else what the consent starts with
+    // (`start`) and what lands with the token (`client`).
+    _mountClientSwitch(cfg, cur, presets = []) {
+      const type = cfg.type || 's3';
+      if (!['drive', 'gmail'].includes(type) || cfg.parentId || cfg.envLocked || cfg.origin === 'my-storage') return null;
+      const fallback = presets.length === 1 ? presets[0].key : (presets.find((p) => p.key === 'default')?.key || '');
+      const of = (r) => {
+        const custom = type === 'drive' ? (r.clientId || '') : (r.clientId && r.clientSecret ? r.clientId : '');
+        return custom ? `custom:${custom}` : `preset:${r.clientPreset || fallback}`;
       };
-      btn.onclick = async () => {
-        btn.disabled = true;
-        status.textContent = tr('Preparing authorization…');
-        try {
-          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify({ mountId: m.id }) });
-          if (r.error) throw new Error(r.error);
-          const _w = window.open(r.url, '_blank');
-          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
-          status.after(oauthLinkRow(r.url));
-          status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: prov.signin });
-          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
-          if (!pasteBox) {
-            pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
-            const inp = document.createElement('input');
-            inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
-            inp.onchange = async () => {
-              try {
-                status.textContent = tr('Completing…');
-                const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }) });
-                finish(fr.token);
-              } catch (e) { status.textContent = e.message || tr('Failed'); }
-            };
-            pasteBox.appendChild(inp);
-            body.appendChild(pasteBox);
-          }
-          poll = setInterval(async () => {
-            if (!status.isConnected) { stopPoll(); return; } // dialog closed
-            try {
-              const st = await api('/api/mounts/gdrive-auth/status');
-              if (st.token) finish(st.token);
-            } catch {}
-          }, 1500);
-          setTimeout(stopPoll, 10 * 60 * 1000);
-        } catch (e) {
-          status.textContent = e.message || tr('Failed to start authorization');
-          btn.disabled = false;
-        }
-      };
+      const next = { ...cfg, ...cur };
+      if (of(cfg) === of(next)) return null;
+      if (type === 'drive' && next.clientId) {
+        const client = { clientId: next.clientId, clientSecret: next.clientSecret || '' };
+        return { type, start: client, client };
+      }
+      return { type, start: { clientPreset: next.clientPreset || undefined }, client: { clientPreset: next.clientPreset || '' } };
+    },
+
+    // The storage Re-authorize dialog under a SWITCHED client (D2): the same
+    // shared dialog as _showDriveReauthDialog (hint, Sign in with {provider},
+    // status, the cross-browser link row, paste-back), but the consent starts
+    // with the NEW client and the minted token lands WITH it — Drive through
+    // drive-token {token, client}, Gmail through one PATCH {clientPreset,
+    // token}. Abandoned, the record keeps its current client and sign-in.
+    _showClientSwitchReauthDialog(m, cfg, sw, presets = []) {
+      const gmail = sw.type === 'gmail';
+      const prov = gmail ? { product: 'Gmail', signin: 'Google' } : this._oauthProviderNames(cfg);
+      const preset = presets.find((p) => p.key === sw.client.clientPreset);
+      const clientName = sw.client.clientId || (preset ? tr('Preset: {name}', { name: preset.label }) : tr('(custom / built-in client)'));
+      const base = gmail ? '/api/mounts/gmail-auth' : '/api/mounts/gdrive-auth';
+      return reauthDialog({
+        title: tr('Re-authorize "{name}"', { name: m.name }),
+        hint: tr('The OAuth client changed to {client}. A token only works with the client that minted it — sign in with {provider} again to finish the switch. Until then the connection keeps its current client and sign-in.', { client: clientName, provider: prov.signin }),
+        signinLabel: tr('Sign in with {provider}', { provider: prov.signin }),
+        provider: prov.signin,
+        start: () => api(`${base}/start`, { method: 'POST', body: JSON.stringify(sw.start) }),
+        // Gmail's status names a failure `error` (the storage block reads `fail`)
+        status: gmail ? async () => { const st = await api(`${base}/status`); return { token: st.token, fail: st.error }; } : () => api(`${base}/status`),
+        callback: async (url) => {
+          const r = await api(`${base}/callback`, { method: 'POST', body: JSON.stringify({ url }) });
+          if (!r.token) throw new Error(r.error || tr('Failed'));
+          return r;
+        },
+        ...(gmail ? { pastePlaceholder: 'http://127.0.0.1:…/?state=…&code=…' } : {}),
+        finish: async (token, { close }) => {
+          if (gmail) await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify({ clientPreset: sw.client.clientPreset, token }) });
+          else await api(`/api/mounts/${m.id}/drive-token`, { method: 'POST', body: JSON.stringify({ token, client: sw.client }) });
+          showToast(tr('{provider} re-authorized', { provider: prov.product }));
+          close(); this._renderMounts();
+        },
+      });
     },
 
     // Add a submount under any storage — the rclone remote:path model:
@@ -1561,104 +1546,11 @@ export function installSidebarMounts(Sidebar) {
     // that awaits a Promise from this dialog, or cancelling it hangs the
     // awaiting flow forever. Callers must make their resolve idempotent
     // (close() runs on the submit path too).
+    // The renderer lives in ./mounts-dialog.js since D1 (one component for the
+    // storage AND the channel account dialogs); `_lastMountsDialog` stays here
+    // because only this mixin's callers read it.
     _mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title, onClose: opts.onClose });
-      const inputs = {};
-      const rows = []; // {field, label, el} for conditional visibility
-      let advBody = null;
-      const readValues = () => Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value]));
-      for (const f of fields) {
-        const label = document.createElement('label');
-        label.textContent = f.label;
-        let el;
-        if (f.type === 'select') {
-          el = document.createElement('select');
-          for (const [v, l] of f.options) { const o = document.createElement('option'); o.value = v; o.textContent = l; el.appendChild(o); }
-          if (f.value) el.value = f.value;
-        } else if (f.type === 'textarea') {
-          el = document.createElement('textarea');
-          el.placeholder = f.placeholder || '';
-          el.style.minHeight = '72px'; el.style.fontSize = '12px';
-          if (f.value) el.value = f.value;
-        } else {
-          el = document.createElement('input');
-          el.type = f.type || 'text';
-          el.placeholder = f.placeholder || '';
-          if (f.value) el.value = f.value;
-        }
-        inputs[f.key] = el;
-        const rowRec = { field: f, label, el };
-        rows.push(rowRec);
-        // Path autocomplete (Tab / type-ahead) — 'local' completes against this
-        // server's filesystem; a function returns a per-keystroke endpoint URL.
-        if (f.autocomplete && el.tagName === 'INPUT') {
-          const wrap = document.createElement('div');
-          wrap.style.position = 'relative';
-          wrap.style.display = 'flex';
-          wrap.style.flexDirection = 'column';
-          const dd = document.createElement('div');
-          dd.className = 'path-autocomplete hidden';
-          wrap.append(el, dd);
-          rowRec.el = wrap; // visibility toggling targets the wrapper
-          inputs[f.key] = el;
-          setupDirAutocomplete(el, dd, {
-            endpoint: typeof f.autocomplete === 'function' ? () => f.autocomplete(inputs) : undefined,
-          });
-          el._acWrap = wrap;
-        }
-        // Advanced fields collect into a collapsed <details> at the end so the
-        // common case isn't cluttered with tuning knobs most users never touch.
-        if (f.advanced && !advBody) { advBody = document.createElement('div'); advBody.className = 'mounts-adv-body'; }
-        const dest = f.advanced ? advBody : body;
-        dest.append(label, rowRec.el);
-        if (f.hint) {
-          const h = document.createElement('div');
-          h.className = 'mounts-field-hint';
-          h.textContent = f.hint;
-          rowRec.hintEl = h;
-          dest.appendChild(h);
-        }
-      }
-      if (advBody) {
-        const det = document.createElement('details');
-        det.className = 'mounts-advanced';
-        const sum = document.createElement('summary');
-        sum.textContent = 'Advanced options';
-        det.append(sum, advBody);
-        body.appendChild(det);
-      }
-      // conditional fields: re-evaluate `when(values)` whenever any input changes
-      const applyConds = () => {
-        const vals = readValues();
-        for (const { field, label, el, hintEl } of rows) {
-          const show = !field.when || field.when(vals);
-          label.style.display = show ? '' : 'none';
-          el.style.display = show ? '' : 'none';
-          if (hintEl) hintEl.style.display = show ? '' : 'none';
-        }
-      };
-      if (fields.some(f => f.when)) {
-        for (const { el } of rows) { el.addEventListener('change', applyConds); el.addEventListener('input', applyConds); }
-        applyConds();
-      }
-      const err = document.createElement('div');
-      err.className = 'cfg-err';
-      const actions = document.createElement('div');
-      actions.className = 'dialog-actions';
-      const submit = document.createElement('button');
-      submit.className = 'btn-create';
-      submit.textContent = submitLabel;
-      actions.appendChild(submit);
-      body.append(err, actions);
-      submit.onclick = async () => {
-        err.textContent = '';
-        submit.disabled = true;
-        try {
-          const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
-          await onSubmit(vals, { close, body, err });
-        } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
-      };
-      const ctx = { close, inputs, body, applyConds: fields.some(f => f.when) ? applyConds : () => {} };
+      const ctx = mountsDialog(title, fields, submitLabel, onSubmit, opts);
       this._lastMountsDialog = ctx;
       return ctx;
     },
@@ -1902,45 +1794,10 @@ export function installSidebarMounts(Sidebar) {
     // reused by OneDrive and (via edit) any OAuth rclone backend. Mirrors the
     // Drive connect flow: same-machine completes hands-free, remote pastes the
     // 127.0.0.1 redirect back.
-    _wireOAuthConnect(ctx, { tokenKey, backend, label, clientIdKey, clientSecretKey }) {
-      const PROVIDER_LABELS = { onedrive: 'Microsoft', drive: 'Google', dropbox: 'Dropbox', box: 'Box', pcloud: 'pCloud', yandex: 'Yandex', jottacloud: 'Jottacloud', hidrive: 'HiDrive' };
-      const tokenInput = ctx.inputs[tokenKey];
-      if (!tokenInput) return;
-      const wrap = document.createElement('div');
-      wrap.className = 'mounts-drive-connect';
-      const btn = document.createElement('button');
-      btn.type = 'button'; btn.className = 'mounts-btn mounts-btn-primary'; btn.textContent = label;
-      const status = document.createElement('div'); status.className = 'mounts-field-hint';
-      wrap.append(btn, status);
-      tokenInput.before(wrap);
-      const sync = () => { wrap.style.display = tokenInput.style.display; };
-      new MutationObserver(sync).observe(tokenInput, { attributes: true, attributeFilter: ['style'] });
-      sync();
-      let pasteBox = null, poll = null;
-      const stopPoll = () => { clearInterval(poll); poll = null; };
-      const finish = (token) => { stopPoll(); tokenInput.value = token; status.textContent = tr('✓ Connected — finish with the “Connect” button below.'); btn.textContent = tr('Reconnect'); btn.disabled = false; pasteBox?.remove(); pasteBox = null; };
-      btn.onclick = async () => {
-        btn.disabled = true; status.textContent = tr('Preparing authorization…');
-        try {
-          const body = { backend: typeof backend === 'function' ? backend() : backend };
-          if (clientIdKey && ctx.inputs[clientIdKey]?.value) { body.clientId = ctx.inputs[clientIdKey].value; body.clientSecret = ctx.inputs[clientSecretKey]?.value || ''; }
-          const r = await api('/api/mounts/gdrive-auth/start', { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } });
-          if (r.error) throw new Error(r.error);
-          const _w = window.open(r.url, '_blank');
-          status.parentElement?.querySelectorAll('.mounts-oauth-link').forEach((e) => e.remove());
-          status.after(oauthLinkRow(r.url));
-          status.textContent = tr('A {provider} sign-in page opened. Approve access, then come back here.', { provider: PROVIDER_LABELS[body.backend] || body.backend });
-          if (!_w) status.textContent = tr('Popup blocked — copy the link below and open it in a browser yourself.');
-          if (!pasteBox) {
-            pasteBox = document.createElement('div');
-            pasteBox.innerHTML = `<div class="mounts-field-hint">${escHtml(tr("If the final page fails to load (address starts with 127.0.0.1 — VibeSpace runs on another machine, or you authorized in a different browser), copy that address and paste it here:"))}</div>`;
-            const inp = document.createElement('input'); inp.placeholder = 'http://127.0.0.1:53682/?state=…&code=…';
-            inp.onchange = async () => { try { status.textContent = tr('Completing…'); const fr = await api('/api/mounts/gdrive-auth/callback', { method: 'POST', body: JSON.stringify({ url: inp.value }), headers: { 'Content-Type': 'application/json' } }); if (fr.error) throw new Error(fr.error); if (fr.token) finish(fr.token); } catch (e) { status.textContent = e.message || tr('Failed'); } };
-            pasteBox.appendChild(inp); wrap.appendChild(pasteBox);
-          }
-          poll = setInterval(async () => { try { const st = await api('/api/mounts/gdrive-auth/status'); if (st.token) finish(st.token); else if (st.error) { stopPoll(); status.textContent = st.error; btn.disabled = false; } else if (!st.running) { stopPoll(); btn.disabled = false; } } catch {} }, 1500);
-        } catch (e) { status.textContent = e.message || tr('Failed to start authorization'); btn.disabled = false; }
-      };
+    // (the block itself lives in ./mounts-dialog.js since D1 — shared with the
+    // channel account dialogs; this delegate keeps every storage caller as is)
+    _wireOAuthConnect(ctx, opts) {
+      return wireOAuthConnect(ctx, opts);
     },
 
     // "List labels" next to the Gmail labels filter: real labels from the
@@ -2442,6 +2299,27 @@ export function installSidebarMounts(Sidebar) {
         }
         if (newKey && newVal) params[newKey] = newVal;
         if (Object.keys(params).length) patch.params = params;
+        // D2 (design-integrations-per-account §6): switching a Drive / Gmail
+        // record's OAuth client IS a re-authorization — a token only works
+        // with the client that minted it, so saving the new client beside the
+        // old token ended in `invalid_client` at the next refresh. Save stores
+        // every OTHER field, then Re-authorize opens under the NEW client and
+        // the token minted there lands together with it. A token pasted into
+        // the dialog by hand is the user bringing their own: a plain save.
+        const cur = {};
+        for (const k of ['clientPreset', 'clientId', 'clientSecret']) { const el = form.querySelector(`[name="${k}"]`); if (el) cur[k] = el.value; }
+        const sw = patch.token === undefined ? this._mountClientSwitch(cfg, cur, editPresets) : null;
+        if (sw) {
+          if (sw.client.clientId && !sw.client.clientSecret) { err.textContent = tr('A custom OAuth client needs its client secret too'); return; }
+          for (const k of ['clientPreset', 'clientId', 'clientSecret']) delete patch[k];
+          if (Object.keys(patch).length) {
+            try { await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } }); }
+            catch (e2) { err.textContent = e2.message || 'Failed'; return; }
+          }
+          close(); this._renderMounts();
+          this._showClientSwitchReauthDialog({ ...m, name: patch.name || name }, cfg, sw, editPresets);
+          return;
+        }
         if (!Object.keys(patch).length) { close(); return; }
         try { await api(`/api/mounts/${m.id}`, { method: 'PATCH', body: JSON.stringify(patch), headers: { 'Content-Type': 'application/json' } }); }
         catch (e2) { err.textContent = e2.message || 'Failed'; return; }

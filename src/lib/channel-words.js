@@ -23,12 +23,25 @@ export function routeErrorText(r, { fallback = null } = {}) {
   const raw = r.error ? String(r.error) : '';
   switch (code) {
     case 'not-found': return t('No such conversation');
-    case 'needs-credentials': return t('The application credential is missing — set it up under Integrations first');
+    // r4 (design-integrations-per-account): the OAuth client is the ACCOUNT's — the remedy is its own dialog, never the Integrations window
+    case 'needs-credentials': return t('No usable OAuth client — pick a preset or enter your own client (Edit or Re-authorize)');
     // the account model (2026-09-22): a key the integration no longer offers / an account that is gone
     case 'unknown-credential': return t('That credential is not one this instance offers — pick another');
-    // verifier r1: a HELD token binds its account to the credential it was minted under
-    case 'credential-bound': return t('This account is bound to the credential its token was minted under — disconnect it first, or add another account');
     case 'no-such-adapter': return t('That account no longer exists');
+    // r4 chunk 2's codes (the account dialogs): the sign-in before the account exists, re-authorize = rebind, duplicate, remove
+    case 'invalid-client': return raw ? t('The OAuth client is not valid: {error}', { error: raw }) : t('The OAuth client is not valid');
+    case 'own-retired': return t('The Integrations card\'s own client is retired — choose Custom and enter the client in this dialog');
+    case 'no-flow': return t('No sign-in is in progress — press the sign-in button again');
+    case 'flow-not-done': return t('The sign-in has not finished yet — approve access on the sign-in page (or paste the address back) first');
+    case 'flow-failed': return t('The sign-in failed — sign in again');
+    case 'flow-client-mismatch': return t('That sign-in ran under another OAuth client — sign in again under the one chosen now');
+    case 'flow-kind-mismatch': return t('That sign-in was for another account type — sign in again');
+    case 'client-change-needs-reauth': return t('Switching the OAuth client is a re-authorization — use Re-authorize with the new client');
+    case 'account-referenced': return t('This account is still referenced — release its assignments, reach grants and pending proposals first');
+    case 'legacy-copy-failed': return t('This account\'s old client could not be moved onto the account — edit it and enter the client again');
+    case 'custom-undecryptable': return t('This account\'s own client secret cannot be decrypted — edit the account and enter it again');
+    case 'builtin': return t('The built-in source cannot be removed or duplicated');
+    case 'unknown-option': return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
     case 'auth-expired': return t('The login expired — re-authorize the channel');
     case 'auth-failed': return raw ? t('The consent flow failed: {error}', { error: raw }) : t('The consent flow failed');
     case 'not-supported': return t('This channel does not support that');

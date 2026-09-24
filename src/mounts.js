@@ -1077,6 +1077,14 @@ class MountManager {
         throw new Error('A shared link points into this mount — revoke it before renaming (the share path would break).');
       }
     }
+    // D2 (docs/design-integrations-per-account.zh.md §6), held HERE and not
+    // only in the storage Edit dialog: switching the OAuth client of a record
+    // that holds a token IS a re-authorization — a token only works with the
+    // client that minted it, so a bare PATCH that re-points the client beside
+    // the old token ends in `invalid_client` at the next refresh. Refused by
+    // name BEFORE anything is touched; the client lands WITH its token
+    // (drive-token {token, client}, or this PATCH carrying `token`).
+    this._refuseClientSwitch(m, patch);
     // Fail-FAST on an unwritable new mountpoint BEFORE touching the live
     // mount (2.227.2, user report: the failure only surfaced at reconnect,
     // leaving a half-state stuck between old and new paths). An early throw
@@ -1238,6 +1246,39 @@ class MountManager {
       }
     }
     return m.id;
+  }
+
+  /** The OAuth client a Drive / Gmail record RESOLVES to, as an identity
+   *  string — the way `_driveClient` / gmail-sync `_client` resolve it: a
+   *  custom id wins (Gmail: id + secret), else the preset key, else the
+   *  resolver's own fallback (the only preset, else `default`, else the
+   *  built-in). The secret is NOT the identity (a rotated secret of the same
+   *  client keeps its tokens). The client-side twin is sidebar-mounts
+   *  `_mountClientSwitch`. */
+  static _clientIdentity(type, r) {
+    const presets = MountManager.drivePresets();
+    const fallback = presets.length === 1 ? presets[0].key : (presets.find((p) => p.key === 'default')?.key || '');
+    const custom = type === 'drive' ? (r.clientId || '') : (r.clientId && r.hasSecret ? r.clientId : '');
+    return custom ? `custom:${custom}` : `preset:${r.clientPreset || fallback}`;
+  }
+
+  /** D2 at the server: throw `client-change-needs-reauth` when `patch`
+   *  would re-point a token-holding Drive / Gmail record's client without
+   *  the token minted under the new one. Mirrors update()'s own write
+   *  semantics (Drive: `clientPreset` any value, `clientId` only when
+   *  non-empty; Gmail: `clientPreset` only). */
+  _refuseClientSwitch(m, patch) {
+    const type = m.type || 's3';
+    if (!['drive', 'gmail'].includes(type) || m.parentId || m.origin === 'my-storage' || !m.tokenEnc) return;
+    if (patch.token !== undefined && String(patch.token).trim() !== '') return; // the token lands with its client
+    const cur = { clientId: m.clientId || '', clientPreset: m.clientPreset || null, hasSecret: !!m.clientSecretEnc };
+    const next = { ...cur };
+    if (patch.clientPreset !== undefined) next.clientPreset = patch.clientPreset ? String(patch.clientPreset) : null;
+    if (type === 'drive' && patch.clientId !== undefined && patch.clientId !== '') next.clientId = String(patch.clientId);
+    if (MountManager._clientIdentity(type, cur) === MountManager._clientIdentity(type, next)) return;
+    const e = new Error('Switching the OAuth client needs a new sign-in — use Re-authorize (a token only works with the client that minted it; the new client is saved together with the token minted under it)');
+    e.code = 'client-change-needs-reauth';
+    throw e;
   }
 
   _get(id) {
@@ -2423,13 +2464,41 @@ class MountManager {
     m.driveType = d.driveType || m.driveType || 'personal';
   }
 
-  async applyDriveToken(id, token) {
+  //
+  // `client` (D2 of docs/design-integrations-per-account.zh.md — switching a
+  // record's OAuth client IS a re-authorization): the client the token was
+  // minted under, `{clientPreset}` or `{clientId, clientSecret}`, written
+  // TOGETHER with the token so a record never holds a new client beside the
+  // old token (the silent edit that ended in `invalid_client` at the next
+  // refresh). Google Drive records only — Gmail's switch lands through its
+  // PATCH, which already writes the preset and the token in one save. The
+  // two forms exclude each other because the custom id wins at resolve
+  // (`_driveClient`): a preset beside a leftover custom id would mint under
+  // the preset and refresh under the custom client.
+  async applyDriveToken(id, token, client = null) {
     const rec = this._get(id);
     // token may target a child's parent credential — write where the token lives
     const holder = rec.parentId ? this._get(rec.parentId) : rec;
     let tok = String(token).trim();
     const jm = tok.match(/\{[\s\S]*\}/); if (jm) tok = jm[0];
     JSON.parse(tok); // validate
+    // The client must NAME itself (integrations r1): `{clientPreset:'<k>'}`,
+    // `{clientPreset:''}` (= the built-in, chosen explicitly) or
+    // `{clientId, clientSecret}`. An object naming neither (`{}`, a secret
+    // alone) or a non-object used to read as "built-in" / be ignored — a
+    // caller that dropped the field by mistake silently downgraded the
+    // record beside a token minted elsewhere.
+    if (client != null && (typeof client !== 'object' || Array.isArray(client)
+        || (!Object.prototype.hasOwnProperty.call(client, 'clientPreset') && !String(client.clientId || '').trim()))) {
+      throw new Error('client must name a preset ("" = built-in) or a custom id + secret');
+    }
+    if (client && typeof client === 'object') {
+      if (holder.type !== 'drive') throw new Error('Switching the OAuth client with a new sign-in is only for Google Drive records');
+      const cid = String(client.clientId || '').trim();
+      if (cid && !client.clientSecret) throw new Error('A custom OAuth client needs its client secret too');
+      if (cid) { holder.clientId = cid; holder.clientSecretEnc = this._enc(String(client.clientSecret)); holder.clientPreset = null; }
+      else { holder.clientPreset = client.clientPreset ? String(client.clientPreset) : null; holder.clientId = null; holder.clientSecretEnc = null; }
+    }
     // OneDrive + generic cloud backends re-auth through the same dialog —
     // rejecting them here left the edit-dialog button dead for those types.
     if (holder.type === 'drive' || holder.type === 'onedrive' || holder.type === 'cloud') holder.tokenEnc = this._enc(tok);

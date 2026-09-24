@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 移除被拒: 账号仍被引用 (分配 / 可见性授权 / 待审批的 outbox 提议), 像有子项的凭据一样点名拒绝</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- §8 pattern 5 (r4): removing a referenced account is refused BY NAME —
+     the mounts' "This credential still has mount points under it — remove
+     those first" rule; the references are the things that point at the
+     account (a conversation's assignment, an adapter-scoped reach grant, an
+     outbox proposal not yet settled). Never a cascade. -->
+<div class="dialog-overlay">
+  <div class="dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">无法移除 "Gmail · me@example.com"</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <div class="chan-flow-refusal chan-warn" id="refusal"><span class="chan-ic"><svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 1.5 15 14H1L8 1.5zm0 4a.9.9 0 0 0-.9 1l.3 3.3h1.2l.3-3.3A.9.9 0 0 0 8 5.5zm0 5.6a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8z" fill="currentColor"/></svg></span><span>这个账号还被引用着 —— 先解除, 再移除:</span></div>
+      <div class="chan-fact" id="refs">
+        · 分配: 「供应商报价」→ 采购 agent（每条消息唤醒）<br>
+        · 分配: 「面试安排」→ 任务组「招聘」（每日摘要）<br>
+        · 可见性授权: 任务组「招聘」可见整个账号<br>
+        · Outbox: 1 条待审批的提议（「供应商报价」的回复）
+      </div>
+      <p class="dialog-hint">「断开」只丢弃 token 并保留这些; 「移除」要求它们先被解除 —— 与有子挂载的凭据不能移除是同一条规则。</p>
+      <div class="dialog-actions"><button type="button" class="mounts-btn">打开 Outbox</button><button type="button" class="btn-create">关闭</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

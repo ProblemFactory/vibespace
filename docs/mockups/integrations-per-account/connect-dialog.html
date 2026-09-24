@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mockup r4 — 连接账号: 类型优先 (= 连接存储的"来源类型"), 之后的字段按类型 (when:), 同一个 _mountsDialog 语法</title>
+<link rel="stylesheet" href="mockup.css">
+</head>
+<body>
+<!-- §8 patterns 11 / 12 (r4): ONE dialog for every kind, exactly the storage
+     dialog's shape — the FIRST field is the type (Gmail / Lark …) and every
+     later field carries a `when:` on it; the OAuth client field, the consent
+     block, the kind's own fields (Gmail: the include query). Rendered by the
+     same helper (_mountsDialog) or its exact field grammar; the parity census
+     pins the shared spellings. -->
+<div class="dialog-overlay">
+  <div class="dialog" id="chan-connect-dialog" role="dialog" aria-labelledby="ttl">
+    <div class="dialog-header"><h3 id="ttl">连接账号</h3><button class="dialog-close" aria-label="关闭">✕</button></div>
+    <div class="dialog-body">
+      <label>类型<select id="kind" aria-label="类型"><option selected>Gmail</option><option>Lark / 飞书</option></select></label>
+      <label>名称<input placeholder="me@example.com（留空 = 授权后的邮箱）" aria-label="名称" id="name"></label>
+
+      <label>OAuth 客户端
+        <select id="oauth-client" aria-label="OAuth 客户端"><option selected>预设：Google (Drive/Gmail)</option><option>自定义（自己的 client id/secret）</option></select>
+      </label>
+      <div class="mounts-field-hint" id="client-hint">Gmail 没有内置兜底客户端 —— 选择预设或提供自己的。客户端需要 gmail.readonly 与 gmail.send scope。</div>
+
+      <label>Google 授权</label>
+      <div class="mounts-drive-connect" id="connect-block">
+        <button type="button" class="mounts-btn mounts-btn-primary" id="connect-btn">连接 Google</button>
+        <div class="mounts-field-hint" id="connect-status">已打开 Google 登录页面。批准访问后回到这里。</div>
+        <div class="mounts-oauth-link" id="oauth-link"><div class="mounts-field-hint">账号在另一个浏览器里登录？复制此链接到那里打开：</div><div class="mounts-oauth-line"><input readonly value="https://accounts.google.com/o/oauth2/v2/auth?client_id=…&scope=gmail.readonly+gmail.send&state=…" aria-label="授权链接"><button type="button" class="mounts-btn">复制</button></div></div>
+        <div class="mounts-field-hint">如果最后的页面无法加载（地址以 127.0.0.1 开头 —— VibeSpace 跑在另一台机器上，或你在别的浏览器里授权），复制那个地址粘贴到这里：</div>
+        <input placeholder="http://127.0.0.1:…/?state=…&code=…" aria-label="粘贴回调地址" id="paste-input">
+      </div>
+
+      <label>包含查询（Gmail 搜索语法）<input value="label:INBOX" aria-label="包含查询" id="query"></label>
+      <button type="button" class="mounts-btn" style="align-self:flex-start;margin-top:-4px">列出标签</button>
+      <div class="mounts-field-hint">只有匹配查询的邮件线程会成为会话; 其余永远不出现。「列出标签」读一次真实标签, 点一个就追加 label:…。</div>
+
+      <div class="cfg-err"></div>
+      <div class="dialog-actions"><button type="button" class="btn-create" id="submit">连接</button></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

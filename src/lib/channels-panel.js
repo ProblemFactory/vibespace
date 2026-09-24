@@ -44,7 +44,7 @@
 // same shape core's session-card / window / gear menus use — registered by the
 // module that OWNS the feature, so gear-menu.js stays byte-identical to its
 // pinned legacy row list.
-import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, copyText, escHtml } from './utils.js';
+import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
@@ -71,6 +71,9 @@ import { showAssignFilterDialog, assignmentSummary } from './channel-filter-edit
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog } from './channel-reach-editor.js';
 import './channel-outbox.js';
+// r4 (design-integrations-per-account, chunk 3): the account dialogs — every
+// one the storage dialog component (src/lib/mounts-dialog.js, D1)
+import { showConnectAccountDialog, showReauthAccountDialog, showEditAccountDialog, showDuplicateAccountDialog, removeAccount, accountName, clientChipText, providerOf } from './channel-account-dialogs.js';
 
 /** A short, honest freshness chip. The server sends `{kind, state, seconds}`
  *  and `freshnessText` turns it into words: a claim whose `state` we do not
@@ -106,11 +109,14 @@ async function api(pathname, init) {
 function rowMenuCtx(app, conv) { return { app, conv }; }
 
 // ── P1a: the adapter's own controls (design §10.1, §13, §14.5) ────────────
-// Connect / re-authorize / paste-back / tracked picker / options. Every
-// control reads a FACT the digest carries (`available[]`, `adapter.auth`,
-// `adapter.credential`, `adapter.flow`, `adapter.optionsSchema`) — nothing
-// here branches on an adapter's kind (the contract suite's census), and
-// every string a vendor or a peer could influence goes through textContent.
+// The account card, the tracked picker, options, push. Every control reads a
+// FACT the digest carries (`kinds[]`, `adapter.auth`, `adapter.credential`,
+// `adapter.flow`, `adapter.presets`, `adapter.optionsSchema`) — nothing here
+// branches on an adapter's kind (the contract suite's census), and every
+// string a vendor or a peer could influence goes through textContent. The
+// connect / re-authorize / edit / duplicate / remove DIALOGS are
+// channel-account-dialogs.js (r4: the storage dialog component; the pre-r4
+// wizard — its credential step, its stepper, its own flow dialog — is gone).
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 const post = (url, body) => api(url, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
@@ -138,317 +144,137 @@ function kindGlyph(a, convs) {
   if (kinds.length && kinds.every((k) => k === 'thread' || k === 'mailbox')) return 'mail';
   return 'chat';
 }
-/** The glyph an AVAILABLE kind carries: from its capability facts (`receive`
- *  names a mailbox-style source), never its id. */
-function availableGlyph(av) {
-  const rec = Array.isArray(av && av.receive) ? av.receive : [];
-  return rec.includes('mailbox') || rec.includes('mail') ? 'mail' : 'chat';
-}
+// ── THE ACCOUNT CARD (docs/design-integrations-per-account.zh.md r4 §2.5,
+// §8.1 #1 / #3 / #6 / #7 / #10; lane integrations chunk 3). A section whose
+// adapter is CONNECTABLE (`connectable` — a Lark / Gmail account, never the
+// built-in watcher or a scan-only fixture) is drawn in the storage row's
+// grammar, credential-first: the login IS the card — its dot, its client
+// chip, a HEALTH line in the storage detail-line grammar (`[Gmail] Connected
+// · <filter> · last poll <ago> · push: <claim>`), and, when the sign-in died,
+// the storage `.mounts-errline` with the mounts' auth-death sentence
+// VERBATIM + the channel's why code in brackets (D8) and the primary
+// `Re-authorize {provider}…` button. Its CHILDREN are the conversations it
+// tracks, as ↳ rows (the storage child-row grammar); an account tracking
+// nothing says so in the credential-only row's register + Track…. Every
+// dialog is the storage dialog component (channel-account-dialogs.js).
+// Nothing here branches on a kind: the facts are the digest's.
 
-/** THE CONNECT WIZARD'S THREE COPY PATHS (§10.1): the credential facts decide
- *  what the button SAYS and what it DOES. `none` opens the Integrations card
- *  first — sending the user into a consent page that will fail is the
- *  failure the design names; `cluster` says so under the button; `user`
- *  says nothing more. One full-width `mounts-btn` per kind, the note under it. */
-function connectRow(app, av) {
-  const frag = document.createDocumentFragment();
-  const cred = av.credential || { source: 'unknown' };
-  const label = av.label || av.kind;
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'mounts-btn chan-connect-btn';
-  b.appendChild(icon(availableGlyph(av), 13));
-  const txt = document.createElement('span');
-  txt.className = 'chan-connect-label';
-  b.appendChild(txt);
-  b.dataset.connectKind = av.kind;
-  if (cred.source === 'none') {
-    txt.textContent = t('Set up {label} credentials…', { label });
-    b.onclick = () => app.openIntegration(av.integration);
-    frag.appendChild(b);
-    frag.appendChild(noteLine('chan-connect-note', t('Not configured — set up the application credential first'), { warn: true }));
+/** The card's dot (§8.1 #1): connected → ok, the sign-in died → bad, no
+ *  usable client → warn, never signed in / disabled → idle; a consent in
+ *  flight → attn; a connected account failing its passes → warn; a
+ *  connected account TRACKING NOTHING → idle (the mockup's "login only":
+ *  nothing is fetched, so there is no health to claim). */
+function accountDot(a, trackedN = 1) {
+  const auth = a.auth || { state: 'unknown' };
+  if (a.enabled === false) return 'idle';
+  if (a.flow && a.flow.running) return 'attn';
+  if (auth.state === 'connected') return a.consecutiveFailures >= 3 ? 'warn' : trackedN > 0 ? 'ok' : 'idle';
+  if (auth.state === 'expired') return 'bad';
+  if (auth.state === 'needs-credentials') return 'warn';
+  return 'idle';
+}
+/** "{n} min ago" in the device's words (the keys the Usage window reads). */
+function agoText(ms, now = Date.now()) {
+  const s = Math.max(0, (now - Number(ms)) / 1000);
+  if (!Number.isFinite(s)) return '';
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
+  if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) });
+  return t('{n} d ago', { n: Math.round(s / 86400) });
+}
+/** The push claim in words for the health line. */
+function claimWord(claim) {
+  return claim === 'exclusive' ? t('exclusive') : claim === 'shared' ? t('shared') : t('undeclared');
+}
+/** The HEALTH line (the storage row's detail line): `[type tag] words`. */
+function healthLine(a, text, { warn = false, verbs = [] } = {}) {
+  const line = document.createElement('div');
+  line.className = 'chan-sec-health' + (warn ? ' chan-warn' : '');
+  const tag = document.createElement('span');
+  tag.className = 'mounts-typetag';
+  tag.textContent = providerOf(a);
+  const s = document.createElement('span');
+  s.className = 'chan-sec-health-text';
+  s.textContent = text;
+  line.append(tag, s);
+  for (const v of verbs) { v.classList.add('chan-sec-verb'); line.appendChild(v); }
+  return line;
+}
+/** The storage error line: `Couldn’t connect: <sentence>` + (auth death) the button. */
+function errLine(app, a, sentence, kinds) {
+  const err = document.createElement('div');
+  err.className = 'mounts-errline';
+  err.textContent = t('Couldn’t connect:') + ' ' + sentence;
+  err.title = sentence;
+  const fix = document.createElement('button');
+  fix.type = 'button';
+  fix.className = 'mounts-btn mounts-btn-primary mounts-reauth-btn';
+  fix.textContent = t('Re-authorize {provider}…', { provider: providerOf(a) });
+  fix.onclick = (e) => { e.stopPropagation(); showReauthAccountDialog(app, a, { kinds }); };
+  err.appendChild(fix);
+  return err;
+}
+/** THE LINES UNDER AN ACCOUNT'S HEAD — the health line when it is well, the
+ *  error line + button when its sign-in died or its client is gone, a
+ *  consent in flight, the countdown to a due re-authorization, a failing
+ *  lane. Returns zero or more elements. */
+function accountLines(app, a, kinds) {
+  const out = [];
+  const auth = a.auth || { state: 'unknown' };
+  const provider = providerOf(a);
+  const reauth = () => showReauthAccountDialog(app, a, { kinds });
+  if (a.enabled === false) {
+    const n = noteLine('chan-sec-note', t('disabled'));
+    const v = btn(t('Enable'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { enabled: true }));
+    v.classList.add('chan-sec-verb'); n.appendChild(v);
+    out.push(n);
+    return out;
+  }
+  if (a.flow && a.flow.running) {
+    out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
+  } else if (auth.state === 'connected') {
+    const bits = [t('Connected')];
+    // the account's FILTER = its first declared free-text option (Gmail's include query); a choice (Lark's brand) is not a filter
+    const f = (a.optionsSchema || [])[0];
+    if (f && !(Array.isArray(f.choices) && f.choices.length)) { const v = (a.options && a.options[f.key]) || f.default; if (v) bits.push(String(v)); }
+    if (a.lastPass && a.lastPass.at) bits.push(t('last poll {ago}', { ago: agoText(a.lastPass.at) }));
+    if (a.push && a.push.enabled) bits.push(t('push: {claim}', { claim: claimWord(a.push.claimedExclusive) }));
+    out.push(healthLine(a, bits.join(' · ')));
+    const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
+    if (eta && (Number(auth.expiresAt) - Date.now()) < REAUTH_SOON_MS) {
+      const n = noteLine('chan-sec-note', t('re-authorize in {eta}', { eta }), { warn: Number(auth.expiresAt) - Date.now() <= 0 });
+      const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
+      out.push(n);
+    }
+  } else if (auth.state === 'expired') {
+    // D8: the mounts' auth-death sentence VERBATIM (its nouns the channel's), the channel's why CODE in brackets
+    out.push(errLine(app, a, `${t('connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix')} (${auth.why || 'needs-reauth'})`, kinds));
+  } else if (auth.state === 'needs-credentials') {
+    const cred = a.credential || {};
+    const why = R.credentialWhyText({ whyCode: cred.whyCode || auth.whyCode || null, whyParams: cred.whyParams || auth.whyParams || null }, { t }) || chanCaps.authWhyText('no-credentials', { t });
+    out.push(errLine(app, a, `${t('no usable OAuth client')} — ${why}`, kinds));
   } else {
-    txt.textContent = t('Connect {label}', { label });
-    b.onclick = () => startConnect(app, av);
-    frag.appendChild(b);
-    if (cred.source === 'cluster') frag.appendChild(chanLine('chan-connect-note', cred.clusterLabel ? t('Provided by the cluster · {label}', { label: cred.clusterLabel }) : t('Provided by the cluster')));
-    else if (cred.source === 'unknown') frag.appendChild(chanLine('chan-connect-note', R.credentialWhyText(cred, { t }) || t('credential state unknown')));
+    out.push(healthLine(a, t('Not connected — sign in to fetch its conversations.'), { verbs: [btn(t('Connect'), reauth, 'mounts-btn-primary')] }));
   }
-  return frag;
+  if (a.lastAuthError && !(a.flow && a.flow.running)) out.push(noteLine('chan-sec-note', t('Last connect failed: {error}', { error: a.lastAuthError }), { warn: true }));
+  if (a.consecutiveFailures >= 3 && a.lastPass && auth.state === 'connected') {
+    const s = t('{n} failed passes ({code})', { n: a.consecutiveFailures, code: chanCaps.errorCodeText((a.lastPass && a.lastPass.code) || 'failed', { t }) });
+    out.push(noteLine('chan-sec-note', s + (a.lastPass.error ? ` — ${a.lastPass.error}` : '') + (a.failureItem ? ` — ${t('a "For you" item was filed')}` : ''), { warn: true }));
+  }
+  if (a.push && (a.push.demotedAt || a.push.state === 'unavailable')) {
+    const n = noteLine('chan-sec-note', chanCaps.pushLaneText(a.push, a.lane, { t, now: Date.now() }), { warn: true });
+    if (a.push.demotedAt) { const v = btn(t('Re-declare exclusive and retry'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push: { claimedExclusive: 'exclusive' } })); v.classList.add('chan-sec-verb'); n.appendChild(v); }
+    out.push(n);
+  }
+  return out;
+}
+/** The ⋯ item "Open conversation window": the account's most recently active
+ *  TRACKED conversation (else its most recent one). */
+function openConversationOf(app, convs) {
+  const list = (convs || []).slice().sort((x, y) => (Number(!!y.tracked) - Number(!!x.tracked)) || ((y.lastAt || 0) - (x.lastAt || 0)));
+  if (list[0]) app.openChannel(list[0].adapterId, list[0].id);
 }
 
-// ── THE ACCOUNT MODEL (2026-09-22, the owner's mounts analogy) ────────────
-// A kind holds N ACCOUNTS, each bound at connect to the credential it was
-// minted under. The wizard MINTS (`newAccount: true`, never the P1a re-point
-// of the first record); an existing account re-authorizes ITSELF by id.
-// Every fact below is read off the digest: `credentials` = what the
-// integration offers a NEW account right now, `credentialDefault` = the row's
-// own pick (pre-picked, never forced), `credentialKey` / `credentialLabel` =
-// what THIS account is bound to.
-
-/** The wizard's SPEC for a kind, read off an `available[]` entry OR an
- *  existing account's row (both carry the same three facts). */
-function wizardSpec(x) {
-  return {
-    kind: x.kind, integration: x.integration || null, label: x.label || x.kind,
-    credentials: Array.isArray(x.credentials) ? x.credentials.filter((c) => c && c.key) : [],
-    credentialDefault: x.credentialDefault || null,
-  };
-}
-/** The credential's words: a cluster preset by its env label (data — never
- *  translated), `own` by ours; a bare key when no label is known. */
-function credentialText(key, label) {
-  if (key === 'own') return t('Own client');
-  return label || String(key || '').replace(/^cluster:/, '');
-}
-/** The name a section carries: the account the token names (an e-mail, a
- *  tenant user) when known, else the kind's label — NUMBERED only when the
- *  kind holds more than one account, so a lone "Gmail" stays "Gmail". The
- *  built-in row's login is this instance, never a named user (`auth.self`). */
-function accountName(a, siblings = 1, n = 1) {
-  const user = a.auth && !a.auth.self && a.auth.user ? String(a.auth.user) : '';
-  if (user) return user;
-  const label = a.label || a.id;
-  return siblings > 1 ? t('{label} account {n}', { label, n }) : label;
-}
-
-/** THE WIZARD'S ENTRY — every Connect / "Add account…" lands here. Step 1
- *  (Credential) is DRAWN only when the integration offers MORE THAN ONE
- *  credential right now; exactly one ⇒ it is sent as the account's key and
- *  the step is skipped silently (no empty step, no extra click); none ⇒ the
- *  server stamps the row's pick. The consent step follows in the SAME dialog. */
-async function startConnect(app, spec) {
-  const s = wizardSpec(spec);
-  // the step is drawn whenever ANYTHING is offered (2.369.147 r3, owner: "lark 为啥没有这个选择 oauth client 的菜单") —
-  // the presets and the user's own client, the latter marked when its fields are missing
-  if (s.credentials.length >= 1) return showCredentialStep(app, s);
-  const body = { newAccount: true };
-  const r = await postConnect(app, s, body);
-  if (r) showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : s.kind, s.label, r.flow);
-}
-async function postConnect(app, s, body) {
-  const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(s.kind)}/connect`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
-  if (!r || r.error) {
-    // A missing application credential is not a failed consent — it is the
-    // card the user has not filled in yet (§10.1): open it, and say why.
-    // The toast words the CODE (a3 i18n); the engine's sentence is the contract.
-    showToast(routeErrorText(r), { type: 'error' });
-    if (r && r.code === 'needs-credentials') app.openIntegration(s.integration);
-    return null;
-  }
-  return r;
-}
-/** RE-AUTHORIZE one ACCOUNT by its id — never by kind: a further account's
- *  consent runs under ITS credential (`POST /adapters/:id/reauthorize`).
- *  A TOKEN-LESS account (`auth.tokenHeld` false: never authenticated, or
- *  disconnected) has nothing minted under its key, so the consent it begins
- *  may RE-BIND it — the wizard's credential step runs first when more than
- *  one credential is offered (the account's OWN key pre-picked, never the
- *  row's default over it), exactly one rides the body (the same silent rule
- *  as a new account); a HELD token binds the account, so nothing about the
- *  key is sent — the server refuses a different one by name
- *  (`credential-bound`; the remedy is Disconnect, then Connect). */
-async function reauthorize(app, a) {
-  const s = wizardSpec(a);
-  const held = !!(a.auth && a.auth.tokenHeld);
-  if (!held && s.credentials.length >= 1) {
-    const own = s.credentials.some((c) => c.key === a.credentialKey) ? a.credentialKey : s.credentialDefault;
-    return showCredentialStep(app, { ...s, credentialDefault: own }, { submit: (credentialKey) => postReauthorize(app, a, { credentialKey }) });
-  }
-  const body = !held && s.credentials.length === 1 ? { credentialKey: s.credentials[0].key } : {};
-  const r = await postReauthorize(app, a, body);
-  if (r) showFlowDialog(app, a.id, a.label || a.id, r.flow);
-}
-async function postReauthorize(app, a, body) {
-  const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(a.id)}/reauthorize`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
-  if (!r || r.error) {
-    showToast(routeErrorText(r), { type: 'error' });
-    if (r && r.code === 'needs-credentials' && a.integration) app.openIntegration(a.integration);
-    return null;
-  }
-  return r;
-}
-/** STEP 1 — THE CREDENTIAL: one radio per offered credential (a preset by
- *  its label, `own` in our words), `s.credentialDefault` pre-picked (the
- *  row's default for a NEW account; a token-less account's own key when it
- *  re-binds); Continue hands the chosen key to `submit` — by default
- *  `{credentialKey, newAccount: true}` to the kind's connect; the re-bind
- *  path posts it to the account's own `/reauthorize` — and the SAME dialog
- *  moves on to the consent step. Cancel here mints nothing (the record is
- *  created by the server only after the credential resolved — the r2 ④ rule). */
-function showCredentialStep(app, s, { submit = (credentialKey) => postConnect(app, s, { credentialKey, newAccount: true }) } = {}) {
-  const shell = createModalShell({ id: 'chan-flow-dialog', title: t('Connect {label}', { label: s.label }), dialogClass: 'chan-dialog chan-flow', escapeToClose: true });
-  const { body, close } = shell;
-  body.appendChild(stepper(0));
-  body.appendChild(chanLine('chan-flow-intro', t('Choose the application credential this account is authorized under. It stays bound to the account — the pick on the Integrations card is only the default for new accounts.')));
-  const list = document.createElement('div');
-  list.className = 'chan-cred-list';
-  const usable = s.credentials.filter((c) => c.available !== false);
-  const picked = usable.some((c) => c.key === s.credentialDefault) ? s.credentialDefault : (usable[0] || s.credentials[0]).key;
-  for (const c of s.credentials) {
-    const lab = document.createElement('label');
-    lab.className = 'dialog-check-row chan-cred-item';
-    const r = document.createElement('input');
-    r.type = 'radio'; r.name = 'chan-cred'; r.value = c.key; r.checked = c.key === picked;
-    const name = document.createElement('span');
-    name.className = 'chan-cred-label';
-    name.textContent = credentialText(c.key, c.label);
-    const hint = document.createElement('span');
-    hint.className = 'dialog-check-hint';
-    hint.textContent = c.key === 'own' ? (c.available === false ? t('Not filled in yet — Continue opens the Integrations card to enter the client id and secret') : t('The keys saved on the Integrations card')) : t('Provided by the cluster');
-    if (c.available === false) lab.classList.add('chan-cred-unavailable');
-    lab.append(r, name, hint);
-    list.appendChild(lab);
-  }
-  body.appendChild(list);
-  const actions = document.createElement('div');
-  actions.className = 'chan-flow-actions';
-  const status = chanLine('chan-flow-status', '');
-  const next = btn(t('Continue'), async () => {
-    const chosen = list.querySelector('input[name="chan-cred"]:checked');
-    const credentialKey = chosen ? chosen.value : picked;
-    const pick = s.credentials.find((c) => c.key === credentialKey);
-    if (pick && pick.available === false) { close(); app.openIntegration(s.integration); return; } // fill the own client in first — one 'Add account…' away
-    next.disabled = true;
-    const r = await submit(credentialKey);
-    next.disabled = false;
-    if (!r) return;
-    showFlowDialog(app, r.adapter && r.adapter.id ? r.adapter.id : s.kind, s.label, r.flow, shell);
-  }, 'mounts-btn-primary');
-  actions.append(btn(t('Cancel'), close), next);
-  body.append(actions, status);
-}
-
-/** The wizard's step strip: keys (done) → consent (current) → track. */
-function stepper(current) {
-  const wrap = document.createElement('div');
-  wrap.className = 'chan-steps';
-  const names = [t('Credential'), t('Consent'), t('Track')];
-  names.forEach((name, i) => {
-    if (i) { const sep = document.createElement('span'); sep.className = 'chan-step-sep'; wrap.appendChild(sep); }
-    const st = document.createElement('span');
-    st.className = 'chan-step' + (i < current ? ' chan-step-done' : i === current ? ' chan-step-on' : '');
-    const n = document.createElement('span');
-    n.className = 'chan-step-n';
-    if (i < current) n.appendChild(icon('check', 9)); else n.textContent = String(i + 1);
-    const lab = document.createElement('span');
-    lab.textContent = name;
-    st.append(n, lab);
-    wrap.appendChild(st);
-  });
-  return wrap;
-}
-
-/** The running consent flow as a STEPPER (design (e)): the consent page as a
- *  LINK the user opens (a window opened after an await is popup-blocked; a
- *  click on a link is not) beside a COPY-LINK affordance (a remote browser
- *  takes the URL by hand), the named port-busy refusal as an amber line, and
- *  PASTE-BACK — the path a remote browser takes anyway (§12.4) — as a
- *  collapsed step that opens itself when nothing is listening. The dialog
- *  follows the adapter's broadcast: a finished flow moves to the Track step. */
-function showFlowDialog(app, adapterId, label, flow, shell = null) {
-  // `shell` = the wizard's own dialog when the credential step ran first (ONE dialog, three steps)
-  const { body, close } = shell || createModalShell({ id: 'chan-flow-dialog', title: t('Connect {label}', { label }), dialogClass: 'chan-dialog chan-flow', escapeToClose: true });
-  body.textContent = '';
-  body.appendChild(stepper(1));
-  body.appendChild(chanLine('chan-flow-intro', t('Open the consent page in your browser and approve the access. When it lands on a page this VibeSpace cannot see, paste that page\'s URL back here.')));
-  const refused = !!(flow && flow.refusal);
-  if (flow && flow.consentUrl) {
-    const row = document.createElement('div');
-    row.className = 'chan-flow-primary';
-    const a = document.createElement('a');
-    a.className = 'mounts-btn mounts-btn-primary';
-    a.href = flow.consentUrl; a.target = '_blank'; a.rel = 'noopener';
-    a.append(icon('external', 12), document.createTextNode(t('Open the consent page')));
-    const cp = btn(t('Copy link'), async () => { await copyText(flow.consentUrl); showToast(t('Copied')); });
-    cp.prepend(icon('copy', 11));
-    row.append(a, cp);
-    body.appendChild(row);
-  }
-  if (refused) {
-    const line = document.createElement('div');
-    line.className = 'chan-flow-refusal chan-warn';
-    line.appendChild(icon('alert', 12));
-    const s = document.createElement('span');
-    s.textContent = flow.refusal.code === 'port-busy'
-      ? t('Another VibeSpace or tool holds port {port} — finish or cancel it there, or paste the redirect URL back here.', { port: flow.port })
-      : (flow.refusal.message || flow.refusal.code || t('refused'));
-    line.appendChild(s);
-    body.appendChild(line);
-  } else if (flow && flow.listening) {
-    const w = document.createElement('div');
-    w.className = 'chan-flow-wait';
-    const spin = document.createElement('span'); spin.className = 'chan-flow-spin';
-    const s = document.createElement('span'); s.textContent = t('Waiting for the vendor to redirect back to port {port}…', { port: flow.port });
-    w.append(spin, s);
-    body.appendChild(w);
-  }
-  // paste-back: collapsed while the loopback listens, open when it cannot
-  const paste = document.createElement('details');
-  paste.className = 'chan-flow-paste';
-  paste.open = refused || !(flow && flow.listening);
-  const sum = document.createElement('summary');
-  sum.textContent = t('Didn\'t come back? Paste the URL your browser landed on');
-  paste.appendChild(sum);
-  const input = document.createElement('input');
-  input.type = 'text'; input.className = 'chan-flow-input'; input.placeholder = 'http://127.0.0.1:…/?code=…&state=…';
-  input.spellcheck = false;
-  const prow = document.createElement('div');
-  prow.className = 'chan-flow-paste-row';
-  const status = chanLine('chan-flow-status', '');
-  const finish = btn(t('Finish'), async () => {
-    const url = input.value.trim();
-    if (!url) { status.className = 'chan-flow-status chan-warn'; status.textContent = t('Paste the URL first.'); return; }
-    finish.disabled = true;
-    const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(adapterId)}/auth/finish`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ url }) });
-    finish.disabled = false;
-    if (!r || r.error) { status.className = 'chan-flow-status chan-warn'; status.textContent = t('The consent flow ended: {error}', { error: (r && r.error) || t('no answer') }); return; }
-    done();
-  }, 'mounts-btn-primary');
-  prow.append(input, finish);
-  paste.append(prow);
-  body.appendChild(paste);
-  const actions = document.createElement('div');
-  actions.className = 'chan-flow-actions';
-  const cancel = btn(t('Cancel'), async () => { off(); await post(`/api/channels/adapters/${encodeURIComponent(adapterId)}/auth/cancel`, {}); close(); });
-  actions.append(cancel);
-  body.append(actions, status);
-  // STEP 3 — connected: the Track picker for this adapter, in the same dialog
-  // (nothing is fetched until a conversation is ticked, §5 invariant 6).
-  let finished = false;
-  const done = async () => {
-    if (finished) return;
-    finished = true;
-    off();
-    status.className = 'chan-flow-status chan-ok'; status.textContent = t('Connected.');
-    const d = await fetchJson('/api/channels');
-    const convs = (d && Array.isArray(d.conversations)) ? d.conversations.filter((c) => c.adapterId === adapterId) : [];
-    const a = (d && Array.isArray(d.adapters) ? d.adapters : []).find((x) => x.id === adapterId) || { id: adapterId, label };
-    body.textContent = '';
-    body.appendChild(stepper(2));
-    body.appendChild(chanLine('chan-flow-status chan-ok', t('Connected.')));
-    body.appendChild(chanLine('chan-flow-note', t('Nothing is fetched for a conversation until you track it.')));
-    body.appendChild(trackList(a, convs));
-    if (!convs.length) body.appendChild(chanLine('chan-flow-note', t('Conversations appear after the first pass — you can also track them later from the panel.')));
-    const acts = document.createElement('div');
-    acts.className = 'chan-flow-actions';
-    acts.appendChild(btn(t('Done'), close, 'mounts-btn-primary'));
-    body.appendChild(acts);
-  };
-  // The loopback path needs no paste: the adapter's broadcast says the flow is done.
-  const onBroadcast = (msg) => {
-    if (msg.type !== 'channels-updated' || !msg.digest) return;
-    const a = (msg.digest.adapters || []).find((x) => x.id === adapterId);
-    if (!a) return;
-    if (a.flow && a.flow.done && a.flow.ok) done();
-    else if (a.flow && a.flow.done && a.flow.error) { status.className = 'chan-flow-status chan-warn'; status.textContent = t('The consent flow ended: {error}', { error: a.flow.error }); }
-    else if (!a.flow && a.lastAuthError) { status.className = 'chan-flow-status chan-warn'; status.textContent = t('The consent flow ended: {error}', { error: a.lastAuthError }); }
-    else if (!a.flow && a.auth && a.auth.state === 'connected') done();
-  };
-  const off = () => { try { app.ws.offGlobal(onBroadcast); } catch {} };
-  app.ws.onGlobal(onBroadcast);
-  setTimeout(() => { if (paste.open) input.focus({ preventScroll: true }); }, 0);
-}
 
 /** The list of one adapter's conversations with a Track checkbox each — the
  *  house `dialog-check-row` grid (a1 O1: the generic `.dialog-body label`
@@ -608,14 +434,15 @@ function adapterDot(a) {
   return 'idle';
 }
 
-/** The STATUS LINES under a head — only when the adapter has something to say
- *  beyond "connected" (a1 D1/D6, design §4.2): each is a wrapping 10px
- *  sentence carrying its ONE verb, amber when it needs the user. Returns
- *  zero or more `.chan-sec-note` elements. */
+/** The STATUS LINES under a SOURCE's head (a section that is not an account:
+ *  the built-in watcher, a scan-only fixture — an account draws
+ *  `accountLines`) — only when it has something to say beyond "connected"
+ *  (a1 D1/D6, design §4.2): each is a wrapping 10px sentence carrying its ONE
+ *  verb, amber when it needs the user. A source has no login of its own, so
+ *  none of these carries a consent verb. */
 function adapterNotes(app, a) {
   const notes = [];
   const auth = a.auth || { state: 'unknown' };
-  const reconnect = () => reauthorize(app, a);   // by id — a further account re-authorizes ITSELF, never the kind's first
   const line = (text, { warn = false, verbs = [] } = {}) => {
     const n = noteLine('chan-sec-note', text, { warn });
     for (const v of verbs) { v.classList.add('chan-sec-verb'); n.appendChild(v); }
@@ -623,32 +450,24 @@ function adapterNotes(app, a) {
   };
   if (a.enabled === false) {
     line(t('disabled'), { verbs: [btn(t('Enable'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { enabled: true }))] });
-  } else if (a.flow && a.flow.running) {
-    line(t('Connecting…'), { verbs: [btn(t('Resume the consent flow'), () => showFlowDialog(app, a.id, a.label || a.id, a.flow)), btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] });
   } else if (auth.state === 'connected') {
     // the built-in row's login IS this instance (`auth.self`), never a named user
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
     const soon = auth.expiresAt && (Number(auth.expiresAt) - Date.now()) < REAUTH_SOON_MS;
     if (soon && eta) {
       const who = auth.self ? t('connected — this instance') : auth.user ? t('connected as {user}', { user: auth.user }) : t('connected');
-      line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0, verbs: a.connectable ? [btn(t('Re-authorize'), reconnect)] : [] });
+      line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0 });
     }
   } else if (auth.state === 'expired') {
     // `auth.why` is a CODE (token-expired / refresh-refused / …) — worded here (a3 i18n)
-    line(t('needs re-authorization ({why})', { why: chanCaps.authWhyText(auth.why || 'token-expired', { t }) }), { warn: true, verbs: a.connectable ? [btn(t('Re-authorize'), reconnect, 'mounts-btn-primary')] : [] });
+    line(t('needs re-authorization ({why})', { why: chanCaps.authWhyText(auth.why || 'token-expired', { t }) }), { warn: true });
   } else if (auth.state === 'needs-credentials') {
-    // the credential facts carry the store's `whyCode` (a real adapter's
-    // module names its integration); an adapter that resolves its own
-    // credential (the fake fixtures) carries the same code on `auth.whyCode`.
-    // NEVER the raw `why` sentence — that is the store's English contract.
+    // an adapter that resolves its own credential (the fake fixtures)
+    // carries the store's code on `auth.whyCode` — NEVER the raw `why`
+    // sentence (the store's English contract)
     const cred = a.credential || {};
     const why = R.credentialWhyText({ whyCode: cred.whyCode || auth.whyCode || null, whyParams: cred.whyParams || auth.whyParams || null }, { t }) || chanCaps.authWhyText('no-credentials', { t });
-    line(t('application credential missing ({why})', { why }), { warn: true, verbs: a.integration ? [btn(t('Open Integrations'), () => app.openIntegration(a.integration), 'mounts-btn-primary')] : [] });
-  } else if (a.connectable) {
-    // an adapter that cannot connect (the fake fixtures, a scan-only source)
-    // has nothing to say here — "not connected" would be a claim about a
-    // control that does not exist
-    line(t('not connected'), { verbs: [btn(t('Connect'), reconnect, 'mounts-btn-primary')] });
+    line(t('application credential missing ({why})', { why }), { warn: true });
   }
   if (a.lastAuthError) line(t('Last connect failed: {error}', { error: a.lastAuthError }), { warn: true });
   if (a.consecutiveFailures >= 3 && a.lastPass) {
@@ -681,43 +500,56 @@ function dotTitle(a) {
 
 /** The `channel-adapter` ⋯ menu — every verb the section used to spread above
  *  its rows (a1 D1/D2/Z5), state-driven: only the verbs that exist for THIS
- *  row. ctx = { app, adapter, convs }. */
+ *  row. ctx = { app, adapter, convs, kinds }.
+ *
+ *  AN ACCOUNT'S ⋯ FOLLOWS THE STORAGE ROW'S ACTION ORDER (r4 §8.1 #6, D6):
+ *  Open conversation window (= Browse) → Track… (= ＋ submount) → Options →
+ *  Push… ‖ Re-authorize / Connect → Duplicate… → Disconnect → Remove… ‖
+ *  Disable. `Remove…` also lives in the Edit dialog (the mount's home for
+ *  it); the sender-line switch of an account lives in Edit too. A SOURCE (not
+ *  connectable — the built-in watcher, a fixture) keeps Track / Options /
+ *  Push / its sender-line row / Disable. */
 export function registerChannelAdapterMenu() {
   const M = 'channel-adapter';
   const A = (c) => c.adapter;
+  const acct = (c) => !!A(c).connectable;
+  registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && (c.convs || []).length > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
   registerMenuItem({ menu: M, group: '1_rows', order: 10, label: () => t('Track…'), run: (c) => showTrackPicker(c.app, A(c), c.convs || []) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
   // only where the capability row allows sending (the digest hands `null`
   // for a read-only adapter). The row's check glyph says the state; the
-  // label says whether the instance default is what applies.
-  registerMenuItem({ menu: M, group: '2_send', order: 0, separator: true, when: (c) => !!A(c).senderHonestyLine });
+  // label says whether the instance default is what applies. An ACCOUNT
+  // carries it in its Edit dialog (D6: the ⋯ is the storage row's order).
+  const sender = (c) => !acct(c) && !!A(c).senderHonestyLine;
+  registerMenuItem({ menu: M, group: '2_send', order: 0, separator: true, when: sender });
   registerMenuItem({
     menu: M, group: '2_send', order: 10,
-    when: (c) => !!A(c).senderHonestyLine,
+    when: sender,
     label: (c) => { const h = A(c).senderHonestyLine; return t('Sender line: {v}', { v: h.effective ? t('on') : t('off') }) + (h.record === null ? ' ' + t('(instance default)') : ''); },
     labelHtml: (c) => { const h = A(c).senderHonestyLine; const label = t('Sender line: {v}', { v: h.effective ? t('on') : t('off') }) + (h.record === null ? ' ' + t('(instance default)') : ''); return `<span class="chan-menu-check${h.effective ? ' chan-menu-check-on' : ''}" data-honesty-line="${h.effective ? 'on' : 'off'}">${h.effective ? UI_ICONS.check : ''}</span>${escHtml(label)}`; },
     tooltip: () => t('When on, a message an AGENT drafted goes out with one trailing line naming the agent. Your own drafts never get one. The approval card says who the recipient will see either way.'),
     run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { senderHonestyLine: !A(c).senderHonestyLine.effective }),
   });
-  registerMenuItem({ menu: M, group: '2_send', order: 20, when: (c) => !!A(c).senderHonestyLine && A(c).senderHonestyLine.record !== null, label: () => t('Use instance default'), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { senderHonestyLine: null }) });
-  registerMenuItem({ menu: M, group: '3_auth', order: 0, separator: true, when: (c) => !!A(c).connectable });
-  registerMenuItem({ menu: M, group: '3_auth', order: 10, when: (c) => !!A(c).connectable && !(A(c).flow && A(c).flow.running), label: (c) => ((A(c).auth || {}).state === 'connected' ? t('Re-authorize') : t('Connect')), run: (c) => reauthorize(c.app, A(c)) });
-  // THE ACCOUNT MODEL: another account of this kind, through the wizard
-  // (its own credential step when more than one is offered) — never a
-  // re-point of this one
-  registerMenuItem({ menu: M, group: '3_auth', order: 15, when: (c) => !!A(c).connectable, label: () => t('Add account…'), tooltip: (c) => t('Another {label} account, under its own credential', { label: A(c).label || A(c).id }), run: (c) => startConnect(c.app, A(c)) });
+  registerMenuItem({ menu: M, group: '2_send', order: 20, when: (c) => sender(c) && A(c).senderHonestyLine.record !== null, label: () => t('Use instance default'), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { senderHonestyLine: null }) });
+  registerMenuItem({ menu: M, group: '3_auth', order: 0, separator: true, when: acct });
+  registerMenuItem({ menu: M, group: '3_auth', order: 10, when: (c) => acct(c) && !(A(c).flow && A(c).flow.running), label: (c) => ((A(c).auth || {}).state === 'connected' ? t('Re-authorize') : t('Connect')), run: (c) => showReauthAccountDialog(c.app, A(c), { kinds: c.kinds }) });
+  // r4 §8.1 #2: a SIBLING account — the same type, client, filters and push
+  // claim, its OWN sign-in (the token is never copied)
+  registerMenuItem({ menu: M, group: '3_auth', order: 15, when: acct, label: () => t('Duplicate…'), run: (c) => showDuplicateAccountDialog(c.app, A(c), { kinds: c.kinds }) });
   registerMenuItem({
     menu: M, group: '3_auth', order: 20,
-    when: (c) => !!A(c).connectable && (A(c).auth || {}).state !== 'unknown',
+    when: (c) => acct(c) && ((A(c).auth || {}).tokenHeld || (A(c).auth || {}).state !== 'unknown'),
     label: () => t('Disconnect'),
     run: async (c) => {
       const a = A(c);
-      const yes = await showConfirmDialog({ title: t('Disconnect'), message: t('Disconnect {label}? The token is dropped; conversations stay.', { label: a.label || a.id }), confirmText: t('Disconnect'), danger: true });
+      const yes = await showConfirmDialog({ title: t('Disconnect'), message: t('Disconnect {label}? The token is dropped; conversations stay.', { label: accountName(a) }), confirmText: t('Disconnect'), danger: true });
       if (yes) await post(`/api/channels/adapters/${encodeURIComponent(a.id)}/disconnect`, {});
     },
   });
+  // r4 §8.1 #5 (D5): refused BY NAME while anything still points at the account
+  registerMenuItem({ menu: M, group: '3_auth', order: 30, when: acct, label: () => t('Remove…'), run: (c) => removeAccount(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '4_state', order: 0, separator: true });
   registerMenuItem({ menu: M, group: '4_state', order: 10, label: (c) => (A(c).enabled === false ? t('Enable') : t('Disable')), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { enabled: A(c).enabled === false }) });
 }
@@ -947,7 +779,6 @@ export function renderChannelsPanel(app, c) {
   function build(into, d) {
     const adapters = (d && d.adapters) || [];
     const convs = (d && d.conversations) || [];
-    const available = (d && d.available) || [];
     const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters });
     const unreadTotal = rows.reduce((s, r) => s + (r.unread || 0), 0);
     summary.textContent = rows.length ? t('{n} groups · {k} unread', { n: rows.length, k: unreadTotal }) : t('No groups yet');
@@ -996,22 +827,26 @@ export function renderChannelsPanel(app, c) {
     const siblings = new Map();
     const ordinal = new Map();
     for (const a of adapters) { const n = (siblings.get(a.kind) || 0) + 1; siblings.set(a.kind, n); ordinal.set(a.id, n); }
+    const kinds = (d && Array.isArray(d.kinds)) ? d.kinds : [];
     into.appendChild(part('accounts', t('Accounts'), accounts.length ? String(accounts.length) : '', (b) => {
-      if (!accounts.length && !available.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
+      if (!accounts.length && !kinds.length) b.appendChild(chanLine('empty-hint empty-hint-inline', t('No account connected.')));
       for (const a of accounts) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
-      // The kinds a user may still CONNECT — one full-width button each, worded
-      // by the credential facts the digest carries (§10.1's three copy paths).
-      if (available.length) {
+      // ONE entry at the bottom (r4 §8.1 #6/#11 — the storage footer's
+      // "Connect storage"): the type-first dialog serves every type, so the
+      // per-kind buttons and "Add account…" are retired
+      if (kinds.length) {
         const blk = document.createElement('div');
         blk.className = 'chan-sec chan-connect';
-        const h = document.createElement('div');
-        h.className = 'chan-sec-head';
-        const nm = document.createElement('span');
-        nm.className = 'chan-sec-name';
-        nm.textContent = t('Connect');
-        h.appendChild(nm);
-        blk.appendChild(h);
-        for (const av of available) blk.appendChild(connectRow(app, av));
+        const cb = document.createElement('button');
+        cb.type = 'button';
+        cb.className = 'mounts-btn chan-connect-btn';
+        cb.dataset.connectAccount = '1';
+        const lab = document.createElement('span');
+        lab.className = 'chan-connect-label';
+        lab.textContent = t('Connect an account ({types})', { types: kinds.map((k) => k.label || k.kind).join(', ') });
+        cb.append(icon('plus', 13), lab);
+        cb.onclick = () => showConnectAccountDialog(app, kinds);
+        blk.appendChild(cb);
         b.appendChild(blk);
       }
     }));
@@ -1073,8 +908,98 @@ export function renderChannelsPanel(app, c) {
     return el;
   }
 
-  /** One ADAPTER section (an account, or the built-in agents source). */
+  /** THE ACCOUNT CARD (r4 §2.5 / §8.1 #1, the mockup `account-card`): head =
+   *  chevron · type glyph · name · client chip · dot · tracked/total · ✎ · ⋯;
+   *  under it the health line OR the error line + Re-authorize button; then
+   *  the TRACKED conversations as ↳ rows (the storage child-row grammar — an
+   *  untracked conversation is picked with Track…, not listed); an account
+   *  tracking nothing says so in the credential-only row's register. */
+  function accountCard(a, mine, siblings, ordinal) {
+    const kinds = (digest && digest.kinds) || [];
+    const tracked = mine.filter((x) => x.tracked);
+    const sec = document.createElement('div');
+    sec.dataset.adapter = a.id;
+    const folded = EXPANDED.has(a.id) ? false : COLLAPSED.has(a.id);
+    sec.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '');
+    const h = document.createElement('div');
+    h.className = 'chan-sec-head folder-header';
+    h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
+    h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
+    const nm = document.createElement('b');
+    nm.className = 'chan-sec-name';
+    const name = accountName(a, siblings.get(a.kind) || 1, ordinal.get(a.id) || 1);
+    nm.textContent = name;
+    h.title = name;
+    h.appendChild(nm);
+    // the CLIENT chip: the OAuth client this account signs in through (a preset by its label, or its own)
+    const chipText = clientChipText(a);
+    if (chipText) {
+      const cc = document.createElement('span');
+      cc.className = 'chan-chip chan-cred-chip';
+      cc.textContent = chipText;
+      cc.title = t('The OAuth client this account signs in through — switching it means signing in again.');
+      h.appendChild(cc);
+    }
+    const dot = document.createElement('span');
+    const dotState = accountDot(a, tracked.length);
+    dot.className = 'chan-dot chan-dot-' + dotState;
+    dot.dataset.state = dotState;
+    dot.title = dotTitle(a);
+    h.appendChild(dot);
+    const cnt = document.createElement('span');
+    cnt.className = 'chan-sec-count';
+    cnt.textContent = `${tracked.length}/${mine.length}`;
+    cnt.title = t('{k} tracked of {n}', { k: tracked.length, n: mine.length });
+    h.appendChild(cnt);
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'mounts-icon-btn chan-sec-edit';
+    edit.title = t('Edit the account (client, filters, push)');
+    edit.setAttribute('aria-label', t('Edit'));
+    edit.appendChild(icon('pencil', 13));   // the library's own static SVG through the ONE icon helper (§17; no innerHTML here — the groups-ui XSS census)
+    edit.onclick = (ev) => { ev.stopPropagation(); showEditAccountDialog(app, a, { kinds }); };
+    h.appendChild(edit);
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'icon-btn chan-sec-more';
+    more.title = t('More actions');
+    more.appendChild(icon('more', 13));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds }));
+    more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
+    h.appendChild(more);
+    h.onclick = () => {
+      const nowFolded = !sec.classList.contains('chan-collapsed');
+      sec.classList.toggle('chan-collapsed', nowFolded);
+      if (nowFolded) { COLLAPSED.add(a.id); EXPANDED.delete(a.id); } else { COLLAPSED.delete(a.id); EXPANDED.add(a.id); }
+    };
+    h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
+    sec.appendChild(h);
+    for (const n of accountLines(app, a, kinds)) sec.appendChild(n);
+    const rows = document.createElement('div');
+    rows.className = 'chan-rows';
+    for (const conv of tracked) rows.appendChild(row(conv, { child: true }));
+    sec.appendChild(rows);
+    // the credential-only row's register (§8.1 #1): signed in, tracking nothing
+    if (!tracked.length && a.enabled !== false && (a.auth || {}).state === 'connected') {
+      const n = document.createElement('div');
+      n.className = 'chan-sec-note chan-sec-empty';
+      n.appendChild(icon('connect', 11));
+      const s2 = document.createElement('span');
+      s2.textContent = t('Login only — no conversation tracked yet; nothing is fetched until you track one. Use Track… to pick conversations under this account.');
+      n.appendChild(s2);
+      const tb = btn(t('Track…'), () => showTrackPicker(app, a, mine));
+      tb.classList.add('chan-sec-verb');
+      n.appendChild(tb);
+      sec.appendChild(n);
+    }
+    return sec;
+  }
+
+  /** One ADAPTER section: an ACCOUNT (connectable) is the credential-first
+   *  card (`accountCard`); a SOURCE — the built-in agents watcher, a
+   *  scan-only fixture — lists every conversation it discovered. */
   function section(a, mine, siblings, ordinal) {
+    if (a.connectable) return accountCard(a, mine, siblings, ordinal);
     const sec = document.createElement('div');
     sec.dataset.adapter = a.id;
     // The built-in Agents adapter lists every live session on this instance —
@@ -1097,16 +1022,6 @@ export function renderChannelsPanel(app, c) {
     // under a 180px container the name hides and the glyph + count stand for it; the tooltip keeps the kind beside the account
     h.title = name === (a.label || a.id) ? name : `${a.label || a.id} · ${name}`;
     h.appendChild(nm);
-    // the credential chip: WHICH application credential this account is
-    // bound to — drawn only where it disambiguates (the kind holds several
-    // accounts, or the integration offers several credentials)
-    if (a.credentialKey && (kindCount > 1 || (Array.isArray(a.credentials) && a.credentials.length > 1))) {
-      const cc = document.createElement('span');
-      cc.className = 'chan-chip chan-cred-chip';
-      cc.textContent = credentialText(a.credentialKey, a.credentialLabel);
-      cc.title = t('Authorized under this application credential — it stays bound to this account.');
-      h.appendChild(cc);
-    }
     const dot = document.createElement('span');
     dot.className = 'chan-dot chan-dot-' + adapterDot(a);
     dot.title = dotTitle(a);
@@ -1121,7 +1036,7 @@ export function renderChannelsPanel(app, c) {
     more.className = 'icon-btn chan-sec-more';
     more.title = t('More actions');
     more.appendChild(icon('more', 13));
-    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine }));
+    const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds: (digest && digest.kinds) || [] }));
     more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.appendChild(more);
     h.onclick = () => {
@@ -1154,9 +1069,9 @@ export function renderChannelsPanel(app, c) {
     return sec;
   }
 
-  function row(conv) {
+  function row(conv, { child = false } = {}) {
     const el = document.createElement('div');
-    el.className = 'chan-row session-item-card' + (conv.tracked ? ' chan-tracked' : '');
+    el.className = 'chan-row session-item-card' + (conv.tracked ? ' chan-tracked' : '') + (child ? ' chan-row-tracked' : '');
     el.dataset.conv = `${conv.adapterId}/${conv.id}`;
     // line 1: the title + ONE freshness pill (the honesty contract)
     const line = document.createElement('div');
@@ -1168,6 +1083,8 @@ export function renderChannelsPanel(app, c) {
     // carries the freshness sentence, which the ≤180px container hides as a pill
     const fresh = conv.tracked ? (chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown')) : '';
     title.title = fresh ? `${conv.title || conv.id} — ${fresh}` : (conv.title || conv.id);
+    // an account's tracked conversation is its CHILD row: the storage child-row arrow
+    if (child) { const ar = document.createElement('span'); ar.className = 'mounts-child-arrow'; ar.textContent = '↳'; line.appendChild(ar); }
     line.appendChild(title);
     // the ONE freshness pill, on a TRACKED row only (§4.3: an untracked row has
     // no evidence to claim; its `not tracked` text is the claim)

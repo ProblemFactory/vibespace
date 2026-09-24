@@ -101,9 +101,12 @@ const CLUSTER = JSON.stringify([
 ]);
 let srv = null;
 const base = `http://127.0.0.1:${PORT}`;
-const bootServer = () => spawn(process.execPath, ['server.js'], {
+// r4: Gmail's OAuth client is an ACCOUNT's choice among the Google presets (the storage
+// reader's env); one preset here, dropped in boot B so the account it minted says so BY NAME
+const GOOGLE_PRESETS = JSON.stringify([{ key: 'team', label: 'Team Google client', clientId: 'team.apps.googleusercontent.com', clientSecret: 'team-google-secret-0000' }]);
+const bootServer = (extraEnv = {}) => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
-  env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_INTEGRATIONS: CLUSTER },
+  env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_INTEGRATIONS: CLUSTER, VIBESPACE_GDRIVE_CLIENTS: GOOGLE_PRESETS, ...extraEnv },
 });
 const waitServer = async () => { for (let i = 0; i < 160; i++) { try { await fetch(`${base}/api/home`); return true; } catch { await sleep(250); } } return false; };
 const waitDown = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`${base}/api/home`); await sleep(100); } catch { return true; } } return false; };
@@ -150,7 +153,11 @@ async function newPage({ width, height, mobile }) {
     if (!r2.result || !r2.result.result || !('value' in r2.result.result)) return undefined;
     return r2.result.result.value;
   };
+  // r4: the account dialogs START consents — the page's window.open records the URL and opens nothing,
+  // so no vendor consent page is ever loaded by this driver (§ban-safety)
+  let noPopups = false;
   const load = async () => {
+    if (!noPopups) { noPopups = true; await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "window.__opened = []; window.open = function (u) { window.__opened.push(String(u)); return {}; };" }); }
     await cdp('Page.navigate', { url: `${base}/` });
     for (let i = 0; i < 160; i++) { try { if (await evaljs('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch {} await sleep(250); }
     return false;
@@ -279,7 +286,7 @@ const SEC = (adapterId) => `[data-chan-sec="${adapterId}"]`;
 /** Sections carry no data attribute; tag them from the digest's order so the driver can scope clicks.
  *  Every `channels-updated` broadcast repaints the sections in place (fresh elements) and drops the
  *  tags, so a section-scoped click or capture re-tags right before it looks. */
-const tagSections = (page) => page.evaljs(`(async () => { const d = await fetch('/api/channels').then((r) => r.json()); const secs = [...document.querySelectorAll('.rail-panel-channels .chan-sec')]; (d.adapters || []).forEach((a, i) => { if (secs[i]) secs[i].dataset.chanSec = a.id; }); return secs.length; })()`);
+const tagSections = (page) => page.evaljs(`(() => { const secs = [...document.querySelectorAll('.rail-panel-channels .chan-sec[data-adapter]')]; for (const s of secs) s.dataset.chanSec = s.dataset.adapter; return secs.length; })()`);
 const clickBtn = async (page, lang, scopeSel, key, params) => {
   if (/data-chan-sec/.test(scopeSel)) await tagSections(page);
   return page.evaljs(`(() => { const s = document.querySelector(${JSON.stringify(scopeSel)}); if (!s) return 'no scope'; const want = ${JSON.stringify(L(lang, key, params))}; const b = [...s.querySelectorAll('button, a.chan-btn')].find((x) => x.textContent.trim() === want || x.textContent.trim().startsWith(want)); if (!b) return 'no button ' + want + ' among ' + [...s.querySelectorAll('button')].map((x) => x.textContent.trim()).join('|'); b.click(); return 'ok'; })()`);
@@ -426,41 +433,79 @@ async function pass({ lang, viewport, theme }) {
     await api('PUT', '/api/channels/adapters/fake-scan', { enabled: true });
     await sleep(800);
   }
-  // CONNECT COPY PATHS: gmail none → user (lark is the cluster path from the env)
-  await api('PUT', '/api/integrations/gmail', { values: { clientId: 'example.apps.googleusercontent.com', clientSecret: 'GOCSPX-example-secret-0000' } });
-  await sleep(800);
+  // r4 (docs/design-integrations-per-account.zh.md, chunk 3): THE ACCOUNT
+  // DIALOGS — the storage dialog component. One `Connect an account` entry,
+  // type-first; a Lark and a Gmail ACCOUNT are then minted through the pre-r4
+  // connect route (its consent begins and is cancelled — no vendor is ever
+  // reached) so the card, Re-authorize (port busy), Edit, Duplicate and the
+  // Options dialogs have a record to draw.
+  const DLG = (kind) => `.dialog-body[data-chan-dialog="${kind}"]`;
+  const mkAccount = async (kind) => {
+    const r = await api('POST', `/api/channels/adapters/${kind}/connect`, {});
+    if (r.status !== 200) { log('connect', kind, 'HTTP', r.status, r.text.slice(0, 160)); return null; }
+    const id = r.json && r.json.adapter && r.json.adapter.id;
+    if (id) await api('POST', `/api/channels/adapters/${encodeURIComponent(id)}/auth/cancel`, {});
+    return id;
+  };
   if (hasPanel) {
     await tagSections(page);
-    await capture(page, tag, 'panel-04-connect-user-cluster', '.rail-panel-channels .chan-connect', { pad: 4 });
-    // WIZARD: Connect Lark (cluster credential) → the flow dialog (consent URL, listening)
-    const r1 = await clickBtn(page, lang, '.rail-panel-channels .chan-connect', 'Connect {label}', { label: 'Lark / 飞书' });
-    log('connect lark:', r1);
-    await waitFor(page, `!!document.querySelector('#chan-flow-dialog .chan-flow-input')`);
-    await sleep(400);
-    await capture(page, tag, 'wizard-01-flow', '#chan-flow-dialog .dialog', { pad: 8 });
-    await clickBtn(page, lang, '#chan-flow-dialog', 'Cancel');
-    await sleep(800); await tagSections(page);
+    const r0 = await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels [data-connect-account]'); if (!b) return 'no entry'; b.click(); return 'ok'; })()`);
+    log('connect an account:', r0);
+    await waitFor(page, `!!document.querySelector('${DLG('connect')}')`, 40);
+    await sleep(300);
+    await capture(page, tag, 'wizard-01-connect', '#mounts-dialog-overlay .dialog', { pad: 8 });
+    // Lark + Custom: the custom fields, the callback row, the three prerequisites
+    await page.evaljs(`(() => { const d = document.querySelector('${DLG('connect')}'); const t = d.querySelector(':scope > select'); t.value = 'lark'; t.dispatchEvent(new Event('change')); const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.value = 'custom'; c.dispatchEvent(new Event('change')); return 1; })()`);
+    await sleep(200);
+    await capture(page, tag, 'wizard-02-connect-lark-custom', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await page.evaljs(`(() => { const d = document.querySelector('${DLG('connect')}'); const t = d.querySelector(':scope > select'); t.value = 'gmail'; t.dispatchEvent(new Event('change')); return 1; })()`);
+    await sleep(200);
+    await capture(page, tag, 'wizard-03-connect-gmail', '#mounts-dialog-overlay .dialog', { pad: 8 });
+    await closeDialogs(page);
+  }
+  const larkId = await mkAccount('lark');
+  const gmailId = await mkAccount('gmail');
+  log('accounts:', larkId, gmailId);
+  await sleep(1200);
+  if (hasPanel) {
+    await tagSections(page);
     await capture(page, tag, 'panel-05-lark-not-connected', SEC('lark'), { pad: 4 });
-    // PORT-BUSY: hold the fixed callback port, connect again from the section
+    // PORT-BUSY: hold the fixed callback port, Re-authorize from the card's Connect
     const held = await holdPort(LARK_PORT).catch((e) => { log('could not hold port', LARK_PORT, e.message); return null; });
     const r2 = await clickBtn(page, lang, SEC('lark'), 'Connect');
     log('connect lark (port busy):', r2);
-    await waitFor(page, `!!document.querySelector('#chan-flow-dialog .chan-flow-refusal')`, 40);
+    await waitFor(page, `!!document.querySelector('${DLG('reauth')}')`, 40);
+    await page.evaljs(`(() => { const b = document.querySelector('${DLG('reauth')} > .mounts-btn-primary'); if (b) b.click(); return !!b; })()`);
+    await waitFor(page, `!!document.querySelector('#chan-reauth-dialog .mounts-oauth-link')`, 40);
     await sleep(400);
-    await capture(page, tag, 'wizard-02-port-busy', '#chan-flow-dialog .dialog', { pad: 8 });
-    await clickBtn(page, lang, '#chan-flow-dialog', 'Cancel');
+    await capture(page, tag, 'wizard-04-reauth-port-busy', '#chan-reauth-dialog .dialog', { pad: 8 });
+    await closeDialogs(page);
+    await api('POST', `/api/channels/adapters/${encodeURIComponent(larkId || 'lark')}/auth/cancel`, {});
     if (held) await new Promise((r) => held.close(r));
-    await sleep(600);
-    // GMAIL: connect (user credential, ephemeral port) → cancel → withdraw the credential → needs-credentials
-    await clickBtn(page, lang, '.rail-panel-channels .chan-connect', 'Connect {label}', { label: 'Gmail' });
-    await waitFor(page, `!!document.querySelector('#chan-flow-dialog .chan-flow-input')`, 40);
+    await sleep(600); await tagSections(page);
+    // EDIT (the storage edit grammar) and DUPLICATE (its own consent — never started here)
+    await page.evaljs(`(() => { const b = document.querySelector('${SEC('lark')} .chan-sec-head .mounts-icon-btn'); if (b) b.click(); return !!b; })()`);
+    await waitFor(page, `!!document.querySelector('${DLG('edit')}')`, 40);
     await sleep(300);
-    await capture(page, tag, 'wizard-03-flow-gmail', '#chan-flow-dialog .dialog', { pad: 8 });
-    await clickBtn(page, lang, '#chan-flow-dialog', 'Cancel');
-    await sleep(600);
-    await api('DELETE', '/api/integrations/gmail');
-    await sleep(1200); await tagSections(page);
-    await capture(page, tag, 'panel-06-needs-credentials', SEC('gmail'), { pad: 4 });
+    await capture(page, tag, 'wizard-05-edit', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await closeDialogs(page);
+    await tagSections(page);
+    await clickMenu(page, lang, SEC('gmail'), 'Duplicate…');
+    await waitFor(page, `!!document.querySelector('${DLG('duplicate')}')`, 40);
+    await sleep(300);
+    await capture(page, tag, 'wizard-06-duplicate', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await closeDialogs(page);
+    // REMOVE REFUSED: the dialog's words (the references are staged on the page's fetch — the
+    // engine's refusal is the chunk-2 suites'; this driver only needs the dialog on screen)
+    await page.evaljs(`(() => { const of = window.fetch; window.fetch = function (u, init, ...r) { if (init && init.method === 'DELETE' && /\\/api\\/channels\\/adapters\\//.test(String(u))) return Promise.resolve(new Response(JSON.stringify({ error: 'referenced', code: 'account-referenced', detail: { refs: [{ kind: 'assignment', convId: 'fake-poll-ops', title: 'Ops room', principal: { kind: 'task-group', id: 'g1', name: 'Ops triage' } }, { kind: 'reach', principal: { kind: 'agent', id: 'a1', name: 'Scout' } }, { kind: 'outbox', id: 'p1' }] } }), { status: 409, headers: { 'Content-Type': 'application/json' } })); return of.call(this, u, init, ...r); }; return 1; })()`);
+    await tagSections(page);
+    await clickMenu(page, lang, SEC('gmail'), 'Remove…');
+    await sleep(250);
+    await page.evaljs(`(() => { const b = [...document.querySelectorAll('.dialog-overlay .dialog-footer .btn-create')].pop(); if (b) b.click(); return !!b; })()`);
+    await waitFor(page, `!!document.querySelector('#chan-remove-refused')`, 40);
+    await sleep(300);
+    await capture(page, tag, 'wizard-07-remove-refused', '#chan-remove-refused .dialog', { pad: 8 });
+    await closeDialogs(page);
     // TRACK PICKER / OPTIONS / PUSH dialogs
     await clickMenu(page, lang, SEC('fake-poll'), 'Track…');
     await waitFor(page, `!!document.querySelector('#chan-track-dialog .chan-track-item')`, 20);
@@ -482,15 +527,6 @@ async function pass({ lang, viewport, theme }) {
     await sleep(300);
     await capture(page, tag, 'dialog-push', '#chan-push-dialog .dialog', { pad: 8 });
     await closeDialogs(page);
-  } else {
-    // mobile / rail-off: the same server-side states, no panel to click — the
-    // consent flows are started through the route so the adapter records exist
-    await api('POST', '/api/channels/adapters/lark/connect', {});
-    await sleep(300);
-    const lk = (await api('GET', '/api/channels')).json;
-    const larkRec = (lk.adapters || []).find((a) => a.kind === 'lark');
-    if (larkRec) await api('POST', `/api/channels/adapters/${larkRec.id}/auth/cancel`, {});
-    await api('DELETE', '/api/integrations/gmail');
   }
 
   // ── WINDOWS: tracked+sendable / read-only adapter / read-only mailbox / untracked ──
@@ -610,12 +646,12 @@ async function pass({ lang, viewport, theme }) {
       await openPanel(page);
       await tagSections(page);
       await capture(page, tag, 'narrow-panel-375', '#sidebar', { fullPage: true });
-      await clickBtn(page, lang, SEC('lark'), 'Connect');
-      await waitFor(page, `!!document.querySelector('#chan-flow-dialog .chan-flow-input')`, 20);
+      await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels [data-connect-account]'); if (b) b.click(); return !!b; })()`);
+      await waitFor(page, `!!document.querySelector('.dialog-body[data-chan-dialog="connect"]')`, 20);
       await sleep(300);
-      await capture(page, tag, 'narrow-dialog-flow', '#chan-flow-dialog .dialog', { fullPage: true });
-      await clickBtn(page, lang, '#chan-flow-dialog', 'Cancel');
-      await sleep(600); await tagSections(page);
+      await capture(page, tag, 'narrow-dialog-connect', '#mounts-dialog-overlay .dialog', { fullPage: true });
+      await closeDialogs(page);
+      await sleep(300); await tagSections(page);
       await clickMenu(page, lang, SEC('lark'), 'Options');
       await waitFor(page, `!!document.querySelector('#chan-options-dialog .chan-opt-input')`, 20);
       await sleep(300);
@@ -642,48 +678,47 @@ async function pass({ lang, viewport, theme }) {
   // ── BOOT B: an EXPIRED token record (through the encrypted store) + a
   //    ROTATED secret key (the undecryptable Integrations rows) + user keys ──
   await closeAllWindows(page);
-  await api('PUT', '/api/integrations/gmail', { values: { clientId: 'example.apps.googleusercontent.com', clientSecret: 'GOCSPX-example-secret-0000' } });
   await api('PUT', '/api/integrations/cloak', { values: { licenseKey: 'cb_1234567890abcd' } });
   await sleep(1500);   // the adapters store's debounced write
   srv.kill('SIGKILL'); await waitDown();
   try { log('expire lark:', expireLarkToken()); } catch (e) { log('expire lark failed:', e.message); }
   const keyFile = path.join(wt, 'data/.integrations-key');
   try { fs.writeFileSync(keyFile, 'f'.repeat(64)); } catch (e) { log('key rotate failed:', e.message); }
-  srv = bootServer(); if (!(await waitServer())) throw new Error('server B did not boot');
+  // boot B drops the Gmail preset: the Gmail ACCOUNT minted under it says so BY NAME (r4 §3.7)
+  srv = bootServer({ VIBESPACE_GDRIVE_CLIENTS: '' }); if (!(await waitServer())) throw new Error('server B did not boot');
   await page.prime({ lang, theme, sidebarWidth: 260 });
   if (!(await page.load())) throw new Error('app did not reload');
   await sleep(600);
   if (!mobile && (await openPanel(page))) {
-    await waitFor(page, `[...document.querySelectorAll('.rail-panel-channels .chan-sec-note, .rail-panel-channels .chan-auth')].some((e) => /re-auth|需要重新授权|再認証|再認可|重新授权/i.test(e.textContent))`, 20);
+    await waitFor(page, `!!document.querySelector('.rail-panel-channels .chan-account[data-adapter="lark"] .mounts-errline')`, 40);
     await tagSections(page);
     await capture(page, tag, 'panel-10-B-expired', SEC('lark'), { pad: 4 });
+    await waitFor(page, `!!document.querySelector('.rail-panel-channels .chan-account[data-adapter="gmail"] .mounts-errline')`, 60);
+    await tagSections(page);
+    await capture(page, tag, 'panel-10b-B-preset-gone', SEC('gmail'), { pad: 4 });
     await capture(page, tag, 'panel-11-B-full', '#sidebar');
   }
-  // INTEGRATIONS: the window, each card, Test passed / failed, the undecryptable rows
-  await page.evaljs(`(() => { const w = window.app.openIntegration('fake'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
-  await waitFor(page, `document.querySelectorAll('.integ-card').length >= 4`, 40);
+  // INTEGRATIONS (r4: the six agent-browser key rows only): the window, two cards, Test passed /
+  // failed (zero-network Tests only — cloak's shape check, a keyless cloud row's refusal), the
+  // undecryptable row, a secret being replaced
+  await page.evaljs(`(() => { const w = window.app.openIntegration('cloak'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
+  await waitFor(page, `document.querySelectorAll('.integ-card').length >= 6`, 40);
   await sleep(400);
   await capture(page, tag, 'integ-01-window', '[data-shot="win"]');
-  for (const id of ['fake', 'lark', 'gmail', 'cloak']) {
+  for (const id of ['cloak', 'cloud:browserless']) {
     await page.evaljs(`(() => { const c = document.querySelector('.integ-card[data-integ="${id}"]'); if (c) c.scrollIntoView({ block: 'start' }); return 1; })()`);
     await sleep(200);
-    await capture(page, tag, `integ-02-card-${id}`, `.integ-card[data-integ="${id}"]`, { pad: 4 });
+    await capture(page, tag, `integ-02-card-${id.replace(':', '-')}`, `.integ-card[data-integ="${id}"]`, { pad: 4 });
   }
-  await page.evaljs(`(() => { document.querySelector('.integ-card[data-integ="fake"]').scrollIntoView({ block: 'start' }); document.querySelector('.integ-card[data-integ="fake"] .integ-test').click(); return 1; })()`);
-  await waitFor(page, `!!document.querySelector('.integ-card[data-integ="fake"] .integ-verdict')`, 30);
+  const BU = '.integ-card[data-integ="cloud:browseruse"]';
+  await page.evaljs(`(() => { document.querySelector('${BU}').scrollIntoView({ block: 'start' }); document.querySelector('${BU} .integ-test').click(); return 1; })()`);
+  await waitFor(page, `!!document.querySelector('${BU} .integ-test-error')`, 30);
   await sleep(300);
-  await capture(page, tag, 'integ-03-test-passed', '.integ-card[data-integ="fake"]', { pad: 4 });
-  await api('PUT', '/api/integrations/fake', { values: { apiKey: 'fail-switch-0000' } });
-  await waitFor(page, `/••••/.test((document.querySelector('.integ-card[data-integ="fake"] .integ-mask') || {}).textContent || '')`, 30);
-  await page.evaljs(`(() => { document.querySelector('.integ-card[data-integ="fake"]').scrollIntoView({ block: 'start' }); document.querySelector('.integ-card[data-integ="fake"] .integ-test').click(); return 1; })()`);
-  await waitFor(page, `!!document.querySelector('.integ-card[data-integ="fake"] .integ-test-error')`, 30);
+  await capture(page, tag, 'integ-04-test-failed-no-key', BU, { pad: 4 });
+  const BB = '.integ-card[data-integ="cloud:browserbase"]';
+  await page.evaljs(`(() => { const r = document.querySelector('${BB} .integ-field[data-field="apiKey"] .integ-replace'); document.querySelector('${BB}').scrollIntoView({ block: 'start' }); if (r) r.click(); return 1; })()`);
   await sleep(300);
-  await capture(page, tag, 'integ-04-test-failed-own-key', '.integ-card[data-integ="fake"]', { pad: 4 });
-  // (lark's Test is a credential-exchange runner — with the cluster credential
-  //  present it would call the vendor, so it is never clicked here; §ban-safety)
-  await page.evaljs(`(() => { const r = document.querySelector('.integ-card[data-integ="fake"] .integ-field[data-field="apiKey"] .integ-replace'); document.querySelector('.integ-card[data-integ="fake"]').scrollIntoView({ block: 'start' }); if (r) r.click(); return 1; })()`);
-  await sleep(300);
-  await capture(page, tag, 'integ-06-editing-secret', '.integ-card[data-integ="fake"]', { pad: 4 });
+  await capture(page, tag, 'integ-06-editing-secret', BB, { pad: 4 });
   await closeAllWindows(page);
 
   page.close();

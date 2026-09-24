@@ -1,0 +1,235 @@
+/* docs/mockups/integrations-per-account — a STANDALONE mockup stylesheet (r4:
+   channels keep their own store and adopt the mounts PATTERNS). Everything
+   above the "NEW IN THIS DESIGN" marker is copied VERBATIM from
+   public/style.css (2.369.160) — the dialog shell, the Remote/storage dialog
+   rules (.mounts-*), the Communication panel rules (.chan-*) — so the mockup
+   renders with the product's own tokens and class names; below the marker
+   are the few rules the build would add. Dark theme only. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+:root, [data-theme="dark"] {
+  --accent-fg: #042f2a; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
+  --bg-root: #0c0c18; --bg-workspace: #111122; --bg-window: #1a1a30;
+  --bg-titlebar: #14142a; --bg-titlebar-active: #1a1a38; --bg-toolbar: #0e0e1e;
+  --bg-taskbar: #0e0e1e; --bg-input: #12122a; --bg-hover: rgba(45,212,191,0.10);
+  --bg-dialog: #1a1a30; --bg-sidebar: #0e0e1e;
+  --accent: #2dd4bf; --accent-hover: #5eead4; --accent-dim: rgba(45,212,191,0.25);
+  --text: #e2e8f0; --text-secondary: #94a3b8; --text-dim: #8890a8;
+  --border: rgba(255,255,255,0.07); --border-active: rgba(45,212,191,0.4);
+  --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
+  --radius: 8px; --radius-sm: 4px;
+  --title-height: 32px; --toolbar-height: 40px; --taskbar-height: 44px;
+  --shadow-window: 0 8px 32px rgba(0,0,0,0.4); --shadow-active: 0 12px 40px rgba(0,0,0,0.5);
+  --transition: 0.15s ease;
+  --ok-text: color-mix(in srgb, var(--green, #3fb950) 44%, var(--text));
+  --warn-text: color-mix(in srgb, var(--yellow, #e5c07b) 47%, var(--text));
+  --bad-text: color-mix(in srgb, var(--red, #e55) 55%, var(--text));
+}
+html, body {
+  height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg-workspace); color: var(--text); font-size: 13px;
+}
+
+/* ── dialog shell (createModalShell) — the SAME shell the storage dialog uses ── */
+.dialog-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+  z-index: 99998; display: flex; align-items: center; justify-content: center;
+}
+.dialog {
+  background: var(--bg-dialog); border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5); box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  width: 440px; max-height: calc(80vh / var(--ui-scale, 1)); overflow: hidden; display: flex; flex-direction: column;
+}
+.dialog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.dialog-header h3 { font-size: 14px; font-weight: 600; }
+.dialog-close {
+  background: transparent; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 13px; padding: 2px 5px; border-radius: var(--radius-sm); transition: all var(--transition);
+}
+.dialog-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.dialog-body label {
+  display: flex; flex-direction: column; gap: 3px; font-size: 11px;
+  color: var(--text-secondary); font-weight: 500;
+}
+.dialog-body input, .dialog-body select, .dialog-body textarea {
+  background: var(--bg-input); border: 1px solid var(--border); color: var(--text);
+  padding: 6px 8px; border-radius: var(--radius-sm); font-size: 12px; font-family: inherit;
+}
+.dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.btn-create {
+  padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent);
+  color: var(--accent-fg, #fff); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 500;
+}
+.cfg-err { color: var(--red, #e55); font-size: 12px; min-height: 15px; }
+
+/* ── buttons ── */
+.mounts-btn {
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+  border-radius: var(--radius-sm); padding: 3px 9px; font-size: 11px; cursor: pointer;
+}
+.mounts-btn:disabled { opacity: 0.45; cursor: default; }
+.mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.mounts-btn-danger { border-color: color-mix(in srgb, var(--red, #e55) 45%, transparent); color: var(--red, #e55); }
+.icon-btn {
+  background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
+  width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center;
+  justify-content: center; font-size: 14px; transition: all var(--transition);
+}
+
+/* ── the Remote tab's storage dialog + rows (src/lib/sidebar-mounts.js) ── */
+.mounts-list { display: flex; flex-direction: column; gap: 4px; }
+.mounts-row {
+  display: flex; flex-direction: column; gap: 2px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.mounts-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mounts-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.mounts-dot-ok { background: var(--green, #3fb950); box-shadow: 0 0 4px var(--green, #3fb950); }
+.mounts-dot-err { background: var(--red, #e55); }
+.mounts-dot-off { background: var(--text-dim); opacity: 0.5; }
+.mounts-name {
+  flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mounts-reauth-btn { display: block; margin-top: 4px; }
+.mounts-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.mounts-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-dim); cursor: pointer;
+}
+.mounts-path {
+  padding-left: 14px; font-size: 10px; color: var(--text-dim);
+  display: flex; align-items: center; gap: 4px; min-width: 0;
+}
+.mounts-path-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mounts-errline { padding-left: 14px; font-size: 10px; color: var(--red, #e55); line-height: 1.4; }
+.mounts-typetag {
+  padding: 0 5px; border-radius: 3px; font-size: 9px; line-height: 15px; flex: none;
+  background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent);
+  vertical-align: 1px; white-space: nowrap;
+}
+.mounts-field-hint { font-size: 10px; color: var(--text-dim); margin: -2px 0 6px; line-height: 1.4; }
+.mounts-drive-connect { margin-bottom: 6px; display: flex; flex-direction: column; gap: 4px; }
+.mounts-advanced { margin: 6px 0; }
+.mounts-advanced > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); padding: 4px 0; user-select: none; }
+.mounts-adv-body { display: flex; flex-direction: column; gap: 10px; }
+.mounts-adv-body input, .mounts-adv-body textarea, .mounts-adv-body select { width: 100%; box-sizing: border-box; }
+/* oauthLinkRow(): the product builds the inner line with an inline style
+   (display:flex; gap:4px; align-items:center; margin:2px 0) — copied below as .mounts-oauth-line */
+.mounts-oauth-link input { flex: 1; min-width: 0; }
+
+/* ── the Communication panel (src/lib/channels-panel.js) ── */
+.chan-ic { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
+.chan-ic svg { width: 1em; height: 1em; }
+.chan-warn { color: var(--warn-text); }
+.chan-bar { display: flex; align-items: center; gap: 6px; padding: 2px 2px 8px; }
+.chan-summary { flex: 1; min-width: 0; font-size: 11px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-sec { margin-top: 6px; }
+.chan-sec-head { display: flex; align-items: center; gap: 5px; padding: 4px 6px; margin: 0; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: none; letter-spacing: normal; border-radius: var(--radius-sm); cursor: pointer; user-select: none; transition: background var(--transition); }
+.chan-sec-chev { font-size: 10px; color: var(--text-dim); transition: transform var(--transition); }
+.chan-sec-kind { font-size: 13px; color: var(--text-dim); }
+.chan-sec-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-weight: 600; }
+.chan-sec-count { font-size: 10px; color: var(--text-dim); font-weight: 400; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.chan-sec-head .chan-cred-chip { max-width: 38%; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.chan-sec-more { width: 20px; height: 20px; font-size: 13px; flex-shrink: 0; }
+.chan-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: var(--text-dim); }
+.chan-dot-ok { background: var(--green, #3fb950); }
+.chan-dot-warn { background: var(--yellow, #e5c07b); }
+.chan-dot-bad { background: var(--red, #e55); }
+.chan-dot-idle { background: var(--text-dim); opacity: .6; }
+.chan-sec-note { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 10px; line-height: 1.45; color: var(--text-dim); padding: 0 6px 4px 8px; }
+.chan-sec-note.chan-warn { color: var(--warn-text); }
+.chan-sec-verb { font-size: 10px; padding: 1px 7px; flex-shrink: 0; }
+.chan-rows { padding-left: 6px; }
+.chan-row { padding: 5px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; transition: all var(--transition); position: relative; overflow: hidden; }
+.chan-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.chan-row-title { flex: 1 1 auto; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
+.chan-row-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 1px; font-size: 10px; color: var(--text-dim); }
+.chan-row-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-chip { flex-shrink: 0; font-size: 9px; font-weight: 600; letter-spacing: 0; padding: 1px 6px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; }
+.chan-chip-live { color: var(--ok-text); background: color-mix(in srgb, var(--green, #3fb950) 13%, transparent); }
+.chan-chip-off { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 10%, transparent); }
+.chan-connect .chan-sec-head { cursor: default; }
+.chan-connect-btn { display: flex; align-items: center; gap: 6px; width: 100%; box-sizing: border-box; margin: 4px 0 0; padding: 6px 9px; text-align: left; }
+.chan-connect-btn .chan-ic { font-size: 13px; }
+.chan-connect-label { flex: 1; min-width: 0; font-size: 11px; }
+
+
+/* ── the Remote tab's list, sections, footer actions (src/lib/sidebar-mounts.js _renderMounts) ── */
+.mounts-panel { display: flex; flex-direction: column; gap: 8px; padding: 10px 8px; font-size: 12px; }
+.mounts-loading, .mounts-empty { color: var(--text-dim); font-size: 12px; padding: 12px 10px; line-height: 1.5; }
+.mounts-sec-head {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-dim); margin: 2px 2px 0;
+}
+.mounts-sec-head { display: flex; flex-direction: column; }
+.mounts-sec-sub { font-size: 10px; font-weight: 400; color: var(--text-dim); margin-top: 1px; }
+.mounts-badge {
+  font-size: 9px; font-weight: 700; color: var(--yellow, #e5c07b);
+  border: 1px solid color-mix(in srgb, var(--yellow, #e5c07b) 50%, transparent);
+  border-radius: 3px; padding: 0 4px; flex-shrink: 0;
+}
+.mounts-badge-red { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 50%, transparent); }
+.mounts-cred-key { display: inline-flex; align-items: center; color: var(--accent); flex-shrink: 0; width: 13px; }
+.mounts-cred-key svg { width: 13px; height: 13px; }
+.mounts-row-child { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); padding-left: 6px; }
+.mounts-child-arrow { color: var(--text-dim); font-size: 11px; flex-shrink: 0; }
+.mounts-icon-accent { color: var(--accent); }
+.mounts-syncline { display: flex; align-items: center; gap: 8px; font-size: 10px; color: var(--text-secondary); padding: 2px 0 0 18px; }
+.mounts-foot { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.mounts-action {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; text-align: left;
+}
+.mounts-action-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-dim); }
+.mounts-note { font-size: 10px; color: var(--text-dim); line-height: 1.5; padding: 0 2px; }
+
+
+/* ── the tracked-conversations picker list (channels-panel showTrackPicker) ── */
+.chan-track-list { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.chan-track-item { padding: 4px 6px; border-radius: var(--radius-sm); }
+.chan-track-title { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-track-sub { grid-column: 2; font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-sec-empty { padding: 2px 8px 4px !important; text-align: left; }
+/* the popover tokens every context menu / popover shares (style.css:97) */
+.term-settings-popover, .global-settings-popover, .taskbar-context-menu {
+  background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 6px 0;
+}
+
+/* ═══════════════════════ NEW IN THIS DESIGN (r4) ═══════════════════════
+   The few rules the build would add (docs/design-integrations-per-account.zh.md
+   §5). Every colour is a theme var; radii are the two tokens. */
+
+/* oauthLinkRow()'s inner line, as a class instead of the product's inline style
+   (the channel dialog draws the SAME row for the consent link AND, on a
+   custom Lark app, for the callback URL the user must register) */
+.mounts-oauth-line { display: flex; gap: 4px; align-items: center; margin: 2px 0; }
+/* the Lark "before connecting" facts under the custom fields: hint lines, one per fact */
+.chan-prereq { margin: -2px 0 6px; padding-left: 14px; font-size: 10px; color: var(--text-dim); line-height: 1.45; }
+.chan-prereq li { margin: 1px 0; }
+/* r4 (mockup-only): the OPEN ⋯ menu drawn statically with the popover tokens above — the
+   product renders it through showContextMenu(); only the ORDER of verbs is the design */
+.mock-menu { position: absolute; min-width: 176px; font-size: 12px; z-index: 5; }
+.mock-menu-item { display: flex; align-items: center; gap: 8px; padding: 5px 12px; color: var(--text); cursor: pointer; }
+.mock-menu-item.danger { color: var(--red, #e55); }
+.mock-menu-item.dim { color: var(--text-dim); }
+.mock-menu-sep { height: 1px; background: var(--border); margin: 4px 0; }
+/* the account section's HEALTH line = the storage row's detail line grammar */
+.chan-sec-health { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); padding: 0 6px 2px 24px; }
+.chan-sec-health.chan-warn { color: var(--warn-text); }
+.chan-sec .mounts-errline { padding-left: 24px; }
+/* the tracked conversations under an account render as ↳ rows (the storage child-row grammar) */
+.chan-row.chan-row-tracked { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+.chan-scopes { font-size: 11px; color: var(--text-secondary); padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); line-height: 1.45; }
+.chan-fact { font-size: 11px; color: var(--text-secondary); padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); line-height: 1.45; }
+.chan-prereq { margin: -2px 0 6px; padding-left: 14px; font-size: 10px; color: var(--text-dim); line-height: 1.45; }
+.chan-prereq li { margin: 1px 0; }
+.mounts-oauth-line { display: flex; gap: 4px; align-items: center; margin: 2px 0; }

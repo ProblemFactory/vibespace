@@ -130,6 +130,11 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
   from its capability row — `backend-caps notificationDelivery({peerDelivery,
   inputModes})` → `steer | queue | cli-inbox | stash` — never a backend id.
 
+#### Storage OAuth re-authorize (src/server/mounts-plugins-wiring.js)
+- `POST /api/mounts/gdrive-auth/start` `{mountId}` (re-authorize under the record's OWN client) or `{clientPreset | clientId + clientSecret, backend?}` (the add flow — and, since 2.369.165 D2, the Edit dialog's client switch) → `{url}`; `GET …/status` → `{active, url, token, error}`; `POST …/callback {url}` (the paste-back). Gmail's own trio `…/gmail-auth/{start,status,callback}` (`{clientPreset | clientId + clientSecret}`).
+- `POST /api/mounts/:id/drive-token` `{token, client?}` — the minted token written to the record's holder (a child's parent), children bounced. `client` (D2, 2.369.165 integrations 4a) = `{clientPreset}` or `{clientId, clientSecret}` the token was minted under, written TOGETHER with it (a preset clears the custom id + secret and vice versa; a custom id without its secret → 400 by name; a non-Drive record → 400 by name). The client must NAME itself (integrations r1): `{clientPreset:'<k>'}`, `{clientPreset:''}` = the built-in chosen explicitly, or `{clientId, clientSecret}`; `{}`, a secret alone or a non-object → 400 `client must name a preset ("" = built-in) or a custom id + secret`, the record untouched (an empty object used to read as built-in and wipe the preset beside a token minted elsewhere). A Gmail switch lands through `PATCH /api/mounts/:id {clientPreset, token}`.
+- `PATCH /api/mounts/:id` — the Edit dialog's diff save. D2 held at the server (integrations r1): on a top-level Drive / Gmail record that holds a token, a patch that changes the client the record RESOLVES to (`clientPreset`; Drive's non-empty `clientId` — a rotated secret is not a switch) WITHOUT a `token` → **409** `{error, code:'client-change-needs-reauth', mounts}` naming Re-authorize, nothing touched (not even the unmount); a patch that carries its `token` lands both. Every other failure stays 400 `{error, mounts}`.
+
 #### Host-capability plugins (⚙ → Plugins; src/plugins.js)
 - `GET /api/plugins` — `{plugins:[…]}` for the panel (tailscale / frp / opencode-serve): def + `enabled` + that plugin's `status()`.
 - `GET /api/plugins/:id/status` · `POST /api/plugins/:id/{install|start|stop|login|enabled|mode|config}` — the per-plugin lifecycle (all cookie-authed; each returns `{error}` with a reason, never a silent no-op).
@@ -245,8 +250,32 @@ question about another machine is the failure the rule exists to stop.
   client opens the Integrations card FIRST; `501 not-supported` = an
   undeclared capability / a kind with no consent flow; `401 auth-expired`;
   `502` = a vendor refusal; `404 no-such-adapter`).
+  - **r4 (2.369.165, docs/design-integrations-per-account.zh.md §2.4) — the
+    account dialog's sign-in, the storage consent block's shapes, for an
+    account that does NOT exist yet.** A CLIENT CHOICE in any body below is
+    `credentialKey` (`cluster:<presetKey>` | `custom`), `clientPreset:'<k>'`
+    (the storage dialog's spelling), `credential {appId, appSecret}` or
+    `clientId` + `clientSecret` (a custom client — sealed under
+    `.channels-key` at once, echoed nowhere); refusals `400 unknown-credential`
+    / `invalid-client` (`detail.errors` = field → rule, never a value) /
+    `own-retired`.
+    - `POST /api/channels/oauth/start` `{kind|backend, <choice>, options?}` →
+      `{ok, flowId, url, flow, kind, credentialKey}` (the consent under THAT
+      client; nothing is created).
+    - `GET /api/channels/oauth/status?flowId=` (omitted = the latest) →
+      `{flowId, kind, credentialKey, running, done, ok, error, user, flow,
+      token}` — `token` is the FLOW ID once signed in (the handle the shared
+      block writes into its field; never a credential); `404 no-flow`.
+    - `POST /api/channels/oauth/callback` `{url, flowId?}` — the paste-back →
+      `{ok, flowId, user, token}`; a foreign `state` is `400`.
+  - `POST /api/channels/adapters/:kind/connect` `{flowId, name?, options?,
+    <choice>?}` — r4: CREATES the account from a finished sign-in (its client
+    and token; the flow is taken once): `404 no-flow`, `409 flow-not-done` /
+    `flow-failed`, `400 flow-client-mismatch` (a body naming another client) /
+    `flow-kind-mismatch`. Answers `{adapter, flow:null}`.
   - `POST /api/channels/adapters/:kind/connect` `{credentialKey?, newAccount?}`
-    — THE ACCOUNT MODEL (2026-09-22): mints a NEW account of the kind (the
+    — THE ACCOUNT MODEL (2026-09-22; r4: also any `<choice>`, `name`,
+    `options`): mints a NEW account of the kind (the
     first record's id IS the kind, every further one `<kind>:<8 hex>`) when
     `newAccount:true` or no record of the kind exists, stamped with
     `credentialKey` = `cluster:<presetKey>` | `own` (validated against what
@@ -254,8 +283,7 @@ question about another machine is the failure the rule exists to stop.
     the offered keys otherwise; omitted = the integration's current pick) and
     begins its consent flow under THAT credential. Without `newAccount` on a
     kind that already has an account it is the P1a path: the FIRST account is
-    re-authorized, a `credentialKey` there judged exactly as by
-    `/reauthorize` (token-less ⇒ re-bind; bound ⇒ `400 credential-bound`).
+    re-authorized, a choice there judged exactly as by `/reauthorize`.
     Answers `{adapter, flow}` where `flow` is `{flowId, mode,
     running, consentUrl, redirectUri, port, listening, refusal, pasteBack:true,
     startedAt, expiresAt}` — never the flow's `state`. A fixed-mode port
@@ -263,29 +291,62 @@ question about another machine is the failure the rule exists to stop.
     flow keeps running on paste-back. `409 needs-credentials` when the
     account's key resolves to none (a withdrawn preset says `preset-gone`
     naming it — never another client).
-  - `POST /api/channels/adapters/:id/reauthorize` `{credentialKey?}` —
-    re-begins ONE account's consent flow by its adapter id (never by kind)
-    under ITS credential. A key RE-BINDS a TOKEN-LESS account (never
-    authenticated / disconnected — nothing is minted under its key) after
-    validation (`400 unknown-credential`), and is `400 credential-bound
-    {error, detail:{key, bound}}` on an account HOLDING a token bound to
-    another credential (its stamp, else what the token itself names) — never
-    dropped (verifier r1). A legacy record with no key is stamped first by its
-    token's own evidence, else the integration's current pick.
+  - `POST /api/channels/adapters/:id/reauthorize` `{<choice>?}` —
+    re-begins ONE account's consent flow by its adapter id (never by kind).
+    r4, the mount semantics: no client named / the same client ⇒ its consent
+    (a same-id custom client with a new secret replaces the secret first); a
+    DIFFERENT client IS a re-authorization under it — `{adapter, flow,
+    rebind:true, credentialKey}`, the account keeping its old client AND
+    token until that consent lands, then both replaced in one write (a failed
+    consent changes nothing and sets `lastAuthError`). The pre-r4 `400
+    credential-bound` is gone. A legacy record with no key is stamped first
+    by its token's own evidence, else the integration's current pick.
     `404 no-such-adapter`.
+  - `POST /api/channels/adapters/:id/duplicate` `{name?}` → `{adapter}` — r4
+    D4: a NEW, UNAUTHORIZED account carrying exactly the engine's declared
+    `DUPLICATE_FIELDS` (kind, the client choice — a custom secret RE-SEALED —,
+    the declared options, the push claim, the sender line); never the token,
+    tracked conversations, assignments, reach grants or the log; named
+    `name` or `<label> (copy)`. It consents on its own (`/reauthorize`).
+  - `DELETE /api/channels/adapters/:id` — r4 D5 REMOVE: `409
+    account-referenced {error, detail:{refs:[{kind:'assignment', key, convId,
+    title, principal} | {kind:'reach', grantId, principal, level, origin} |
+    {kind:'outbox', id, key, state}]}}` while anything points at the account
+    (assignments of its conversations, `scope.kind==='adapter'` reach grants,
+    unsettled outbox proposals — agent groups never); otherwise `{ok,
+    removed:true, id}` (record + index rows; logs stay). Builtin `400`.
+  - `GET /api/channels/adapters/:id/config` — r4 D3, OWNER-ONLY (cookie auth;
+    never broadcast, never logged, no agent route): `{config: {id, kind,
+    label, credentialKey, client: {appId, appSecret, undecryptable} | null,
+    presets, clientFields, options, push, senderHonestyLine}}` — the Edit
+    dialog's prefill, the custom secret in the clear (the storage `GET
+    /api/mounts/:id/config` rule). The ONLY channel answer carrying a secret.
   - `POST /api/channels/adapters/:id/auth/finish` `{url}` — PASTE-BACK: the
     redirect URL the user's browser landed on; `400 auth-failed` with the
     reason (a `state` mismatch says "restart the flow"); `501 no-flow` when
     nothing is running.
   - `POST /api/channels/adapters/:id/auth/cancel` — `{ok, cancelled}`.
-  - `POST /api/channels/adapters/:id/disconnect` — drops the token (the
-    FIRST account's record and conversations stay), cancels a running flow,
-    retracts the failure item; a FURTHER account (`<kind>:<hex>`) is REMOVED
-    with its index rows — only its own — and answers `{ok, removed:true}`.
+  - `POST /api/channels/adapters/:id/disconnect` — drops the token, cancels a
+    running flow, retracts the failure item; r4: the record, its client, its
+    conversations, assignments and grants stay for EVERY account (the pre-r4
+    "a further account is removed" special case is gone — REMOVE is `DELETE`)
+    and it ignores references. `{ok}`.
   - `PUT /api/channels/adapters/:id` `{enabled?, options?}` — enable/disable
     and/or the adapter's DECLARED options (an undeclared key or a value
     outside its `choices` is a `400` naming it; `''` restores the default; a
-    change re-runs discovery).
+    change re-runs discovery). r4: also `{label}` (rename) and `{credential:
+    {appId, appSecret}}` — a custom client's SECRET replaced in place when
+    the id is the account's own (answer `customClient` masked); another id or
+    a preset is `409 client-change-needs-reauth` (use `/reauthorize`).
+  - r4 digest additions (`GET /api/channels`, `channels-updated`): each
+    adapter row carries `bindsPerAccount`, `presets [{key,label}]`,
+    `clientHint`, `clientFields {id, secret}` (declarations), `customClient
+    {appId, secretSet, secretMasked, undecryptable} | null`; the digest adds
+    `kinds` = every connectable type `{kind, label, integration,
+    bindsPerAccount, presets, clientHint, clientFields, setup, optionsSchema,
+    receive, sendAs, pushOptIn}` (the type-first account dialog's input).
+    `credentials` for an account-bound row lists presets only (`own`
+    retired).
   - **P1b:** `PUT /api/channels/adapters/:id` also takes `{push: {enabled?,
     claimedExclusive?}}` — the push switch (an opt-in lane, Gmail, is OFF
     until `enabled:true`) and the exclusivity DECLARATION (`exclusive` /
@@ -452,6 +513,13 @@ field's plaintext**: not GET, and there is no "reveal". A set secret is
 chars). Every failure answers `{error, code, detail}` with a real status so
 the client can toast it (`fetchJson` never throws).
 
+- **r4 (2.369.165): an account-bound row (`bindsPerAccount`: fake / lark /
+  gmail) is NOT a card** — `GET /api/integrations` leaves it out (the list is
+  the six browser key rows) and GET one / PUT / POST test / DELETE on it
+  answer `404 binds-per-account` BY NAME ("… is chosen per account where the
+  account is added (Communication panel → Connect an account)"); its client
+  is chosen in the account dialog (`/api/channels/oauth/*`, above). An
+  unknown id stays `404 unknown-integration`.
 - `GET /api/integrations` — `{integrations: [publicView…], storeError}`. Each
   view: `{id, label, fields (declarations only: key/label/secret/required/
   placeholder/help), setup {callbackUrl, callbackNote, prerequisites} | null,
