@@ -21,9 +21,10 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn, execSync } from 'node:child_process';
+import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePorts, ONBOARDED_SOURCE } from './scratch.mjs';
+import { gitEnvFrom } from './git-env.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let passed = 0, failed = 0;
@@ -745,11 +746,25 @@ const mod = mkModule();
   // file binds: `hosts` in session-stdout is a lazy ref, `hosts` elsewhere may
   // be an ordinary object.
   {
+    // The set a commit of this tree would contain (TRACKED + untracked-not-
+    // ignored), never a directory walk: other suites write gitignored PATCHED
+    // COPIES beside the real modules (test-restore-liveness's
+    // src/server/session-stdout.__prefix_control.js is a PRE-FIX copy) and
+    // unlink them — a walk running in a parallel heavy lane read one that had
+    // just vanished (ENOENT, 2026-09-24) and could equally sweep a pre-fix
+    // copy's retired spelling as an offender.
+    let listed = null;
+    try {
+      const ls = (args) => execFileSync('git', ['-C', REPO, 'ls-files', '-z', ...args, '--', 'src', 'server.js'], { env: gitEnvFrom(process.env), encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 })
+        .toString('utf8').split('\0').filter(Boolean);
+      listed = [...new Set([...ls([]), ...ls(['--others', '--exclude-standard'])])].filter((f) => f.endsWith('.js') && fs.existsSync(path.join(REPO, f)));
+    } catch (e) { console.log('    (no git listing — ' + String(e.message).slice(0, 100) + ' — falling back to a directory walk)'); }
+    if (listed) console.log(`    sweep scope = git listing (${listed.length} .js files under src/ + server.js; gitignored patched copies excluded)`);
     const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
       const full = path.join(dir, e.name);
       return e.isDirectory() ? walk(full) : (e.name.endsWith('.js') ? [full] : []);
     });
-    const candidates = [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js')];
+    const candidates = listed ? listed.map((f) => path.join(REPO, f)) : [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js')];
     const builders = [];       // [relPath, [lazy names it binds]]
     const offenders = [];
     for (const full of candidates) {
@@ -777,7 +792,9 @@ const mod = mkModule();
     // they are swept with the names their engine binds — the seam the bug used.
     const engine = builders.find(([rel]) => rel === 'src/server/session-stdout.js');
     if (engine) {
-      for (const f of fs.readdirSync(path.join(REPO, 'src/server/stdout')).filter((n) => n.endsWith('.js'))) {
+      const stdoutFiles = listed ? listed.filter((f) => /^src\/server\/stdout\/[^/]+\.js$/.test(f)).map((f) => path.basename(f))
+        : fs.readdirSync(path.join(REPO, 'src/server/stdout')).filter((n) => n.endsWith('.js'));
+      for (const f of stdoutFiles) {
         const rel = path.join('src/server/stdout', f);
         fs.readFileSync(path.join(REPO, rel), 'utf8').split('\n').forEach((line, i) => {
           if (/^\s*(\/\/|\*)/.test(line)) return;

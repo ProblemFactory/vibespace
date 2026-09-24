@@ -492,14 +492,26 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // because that claim is what lets a write RETIRE a limit the file holds
     // (src/quota-model.js `markScopedEnumeration` / `authoritativeScopesOf`).
     let dropped = 0;
+    // How many entries this parse NAMED as a model cap (B-9f4b): a
+    // `model_scoped` display name or a `seven_day_<model>` key. A CODENAME
+    // sibling key (`nimbus_quill`) is still KEPT as a bucket — a stated spend
+    // counts — but it is inferred from the key's shape, never named, so it
+    // cannot carry the right to retire (quota-model `authoritativeScopesOf`).
+    let named = 0;
     for (const s of (Array.isArray(rl.model_scoped) ? rl.model_scoped : [])) {
       if (!s?.display_name) { if (s && typeof s === 'object') dropped++; continue; }
-      const resetsAt = typeof s.resets_at === 'number' ? s.resets_at
-        : (s.resets_at ? Math.floor(Date.parse(s.resets_at) / 1000) || 0 : 0);
+      // A NAME WITHOUT A NUMBER IS A DROP (quota r2): the key loop below counts
+      // a window-shaped entry that states no readable number as `dropped`; this
+      // branch used to count the same shape as NAMED and write a fabricated
+      // 0 % — one parser, two answers, and under B-9f4b the named count is
+      // the right to retire. What marks a bucket is a NUMBER.
+      if (typeof s.utilization !== 'number' && typeof s.used_percentage !== 'number') { dropped++; continue; }
+      named++;
+      const w = toWin(s);
       scopedWeekly.push({
         name: s.display_name,
-        utilization: typeof s.utilization === 'number' ? (s.utilization > 1 ? s.utilization / 100 : s.utilization) : 0,
-        resetsAt,
+        utilization: w.utilization,
+        resetsAt: w.resetsAt,
         severity: s.severity || 'normal',
       });
     }
@@ -540,6 +552,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
         const name = k.replace(/^seven_day_/, '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
         if (have.has(name.toLowerCase())) continue; // array entry wins
         have.add(name.toLowerCase());
+        if (/^seven_day_./.test(k)) named++;
         scopedWeekly.push({ name, utilization: w.utilization, resetsAt: w.resetsAt, severity: w.utilization >= 1 ? 'exceeded' : 'normal' });
       }
     }
@@ -548,7 +561,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
       fetchedAt: Date.now(), source: 'control',
       scopedFetchedAt: scopedWeekly.length ? Date.now() : undefined,
-    }, dropped === 0);
+    }, dropped === 0, named);
   }
 
   // Chat-mode PASSIVE limit signal (2.260.0, ToS-clean by construction): the

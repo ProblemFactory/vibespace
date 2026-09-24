@@ -317,7 +317,10 @@ class UsageHistory {
       for (const line of data.split('\n')) {
         if (!line) continue;
         let e; try { e = JSON.parse(line); } catch { out.push(line); continue; }
-        if (e.sid && (attrib[e.sid] || emptied.has(e.sid))) {
+        // A row the ledger-by-slot backfill re-keyed (B-f69c) is PROVEN by the
+        // slot record that names it — possibly the transition ledger, which this
+        // walk cannot read — so no re-bake generation may re-derive it.
+        if (e.sid && !e.slotRekeyedBy && (attrib[e.sid] || emptied.has(e.sid))) {
           const acct = this._acctAt(e.sid, e.ts, attrib, meta[e.sid]?.acct);
           // remote-host events (atype 'host') are attributed at ingest — the
           // LOCAL attribution log knows nothing about remote sids and would

@@ -54,6 +54,9 @@ ck('LIVE: null buckets skipped, extra_usage not a scoped entry', !lv.scopedWeekl
 {
   const QM = require('../src/quota-model.js');
   ck('LIVE: the parse claims the model scope (it dropped nothing)', QM.scopedEnumeration(lv) === true);
+  // B-9f4b: …and it NAMED exactly one model cap — `seven_day_sonnet`. The codename bucket is KEPT
+  // (a stated spend counts) but inferred from the key's shape, so it never carries the right to retire.
+  ck('LIVE: the parse NAMED one model cap (seven_day_sonnet), not the codename bucket', QM.scopedNamedCount(lv) === 1);
 }
 
 // ── chat-mode limit banner parser (passive exhaustion signal) ──
@@ -118,6 +121,16 @@ ck("banner: 'Fable 5 limit' (no week word) → scoped Fable", (()=>{const r=pb("
   // …while an object that is not window-shaped at all is neither a bucket nor a drop.
   const other = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { five_hour: { utilization: 1 }, some_flag: { enabled: true } } });
   ck('a non-window object is ignored and costs nothing', other.scopedWeekly.length === 0 && QM.scopedEnumeration(other) === true);
+  // A NAME WITHOUT A NUMBER IS A DROP IN THE ARRAY TOO (quota r2, the r2
+  // verifier's d_namedNoNumber): the array branch counted `{display_name}`
+  // with no number as NAMED — the right to retire under B-9f4b — and wrote a
+  // fabricated 0 %, while the key branch above counts the same shape as a drop.
+  const arrNoNum = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { five_hour: { utilization: 1 }, seven_day_sonnet: { utilization: 12, resets_at: 1786900000 }, model_scoped: [{ display_name: 'Fable' }] } });
+  ck('a model_scoped entry with a name and NO number is not a bucket (never a fabricated 0 %) (red on quota 2: {utilization:0})', !arrNoNum.scopedWeekly.some((b) => b.name === 'Fable'));
+  ck('…it is counted as a DROP: the parse claims no enumeration, so it can retire nothing (red on quota 2: authority [model], named 2)',
+    QM.scopedEnumeration(arrNoNum) === false && (QM.authoritativeScopesOf(arrNoNum) || []).length === 0 && QM.scopedNamedCount(arrNoNum) === 1);
+  const arrPct = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { model_scoped: [{ display_name: 'Fable', used_percentage: 40, resets_at: 1786900000 }] } });
+  ck('…while an entry stating `used_percentage` is read like the key branch reads it (40 → 0.4)', arrPct.scopedWeekly.length === 1 && Math.abs(arrPct.scopedWeekly[0].utilization - 0.4) < 1e-9 && QM.scopedEnumeration(arrPct) === true);
 }
 
 console.log(fail?`${fail} FAILED`:`ALL PASS (${pass})`);

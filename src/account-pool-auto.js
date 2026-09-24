@@ -725,7 +725,8 @@ function poolCreditsNotice(d, { poolName = '', memberName = 'the current member'
 // the ToS explicit-permit argument; cadence made BURN-AWARE per the owner's
 // "30min太慢, workflow快跑时容易挂") ──
 // Pure: pick which accounts to ground-truth via `claude -p /usage` this tick.
-// list: [{ key, fetchedAt, lastAttemptAt, estDriftPct, activeBurn }]
+// list: [{ key, fetchedAt, lastAttemptAt, estDriftPct, activeBurn,
+//          projCrossInMs?, estBurnPtPerMin?, projReadCrossAt? }]
 //   estDriftPct = max over buckets of |estimated - last reading| in POINTS —
 //   the dead-reckoner's own signal that real burn happened since the reading.
 //   activeBurn  = any estimated movement at all since fetchedAt.
@@ -740,17 +741,191 @@ function poolCreditsNotice(d, { poolName = '', memberName = 'the current member'
 // floor keeps bursts from hammering one account; one refresh per tick
 // serializes the CLI spawns fleet-wide; drift beats stale-idle in priority,
 // then oldest reading first.
-function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, idleMaxAgeMs = 60 * 60e3, maxPerTick = 1 } = {}) {
-  const eligible = (list || []).filter((a) => {
-    if (!a || !a.key) return false;
-    if (now - (a.lastAttemptAt || 0) < floorMs) return false;
-    const age = now - (a.fetchedAt || 0);
-    if ((a.estDriftPct || 0) >= driftPct) return true;
-    if (age >= maxAgeMs && a.activeBurn) return true;
-    return age >= idleMaxAgeMs;
-  });
-  eligible.sort((x, y) => ((y.estDriftPct || 0) - (x.estDriftPct || 0)) || ((x.fetchedAt || 0) - (y.fetchedAt || 0)));
-  return eligible.slice(0, maxPerTick).map((a) => a.key);
+// THE PROJECTION RULE (B-f69c ③, owner ruling ut-1c6c15a2db ③ — "1%/min 燃烧
+// 40 分钟读一次不够"): the estimator's OWN projection may ask for the same fast
+// rung — `projCrossInMs` is when the member's burn carries a bucket of a live
+// conversation's family across its switch line (projectionCrossing), and when
+// that lands BEFORE the next reading the rules above would take
+// (`nextScheduledReadMs`: the age rung, or the drift rung at the current burn
+// `estBurnPtPerMin`), the reading is taken now so the pool re-decides on a
+// real number instead of meeting the line blind. It is the SAME rung under the
+// SAME floor, backoff and one-per-tick serialization — event-driven by a
+// projection, never a cadence — and it ranks first (the soonest crossing).
+// THE PROJECTION'S OWN MEMORY (quota r1, the B-f69c ③ verifier, reproduced):
+// the floor paces a spawn, it never limited the drift rung (which needs
+// `driftPct` of movement between reads) — and the projection had no such
+// self-limiter: after each reading the crossing is still ahead and still before
+// the next scheduled read, so it was answered again every time the floor
+// cleared (a slow 0.05 %/min approach: 7 reads before the line where the
+// pre-B-f69c rule took none). The caller carries `projReadCrossAt` = the
+// crossing INSTANT its last successful projection read was spent on; the same
+// instant within PROJECTION_MOVE_MS (= the floor: the estimate's own wobble) is
+// not asked again, a crossing that moved further is a new crossing. The drift,
+// age and idle rungs are untouched by the memory.
+// THE MEMORY IS THE BUCKET (quota r2, the r2 verifier's Poisson worlds): the
+// crossing INSTANT is the burn window's noise — a 10-min trailing window over
+// Poisson arrivals moves a 20-min crossing by ±9 min tick to tick (47-65 % of
+// ticks move more than the band), so "a new crossing" was bought again at the
+// floor cadence (4 reads before the line where a constant burn took 1; a
+// 10-member fleet 42 projection reads in its first hour instead of 9). The
+// loop now remembers WHICH BUCKET (the crossing's `label`) of WHICH WINDOW
+// (its `resetsAt`) a successful projection read was spent on —
+// `projReads = {label: {at, resetsAt, boughtAt}}` — and a bucket that already
+// bought its reading is never asked again before its window resets (an
+// unknown reset: PROJECTION_MEMORY_MS after the purchase). A second bucket is
+// its own question (two families ⇒ two reads, alternation re-buys nothing).
+// The instant band stays as a secondary guard across buckets.
+// A PASSIVE READING IS THE READING (quota r2): the projection arm also needs
+// the reading to be at least `floorMs` old — a statusline reading 30 s old is
+// exactly the number a projection read would have bought, and since
+// `fetchedAt` lives on disk this is also the rung's restart-proof floor.
+// THE READ IS SPENT NEXT TO THE LINE (quota r3, the r3 verifier's placement
+// worlds): with one read per bucket the rule used to spend it at the FIRST
+// eligible tick — the moment the reading turned floor-old — i.e. as far from
+// the line as the floor allowed (a 10 % / 0.05 %/min approach bought its read
+// at min 43 for a line at min 80, so the estimate the pool met the line with
+// was 37 min old). The projection arm now also needs the crossing inside
+// PROJECTION_WINDOW_MS (= the floor + the lead, 10 min): the one read lands in
+// the last window before the line, where PROJECTION_LEAD_SEC's promise (an
+// early move covers exactly the stretch no fresh reading can) holds again.
+// A read of ANY rung taken while the bucket's crossing is inside that window
+// is the purchase too (the loop marks it) — a stale-idle read at min 42 is the
+// same number a projection read at min 47 would buy.
+// A RECORD THAT CANNOT BE A WINDOW IS NO MEMORY (quota r3): no vendor window
+// is longer than 7 d, so a record whose resetsAt lies more than
+// PROJECTION_RECORD_MAX_MS past its purchase (a ms-shaped resetsAt, a
+// hand-edited file) is ignored and pruned — never a bucket silenced for good.
+// A crossing that names a DIFFERENT known window than the record (a panel
+// estimate corrected by an exact rate_limit_event, the next window) is a new
+// question (beyond PROJECTION_MOVE_MS of disagreement).
+const PROJECTION_MOVE_MS = 5 * 60e3;
+const PROJECTION_WINDOW_MS = 2 * PROJECTION_MOVE_MS;
+const PROJECTION_MEMORY_MS = 5 * 3600e3;
+const PROJECTION_RECORD_MAX_MS = 8 * 86400e3;
+/** Has this account's current projection bucket already bought its reading?
+ *  PURE: `a.projLabel` / `a.projResetsAt` = the crossing now; `a.projReads` =
+ *  the loop's memory `{label: {at, resetsAt, boughtAt}}`. */
+function projectionBucketBought(a, now) {
+  if (!a || a.projLabel == null || !a.projReads || typeof a.projReads !== 'object') return false;
+  const rec = a.projReads[String(a.projLabel)];
+  if (!rec || typeof rec !== 'object') return false;
+  const reset = Number(rec.resetsAt) || 0, boughtAt = Number(rec.boughtAt) || 0;
+  if (reset > 0 && reset * 1000 > boughtAt + PROJECTION_RECORD_MAX_MS) return false; // not a window any vendor has (quota r3)
+  const cur = Number(a.projResetsAt) || 0;
+  if (reset > 0 && cur > 0 && Math.abs(cur - reset) * 1000 > PROJECTION_MOVE_MS) return false; // the crossing is in ANOTHER window (quota r3)
+  const until = reset > 0 ? reset * 1000 : boughtAt + PROJECTION_MEMORY_MS;
+  return now < until;
+}
+/** The loop's memory after a SUCCESSFUL projection read of `pj` at `now`
+ *  (expired records pruned) — PURE, so the loop and the suites share it. */
+function projectionReadsAfter(reads, pj, now) {
+  const out = {};
+  for (const [k, r] of Object.entries(reads && typeof reads === 'object' ? reads : {})) {
+    if (!r || typeof r !== 'object') continue;
+    if (projectionBucketBought({ projLabel: k, projReads: { [k]: r } }, now)) out[k] = r;
+  }
+  if (pj && pj.label != null && Number.isFinite(Number(pj.inMs))) out[String(pj.label)] = { at: now + Number(pj.inMs), resetsAt: Number(pj.resetsAt) || 0, boughtAt: now };
+  return out;
+}
+function nextScheduledReadMs(a, now, { driftPct = 4, maxAgeMs = 45 * 60e3, idleMaxAgeMs = 60 * 60e3 } = {}) {
+  const age = now - ((a && a.fetchedAt) || 0);
+  const byAge = Math.max(0, Math.min(a && a.activeBurn ? maxAgeMs - age : Infinity, idleMaxAgeMs - age));
+  const burn = Number(a && a.estBurnPtPerMin) || 0;
+  const byDrift = burn > 0 ? Math.max(0, ((driftPct - ((a && a.estDriftPct) || 0)) / burn) * 60e3) : Infinity;
+  return Math.min(byAge, byDrift);
+}
+/** WHY this account is read this tick ('projection' | 'drift' | 'stale-active'
+ *  | 'stale-idle'), or null — the ONE eligibility rule decideCliRefresh sorts
+ *  and the loop's journal line names. */
+function cliRefreshWhy(a, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, idleMaxAgeMs = 60 * 60e3, projMoveMs = PROJECTION_MOVE_MS, projWindowMs = PROJECTION_WINDOW_MS } = {}) {
+  if (!a || !a.key) return null;
+  if (now - (a.lastAttemptAt || 0) < floorMs) return null;
+  const age = now - (a.fetchedAt || 0);
+  const cross = a.projCrossInMs == null ? NaN : Number(a.projCrossInMs);
+  if (Number.isFinite(cross) && cross > 0 && cross <= projWindowMs && age >= floorMs && cross < nextScheduledReadMs(a, now, { driftPct, maxAgeMs, idleMaxAgeMs })) {
+    // ONE READING PER BUCKET (quota r2): a bucket whose window already bought
+    // a projection read is never asked again; the r1 instant band (± projMoveMs
+    // of the last bought instant) stays as the secondary guard. A reading
+    // younger than the floor (a passive one) IS the reading — `age >= floorMs`.
+    const bought = a.projReadCrossAt == null ? NaN : Number(a.projReadCrossAt);
+    if (!projectionBucketBought(a, now) && !(Number.isFinite(bought) && Math.abs(now + cross - bought) <= projMoveMs)) return 'projection';
+  }
+  if ((a.estDriftPct || 0) >= driftPct) return 'drift';
+  if (age >= maxAgeMs && a.activeBurn) return 'stale-active';
+  return age >= idleMaxAgeMs ? 'stale-idle' : null;
+}
+function decideCliRefresh(list, now, { floorMs = 5 * 60e3, driftPct = 4, maxAgeMs = 45 * 60e3, idleMaxAgeMs = 60 * 60e3, maxPerTick = 1, projMoveMs = PROJECTION_MOVE_MS, projWindowMs = PROJECTION_WINDOW_MS } = {}) {
+  const opts = { floorMs, driftPct, maxAgeMs, idleMaxAgeMs, projMoveMs, projWindowMs };
+  const eligible = (list || []).map((a) => ({ a, why: cliRefreshWhy(a, now, opts) })).filter((x) => x.why);
+  const proj = (x) => (x.why === 'projection' ? Number(x.a.projCrossInMs) : Infinity);
+  eligible.sort((x, y) => (proj(x) - proj(y)) || ((y.a.estDriftPct || 0) - (x.a.estDriftPct || 0)) || ((x.a.fetchedAt || 0) - (y.a.fetchedAt || 0)));
+  return eligible.slice(0, maxPerTick).map((x) => x.a.key);
+}
+
+// ── THE PROJECTION (B-f69c ③, 2026-09-23) ──────────────────────────────────
+// The pool decides on the ESTIMATED view of NOW; between two readings that is
+// the best it has, and at a fast burn it is not enough — a bucket 4 points
+// above its line at 1 %/min is across it before any scheduled reading lands.
+// `burn` = {fiveHour|sevenDay|'scoped:<name>': utilization per MINUTE} from
+// the estimator (usage-estimator burnRates); an absent key is no claim.
+// Two uses, both PURE here:
+//   projectCacheAhead — the view `leadSec` from now: every bucket advanced by
+//     its own burn, except a window that resets inside the lead (it refills;
+//     advancing a spent number past its own reset would invent a wall) and an
+//     empty window (nobody is spending in it — B-8b12);
+//   projectionCrossing — when the soonest bucket crosses its switch line (the
+//     hot bar on a hot pool, the hard bar otherwise), strictly in the FUTURE:
+//     a bucket already under its line is the estimate's business, not a
+//     projection's.
+// THE WARM RULES STAND: the engine hands a projected view ONLY to a decision
+// about a conversation whose prompt cache is COLD. A projection alone never
+// moves a warm conversation — it can only buy the fresh reading (the auto-cli
+// fast rung above) that the owner's warm-cache and first-stop rules then
+// judge exactly as before.
+// PROJECTION_LEAD_SEC is the fast rung's own floor: the longest a reading the
+// projection asked for can be withheld by pacing — so an early move covers
+// exactly the stretch no fresh reading can cover. It holds because the read is
+// spent inside PROJECTION_WINDOW_MS of the line (quota r3), so the reading
+// the crossing is judged on is at most the floor + the lead old.
+const PROJECTION_LEAD_SEC = 300;
+function _burnKey(kind, b) { return kind === 'scoped' ? 'scoped:' + String((b && b.name) || '').trim().toLowerCase() : kind; }
+function projectCacheAhead(cache, burn, nowSec, leadSec = PROJECTION_LEAD_SEC) {
+  if (!cache || typeof cache !== 'object' || !burn || !(leadSec > 0)) return cache;
+  let moved = false;
+  const adv = (b, key) => {
+    if (!b || typeof b !== 'object') return b;
+    const r = Number(burn[key]);
+    if (!(r > 0) || b.state === 'empty' || !bucketStatesSpend(b)) return b;
+    const u = Number(b.utilization);
+    if (!Number.isFinite(u)) return b;
+    const reset = Number(b.resetsAt) || 0;
+    if (reset && reset <= nowSec + leadSec) return b; // it refills inside the lead
+    moved = true;
+    return { ...b, utilization: Math.min(1.2, u + (r * leadSec) / 60), projected: true };
+  };
+  const out = { ...cache, fiveHour: adv(cache.fiveHour, 'fiveHour'), sevenDay: adv(cache.sevenDay, 'sevenDay') };
+  if (Array.isArray(cache.scopedWeekly)) out.scopedWeekly = cache.scopedWeekly.map((b) => adv(b, _burnKey('scoped', b)));
+  if (!moved) return cache;
+  out.projectedAheadSec = leadSec;
+  return out;
+}
+function projectionCrossing(cache, burn, nowSec, { hot = false } = {}) {
+  if (!cache || typeof cache !== 'object' || !burn) return null;
+  const rows = [['fiveHour', cache.fiveHour, '5h', 'fiveHour'], ['weekly', cache.sevenDay, '7d', 'sevenDay']];
+  for (const b of Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : []) rows.push(['weekly', b, String((b && b.name) || 'model cap'), _burnKey('scoped', b)]);
+  let best = null;
+  for (const [kind, b, label, key] of rows) {
+    const rem = bucketRemaining(b, nowSec);
+    const pctPerMin = (Number(burn[key]) || 0) * 100;
+    if (rem == null || !(pctPerMin > 0) || (b && b.state === 'empty')) continue;
+    const line = hot ? THRESH[kind].hot : THRESH[kind].hard;
+    if (rem < line) continue; // already under: the estimate of NOW decides that
+    const inSec = ((rem - line) / pctPerMin) * 60;
+    const reset = bucketCounts(b) ? (Number(b.resetsAt) || 0) : 0;
+    if (reset && reset <= nowSec + inSec) continue; // it refills before it gets there
+    if (!best || inSec < best.inSec) best = { inSec: Math.round(inSec), label, kind, remaining: rem, line, pctPerMin: Math.round(pctPerMin * 100) / 100, band: hot ? 'soft' : 'hard', resetsAt: reset }; // resetsAt = the window the crossing is in (0 = unknown) — the auto-cli memory's key half
+  }
+  return best;
 }
 
 // ── auth-failure classification (2.335.0, owner report: a banned/expired/
@@ -844,4 +1019,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 
 module.exports = {
   quotaVerdict, conversationDisplayName,
-  classifyAuthFailure, decideCliRefresh, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };

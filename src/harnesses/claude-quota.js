@@ -84,9 +84,11 @@ function parseCliUsageText(text, nowMs) {
   // the parse itself still degrades exactly as it always has.
   let printed = 0;
   for (const m of s.matchAll(/^Current week \(([^)]+)\):/gm)) if (!/^all models$/i.test(m[1])) printed++;
+  // Every entry is a `Current week (<model>)` line: the panel NAMES each cap it
+  // prints (B-9f4b — the right to retire needs a NAMED cap, `authoritativeScopesOf`).
   return quotaModel.markScopedEnumeration(
     { fiveHour: fiveHour || undefined, sevenDay: sevenDay || undefined, scopedWeekly, fetchedAt: nowMs || Date.now() },
-    printed === scopedWeekly.length);
+    printed === scopedWeekly.length, scopedWeekly.length);
 }
 
 // GET /api/oauth/usage reply → usage-cache shape (usage-routes `_parseUsage`,
@@ -186,7 +188,10 @@ function parseOAuthUsage(u) {
     fiveHour, sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
     overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(),
-  }, dropped === 0);
+    // Both branches name every entry they keep — a `limits[]` display name or a
+    // `seven_day_<model>` key; this parse never infers a cap from a codename
+    // (B-9f4b: only a NAMED cap carries the right to retire).
+  }, dropped === 0, scopedWeekly.length);
 }
 
 // ONE entry over the three claude reading shapes (the harness contract).

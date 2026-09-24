@@ -484,5 +484,34 @@ const cs = (total, fable = total) => ({ total, byFamily: { fable, opus: total - 
   ck('③ idle trail = zero extrapolation', Math.abs(eIdle.sevenDay.utilization - eOff.sevenDay.utilization) < 1e-9);
 }
 
+// ── THE BURN (B-f69c ③): the projection's input — utilization per MINUTE ─────
+{
+  ck('burn: the window is ten minutes', est.BURN_WINDOW_MS === 10 * 60000);
+  const rates = { fiveHour: { rate: 1 / 500 }, sevenDay: { rate: 1 / 1730 }, 'scoped:fable': { rate: 1 / 875 } };
+  let asked = null;
+  const costFn = (from, to) => { asked = [from, to]; return { total: 10, byFamily: { fable: 8, opus: 2, sonnet: 0, haiku: 0, other: 0 } }; };
+  const b = est.burnRates({ rates, costFn, nowMs: T0 });
+  ck('burn: asks the ledger for the trailing window [now − 10 min, now]', asked && asked[0] === T0 - 600000 && asked[1] === T0);
+  ck('burn: 5h = rate × window cost / minutes ($10 over 10 min at 1/500 ⇒ 0.002/min = 0.2 %/min)', approx(b.fiveHour, 0.002));
+  ck('burn: 7d over the TOTAL, the Fable cap over the FABLE family cost only', approx(b.sevenDay, 10 / 1730 / 10) && approx(b['scoped:fable'], 8 / 875 / 10));
+  const cls = est.burnRates({ rates: { fiveHour: { rate: 1 / 500, rateCw: 1 / 400, rateCr: 1 / 4000, rateFresh: 1 / 200 } }, costFn: () => ({ total: 10, byFamily: {}, byClass: { cw: 4, cr: 4, other: 2 } }), nowMs: T0 });
+  ck('burn: the 5h bucket uses the CLASS coefficients when the regression produced them (the predict rule)', approx(cls.fiveHour, (4 / 400 + 4 / 4000 + 2 / 200) / 10));
+  ck('burn: no spend in the window ⇒ NO claim (an empty object, never a zero burn)', Object.keys(est.burnRates({ rates, costFn: () => ({ total: 0, byFamily: {} }), nowMs: T0 })).length === 0);
+  ck('burn: a bucket without a learned rate has no entry', !('scoped:opus' in b));
+  ck('burn: a throwing ledger is no claim, never a throw', Object.keys(est.burnRates({ rates, costFn: () => { throw new Error('x'); }, nowMs: T0 })).length === 0);
+  // the class: burnFor goes through the identity's own learned rates AND the live odometer
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-est-burn-'));
+  const key = 'org:burn';
+  fs.writeFileSync(path.join(dir, 'anchors-org_burn.ndjson'), JSON.stringify({ ...mkAnchor(T0, { u7: 0.40 }), identityKey: key, accountId: 'sub-x' }) + '\n');
+  const fakeHistory = { *_events() {}, _cost: () => 0, _evCache: { rids: new Set(), mids: new Set() } };
+  const ue = new est.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: fakeHistory, resolveIdentity: (id) => (id === 'sub-x' ? { identityKey: key } : null), priorsFor: () => ({ sevenDay: 1730 }) });
+  ck('burnFor: an idle account has no burn', Object.keys(ue.burnFor('sub-x', T0 + HR)).length === 0);
+  ue.noteLive({ rid: 'req_burn1', accountId: 'sub-x', model: 'claude-fable-5', usd: 17.3, ts: T0 + HR - 5 * 60000 });
+  const bf = ue.burnFor('sub-x', T0 + HR);
+  ck('burnFor: a streamed $17.30 five minutes ago on a $1730 week ⇒ 1 % of the week over the 10-min window = 0.1 %/min', approx(bf.sevenDay, 0.01 / 10, 1e-5));
+  ck('burnFor: an unknown account is no claim', Object.keys(ue.burnFor('sub-nobody', T0 + HR)).length === 0);
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

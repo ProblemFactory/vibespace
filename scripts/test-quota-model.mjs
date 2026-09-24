@@ -353,6 +353,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ["src/server/otel-ingest.js", "names it in one warning string (\"no usage-cache orgUuid match\"); it writes the OTel stash"],
       ["src/server/spend-guard.js", "the P4 spend ceiling (2.369.81): it READS a usage-cache object through an injected dep (deps.readCacheFor, for the overage verdict) and its own writeJsonAtomic writes data/spend-budget.json — the persisted per-identity budget, a different store"],
       ["src/usage-anchors.js", "writes the ANCHOR streams (data/usage-anchors/*.ndjson) — a different store, fed BY cache writes"],
+      ["src/server/auto-cli-loop.js", "READS usage-cache/<id>.json to pace the auto-cli rung; its own write is data/auto-cli-state.json — the loop's persisted pacing state (quota r2), a different store"],
       ["src/ws-create.js", "names VIBESPACE_USAGE_CACHE when shipping the remote tools; it writes session state"],
       ['data/bin/vibespace-usage', 'the SHIPPED statusline tool: a single file on hosts with no checkout, so it cannot require src/ — the same documented exception as vibespace-usage-scan. WHAT IT MIRRORS IS THE READING-LAG RULE, byte-for-byte between sentinels and pinned by test-readings-attribution §13 (r2: round 1 said "the RULES it needs", which was true of `windowOf` and false of the MERGE — and the merge is where it deleted `limits`). It does NOT mirror the write path: it spreads the stored object, states only the buckets it measured, and DROPS the one limit it can measure so the lift reconstructs it. §⑮ drives the real file.'],
     ]);
@@ -444,7 +445,7 @@ console.log('\n⑨ backend shape detection is by FIELDS, never by key name');
       ['src/lib/manage-agents.js', ['pending', 'the Agents roster donuts read u.fiveHour/u.sevenDay/u.scopedWeekly directly — they show the DERIVED view (now the plan limit, deterministically) but do not yet render the other limits or the not-started note']],
       ['src/lib/session-lifecycle.js', ['pending', "the billing switcher's per-account chips read the legacy pair for a one-line summary"]],
       ['src/lib/usage-pace.js', ['pending', "the pace/burn helper is a parity port of claude-swap's pace.py and reads the legacy pair verbatim"]],
-      ['server.js', ['pending', 'wiring only — it passes cache objects through to the engine']],
+      ['src/server/auto-cli-loop.js', ['pending', 'the auto-cli drift signal compares the estimate against the reading per legacy bucket (fiveHour/sevenDay/scopedWeekly) — server.js\'s old row, moved with the loop in quota r2 (same reads)']],
     ]);
     console.log('  … readers found:', found.length);
     const unlisted = found.filter((f) => !TABLE.has(f));
@@ -2199,7 +2200,10 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   // the legacy round trip and the accessors
   const lg = QM.fromLegacy({ scopedWeekly: [{ name: 'Model cap', utilization: 0.87, resetsAt: R }, { name: 'Fable', utilization: 0.5, resetsAt: R + 604800 }] }, { fetchedAt: 5, familyOf: familyOfScopedBucket });
   ok(lg.limits.map((l) => l.limitId).join() === 'model:cap,model:fable' && lg.limits[0].family === null && lg.limits[0].model === null && lg.limits[1].family === 'fable', '⑲ fromLegacy: "Model cap" lifts to model:cap with family/model null even with familyOf injected');
-  ok(QM.toLegacyView(lg).scopedWeekly[0].name === 'Model cap' && QM.scopedLimitId('Model cap') === 'model:cap' && QM.scopedLimitId('Fable') === 'model:fable', '⑲ toLegacyView: …and projects back under the placeholder name — the id round-trips (scopedLimitId is the ONE spelling)');
+  // (B-9f4b: the round trip is asked of a set that HAS a plan limit — with none, `legacyWindowLimit`
+  // promotes the first model limit into the plan slot and ⑳a's one-limit-one-row rule projects it there only)
+  const lgPlan = QM.fromLegacy({ sevenDay: { utilization: 0.4, resetsAt: R }, scopedWeekly: [{ name: 'Model cap', utilization: 0.87, resetsAt: R }, { name: 'Fable', utilization: 0.5, resetsAt: R + 604800 }] }, { fetchedAt: 5, familyOf: familyOfScopedBucket });
+  ok(QM.toLegacyView(lgPlan).scopedWeekly[0].name === 'Model cap' && QM.scopedLimitId('Model cap') === 'model:cap' && QM.scopedLimitId('Fable') === 'model:fable', '⑲ toLegacyView: …and projects back under the placeholder name — the id round-trips (scopedLimitId is the ONE spelling)');
   const both = QM.makeLimitSet({ identity: 'k', limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '7d', usedPct: 43, resetsAt: R, measuredAt: 1 })], fetchedAt: 1 }), fable(1), ph(2, 87, R + 604800)] });
   ok(QM.limitFor(both, { family: 'fable' }).limitId === 'model:fable' && QM.limitFor(both, { family: 'opus' }).limitId === 'plan', '⑲ limitFor: a family still finds ITS named lane; the placeholder governs no named request');
   ok(QM.applicableLimits(both, {}).some((l) => l.limitId === 'model:cap') && !QM.applicableLimits(both, { family: 'opus' }).some((l) => l.limitId === 'model:cap'), '⑲ applicableLimits: the placeholder counts for the ACCOUNT-level min (conservative) and never for a named family');
@@ -2250,6 +2254,169 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
     render({ five_hour: { used_percentage: 13, resets_at: nowSec + 3600 }, seven_day: { used_percentage: 47, resets_at: RR }, seven_day_opus: { used_percentage: 33, resets_at: RR } });
     const after3 = JSON.parse(fs.readFileSync(f, 'utf8'));
     ok((after3.scopedWeekly || []).find((s) => s.name === 'Opus')?.utilization === 0.33 && (after3.scopedWeekly || []).find((s) => s.name === 'Fable')?.utilization === 0.86, '⑲ TOOL: a top-level seven_day_opus field names its lane the same way (Opus 33, Fable untouched)');
+  }
+}
+
+// ── ⑳ B-9f4b: THE r6 VERIFIER'S TWO INFO FINDINGS, ON ITS OWN FIXTURES ──────
+//
+// (1) ONE VENDOR LIMIT, TWO PANEL ROWS. `__global_codex__.json` on this
+//     instance holds `codex_bengalfox`/"GPT-5.3-Codex-Spark" (model) + a
+//     `credits` limit and NO plan limit (B-9213 overwrote it before the model
+//     existed). `legacyWindowLimit` rightly promotes the Spark limit into the
+//     plan slot (⑭) — and the scoped projection forty lines below emitted the
+//     SAME limit again: `scopedWeekly: undefined → [{GPT-5.3-Codex-Spark, 0,
+//     state:'empty'}]`, measured by the verifier running the migration on a
+//     copy of that file. Harmless to the MIN (identical numbers), but a panel
+//     rendered one vendor limit as two rows. The rule: the limit promoted into
+//     the plan slot is not projected a second time AS WELL — only when the
+//     window it would project is the very `sevenDay` it already fills.
+// (2) AN INFERRED CODENAME MAY NOT CARRY THE RIGHT TO RETIRE. r6 admitted
+//     reset-less buckets, so the control parse turns an untouched codename
+//     field (`nimbus_quill: {utilization: 0, resets_at: null}`, the 2026-08-09
+//     LIVE envelope in scripts/test-get-usage-parse.mjs) into a scopedWeekly
+//     entry — and `authoritativeScopesOf` asked only that the list be
+//     NON-EMPTY. So a payload whose ONLY model-scoped entry is a codename the
+//     parse could not name as a model claimed to have enumerated the model caps
+//     and RETIRED a real, spent Fable cap. The authority now needs a cap the
+//     parse can NAME as a model: a `limits[]`/`model_scoped` entry with a
+//     display name, a `seven_day_<model>` key, a `Current week (<model>)` panel
+//     line — never a sibling key inferred to be one.
+console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries the right to retire');
+{
+  const POOL20 = require(path.join(ROOT, 'src/account-pool-auto.js'));
+  const CQ20 = require(path.join(ROOT, 'src/harnesses/claude-quota.js'));
+  const { ClaudeCodeAdapter: ADP20 } = require(path.join(ROOT, 'src/adapters/claude-code.js'));
+
+  // ── ⑳a the verifier's __global_codex__ shape (the real Spark push, no plan limit) ─
+  {
+    const at = T0;
+    const noPlan = QM.mergeLimitSets(
+      CODEXQ.toLimitSet(sparkAt(at), { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at }),
+      QM.makeLimitSet({ identity: '__global_codex__', fetchedAt: at, limits: [QM.makeLimit({ limitId: 'credits', scope: 'credits', fetchedAt: at, windows: [], flags: { hasCredits: false } })] }));
+    eq(QM.limitsOf(noPlan).map((l) => `${l.limitId}:${l.scope}`), ['codex_bengalfox:model', 'credits:credits'], '⑳a fixture: the verifier\'s file — the Spark model limit + credits, NO plan limit');
+    ok(QM.legacyWindowLimit(noPlan).limitId === 'codex_bengalfox', '⑳a …and the Spark limit is the one promoted into the plan slot (⑭)');
+    const v = QM.toLegacyView(noPlan, { nowSec: Math.round(at / 1000) + 60 });
+    ok(!!v.fiveHour && !!v.sevenDay && v.sevenDay.state === 'empty', '⑳a the promoted limit still fills fiveHour/sevenDay (a panel keeps the vendor\'s limit, marked empty)');
+    ok(v.scopedWeekly === undefined,
+      `⑳a …and is NOT projected a second time as a scopedWeekly row — one vendor limit, one row (got ${JSON.stringify(v.scopedWeekly)})`);
+    // through the ONE write path, as the migration and every codex push write it
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-qm20a-${process.pid}-`)); tmpDirs.push(dir);
+    const wr = W.writeCacheObject({ cacheDir: dir, key: '__global_codex__', obj: { fetchedAt: at, source: 'codex-rate-limits' }, set: noPlan, measuredAt: at, source: 'codex-rate-limits', backend: 'codex' });
+    const onDisk = W.readCacheObject(dir, '__global_codex__');
+    ok(wr.ok && onDisk && onDisk.scopedWeekly === undefined && onDisk.sevenDay && (onDisk.limits || []).some((l) => l.limitId === 'codex_bengalfox'),
+      `⑳a …the file the write path persists carries it once too, and the typed limit is untouched (scopedWeekly ${JSON.stringify(onDisk && onDisk.scopedWeekly)})`);
+    // THE MONEY SIDE: dropping the duplicate row changes no pool answer — it was a MIN over identical numbers.
+    const spent = QM.mergeLimitSets(noPlan, CODEXQ.toLimitSet({ ...sparkAt(at + 1000), primary: { usedPercent: 90, windowDurationMins: 300, resetsAt: Math.round(at / 1000) + 3600 }, secondary: { usedPercent: 97, windowDurationMins: 10080, resetsAt: Math.round(at / 1000) + 200000 } }, { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at + 1000 }));
+    const nowA = Math.round(at / 1000) + 120;
+    const vs = QM.toLegacyView(spent, { nowSec: nowA });
+    const withRow = { ...vs, scopedWeekly: [{ name: 'GPT-5.3-Codex-Spark', utilization: 0.97, resetsAt: Math.round(at / 1000) + 200000 }] };
+    eq(POOL20.accountRemaining(vs, nowA), POOL20.accountRemaining(withRow, nowA),
+      '⑳a the pool reads the SAME answer with or without the duplicate row (no constraint was lost with it)');
+    ok(POOL20.accountRemaining(vs, nowA).remaining <= 10 && POOL20.accountRemaining(vs, nowA).known === true,
+      `⑳a …and that answer still sees the spent Spark limit (${JSON.stringify(POOL20.accountRemaining(vs, nowA))})`);
+
+    // CONTROLS: the skip is exactly the promoted limit, never "any model limit".
+    const withPlan = QM.mergeLimitSets(noPlan, CODEXQ.toLimitSet(CODEX_PLAN, { identity: '__global_codex__', source: 'codex-rate-limits', fetchedAt: at + 2000 }));
+    const vp = QM.toLegacyView(withPlan, { nowSec: Math.round(at / 1000) + 60 });
+    ok(QM.legacyWindowLimit(withPlan).limitId === 'codex' && (vp.scopedWeekly || []).some((e) => e.name === 'GPT-5.3-Codex-Spark'),
+      '⑳a CONTROL: once a plan limit exists the Spark limit is a model limit again and keeps its scopedWeekly row');
+    const R = Math.round(at / 1000) + 400000;
+    const twoModels = QM.makeLimitSet({ identity: 'k', fetchedAt: at, limits: [
+      QM.makeLimit({ limitId: 'model:fable', name: 'Fable', scope: 'model', family: 'fable', fetchedAt: at + 5, windows: [QM.makeWindow({ kind: '7d', usedPct: 40, resetsAt: R, measuredAt: at })] }),
+      QM.makeLimit({ limitId: 'model:opus', name: 'Opus', scope: 'model', family: 'opus', fetchedAt: at, windows: [QM.makeWindow({ kind: '7d', usedPct: 70, resetsAt: R, measuredAt: at })] }),
+    ] });
+    const v2 = QM.toLegacyView(twoModels, { nowSec: Math.round(at / 1000) + 60 });
+    ok(QM.legacyWindowLimit(twoModels).limitId === 'model:fable' && v2.sevenDay.utilization === 0.4
+      && JSON.stringify((v2.scopedWeekly || []).map((e) => e.name)) === '["Opus"]',
+      `⑳a CONTROL: with two model limits and no plan, only the PROMOTED one loses its row — the other keeps it (${JSON.stringify(v2.scopedWeekly)})`);
+    const monthlyOnly = QM.makeLimitSet({ identity: 'k', fetchedAt: at, limits: [
+      QM.makeLimit({ limitId: 'model:x', name: 'X', scope: 'model', fetchedAt: at, windows: [
+        QM.makeWindow({ kind: '5h', minutes: 300, usedPct: 10, resetsAt: Math.round(at / 1000) + 3600, measuredAt: at }),
+        QM.makeWindow({ kind: 'monthly', usedPct: 80, resetsAt: R, measuredAt: at }),
+      ] }),
+    ] });
+    const vm = QM.toLegacyView(monthlyOnly, { nowSec: Math.round(at / 1000) + 60 });
+    ok(vm.sevenDay === undefined && (vm.scopedWeekly || []).length === 1 && vm.scopedWeekly[0].utilization === 0.8,
+      `⑳a CONTROL: a promoted limit whose budget window is NOT the sevenDay it fills keeps its row — the view never drops a window it projects nowhere else (${JSON.stringify(vm.scopedWeekly)})`);
+
+    // NEGATIVE CONTROL: the pre-fix projection, from a patched copy in a SCRATCH dir
+    // (quota-model imports nothing, so the copy runs anywhere — never in the tree).
+    const skip = "    if (l === plan && w === windowOfKind(plan, '7d')) continue;\n";
+    const src20 = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
+    ok(src20.split(skip).length === 2, '⑳a NEGATIVE CONTROL setup: the skip line is in the module exactly once');
+    const mdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-qm20mut-${process.pid}-`)); tmpDirs.push(mdir);
+    fs.writeFileSync(path.join(mdir, 'quota-model.js'), src20.split(skip).join(''));
+    const QMpre20 = require(path.join(mdir, 'quota-model.js'));
+    const vPre20 = QMpre20.toLegacyView(noPlan, { nowSec: Math.round(at / 1000) + 60 });
+    ok((vPre20.scopedWeekly || []).length === 1 && vPre20.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && vPre20.sevenDay && vPre20.sevenDay.resetsAt === vPre20.scopedWeekly[0].resetsAt,
+      `⑳a NEGATIVE CONTROL: without the skip the verifier's measurement comes back — the Spark limit is BOTH the sevenDay and a scopedWeekly row (${JSON.stringify(vPre20.scopedWeekly)})`);
+  }
+
+  // ── ⑳b the right to retire needs a model cap the parse can NAME ──────────
+  {
+    // the 2026-08-09 LIVE control envelope, verbatim (scripts/test-get-usage-parse.mjs) …
+    const LIVE = () => ({ session: { total_cost_usd: 0 }, subscription_type: 'max', rate_limits_available: true, rate_limits: {
+      five_hour: { utilization: 34, resets_at: '2026-08-09T09:59:59.753015+00:00', limit_dollars: null },
+      seven_day: { utilization: 39, resets_at: '2026-08-11T16:59:59.753043+00:00' },
+      seven_day_oauth_apps: null, seven_day_opus: null,
+      seven_day_sonnet: { utilization: 12, resets_at: '2026-08-11T16:59:59.753043+00:00' },
+      nimbus_quill: { utilization: 0, resets_at: null },
+      extra_usage: { is_enabled: false } } });
+    // … and the shape the verifier named: the same envelope whose ONLY model-scoped entry is the codename bucket.
+    const CODENAME_ONLY = () => { const p = LIVE(); delete p.rate_limits.seven_day_sonnet; return p; };
+    const gate = QM.authoritativeScopesOf;
+    const cOnly = ADP20.parseGetUsageResponse(CODENAME_ONLY());
+    ok(QM.scopedEnumeration(cOnly) === true && cOnly.scopedWeekly.length === 1 && /nimbus/i.test(cOnly.scopedWeekly[0].name),
+      '⑳b fixture: the codename-only envelope enumerates (it dropped nothing) and its one scoped entry is the codename bucket (r6 kept it: a stated spend counts)');
+    ok(gate(cOnly) === null,
+      `⑳b …and it claims NO right to retire: the parse named no model cap, it inferred one from a sibling key (got ${JSON.stringify(gate(cOnly))})`);
+    ok(JSON.stringify(gate(ADP20.parseGetUsageResponse(LIVE()))) === '["model"]',
+      '⑳b the verbatim LIVE envelope still claims it — `seven_day_sonnet` is a seven_day_<model> key, a cap the parse NAMES');
+    const arr = CODENAME_ONLY(); arr.rate_limits.model_scoped = [{ display_name: 'Fable', utilization: 10, resets_at: '2026-08-11T16:59:59.753043+00:00' }];
+    ok(JSON.stringify(gate(ADP20.parseGetUsageResponse(arr))) === '["model"]',
+      '⑳b …as does a model_scoped entry with a display name beside the codename bucket');
+    const oauthNamed = { five_hour: { utilization: 20, resets_at: '2026-08-09T09:59:59Z' }, seven_day: { utilization: 20, resets_at: '2026-08-11T16:59:59Z' },
+      limits: [{ kind: 'weekly_scoped', scope: { model: { display_name: 'Fable' } }, percent: 10, resets_at: '2026-08-11T16:59:59Z' }] };
+    ok(JSON.stringify(gate(CQ20.parseOAuthUsage(oauthNamed))) === '["model"]', '⑳b …the OAuth parse\'s limits[] entry names one');
+    ok(JSON.stringify(gate(CQ20.parseOAuthUsage({ five_hour: { utilization: 20 }, seven_day: { utilization: 20 }, seven_day_opus: { utilization: 100 } }))) === '["model"]',
+      '⑳b …and so does its seven_day_<model> key');
+    ok(JSON.stringify(gate(CQ20.parseCliUsageText('Current session: 20% used\nCurrent week (all models): 20% used\nCurrent week (Fable): 10% used', Date.now()))) === '["model"]',
+      '⑳b …and so does a `Current week (<model>)` panel line');
+    const stripped = ADP20.parseGetUsageResponse(arr);
+    ok(gate(JSON.parse(JSON.stringify(stripped))) === null, '⑳b the NAMED count is a fact about one read too — a JSON round trip loses it (fails safe, like ⑱d)');
+
+    // END TO END, the verifier's scenario: a spent Fable cap on file, then the codename-only control probe.
+    const nowB = Math.floor(Date.now() / 1000);
+    const at = (s) => { const d = new Date(Date.now() + s * 1000); const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; return `${MON[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCHours() % 12 || 12}${d.getUTCHours() < 12 ? 'am' : 'pm'} (UTC)`; };
+    const PANEL = `Current session: 20% used · resets ${at(3 * 3600)}\nCurrent week (all models): 20% used · resets ${at(3 * 86400)}\nCurrent week (Fable): 100% used · resets ${at(3 * 86400)}\n`;
+    const run = (gateFn) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-qm20b-${process.pid}-`)); tmpDirs.push(dir);
+      const panel = CQ20.parseCliUsageText(PANEL, Date.now());
+      W.writeCacheObject({ cacheDir: dir, key: 'acct', obj: { ...panel, source: 'on-demand', scopedFetchedAt: Date.now() }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+        authoritativeScopes: gateFn(panel) });
+      const mid = W.readCacheObject(dir, 'acct');
+      const probe = ADP20.parseGetUsageResponse(CODENAME_ONLY());
+      W.writeCacheObject({ cacheDir: dir, key: 'acct', obj: probe, source: 'control', familyOf: familyOfScopedBucket, backend: 'claude',
+        authoritativeScopes: gateFn(probe) });
+      return { mid, after: W.readCacheObject(dir, 'acct') };
+    };
+    const ids = (o) => (o && o.limits || []).map((l) => l.limitId).sort();
+    const r = run(gate);
+    ok(ids(r.mid).includes('model:fable') && POOL20.accountRemaining(r.mid, nowB).remaining === 0,
+      `⑳b the panel establishes a SPENT Fable cap (${JSON.stringify(ids(r.mid))}, ${JSON.stringify(POOL20.accountRemaining(r.mid, nowB))})`);
+    ok(ids(r.after).includes('model:fable'),
+      `⑳b the codename-only probe does NOT retire it (${JSON.stringify(ids(r.after))})`);
+    const rem = POOL20.accountRemaining(r.after, nowB);
+    ok(rem.remaining === 0 && rem.known === true, `⑳b …so the pool still reads a spent account (${JSON.stringify(rem)})`);
+    // NEGATIVE CONTROL: the r6 rule verbatim ("enumerated AND the list is non-empty").
+    const r6gate = (u) => (QM.scopedEnumeration(u) && Array.isArray(u.scopedWeekly) && u.scopedWeekly.length ? ['model'] : null);
+    ok(JSON.stringify(r6gate(cOnly)) === '["model"]', '⑳b NEGATIVE CONTROL: the r6 rule DID grant the codename-only parse the right to retire');
+    const pre = run(r6gate);
+    ok(!ids(pre.after).includes('model:fable'),
+      `⑳b NEGATIVE CONTROL: …and under it the spent Fable cap is RETIRED (${JSON.stringify(ids(pre.after))})`);
+    const preRem = POOL20.accountRemaining(pre.after, nowB);
+    ok(preRem.remaining > 0,
+      `⑳b NEGATIVE CONTROL: …so the pool reads ${preRem.remaining} % free on an account whose Fable is gone — the money leak the tightening closes`);
   }
 }
 

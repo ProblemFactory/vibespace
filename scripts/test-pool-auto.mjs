@@ -525,5 +525,142 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
     /notePoolAuthFailure, noteTurnStopped,/.test(srv) && /noteTurnEnd, noteTurnStopped, noteWallSignal,/.test(srv));
 }
 
+// ── THE PROJECTION (B-f69c ③, owner ruling ut-1c6c15a2db ③): the estimator's
+// burn carries the view PROJECTION_LEAD_SEC ahead; a COLD conversation decides
+// on it and leaves BEFORE the line, a WARM one never does (a projection alone
+// never moves a warm conversation — the .149/.153 rules judge only readings). ──
+await (async () => {
+  const { projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, THRESH, warmCache } = require(path.resolve('src/account-pool-auto.js'));
+  const fs = require('node:fs'), os = require('node:os');
+  ck('proj: the lead is the fast rung\'s own floor (5 min)', PROJECTION_LEAD_SEC === 300);
+  // A: 5h at 14 % remaining, burning 1.2 %/min; B healthy; SAME weekly deadline (EDF silent)
+  const A14 = { fiveHour: { utilization: 0.86, resetsAt: NOW + 2 * H }, sevenDay: { utilization: 0.3, resetsAt: NOW + 3 * D }, scopedWeekly: [{ name: 'Fable', utilization: 0.4, resetsAt: NOW + 3 * D }] };
+  const burn = { fiveHour: 0.012, 'scoped:fable': 0.001 };
+  const ahead = projectCacheAhead(A14, burn, NOW, 300);
+  ck('proj: 5 min at 1.2 %/min takes the 5h from 14 % to 8 % remaining; the Fable cap moves by its own burn; 7d (no burn entry) does not move',
+    Math.abs(ahead.fiveHour.utilization - 0.92) < 1e-9 && ahead.fiveHour.projected === true && Math.abs(ahead.scopedWeekly[0].utilization - 0.405) < 1e-9 && ahead.sevenDay === A14.sevenDay && ahead.projectedAheadSec === 300, JSON.stringify(ahead));
+  ck('proj: no burn ⇒ the SAME object (no claim, nothing projected)', projectCacheAhead(A14, {}, NOW, 300) === A14 && projectCacheAhead(A14, null, NOW, 300) === A14 && projectCacheAhead(A14, burn, NOW, 0) === A14);
+  const soonReset = { ...A14, fiveHour: { utilization: 0.86, resetsAt: NOW + 120 } };
+  ck('proj: a window that resets INSIDE the lead is not advanced (it refills — a projection never invents a wall past its own reset)', projectCacheAhead(soonReset, burn, NOW, 300).fiveHour === soonReset.fiveHour);
+  ck('proj: an EMPTY window is never advanced (B-8b12: nobody is spending in it)', projectCacheAhead({ fiveHour: { utilization: 0, resetsAt: NOW + 5 * H, state: 'empty' } }, burn, NOW, 300).fiveHour.projected !== true);
+  const c = projectionCrossing(A14, burn, NOW, { hot: true });
+  ck('cross: on a hot pool the 5h reaches its 10 % soft line in (14−10)/1.2 min = 200 s', c && c.label === '5h' && c.line === THRESH.fiveHour.hot && c.inSec === 200 && c.band === 'soft' && c.pctPerMin === 1.2, JSON.stringify(c));
+  const ch = projectionCrossing(A14, burn, NOW, { hot: false });
+  ck('cross: a cold pool\'s line is the hard bar (5 %): 450 s', ch && ch.line === THRESH.fiveHour.hard && ch.inSec === 450 && ch.band === 'hard', JSON.stringify(ch));
+  ck('cross: a bucket already under its line is NOT a projection (the estimate of now decides it)', projectionCrossing({ fiveHour: { utilization: 0.95, resetsAt: NOW + 2 * H } }, burn, NOW, { hot: true }) === null);
+  ck('cross: a reset before the crossing ⇒ no crossing', projectionCrossing({ fiveHour: { utilization: 0.86, resetsAt: NOW + 100 } }, burn, NOW, { hot: true }) === null);
+  ck('cross: no burn ⇒ no crossing', projectionCrossing(A14, {}, NOW, { hot: true }) === null);
+
+  // the PURE decision on the two views: the projected one is soft-exhausted, the estimate of now is healthy
+  const B = { fiveHour: { utilization: 0.1, resetsAt: NOW + 2 * H }, sevenDay: { utilization: 0.3, resetsAt: NOW + 3 * D }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: NOW + 3 * D }] };
+  const caches = { a: A14, b: B };
+  const dec = (view, warm) => decidePoolSwitch({ currentId: 'a', members, readCache: view, nowSec: NOW, proactive: true, hot: true, explain: true, warm });
+  const nowView = (id) => caches[id] ?? null, projView = (id) => projectCacheAhead(caches[id] ?? null, id === 'a' ? burn : {}, NOW, 300);
+  ck('decide: on the estimate of NOW the member is healthy (14 % > the 10 % soft line) — nothing moves', dec(nowView, null).to === null);
+  const dp = dec(projView, null);
+  ck('decide: on the projected view it is soft-exhausted (8 %) — the move a cold conversation takes early', dp.to === 'b' && dp.reason === 'exhausted' && dp.band === 'soft', JSON.stringify(dp));
+
+  // ── the REAL engine: two conversations on member A, one cold, one warm ──
+  const { AccountManager } = require(path.resolve('src/accounts.js'));
+  const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
+  const { scratch } = await import('./scratch.mjs');
+  const scr = scratch('poolproj'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
+  // PATCHED COPIES live in a SCRATCH copy of src/ (never in the tree): the
+  // relative requires resolve inside the copy, node_modules through a symlink.
+  const mutEngine = (tag, from, to) => {
+    const root = path.join(scr, 'mut-' + tag);
+    fs.cpSync(path.resolve('src'), path.join(root, 'src'), { recursive: true });
+    fs.copyFileSync(path.resolve('package.json'), path.join(root, 'package.json'));
+    try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
+    const fp = path.join(root, 'src/server/usage-pool-engine.js');
+    const src = fs.readFileSync(fp, 'utf8');
+    if (!src.includes(from)) return { hit: false };
+    fs.writeFileSync(fp, src.replace(from, to));
+    return { hit: true, mod: require(fp) };
+  };
+  const CREDS = (id) => JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } });
+  const world = (engMod, { burnA = 0.012 } = {}) => {
+    const root = fs.mkdtempSync(path.join(scr, 'w-'));
+    const dataDir = path.join(root, 'data');
+    const am = new AccountManager({ dataDir });
+    if (!am.poolSupported()) return null;
+    const A = am.createSubscription({ name: 'Member A' }).id, Bm = am.createSubscription({ name: 'Member B' }).id;
+    for (const x of [A, Bm]) fs.writeFileSync(path.join(am.subDir(x), '.credentials.json'), CREDS(x), { mode: 0o600 });
+    const P = am.createPool({ name: 'Pool' }).id;
+    am.setPoolTarget(P, A); am.updatePool(P, { auto: true, hot: true });
+    const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    const nowS = Math.floor(Date.now() / 1000);
+    const wk = nowS + 3 * 86400;
+    fs.writeFileSync(path.join(cacheDir, A + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.86, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: wk }, scopedWeekly: [{ name: 'Fable', utilization: 0.4, resetsAt: wk }] }));
+    fs.writeFileSync(path.join(cacheDir, Bm + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: wk }, scopedWeekly: [{ name: 'Fable', utilization: 0.2, resetsAt: wk }] }));
+    const sessions = new Map(), notices = [];
+    const eng = engMod.create({
+      app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+      wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => notices.push(t), serverSetting: () => undefined, getAccounts: () => am,
+      getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
+      getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+      getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
+      getOtelIngest: () => ({ observedOrgFor: () => null }), getQuotaProbe: () => null, getSessionMetaStore: () => null,
+    });
+    // the estimator's burn, injected on the engine's OWN instance (the ledger is
+    // a stub here): member A burns its 5h at 1.2 %/min, B is idle
+    eng.usageEstimator.burnFor = (id) => (id === A && burnA ? { fiveHour: burnA } : {});
+    const mk = (sid, lastAgoMs) => {
+      const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } },
+        _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - lastAgoMs, _isStreaming: false, _turnState: 'idle' };
+      sessions.set(sid, s); am.ensureSessionPoolLink(P, sid, A, { why: 'spawn' });
+      return s;
+    };
+    mk('sess-cold', 20 * 60e3);   // output 20 min ago on a 5-min cache: COLD
+    mk('sess-warm', 30e3);        // output 30 s ago: WARM, idle between turns
+    const linkOf = (sid) => (am.poolCurrentFor(P, sid) === A ? 'A' : am.poolCurrentFor(P, sid) === Bm ? 'B' : String(am.poolCurrentFor(P, sid)));
+    const quiet = () => { const o = console.log, w = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); return () => { console.log = o; console.warn = w; return lines; }; };
+    const run = () => { const done = quiet(); try { eng.maybePoolAutoSwitchForPool(P); } finally { var lines = done(); } return lines; };
+    return { eng, am, A, Bm, P, sessions, notices, linkOf, run };
+  };
+  const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
+  const w = world(engMod);
+  if (!w) { ck('proj/engine SKIP — pools unsupported on this platform', true); }
+  else {
+    ck('engine setup: the cold/warm split is what warmCache says', warmCache({ lastActivityMs: w.sessions.get('sess-cold')._lastPtyDataAt, nowMs: Date.now(), model: 'claude-fable-5-1' }).warm === false
+      && warmCache({ lastActivityMs: w.sessions.get('sess-warm')._lastPtyDataAt, nowMs: Date.now(), model: 'claude-fable-5-1' }).warm === true);
+    const pr = w.eng.projectionRereadFor(w.A, Date.now());
+    ck('engine: projectionRereadFor names A\'s crossing — 5h, its 10 % soft line, ~200 s, burn 1.2 pt/min, fam fable', pr && pr.label === '5h' && pr.line === 10 && Math.abs(pr.inMs - 200000) <= 1000 && pr.burnPtPerMin === 1.2 && pr.fam === 'fable', JSON.stringify(pr));
+    ck('engine: …and nothing for B (no live conversation on it)', w.eng.projectionRereadFor(w.Bm, Date.now()) === null);
+    const lines = w.run();
+    ck('engine: the COLD conversation leaves A early on the projection (the estimate of now says 14 % — healthy)', w.linkOf('sess-cold') === 'B', w.linkOf('sess-cold') + ' | ' + lines.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
+    ck('engine: a projection alone NEVER moves the WARM conversation — it stays on A', w.linkOf('sess-warm') === 'A', lines.filter((l) => /\[pool\]/.test(l)).join(' | ').slice(0, 300));
+    ck('engine: the journal line says the move was EARLY and why (projected: 5h … line … %/min)', lines.some((l) => /per-session switch .*sess-cold.*projected: 5h reaches its 10% line in ~\d+ min at 1\.2%\/min/.test(l)), lines.filter((l) => /sess-cold/.test(l)).join(' | '));
+    ck('engine: the user notice says it too (will be at … — moved early)', w.notices.length === 2 && /moved to Member B/.test(w.notices[0]) && /moved early, projected: 5h/.test(w.notices[0]) && /will be at 8% within 5 min/.test(w.notices[0]), JSON.stringify(w.notices));
+    ck('engine: the pool DEFAULT (no follower, so none warm) moves early too, and its notice says the number is PROJECTED — never "down to 8 %" of a member at 14 %',
+      /auto-switched to Member B \(previous account will be down to 8% within 5 min — moved early, projected: 5h reaches its 10% line/.test(w.notices[1]) && !/down to 8% remaining/.test(w.notices[1]), w.notices[1]);
+    // no burn ⇒ no projection ⇒ nothing moves (the same world shape, idle member)
+    const w0 = world(engMod, { burnA: 0 });
+    w0.run();
+    ck('engine: with no burn nothing moves — the projection is the ONLY reason the cold one left', w0.linkOf('sess-cold') === 'A' && w0.linkOf('sess-warm') === 'A');
+    // NEGATIVE CONTROLS — patched copies in a scratch dir
+    const noGate = mutEngine('nogate', 'const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;', 'const lead = PROJECTION_LEAD_SEC; // PATCHED: no warm gate');
+    ck('control: the patch (the warm gate removed) hits', noGate.hit);
+    if (noGate.hit) {
+      const wg = world(noGate.mod); wg.run();
+      ck('control: WITHOUT the warm gate the projection moves the warm conversation too — the gate is what holds it', wg.linkOf('sess-warm') === 'B' && wg.linkOf('sess-cold') === 'B', wg.linkOf('sess-warm'));
+    }
+    const noProj = mutEngine('noproj', 'const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;', 'const lead = 0; // PATCHED: master (no projection)');
+    ck('control: the patch (master: no projection) hits', noProj.hit);
+    if (noProj.hit) {
+      const wp = world(noProj.mod); wp.run();
+      ck('control: on master the cold conversation stays on A and meets the line blind', wp.linkOf('sess-cold') === 'A', wp.linkOf('sess-cold'));
+    }
+  }
+  // WIRING PINS (code only): both proactive sites decide on the projection-gated view
+  const strip = (f) => fs.readFileSync(path.resolve(f), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
+  const eng = strip('src/server/usage-pool-engine.js');
+  ck('WIRING PIN: the per-session lead is 0 for a warm conversation, and its decision reads `viewFor`',
+    /const lead = warm\.warm \? 0 : PROJECTION_LEAD_SEC;/.test(eng) && /decidePoolSwitch\(\{ currentId: curFor, members, readCache: viewFor,/.test(eng));
+  ck('WIRING PIN: the pool default projects only while no follower is warm',
+    /const defaultView = defaultWarm \? readCache : \(id\) => projectCacheAhead\(readCache\(id\), burnOf\(id\), now \/ 1000, PROJECTION_LEAD_SEC\);/.test(eng) && /readCache: defaultView,[^\n]*warm: defaultWarm/.test(eng));
+  fs.rmSync(scr, { recursive: true, force: true });
+})();
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

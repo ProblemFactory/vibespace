@@ -432,7 +432,7 @@ console.log('\n§3 idempotent, rate-floored, and never an unbounded side effect 
     const t0 = Date.now();
     await w.eng.onMemberLoginSuccess(w.NEW, 'login success');
     ok('…and the loop can see it: lastMemberReadAt names the instant of that read', w.eng.lastMemberReadAt(w.NEW) >= t0);
-    ok('…which server.js folds into the loop\'s own lastAttemptAt', /Math\.max\(attempts\.get\(a\.id\) \|\| 0, lastMemberReadAt\(a\.id\)\)/.test(read('server.js')));
+    ok('…which the auto-cli loop (src/server/auto-cli-loop.js since quota r2) folds into its own lastAttemptAt (quota r3: over every id of the identity)', /lastAttemptAt: Math\.max\(\.\.\.mem\.map\(\(x\) => Math\.max\(attempts\.get\(x\) \|\| 0, d\.lastMemberReadAt\(x\) \|\| 0\)\)\)/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(\{[^\n]*lastMemberReadAt,/.test(read('server.js')));
   }
 }
 
@@ -457,7 +457,7 @@ console.log('\n§4 not ready is not failed (the auto-cli readiness gate)');
   w.login(w.NEW);
   ok('a live login is ready', w.eng.autoCliReady(w.NEW) === true);
   ok('an id that is not a claude subscription never blocks (null = no claim)', w.eng.autoCliReady('__global__') === true && w.eng.autoCliReady(w.P) === true);
-  ok('the loop asks it before it spends a spawn (wiring pin)', /\|\| !autoCliReady\(a\.id\)\) continue;/.test(read('server.js')));
+  ok('the loop asks it before it spends a spawn (wiring pin)', /\|\| !d\.autoCliReady\(a\.id\)\) continue;/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(\{[^\n]*autoCliReady,/.test(read('server.js')));
   ok('…and the FILE reader is the right one because the rung strips the long-lived token from the child env',
     /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(read('src/usage-routes.js')));
 }
@@ -526,9 +526,9 @@ console.log('\n§6 every producer of a fresh reading takes the SAME edge');
   ok('…the edge reaches the routes as an injected dep, not a require (tier: usage-routes stays ORCH wiring)',
     /probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD \}\) \{/.test(usageSrc) && /onMemberReadingFresh, CLAUDE_CMD \}\);/.test(read('server.js')));
 
-  const srv = read('server.js');
+  const srv = read('src/server/auto-cli-loop.js');
   ok('the auto-cli loop — the THIRD producer, whose successful read at 02:31:43 changed nothing — takes the same edge, and only on success',
-    /const ok = await usage\.refreshViaCliPanel\(key\)[\s\S]{0,200}?if \(ok\) onMemberReadingFresh\(key, 'auto-cli refresh'\);/.test(srv));
+    /ok = !!\(await d\.usage\.refreshViaCliPanel\(key\)\)[\s\S]{0,1400}?if \(ok\) \{ try \{ d\.onMemberReadingFresh\(key, 'auto-cli refresh'\); \}/.test(srv) && /createAutoCliLoop\(\{[^\n]*usage, onMemberReadingFresh,/.test(read('server.js')));
   ok('…and the edge is NOT buried inside refreshViaCliPanel, where the pre-fire spend gate also calls it (a gate that fires conversations as a side effect of asking a question is not a gate)',
     !/onMemberReadingFresh/.test(read('src/usage-routes.js').split('async function refreshViaCliPanel')[1].split('\n}\n')[0]));
 
@@ -1205,6 +1205,38 @@ console.log('\n§9 the /usage panel refresher answers for a record that no longe
     const p2 = c2.routes['POST /api/usage/refresh']({ body: { account: w2.id } }, res2); await tick(120); w2.am.remove(w2.id); await p2;
     ok('§9b NEGATIVE CONTROL: the pre-fix route falls through to the token ladder for the removed record (usageToken consulted, no 404)',
       asked2() >= 1 && res2.code !== 404, JSON.stringify({ code: res2.code, body: res2.body, tokenAsked: asked2() }));
+  }
+
+  // §9c THE ANSWER IS THE WRITE (quota r3, the r3 verifier's low): a panel
+  // whose typed cache write was REFUSED answered `true`, so the auto-cli loop
+  // counted a success, reset its backoff and — the cache's fetchedAt never
+  // advancing — re-spawned `claude -p /usage` every 5-min floor. The write is
+  // refused here through the ONE write path (usage-cache-write), the route is
+  // driven too: it says "not recorded" and never climbs the token ladder.
+  {
+    const uw = require(path.join(REPO, 'src/usage-cache-write.js'));
+    const orig = uw.writeCacheObject;
+    const refuse = () => { uw.writeCacheObject = () => ({ ok: false, why: 'refused by the test (a typed-set validation failure)' }); };
+    try {
+      refuse();
+      const w = mkUsage();
+      const okd = await w.u.refreshViaCliPanel(w.id);
+      const pv = w.u.panelVerdictFor(w.id);
+      ok('§9c a panel whose typed cache write is REFUSED answers false (the loop takes the failure backoff) and its verdict names the write',
+        okd === false && pv && pv.code === 'write' && pv.outcome === 'write-refused', JSON.stringify({ okd, pv }));
+      const routes = {}; const app = { get(p2, h) { routes['GET ' + p2] = h; }, post(p2, h) { routes['POST ' + p2] = h; }, put() { }, delete() { }, use() { }, locals: {} };
+      const w3 = mkUsage({ app });
+      let n = 0; const ut = w3.am.usageToken.bind(w3.am); w3.am.usageToken = (...a) => { n++; return ut(...a); };
+      const res = { code: 200, body: null, status(c) { res.code = c; return res; }, json(b) { res.body = b; return res; } };
+      await routes['POST /api/usage/refresh']({ body: { account: w3.id } }, res);
+      ok('§9c …and the ⟳ route answers "not recorded" with the reason, never consulting the token ladder (the vendor already answered once)',
+        res.body && /^not recorded/.test(String(res.body.error || '')) && n === 0, JSON.stringify({ body: res.body, tokenAsked: n }));
+      const mut = mutantUsage([['  return wroteOk;\n}', '  return true;\n}']]);
+      ok('control setup: the pre-fix refresher copy (answers true whatever the write did) applied its replacement', mut.hits === 1, JSON.stringify(mut));
+      const w2 = mkUsage({ usageModule: mut.mod });
+      const okd2 = await w2.u.refreshViaCliPanel(w2.id);
+      ok('§9c NEGATIVE CONTROL (pre-fix copy): the same refused write answers true', okd2 === true, JSON.stringify({ okd2 }));
+    } finally { uw.writeCacheObject = orig; }
   }
 
   // THE RACE: the record is removed while the panel is running

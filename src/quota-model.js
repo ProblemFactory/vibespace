@@ -579,15 +579,38 @@ function sameLimitClaim(a, b) { return limitClaimKey(a) === limitClaimKey(b); }
 //     because a symbol is not expressible in JSON. A string field would have
 //     been forgeable by the very stored object this rule exists to distrust.
 const SCOPED_ENUMERATED = Symbol('scopedComplete');
+// HOW MANY of the parse's scoped entries it NAMED AS A MODEL (B-9f4b, the r6
+// verifier's second info finding). r6 kept reset-less buckets, so the control
+// parse turns an untouched CODENAME sibling key (`nimbus_quill: {utilization:
+// 0, resets_at: null}` — the 2026-08-09 LIVE envelope) into a scopedWeekly
+// entry; with "the list is non-empty" as the r5 half, a payload whose ONLY
+// scoped entry was that codename claimed to have enumerated the model caps and
+// retired a real, spent Fable cap. A codename is a bucket the parse INFERRED
+// from a key's shape, not a model cap it can name, so it counts for the list
+// and never for the right to retire. Same storage law as the mark above: a
+// non-enumerable symbol, a fact about ONE read, lost (safely) on any copy.
+const SCOPED_NAMED = Symbol('scopedNamed');
 
-/** Mark a parse result as having enumerated its model-scoped set (or not).
- *  Returns the same object, so a parser can `return markScopedEnumeration({…}, ok)`. */
-function markScopedEnumeration(parsed, complete) {
+/** Mark a parse result as having enumerated its model-scoped set (or not), and
+ *  say how many of its scoped entries it NAMED as a model cap — a `limits[]` /
+ *  `model_scoped` entry with a display name, a `seven_day_<model>` key, a
+ *  `Current week (<model>)` panel line; never a codename key inferred to be a
+ *  bucket. An omitted `named` is 0: a parser that does not say claims nothing.
+ *  Returns the same object, so a parser can `return markScopedEnumeration({…}, ok, n)`. */
+function markScopedEnumeration(parsed, complete, named = 0) {
   if (!parsed || typeof parsed !== 'object') return parsed;
+  const n = Number(named);
   try {
     Object.defineProperty(parsed, SCOPED_ENUMERATED, { value: !!complete, enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(parsed, SCOPED_NAMED, { value: Number.isFinite(n) && n > 0 ? Math.floor(n) : 0, enumerable: false, configurable: true, writable: true });
   } catch { /* frozen object: no claim, which is the safe answer */ }
   return parsed;
+}
+
+/** How many model caps did THIS parse name as a model? Unknown ⇒ 0. */
+function scopedNamedCount(parsed) {
+  const n = parsed && typeof parsed === 'object' ? parsed[SCOPED_NAMED] : 0;
+  return typeof n === 'number' && n > 0 ? n : 0;
 }
 
 /** Did THIS parse enumerate the model-scoped set? Unknown ⇒ false. */
@@ -599,16 +622,20 @@ function scopedEnumeration(parsed) {
  *
  *  Two conditions, and both are load-bearing:
  *   • the parse enumerated (`scopedEnumeration`) — the r6 half;
- *   • it named at least one model cap — the r5 half, kept deliberately. An
- *     empty list is indistinguishable from "my scoped parsing broke", and
- *     acting on it would retire every model cap at the call sites that hand us
- *     their read verbatim. Retiring a spent cap is the money-losing direction
- *     (the pool goes on spending against it), so an empty read keeps stating
- *     nothing about the set — exactly as it did before this change. */
+ *   • it NAMED at least one model cap (`scopedNamedCount`) — the r5 half, kept
+ *     deliberately and tightened by B-9f4b. An empty list is indistinguishable
+ *     from "my scoped parsing broke", and acting on it would retire every model
+ *     cap at the call sites that hand us their read verbatim. Retiring a spent
+ *     cap is the money-losing direction (the pool goes on spending against
+ *     it), so an empty read keeps stating nothing about the set — and so does
+ *     a read whose only entries are CODENAME buckets the parse inferred from a
+ *     key's shape (B-9f4b: `nimbus_quill` alone retired a spent Fable cap).
+ *     Counting the entries of the ARRAY is the r5 mistake again one level
+ *     down: the array says what was kept, only the parse says what it named. */
 function authoritativeScopesOf(parsed) {
   if (!scopedEnumeration(parsed)) return null;
   const list = parsed.scopedWeekly;
-  return Array.isArray(list) && list.length ? ['model'] : null;
+  return Array.isArray(list) && list.length && scopedNamedCount(parsed) > 0 ? ['model'] : null;
 }
 
 // ── merge ───────────────────────────────────────────────────────────────────
@@ -986,6 +1013,17 @@ function toLegacyView(set, { nowSec = null } = {}) {
     if (!l || l.scope !== 'model') continue;
     const w = windowOfKind(l, '7d') || windowsOf(l).find((x) => isBudgetKind(x.kind)) || null;
     if (!w) continue;
+    // ONE VENDOR LIMIT IS ONE ROW (B-9f4b, the r6 verifier on this instance's
+    // own `__global_codex__.json`: the Spark model limit + credits, NO plan
+    // limit). `legacyWindowLimit` promotes the freshest window-bearing limit
+    // into the plan slot, so its '7d' window already IS `sevenDay` above —
+    // projecting it here too rendered one limit as two panel rows. Skipped only
+    // when this row's window is that very `sevenDay` window: a promoted limit
+    // whose budget window lives nowhere else keeps its row (the view never
+    // drops a window it projects nowhere else), and with a real plan limit the
+    // promoted limit IS the plan, which never reaches this loop. The pool loses
+    // nothing: the row was a MIN over the identical numbers `sevenDay` carries.
+    if (l === plan && w === windowOfKind(plan, '7d')) continue;
     // Same rule as `toBucket`: a scoped window with no stated spend carries no
     // `utilization` rather than a fabricated 0.
     const e = { name: l.name || l.limitId };
@@ -1326,7 +1364,7 @@ module.exports = {
   // "did these numbers move?" — the write path's carried-forward rule
   windowClaimKey, limitClaimKey, sameLimitClaim,
   // "did this READ see the whole set?" — the retirement's right to speak
-  markScopedEnumeration, scopedEnumeration, authoritativeScopesOf, SCOPED_ENUMERATED,
+  markScopedEnumeration, scopedEnumeration, scopedNamedCount, authoritativeScopesOf, SCOPED_ENUMERATED,
   // panels
   orderLimits, limitLabel, limitState,
   // the wall's own attribution (inc-mttbrtc0-6049)

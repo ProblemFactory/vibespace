@@ -55,7 +55,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // hot=off → also ask ONE connected client to cold-restart the affected
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
-const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const { feedPeerCard } = require('../normalizers'); // the rebuild-gated chat-card writer (the wall card that names the credits)
@@ -942,7 +942,8 @@ function writeUsageCacheForKey(key, parsed) {
     for (const k of ['orgUuid', 'orgName', 'orgEmail', 'email', 'name']) if (prev[k] !== undefined && merged[k] === undefined) merged[k] = prev[k];
     delete merged.limits; // the canonical half is the write path's to compute, never inherited whole from `prev`
     // AUTHORITATIVE OVER THE MODEL SET only when THIS answer both ENUMERATED
-    // and listed one (r5 + r6) — the preserve-merge above carries `prev`'s
+    // and NAMED a model cap (r5 + r6 + B-9f4b: a codename bucket is kept, never
+    // named) — the preserve-merge above carries `prev`'s
     // forward when it did not, and a carried-forward list states nothing about
     // what the vendor still reports. `parsed` is the control payload's own
     // parse (`parseGetUsageResponse`), which is the only object that can know
@@ -4669,6 +4670,52 @@ function noteWarmHold(poolId, sid, d, now, scope = '', key = poolId + ':' + sid)
   }
   console.log(`[pool] hold ${sid}: warm cache (last output ${d.agoSec}s ago < ttl ${d.ttlSec}s) — proactive move to ${d.wouldToName || d.wouldTo} deferred${scope}`);
 }
+/** ONE burn read per member per evaluation (the estimator's `burnFor`: learned
+ *  rate × the trailing window's ledger + live cost). */
+function projectionBurnMemo(now) {
+  const memo = new Map();
+  return (id) => {
+    if (!memo.has(id)) { let b = {}; try { b = usageEstimator.burnFor(id, now) || {}; } catch { b = {}; } memo.set(id, b); }
+    return memo.get(id);
+  };
+}
+/** THE PROJECTION'S READ HALF (B-f69c ③): when does this member's burn carry a
+ *  bucket of a LIVE local claude conversation's family across its switch line?
+ *  The families are the conversations billed on the member RIGHT NOW (a pooled
+ *  one through its validated credential slot, a direct one through its own
+ *  account); the line is the hot bar when the member serves a hot auto pool,
+ *  else the hard bar. `{inMs, label, line, pctPerMin, band, fam, burnPtPerMin}`
+ *  (+ `resetsAt`, the crossing bucket's window — the auto-cli memory's key, quota r2)
+ *  or null (no live conversation on it, no burn, nothing crosses). The auto-cli
+ *  loop hands it to decideCliRefresh, whose PROJECTION rule asks the SAME fast
+ *  rung (`refreshViaCliPanel`, the owner-approved exception) for a reading
+ *  before the crossing — never a new vendor path, never a cadence; the pool then
+ *  re-decides on that reading through the new-member wake. */
+function projectionRereadFor(memberId, nowMs = Date.now()) {
+  try {
+    if (!memberId) return null;
+    const fams = new Set();
+    for (const [, s] of activeSessions) {
+      if ((s.backend || 'claude') !== 'claude' || s.host || !s._accountId) continue;
+      const a = accounts.get(s._accountId);
+      const on = a && a.type === 'pooled' ? sessionBillingMember(s, a.id).id : s._accountId;
+      if (on !== memberId) continue;
+      fams.add(projectionFamilyFor(s, sessionModelFor(s)) || null);
+    }
+    if (!fams.size) return null;
+    const hot = memberPoolsOf(memberId).some((p) => p.auto && p.hot && capsOf(p.backend).hotSwitch === 'verified');
+    const view = poolReadCache()(memberId);
+    const burn = usageEstimator.burnFor(memberId, nowMs) || {};
+    let best = null;
+    for (const fam of fams) {
+      const c = projectionCrossing(projectCacheForFamily(view, fam), burn, nowMs / 1000, { hot });
+      if (c && (!best || c.inSec < best.inSec)) best = { ...c, fam };
+    }
+    if (!best) return null;
+    const burnPtPerMin = Math.max(0, ...Object.values(burn).map((v) => (Number(v) || 0) * 100));
+    return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(burnPtPerMin * 100) / 100 };
+  } catch { return null; }
+}
 function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
   try {
     if (!poolId) return;
@@ -4738,6 +4785,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     const members = switchCandidates(poolId);
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
+    const burnOf = projectionBurnMemo(now); // ONE burn read per member for this whole tick (B-f69c ③)
     for (const [sid, s2] of activeSessions) {
       if (!poolCaps.planC) break; // plan-C per-session links need the backend's material path
       if ((s2.backend || 'claude') === 'codex') continue;
@@ -4769,10 +4817,21 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // of a conversation that is mid-turn with a warm cache waits for its first
       // stop (warm-soft-defer); the turn boundary re-decides it.
       const warm = { ...warmCache({ lastActivityMs: s2._lastPtyDataAt, nowMs: now, model: cacheModelFor(s2) }), inTurn: conversationInTurn({ isStreaming: s2._isStreaming, turnState: s2._turnState }) };
+      // THE PROJECTION (B-f69c ③): a COLD conversation decides on the view its
+      // members' own burn reaches PROJECTION_LEAD_SEC from now — the stretch no
+      // fresh reading can cover — so it leaves a member BEFORE the line instead
+      // of meeting it. A WARM one never does: a projection alone never moves a
+      // warm conversation (the owner's warm-cache + first-stop rules judge only
+      // real readings; the projection's other half, the auto-cli fast rung,
+      // fetches the reading they judge — projectionRereadFor).
+      const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;
+      const viewFor = lead ? (id) => projectCacheAhead(projected(id), burnOf(id), now / 1000, lead) : projected;
+      const pc = lead ? projectionCrossing(projected(curFor), burnOf(curFor), now / 1000, { hot }) : null;
+      const early = pc && pc.inSec <= lead ? `projected: ${pc.label} reaches its ${pc.line}% line in ~${Math.max(1, Math.round(pc.inSec / 60))} min at ${pc.pctPerMin}%/min` : null;
       // never pick a member that just answered THIS session with a limit
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
-      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: projected, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
+      const ds = decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
       if (!ds || !ds.to) {
         if (ds && ds.reason === 'warm-cache') { noteWarmHold(poolId, sid, ds, now); continue; }
         if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(poolId, sid, ds, now, '', poolId + ':' + sid + ':soft'); continue; }
@@ -4824,8 +4883,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
           ? ` — the last resort: ${toName} bills pay-per-use past its quota (usage credits)`
           : '';
         if (ds.toCredits) noteCreditsParking(poolId, ds.to, poolCreditsNotice({ toCredits: ds.toCredits, toRemaining: ds.toRemaining }, { poolName: a.name, memberName: toName }), now);
-        if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${cm.divergent ? ` (it was still running on ${nameOf(curFor)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` was at ${Math.round(ds.fromRemaining)}%` : ''})` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
-        console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor}${cm.divergent ? ` (observed; linked ${linkCur})` : ''} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%)`);
+        if (ds.to !== linkCur) serverNotice(`pool-sess-${sid}-${now}`, `Pool "${a.name}": conversation "${convName(s2, sid)}" moved to ${toName}${cm.divergent ? ` (it was still running on ${nameOf(curFor)})` : ''}${fam ? ` (its ${fam} quota${ds.fromRemaining != null ? ` ${early ? 'will be' : 'was'} at ${Math.round(ds.fromRemaining)}%${early ? ` within ${Math.round(lead / 60)} min` : ''}` : ''})` : ''}${early ? ` — moved early, ${early}` : ''}${a.hot ? '' : ' — restarting it'}${sScraps}`);
+        console.log(`[pool] per-session switch ${poolId}/${sid}: ${curFor}${cm.divergent ? ` (observed; linked ${linkCur})` : ''} → ${ds.to}${ds.to === linkCur ? ' (re-point, same target)' : ''} (fam=${fam || '?'}, from ${ds.fromRemaining}%${early ? `; ${early}` : ''})`);
         // a hot re-point does not move an idle limit-blocked session by itself
         // (c1206711: the pool switched back and the session stayed dead) —
         // an ARMED session gets its continue NOW. Hot only: a cold switch
@@ -4858,7 +4917,12 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       if (!w.warm) continue;
       if (!defaultWarm || w.ttlSec - w.agoSec > defaultWarm.ttlSec - defaultWarm.agoSec) { defaultWarm = w; defaultWarmSid = sid; }
     }
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
+    // THE PROJECTION at the default (B-f69c ③): only while NO follower is warm —
+    // the default moves every follower at once, so one warm follower keeps the
+    // decision on the estimate of NOW (a projection alone never moves a warm
+    // conversation).
+    const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), now / 1000, PROJECTION_LEAD_SEC);
+    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), readLogin, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
     if (!d) return;
     if (!d.to) {
       if (d.reason === 'warm-cache') { noteWarmHold(poolId, defaultWarmSid, d, now, ' (pool default)', poolId + ':default'); return; }
@@ -4920,6 +4984,9 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       affected.push({ serverId: sid, backend: s.backend || 'claude', backendSessionId: s.claudeSessionId || s.backendSessionId || null, cwd: s.cwd || null, name: s.name || null, host: s.host || null });
     }
     const fromPct = d.fromRemaining != null ? Math.round(d.fromRemaining) : null;
+    // an EARLY move (B-f69c ③) says so: its `fromRemaining` is the PROJECTED number
+    const dpc = defaultWarm ? null : projectionCrossing(readCache(currentId), burnOf(currentId), now / 1000, { hot });
+    const dEarly = dpc && dpc.inSec <= PROJECTION_LEAD_SEC ? `projected: ${dpc.label} reaches its ${dpc.line}% line in ~${Math.max(1, Math.round(dpc.inSec / 60))} min at ${dpc.pctPerMin}%/min` : null;
     // SCRAPS (round-2 verifier): the only member left was itself minutes from
     // its login deadline. Moving beats staying on a dead member, but the user
     // has to hear that the reprieve is short — otherwise the pool "recovers"
@@ -4934,8 +5001,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       ? `Pool "${a.name}" switched to ${d.toName} — draining the member whose weekly quota resets soonest (use-it-or-lose-it)`
       : d.reason === 'login-expired'
       ? `Pool "${a.name}" switched to ${d.toName} — ${nameOf(currentId)}'s ${(() => { try { const l = accounts.loginStateOf(currentId); return l ? loginWallPhrase(l) : 'login session expired'; } catch { return 'login session expired'; } })()}; re-login it in Manage Agents${hot ? '' : ' (restarting its conversations)'}${scraps}`
-      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account down to ${fromPct}% remaining)${hot ? '' : ' — restarting its conversations'}${scraps}`);
-    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left, hot=${hot}, affected=${affected.length})`);
+      : `Pool "${a.name}" auto-switched to ${d.toName} (previous account ${dEarly ? `will be down to ${fromPct}% within ${Math.round(PROJECTION_LEAD_SEC / 60)} min — moved early, ${dEarly}` : `down to ${fromPct}% remaining`})${hot ? '' : ' — restarting its conversations'}${scraps}`);
+    console.log(`[pool] auto-switch ${poolId}: ${currentId} → ${d.to} (${d.reason}, from ${fromPct}% left${dEarly ? `; ${dEarly}` : ''}, hot=${hot}, affected=${affected.length})`);
     if (!hot && affected.length) {
       // ONE client only — every client acting would race duplicate restarts.
       sendColdRestart(poolId, affected, now);
@@ -4998,7 +5065,7 @@ function maybeStopOnFallback(session, id, from, to) {
     _vsuPending, usageAnchors, usageEstimator,
     armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
     markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
-    onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
+    onMemberReadingFresh, onMemberLoginSuccess, readingForeignForWake, memberPoolsOf, autoCliReady, lastMemberReadAt, projectionRereadFor, // THE NEW-MEMBER WAKE (2026-09-08): the one edge every producer of a fresh reading takes, its login half, and the two facts the auto-cli loop asks before it spends a spawn
     _memberWakeAt, _loginReadAt, MEMBER_WAKE_FLOOR_MS, MEMBER_READING_FRESH_MS, LOGIN_READ_FLOOR_MS, // the wake's floors are WALL-CLOCK: a suite winds them back instead of sleeping through them (same seam as _poolAutoLast)
     maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, noteServedModel, noteModelFallback, servedDefinesModel, projectionFamilyFor, rerouteAnnouncedBy, // the two stdout-fed model facts + the fallback predicate + the PROJECTION family + THE REROUTE THIS RECORD ANNOUNCES (2026-09-13: one implementation for the parse AND the device feed; r2: one rule for "which cap can refuse this turn"; r4: the fact is placed BEFORE its readers, at both feeds)
     poolChooserForModel, poolReadCache, probeUsageForAccountKey,

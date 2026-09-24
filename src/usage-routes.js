@@ -667,6 +667,11 @@ async function refreshViaCliPanel(key) {
   }
   if (_panelVerdictSaid.get(key) !== 'ok') { _panelVerdictSaid.set(key, 'ok'); if (_panelVerdictSaid.size > 256) _panelVerdictSaid.delete(_panelVerdictSaid.keys().next().value); }
   const u = { ...cliPanel, source: 'on-demand', scopedFetchedAt: Date.now() };
+  // THE ANSWER IS THE WRITE (quota r3): `true` only when the typed cache write
+  // landed. A refused write (or a throw before it) used to answer `true`, so
+  // the auto-cli loop counted a success, reset its backoff, and — the cache's
+  // fetchedAt never advancing — re-spawned `claude -p /usage` every floor.
+  let wroteOk = false;
   try {
     fs.mkdirSync(USAGE_CACHE_DIR, { recursive: true });
     const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
@@ -778,6 +783,7 @@ async function refreshViaCliPanel(key) {
     // spelling it `u` here fails SILENTLY: authority simply never happens.)
     const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
       authoritativeScopes: authoritativeScopesOf(cliPanel) });
+    wroteOk = !!wrote.ok;
     if (wrote.ok) Object.assign(merged, wrote.object);
     try {
       const { windowOf } = require('./reading-lag.js');
@@ -787,8 +793,10 @@ async function refreshViaCliPanel(key) {
     if (isGlobal) { _rateLimitCache = merged; writeUsageCache(); }
     else _accountUsage[key] = { ...merged, name: acctMeta.name, email: acctMeta.email };
     try { ingestPassiveUsage(); } catch { }
-  } catch { }
-  return true;
+  } catch (e) {
+    if (!wroteOk) { _panelVerdict[key] = { at: Date.now(), outcome: 'write-refused', code: 'write', identityVerified: false, why: 'cache write failed: ' + (e && e.message), rung: 'panel' }; try { logProbe('write-refused', { why: 'cache write failed: ' + (e && e.message) }); } catch { } }
+  }
+  return wroteOk;
 }
 /** The last panel probe's verdict for a key — what the ⟳ route answers with. */
 function panelVerdictFor(key) { return _panelVerdict[key] || null; }
@@ -1022,6 +1030,12 @@ app.post('/api/usage/refresh', async (req, res) => {
   // would be the pattern §ban-safety exists to stop, and it could not verify
   // its own identity either. The user is told, with both identities named.
   if (pv && pv.at >= t0 && pv.code === 'identity') {
+    return res.json({ error: `not recorded — ${pv.why}`, rung: 'panel', identityVerified: false, why: pv.why, skipped });
+  }
+  // …and so does a panel that ANSWERED but whose write was refused (quota r3:
+  // refreshViaCliPanel now says false for it) — the vendor already answered
+  // once; the user is told why it was not recorded, never a second request.
+  if (pv && pv.at >= t0 && pv.code === 'write') {
     return res.json({ error: `not recorded — ${pv.why}`, rung: 'panel', identityVerified: false, why: pv.why, skipped });
   }
   // A record REMOVED while its panel was being read (the r3 belt refuses to

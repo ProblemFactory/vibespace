@@ -49,8 +49,15 @@ if (process.env.CLAUDECODE || process.env.CLAUDE_CODE_CHILD_SESSION) {
 // installed EARLY so the console tee captures the whole boot narrative.
 try { require('./src/opslog').setupOpslog(require('./package.json').version); } catch (e) { console.warn('[opslog] init failed:', e.message); }
 
-// Auto-update: pull latest + rebuild on startup (skip with NO_AUTO_UPDATE=1)
-if (!process.env.NO_AUTO_UPDATE) {
+// Auto-update: pull latest + rebuild on startup (skip with NO_AUTO_UPDATE=1).
+// A THROWAWAY server — its code under the OS temp dir, i.e. every suite's
+// scratch worktree — never pulls (the hookRegistrationSafe rule): `git pull`
+// in a worktree FETCHES into the SHARED .git and costs a network round trip
+// before listen (measured 2026-09-24: 0.5-0.9 s boot without it, 2.5-15 s with
+// it — past the 10 s boot window many scratch suites wait: five went red).
+const throwawayRoot = [os.tmpdir(), '/tmp'].some((t) => (path.resolve(__dirname) + path.sep).startsWith(path.resolve(t) + path.sep));
+if (throwawayRoot && !process.env.NO_AUTO_UPDATE) console.log('[auto-update] skipped: throwaway/temp server root');
+if (!process.env.NO_AUTO_UPDATE && !throwawayRoot) {
   try {
     const repoDir = __dirname;
     // Ensure Homebrew/nvm paths are in PATH for child processes (macOS non-login shells)
@@ -424,7 +431,7 @@ const {
   _vsuPending, usageAnchors, usageEstimator,
   armWorkflowUsageWatcher, darkSources, darkTaintedAccounts, kickPoolEval,
   markLimitBanner, maybePoolAutoSwitch, maybePoolAutoSwitchForPool, notePoolAuthFailure, noteTurnStopped,
-  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, // …+ the new-member wake (2026-09-08)
+  maybeRepinLockedModel, maybeStopOnFallback, modelsMatch, onMemberReadingFresh, autoCliReady, lastMemberReadAt, projectionRereadFor, // …+ the new-member wake (2026-09-08)
   apiDerivedWindow, establishedWindows, repairIdentityAnchors, // B-855a: the two identity witnesses handed to setupUsage — the panel probe may only write the account it proves — + c2's STANDING identity repair (boot + POST /api/usage/repair-identity)
   poolChooserForModel, poolReadCache, probeUsageForAccountKey, readRawUsageCache, spendGuard, // the ONE raw usage-cache read (overage lives there — design §1.4) + THE SPEND CEILING (§4.4c): ONE authorizer in front of every turn nobody typed, per credential slot, persisted ⇒ src/server/spend-guard.js
   noteSessionProduced, noteTurnEnd, noteWallSignal, beforeAutoResumeFire, fireIdentityFor, memberLoginState, probeUsageViaSession, recordCodexQuotaSignal, recordRateLimitEvent, resolveUsageKey, noteServedModel, noteModelFallback, servedDefinesModel, rerouteAnnouncedBy, settleTurnLane, // …+ the SERVED-MODEL pair + its FALLBACK PREDICATE (r3-r2: the parse's target-less lock latch asks it, so a classifier substitute never becomes the lock target that defines placement) + the REROUTE THIS RECORD ANNOUNCES (r4: placed BEFORE the served capture at both feeds — the incident's first announcement rides the very record the substitute answered) + the per-turn LANE settle (2026-09-13 r3): both stdout feeds destructure them from the `engine:` literals below, and neither was exported here — the whole round-1 fix was a TypeError in production
@@ -1624,64 +1631,10 @@ app.use(sessionsRouter);
 const { setupUsage } = require('./src/usage-routes');
 const usage = setupUsage({ app, accounts, hosts, usageHistory, activeSessions, serverSetting, ensureDir, USAGE_CACHE_FILE, USAGE_CACHE_DIR, CODEX_SESSIONS_DIR, META_DIR, AVAILABLE_MODELS, BUFFERS_DIR, apiDerivedWindow, establishedWindows, repairIdentityAnchors, probeUsageForAccountKey, onMemberReadingFresh, CLAUDE_CMD });
 
-const { decideCliRefresh } = require('./src/account-pool-auto.js');
-// ── auto-cli quota refresh loop (2.329.0, owner-approved after the ToS
-// explicitly-permit argument; §ban-safety posture: the fetch is made by the
-// official CLI exactly as if the user typed /usage — this instance never
-// touches the vendor API). Setting accounts.onDemandQuotaRefresh='auto-cli';
-// cadence is BURN-AWARE, not fixed: the dead-reckoner's own drift signal
-// (est vs last reading) triggers refreshes within minutes during a fast
-// workflow burst; idle accounts get a SLOW rung (owner-directed 2026-08-13):
-// a reading older than a per-tick-randomized 30–60min threshold refreshes
-// even with zero activity, so the roster never shows week-stale numbers —
-// the wandering threshold avoids the metronomic fixed-interval pattern the
-// ban postmortem flagged, and never-read accounts bootstrap their first
-// reading through the same rung. One CLI spawn per tick, per-account 5min
-// floor, exponential backoff on consecutive failures (an unparseable
-// account must not spawn claude every 5min forever).
-{
-  const attempts = new Map(); // key → last attempt ts
-  const fails = new Map(); // key → consecutive failures (backoff exponent)
-  const jitter = 1 + Math.random() * 0.4; // per-boot 45–63min active-burn cap
-  setInterval(async () => {
-    try {
-      if (serverSetting('accounts.onDemandQuotaRefresh') !== 'auto-cli') return;
-      const now = Date.now();
-      const list = [];
-      for (const a of (accounts.list().accounts || [])) {
-        if (a.type !== 'subscription' || !a.loggedIn || a.pooled || (a.backend || 'claude') !== 'claude' || !autoCliReady(a.id)) continue; // auto-cli spawns `claude -p /usage` — claude accounts only, and NOT READY IS NOT FAILED (autoCliReady, 2026-09-08)
-        let raw = null;
-        try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, a.id + '.json'), 'utf-8')); } catch { }
-        try {
-          for (const [, g] of usageIdentityGroupsCached()) {
-            if (g.accountIds.includes(a.id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
-          }
-        } catch { }
-        // never-read accounts (no cache at all) ride the idle rung with fetchedAt 0 —
-        // their first auto-cli read IS the bootstrap; failure backoff bounds retries
-        const f = fails.get(a.id) || 0;
-        if (f > 0 && now - (attempts.get(a.id) || 0) < 5 * 60e3 * Math.pow(2, Math.min(f, 6))) continue;
-        let est = null; try { est = raw ? usageEstimator.estimateFor(a.id, raw, now) : null; } catch { }
-        let drift = 0, moved = false;
-        const cmp = (e, r) => { if (e && r && typeof e.utilization === 'number' && typeof r.utilization === 'number') { const d = Math.abs(e.utilization - r.utilization) * 100; drift = Math.max(drift, d); if (d > 0.2) moved = true; } };
-        cmp(est?.fiveHour, raw?.fiveHour); cmp(est?.sevenDay, raw?.sevenDay);
-        for (const s of est?.scopedWeekly || []) cmp(s, (raw?.scopedWeekly || []).find((x) => x.name === s.name));
-        list.push({ key: a.id, fetchedAt: raw?.fetchedAt || 0, lastAttemptAt: Math.max(attempts.get(a.id) || 0, lastMemberReadAt(a.id)), estDriftPct: drift, activeBurn: moved }); // ONE attempt clock for both schedulers (lastMemberReadAt, 2026-09-08)
-      }
-      // idle threshold re-rolls EVERY tick inside the owner's 30–60min band —
-      // a wandering threshold, not a fixed cadence
-      const idleMaxAgeMs = 30 * 60e3 * (1 + Math.random());
-      const picks = decideCliRefresh(list, now, { maxAgeMs: 45 * 60e3 * jitter, idleMaxAgeMs });
-      for (const key of picks) {
-        attempts.set(key, now);
-        const ok = await usage.refreshViaCliPanel(key).catch(() => false);
-        fails.set(key, ok ? 0 : (fails.get(key) || 0) + 1); if (ok) onMemberReadingFresh(key, 'auto-cli refresh'); // the THIRD producer of a fresh reading takes the SAME edge (2026-09-08: its 02:31:43 success changed nothing)
-        console.log(`[auto-cli] quota refresh ${key}: ${ok ? 'ok' : 'failed'} (drift ${Math.round(list.find((x) => x.key === key)?.estDriftPct || 0)}pt)`);
-        global.__vsMetric?.('auto-cli-refresh-ms', 0);
-      }
-    } catch (e) { console.warn('[auto-cli] tick failed:', e.message); }
-  }, 60000).unref();
-}
+// ── auto-cli quota refresh loop (2.329.0; src/server/auto-cli-loop.js since
+// quota r2 — its pacing state persists in data/auto-cli-state.json). One
+// `claude -p /usage` spawn per 60 s tick at most, burn-aware, never a cadence.
+require('./src/server/auto-cli-loop.js').createAutoCliLoop({ serverSetting, accounts, autoCliReady, USAGE_CACHE_DIR, usageIdentityGroupsCached, usageEstimator, projectionRereadFor, lastMemberReadAt, usage, onMemberReadingFresh, dataDir: path.join(__dirname, 'data') }).start();
 // Normalizer-level settings reads (chat.hideEmptyHooks) go through the REAL store
 MessageManager.getSetting = (k) => { try { return serverSetting(k); } catch { return undefined; } };
 const { getOAuthToken, usagePollingEnabled, summarizeCodexRateLimit, summarizeCodexRateLimits } = usage;

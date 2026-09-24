@@ -339,6 +339,40 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
   return out;
 }
 
+// THE BURN (B-f69c ③, 2026-09-23): how fast each bucket is moving RIGHT NOW,
+// in utilization (0..1) per MINUTE — the learned rate × the ledger cost of the
+// trailing window (the live odometer included, through the caller's costFn).
+// It is what turns an estimate of NOW into a projection of LATER: the pool's
+// early move and the auto-cli fast rung both ask "does this bucket cross its
+// line before the next reading lands", and only the burn can answer that. The
+// 5h bucket uses the class-aware coefficients when the regression produced
+// them (the same rule estimateBuckets predicts with); a bucket with no rate or
+// no cost in the window has NO burn entry (absent = no claim, never 0 by
+// default — a projection must not rest on a number nobody measured).
+const BURN_WINDOW_MS = 10 * 60e3;
+function burnRates({ rates, costFn, nowMs, windowMs = BURN_WINDOW_MS }) {
+  if (!rates || !costFn || !(windowMs > 0)) return {};
+  let c = null;
+  try { c = costFn(nowMs - windowMs, nowMs) || null; } catch { c = null; }
+  if (!c || !(Number(c.total) > 0)) return {};
+  const min = windowMs / 60e3;
+  const out = {};
+  for (const key of Object.keys(rates)) {
+    const r = rates[key];
+    if (!r || !(r.rate > 0)) continue;
+    const cost = costForKey(key, c);
+    if (cost == null || !(cost > 0)) continue;
+    let du;
+    const bc = c.byClass;
+    if (key === 'fiveHour' && r.rateCw != null && r.rateCr != null && r.rateFresh != null && bc && Number.isFinite(Number(bc.cw)) && Number.isFinite(Number(bc.cr))) {
+      const cw = Number(bc.cw) || 0, cr = Number(bc.cr) || 0;
+      du = r.rateCw * cw + r.rateCr * cr + r.rateFresh * Math.max(0, cost - cw - cr);
+    } else du = r.rate * cost;
+    if (du > 0) out[key] = du / min;
+  }
+  return out;
+}
+
 // Merge an estimate over a raw cache entry → a cache-SHAPED view the pool
 // decision logic consumes unchanged. Estimated buckets replace their raw
 // counterparts; buckets the estimator abstained on keep the raw reading.
@@ -583,6 +617,18 @@ class UsageEstimator {
       return c;
     };
   }
+  /** The per-bucket burn (utilization per minute) of one account NOW — the
+   *  identity's learned rates over the trailing window's ledger + live cost
+   *  (burnRates). {} = no rate or no recent spend: no claim. */
+  burnFor(accountId, nowMs = Date.now(), { windowMs = BURN_WINDOW_MS } = {}) {
+    try {
+      const ident = this.resolveIdentity(accountId);
+      if (!ident?.identityKey) return {};
+      const rates = this.ratesFor(ident.identityKey);
+      const accountIds = this.accountIdsFor(ident.identityKey, [accountId || '__global__']);
+      return burnRates({ rates, costFn: this._costFn(accountIds), nowMs, windowMs });
+    } catch { return {}; }
+  }
   // Estimated bucket view for one account NOW (memo 30s). rawCache is only a
   // freshness reference: when the cache reading is NEWER than the last anchor
   // (sweep lag ≤60s), the cache itself is the better base — build a pseudo-
@@ -632,5 +678,6 @@ module.exports = {
   PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
+  burnRates, BURN_WINDOW_MS,
   UsageEstimator,
 };

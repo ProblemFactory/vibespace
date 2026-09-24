@@ -16,9 +16,23 @@ try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore'
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+// NO_AUTO_UPDATE is dropped so the boot takes the path every scratch server takes
+const { NO_AUTO_UPDATE: _nau, ...bootEnv } = process.env;
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...bootEnv, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+let bootLog = '';
+srv.stdout.on('data', (d) => { bootLog += d; }); srv.stderr.on('data', (d) => { bootLog += d; });
 process.on('exit', () => { try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} });
-for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
+const bootStart = Date.now();
+let up = false;
+for (let i = 0; i < 240 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
+if (!up) { console.error(`  ✗ the scratch server never answered /api/home in 60 s — its boot log:\n${bootLog.slice(-3000)}`); process.exit(1); }
+// 2026-09-24 (the 2.369.163 heavy RED): every scratch server ran the boot
+// auto-update's `git pull` — a network fetch into the SHARED .git before
+// listen, 2.5-15 s — and this suite's old 10 s window fell through to
+// ECONNREFUSED. A server whose root is under the OS temp dir never pulls.
+check('a throwaway (temp-dir) server root skips the boot auto-update — no `git pull` into the shared .git before listen',
+  /\[auto-update\] skipped: throwaway\/temp server root/.test(bootLog) && !/git pull|pull --ff-only/.test(bootLog), bootLog.split('\n').filter((l) => /auto-update/.test(l)).join(' | ') || '(no auto-update line)');
+console.log(`    (scratch server up in ${Date.now() - bootStart} ms)`);
 
 const post = async (url, body) => (await fetch(`http://127.0.0.1:${PORT}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
 const r = await post('/api/incident', { note: 'test note 现场', version: '0.0.0', rings: { action: [{ t: 1, k: 'ptr', el: 'div#x' }], ws: [], console: [{ t: 1, l: 'error', m: 'boom' }] }, snapshot: { windows: [], sessions: [] } });

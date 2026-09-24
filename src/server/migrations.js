@@ -335,6 +335,27 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-backfill-ledger-by-slot',
+      note: "B-f69c ② (owner decision ut-1c6c15a2db ②): from 2.361.0 until the 2026-09-07 attribution law the OTel-observed org — the identity the CLI cached at SPAWN — decided which account a permanent ledger row was billed to, twice over: truthLookup overrode the bake by request id, and corrective attribution entries wrote the observed org into attribution.ndjson for every later bake. Both were unwired going forward; the rows kept the account each hot-switched conversation STARTED on. This re-keys every row the OTel path demonstrably wrote (its rid in the OTel stash with that account, or a corrective entry governing it) to the credential slot that held the session at the row's time — the slot-transition ledger first, then the conversation's own attribution walk with the corrective entries set aside — refuses an answer the reading-window rules contradict (the lag shadow of a re-point, a slot whose login was already dead), ARCHIVES every row it cannot prove with a per-row reason (never a guess), archives the corrective entries themselves, and re-learns the estimator rates of every identity whose accounts moved (src/ledger-slot-backfill.js).",
+      run() {
+        const { backfillLedgerBySlot } = require('../ledger-slot-backfill.js');
+        const rep = backfillLedgerBySlot({ dataDir, id: '2026-09-backfill-ledger-by-slot' });
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran. ONE line; the same counts ride
+        // the ledger's report row (the runner stores the returned object).
+        console.log('[migrate] ledger-by-slot:', JSON.stringify(rep));
+        // THE WHOLE REPAIR (quota r2): a pass that resumes a crashed one states
+        // both — `total` — never only the remainder it found left to do
+        const T = rep.total || { rekeyed: rep.rekeyed, archived: rep.archived, corrective: rep.corrective };
+        if (T.rekeyed || T.archived) {
+          try {
+            serverNotice?.('ledger-by-slot', `Usage bookkeeping repaired: ${T.rekeyed} ledger row(s) that were billed to the account a conversation STARTED on (the OTel-observed org) were re-keyed to the account whose credentials actually served them, and ${T.archived} row(s) whose account cannot be proven were archived to data/archive/ with a reason each. The Usage window and the quota estimator (${rep.relearned} identit${rep.relearned === 1 ? 'y' : 'ies'} re-learned) re-derive from the repaired ledger.`, { level: 'info' });
+          } catch { }
+        }
+        return { rows: rep.rows, candidates: rep.candidates, rekeyed: T.rekeyed, archived: T.archived, untouched: rep.untouched, confirmed: rep.confirmed, corrective: T.corrective, relearned: rep.relearned, ...(rep.resumed ? { resumed: true, thisPass: { rekeyed: rep.rekeyed, archived: rep.archived, corrective: rep.corrective } } : {}) };
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {

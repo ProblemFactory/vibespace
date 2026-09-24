@@ -51,7 +51,8 @@ const { normalizeCodexRateLimit } = require(path.join(REPO, 'src/usage-routes.js
   // adjacency is bounded to the same line rather than literal; what is pinned
   // is unchanged: the backend test is one of the conditions that `continue`s
   // BEFORE the spawn.)
-  ok('auto-cli refresh loop skips codex accounts (claude -p /usage is claude-only)', /a\.backend \|\| 'claude'\) !== 'claude'[^\n]*\) continue; \/\/ auto-cli/.test(read('server.js')));
+  // (quota r2: the loop lives in src/server/auto-cli-loop.js; server.js only starts it)
+  ok('auto-cli refresh loop skips codex accounts (claude -p /usage is claude-only)', /a\.backend \|\| 'claude'\) !== 'claude'[^\n]*\) continue; \/\/ auto-cli/.test(read('src/server/auto-cli-loop.js')) && /createAutoCliLoop\(/.test(read('server.js')));
   const um = read('src/lib/usage-meter.js');
   ok('the popup codex section renders est pairs like the claude one', /estDisplayPair\(codex\?\.fiveHour, cEstSel\?\.fiveHour\)/.test(um) && /estBar\(cp5\)/.test(um) && /estStat\(cp7\)/.test(um));
   ok('cache-efficiency bar drops the fake cache-write segment for codex-only views', /codexOnly \? \[\] : \[\{ k: t\('Cache writes'\)/.test(read('src/lib/usage-window.js')));
