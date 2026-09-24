@@ -77,7 +77,7 @@ globalThis.isSecureContext = false;
 class FakeWorker {
   constructor(url) { this.url = url; this.posted = []; this.terminated = false; FakeWorker.instances.push(this); setTimeout(() => this.onmessage?.({ data: { c: 'r' } }), 0); }
   postMessage(m) { this.posted.push(m); if (m.c === 'o') { this.opened = m.u; setTimeout(() => this.onmessage?.({ data: { c: 'p', p: ['open'] } }), 0); } }
-  terminate() { this.terminated = true; }
+  terminate() { this.terminated = true; }   // a real Worker may still deliver a message queued before terminate() — the fake keeps delivering on purpose, the client must ignore it (§late)
   feed(p) { this.onmessage?.({ data: { c: 'p', p } }); }
   sent(type) { return this.posted.filter((m) => m.c === 's' && m.p[0] === type).map((m) => m.p); }
   get all() { return this.posted.filter((m) => m.c === 's').map((m) => m.p); }
@@ -861,7 +861,33 @@ console.log('§4 the census (grep over src/lib + style.css)');
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 9 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+console.log('§late — a worker message delivered after close() is ignored (the 2.369.165 push-gate crash: finish() nulled `worker`, a ready message queued before terminate() then dereferenced null)');
+{
+  const run = async (mod) => {
+    const posted = [];
+    class LateWorker { constructor() { setTimeout(() => this.onmessage?.({ data: { c: 'r' } }), 0); } postMessage(m) { posted.push(m); } terminate() { /* a real Worker may still deliver what it queued before this */ } }
+    let threw = null; const onUnc = (e) => { threw = e; };
+    process.on('uncaughtException', onUnc);
+    const c = mod.createXpraClient({ url: 'ws://x/late', workerUrl: '/w', screen: { width: 10, height: 10 }, Worker: LateWorker, decode: async () => ({ close() {} }) });
+    c.connect(); c.close();                      // torn down BEFORE the 0 ms ready timer fires
+    await new Promise((r) => setTimeout(r, 10));
+    process.off('uncaughtException', onUnc);
+    return { threw, opened: posted.some((m) => m && m.c === 'o') };
+  };
+  const shipped = await run(C);
+  ok(!shipped.threw && !shipped.opened, `shipped: a ready message after close() neither throws nor opens the socket (${shipped.threw ? shipped.threw.message : 'no throw'}, opened=${shipped.opened})`);
+  // NEGATIVE CONTROL: the pre-fix handler — the closure read the shared `worker` binding with no instance guard — in a patched copy
+  const src = read('src/lib/xpra-client.js');
+  const guard = "      if (worker !== w) return;\n";
+  const post = "      if (m.c === 'r') { w.postMessage({ c: 'o', u: url }); return; }";
+  ok(src.split(guard).length === 2 && src.split(post).length === 2, 'the instance guard and the bound postMessage are spelled once each (the control removes exactly them)');
+  const pre = src.replace(guard, '').replace(post, "      if (m.c === 'r') { worker.postMessage({ c: 'o', u: url }); return; }");
+  const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', pre, 'late-prefix')).href);
+  const control = await run(Cpre);
+  ok(!!control.threw && /postMessage/.test(String(control.threw && control.threw.message)), `NEGATIVE CONTROL: the pre-fix handler throws on the late message (${control.threw ? control.threw.message : 'no throw'})`);
+}
+
+for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

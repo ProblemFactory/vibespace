@@ -343,10 +343,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     state = 'opening';
     try { worker = new WorkerCtor(workerUrl); }
     catch (e) { finish(`the xpra protocol worker could not start: ${(e && e.message) || e}`); return; }
-    worker.onmessage = (e) => {
+    // The handler is bound to THIS worker instance: a real Worker can still
+    // deliver a message queued before terminate(), and finish() nulls `worker`
+    // first — a late 'r' then dereferenced null (the 2.369.165 push gate crash).
+    // A message from a worker finish() already tore down is ignored, never acted on.
+    const w = worker;
+    w.onmessage = (e) => {
+      if (worker !== w) return;
       const m = e && e.data;
       if (!m || typeof m !== 'object') return;
-      if (m.c === 'r') { worker.postMessage({ c: 'o', u: url }); return; }
+      if (m.c === 'r') { w.postMessage({ c: 'o', u: url }); return; }
       if (m.c === 'p') { onPacket(m.p); return; }
       if (m.c === 'l') { log?.log?.(`[xpra worker] ${m.t}`); return; }
     };

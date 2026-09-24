@@ -1,6 +1,7 @@
 # Changelog
 
 ## 2.369.165 — the OAuth client is chosen where the account is added, exactly like a storage mount; account cards work like mount rows (re-authorize, duplicate, edit, remove); the Integrations window keeps only browser keys
+- **r1 (push-gate crash, same version):** the xpra client's worker handler read the shared `worker` binding, and `finish()` nulls it before `terminate()` — a ready message the fake (or a real) Worker had already queued then dereferenced null and crashed test-xpra-client in the pre-push fast gate (a timing race the integration's own runs never hit). The handler is now bound to its own worker instance and ignores any message from a worker that was torn down; new §late leg with a pre-fix patched-copy control (red first).
 
 docs/design-integrations-per-account.zh.md r4 (the English twin beside it), owner rulings D1–D8 at their recommended defaults. One lane, four chunks in dependency order:
 
