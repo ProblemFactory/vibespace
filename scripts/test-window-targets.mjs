@@ -26,6 +26,9 @@
 //      an injection backend present (the rule is about the node, not the
 //      column) — the audit line without text, the STATUS map covering every
 //      typed refusal, 401 / 400 unsupported-host at the routes.
+//      B-bfe6 r1: a desktop-app BROWSER row (or url / keepProfile in the body) is
+//      refused browser_is_human (403) before the keeper; a patched copy (outside
+//      the tree) without the refusal is the negative control (it launches).
 // No fixed display, no fixed port, no fixed /tmp name (scripts/scratch.mjs).
 // Run: node scripts/test-window-targets.mjs
 import fs from 'node:fs';
@@ -33,6 +36,7 @@ import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
@@ -46,6 +50,12 @@ const D = require('../src/desktop-display.js');
 const ENGINE = require('../src/server/window-targets-engine.js');
 const ROUTES = require('../src/routes/window-targets.js');
 const dir = scratch('window-targets');
+// §4's negative control (a patched copy of the engine without the browser_is_human refusal) is written OUTSIDE
+// the tree (scripts/mutant-copy.mjs, `require` re-bound to the real module's path — B-0220); §4 measures that
+// while it exists.
+const repo = path.resolve(path.dirname(require.resolve('../package.json')));
+const MUTW = mutantCopies('wtargets', repo);
+sweepLegacy(repo, ['src/server'], /^vs-wte-mut-(\d+)\.js$/);   // what a pre-fix run stranded (dead PIDs only)
 fs.mkdirSync(dir, { recursive: true });
 const children = new Set();
 const cleanup = () => {
@@ -304,6 +314,8 @@ console.log('§4 the engine over a fake keeper + the routes');
     sessionPids: (rec) => Object.values(rec.pids).filter(Boolean),
     x11EnvFor: (id) => (records.get(id) ? (real ? real.xenv : D.x11Env(base, { display: ':77', authFile: path.join(dir, 'none') })) : null),
     launch: async (body) => { launched++; const rec = mk('da-new', { label: body.label || 'new', exec: body.exec || body.appId }); records.set(rec.id, rec); return rec; },
+    // the keeper's catalog shape (B-bfe6): a browser row carries `browser`; the rest are ordinary apps
+    registry: () => [{ id: 'gedit', label: 'gedit', exec: 'gedit', args: [], available: true, reason: null }, { id: 'chromium', label: 'Google Chrome', exec: 'google-chrome', args: [], category: 'browser', browser: 'chromium', available: true, reason: null }, { id: 'vs-browser', label: 'Fake browser', exec: 'vs-fake', args: [], category: 'browser', browser: 'firefox', available: true, reason: null }],
   };
   const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta' }]]);
   let helperCalls = 0;
@@ -332,6 +344,34 @@ console.log('§4 the engine over a fake keeper + the routes');
   ok(ex && ex.code === 'exec_is_human' && /registry app/i.test(ex.message) && /vibespace-window list/.test(ex.message) && Array.isArray(ex.apps) && launched === 1, 'open with an exec is refused exec_is_human naming the remedy (registry ids via `list`) — the keeper never launched it');
   ok((await err(() => engine.open({ appId: 'gedit', cwd: '/tmp' }, f2))).code === 'exec_is_human' && (await err(() => engine.open({ appId: 'gedit', args: [] }, f2))).code === 'exec_is_human' && launched === 1, '…and so are args / cwd beside an appId (the whole exec triple is the user\'s)');
   ok(Array.isArray((await engine.list(f1)).apps), 'list carries the registry ids an agent may open (the refusal\'s remedy is real)');
+  // A BROWSER ROW IS A HUMAN'S (B-bfe6, design-desktop-apps §7.7; the 2026-09-23 verifier's probe1 §E launched a real
+  // browser from the agent route with the agent's url/keepProfile silently dropped): refused BY NAME before the keeper
+  {
+    const br = await err(() => engine.open({ appId: 'chromium' }, f2));
+    ok(br && br.code === 'browser_is_human' && /vibespace-browser/.test(br.message) && /Google Chrome/.test(br.message) && launched === 1, 'open {appId:chromium} is refused browser_is_human naming the agent browser (`vibespace-browser`) — the keeper never launched it');
+    ok((await err(() => engine.open({ appId: 'vs-browser' }, f2))).code === 'browser_is_human' && (await err(() => engine.open({ app: 'chromium' }, f2))).code === 'browser_is_human' && launched === 1, '…any row carrying `browser` (a custom id too), by either spelling of the id');
+    const u = await err(() => engine.open({ appId: 'gedit', url: 'https://agent.example/' }, f2));
+    const kp = await err(() => engine.open({ appId: 'gedit', keepProfile: false }, f2));
+    ok(u && u.code === 'browser_is_human' && /^url/.test(u.message) && kp && kp.code === 'browser_is_human' && /^keepProfile/.test(kp.message) && launched === 1, '`url` / `keepProfile` in the agent body are refused by name, never silently dropped');
+    const apps = (await engine.list(f1)).apps.map((a) => a.id);
+    ok(apps.includes('gedit') && !apps.includes('chromium') && !apps.includes('vs-browser'), `list's "apps you may open" leaves the browser rows out (${apps.join(', ')})`);
+    const plain = await engine.open({ appId: 'gedit' }, f2);
+    ok(plain.handle === 'da-new' && plain.lease.sessionId === 's2' && launched === 2, 'a non-browser registry row still opens through the keeper');
+    ok(ROUTES.STATUS.browser_is_human === 403, 'the route maps browser_is_human to 403');
+    // negative control: the engine WITHOUT the refusal (a patched copy in this process's scratch dir) launches the browser row
+    const src = fs.readFileSync(require.resolve('../src/server/window-targets-engine.js'), 'utf8');
+    const patched = src.replace(/\n\s*if \(\(b\.url !== undefined[^\n]*\n/, '\n').replace(/\n\s*if \(bRow\) throw namedError\('browser_is_human'[^\n]*\n/, '\n');
+    ok(patched !== src && !/if \(bRow\) throw/.test(patched), 'the control patch removed both refusals');
+    const mut = MUTW.write('src/server/window-targets-engine.js', patched, 'nobrowser');
+    {
+      const M2 = require(mut);
+      const e2 = M2.create({ keeper, dataDir: path.join(dir, 'mut'), env: () => base, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, log: { warn() { } } });
+      const o2 = await e2.open({ appId: 'chromium', url: 'https://agent.example/' }, f2);
+      ok(o2 && o2.handle && launched === 3, 'negative control: without the refusal the agent route LAUNCHES the browser row (and drops its url) — the leg above is what stops it');
+    }
+    // the tree is never written (B-0220): measured while the copy still exists
+    for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(r.pass, '§4 tree: ' + r.name, r.pass ? undefined : r.detail);
+  }
   ok((await err(() => engine.act('da-one', f1, { verb: 'key', chord: 'ctrl+s; x' }))).code === 'bad_chord', 'a bad chord is refused before any backend is consulted');
   ok((await err(() => engine.act('da-one', f1, { verb: 'click' }))).code === 'bad-request' && (await err(() => engine.act('da-one', f1, { verb: 'dance' }))).code === 'bad-request', 'click without a ref or --at, or an unknown verb ⇒ bad-request');
   ok((await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' }))).code === 'ref_unknown', 'a ref before any snapshot ⇒ ref_unknown (snapshot first)');

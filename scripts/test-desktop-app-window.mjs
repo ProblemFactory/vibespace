@@ -7,7 +7,7 @@
 // (layout sync replays the openSpec; both stream one display) → SIGKILL the
 // server + reboot ⇒ the session is ADOPTED and the window reconnects (the
 // status chip reads "vnc-display (xpra not on PATH)" on this box) → Stop ⇒ the
-// window says it exited, and no X/x11vnc survives. Also the singleton Desktop
+// window closes itself with a toast (round 3 A2), and no X/x11vnc survives. Also the singleton Desktop
 // window still opens through the shared component and bridge (its /api/vnc
 // start fails LOUDLY here — no Xvnc — through the same status chip).
 //
@@ -147,6 +147,7 @@ const GEOM = `(() => {
 })()`;
 const shot = async (p, name) => { if (!SHOTS) return; const r = await p.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); };
 const INTRO_KEY = (() => { const m = /desktop-launch-intro">\$\{escHtml\(t\('([^']+)'\)\)\}/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })();
+const SNAP_SHORT_KEY = (() => { const m = /'snap-profile-unreachable'\) return t\('([^']+)'\)/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })();
 
 let p1 = await page(target);
 try {
@@ -188,7 +189,7 @@ try {
     let g = await p1.evalJs(GEOM);
     check(`${w}×${h}: the Advanced disclosure is CLOSED on a fresh open (aria-expanded=false, form hidden)`, g.adv === 'false' && !g.advBodyVisible, { adv: g.adv, advBodyVisible: g.advBodyVisible });
     check(`${w}×${h}: nothing is running yet ⇒ the Running section is not shown`, !g.runningVisible);
-    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && /not on PATH|parked/i.test(c.sub)), g.cards);
+    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && (/not on PATH|parked/i.test(c.sub) || c.sub === SNAP_SHORT_KEY)), g.cards); // B-bfe6 r1: a browser row a snap cannot serve here is dimmed with the SHORT reason (the verdict's sentence is its tooltip)
     await shot(p1, `after-fresh-open-${w}x${h}@2x.png`);
     // the closed state has no columns to measure; open the disclosure (a real click) and measure the form
     await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
@@ -218,6 +219,36 @@ try {
   }
   await patchState({ desktopAppRecents: [], desktopAppAdvancedOpen: false });
 
+  // ── §B THE BROWSERS SECTION'S GEOMETRY (B-bfe6 r1, the 2026-09-23 verifier's probe4): the keep-profile checkbox
+  // sat 13×13 ABOVE its text (`.dialog-body label`'s column flex out-ranked `.desktop-launch-check`), and a dimmed
+  // snap browser's 204-char English sentence was a 10 px nowrap sub-label cut to ~27 characters (tooltip-only on a
+  // phone). A SYNTHETIC snap row rides the catalog fetch in the page so the leg runs on every box, snap or not.
+  console.log('§B the Browsers section: the keep-profile box sits LEFT of its text on one row; a dimmed browser card says a short reason, unclipped (1200×800 / 375×667)');
+  const SNAP_LONG = 'firefox is a snap: it can only open a profile inside your home folder, outside a hidden one — this instance keeps its data at /tmp/vs-probe/data/desktop-apps, which the snap cannot reach';
+  const injectSnapRow = (p) => p.evalJs(`(() => { if (window.__vsSnapFetch) return true; const of = window.fetch; window.__vsSnapFetch = of; window.fetch = function (u, o) { const pr = of.apply(this, arguments); if ((!o || !o.method || o.method === 'GET') && /\\/api\\/desktop\\/apps(\\?|$)/.test(String(u))) return pr.then((r) => r.clone().json().then((j) => { if (j && Array.isArray(j.registry)) j.registry.push({ id: 'vs-snap-probe', label: 'Firefox (probe)', exec: 'firefox', args: [], category: 'browser', browser: 'firefox', available: false, path: null, reason: ${JSON.stringify(SNAP_LONG)}, reasonCode: 'snap-profile-unreachable' }); return new Response(JSON.stringify(j), { status: r.status, headers: { 'Content-Type': 'application/json' } }); })); return pr; }; return true; })()`);
+  const BGEOM = `(() => {
+    const dlg = document.querySelector('#desktop-launch-dialog .dialog'); if (!dlg) return null;
+    const R = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; };
+    const lab = dlg.querySelector('label.desktop-launch-check'); const box = lab && lab.querySelector('input[type=checkbox]'); const txt = lab && lab.querySelector('span');
+    const cards = [...dlg.querySelectorAll('.desktop-launch-browsers .desktop-launch-card.is-unavailable')].map((c) => { const s = c.querySelector('.desktop-launch-card-sub'); return { id: c.dataset.appId, sub: s.textContent, title: c.title, sw: s.scrollWidth, cw: s.clientWidth, sh: s.scrollHeight, ch: s.clientHeight }; });
+    return { box: box ? R(box) : null, txt: txt ? R(txt) : null, flexDir: lab ? getComputedStyle(lab).flexDirection : null, cards };
+  })()`;
+  check('control: the short snap reason key is read off the launcher source', !!SNAP_SHORT_KEY && SNAP_SHORT_KEY.length < SNAP_LONG.length / 3, SNAP_SHORT_KEY);
+  for (const [w, h] of [[1200, 800], [375, 667]]) {
+    await p1.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: w <= 768 });
+    await sleep(200);
+    await injectSnapRow(p1);
+    check(`${w}×${h}: a fresh open renders the catalog (with the synthetic snap row)`, await openDialog(p1) && await until(() => p1.evalJs(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="vs-snap-probe"]')`), 4000, 100));
+    await p1.evalJs(`document.querySelector('#desktop-launch-dialog label.desktop-launch-check')?.scrollIntoView({ block: 'nearest' }); true`);
+    const g = await p1.evalJs(BGEOM);
+    check(`${w}×${h}: the keep-profile checkbox is LEFT of its text, on the same row (flex-direction ${g && g.flexDir})`, !!g && !!g.box && !!g.txt && g.box.r <= g.txt.x + 0.5 && g.box.y < g.txt.b && g.box.b > g.txt.y && g.box.w > 0, g && { box: g.box, txt: g.txt });
+    const snapCard = g && g.cards.find((c) => c.id === 'vs-snap-probe');
+    check(`${w}×${h}: the dimmed snap card says the SHORT reason ("${snapCard && snapCard.sub}") and keeps the full sentence in its tooltip`, !!snapCard && snapCard.sub === SNAP_SHORT_KEY && snapCard.title.includes(SNAP_LONG), snapCard);
+    check(`${w}×${h}: no dimmed browser card's reason is clipped (${g && g.cards.map((c) => `${c.id} ${c.sw}/${c.cw}×${c.sh}/${c.ch}`).join(', ')})`, !!g && g.cards.length >= 1 && g.cards.every((c) => c.sw <= c.cw + 1 && c.sh <= c.ch + 1), g && g.cards);
+    await shot(p1, `browsers-section-${w}x${h}@2x.png`);
+  }
+  await p1.evalJs(`(() => { if (window.__vsSnapFetch) { window.fetch = window.__vsSnapFetch; delete window.__vsSnapFetch; } document.getElementById('desktop-launch-dialog')?.remove(); return true; })()`);
+
   // ── §Z the intro line in zh (per-device language; reload-on-switch) ──
   console.log('§Z the intro line speaks the device language');
   check('control: the intro key is read off the launcher source', !!INTRO_KEY && INTRO_KEY.length > 40, INTRO_KEY);
@@ -229,6 +260,7 @@ try {
     const g = await p1.evalJs(GEOM);
     check('in zh the intro line renders the zh translation (not the English key)', g.introVisible && g.introText === zhDict[INTRO_KEY], { got: g.introText.slice(0, 80) });
     check('in zh the disclosure label is translated too', await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-adv-toggle').textContent === ${JSON.stringify(zhDict['Advanced: run any command'])}`));
+    check('control: the zh dictionary carries the short snap reason', typeof zhDict[SNAP_SHORT_KEY] === 'string' && zhDict[SNAP_SHORT_KEY].length > 3);
     await shot(p1, 'after-intro-zh-1000x800@2x.png');
   }
   await p1.evalJs(`localStorage.removeItem('vibespace.lang'); true`);
@@ -370,11 +402,16 @@ try {
 
   // Stop from the window's own button
   await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); w.content.querySelector('.desktop-app-stop').click(); return true; })()`);
-  const ended = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); const s = w?.content.querySelector('.desktop-status')?.textContent; return s === 'Stopped' ? s : null; })()`), 15000);
-  check('Stop ⇒ the window says "Stopped"', ended === 'Stopped', ended);
+  // round 3 A2 (docs/design-desktop-apps-seamless §3.2): a Stop closes the window itself — with a toast, never a dead "Stopped" shell
+  const tStop = Date.now();
+  const ended = await until(() => p1.evalJs(`(() => ![...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'))()`), 15000, 50);
+  const stopMs = Date.now() - tStop;
+  const stopToasts = await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
+  check(`Stop ⇒ the window closes itself (${stopMs} ms) with the "<app> stopped" toast`, !!ended && stopToasts.some((x) => / stopped/.test(x)), { ended, stopToasts });
   await sleep(500);
   check('Stop leaves no X / picture server / app behind (every recorded pid gone)', [pidsBefore.x, pidsBefore.server, pidsBefore.app].every((p) => !D.pidAlive(p)));
-  check('the Stop button is gone from an ended window; no Keep running either', await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}'); return getComputedStyle(w.content.querySelector('.desktop-app-stop')).display === 'none'; })()`));
+  const rec2 = await p1.evalJs(`fetch('/api/desktop/apps/${appId}').then((r) => r.json())`);
+  check('…the record says who ended it (exited, stoppedBy user) — the verdict every client closes on', rec2.state === 'exited' && rec2.stoppedBy === 'user', { state: rec2.state, stoppedBy: rec2.stoppedBy });
 
   // the singleton Desktop window still goes through the shared component + bridge
   await p1.evalJs(`app.openDesktop(); true`);

@@ -32,7 +32,30 @@
 //     session's screen is the pane's on-screen size, zero black pixels
 //     outside the app window, and a pointer move lands on the SAME X
 //     coordinate (`xdotool getmouselocation` on the display);
-//   • Stop ⇒ "Stopped", nothing left running.
+//   • Stop ⇒ the window closes itself (round 3 A2), nothing left running.
+//   • §8 (B-bfe6) a BROWSER as an app, from the dialog's Browsers section with an
+//     Open URL: the real chromium-family / firefox binary (each SKIPPED with its
+//     reason when absent or unreachable — a snap is refused by name), the window
+//     maps, our own http server sees the browser's GET and the title bar carries
+//     the page title xpra reports, the argv / the process / the files name the
+//     keeper's OWN 0700 profile (never under $HOME), Stop removes it.
+//   • §9 (round 3, A1 — docs/design-desktop-apps-seamless §3.1) THE PLAIN-HTTP
+//     GESTURE WINDOW on a hostname page with GNOME Calculator: the user's own
+//     Ctrl+C ⇒ the calculator's copy lands in the browser clipboard with NO
+//     click (read back from the secure page); a token 5.5 s after the chord,
+//     or after a plain key (activation but no copy chord) ⇒ the chip; the
+//     one-time HTTPS hint (§2's first chip shows it, §9's does not repeat it).
+//   • §10 (round 3, A2 — §3.2) THE CLOSE: the calculator's own ✕ ⇒ the VibeSpace
+//     window gone on TWO clients within 2 s with a toast; the outer ✕ ⇒
+//     close-window ⇒ the app process gone; an app that answers with its own
+//     dialog keeps everything, a second ✕ within 5 s = Stop; a blocked pane's ✕
+//     never asks the app; a dead record replayed from the layout never paints;
+//     CONTROL = a copy whose window never closes itself (the dead picture).
+//   • §11 (round 3, A3 — §3.4) THE SCALE: a DPR-2 page at UI scale 125 % launches GNOME
+//     Calculator from the launcher's card ⇒ 2.5× (GDK_SCALE 2 in the app's environ, Xft.dpi
+//     120 in its display, the chip "2.5× · auto"); ⋯ → Scale ▸ 1.5× → the confirm ⇒ the SAME
+//     window on two clients shows the successor at 1.5× (GDK_SCALE 1, 144 dpi), the old one
+//     stopped; CONTROL = a copy whose keeper ignores the UI scale (2× / 96).
 // SKIPs with evidence without chrome / xpra / xauth / xterm; the xclip legs
 // SKIP without xclip; the plain-http leg SKIPs when the hostname does not
 // resolve. Worktree-isolated (own data/, scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1),
@@ -40,6 +63,7 @@
 // Run: node scripts/test-desktop-xpra-window.mjs
 import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,6 +164,7 @@ const cleanup = () => {
   try { fs.rmSync(scratch('deskxpra-x5ctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-hidpictl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-r2ctl-home'), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(scratch('deskxpra-a2ctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
@@ -299,6 +324,9 @@ try {
         const holder2 = spawn('sh', ['-c', `printf 'from-the-app-2' | ${XCLIP} -i -selection clipboard`], { env: xenv, stdio: 'ignore', detached: true }); xclipKids.push(holder2);
         const chipSt = await until(async () => { const s = await p2.evalJs(WIN(appId)); return s && s.chip && s.chip.shown && s.chip.text === 'from-the-app-2' ? s : null; }, 10000, 300);
         check('on plain http the copy becomes the "Copied in the app — click to copy" chip holding the text (never a silent no-op)', !!chipSt, chipSt || (await p2.evalJs(WIN(appId))).chip);
+        // round 3, A1: the FIRST chip on this plain-http device carries the one-time "Enable HTTPS for seamless copy" hint + the docs link
+        const hint2 = await p2.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); const h = w._desktopAppView.copyHint; const a = h && h.querySelector('a'); const r = h && h.getBoundingClientRect(); return h ? { shown: getComputedStyle(h).display !== 'none' && r.width > 0, text: h.textContent, href: a && a.href, stored: localStorage.getItem('vibespace.desktopCopyHintShown') } : null; })()`);
+        check('A1: the first chip on this plain-http device shows the one-time hint "Enable HTTPS for seamless copy" with the docs link, and the device remembers it (localStorage)', !!hint2 && hint2.shown && /Enable HTTPS for seamless copy/.test(hint2.text) && /docs\/getting-started\.md#https-for-seamless-copy$/.test(hint2.href || '') && !!hint2.stored, hint2);
         if (chipSt) {
           await trustedClickAt(p2, chipSt.chip.rect.x + chipSt.chip.rect.w / 2, chipSt.chip.rect.y + chipSt.chip.rect.h / 2);
           const gone = await until(async () => { const s = await p2.evalJs(WIN(appId)); return s && s.chip && !s.chip.shown ? true : null; }, 5000, 200);
@@ -817,7 +845,7 @@ try {
   check(`the canvas backing store is 2× its CSS size (${o.x && o.x.canvas && `${o.x.canvas.w}×${o.x.canvas.h} in ${o.x.canvas.rw.toFixed(1)}×${o.x.canvas.rh.toFixed(1)}`}) — one app pixel per screen pixel`, !!o.x && !!o.x.canvas && Math.abs(o.x.canvas.w - o.x.canvas.rw * 2) <= 2 && Math.abs(o.x.canvas.h - o.x.canvas.rh * 2) <= 2, o.x && o.x.canvas);
   check(`xterm's character cell is ${inc[0]}×${inc[1]} DEVICE px (the X resources gave it an Xft face at 2× before it started; its 6×13 bitmap at 1× — the text is drawn at the screen's resolution, not blown up)`, inc[0] >= 12 && inc[1] >= 26, inc);
   check(`the pointer at DPR 2 lands on X at TWICE the CSS point (${JSON.stringify(o.pointer)})`, !XDOTOOL || (Array.isArray(o.pointer) && o.pointer.length === 2 && o.pointer.every((q) => q.x && Math.abs(q.x[0] - 2 * q.css[0]) <= 2 && Math.abs(q.x[1] - 2 * q.css[1]) <= 2)), o.pointer);
-  check('the status strip names the scale (the chip says "2×", its tooltip says a relaunch applies a change) and the backend chip says what xpra is', !!o.x && !!o.x.chip && o.x.chip.shown && o.x.chip.text === '2×' && /launched again/.test(o.x.chip.title) && /streams each app window as pixels/.test(o.x.backendTitle), o.x && { chip: o.x.chip, backend: o.x.backendTitle });
+  check('the status strip names the scale (the chip says "2× · auto" since round 3 A3, its tooltip says ⋯ → Scale relaunches it) and the backend chip says what xpra is', !!o.x && !!o.x.chip && o.x.chip.shown && o.x.chip.text === '2× · auto' && /relaunches the app at another scale/.test(o.x.chip.title) && /streams each app window as pixels/.test(o.x.backendTitle), o.x && { chip: o.x.chip, backend: o.x.backendTitle });
   if (CALC6) {
     console.log(`  ours calculator: record ${JSON.stringify(o.calcRec)}, constraints ${JSON.stringify(o.c0 && o.c0.constraints)}, min pane ${JSON.stringify(o.c1 && o.c1.minSize)}; window min ${o.c1 && `${o.c1.win.minW}×${o.c1.win.minH}`} layout px; after a drag 700 px past it: window ${o.c1 && `${o.c1.win.w.toFixed(0)}×${o.c1.win.h.toFixed(0)}`}, pane ${o.c1 && `${o.c1.pane.w}×${o.c1.pane.h}`}, main ${o.c1 && o.c1.main && `${o.c1.main.w}×${o.c1.main.h}`} device, stage ${o.c1 && o.c1.scale}; '7' clicked twice ⇒ the calculator copies "${o.seven}"`);
     const cmin = (o.c0 && o.c0.constraints && o.c0.constraints['minimum-size']) || [0, 0];
@@ -874,7 +902,7 @@ try {
     fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
     const patches = [
       ['src/lib/xpra-view.js', "  const ratio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);", '  const ratio = () => 1; // pre-fix CONTROL'],
-      ['src/server/desktop-app-keeper.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr)) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'],
+      ['src/server/desktop-app-keeper.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'], // round 3 A3 respelled the lever (the pick is scalePick's)
       ['src/lib/xpra-proto.js', "'title', 'size-hints', 'size-constraints', 'class-instance'", "'title', 'size-hints', 'class-instance'"],
     ];
     let allOnce = true;
@@ -1027,7 +1055,7 @@ try {
       ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
       ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
       ['src/server/desktop-app-keeper.js', "      if (own && M.streamKindOf(rec, backends) === 'xpra') {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
-      ['src/desktop-apps.js', '  return normalizeDpr(dpr) >= 1.5 ? 2 : 1;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2));'],
+      ['src/desktop-apps.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],
     ];
     let once = true;
     for (const [f, from, to] of levers) { const src = fs.readFileSync(path.join(wtr, f), 'utf8'); if (src.split(from).length !== 2) { once = false; console.error(`    lever not spelled once in ${f}: ${from.slice(0, 70)}`); } fs.writeFileSync(path.join(wtr, f), src.replace(from, to)); }
@@ -1056,10 +1084,570 @@ try {
   check('the first app\'s window is on the current page again (layout replay after §5\'s page swap)', !!(await ensureWin()));
   // ── Stop from the window ──
   await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(appId)}); w.content.querySelector('.desktop-app-stop').click(); return true; })()`);
-  const ended = await until(async () => { const s = await p1.evalJs(WIN(appId)); return s && s.status === 'Stopped' ? s : null; }, 15000);
-  check('Stop ⇒ the window says "Stopped"', !!ended, ended);
+  // round 3 A2: a Stop closes the window itself (every client, from the broadcast) with a toast — never a dead "Stopped" shell
+  const ended = await until(async () => { const s = await p1.evalJs(WIN(appId)); return s === null ? true : null; }, 15000);
+  const stopToasts = await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
+  check('Stop ⇒ the window closes itself with the "<app> stopped" toast (round 3 A2)', !!ended && stopToasts.some((x) => /^vs-xpra-title stopped/.test(x)), { ended, stopToasts });
   await sleep(600);
   check('Stop leaves no xpra / Xvfb / xterm behind (every recorded pid gone)', [rec.pids.x, rec.pids.server, rec.pids.app].every((p) => !D.pidAlive(p)));
+
+  // ── §8 B-bfe6: a BROWSER as a desktop app — launched from the dialog's Browsers section with an Open URL, on the
+  // xpra rung like every app: the window maps, the URL argument landed (our own http server sees the browser's GET and
+  // the title bar carries the page title xpra reports), the profile is the keeper's (the argv names it, the browser
+  // wrote into it, 0700, never under $HOME), Stop removes it. Every browser row on this box is judged; one that cannot
+  // launch here is SKIPPED with its reason (a snap's private /tmp cannot reach this run's scratch data dir — the
+  // refusal itself is asserted by name) ──
+  {
+    const same2 = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+    const M_LIMITS = require('../src/keeper-limits.js');
+    const trustedClick = async (p, sel) => { const r = await p.evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`); if (r) await trustedClickAt(p, r.x, r.y); return !!r; };
+    const hits = [];
+    const PAGE_TITLE = `vs-bfe6 ${process.pid}`;
+    const web = http.createServer((q, s) => { hits.push({ url: q.url, ua: String(q.headers['user-agent'] || '') }); s.writeHead(q.url.startsWith('/vs-bfe6') ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' }); s.end(q.url.startsWith('/vs-bfe6') ? `<!doctype html><title>${PAGE_TITLE}</title><body style="background:#fff"><h1>${PAGE_TITLE}</h1>` : ''); });
+    const [WEB_PORT] = await freePorts(1);
+    await new Promise((r) => web.listen(WEB_PORT, '127.0.0.1', r));
+    try {
+      const regB = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.registry.filter((r) => r.browser))`);
+      console.log(`  browser rows: ${regB.map((r) => `${r.id} → ${r.available ? `${r.exec} ${r.path}${r.confinement ? ' [' + r.confinement + ']' : ''}` : `UNAVAILABLE (${r.reason})`}`).join('; ')}`);
+      check('the catalog serves the two browser families (chromium, firefox), each available or dimmed WITH a reason', same2(regB.map((r) => r.id).sort(), ['chromium', 'firefox']) && regB.every((r) => r.available || !!r.reason), regB);
+      for (const row of regB) {
+        if (!row.available) {
+          if (/is a snap/.test(row.reason || '')) {
+            const rr = await p1.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: ${JSON.stringify(row.id)} }) }).then(async (r) => ({ status: r.status, body: await r.json() }))`);
+            check(`${row.id}: this box's ${row.id} is a SNAP — the launch is refused by name (409 snap-profile-unreachable), never a profile the snap would silently swap for its own`, rr.status === 409 && rr.body.code === 'snap-profile-unreachable', rr);
+          }
+          skip(`${row.id} window leg`, row.reason || 'not available');
+          continue;
+        }
+        const url = `http://127.0.0.1:${WEB_PORT}/vs-bfe6-${row.id}`;
+        const before = new Set((await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.apps.map((a) => a.id))`)));
+        // the dialog: open it, type the URL into the Browsers section's field, click the family's card
+        await p1.evalJs(`(() => { document.getElementById('desktop-launch-dialog')?.remove(); document.getElementById('btn-desktop-apps').click(); return true; })()`);
+        const card = await until(() => p1.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-browsers .desktop-launch-card[data-app-id=${JSON.stringify(row.id)}]'); return c && !c.disabled ? { title: c.title, inBrowsers: !!c.closest('.desktop-launch-browsers-sec'), note: document.querySelector('#desktop-launch-dialog .desktop-launch-browser-note')?.textContent || '' } : null; })()`), 10000, 150);
+        check(`${row.id}: its card sits under the dialog's Browsers heading and its tooltip carries the "your own browser window … the Agent browser is separate" note`, !!card && card.inBrowsers && /your own browser window \(an app\); the Agent browser \(Browser profiles\) is separate/.test(card.title) && card.note === 'This is your own browser window (an app); the Agent browser (Browser profiles) is separate', card);
+        if (!card) continue;
+        // a bad URL is refused IN the dialog, by the same pure function the server runs — nothing launched
+        await p1.evalJs(`(() => { const i = document.querySelector('#desktop-launch-dialog .desktop-launch-url'); i.value = 'javascript:alert(1)'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+        await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-browsers .desktop-launch-card[data-app-id="${row.id}"]`);
+        await sleep(600);
+        const afterBad = await p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.apps.filter((a) => a.state === 'launching' || a.state === 'ready').map((a) => a.id))`);
+        check(`${row.id}: a javascript: URL in the dialog is refused before any request (the dialog stays open, no session started)`, await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`) && afterBad.every((id) => before.has(id)), afterBad);
+        await p1.evalJs(`(() => { const i = document.querySelector('#desktop-launch-dialog .desktop-launch-url'); i.value = ${JSON.stringify(url)}; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+        await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-browsers .desktop-launch-card[data-app-id="${row.id}"]`);
+        const recB = await until(() => p1.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((d) => d.apps.find((a) => a.appId === ${JSON.stringify(row.id)} && !${JSON.stringify([...before])}.includes(a.id) && (a.state === 'ready' || a.state === 'failed')) || null)`), 45000, 300);
+        check(`${row.id}: the launch from the dialog reaches ready on the xpra rung (${recB && recB.backend})`, !!recB && recB.state === 'ready' && recB.backend === 'xpra', recB && { state: recB.state, lastError: recB.lastError });
+        if (!recB || recB.state !== 'ready') continue;
+        const profWant = path.join(wt, 'data', 'desktop-apps', recB.id, 'profile');
+        check(`${row.id}: the record names the keeper's OWN profile dir (data/desktop-apps/<id>/profile) and the URL as the LAST argv item, after the profile flags`, recB.profileDir === profWant && recB.url === url && recB.args[recB.args.length - 1] === url && recB.args.findIndex((a) => a === profWant || a === `--user-data-dir=${profWant}`) >= 0 && recB.args.findIndex((a) => a === profWant || a === `--user-data-dir=${profWant}`) < recB.args.length - 1, { profileDir: recB.profileDir, args: recB.args });
+        // Chrome rewrites its own /proc cmdline into ONE space-joined string (measured: `/opt/google/chrome/chrome --user-data-dir=… …`) — tokenised back here
+        const cmd = (() => { try { return fs.readFileSync(`/proc/${recB.pids.app}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ').split(' ').filter(Boolean); } catch { return []; } })();
+        check(`${row.id}: the RUNNING browser process (pid ${recB.pids.app}) carries that profile and that URL in its argv — and no automation flag`, cmd.some((a) => a === `--user-data-dir=${profWant}` || a === profWant) && cmd.includes(url) && !cmd.some((a) => /^--?(remote-debugging|enable-automation|headless|marionette)/.test(a)), cmd);
+        // the window maps (our xpra client draws it) and the title bar carries the PAGE title xpra reports
+        const winB = await until(async () => { const s = await p1.evalJs(WIN(recB.id)); return s && s.status === 'Connected' && s.windows.length && s.title && s.title.includes(PAGE_TITLE) ? s : null; }, 45000, 400);
+        const winAny = winB || await p1.evalJs(WIN(recB.id));
+        check(`${row.id}: the window maps in VibeSpace (status Connected, ${winAny && winAny.windows.length} window(s) in the session)`, !!winAny && winAny.status === 'Connected' && winAny.windows.length > 0, winAny && { status: winAny.status, windows: winAny.windows.length });
+        check(`${row.id}: the VibeSpace title bar carries the page title xpra reports ("${winAny && winAny.title}")`, !!winB, winAny && winAny.title);
+        const xs = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}/windows').then((r) => r.json())`);
+        check(`${row.id}: X agrees — a mapped browser window titled with the page (${(xs.windows || []).map((w) => JSON.stringify(w.title)).join(', ')})`, (xs.windows || []).some((w) => (w.title || '').includes(PAGE_TITLE)), xs);
+        const got = hits.filter((h) => h.url.startsWith(`/vs-bfe6-${row.id}`));
+        check(`${row.id}: the URL argument LANDED — our http server served ${got.length} GET(s) of ${new URL(url).pathname} (UA ${got[0] ? got[0].ua.slice(0, 60) : 'none'})`, got.length > 0, hits.slice(-5));
+        // the profile is the keeper's — the browser wrote into it; 0700; not under $HOME; the apps' $HOME has no profile of that browser
+        const profEntries = (() => { try { return fs.readdirSync(profWant); } catch { return null; } })();
+        // A PROFILE of that browser under $HOME = anything but Chrome's crashpad database: Chrome creates
+        // `~/.config/<channel>/Crash Reports` (settings.dat + four empty dirs) whatever --user-data-dir says — measured with
+        // strace on google-chrome 2026-09-23 — and opens the user's shared NSS store ~/.local/share/pki/nssdb; neither holds
+        // a cookie, a history or a login. Everything else of the profile must be in the keeper's dir.
+        const realRoots = ['.config/google-chrome', '.config/chromium', '.config/chromium-browser', '.mozilla'].flatMap((r) => { try { return fs.readdirSync(path.join(fakeHome, r)).filter((e) => e !== 'Crash Reports').map((e) => `${r}/${e}`); } catch { return []; } });
+        check(`${row.id}: the browser wrote its profile INTO the keeper's dir (${profEntries ? profEntries.slice(0, 6).join(', ') : 'missing'}), mode ${profEntries ? (fs.statSync(profWant).mode & 0o777).toString(8) : '?'}`, !!profEntries && profEntries.length > 0 && (fs.statSync(profWant).mode & 0o777) === 0o700);
+        check(`${row.id}: the profile is not under $HOME (${fakeHome}) and no ${row.id} profile appeared under $HOME (${realRoots.join(', ') || 'none'}; Chrome's crashpad dir aside)`, !profWant.startsWith(fakeHome + path.sep) && !realRoots.length, realRoots);
+        const liveB = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}').then((r) => r.json())`);
+        if (liveB.live) console.log(`  ${row.id}: the runaway guard's last sample — ${(liveB.live.rssBytes / 1048576).toFixed(0)} MB RSS over ${liveB.live.pids} process(es), ${liveB.live.cpuPct == null ? '?' : liveB.live.cpuPct.toFixed(0)} % CPU (limit ${M_LIMITS.GUARD_RSS_BYTES / 2 ** 30} GiB)`);
+        // Stop from the window ⇒ Stopped, nothing left, the profile removed
+        await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); w.content.querySelector('.desktop-app-stop').click(); return true; })()`);
+        const endB = await until(async () => { const r = await p1.evalJs(`fetch('/api/desktop/apps/${recB.id}').then((r) => r.json())`); return r.state === 'exited' && r.profileRemovedAt ? r : null; }, 30000, 300);
+        check(`${row.id}: Stop ⇒ exited, every recorded pid gone, THEN the profile removed (${endB && endB.profileRemovedAt ? 'profileRemovedAt set' : 'not removed'})`, !!endB && [recB.pids.x, recB.pids.server, recB.pids.app].every((p) => !D.pidAlive(p)) && !fs.existsSync(profWant), endB && { state: endB.state, profileError: endB.profileError, exists: fs.existsSync(profWant) });
+        await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(recB.id)}); if (w) app.wm.closeWindow ? app.wm.closeWindow(w.id) : null; return true; })()`).catch(() => {});
+      }
+    } finally { web.close(); }
+  }
+
+  // ── §9 ROUND 3, LANE A1 (docs/design-desktop-apps-seamless §3.1): THE PLAIN-HTTP GESTURE WINDOW on the real rung. A page by
+  // HOSTNAME (never loopback — loopback is a secure context and proves nothing), GNOME Calculator on xpra: the user's own
+  // trusted Ctrl+C in the pane ⇒ the calculator copies ⇒ its token is written to the browser clipboard with NO click (read
+  // back from the secure loopback page: one browser, one clipboard); a token 5.5 s after the chord ⇒ the chip; a token
+  // after a trusted key that is NOT a copy chord (fresh activation, no stamp) ⇒ the chip; the hint does not repeat ──
+  console.log('§9 A1 — the plain-http gesture window: Ctrl+C in the app ⇒ the local clipboard with no click; late / chord-less ⇒ the chip');
+  const CALC9 = bin('gnome-calculator');
+  if (!hostResolves) skip('§9 the gesture window', `${HOSTNAME} does not resolve`);
+  else if (!CALC9) skip('§9 the gesture window', 'gnome-calculator not on PATH');
+  else if (!XCLIP) skip('§9 the gesture window', 'xclip not on PATH');
+  else {
+    // the READER is the secure loopback page (one browser, one clipboard): p1 is §5's replacement page by now — grant it the
+    // clipboard again and emulate its focus (readText needs a focused document; the §2 grant was made through another page)
+    await p1.cdp('Browser.grantPermissions', { origin: `http://127.0.0.1:${PORT}`, permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] }).catch(() => {});
+    await p1.cdp('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
+    const H9 = await mkPage(`http://${HOSTNAME}:${PORT}`, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+    let id9 = null;
+    const kids9 = [];
+    try {
+      check(`§9: the hostname page (http://<hostname>:${PORT}) is NOT a secure context and has no clipboard API`, await H9.p.evalJs('window.isSecureContext === false && typeof navigator.clipboard === "undefined"'));
+      const lc = await launchOn(H9.p, { exec: CALC9, args: [], label: 'vs-calc-a1' });
+      const rc = lc && lc.id && await readyOn(H9.p, lc.id);
+      check('§9: GNOME Calculator reaches ready on the xpra rung', !!rc && rc.backend === 'xpra', lc);
+      if (rc) {
+        id9 = rc.id;
+        const xe9 = xenvFor(wt, rc);
+        await H9.p.evalJs(`app.openDesktopApp(${JSON.stringify(id9)}); true`);
+        await ensureActive(H9.p, id9);
+        await sizeWinOn(H9.p, id9, 560, 760);
+        const up9 = await until(async () => { const v = await H9.p.evalJs(R2(id9)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
+        check('§9: the calculator window is connected on the hostname page', !!up9, await H9.p.evalJs(R2(id9)));
+        await sleep(1500);
+        // the pane's keyboard: focus its IME textarea by SCRIPT (no click — a click would be a gesture of its own)
+        await H9.p.cdp('Page.bringToFront');
+        await H9.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id9)}); app.wm.focusWindow(w.id); w._desktopAppView.focus(); return document.activeElement === w._desktopAppView.ime; })()`);
+        const A9 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const v = w._desktopAppView; const h = v.copyHint; return { chip: v.chip.style.display !== 'none', chipText: v.chipText, hint: !!h && getComputedStyle(h).display !== 'none', last: v.client && v.client.lastReceived, toasts: [...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent) }; })()`;
+        const type9 = async (chars) => { for (const ch of chars) { const k = keyOf(ch); await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k }); await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k }); await sleep(120); } };
+        const ctrlC9 = async () => {
+          await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 2 });
+          await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+          await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'c', code: 'KeyC', windowsVirtualKeyCode: 67, modifiers: 2 });
+          await H9.p.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', code: 'ControlLeft', windowsVirtualKeyCode: 17, modifiers: 0 });
+        };
+        const readClip = async () => { await p1.cdp('Page.bringToFront'); const r = await p1.evalJs(`navigator.clipboard.readText().then((t) => t).catch((e) => 'err:' + e.message)`); await H9.p.cdp('Page.bringToFront'); return r; };
+        const setClip = async (text) => { await p1.cdp('Page.bringToFront'); const r = await p1.evalJs(`navigator.clipboard.writeText(${JSON.stringify(text)}).then(() => 'ok').catch((e) => 'err:' + e.message)`); await H9.p.cdp('Page.bringToFront'); return r; };
+        const hold9 = (text) => { const k = spawn('sh', ['-c', `printf '%s' ${JSON.stringify(text)} | ${XCLIP} -i -selection clipboard`], { env: xe9, stdio: 'ignore', detached: true }); kids9.push(k); xclipKids.push(k); };
+        // (a) type 1 2 3 4 into the calculator, then the user's own Ctrl+C: the calculator copies "1234", the token is written — no click
+        const wrote0 = await setClip('vs-a1-sentinel');
+        await H9.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id9)}); w._desktopAppView.focus(); return true; })()`);
+        await type9('1234');
+        await sleep(600);
+        const t0 = Date.now();
+        await ctrlC9();
+        const got = await until(async () => { const v = await H9.p.evalJs(A9(id9)); return v && v.last === '1234' ? { v, ms: Date.now() - t0 } : null; }, 5000, 25);
+        await sleep(300);
+        const after = await H9.p.evalJs(A9(id9));
+        const clipA = await readClip();
+        console.log(`  §9 (a): the calculator's token observed ${got ? got.ms : '?'} ms after the trusted Ctrl+C (poll 25 ms; the browser's window is 5000 ms); clipboard sentinel written: ${wrote0}; the browser clipboard now reads ${JSON.stringify(clipA)}; chip ${after.chip ? 'SHOWN' : 'hidden'}`);
+        check(`§9 A1: the user's own Ctrl+C in the pane ⇒ the calculator copies "1234" and it LANDS in the browser clipboard with NO click (read back from the secure page: ${JSON.stringify(clipA)}), no chip, a "Copied to your clipboard" toast`, !!got && clipA === '1234' && !after.chip && after.toasts.some((x) => /Copied to your clipboard/.test(x)), { got, after, clipA });
+        // (a2) desktop A r1: the gesture write's temporary textarea took the focus and dropped it to <body> — every key after
+        // the copy was swallowed. The pane's IME holds the focus again, with NO script refocus (the legs below type without one)
+        const focusA2 = await H9.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id9)}); const a = document.activeElement; return { ime: a === w._desktopAppView.ime, tag: a ? a.tagName : null }; })()`);
+        check(`§9 A1 r1: after the gesture copy the keyboard focus is back on the pane's IME (activeElement ${focusA2.tag}) — the next keys reach the app`, focusA2.ime === true, focusA2);
+        // (b) the stamp outlives nothing: a Ctrl+C whose token arrives 5.5 s later ⇒ the chip. The calculator's re-copy of the same
+        // "1234" is DEDUPED by the client (no delivery, the stamp stays), so the only token after it is xclip's at +5.5 s
+        await ctrlC9();
+        await sleep(5500);
+        hold9('vs-a1-late');
+        const late = await until(async () => { const v = await H9.p.evalJs(A9(id9)); return v && v.chip && v.chipText === 'vs-a1-late' ? v : null; }, 8000, 150);
+        const clipB = await readClip();
+        check(`§9 A1: a token 5.5 s after the Ctrl+C (outside Chrome's activation window) ⇒ the "Copied in the app — click to copy" chip, and the browser clipboard is untouched (${JSON.stringify(clipB)})`, !!late && clipB === '1234', { late: late || await H9.p.evalJs(A9(id9)), clipB });
+        check('§9 A1: the HTTPS hint is one-time per device — §2 showed it on this origin, this chip comes without it', !!late && !late.hint && await H9.p.evalJs(`!!localStorage.getItem('vibespace.desktopCopyHintShown')`), late);
+        // (c) a FRESH trusted key that is not a copy chord (the page has activation, no stamp) + a copy nobody made here ⇒ the chip.
+        // NO script refocus here (desktop A r1): the '5' must reach the calculator on the focus the gesture copy handed back — (d)
+        // reading "12345" is the proof (before r1 the key went to <body> and (d) read "1234" again)
+        await type9('5');
+        const t1 = Date.now();
+        hold9('vs-a1-agent-copy');
+        const agentCopy = await until(async () => { const v = await H9.p.evalJs(A9(id9)); return v && v.chip && v.chipText === 'vs-a1-agent-copy' ? { v, ms: Date.now() - t1 } : null; }, 8000, 100);
+        const clipC = await readClip();
+        check(`§9 A1 CONTROL: a copy the user did not make (xclip on the app's display ${agentCopy ? agentCopy.ms : '?'} ms after a plain digit key — the page HAS activation, no copy chord) ⇒ the chip, never written behind the user's back (clipboard still ${JSON.stringify(clipC)})`, !!agentCopy && clipC === '1234', { agentCopy, clipC });
+        // (d) and a second real Ctrl+C right after writes again (the calculator now shows 12345 — a fresh chord, a fresh token)
+        const t2 = Date.now();
+        await ctrlC9();
+        const got2 = await until(async () => { const v = await H9.p.evalJs(A9(id9)); return v && v.last === '12345' ? { v, ms: Date.now() - t2 } : null; }, 5000, 25);
+        await sleep(300);
+        const clipD = await readClip();
+        const afterD = await H9.p.evalJs(A9(id9));
+        console.log(`  §9 (d): the second Ctrl+C's token observed ${got2 ? got2.ms : '?'} ms after the chord; clipboard ${JSON.stringify(clipD)}; chip ${afterD.chip ? `SHOWN (${JSON.stringify(afterD.chipText)})` : 'hidden'}`);
+        check(`§9 A1: a second Ctrl+C writes the calculator's new value (${JSON.stringify(clipD)}) with no click, and the pending chip goes away (the clipboard now holds the newer copy)`, !!got2 && clipD === '12345' && !afterD.chip, { got2, clipD, afterD });
+        check('§9 A1 r1: …and after the second gesture copy the pane\'s IME holds the focus again', await H9.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id9)}); return document.activeElement === w._desktopAppView.ime; })()`));
+      }
+    } catch (e) { failed++; console.error('  ✗ §9 threw:', e.stack || e.message); }
+    finally {
+      for (const k of kids9) { try { process.kill(-k.pid, 'SIGKILL'); } catch {} }
+      if (id9) await H9.p.evalJs(`fetch('/api/desktop/apps/${id9}/stop', { method: 'POST' }).then((r) => r.status)`).catch(() => {});
+      await dropPage(H9);
+      await p1.cdp('Page.bringToFront').catch(() => {});
+    }
+  }
+
+  // ── §10 ROUND 3, LANE A2 (docs/design-desktop-apps-seamless §3.2): THE APP'S EXIT CLOSES THE WINDOW; THE OUTER ✕ IS THE
+  // APP'S OWN CLOSE. Two clients on the real rung (GNOME Calculator on xpra): the calculator's OWN ✕ (its CSD header bar,
+  // clicked through the pane) ⇒ the VibeSpace window is gone on BOTH pages within 2 s, each with a "<app> exited" toast;
+  // the OUTER ✕ (the title bar's, a trusted click) ⇒ close-window to the app ⇒ the calculator process is gone and both
+  // windows with it; a Tk app that answers WM_DELETE_WINDOW with its own "Save?" dialog ⇒ the window STAYS (a dialog is
+  // not the app), the dialog closing is not the app exiting, a SECOND ✕ within 5 s ⇒ Stop ⇒ gone on both; a dead record
+  // replayed from the layout opens NO window (never painted); CONTROL = a copy of this tree whose window never closes
+  // itself — the same ✕ leaves the dead picture (M3c's measurement, today's behaviour before A2) ──
+  console.log('§10 A2 — the app exiting closes the window on every client; the outer ✕ asks the app; twice = Stop; a dead record opens nothing');
+  const CALC10 = bin('gnome-calculator'), WISH10 = bin('wish');
+  if (!CALC10) skip('§10 the close legs', 'gnome-calculator not on PATH');
+  else {
+    // p1 (and every page before) steps aside: the replay leg needs a moment with NO client, and a third client would only race the layout
+    await p1.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
+    const O10 = `http://127.0.0.1:${PORT}`;
+    const A = await mkPage(O10, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+    const B = await mkPage(O10, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+    const has = (P, id) => P.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)})`);
+    const toasts = (P) => P.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
+    const verdictOf = (P, id, k) => P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); return w ? w[${JSON.stringify(k)}] || null : 'gone'; })()`);
+    /** both pages hold the app's window; A is the active viewer, B is blocked (x5) */
+    const openOnBoth = async (id) => {
+      await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(id)}); true`);
+      await ensureActive(A.p, id);
+      await sizeWinOn(A.p, id, 560, 760);
+      const up = await until(async () => { const v = await A.p.evalJs(R2(id)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
+      const onB = await until(() => has(B.p, id), 15000, 250); if (!onB) await B.p.evalJs(`app.openDesktopApp(${JSON.stringify(id)}); true`);
+      await until(() => has(B.p, id), 5000, 100);
+      return up;
+    };
+    /** poll BOTH pages every 25 ms from `t0` until the window is gone on each; ms per page (null = still there at the deadline) */
+    const goneTimes = async (id, t0, ms = 6000) => {
+      const out = { a: null, b: null };
+      const end = t0 + ms;
+      while (Date.now() < end && (out.a === null || out.b === null)) {
+        if (out.a === null && !(await has(A.p, id))) out.a = Date.now() - t0;
+        if (out.b === null && !(await has(B.p, id))) out.b = Date.now() - t0;
+        await sleep(25);
+      }
+      return out;
+    };
+    const titleClose = async (P, id) => { const r = await P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); app.wm.focusWindow(w.id); const b = w.element.querySelector('.win-close').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`); await trustedClickAt(P, r.x, r.y); };
+    const ids10 = [];
+    try {
+      // (1) the calculator's OWN ✕ — clicked on its CSD header bar through the pane (M3c: top-right, 22 px in)
+      const l1 = await launchOn(A.p, { exec: CALC10, args: [], label: 'vs-calc-a2' });
+      const r1 = l1 && l1.id && await readyOn(A.p, l1.id);
+      check('§10: GNOME Calculator reaches ready on the xpra rung', !!r1 && r1.backend === 'xpra', l1);
+      if (r1) {
+        ids10.push(r1.id);
+        const up = await openOnBoth(r1.id);
+        check('§10 (1): the calculator is drawn on page A (active) and its window replayed on page B', !!up && await has(B.p, r1.id), up);
+        await sleep(1200);
+        const v = await A.p.evalJs(R2(r1.id));
+        const cx = v.pane.x + (v.main.x + v.main.w) / v.ratio - 22, cy = v.pane.y + v.main.y / v.ratio + 22;
+        const t0 = Date.now();
+        await trustedClickAt(A.p, cx, cy);
+        const g = await goneTimes(r1.id, t0);
+        const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r1.id}').then((r) => r.json())`);
+        const tA = await toasts(A.p), tB = await toasts(B.p);
+        console.log(`  §10 (1): the calculator's own ✕ ⇒ the VibeSpace window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state} (code ${recEnd.exitCode}, windowsAtExit ${recEnd.windowsAtExit}); toasts A ${JSON.stringify(tA)} B ${JSON.stringify(tB)}`);
+        check(`§10 (1): the calculator's OWN ✕ ⇒ the record exited with no window left (windowsAtExit ${recEnd.windowsAtExit}) and the VibeSpace window is GONE on BOTH clients within 2 s (A ${g.a} ms, B ${g.b} ms)`, recEnd.state === 'exited' && recEnd.windowsAtExit === 0 && g.a !== null && g.b !== null && g.a <= 2000 && g.b <= 2000, { g, recEnd: { state: recEnd.state, windowsAtExit: recEnd.windowsAtExit, lastError: recEnd.lastError } });
+        check('§10 (1): …each client said why in a toast ("Calculator exited")', tA.some((x) => /Calculator exited/.test(x)) && tB.some((x) => /Calculator exited/.test(x)), { tA, tB });
+      }
+      // (2) the OUTER ✕ (the title bar's, a trusted click on the ACTIVE pane) ⇒ close-window ⇒ the calculator quits ⇒ gone on both
+      const l2 = await launchOn(A.p, { exec: CALC10, args: [], label: 'vs-calc-a2-outer' });
+      const r2 = l2 && l2.id && await readyOn(A.p, l2.id);
+      if (r2) {
+        ids10.push(r2.id);
+        await openOnBoth(r2.id);
+        await sleep(1200);
+        const t0 = Date.now();
+        await titleClose(A.p, r2.id);
+        const vd = await verdictOf(A.p, r2.id, '_desktopCloseVerdict');
+        const g = await goneTimes(r2.id, t0);
+        const appGone = await until(() => (!D.pidAlive(r2.pids.app) ? Date.now() - t0 : null), 5000, 25);
+        const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r2.id}').then((r) => r.json())`);
+        console.log(`  §10 (2): the outer ✕ ⇒ verdict ${JSON.stringify(vd)}; the calculator process (pid ${r2.pids.app}) gone after ${appGone} ms; the window gone on A after ${g.a} ms, on B after ${g.b} ms; record ${recEnd.state}, stoppedBy ${recEnd.stoppedBy || '-'}`);
+        check(`§10 (2): the OUTER ✕ on the active pane ASKS the app (verdict ask-app, the window did not close itself at the click) and the calculator PROCESS is gone (${appGone} ms) — an app exit, not a Stop (stoppedBy ${recEnd.stoppedBy || 'none'})`, (vd === 'gone' || (vd && vd.act === 'ask-app')) && appGone !== null && recEnd.state === 'exited' && !recEnd.stoppedBy && recEnd.windowsAtExit === 0, { vd, recEnd: { state: recEnd.state, stoppedBy: recEnd.stoppedBy, windowsAtExit: recEnd.windowsAtExit } });
+        check(`§10 (2): …and the window is gone on BOTH clients within 2 s of the ✕ (A ${g.a} ms, B ${g.b} ms)`, g.a !== null && g.b !== null && g.a <= 2000 && g.b <= 2000, g);
+      }
+      // (3) an app that answers WM_DELETE_WINDOW with its OWN dialog (Tk: `wm protocol . WM_DELETE_WINDOW` opens "Save?",
+      // which closes itself after 1 s): the first ✕ keeps everything, the dialog closing is not the app exiting, a second ✕
+      // within 5 s is the Stop
+      if (!WISH10) skip('§10 (3) the second ✕', 'wish (Tk) not on PATH');
+      else {
+        const tk = path.join(fakeHome, 'vs-a2-save.tcl');
+        fs.writeFileSync(tk, 'wm title . "vs-a2-tk"\nwm geometry . 420x300\nlabel .l -text "unsaved work"\npack .l -expand 1\nwm protocol . WM_DELETE_WINDOW {\n  if {![winfo exists .d]} { toplevel .d; wm title .d "Save?"; label .d.l -text "Save changes?"; pack .d.l -padx 20 -pady 20; wm transient .d .; after 1000 {destroy .d} }\n}\n');
+        const l3 = await launchOn(A.p, { exec: WISH10, args: [tk], label: 'vs-a2-tk' });
+        const r3 = l3 && l3.id && await readyOn(A.p, l3.id);
+        check('§10 (3): the Tk stand-in (answers WM_DELETE_WINDOW with its own "Save?" dialog) reaches ready', !!r3, l3);
+        if (r3) {
+          ids10.push(r3.id);
+          await openOnBoth(r3.id);
+          await sleep(1000);
+          const firstAt = Date.now();
+          await titleClose(A.p, r3.id);
+          const dlg = await until(async () => { const v = await A.p.evalJs(WIN(r3.id)); return v && v.windows.some((w) => w.kind === 'dialog' || /Save\?/.test(w.title || '')) ? v : null; }, 4000, 50);
+          const tA = await toasts(A.p);
+          check('§10 (3): the first ✕ ⇒ the APP answers with its own "Save?" dialog (drawn in the pane) and the VibeSpace window stays on both pages, with the toast naming the second ✕', !!dlg && await has(A.p, r3.id) && await has(B.p, r3.id) && tA.some((x) => /press ✕ again within 5 s to stop it/.test(x)), { dlg: dlg && dlg.windows, tA });
+          // the dialog closes by itself (after 1 s): a lost DIALOG is not the app exiting
+          const dlgGone = await until(async () => { const v = await A.p.evalJs(WIN(r3.id)); return v && !v.windows.some((w) => /Save\?/.test(w.title || '') || w.kind === 'dialog') ? v : null; }, 4000, 50);
+          await sleep(300);
+          const mid = await A.p.evalJs(`fetch('/api/desktop/apps/${r3.id}').then((r) => r.json())`);
+          check('§10 (3): the dialog closing is NOT the app exiting — the record stays ready, the window stays on both pages', !!dlgGone && mid.state === 'ready' && await has(A.p, r3.id) && await has(B.p, r3.id), { mid: mid.state, dlgGone: !!dlgGone });
+          // the SECOND ✕ within 5 s of the first ⇒ Stop ⇒ gone on both
+          const t0 = Date.now();
+          await titleClose(A.p, r3.id);
+          const g = await goneTimes(r3.id, t0, 8000);
+          const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r3.id}').then((r) => r.json())`);
+          const tA2 = await toasts(A.p), tB2 = await toasts(B.p);
+          console.log(`  §10 (3): the second ✕ ${t0 - firstAt} ms after the first ⇒ record ${recEnd.state} stoppedBy ${recEnd.stoppedBy}; gone on A after ${g.a} ms, on B after ${g.b} ms; toasts A ${JSON.stringify(tA2)} B ${JSON.stringify(tB2)}`);
+          check(`§10 (3): a SECOND ✕ ${t0 - firstAt} ms after the first (within 5 s) ⇒ Stop (stoppedBy ${recEnd.stoppedBy}) ⇒ the window gone on BOTH clients (A ${g.a} ms, B ${g.b} ms) with "vs-a2-tk stopped"`, t0 - firstAt < 5000 && recEnd.state === 'exited' && recEnd.stoppedBy === 'user' && g.a !== null && g.b !== null && tA2.some((x) => /vs-a2-tk stopped/.test(x)) && tB2.some((x) => /vs-a2-tk stopped/.test(x)), { g, recEnd: { state: recEnd.state, stoppedBy: recEnd.stoppedBy }, tA2, tB2 });
+          check('§10 (3): Stop left nothing of the Tk app running', [r3.pids.x, r3.pids.server, r3.pids.app].every((p) => !D.pidAlive(p)));
+        }
+      }
+      // (3b) desktop A r1 — xterm, an app with NO client-side decorations, on the OUTER ✕ (the verifier's attack). xterm honours
+      // WM_DELETE_WINDOW by HANGING UP its child (SIGHUP to the shell) and exits when the child does. Measured 2026-09-24: an
+      // interactive bash exits on the hangup ⇒ the first ✕ ends xterm; a child that survives SIGHUP keeps xterm running, and
+      // the second ✕ within 5 s (the toast names it) is the Stop. The verifier's plain `xterm` ran $SHELL = zsh in a HOME with no
+      // .zshrc — zsh's first-run menu survives SIGHUP (by hand on Xvfb: the same xterm exits once the HOME has an empty .zshrc);
+      // it was never xterm ignoring the ✕. The stand-in here is DETERMINISTIC: a shell loop with SIGHUP ignored.
+      const BASH10 = bin('bash'), SH10 = bin('sh');
+      if (!XTERM || !BASH10) skip('§10 (3b) the xterm legs', 'xterm / bash not on PATH');
+      else {
+        const l5 = await launchOn(A.p, { exec: XTERM, args: ['-T', 'vs-a2-xterm-bash', '-geometry', '60x10', '-e', BASH10, '--norc', '-i'], label: 'vs-a2-xterm-bash' });
+        const r5 = l5 && l5.id && await readyOn(A.p, l5.id);
+        check('§10 (3b): xterm running an interactive bash reaches ready', !!r5, l5);
+        if (r5) {
+          ids10.push(r5.id);
+          await openOnBoth(r5.id);
+          await sleep(1000);
+          const t0 = Date.now();
+          await titleClose(A.p, r5.id);
+          const vd = await verdictOf(A.p, r5.id, '_desktopCloseVerdict');
+          const g = await goneTimes(r5.id, t0, 6000);
+          const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r5.id}').then((r) => r.json())`);
+          console.log(`  §10 (3b): xterm + interactive bash, the outer ✕ ⇒ verdict ${JSON.stringify(vd)}; record ${recEnd.state} stoppedBy ${recEnd.stoppedBy || '-'}; gone on A after ${g.a} ms, on B after ${g.b} ms`);
+          check(`§10 (3b): the OUTER ✕ ends an xterm with an interactive bash by itself (ask-app ⇒ xterm hangs up its shell ⇒ exits: ${recEnd.state}, not a Stop) and the window is gone on BOTH clients within 3 s (A ${g.a} ms, B ${g.b} ms)`, (vd === 'gone' || (vd && vd.act === 'ask-app')) && recEnd.state === 'exited' && !recEnd.stoppedBy && g.a !== null && g.b !== null && g.a <= 3000 && g.b <= 3000 && !D.pidAlive(r5.pids.app), { vd, recEnd: { state: recEnd.state, stoppedBy: recEnd.stoppedBy }, g });
+        }
+        if (!SH10) skip('§10 (3b) the hangup-proof leg', 'sh not on PATH');
+        else {
+          const l6 = await launchOn(A.p, { exec: XTERM, args: ['-T', 'vs-a2-xterm-nohup', '-geometry', '60x10', '-e', SH10, '-c', 'trap "" HUP; while :; do sleep 1; done'], label: 'vs-a2-xterm-nohup' });
+          const r6 = l6 && l6.id && await readyOn(A.p, l6.id);
+          check('§10 (3b): xterm running a child that ignores SIGHUP (the stand-in for zsh\'s first-run menu) reaches ready', !!r6, l6);
+          if (r6) {
+            ids10.push(r6.id);
+            await openOnBoth(r6.id);
+            await sleep(1500);
+            const firstAt = Date.now();
+            await titleClose(A.p, r6.id);
+            const vd = await verdictOf(A.p, r6.id, '_desktopCloseVerdict');
+            await sleep(2000);
+            const mid = await A.p.evalJs(`fetch('/api/desktop/apps/${r6.id}').then((r) => r.json())`);
+            const tA = await toasts(A.p);
+            const stays = vd && vd.act === 'ask-app' && mid.state === 'ready' && D.pidAlive(r6.pids.app) && await has(A.p, r6.id) && await has(B.p, r6.id);
+            check(`§10 (3b): the first ✕ ASKS (verdict ${JSON.stringify(vd)}) and a child that survives xterm's hangup keeps it running — record ${mid.state} 2 s later, the window on both pages, and the toast names the second ✕ (never silent)`, stays && tA.some((x) => /Asked .* to close — press ✕ again within 5 s to stop it/.test(x)), { vd, mid: mid.state, tA });
+            if (stays) {
+            const t0 = Date.now();
+            await titleClose(A.p, r6.id);
+            const g = await goneTimes(r6.id, t0, 8000);
+            const recEnd = await A.p.evalJs(`fetch('/api/desktop/apps/${r6.id}').then((r) => r.json())`);
+            console.log(`  §10 (3b): xterm + a hangup-proof child, the second ✕ ${t0 - firstAt} ms after the first ⇒ record ${recEnd.state} stoppedBy ${recEnd.stoppedBy}; gone on A after ${g.a} ms, on B after ${g.b} ms`);
+            check(`§10 (3b): …the second ✕ ${t0 - firstAt} ms after the first ⇒ Stop (stoppedBy ${recEnd.stoppedBy}) ⇒ the window gone on BOTH clients and nothing of the xterm left`, t0 - firstAt < 5000 && recEnd.state === 'exited' && recEnd.stoppedBy === 'user' && g.a !== null && g.b !== null && [r6.pids.x, r6.pids.server, r6.pids.app].every((p) => !D.pidAlive(p)), { g, recEnd: { state: recEnd.state, stoppedBy: recEnd.stoppedBy } });
+            }
+          }
+        }
+      }
+      // (4) a BLOCKED pane's ✕ does not ask the app (it cannot drive it): the window closes as it always did (the layout is
+      // shared — every client's copy goes with it) and the app keeps running
+      const l4 = await launchOn(A.p, { exec: XTERM, args: ['-T', 'vs-a2-blocked', '-geometry', '60x10'], label: 'vs-a2-blocked' });
+      const r4 = l4 && l4.id && await readyOn(A.p, l4.id);
+      if (r4) {
+        ids10.push(r4.id);
+        await openOnBoth(r4.id);
+        await until(async () => { const s = await B.p.evalJs(SEAT(r4.id)); return s && s.mode === 'blocked' ? s : null; }, 10000, 200);
+        await titleClose(B.p, r4.id);
+        await sleep(800);
+        const recMid = await A.p.evalJs(`fetch('/api/desktop/apps/${r4.id}').then((r) => r.json())`);
+        check('§10 (4): a BLOCKED pane\'s ✕ (verdict not-active) closes its window without asking the app — the app keeps running', !(await has(B.p, r4.id)) && recMid.state === 'ready' && D.pidAlive(r4.pids.app), { state: recMid.state });
+        if (!(await has(A.p, r4.id))) await A.p.evalJs(`app.openDesktopApp(${JSON.stringify(r4.id)}); true`); // the layout is shared: B's close took A's copy too — open it again for (5)
+        await until(() => has(A.p, r4.id), 5000, 100);
+        // (5) the replay of a DEAD record opens NO window: the window is in the saved layout, NO client is connected when the app
+        // ends (so nobody closes it), and a fresh page's layout restore meets `exited` at its first GET — never painted
+        await sleep(2600); // the layout autosave (2 s debounce) holds A's window
+        const saved = await A.p.evalJs(`fetch('/api/layouts').then((r) => r.json()).then((l) => JSON.stringify(l).includes(${JSON.stringify(r4.id)}))`);
+        await dropPage(A); await dropPage(B);
+        await sleep(500);
+        const st = await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${r4.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json();
+        const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+        const C = { p: await page(t), t };
+        await C.p.cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+        // every desktop-app window this page ever creates is watched from the first script: was it ever shown (the pending class removed while attached)?
+        await C.p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `window.__a2 = { born: 0, revealed: 0, toasts: [] }; new MutationObserver((ms) => { for (const m of ms) { if (m.type === 'childList') for (const n of m.addedNodes) { if (n.classList && n.classList.contains('desktop-app-pending')) window.__a2.born++; if (n.classList && n.classList.contains('global-toast')) setTimeout(() => window.__a2.toasts.push(n.textContent), 0); } else if (m.type === 'attributes' && m.target.classList && m.target.classList.contains('window') && m.oldValue && m.oldValue.includes('desktop-app-pending') && !m.target.classList.contains('desktop-app-pending') && m.target.isConnected) window.__a2.revealed++; } }).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });` });
+        await openPage(C.p, O10);
+        await sleep(1500);
+        const a2 = await C.p.evalJs('window.__a2');
+        const tC = a2.toasts || []; // every toast the page showed since its first script (a 3.5 s toast is gone by the time the restore settles)
+        check(`§10 (5): a dead record replayed from the layout opens NO window — the layout held it (${saved}), it was stopped with no client (${st.state}), the fresh page created it pending (${a2.born}) and closed it before it ever showed (revealed ${a2.revealed}), with the "stopped" toast`, saved && st.state === 'exited' && a2.born >= 1 && a2.revealed === 0 && !(await has(C.p, r4.id)) && tC.some((x) => /^vs-a2-blocked stopped/.test(x)), { saved, st: st.state, a2, tC });
+        await dropPage(C);
+      }
+      // (6) CONTROL — the pre-A2 window: a copy of this tree whose window never closes itself (the verdict's close line pulled
+      // back) — the calculator's own ✕ leaves the VibeSpace window standing as a dead picture (M3c, 2026-09-23)
+      const wtc = scratch('deskxpra-a2ctl');
+      try { execSync(`git worktree remove --force ${wtc}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+      execSync(`git worktree add --detach ${wtc} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wtc);
+      for (const f of ['src', 'public', 'server.js', 'scripts', 'package.json']) execSync(`rm -rf ${wtc}/${f} && cp -r ${wt}/${f} ${wtc}/${f}`);
+      fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtc, 'node_modules'));
+      fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
+      const winSrc = fs.readFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), 'utf8');
+      const closeLine = '    if (!v.close) return false;';
+      check('CONTROL: the window\'s close decision is spelled exactly once (the control pulls exactly it back)', winSrc.split(closeLine).length === 2);
+      fs.writeFileSync(path.join(wtc, 'src/lib/desktop-app-window.js'), winSrc.replace(closeLine, '    return false; // pre-A2 CONTROL: the window never closes itself'));
+      execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
+      const [PORTA] = await freePorts(1);
+      const homeA = scratchHome('deskxpra-a2ctl-home', fs);
+      const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
+      let upA = false; for (let i = 0; i < 80 && !upA; i++) { try { await fetch(`http://127.0.0.1:${PORTA}/api/home`); upA = true; } catch { await sleep(250); } }
+      check('CONTROL: the pre-A2 copy boots', upA);
+      if (upA) {
+        const CT = await mkPage(`http://127.0.0.1:${PORTA}`, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+        try {
+          const lc = await launchOn(CT.p, { exec: CALC10, args: [], label: 'vs-calc-a2-ctl' });
+          const rc = lc && lc.id && await readyOn(CT.p, lc.id);
+          if (rc) {
+            await CT.p.evalJs(`app.openDesktopApp(${JSON.stringify(rc.id)}); true`);
+            await sizeWinOn(CT.p, rc.id, 560, 760);
+            const vc = await until(async () => { const v = await CT.p.evalJs(R2(rc.id)); return v && v.status === 'Connected' && v.main && v.main.h > 100 ? v : null; }, 40000, 300);
+            await sleep(1200);
+            if (vc) await trustedClickAt(CT.p, vc.pane.x + (vc.main.x + vc.main.w) / vc.ratio - 22, vc.pane.y + vc.main.y / vc.ratio + 22);
+            const ex = await until(() => CT.p.evalJs(`fetch('/api/desktop/apps/${rc.id}').then((r) => r.json()).then((r) => (r.state === 'exited' ? r : null))`), 6000, 100);
+            await sleep(2000);
+            const still = await CT.p.evalJs(WIN(rc.id));
+            check(`CONTROL: on the pre-A2 copy the same ✕ ends the app (${ex && ex.state}) and the VibeSpace window STAYS as a dead picture 2 s later (status ${JSON.stringify(still && still.status)}) — the leg above is the fix, not a coincidence`, !!ex && !!still, { ex: ex && ex.state, still });
+          } else check('CONTROL: the calculator reaches ready on the pre-A2 copy', false, lc);
+        } finally { await dropPage(CT); }
+      }
+      try { sa.kill('SIGKILL'); } catch {}
+    } catch (e) { failed++; console.error('  ✗ §10 threw:', e.stack || e.message); }
+    finally {
+      for (const id of ids10) await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+      await dropPage(A); await dropPage(B);
+    }
+  }
+  // ── (11) round 3 A3 (docs/design-desktop-apps-seamless §3.4) — THE SCALE DERIVED FROM VIBESPACE'S OWN SCALE, PER WINDOW:
+  // a DPR-2 page at UI scale 125 % launches GNOME Calculator from the LAUNCHER (its catalog card — the product's own POST):
+  // auto ⇒ 2.5× = GDK_SCALE 2 in the app's environ + Xft.dpi 120 in its display, the chip "2.5× · auto"; then ⋯ → Scale ▸
+  // 1.5× → the confirm → the SAME VibeSpace window on BOTH clients now shows the successor at 1.5× (GDK_SCALE 1, 144 dpi),
+  // the old session gone; CONTROL = a copy whose keeper ignores the UI scale (the pre-A3 pick): the same page gets 2× / 96 ──
+  console.log('§11 A3 — the scale derived from dpr × UI scale (DPR 2 + 125 % ⇒ GDK_SCALE 2 + Xft.dpi 120, measured in the app\'s display); the ⋯ Scale ▸ relaunch on two clients');
+  const CALC11 = bin('gnome-calculator'), XRDB11 = bin('xrdb');
+  if (!CALC11 || !XRDB11) skip('§11 the scale legs', `${!CALC11 ? 'gnome-calculator' : 'xrdb'} not on PATH`);
+  else {
+    const O11 = `http://127.0.0.1:${PORT}`;
+    const ids11 = [];
+    const envOf = (pid) => { try { return Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`, 'latin1').split('\0').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])); } catch { return {}; } };
+    const inside = (w, r) => { const xe = xenvFor(w, r); return { gdk: envOf(r.pids.app).GDK_SCALE || null, xft: Number((xq(xe, 'xrdb', ['-query']).match(/^Xft\.dpi:\s+(\d+)/m) || [])[1]) || null, xdpy: (xq(xe, 'xdpyinfo', []).match(/resolution:\s+(\S+)/) || [])[1] || null }; };
+    const trustedClick = async (p, sel) => { const r = await p.evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'nearest' }); const b = e.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`); if (r) await trustedClickAt(p, r.x, r.y); return !!r; };
+    const S11 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const v = w._desktopAppView; const c = v && v.client; const chip = w.content.querySelector('.desktop-app-chip-scale'); const more = w.content.querySelector('.desktop-app-more'); return { wmId: w.id, appId: w._desktopAppId, spec: w._openSpec, status: v ? v.status.textContent : null, constraints: c ? c.mainConstraints : null, main: c && c.windows.get(c.mainWid) ? { w: c.windows.get(c.mainWid).w, h: c.windows.get(c.mainWid).h } : null, chip: chip ? { shown: chip.style.display !== 'none', text: chip.textContent, title: chip.title } : null, more: more ? { shown: more.style.display !== 'none', svg: !!more.querySelector('svg') } : null, menu: w._desktopScaleMenu ? w._desktopScaleMenu() : null, n: [...app.wm.windows.values()].filter((x) => x.type === 'desktop-app').length }; })()`;
+    let A = null, B = null;
+    try {
+      await p1.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
+      A = await mkPage(O11, { width: 1400, height: 1000, deviceScaleFactor: 2, mobile: false });
+      await A.p.evalJs(`localStorage.setItem('vibespace.uiScale', '125'); true`);
+      await openPage(A.p, O11);
+      const aScale = await A.p.evalJs(`[devicePixelRatio, getComputedStyle(document.documentElement).getPropertyValue('--ui-scale').trim()]`);
+      check(`§11: the page runs at devicePixelRatio ${aScale[0]} and UI scale ${aScale[1]}`, aScale[0] === 2 && aScale[1] === '1.25', aScale);
+      // (1) the LAUNCHER's own POST: the catalog card (dpr + uiScale are the launcher's, never this suite's)
+      const before = new Set((await A.p.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((l) => l.apps.map((a) => a.id))`)) || []);
+      await A.p.evalJs(`(() => { document.getElementById('desktop-launch-dialog')?.remove(); document.getElementById('btn-desktop-apps').click(); return true; })()`);
+      const card = await until(() => A.p.evalJs(`(() => { const c = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="gnome-calculator"]'); return c && !c.disabled ? true : null; })()`), 10000, 150);
+      check('§11 (1): the launcher offers GNOME Calculator as a catalog card', !!card);
+      await trustedClick(A.p, '#desktop-launch-dialog .desktop-launch-card[data-app-id="gnome-calculator"]');
+      const id0 = await until(() => A.p.evalJs(`fetch('/api/desktop/apps').then((r) => r.json()).then((l) => (l.apps.find((a) => !${JSON.stringify([...before])}.includes(a.id) && a.appId === 'gnome-calculator') || {}).id || null)`), 15000, 200);
+      if (id0) ids11.push(id0);
+      const r0 = id0 && await readyOn(A.p, id0);
+      check('§11 (1): the calculator reaches ready', !!r0, id0);
+      if (r0) {
+        await ensureActive(A.p, id0);
+        await sizeWinOn(A.p, id0, 700, 900);
+        const s0 = await until(async () => { const v = await A.p.evalJs(S11(id0)); return v && v.status === 'Connected' && v.constraints && v.constraints['minimum-size'] ? v : null; }, 40000, 300);
+        const in0 = inside(wt, r0);
+        const min0 = (s0 && s0.constraints && s0.constraints['minimum-size']) || [0, 0];
+        console.log(`  §11 (1): record scale ${r0.scale} dpi ${r0.dpi} origin ${r0.scaleOrigin} from ${JSON.stringify(r0.scaleFrom)}; inside the display: GDK_SCALE=${in0.gdk}, Xft.dpi ${in0.xft}, xdpyinfo ${in0.xdpy}; the calculator's minimum ${JSON.stringify(min0)} device px (2× alone: 720x1232); chip ${JSON.stringify(s0 && s0.chip && s0.chip.text)}`);
+        check(`§11 (1): DPR 2 × UI 1.25 through the launcher ⇒ the record says 2.5× at 120 dpi, origin auto, from {dpr 2, uiScale 1.25}`, r0.scale === 2.5 && r0.dpi === 120 && r0.scaleOrigin === 'auto' && r0.scaleFrom && r0.scaleFrom.dpr === 2 && r0.scaleFrom.uiScale === 1.25, { scale: r0.scale, dpi: r0.dpi, origin: r0.scaleOrigin, from: r0.scaleFrom });
+        check(`§11 (1): MEASURED inside the app's display — GDK_SCALE=${in0.gdk} in the calculator's environ, Xft.dpi ${in0.xft} in its resource database`, in0.gdk === '2' && in0.xft === 120, in0);
+        // GNOME Calculator 50's minimum is BUTTON-bound (measured: 720x1232 at 2.5× / 120 dpi exactly as at 2× / 96 — its 120-dpi
+        // text fits inside the 2× buttons; and 360x616 at 1.5× / 144): the widgets half is asserted here, the TEXT half is
+        // measured where a text-bound window exists — test-desktop-app-keeper §20 (a) (xterm's 40×10 cells, 1.25× at 120 dpi)
+        check(`§11 (1): the calculator draws its widgets at 2× — its minimum ${JSON.stringify(min0)} is the 2× floor 720x1232 (1×: 360x616)`, min0[0] >= 720 && min0[1] >= 1232, min0);
+        check(`§11 (1): the chip names the value AND its origin (${JSON.stringify(s0 && s0.chip)}) and the ⋯ button is there (an SVG)`, !!s0 && !!s0.chip && s0.chip.shown && s0.chip.text === '2.5× · auto' && /devicePixelRatio 2 × UI scale 125%/.test(s0.chip.title) && /text at 120 dpi/.test(s0.chip.title) && !!s0.more && s0.more.shown && s0.more.svg, s0 && { chip: s0.chip, more: s0.more });
+        // (2) a second client (DPR 1) holds the same window (the layout sync), blocked — its menu is disabled with the reason
+        B = await mkPage(O11, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+        const onB = await until(() => B.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)})`), 15000, 250); if (!onB) await B.p.evalJs(`app.openDesktopApp(${JSON.stringify(id0)}); true`);
+        const bm = await until(async () => { const v = await B.p.evalJs(S11(id0)); return v && v.menu && v.menu.why ? v : null; }, 10000, 250);
+        // (page B shares the origin's localStorage, so its UI scale is A's 125 %: at DPR 1 its auto would derive 1 × 1.25 = 1.25)
+        check(`§11 (2): on the second client (not the active viewer) Scale ▸ is disabled with the reason (${bm && bm.menu && bm.menu.why}); auto there would derive ${bm && bm.menu && bm.menu.rows[0].scale}× (DPR 1 × its 125 %)`, !!bm && bm.menu.why === 'seat' && bm.menu.rows.every((r) => r.disabled) && bm.menu.rows[0].scale === 1.25, bm && bm.menu);
+        const wmA = s0 && s0.wmId, wmB = bm && bm.wmId;
+        // (3) ⋯ → Scale ▸ → 1.5× (text only in GTK apps) → the confirm → Relaunch — real clicks
+        const mb = await A.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)}); const r = w.content.querySelector('.desktop-app-more').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+        await trustedClickAt(A.p, mb.x, mb.y); await sleep(300);
+        const par = await A.p.evalJs(`(() => { const el = [...document.querySelectorAll('.context-menu > .context-menu-item')].find((e) => /^Scale/.test(e.textContent)); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + 12, y: r.y + r.height / 2, rows: [...el.querySelectorAll('.context-menu .context-menu-item')].map((c) => ({ text: c.textContent, disabled: c.classList.contains('disabled') })) }; })()`);
+        check(`§11 (3): ⋯ opens the window's menu with Scale ▸ Auto / 1× / 1.5× / 2× (${JSON.stringify(par && par.rows)}) — auto is current and not offered again`, !!par && par.rows.length === 4 && /Auto \(2\.5×\)/.test(par.rows[0].text) && par.rows[0].text.startsWith('✓') && par.rows[0].disabled && par.rows.slice(1).every((r) => !r.disabled), par);
+        if (par) {
+          await A.p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: par.x, y: par.y }); await sleep(300);
+          const kid = await A.p.evalJs(`(() => { const el = [...document.querySelectorAll('.context-menu .context-menu .context-menu-item')].find((e) => /1\.5×/.test(e.textContent)); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+          if (kid) { await A.p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: kid.x, y: kid.y }); await sleep(150); await trustedClickAt(A.p, kid.x, kid.y); }
+          const dlg = await until(() => A.p.evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay, .modal-overlay')].pop(); const b = o && o.querySelector('.btn-create'); return b ? { text: o.textContent, ok: b.textContent } : null; })()`), 5000, 100);
+          check(`§11 (3): the pick asks first, saying the app restarts and unsaved work is lost (${JSON.stringify(dlg)})`, !!dlg && /restarts at the new scale; unsaved work in it is lost/.test(dlg.text) && dlg.ok === 'Relaunch', dlg);
+          const t0 = Date.now();
+          await A.p.evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay, .modal-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
+          // (4) the SAME window on both clients follows the successor
+          const follow = async (P, wmId) => until(async () => { const v = await P.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(wmId)}); return w && w._desktopAppId !== ${JSON.stringify(id0)} ? { appId: w._desktopAppId, spec: w._openSpec } : null; })()`); return v; }, 20000, 100);
+          const fa = await follow(A.p, wmA); const faMs = Date.now() - t0;
+          const fb = await follow(B.p, wmB); const fbMs = Date.now() - t0;
+          const id1 = fa && fa.appId;
+          if (id1) ids11.push(id1);
+          const r1 = id1 && await readyOn(A.p, id1);
+          const readyMs = Date.now() - t0;
+          check(`§11 (4): the SAME VibeSpace window (${wmA}) now shows the successor ${id1} (${faMs} ms, openSpec ${JSON.stringify(fa && fa.spec)}) — and on the second client too (${wmB} → ${fb && fb.appId}, ${fbMs} ms)`, !!fa && !!fb && fb.appId === id1 && fa.spec && fa.spec.id === id1 && fb.spec && fb.spec.id === id1, { fa, fb });
+          if (r1) {
+            const s1 = await until(async () => { const v = await A.p.evalJs(S11(id1)); return v && v.status === 'Connected' && v.constraints && v.constraints['minimum-size'] ? v : null; }, 40000, 300);
+            const in1 = inside(wt, r1);
+            const min1 = (s1 && s1.constraints && s1.constraints['minimum-size']) || [0, 0];
+            const old = await (await fetch(`${O11}/api/desktop/apps/${id0}`)).json();
+            const nB = await B.p.evalJs(S11(id1));
+            console.log(`  §11 (4): relaunch → ready ${readyMs} ms; successor scale ${r1.scale} dpi ${r1.dpi} origin ${r1.scaleOrigin}; inside: GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}; minimum ${JSON.stringify(min1)}; chip ${JSON.stringify(s1 && s1.chip && s1.chip.text)}; old ${old.state} stoppedBy ${old.stoppedBy} replacedBy ${old.replacedBy}, its app pid ${r0.pids.app} alive ${D.pidAlive(r0.pids.app)}; desktop-app windows: A ${s1 && s1.n}, B ${nB && nB.n}`);
+            check(`§11 (4): the successor runs at the CHOSEN 1.5× — the record (${r1.scale}×, ${r1.dpi} dpi, ${r1.scaleOrigin}) and MEASURED inside its display (GDK_SCALE=${in1.gdk}, Xft.dpi ${in1.xft}: text only in GTK)`, r1.scale === 1.5 && r1.dpi === 144 && r1.scaleOrigin === 'chosen' && in1.gdk === '1' && in1.xft === 144, { r1: { scale: r1.scale, dpi: r1.dpi, origin: r1.scaleOrigin }, in1 });
+            check(`§11 (4): the picture reconnected to the successor (${s1 && s1.status}) and its widgets are 1× again (minimum ${JSON.stringify(min1)}: under 720 wide, 616..1232 high)`, !!s1 && s1.status === 'Connected' && min1[0] > 300 && min1[0] < 720 && min1[1] >= 616 && min1[1] < 1232, min1);
+            check(`§11 (4): the chip says "1.5× · chosen" (${JSON.stringify(s1 && s1.chip && s1.chip.text)})`, !!s1 && !!s1.chip && s1.chip.text === '1.5× · chosen', s1 && s1.chip);
+            // desktop A r1: the seat is CARRIED — the client that chose the scale (A) holds the successor's seat with no Resume,
+            // the other one (B, blocked before) is blocked again, whichever retargeted first (the verifier saw B win the race)
+            const SEAT11 = (id) => `(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); if (!w) return null; const s = w._desktopSeats || {}; const ov = w.content.querySelector('.desktop-app-blocked'); return { pane: w._desktopPaneKey, active: s.active || null, known: !!s.known, mode: w._desktopAppView && w._desktopAppView.mode, overlay: !!ov && getComputedStyle(ov).display !== 'none' }; })()`;
+            const seatA = await until(async () => { const v = await A.p.evalJs(SEAT11(id1)); return v && v.known && v.active ? v : null; }, 8000, 150);
+            const seatB = await B.p.evalJs(SEAT11(id1));
+            check(`§11 (4) A r1: the client that chose the scale is ACTIVE on the successor with no Resume (seat ${seatA && seatA.active}, its pane ${seatA && seatA.pane}, mode ${seatA && seatA.mode}, overlay ${seatA && seatA.overlay}); the other client is blocked (${seatB && seatB.pane})`, !!seatA && seatA.active === seatA.pane && seatA.mode === 'active' && !seatA.overlay && !!seatB && seatB.pane !== seatA.pane && seatB.active === seatA.pane, { seatA, seatB });
+            check(`§11 (4): the old session stopped for the relaunch and names its successor (${old.state}, ${old.stoppedBy}, ${old.replacedBy}); its calculator is gone`, old.state === 'exited' && old.stoppedBy === 'relaunch' && old.replacedBy === id1 && !D.pidAlive(r0.pids.app), { state: old.state, stoppedBy: old.stoppedBy, replacedBy: old.replacedBy });
+            check(`§11 (4): one window per client, never a duplicate or a closed one (A ${s1 && s1.n}, B ${nB && nB.n}); nobody still names the old id`, !!s1 && s1.n === 1 && !!nB && nB.n === 1 && !(await A.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)})`)) && !(await B.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id0)})`)));
+          }
+        }
+      }
+      // (5) CONTROL — the pre-A3 keeper (the setting + dpr only; the UI scale never reaches the pick) on a copy of this tree:
+      // the SAME page (DPR 2, 125 %) gets 2× at 96 dpi — the (1) leg is the derivation, not a coincidence
+      const wtc = scratch('deskxpra-a3ctl');
+      try { execSync(`git worktree remove --force ${wtc}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+      execSync(`git worktree add --detach ${wtc} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wtc);
+      for (const f of ['src', 'public', 'server.js', 'scripts', 'package.json']) execSync(`rm -rf ${wtc}/${f} && cp -r ${wt}/${f} ${wtc}/${f}`);
+      fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtc, 'node_modules'));
+      fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
+      const kSrc = fs.readFileSync(path.join(wtc, 'src/server/desktop-app-keeper.js'), 'utf8');
+      const pickLine = "const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });";
+      check('CONTROL: the keeper\'s scale pick is spelled exactly once (the control replaces exactly it)', kSrc.split(pickLine).length === 2);
+      fs.writeFileSync(path.join(wtc, 'src/server/desktop-app-keeper.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
+      const [PORTC] = await freePorts(1);
+      const homeC = scratchHome('deskxpra-a3ctl-home', fs);
+      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+      let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
+      check('CONTROL: the pre-A3 copy boots', upC);
+      if (upC) {
+        await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
+        await openPage(A.p, `http://127.0.0.1:${PORTC}`); // the same page: DPR 2, localStorage uiScale 125 is per origin — set it here too
+        await A.p.evalJs(`localStorage.setItem('vibespace.uiScale', '125'); true`); await openPage(A.p, `http://127.0.0.1:${PORTC}`);
+        const lc = await A.p.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ appId: 'gnome-calculator', dpr: devicePixelRatio, uiScale: Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale')) }) }).then((r) => r.json())`);
+        const rc = lc && lc.id && await readyOn(A.p, lc.id);
+        const inC = rc ? inside(wtc, rc) : null;
+        check(`CONTROL: on the pre-A3 copy the same DPR-2 / 125 % client gets ${rc && rc.scale}× with Xft.dpi ${inC && inC.xft} — the UI scale never reached the app`, !!rc && rc.scale === 2 && inC && inC.xft === 96 && inC.gdk === '2', { rc: rc && { scale: rc.scale, dpi: rc.dpi }, inC });
+        if (lc && lc.id) await fetch(`http://127.0.0.1:${PORTC}/api/desktop/apps/${lc.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+      }
+      try { sc.kill('SIGKILL'); } catch {}
+    } catch (e) { failed++; console.error('  ✗ §11 threw:', e.stack || e.message); }
+    finally {
+      for (const id of ids11) await fetch(`${O11}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+      if (A) await A.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`).catch(() => {});
+      await dropPage(A); await dropPage(B);
+    }
+  }
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
   console.error('  server log tail:', srvLog.join('').split('\n').slice(-12).join('\n  '));

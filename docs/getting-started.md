@@ -59,6 +59,28 @@ Open **http://localhost:3456** in your browser. On startup, a loading screen is 
 
 Example: `PORT=8080 HOST=127.0.0.1 CODEX_CMD=/usr/local/bin/codex npm start`
 
+## HTTPS for seamless copy
+
+When you open VibeSpace by a machine name over plain http (`http://<hostname>:3456`), the browser treats the page as **not secure** and gives it no clipboard API. That matters for **desktop apps** (⚙ → Desktop apps…): a copy made inside the app has to reach your own clipboard.
+
+- **A copy you make yourself works anyway.** Press Ctrl+C (⌘+C) in the app window: the app's copy arrives within the few seconds the browser allows after a key press, and VibeSpace writes it to your clipboard with no extra click.
+- **A copy you did not make on this page** (an agent's, an app copying on a timer, a copy made on another device) cannot be written without a click on plain http. It shows as a **"Copied in the app — click to copy"** chip; one click copies it. The first time the chip appears on a device, a one-time hint links here.
+- **Paste works on plain http** (Ctrl+V in the app window, or the Paste button's paste box).
+
+To make every copy seamless, serve the page over **HTTPS**. VibeSpace does not terminate TLS itself; use one of these three routes:
+
+1. **No infrastructure, this browser only (Chrome / Edge):** open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, add `http://<hostname>:3456`, set the flag to *Enabled* and restart the browser. The page then counts as secure in that browser, so the clipboard API is there. Other browsers and devices are unchanged.
+2. **Tailscale:** on the VibeSpace machine run `tailscale serve --bg 3456`. Tailscale issues the certificate; open `https://<machine>.<tailnet>.ts.net` instead.
+3. **A reverse proxy (for example Caddy):** a two-line `Caddyfile`:
+   ```
+   <hostname> {
+     reverse_proxy 127.0.0.1:3456
+   }
+   ```
+   For a name without a public certificate, Caddy uses its own local certificate authority — trust it once in your browser (or the operating system), then open `https://<hostname>`.
+
+`localhost` / `127.0.0.1` is already a secure context, so a browser on the VibeSpace machine itself needs none of this.
+
 ## Quick Tour
 
 ![Overview](screenshots/overview.png)

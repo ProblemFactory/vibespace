@@ -197,7 +197,7 @@ export function registerWindowMenu() {
   registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => (c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id)) });
   registerCommand({ id: 'window.renameSession', title: () => t('Rename…'), run: (c) => c.app.sidebar?.renameSession?.(c.s, c.s.name) });
   registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.killSession(c.s.webuiId) });
-  registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => c.app.wm.closeWindow(c.id) });
+  registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => c.app.wm.requestClose(c.id) });
   // Title-bar variant (2.212.0): the whole right-click used to BE the overlap
   // switcher — now it's a submenu whose scope is user-configurable.
   registerMenuItem({ menu: M, group: 'navigation', order: 10, id: 'window/switch-window', when: (c) => !!c.switchSubmenu, label: () => t('Switch window'), children: (c) => switchWindowItems(c.app, c.id) });

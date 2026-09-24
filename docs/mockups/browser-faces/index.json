@@ -1,0 +1,483 @@
+[
+ {
+  "dir": "a",
+  "name": "desktop-zh",
+  "png": "direction-a-desktop-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "hub-entry",
+    "box": [
+     1055,
+     7,
+     72,
+     26
+    ],
+    "light": 241,
+    "colours": 64
+   },
+   {
+    "face": "web",
+    "box": [
+     385,
+     287,
+     223,
+     195
+    ],
+    "light": 1598,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     618,
+     287,
+     223,
+     195
+    ],
+    "light": 1878,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     852,
+     287,
+     223,
+     195
+    ],
+    "light": 1776,
+    "colours": 64
+   }
+  ]
+ },
+ {
+  "dir": "a",
+  "name": "desktop-en",
+  "png": "direction-a-desktop-en.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "hub-entry",
+    "box": [
+     1045,
+     7,
+     79,
+     26
+    ],
+    "light": 219,
+    "colours": 64
+   },
+   {
+    "face": "web",
+    "box": [
+     385,
+     289,
+     223,
+     190
+    ],
+    "light": 1604,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     618,
+     289,
+     223,
+     190
+    ],
+    "light": 1888,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     852,
+     289,
+     223,
+     190
+    ],
+    "light": 1779,
+    "colours": 64
+   }
+  ]
+ },
+ {
+  "dir": "a",
+  "name": "desktop-ja",
+  "png": "direction-a-desktop-ja.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "hub-entry",
+    "box": [
+     1033,
+     7,
+     83,
+     26
+    ],
+    "light": 179,
+    "colours": 64
+   },
+   {
+    "face": "web",
+    "box": [
+     385,
+     274,
+     223,
+     221
+    ],
+    "light": 1493,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     618,
+     274,
+     223,
+     221
+    ],
+    "light": 2498,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     852,
+     274,
+     223,
+     221
+    ],
+    "light": 1719,
+    "colours": 64
+   }
+  ]
+ },
+ {
+  "dir": "a",
+  "name": "phone-zh",
+  "png": "direction-a-phone-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "web",
+    "box": [
+     15,
+     307,
+     360,
+     140
+    ],
+    "light": 1536,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     15,
+     457,
+     360,
+     124
+    ],
+    "light": 1913,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     15,
+     591,
+     360,
+     136
+    ],
+    "light": 1826,
+    "colours": 64
+   }
+  ]
+ },
+ {
+  "dir": "b",
+  "name": "desktop-zh",
+  "png": "direction-b-desktop-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "web",
+    "box": [
+     1044,
+     7,
+     83,
+     26
+    ],
+    "light": 285,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     1131,
+     7,
+     61,
+     26
+    ],
+    "light": 171,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "b",
+  "name": "desktop-en",
+  "png": "direction-b-desktop-en.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "web",
+    "box": [
+     1037,
+     7,
+     86,
+     26
+    ],
+    "light": 218,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     1128,
+     7,
+     64,
+     26
+    ],
+    "light": 164,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "b",
+  "name": "desktop-ja",
+  "png": "direction-b-desktop-ja.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "web",
+    "box": [
+     1011,
+     7,
+     105,
+     26
+    ],
+    "light": 203,
+    "colours": 64
+   },
+   {
+    "face": "app",
+    "box": [
+     1120,
+     7,
+     72,
+     26
+    ],
+    "light": 134,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "b",
+  "name": "phone-zh",
+  "png": "direction-b-phone-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "web-phone",
+    "box": [
+     9,
+     231,
+     372,
+     44
+    ],
+    "light": 449,
+    "colours": 64
+   },
+   {
+    "face": "app-phone",
+    "box": [
+     9,
+     275,
+     372,
+     44
+    ],
+    "light": 475,
+    "colours": 64
+   },
+   {
+    "face": "agent-phone",
+    "box": [
+     9,
+     319,
+     372,
+     44
+    ],
+    "light": 545,
+    "colours": 64
+   }
+  ]
+ },
+ {
+  "dir": "c",
+  "name": "desktop-zh",
+  "png": "direction-c-desktop-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "app",
+    "box": [
+     1055,
+     7,
+     72,
+     26
+    ],
+    "light": 297,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "c",
+  "name": "desktop-en",
+  "png": "direction-c-desktop-en.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "app",
+    "box": [
+     1045,
+     7,
+     79,
+     26
+    ],
+    "light": 275,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "c",
+  "name": "desktop-ja",
+  "png": "direction-c-desktop-ja.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "app",
+    "box": [
+     1033,
+     7,
+     83,
+     26
+    ],
+    "light": 235,
+    "colours": 64
+   },
+   {
+    "face": "agent",
+    "box": [
+     2,
+     407,
+     40,
+     38
+    ],
+    "light": 52,
+    "colours": 44
+   }
+  ]
+ },
+ {
+  "dir": "c",
+  "name": "phone-zh",
+  "png": "direction-c-phone-zh.png",
+  "verdict": "ok",
+  "faces": [
+   {
+    "face": "app-phone",
+    "box": [
+     9,
+     231,
+     372,
+     44
+    ],
+    "light": 435,
+    "colours": 64
+   },
+   {
+    "face": "agent-phone",
+    "box": [
+     9,
+     275,
+     372,
+     44
+    ],
+    "light": 545,
+    "colours": 64
+   }
+  ]
+ }
+]

@@ -1,0 +1,59 @@
+{
+ "dir": "b",
+ "name": "desktop-zh",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-b-desktop-zh.png",
+ "expected": [
+  "web",
+  "app",
+  "agent"
+ ],
+ "faces": [
+  {
+   "face": "web",
+   "text": "网页视图",
+   "x": 1044,
+   "y": 7,
+   "w": 83,
+   "h": 26,
+   "pixels": 2158,
+   "light": 285,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "应用",
+   "x": 1131,
+   "y": 7,
+   "w": 61,
+   "h": 26,
+   "pixels": 1586,
+   "light": 171,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "",
+   "x": 2,
+   "y": 407,
+   "w": 40,
+   "h": 38,
+   "pixels": 1520,
+   "light": 52,
+   "colours": 44,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 8,
+  "painted": false
+ },
+ "verdict": "ok"
+}

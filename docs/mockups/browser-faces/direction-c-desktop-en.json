@@ -1,0 +1,46 @@
+{
+ "dir": "c",
+ "name": "desktop-en",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-c-desktop-en.png",
+ "expected": [
+  "app",
+  "agent"
+ ],
+ "faces": [
+  {
+   "face": "app",
+   "text": "Browser",
+   "x": 1045,
+   "y": 7,
+   "w": 79,
+   "h": 26,
+   "pixels": 2054,
+   "light": 275,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "",
+   "x": 2,
+   "y": 407,
+   "w": 40,
+   "h": 38,
+   "pixels": 1520,
+   "light": 52,
+   "colours": 44,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

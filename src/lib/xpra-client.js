@@ -454,8 +454,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     return true;
   };
 
+  /** round 3 A2 (docs/design-desktop-apps-seamless §3.2): the OUTER ✕ asks the app to close its MAIN window — xpra
+   *  `close-window` = WM_DELETE_WINDOW, so the app may answer with its own "save?" dialog and nothing closes. Never a
+   *  dialog's wid (the app's own ✕ on a dialog is the app's), never from Watch / view-only. false = nothing sent. */
+  const closeMain = () => {
+    if (state !== 'connected' || viewOnly || watch || !mainWid || !windows.has(mainWid)) return false;
+    return send(P.closeWindow(mainWid));
+  };
+
   return {
-    connect, close: () => finish('closed by the window'), send, resize, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
+    connect, close: () => finish('closed by the window'), send, resize, closeMain, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
     get state() { return state; }, get closedReason() { return closedReason; }, get windows() { return windows; }, get mainWid() { return mainWid; }, get focusedWid() { return focusedWid; },
     beltState: (wid) => { const w = windows.get(wid); return w && w.belt ? { at: w.belt.at, fights: w.belt.fights, gaveUp: w.belt.gaveUp, pending: !!w.belt.timer } : null; },
     get pane() { return pane; }, get display() { return sentDisplay ? { ...sentDisplay } : null; }, get cssPane() { return cssPane; }, get ratio() { return ratioNow(); }, get dpi() { return dpi; },

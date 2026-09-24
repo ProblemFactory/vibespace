@@ -18,7 +18,7 @@ const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // Patched copies of the bridge (negative controls) are written OUTSIDE the tree
-// (scripts/mutant-copy.mjs, `require` re-bound to the real module's path); §11
+// (scripts/mutant-copy.mjs, `require` re-bound to the real module's path); §tree
 // measures that while they exist. They used to be src/server/vs-dak-mut-*.
 const MUTD = mutantCopies('dapps', repo);
 sweepLegacy(repo, ['src/server'], /^vs-dak-mut-(\d+)-/);   // what a pre-fix run stranded (dead PIDs only)
@@ -743,9 +743,12 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   ok(M.appScaleFor('auto', 2) === 2 && M.appScaleFor(undefined, 2) === 2 && M.appScaleFor('', 1) === 1 && M.appScaleFor(null, 1.5) === 2, 'auto (also unset — the setting\'s default) follows the launching client\'s devicePixelRatio');
   // r2 (the verifier, measured): 1.5× is TEXT ONLY in GTK (no fractional GDK_SCALE on X11 — the calculator's minimum 370x616 device px
   // at 1.5× vs 720x1232 at 2×), so on a DPR-1.5 screen its keys drew at 0.67× their 1×-screen size. auto never picks the fraction:
-  const AUTO = [[1, 1], [1.2, 1], [1.25, 1], [1.49, 1], [1.5, 2], [1.75, 2], [2, 2], [3, 2], [0.5, 1], ['x', 1]];
+  // round 3 A3 (§13) moved the thresholds to the ratio rule's midpoint √2 and lets a fraction below it through as TEXT
+  // (1.25 ⇒ GDK_SCALE 1 + 120 dpi) and 2..2√2 likewise (2.5 ⇒ 2 + 120), 3 ⇒ 3: the r2 invariant kept here is the one
+  // that bit — a screen of 1.5 or more never gets the text-only 1.5, it gets 2
+  const AUTO = [[1, 1], [1.2, 1.2], [1.25, 1.25], [1.49, 2], [1.5, 2], [1.75, 2], [2, 2], [3, 3], [0.5, 1], ['x', 1]];
   const autoGot = AUTO.map(([d]) => M.appScaleFor('auto', d));
-  ok(same(autoGot, AUTO.map(([, w]) => w)), `auto = 2 from a DPR of 1.5 up, else 1 — never the text-only 1.5 (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
+  ok(same(autoGot, AUTO.map(([, w]) => w)) && [1.5, 1.75].every((d) => M.scaleKnobs(M.appScaleFor('auto', d)).gdkScale === 2), `auto never picks the text-only 1.5 on a screen of 1.5 or more — it is 2 there (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
   const preFixAuto = (d) => Math.min(2, Math.max(1, Math.round(M.normalizeDpr(d) * 2) / 2)); // the shipped-then-refuted rule: the nearest 0.5
   ok(!same(AUTO.map(([d]) => preFixAuto(d)), AUTO.map(([, w]) => w)) && preFixAuto(1.5) === 1.5 && preFixAuto(1.25) === 1.5, 'CONTROL: the pre-fix rule (the nearest 0.5) fails that table — it picks 1.5 on a 1.25 and a 1.5 screen');
   ok(M.appScaleFor('1', 2) === 1 && M.appScaleFor('1.5', 1) === 1.5 && M.appScaleFor(2, 1) === 2 && M.appScaleFor('3', 1) === 1, 'an explicit scale wins over the DPR (as a string — the enum\'s values — or a number); an unknown value ⇒ 1');
@@ -755,7 +758,7 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   ok(k1.dpi === 96 && k1.xresources === '' && k1.env.GDK_SCALE === '1', '1×: 96 dpi, no X resources');
   ok(!('GDK_DPI_SCALE' in k2.env) && !('GDK_DPI_SCALE' in k15.env), 'GDK_DPI_SCALE is NOT set (GTK4 ignores it — measured — and in GTK3 it would double-count the fraction already in Xft.dpi)');
   ok(/XTerm\*faceName: Monospace\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k2.xresources) && /UXTerm\*faceSize: 16\n/.test(k2.xresources) && /XTerm\*faceSize: 8\n/.test(k15.xresources), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE, the fraction through Xft.dpi');
-  ok(M.scaleKnobs(7).scale === 1 && M.scaleKnobs('2').scale === 2, 'scaleKnobs takes only the offered scales (anything else ⇒ 1)');
+  ok(M.scaleKnobs(7).scale === 1 && M.scaleKnobs('2').scale === 2, 'scaleKnobs: out of range ⇒ 1, a string is read as its number');
   // the launch request's dpr
   const reg = M.DEFAULT_REGISTRY;
   const v1 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2 }, reg), v2 = M.validateLaunchRequest({ exec: 'xterm' }, reg), v3 = M.validateLaunchRequest({ appId: 'xterm', dpr: 1.25 }, reg);
@@ -766,7 +769,7 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
   ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
   const keeper = read('src/server/desktop-app-keeper.js'), disp = read('src/desktop-display.js');
-  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(M\.appScaleFor\(serverSetting\('desktop\.appScale'\), v\.launch\.dpr\)\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch from `desktop.appScale` + the request\'s dpr — on the xpra STREAM only (a whole-display rung\'s picture is CSS px)');
+  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px); the pick itself is §13\'s pin');
   ok(/\.\.\.\(M\.streamKindOf\(rec, backends\) === 'xpra' \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
   { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
     ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.streamKindOf\(rec, backends\) === 'xpra'\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
@@ -775,16 +778,228 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   ok(/'desktop\.appScale': \{\s*type: 'enum', default: 'auto', options: \[\s*\{ value: 'auto'[^\]]*\{ value: '1', [^\]]*\{ value: '1\.5', [^\]]*\{ value: '2', /.test(schema), 'the setting `desktop.appScale` (auto | 1 | 1.5 | 2, default auto) exists in the schema — only for working code');
 }
 
+console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pick, the argv, the URL, the profile directory');
+{
+  const reg = M.DEFAULT_REGISTRY;
+  const cr = reg.find((r) => r.id === 'chromium'), fx = reg.find((r) => r.id === 'firefox');
+  ok(!!cr && cr.browser === 'chromium' && cr.category === 'browser' && same(cr.execs, ['chromium', 'chromium-browser', 'google-chrome']) && M.validateAppRow(cr).ok, 'the chromium row: family chromium, execs chromium → chromium-browser → google-chrome (first on PATH), validates', cr);
+  ok(!!fx && fx.browser === 'firefox' && fx.category === 'browser' && same(fx.execs, ['firefox', 'firefox-esr']) && M.validateAppRow(fx).ok, 'the firefox row: family firefox, execs firefox → firefox-esr, validates', fx);
+  ok(same(M.BROWSER_BINS, ['chromium', 'chromium-browser', 'google-chrome', 'firefox', 'firefox-esr']) && same(D.BROWSER_BINS, M.BROWSER_BINS), 'BROWSER_BINS is the union of the families, and desktop-display probes THAT list (one spelling)');
+  // the binary pick — first on PATH wins, every combination of the chromium family
+  const names = ['chromium', 'chromium-browser', 'google-chrome'];
+  let pickOk = true;
+  for (let mask = 0; mask < 8; mask++) {
+    const bins = Object.fromEntries(names.map((n, i) => [n, mask & (1 << i) ? `/usr/bin/${n}` : null]));
+    const want = names.find((n) => bins[n]) || null;
+    const b = M.browserRowFor(cr, bins);
+    if (want ? !(b.ok && b.row.exec === want && b.row.path === `/usr/bin/${want}`) : !(b.ok === false && b.code === 'browser-absent' && /none of chromium, chromium-browser, google-chrome on PATH/.test(b.error))) { pickOk = false; console.error('    pick', mask, JSON.stringify(b)); }
+  }
+  ok(pickOk, 'browserRowFor over all 8 presence combinations of the chromium family: the FIRST present name wins; none ⇒ `browser-absent` naming every candidate');
+  ok(M.browserRowFor(cr, { 'google-chrome': '/usr/bin/google-chrome' }).row.label === 'Google Chrome' && M.browserRowFor(fx, { 'firefox-esr': '/usr/bin/firefox-esr' }).row.label === 'Firefox ESR' && M.browserRowFor(cr, { chromium: '/usr/bin/chromium' }).row.label === 'Chromium', 'the served label follows the binary (google-chrome ⇒ "Google Chrome", firefox-esr ⇒ "Firefox ESR")');
+  ok(M.browserRowFor(reg.find((r) => r.id === 'xterm'), { xterm: '/usr/bin/xterm' }).code === 'not-a-browser', 'browserRowFor refuses a non-browser row by name');
+  // the argv: the profile flags, then the URL — no automation flag, ever
+  const P = '/tmp/vs-da/desktop-apps/da-1/profile';
+  const ac = M.browserArgv({ ...cr, exec: 'google-chrome' }, { profileDir: P, url: 'https://example.com/a?b=1' });
+  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic, THEN the URL (last)', ac);
+  const af = M.browserArgv(fx, { profileDir: P, url: 'http://127.0.0.1:8080/' });
+  ok(af.ok && same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/']), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
+  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
+  ok(same(M.browserArgv(cr, { profileDir: '/tmp/vs-da/desktop-apps/./da-1/x/../profile' }).argv[0], `--user-data-dir=${P}`), 'the profile path is normalised (`.` / `..` folded) before it reaches argv');
+  const AUTOMATION = /^--?(remote-debugging|enable-automation|headless|marionette|remote-allow|start-debugger-server|load-extension)/;
+  ok([ac, af].every((a) => a.argv.every((x) => !AUTOMATION.test(x))), 'no automation flag in either family\'s argv (remote-debugging / enable-automation / headless / marionette / debugger server / extensions)');
+  const forbidden = ['--remote-debugging-port=9222', '--remote-debugging-pipe', '--enable-automation', '--headless=new', '--user-data-dir=/home/u/.config/chromium', '-profile', '--marionette', '--load-extension=/x'];
+  ok(forbidden.every((f) => { const v = M.validateAppRow({ ...cr, args: [f] }); const a = M.browserArgv({ ...cr, args: [f] }, { profileDir: P }); return !v.ok && /may not carry/.test(v.error) && !a.ok && a.code === 'automation-flag'; }), 'a browser row carrying a profile or automation flag is REFUSED by name (validateAppRow AND browserArgv)');
+  ok(!M.validateAppRow({ id: 'x', label: 'x', exec: 'x', execs: ['x'] }).ok && !M.validateAppRow({ ...cr, browser: 'lynx' }).ok && !M.validateAppRow({ ...cr, execs: ['bad/name'] }).ok, 'execs only on a browser row, a known family only, bare names only');
+  // the URL
+  const good = ['https://example.com', 'http://127.0.0.1:3456/x?y=1#z', 'https://例え.jp/パス'];
+  ok(good.every((u) => M.validateBrowserUrl(u).ok) && M.validateBrowserUrl('  https://example.com  ').url === 'https://example.com/', 'http / https URLs pass (trimmed, parsed to their href)');
+  const badUrls = ['javascript:alert(1)', 'file:///etc/passwd', 'ftp://x/y', 'chrome://settings', 'about:config', 'data:text/html,x', 'not a url', 'https://a b', '--remote-debugging-port=1', '', '   ', 'http://', 'https://x/' + 'a'.repeat(2100), 'http://x/\u0000', 42];
+  const refusals = badUrls.map((u) => M.validateBrowserUrl(u));
+  ok(refusals.every((r) => !r.ok && r.code === 'bad-url' && /^Open URL must be an http:\/\/ or https:\/\/ address \(/.test(r.error)), 'every non-http(s) / malformed / spaced / control-char / over-long URL is REFUSED by name (`bad-url`, the sentence says why)', refusals.filter((r) => r.ok || r.code !== 'bad-url'));
+  const bu = M.browserArgv(cr, { profileDir: P, url: 'javascript:alert(1)' });
+  ok(!bu.ok && bu.code === 'bad-url' && bu.argv === null, 'browserArgv refuses a bad URL by name (nothing half-built)');
+  // the launch request
+  const view = reg.map((r) => (r.browser ? M.browserRowFor(r, { 'google-chrome': '/usr/bin/google-chrome', firefox: '/usr/bin/firefox' }).row : r));
+  const l1 = M.validateLaunchRequest({ appId: 'chromium', url: 'https://example.com', keepProfile: true }, view);
+  ok(l1.ok && l1.launch.url === 'https://example.com/' && l1.launch.keepProfile === true && l1.launch.row.exec === 'google-chrome', 'launch {appId: chromium, url, keepProfile}: the URL (parsed) and the keep choice ride the launch', l1);
+  const l0 = M.validateLaunchRequest({ appId: 'firefox' }, view);
+  ok(l0.ok && l0.launch.url === null && l0.launch.keepProfile === false, 'a browser launch without a URL / a keep choice: url null, keepProfile false (removed with the session by default)');
+  const lb = M.validateLaunchRequest({ appId: 'chromium', url: 'file:///etc/shadow' }, view);
+  ok(!lb.ok && lb.code === 'bad-url', 'launch with a bad URL: refused by name (`bad-url`)', lb);
+  const lx = M.validateLaunchRequest({ appId: 'xterm', url: 'https://example.com' }, view), lk = M.validateLaunchRequest({ appId: 'xterm', keepProfile: true }, view), la = M.validateLaunchRequest({ exec: 'chromium', url: 'https://example.com' }, view);
+  ok([lx, lk, la].every((r) => !r.ok && r.code === 'not-a-browser'), '`url` / `keepProfile` on a non-browser row or a typed command: refused by name (`not-a-browser`), never silently ignored', [lx, lk, la]);
+  ok(!M.validateLaunchRequest({ appId: 'chromium', keepProfile: 'yes' }, view).ok, 'keepProfile must be a boolean');
+  // the profile directory — the app session's own, never the user's real profiles, never an agent-browser profile
+  const home = '/home/u', owned = '/tmp/vs-da/desktop-apps';
+  const pv = M.profileDirVerdict(P, { home, ownedRoot: owned });
+  ok(pv.ok && pv.dir === P && !P.startsWith(home + '/'), 'the keeper\'s profile dir (inside its own data/desktop-apps, a scratch /tmp root here) passes — and is NOT under $HOME');
+  const refusedDirs = [
+    [home, 'profile-not-owned', { ownedRoot: owned }],
+    [`${home}/.config/chromium/Default`, 'profile-is-users', { ownedRoot: home }],
+    [`${home}/.config/google-chrome`, 'profile-is-users', { ownedRoot: home }],
+    [`${home}/.mozilla/firefox/abc.default`, 'profile-is-users', { ownedRoot: home }],
+    [`${home}/snap/firefox/common/.mozilla`, 'profile-is-users', { ownedRoot: home }],
+    [home, 'profile-is-users', { ownedRoot: '/' }],
+    ['/tmp/vs-da/browser-profiles/p1', 'profile-not-owned', { ownedRoot: owned }],
+    ['/tmp/vs-da/desktop-apps/../browser-env/x', 'profile-not-owned', { ownedRoot: owned }],
+    [owned, 'profile-not-owned', { ownedRoot: owned }],
+    ['relative/profile', 'profile-not-owned', { ownedRoot: owned }],
+  ];
+  const got = refusedDirs.map(([d, code, o]) => { const v = M.profileDirVerdict(d, { home, ...o }); return { d, code, got: v.code, ok: v.ok }; });
+  ok(got.every((g) => !g.ok && g.got === g.code), '$HOME itself, the user\'s real Chromium / Chrome / Firefox / snap profiles, an agent-browser dir, a `..` escape, the root itself and a relative path are REFUSED by name', got.filter((g) => g.ok || g.got !== g.code));
+  const sn = (d) => M.profileDirVerdict(d, { home, ownedRoot: d.slice(0, d.indexOf('/desktop-apps') + 13), confinement: 'snap', exec: 'firefox' });
+  ok(sn(P).code === 'snap-profile-unreachable' && /firefox is a snap/.test(sn(P).error) && sn(`${home}/.vibespace/data/desktop-apps/da-1/profile`).code === 'snap-profile-unreachable' && sn(`${home}/work/vs/data/desktop-apps/da-1/profile`).ok, 'a SNAP browser (private /tmp, no hidden top-level folder): a /tmp or ~/.hidden data dir is refused by name (`snap-profile-unreachable`); ~/work/… passes');
+  const uj = M.firefoxUserJs();
+  ok(uj.split('\n').filter(Boolean).every((l) => /^user_pref\("[a-z.A-Z_]+", (false|true|"[^"]*")\);$/.test(l)) && /"browser\.shell\.checkDefaultBrowser", false/.test(uj) && /"browser\.aboutwelcome\.enabled", false/.test(uj), 'firefox\'s first-run switch is its profile\'s user.js (user_pref lines only; no default-browser check, no welcome page)');
+  // WIRING PINS — the keeper / the launcher / the display name the PURE functions (never a re-spelled rule)
+  const keeper = read('src/server/desktop-app-keeper.js'), launcher = read('src/lib/desktop-app-launcher.js'), disp = read('src/desktop-display.js');
+  ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
+  ok(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper) && /const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
+  ok(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper) && /fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
+  ok(/import \{ validateBrowserUrl \} from '\.\.\/desktop-apps\.js';/.test(launcher) && /browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
+  ok(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp) && /for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS\]\)/.test(disp), 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
+}
 
-// ── §11 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app exiting closes the window, the outer ✕ is the app\'s own close');
+{
+  // (a) the keeper's census at the exit: windows a person could still see
+  const rows = [
+    { id: 1, x: 0, y: 0, w: 360, h: 616, mapped: true, cls: 'gnome-calculator' },
+    { id: 2, x: -1000, y: -1000, w: 5, h: 5, mapped: true, cls: 'Xfwm4' },         // xfwm4's parked helper
+    { id: 3, x: 0, y: 0, w: 1, h: 1, mapped: true },                                // a leader
+    { id: 4, x: 10, y: 10, w: 400, h: 300, mapped: false, cls: 'xterm' },          // withdrawn
+    { id: 5, x: -500, y: 20, w: 400, h: 300, mapped: true, cls: 'xterm' },         // entirely off the left edge
+    { id: 6, x: -100, y: 20, w: 400, h: 300, mapped: null, cls: 'xterm' },         // partly on screen, visibility unread
+  ];
+  ok(M.windowsLeftCount(rows) === 2 && M.windowsLeftCount([]) === 0 && M.windowsLeftCount(null) === 0, `windowsLeftCount: a real window + a partly visible one count; the WM helper, a 1×1 leader, a withdrawn and an off-screen window do not (${M.windowsLeftCount(rows)})`);
+  // (b) the exit verdict — the whole matrix
+  const V = (rec, o) => M.exitCloseVerdict(rec, o);
+  const exited = { state: 'exited', exitCode: 0, lastError: 'application exited (code 0)', windowsAtExit: 0 };
+  const table = [
+    [null, {}, false, 'no-record'],
+    [{ state: 'launching' }, {}, false, 'live'],
+    [{ state: 'ready' }, {}, false, 'live'],
+    [{ state: 'failed', lastError: 'X display :9 exited' }, {}, false, 'failed'],
+    [{ state: 'failed', stoppedBy: 'runaway' }, {}, false, 'failed'],
+    [exited, {}, true, 'exited'],
+    [{ ...exited, windowsAtExit: undefined }, {}, true, 'exited'],        // not counted (a shared display, a census that could not run)
+    [{ ...exited, windowsAtExit: null }, {}, true, 'exited'],
+    [{ ...exited, windowsAtExit: 1 }, {}, false, 'windows-left'],        // a forking launcher's child still shows a window
+    [{ ...exited, stoppedBy: 'user', windowsAtExit: undefined }, {}, true, 'stopped'],
+    [{ ...exited, stoppedBy: 'idle', lastError: 'stopped after 30 min without input (idle timeout)' }, {}, true, 'stopped'],
+    [{ ...exited, stoppedBy: 'user', windowsAtExit: 3 }, {}, true, 'stopped'],
+    [exited, { leased: true }, false, 'lease'],
+    [{ ...exited, stoppedBy: 'user' }, { leased: true }, false, 'lease'],
+  ];
+  const bad = table.map(([rec, o, close, why]) => ({ rec, o, want: [close, why], got: V(rec, o) })).filter((x) => x.got.close !== x.want[0] || x.got.why !== x.want[1]);
+  ok(bad.length === 0, `exitCloseVerdict: ${table.length} rows — failed stays, a lease keeps it, a stop closes, an exit closes unless a window is LEFT on the display`, bad);
+  // (c) the outer ✕ — the whole matrix
+  const base = { state: 'ready', stream: 'xpra', seat: 'active', connected: true, mainWid: 7, leased: false, askedAt: 0, now: 100000 };
+  const O = (o) => M.outerCloseVerdict({ ...base, ...o });
+  const otable = [
+    [{}, 'ask-app', 'close-window'],
+    [{ state: 'launching' }, 'close', 'not-running'],
+    [{ state: 'exited' }, 'close', 'not-running'],
+    [{ state: 'failed' }, 'close', 'not-running'],
+    [{ stream: 'rfb' }, 'close', 'no-window-protocol'],
+    [{ leased: true }, 'close', 'lease'],
+    [{ seat: 'blocked' }, 'close', 'not-active'],
+    [{ seat: 'watch' }, 'close', 'not-active'],
+    [{ connected: false }, 'close', 'no-main-window'],
+    [{ mainWid: 0 }, 'close', 'no-main-window'],
+    [{ askedAt: 100000 - 1 }, 'stop', 'again'],
+    [{ askedAt: 100000 - M.OUTER_CLOSE_AGAIN_MS }, 'stop', 'again'],
+    [{ askedAt: 100000 - M.OUTER_CLOSE_AGAIN_MS - 1 }, 'ask-app', 'close-window'],
+    [{ askedAt: 100000 + 50 }, 'ask-app', 'close-window'],              // a clock that went back is not "again"
+    [{ askedAt: 100000 - 1, state: 'exited' }, 'close', 'not-running'], // the app already went: the ✕ just closes
+    [{ askedAt: 100000 - 1, mainWid: 0 }, 'stop', 'again'],             // the app closed its window and kept running: the second ✕ stops it
+  ];
+  const obad = otable.map(([o, act, why]) => ({ o, want: [act, why], got: O(o) })).filter((x) => x.got.act !== x.want[0] || x.got.why !== x.want[1]);
+  ok(M.OUTER_CLOSE_AGAIN_MS === 5000 && obad.length === 0, `outerCloseVerdict: ${otable.length} rows — ask the app first, a second ✕ within ${M.OUTER_CLOSE_AGAIN_MS} ms stops it, today's pane-only close everywhere the app cannot be asked`, obad);
+  // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
+  // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
+  const keeper = read('src/server/desktop-app-keeper.js'), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
+  ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up) and before the commit that broadcasts it');
+  ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
+  ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(winInfo\.id\); \}/.test(wm), 'WIRING PIN: the title bar ✕ asks WindowManager.requestClose (the veto point), never closeWindow directly');
+  const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => c\.app\.wm\.requestClose\(c\.id\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /if \(tabWin\.onCloseRequest && tabWin\.onCloseRequest\(\) === false\) return;/ };
+  const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);
+  ok(missing.length === 0, 'WIRING PIN: every USER close (taskbar menu, Ctrl+\\ x, the phone nav ✕, a tab ✕) passes the same veto point', missing);
+}
+
+console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scale DERIVED from the launching client (devicePixelRatio × UI scale), its origin, the per-window relaunch');
+{
+  // (a) the derivation — design §3.4's table, row for row: eff = dpr × uiScale (clamped 1..3); GDK_SCALE by the ratio-nearest
+  // integer (the geometric midpoints √2 and 2√2), the fraction ONLY UPWARD into the font dpi (never text below 96)
+  const TABLE = [[1, 1, 1, 96], [1.25, 1, 1.25, 120], [1.5, 1, 2, 96], [2, 1, 2, 96], [2, 1.25, 2.5, 120], [3, 1, 3, 96], [1.25, 1.25, 2, 96], [1, 1.25, 1.25, 120], [2, 0.75, 2, 96], [1, 0.6, 1, 96], [3, 2, 3, 96]];
+  const got = TABLE.map(([dpr, ui]) => { const s = M.appScaleFor('auto', dpr, ui); const k = M.scaleKnobs(s); return [s, k.gdkScale, k.dpi]; });
+  const want = TABLE.map(([, , s, dpi]) => [s, s >= 3 ? 3 : s >= 2 ? 2 : 1, dpi]);
+  ok(same(got, want), `auto = the ratio rule over dpr × uiScale: ${TABLE.map(([d, u], i) => `${d}×${u} ⇒ ${got[i][0]}× (GDK_SCALE ${got[i][1]}, ${got[i][2]} dpi)`).join('; ')}`, { got, want });
+  // the boundaries: √2 and 2√2 are the geometric midpoints between 1/2 and 2/3
+  const B = [[1.41, 1.41], [1.42, 2], [2.82, 2.82], [2.83, 3]].map(([e, w]) => [e, M.appScaleFor('auto', e, 1), w]);
+  ok(B.every(([, g, w]) => g === w), `the boundaries √2 / 2√2: ${B.map(([e, g]) => `${e} ⇒ ${g}`).join(', ')}`, B);
+  // (b) the two numbers the owner asked for, on a DPR-2 screen at UI scale 125 %: GDK_SCALE 2 + Xft.dpi 120
+  const k25 = M.scaleKnobs(M.appScaleFor('auto', 2, 1.25));
+  ok(k25.scale === 2.5 && k25.gdkScale === 2 && k25.env.GDK_SCALE === '2' && k25.dpi === 120 && /XTerm\*faceSize: 16\n/.test(k25.xresources), 'DPR 2 × UI 1.25 = 2.5× ⇒ GDK_SCALE 2 (widgets 2×) + 120 dpi (text 2.5×), the xterm face 8 × 2 through the same dpi', k25);
+  // (c) 1.5× stays EXPLICIT and text-only for GTK (the floor rule on a chosen value): widgets 1×, text at 144 dpi
+  const k15 = M.scaleKnobs(M.appScaleFor('1.5', 2, 1.25));
+  ok(k15.scale === 1.5 && k15.gdkScale === 1 && k15.dpi === 144, 'an explicit 1.5 stays 1.5 whatever the screen (GDK_SCALE 1 + 144 dpi — text only in GTK)', k15);
+  // (d) REGRESSION CONTROL — uiScale absent = 1: the .158 answers on the integer screens it was measured on are unchanged
+  const r158 = [1, 1.5, 2].map((d) => [d, M.appScaleFor('auto', d), M.appScaleFor('auto', d, 1), M.appScaleFor('auto', d, undefined)]);
+  ok(r158.every(([d, a, b, c]) => a === b && b === c && a === (d >= 1.5 ? 2 : 1)), `uiScale absent / 1 / undefined give the .158 answer on DPR 1, 1.5, 2 (${r158.map((r) => r.join('→')).join(', ')})`, r158);
+  ok(M.appScaleFor('auto', 2, 'x') === 2 && M.appScaleFor('auto', 2, 9) === 2 && M.normalizeUiScale(0.3) === 1 && M.normalizeUiScale(1.25) === 1.25 && M.normalizeUiScale('1.1') === 1.1, 'a uiScale outside 0.6..2 (or not a number) counts as 1 in the PURE derivation');
+  ok(M.scaleKnobs(2.5).scale === 2.5 && M.scaleKnobs(7).scale === 1 && M.scaleKnobs(0.5).scale === 1 && M.scaleKnobs('3').gdkScale === 3, 'scaleKnobs takes any effective value 1..3 (anything else ⇒ 1)');
+  // (e) the ORIGIN the chip names: auto (derived from this screen) | setting (an explicit desktop.appScale) | chosen (this window's Scale ▸)
+  const pA = M.scalePick({ setting: 'auto', dpr: 2, uiScale: 1.25 }), pS = M.scalePick({ setting: '1.5', dpr: 2, uiScale: 1.25 }), pC = M.scalePick({ setting: 'auto', choice: 1, dpr: 2, uiScale: 1.25 }), pCA = M.scalePick({ setting: '2', choice: 'auto', dpr: 1, uiScale: 1.25 });
+  ok(pA.scale === 2.5 && pA.origin === 'auto' && same(pA.from, { dpr: 2, uiScale: 1.25 }) && pS.scale === 1.5 && pS.origin === 'setting' && pS.from === null && pC.scale === 1 && pC.origin === 'chosen' && pCA.scale === 1.25 && pCA.origin === 'auto' && same(pCA.from, { dpr: 1, uiScale: 1.25 }), 'scalePick names the origin: auto (with the dpr × uiScale it came from) / setting / chosen; a window\'s "auto" re-derives from the RELAUNCHING client', { pA, pS, pC, pCA });
+  const rec = M.newRecord({ id: 'da-3', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'xpra', now: 1, scale: 2.5, dpi: 120, scaleOrigin: 'auto', scaleFrom: { dpr: 2, uiScale: 1.25 } });
+  ok(rec.scale === 2.5 && rec.dpi === 120 && rec.scaleOrigin === 'auto' && same(rec.scaleFrom, { dpr: 2, uiScale: 1.25 }), 'the record carries the effective scale (any 1..3), its dpi and its ORIGIN', rec);
+  // (f) the launch request carries the UI scale; a value outside the product's own range is REFUSED by name
+  const reg = M.DEFAULT_REGISTRY;
+  const v1 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2, uiScale: 1.25 }, reg), v2 = M.validateLaunchRequest({ appId: 'xterm', dpr: 2 }, reg);
+  ok(v1.ok && v1.launch.uiScale === 1.25 && v2.ok && v2.launch.uiScale === 1, 'POST /api/desktop/apps `uiScale`: carried (1.25); absent ⇒ 1');
+  const badU = [0.5, 2.5, 'x', -1].map((u) => M.validateLaunchRequest({ appId: 'xterm', uiScale: u }, reg));
+  ok(badU.every((b) => !b.ok && /uiScale must be a number from 0\.6 to 2/.test(b.error)), 'a uiScale outside 0.6..2 is REFUSED by name, never silently clamped');
+  // (g) the per-window relaunch: the request (auto | 1 | 1.5 | 2 — the menu's four rows) and the record's verdict
+  ok(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2]) && Object.isFrozen(M.SCALE_CHOICES), 'the Scale ▸ menu offers auto, 1×, 1.5×, 2×');
+  const rq = [[{ scale: 'auto', dpr: 2, uiScale: 1.25 }, true], [{ scale: '1.5' }, true], [{ scale: 2 }, true], [{ scale: 3 }, false], [{}, false], [{ scale: 'auto', dpr: 9 }, false], [{ scale: 1, uiScale: 3 }, false]].map(([b, w]) => [b, w, M.validateRelaunchRequest(b)]);
+  ok(rq.every(([, w, v]) => v.ok === w) && rq[0][2].choice === 'auto' && rq[0][2].dpr === 2 && rq[0][2].uiScale === 1.25 && rq[1][2].choice === 1.5 && rq.filter(([, w]) => !w).every(([, , v]) => v.code === 'bad-request' && v.error), `validateRelaunchRequest: ${rq.map(([b, , v]) => `${JSON.stringify(b)} ⇒ ${v.ok ? 'ok ' + v.choice : v.error}`).join('; ')}`, rq.map((r) => r[2]));
+  const live = { id: 'da-9', state: 'ready', backend: 'xpra', exec: '/usr/bin/gnome-calculator', args: [], cwd: null, label: 'Calc', source: 'registry', appId: 'gnome-calculator' };
+  const RV = [[live, null], [{ ...live, state: 'launching' }, 'not-ready'], [{ ...live, state: 'exited' }, 'not-ready'], [{ ...live, backend: 'vnc-display' }, 'not-xpra'], [{ ...live, browser: 'chrome' }, 'relaunch-browser'], [null, 'not-found']].map(([r, w]) => [w, M.relaunchVerdict(r)]);
+  ok(RV.every(([w, v]) => (w === null ? v === null : v && v.code === w && typeof v.error === 'string' && v.error.length > 10)), `relaunchVerdict: ready xpra ⇒ ok; ${RV.filter(([w]) => w).map(([w]) => w).join(' / ')} refused by name`, RV);
+  ok(same(M.relaunchBodyOf(live), { appId: 'gnome-calculator' }) && same(M.relaunchBodyOf({ ...live, source: 'adhoc', appId: undefined, exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' }), { exec: '/usr/bin/xterm', args: ['-T', 'a b'], cwd: '/tmp', label: 'mine' }), 'relaunchBodyOf: a catalog row relaunches by its id, a typed command as typed (exec, args, cwd, label)');
+  // (g2) the Scale ▸ menu model: auto shows what THIS client would derive now, the row the record runs at is current (and
+  // not offered again unless auto would now derive something else), every reason a window cannot relaunch disables it
+  const mm = M.scaleMenuModel({ ...live, scale: 2.5, scaleOrigin: 'auto' }, { dpr: 2, uiScale: 1.25 });
+  ok(mm.why === null && same(mm.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 2.5, true, true], [1, 1, false, false], [1.5, 1.5, false, false], [2, 2, false, false]]), 'scaleMenuModel on the auto 2.5× app, same screen: auto (2.5×) is current and not offered again; 1× / 1.5× / 2× offered', mm);
+  const mm2 = M.scaleMenuModel({ ...live, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, uiScale: 1 });
+  ok(same(mm2.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 1, false, false], [1, 1, false, false], [1.5, 1.5, true, true], [2, 2, false, false]]), 'scaleMenuModel on a chosen 1.5×, from a DPR-1 client: 1.5× current; auto offered at THIS client\'s derivation (1×)', mm2);
+  const mm3 = M.scaleMenuModel({ ...live, scale: 2, scaleOrigin: 'auto' }, { dpr: 1, uiScale: 1 });
+  ok(mm3.rows[0].current && !mm3.rows[0].disabled && mm3.rows[0].scale === 1, 'an auto app opened on ANOTHER screen: auto is current yet offered (it would re-derive 1× here)', mm3.rows[0]);
+  const whys = [[{ leased: true }, 'lease'], [{ seat: 'blocked' }, 'seat'], [{}, null]].map(([o, w]) => [w, M.scaleMenuModel(live, o).why]);
+  ok(whys.every(([w, g]) => w === g) && M.scaleMenuModel({ ...live, backend: 'vnc-display' }).why === 'not-xpra' && M.scaleMenuModel({ ...live, backend: 'vnc-display' }).rows.every((r) => r.disabled), `scaleMenuModel disables every row with the reason: an agent lease, a non-active seat, the relaunch verdict (${JSON.stringify(whys)})`);
+  // (h) a relaunched record does not CLOSE its window — it names its successor, and every client follows it
+  const old = { state: 'exited', stoppedBy: 'relaunch', replacedBy: 'da-10' };
+  ok(same(M.exitCloseVerdict(old), { close: false, why: 'relaunched', replacedBy: 'da-10' }) && same(M.exitCloseVerdict({ state: 'ready', replacedBy: 'da-10' }), { close: false, why: 'relaunched', replacedBy: 'da-10' }), 'exitCloseVerdict: a record replaced by a relaunch never closes its window — it names the successor (even before the old one has stopped)');
+  // (i) WIRING PINS — the keeper decides the scale ONCE through scalePick (the launch's dpr + uiScale, or the relaunch's choice);
+  // the launcher sends THIS client's UI scale; the window offers the menu and follows a replacement
+  const keeper = read('src/server/desktop-app-keeper.js'), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
+  ok(/const pick = opts\.scaleChoice \? M\.scalePick\(\{ choice: opts\.scaleChoice, dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\) : M\.scalePick\(\{ setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (the setting, or a relaunch\'s choice) from the request\'s dpr + uiScale, on the xpra STREAM only');
+  ok(/const armSeat = carrySeat\(id, next\.id\);\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ armSeat\(\); \}/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
+  ok(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes) && /ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
+  ok(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
+  ok(/r\.replacedBy/.test(win) && /retarget\(/.test(win) && /\/relaunch`/.test(win) && /showConfirmDialog\(/.test(win), 'WIRING PIN: the window follows a replacement (retarget) and relaunches through the route after a confirm');
+}
+
+// ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix
 // placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
-console.log('\n§11 the patched copies never touch the tree');
-for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 7 })) ok(r.pass, '§11 ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+console.log('\n§tree the patched copies never touch the tree');
+for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 7 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

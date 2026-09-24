@@ -18,6 +18,12 @@
 //      persists in user state (`desktopAppAdvancedOpen`, a merge-only PATCH
 //      like `desktopAppRecents`, the B-b87b belt);
 //   5. the backend availability chip in the ladder's own words.
+//   3b. BROWSERS (B-bfe6, 2026-09-23) — the registry's browser rows under their
+//      own heading with the ONE sentence that separates them from the Agent
+//      browser (in the section AND in each card's tooltip), an optional
+//      "Open URL" (http/https, checked by the PURE `validateBrowserUrl` before
+//      the request and by the server again) and a "keep the profile" choice;
+//      both ride the launch as `url` / `keepProfile` for a browser row only.
 // ≤768px is one column. Every failure reaches a toast (fetchJson never throws;
 // the server always answers `{error}`). The dialog holds NO session state: it
 // re-reads /api/desktop/apps when it opens and follows the
@@ -32,10 +38,11 @@
 // what scrolled the title off-left. test-desktop-app-window pins the three
 // viewports with computed geometry.
 import { t } from './i18n.js';
-import { createModalShell, escHtml, fetchJson, showToast } from './utils.js';
+import { createModalShell, escHtml, fetchJson, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
+import { validateBrowserUrl } from '../desktop-apps.js';
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -51,6 +58,39 @@ const CATEGORY_ICONS = Object.freeze({ terminal: UI_ICONS.terminal, editor: UI_I
 export function launchDpr(v = (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1)) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(3, Math.max(1, Math.round(n * 100) / 100)) : 1;
+}
+
+/** Round 3 A3: the launching client's UI scale (utils applyUiPrefs' body zoom — 1 on a phone) for the same POST
+ *  (`uiScale`, the route accepts 0.6..2): under `desktop.appScale: auto` the app's scale is dpr × this. */
+export function launchUiScale(v = uiScale()) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(2, Math.max(0.6, Math.round(n * 100) / 100)) : 1;
+}
+
+/** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
+ *  prints it and every browser card carries it in its tooltip (a function: `t` must run after the language loads). */
+export const browserNote = () => t('This is your own browser window (an app); the Agent browser (Browser profiles) is separate');
+/** B-bfe6 r1: the SHORT, translated reason a dimmed browser card shows, by the keeper's verdict CODE (the verdict's
+ *  own sentence — with its data-dir path — stays the card's tooltip). null ⇒ the card falls back to the sentence. */
+export function browserReasonShort(code) {
+  if (code === 'snap-profile-unreachable') return t('Snap: cannot reach the data folder');
+  if (code === 'browser-absent') return t('not on PATH');
+  if (code === 'profile-is-users' || code === 'profile-not-owned') return t('No private profile folder here');
+  return null;
+}
+
+/** The launch body of a browser card (PURE — the suite drives it): `{appId}` plus the typed URL when there is one
+ *  (refused by name when it is not http/https — `{error}`) and `keepProfile` only when chosen. */
+export function browserLaunchBody(row, { url = '', keepProfile = false } = {}) {
+  const typed = String(url || '').trim();
+  const body = { appId: row.id };
+  if (typed) {
+    const v = validateBrowserUrl(typed);
+    if (!v.ok) return { error: v.error, code: v.code };
+    body.url = v.url;
+  }
+  if (keepProfile) body.keepProfile = true;
+  return { body };
 }
 
 /** The availability sentence for the dialog head — the ladder's verdict in
@@ -137,6 +177,15 @@ export async function showLaunchDialog(app) {
       <h4>${escHtml(t('Applications'))}</h4>
       <div class="desktop-launch-registry desktop-launch-grid"></div>
     </section>
+    <section class="desktop-launch-sec desktop-launch-browsers-sec is-empty">
+      <h4>${escHtml(t('Browsers'))}</h4>
+      <p class="desktop-launch-browser-note">${escHtml(browserNote())}</p>
+      <div class="desktop-launch-browser-opts">
+        <label class="desktop-launch-field desktop-launch-url-field"><span>${escHtml(t('Open URL (optional)'))}</span><input type="url" class="desktop-launch-url" placeholder="https://" autocomplete="off" spellcheck="false"></label>
+        <label class="desktop-launch-check"><input type="checkbox" class="desktop-launch-keep-profile"><span>${escHtml(t('Keep the profile after it closes'))}</span></label>
+      </div>
+      <div class="desktop-launch-browsers desktop-launch-grid"></div>
+    </section>
     <div class="desktop-launch-adv">
       <button type="button" class="desktop-launch-adv-toggle" aria-expanded="false" aria-controls="desktop-launch-adv-body">${UI_ICONS.chevronDown}<span>${escHtml(t('Advanced: run any command'))}</span></button>
       <div class="desktop-launch-adv-body collapsed" id="desktop-launch-adv-body">
@@ -157,6 +206,7 @@ export async function showLaunchDialog(app) {
     </div>`;
   const $ = (sel) => body.querySelector(sel);
   const availEl = $('.desktop-launch-avail'), regEl = $('.desktop-launch-registry'), runEl = $('.desktop-launch-running'), recEl = $('.desktop-launch-recents');
+  const browsersSec = $('.desktop-launch-browsers-sec'), browsersEl = $('.desktop-launch-browsers'), urlIn = $('.desktop-launch-url'), keepIn = $('.desktop-launch-keep-profile');
   const runSec = $('.desktop-launch-running-sec'), countEl = $('.desktop-launch-count');
   const advToggle = $('.desktop-launch-adv-toggle'), advBody = $('.desktop-launch-adv-body');
   const execIn = $('.desktop-launch-exec'), argsIn = $('.desktop-launch-args'), cwdIn = $('.desktop-launch-cwd'), runBtn = $('.desktop-launch-run');
@@ -182,8 +232,9 @@ export async function showLaunchDialog(app) {
 
   const launch = async (payload, recent) => {
     runBtn.disabled = true;
-    // HiDPI (2.369.158): THIS client's devicePixelRatio rides the launch — under `desktop.appScale: auto` it is the app's scale
-    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr() }) });
+    // HiDPI (2.369.158): THIS client's devicePixelRatio rides the launch; round 3 A3: and its UI scale — under
+    // `desktop.appScale: auto` the app's scale is derived from dpr × uiScale (VibeSpace's own effective scale here)
+    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale() }) });
     runBtn.disabled = false;
     if (!r || r.error) { showToast(r?.error || t('Could not launch the application'), { type: 'error' }); return null; }
     if (recent) {
@@ -200,31 +251,42 @@ export async function showLaunchDialog(app) {
     availEl.classList.toggle('desktop-launch-avail-bad', !!(data && !data.availability?.backend));
     const dead = !data?.availability?.backend;
     const capUsed = data?.cap?.used ?? 0, cap = data?.cap?.cap ?? 0;
-    // ── the catalog ──
+    // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
     regEl.innerHTML = '';
+    browsersEl.innerHTML = '';
     for (const row of (data?.registry || [])) {
       const b = document.createElement('button');
       b.type = 'button';
       const isLaunching = launching.has(row.id);
       const unavailable = !row.available || !!row.parkedUntil;
       b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
-      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : (row.reason || t('not on PATH'));
+      // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
+      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || row.reason || t('not on PATH'));
       b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${escHtml(sub)}</span>`;
       b.disabled = unavailable || dead || isLaunching;
       b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
       if (isLaunching) b.setAttribute('aria-busy', 'true');
       b.title = row.available ? (row.path || row.exec) : (row.reason || '');
+      if (row.browser) b.title = `${b.title ? b.title + ' — ' : ''}${browserNote()}`;
       b.dataset.appId = row.id;
       b.onclick = async () => {
         if (b.disabled) return;
+        let body = { appId: row.id };
+        if (row.browser) {
+          const bb = browserLaunchBody(row, { url: urlIn.value, keepProfile: keepIn.checked });
+          if (bb.error) { showToast(t('Open URL must be an http:// or https:// address'), { type: 'error' }); focusQuiet(urlIn); return; }
+          body = bb.body;
+        }
         launching.add(row.id); render();
-        const r = await launch({ appId: row.id }, null);
+        const r = await launch(body, null);
         if (!r) { launching.delete(row.id); render(); }
       };
-      regEl.appendChild(b);
+      (row.browser ? browsersEl : regEl).appendChild(b);
     }
-    const registryEmpty = !regEl.children.length;
-    if (registryEmpty) regEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
+    browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
+    urlIn.disabled = keepIn.disabled = dead;
+    const registryEmpty = !regEl.children.length && !browsersEl.children.length;
+    if (!regEl.children.length) regEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
     // ── running ──
     runEl.innerHTML = '';
     const live = (data?.apps || []).filter((a) => a.state === 'ready' || a.state === 'launching');

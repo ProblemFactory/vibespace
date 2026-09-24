@@ -7,10 +7,18 @@
  *   GET  /api/desktop/apps            registry (+ availability per row) + live
  *                                     sessions + the backend ladder with its
  *                                     reasons + the cap
- *   POST /api/desktop/apps            { appId } | { exec, args?, cwd?, label? }
+ *   POST /api/desktop/apps            { appId, url?, keepProfile? } | { exec, args?, cwd?, label? }
+ *                                     (B-bfe6: `url` / `keepProfile` for a BROWSER row only —
+ *                                     bad-url / not-a-browser 400, browser-absent /
+ *                                     snap-profile-unreachable 409, each by name)
  *   GET  /api/desktop/apps/:id
  *   POST /api/desktop/apps/:id/stop
  *   POST /api/desktop/apps/:id/keep-alive   ("keep running" = one explicit action, §5)
+ *   POST /api/desktop/apps/:id/relaunch     round 3 A3: `{ scale: 'auto'|1|1.5|2, dpr?, uiScale? }` — the
+ *                                     same app started again at that scale (auto = derived from
+ *                                     THIS client's dpr × uiScale), the old session stopped with
+ *                                     `replacedBy` naming the new one → `{ app, replaced }`;
+ *                                     not-ready / not-xpra / relaunch-browser 409, bad-request 400
  *   GET  /api/vnc/status · POST /api/vnc/start   the singleton desktop's two
  *                                     routes (moved from server.js — same
  *                                     answers, one home for desktop routes)
@@ -76,8 +84,8 @@ function refuseHost(req, res) {
 }
 function fail(res, e) {
   const code = e?.code || null;
-  const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' ? 400
-    : code === 'cap' || code === 'runaway-parked' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' ? 409
+  const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' ? 400
+    : code === 'cap' || code === 'runaway-parked' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable' ? 409
       : code === 'no-engine' || code === 'xpra-ui-unavailable' ? 503 : 500;
   res.status(status).json({ error: String(e?.message || e), code });
 }
@@ -107,6 +115,12 @@ router.post('/api/desktop/apps/:id/keep-alive', (req, res) => {
   if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   try { res.json(ctx.keeper.keepAlive(req.params.id)); } catch (e) { fail(res, e); }
+});
+
+router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+  try { res.json(await ctx.keeper.relaunch(req.params.id, req.body || {})); } catch (e) { fail(res, e); }
 });
 
 // P8-2: the app's windows on its display — an on-demand snapshot (two spawns),

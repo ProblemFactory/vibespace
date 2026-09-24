@@ -366,31 +366,295 @@ function windowTitleOf(name) {
 //     font dpi: xpra rewrites Xft.dpi to a client's dpi whenever it CHANGES
 //     (measured: 96 → 144 through one display-configure), so a client that
 //     sent 96 × devicePixelRatio would quadruple a GDK_SCALE=2 app's text.
+// ROUND 3 A3 (docs/design-desktop-apps-seamless §3.4, the owner 2026-09-23: "内部app的dpi … 最好是能从
+// vibespace自身的dpi自动推导"): `auto` derives from VibeSpace's OWN effective scale on the launching client,
+// eff = devicePixelRatio × the UI scale (utils applyUiPrefs' body zoom — the pane is counter-zoomed to net zoom
+// 1, so without this factor a 125 % UI drew a 1.0× app next to 1.25× chrome, measured M4). The integer part is
+// the RATIO-NEAREST integer (the geometric midpoints √2 and 2√2 — r2's rule, carried to 3); the fraction goes
+// ONLY UPWARD into the font dpi (text is never drawn below 96 dpi):
+//   eff 1.00 ⇒ 1×/96 · 1.25 ⇒ 1×/120 · 1.5 ⇒ 2×/96 · 2.0 ⇒ 2×/96 · 2.5 ⇒ 2×/120 · 3.0 ⇒ 3×/96
+// so `appScaleFor('auto', …)` answers the TEXT scale (1..√2 as is, √2..2 ⇒ 2, 2..2√2 as is, above ⇒ 3) and
+// `scaleKnobs` spells ANY value 1..3 by the floor rule (GDK_SCALE = floor, the rest in Xft.dpi) — which is also
+// what an explicit 1.5 has always been: text only in GTK. The ORIGIN rides the record (`scaleOrigin`
+// auto | setting | chosen) so the chip can say whether the number was derived or picked.
 /** The scales `desktop.appScale` offers (the setting's enum is these + 'auto'). */
 const APP_SCALES = Object.freeze([1, 1.5, 2]);
+/** The per-window Scale ▸ menu's rows (round 3 A3): re-derive from this screen, or one of the explicit scales. */
+const SCALE_CHOICES = Object.freeze(['auto', ...APP_SCALES]);
+/** The highest effective scale a launch derives (GDK_SCALE 3). */
+const SCALE_MAX = 3;
+/** The UI scale range the product itself offers (utils UI_SCALE_MIN/MAX, as fractions). */
+const UI_SCALE_RANGE = Object.freeze([0.6, 2]);
+const round2 = (n) => Math.round(n * 100) / 100;
 /** A launch request's devicePixelRatio: a finite number in 1..3, else the default 1. */
 function normalizeDpr(v) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1 && n <= 3 ? n : 1;
 }
-/** The app's scale from the setting (auto | 1 | 1.5 | 2, as a string or a number) and the launching client's DPR.
- *  auto = 2 from a DPR of 1.5 up, else 1 — never the text-only 1.5 (see the table above). */
-function appScaleFor(setting, dpr = 1) {
+/** A launch request's UI scale (the body zoom, a fraction): a finite number in 0.6..2, else the default 1. */
+function normalizeUiScale(v) {
+  const n = Number(v);
+  return v !== null && v !== '' && Number.isFinite(n) && n >= UI_SCALE_RANGE[0] && n <= UI_SCALE_RANGE[1] ? n : 1;
+}
+/** VibeSpace's effective scale on a client: devicePixelRatio × UI scale, clamped to 1..SCALE_MAX. */
+function effectiveScale(dpr = 1, uiScale = 1) {
+  return round2(Math.min(SCALE_MAX, Math.max(1, normalizeDpr(dpr) * normalizeUiScale(uiScale))));
+}
+/** The app's scale from the setting (auto | 1 | 1.5 | 2, as a string or a number) and the launching client's
+ *  DPR + UI scale. auto = the TEXT scale the ratio rule gives eff (see the table above); never the text-only
+ *  1.5 on a screen of 1.5 or more (that is 2). */
+function appScaleFor(setting, dpr = 1, uiScale = 1) {
   const s = setting === undefined || setting === null || setting === '' ? 'auto' : String(setting);
   if (s !== 'auto') {
     const n = Number(s);
     return APP_SCALES.includes(n) ? n : 1;
   }
-  return normalizeDpr(dpr) >= 1.5 ? 2 : 1;
+  const eff = effectiveScale(dpr, uiScale);
+  if (eff < Math.SQRT2) return eff;
+  if (eff < 2) return 2;
+  if (eff < 2 * Math.SQRT2) return eff;
+  return SCALE_MAX;
 }
-/** Every knob a scale sets (see the table above): `{scale, gdkScale, dpi, env, xresources}`. */
+/** The scale a launch runs at AND where it came from → { scale, origin: 'auto'|'setting'|'chosen', from: {dpr, uiScale}|null }.
+ *  `choice` (a relaunch's Scale ▸ row) wins over `setting`; its 'auto' re-derives from the RELAUNCHING client. */
+function scalePick({ setting, choice, dpr = 1, uiScale = 1 } = {}) {
+  const from = { dpr: normalizeDpr(dpr), uiScale: normalizeUiScale(uiScale) };
+  if (choice !== undefined && choice !== null) {
+    if (String(choice) === 'auto') return { scale: appScaleFor('auto', dpr, uiScale), origin: 'auto', from };
+    return { scale: appScaleFor(choice, dpr, uiScale), origin: 'chosen', from: null };
+  }
+  const s = setting === undefined || setting === null || setting === '' ? 'auto' : String(setting);
+  if (s === 'auto') return { scale: appScaleFor('auto', dpr, uiScale), origin: 'auto', from };
+  return { scale: appScaleFor(s, dpr, uiScale), origin: 'setting', from: null };
+}
+/** A record's scale: any finite value 1..SCALE_MAX (2 decimals), else 1. */
+function normalizeScale(v) {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 1 && n <= SCALE_MAX ? round2(n) : 1;
+}
+/** Every knob a scale sets (see the tables above): `{scale, gdkScale, dpi, env, xresources}` — GDK_SCALE = the
+ *  integer part (floor), the fraction in the display's font dpi (96 × scale / GDK_SCALE). */
 function scaleKnobs(scale) {
-  const s = APP_SCALES.includes(Number(scale)) ? Number(scale) : 1;
-  const gdkScale = s >= 2 ? 2 : 1;
+  const s = normalizeScale(scale);
+  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s)));
   const dpi = Math.round(96 * s / gdkScale);
   const env = { GDK_SCALE: String(gdkScale), QT_ENABLE_HIGHDPI_SCALING: '1', QT_SCALE_FACTOR: String(gdkScale) };
   const xresources = s > 1 ? ['XTerm', 'UXTerm'].map((c) => `${c}*faceName: Monospace\n${c}*faceSize: ${8 * gdkScale}\n`).join('') : '';
   return { scale: s, gdkScale, dpi, env, xresources };
+}
+/** POST /api/desktop/apps/:id/relaunch `{ scale: 'auto'|1|1.5|2, dpr?, uiScale? }` → { ok, choice, dpr, uiScale } | { ok:false, code, error }. */
+function validateRelaunchRequest(body) {
+  const b = body && typeof body === 'object' ? body : {};
+  const raw = b.scale;
+  const choice = raw === 'auto' ? 'auto' : (raw !== undefined && raw !== null && raw !== '' && APP_SCALES.includes(Number(raw)) ? Number(raw) : null);
+  if (choice === null) return { ok: false, code: 'bad-request', error: `scale must be one of ${SCALE_CHOICES.join(', ')}` };
+  if (b.dpr !== undefined && b.dpr !== null && !(Number.isFinite(Number(b.dpr)) && Number(b.dpr) >= 1 && Number(b.dpr) <= 3)) return { ok: false, code: 'bad-request', error: 'dpr must be a number from 1 to 3' };
+  if (b.uiScale !== undefined && b.uiScale !== null && !(Number.isFinite(Number(b.uiScale)) && Number(b.uiScale) >= UI_SCALE_RANGE[0] && Number(b.uiScale) <= UI_SCALE_RANGE[1])) return { ok: false, code: 'bad-request', error: `uiScale must be a number from ${UI_SCALE_RANGE[0]} to ${UI_SCALE_RANGE[1]}` };
+  return { ok: true, choice, dpr: normalizeDpr(b.dpr), uiScale: normalizeUiScale(b.uiScale) };
+}
+/** May this record be relaunched at another scale? null = yes, else { code, error } by name. The scale is fixed at
+ *  launch (GDK_SCALE is read once), so the relaunch is a NEW app session: only a running xpra app, never a browser
+ *  (its profile belongs to the session it was made for — a relaunch would start from an empty one). */
+function relaunchVerdict(rec, backends = DISPLAY_BACKENDS) {
+  if (!rec) return { code: 'not-found', error: 'no such desktop app' };
+  if (rec.state !== 'ready') return { code: 'not-ready', error: `${rec.label || rec.id} is ${rec.state} — only a running app can be relaunched at another scale` };
+  const b = rec.backend ? backendById(rec.backend, backends) : null;
+  if (!b || b.stream !== 'xpra') return { code: 'not-xpra', error: `${rec.label || rec.id} runs on ${rec.backend || 'no'} rung — only an xpra app has a scale (a whole display is drawn at the browser's pixels)` };
+  if (rec.browser) return { code: 'relaunch-browser', error: `${rec.label || rec.id} is a browser with a profile of its own session — stop it and launch it again to change its scale` };
+  return null;
+}
+/** The launch body that starts the same app again: a catalog row by its id, a typed command as typed. */
+function relaunchBodyOf(rec) {
+  if (rec.source === 'registry' && rec.appId) return { appId: rec.appId };
+  return { exec: rec.exec, args: Array.isArray(rec.args) ? rec.args.slice() : [], cwd: rec.cwd || null, label: rec.label };
+}
+
+/** The Scale ▸ menu of ONE window (round 3 A3), words left to the client: the four rows (auto = what THIS client's
+ *  dpr × uiScale would derive now), which one the record runs at, and — when the window cannot relaunch — the reason
+ *  CODE (relaunchVerdict's, or 'lease' = an agent holds the app, 'seat' = another client is the active viewer). */
+function scaleMenuModel(rec, { dpr = 1, uiScale = 1, leased = false, seat = 'active', backends = DISPLAY_BACKENDS } = {}) {
+  const v = relaunchVerdict(rec, backends);
+  const why = v ? v.code : leased ? 'lease' : seat !== 'active' ? 'seat' : null;
+  const cur = rec ? normalizeScale(rec.scale) : 1;
+  const rows = SCALE_CHOICES.map((choice) => {
+    const scale = choice === 'auto' ? appScaleFor('auto', dpr, uiScale) : choice;
+    const current = !!rec && (choice === 'auto' ? rec.scaleOrigin === 'auto' : rec.scaleOrigin !== 'auto' && cur === choice);
+    return { choice, scale, current, disabled: !!why || (current && (choice !== 'auto' || scale === cur)) };
+  });
+  return { rows, why };
+}
+
+// ── round 3 A2: the app's exit closes our window; the outer ✕ is the app's own close ──
+// docs/design-desktop-apps-seamless.md §3.2 (the owner, 2026-09-23: "我关闭内部窗口之后
+// 外部窗口还要额外关闭一次"). MEASURED (M3c, xpra 6.5.3 + GNOME Calculator): the app's
+// own ✕ ⇒ `lost-window` 23 ms ⇒ the record `exited` (code 0) 61 ms — and the
+// VibeSpace window stayed as a dead picture. The rule, decided ONCE per window at the
+// record's arrival in a terminal state (never re-decided when a lease drops later):
+//   · `failed` stays — its red sentence is the one place the error is said;
+//   · an agent lease holding the app keeps the window (the marker says who drove it);
+//   · a STOP (`stoppedBy` set: the user's Stop, the idle timeout, the guard) closes —
+//     VibeSpace tore the display down on purpose (D2d);
+//   · an app EXIT closes only when the keeper's census at the exit found NO window
+//     left on the display (`windowsAtExit` 0, or not counted — a shared display, a
+//     census that could not run): a forking launcher that exited while its child
+//     still shows a window is not "the app exited" — that window keeps its sentence.
+// `windowsAtExit` is the KEEPER's fact (one enumeration BEFORE the teardown), so every
+// client decides the same — a blocked pane has no protocol windows to count.
+/** The outer ✕ asks the app first; a second ✕ within this window = Stop. */
+const OUTER_CLOSE_AGAIN_MS = 5000;
+/** Windows a person could still see after the app process exited: mapped, at least
+ *  16×16 (a WM's 5×5 helper, a 1×1 leader are not windows), on screen (xfwm4 parks
+ *  its helper at -1000,-1000). Rows are the keeper's app-window rows. */
+function windowsLeftCount(rows) {
+  return (rows || []).filter((w) => w && w.mapped !== false && w.w >= 16 && w.h >= 16 && w.x + w.w > 0 && w.y + w.h > 0).length;
+}
+/** Does a window whose record reached a terminal state close itself?
+ *  → { close, why: 'no-record'|'relaunched'|'live'|'failed'|'lease'|'stopped'|'windows-left'|'exited' } ('relaunched' also names `replacedBy`) */
+function exitCloseVerdict(rec, { leased = false } = {}) {
+  if (!rec) return { close: false, why: 'no-record' };
+  if (rec.replacedBy) return { close: false, why: 'relaunched', replacedBy: rec.replacedBy }; // A3: the window follows its successor
+  if (rec.state === 'failed') return { close: false, why: 'failed' };
+  if (rec.state !== 'exited') return { close: false, why: 'live' };
+  if (leased) return { close: false, why: 'lease' };
+  if (rec.stoppedBy) return { close: true, why: 'stopped' };
+  if (Number(rec.windowsAtExit) > 0) return { close: false, why: 'windows-left' };
+  return { close: true, why: 'exited' };
+}
+/** The OUTER ✕ of a desktop-app window → { act: 'close'|'ask-app'|'stop', why }.
+ *  'ask-app' = xpra `close-window` to the app's MAIN window (WM_DELETE_WINDOW: the app
+ *  may ask "save?" — nothing closes then); 'stop' = the second ✕ within `againMs` of
+ *  an ask (the existing Stop); 'close' = today's behaviour, the pane only (a record not
+ *  running, a rung with no per-window protocol, an agent lease, a pane that is not the
+ *  active viewer, no main window to ask). */
+function outerCloseVerdict({ state, stream, seat, connected, mainWid, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
+  if (state !== 'ready') return { act: 'close', why: 'not-running' };
+  if (askedAt > 0 && now >= askedAt && now - askedAt <= againMs) return { act: 'stop', why: 'again' };
+  if (stream !== 'xpra') return { act: 'close', why: 'no-window-protocol' };
+  if (leased) return { act: 'close', why: 'lease' };
+  if (seat !== 'active') return { act: 'close', why: 'not-active' };
+  if (!connected || !(mainWid > 0)) return { act: 'close', why: 'no-main-window' };
+  return { act: 'ask-app', why: 'close-window' };
+}
+
+// ── B-bfe6: a BROWSER as a desktop app ───────────────────────────────────────
+// Owner (2026-09-23): "应用里面也可以加入一下浏览器". A desktop-app browser is a
+// HUMAN'S browser: a registry exec (§5 — never an agent's), on the xpra
+// per-window rung like every other app, with its OWN profile directory that the
+// app session owns (created 0700 by the keeper under data/desktop-apps/<id>/,
+// removed with the session unless the user chose "keep profile"). It is never an
+// agent-browser profile (those live under data/browser-*, driven over CDP by
+// the Browser profiles keeper — design-agent-browser-v2 §3) and never the user's
+// real ~/.config/chromium or ~/.mozilla: the verdicts below refuse both BY NAME.
+// No automation flag ever reaches its argv (no --remote-debugging-*, no
+// --enable-automation, no marionette): it is a window a person drives.
+const BROWSER_KINDS = Object.freeze({
+  chromium: Object.freeze({ execs: Object.freeze(['chromium', 'chromium-browser', 'google-chrome']), labels: Object.freeze({ chromium: 'Chromium', 'chromium-browser': 'Chromium', 'google-chrome': 'Google Chrome' }) }),
+  firefox: Object.freeze({ execs: Object.freeze(['firefox', 'firefox-esr']), labels: Object.freeze({ firefox: 'Firefox', 'firefox-esr': 'Firefox ESR' }) }),
+});
+/** Every bare browser binary name a family may resolve to (desktop-display probes them). */
+const BROWSER_BINS = Object.freeze([...new Set(Object.values(BROWSER_KINDS).flatMap((k) => k.execs))]);
+/** Flags a desktop-app browser's argv may never carry from a row: a profile of its own
+ *  (the keeper's is the only one) or anything that makes it an automated browser. */
+const FORBIDDEN_BROWSER_ARG_RE = /^(?:--?(?:user-data-dir|profile|p|P|remote-debugging-port|remote-debugging-pipe|remote-debugging-address|remote-allow-origins|remote-allow-hosts|enable-automation|headless|marionette|remote-debugging|start-debugger-server|load-extension|disable-extensions-except))(?:=.*)?$/;
+const isForbiddenBrowserArg = (a) => typeof a === 'string' && FORBIDDEN_BROWSER_ARG_RE.test(a);
+/**
+ * The row the catalog SERVES for a browser family: `row.execs` (default the
+ * family's) in order, the first one `bins` names (path|null, desktop-display's
+ * probe) wins and becomes the row's `exec`; the label follows the binary
+ * (google-chrome ⇒ "Google Chrome"). Returns `{ ok, row, error, code }` —
+ * `browser-absent` names every candidate when none is on PATH (the catalog
+ * shows the row DIMMED with that reason, never hidden).
+ */
+function browserRowFor(row, bins = {}) {
+  const kind = row && BROWSER_KINDS[row.browser];
+  if (!kind) return { ok: false, row: null, code: 'not-a-browser', error: `${row && row.label ? row.label : 'this row'} is not a browser row` };
+  const execs = Array.isArray(row.execs) && row.execs.length ? row.execs : kind.execs;
+  const hit = execs.find((e) => bins && bins[e]);
+  if (!hit) return { ok: false, row: { ...row, exec: execs[0] }, code: 'browser-absent', error: `none of ${execs.join(', ')} on PATH` };
+  return { ok: true, row: { ...row, exec: hit, label: kind.labels[hit] || row.label, path: bins[hit] }, code: null, error: null };
+}
+/** The launch dialog's optional "Open URL": http(s) only, no whitespace or control character, ≤ 2048 — PURE (the
+ *  bundle's dialog and the server run the same function). Returns `{ ok, url, code:'bad-url', error }`; `url` is the
+ *  parsed href (it is one argv item AFTER the profile flags, and an http(s) href never begins with '-'). */
+const URL_MAX = 2048;
+function validateBrowserUrl(value) {
+  const bad = (why) => ({ ok: false, url: null, code: 'bad-url', error: `Open URL must be an http:// or https:// address (${why})` });
+  if (typeof value !== 'string') return bad('not a string');
+  const s = value.trim();
+  if (!s) return bad('empty');
+  if (s.length > URL_MAX) return bad(`longer than ${URL_MAX} characters`);
+  if (/[\u0000- \u007f-\u009f]/.test(s)) return bad('it contains a space or a control character');
+  let u;
+  try { u = new URL(s); } catch { return bad(`${JSON.stringify(s.slice(0, 80))} is not a URL`); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return bad(`${u.protocol} is not allowed`);
+  if (!u.hostname) return bad('no host');
+  return { ok: true, url: u.href, code: null, error: null };
+}
+/** A slash-normalised absolute path (`//`, `/./`, `/../` folded) or null — PURE, no `path` import. */
+function normAbs(p) {
+  if (typeof p !== 'string' || !p.startsWith('/') || /\0/.test(p)) return null;
+  const out = [];
+  for (const seg of p.split('/')) { if (!seg || seg === '.') continue; if (seg === '..') out.pop(); else out.push(seg); }
+  return '/' + out.join('/');
+}
+const within = (child, parent) => child === parent || child.startsWith(parent === '/' ? '/' : parent + '/');
+/** Where the user's REAL browsers keep their profiles, relative to $HOME (deb, snap, flatpak). A desktop-app profile
+ *  is never one of them nor inside one. */
+const REAL_BROWSER_ROOTS = Object.freeze(['.config/chromium', '.config/chromium-browser', '.config/google-chrome', '.config/google-chrome-beta', '.config/google-chrome-unstable', '.mozilla', 'snap/chromium', 'snap/firefox', '.var/app/org.chromium.Chromium', '.var/app/com.google.Chrome', '.var/app/org.mozilla.firefox']);
+/**
+ * Is `dir` a profile directory a desktop-app browser may be pointed at?
+ *   · absolute, and INSIDE `ownedRoot` (the keeper's data/desktop-apps — so it is the app session's own, never an
+ *     agent-browser profile, which lives under data/browser-*)            else `profile-not-owned`
+ *   · not $HOME itself and not inside the user's real browser profiles     else `profile-is-users`
+ *   · `confinement: 'snap'` (the binary is a snap — Ubuntu's firefox / chromium-browser): a snap sees a private /tmp
+ *     and no hidden top-level folder of $HOME, so the dir must be inside $HOME under a non-hidden first segment
+ *                                                                           else `snap-profile-unreachable`
+ * Returns `{ ok, dir, code, error }` (`dir` normalised).
+ */
+function profileDirVerdict(dir, { home = null, ownedRoot = null, confinement = null, exec = 'the browser' } = {}) {
+  const d = normAbs(dir), root = normAbs(ownedRoot), h = normAbs(home);
+  if (!d) return { ok: false, dir: null, code: 'profile-not-owned', error: `the profile directory must be an absolute path (${JSON.stringify(dir)})` };
+  if (!root || !within(d, root) || d === root) return { ok: false, dir: d, code: 'profile-not-owned', error: `the profile directory ${d} is not inside the keeper's own ${root || '(no root)'} — a desktop-app browser only ever gets a profile its app session owns` };
+  if (h && h !== '/') {
+    if (d === h) return { ok: false, dir: d, code: 'profile-is-users', error: `the profile directory may not be your home folder (${h})` };
+    const real = REAL_BROWSER_ROOTS.map((r) => `${h}/${r}`).find((r) => within(d, r));
+    if (real) return { ok: false, dir: d, code: 'profile-is-users', error: `the profile directory ${d} is inside your own browser's profiles (${real}) — a desktop-app browser never opens them` };
+  }
+  if (confinement === 'snap') {
+    const first = h && h !== '/' && within(d, h) && d !== h ? d.slice(h.length + 1).split('/')[0] : null;
+    if (!first || first.startsWith('.')) return { ok: false, dir: d, code: 'snap-profile-unreachable', error: `${exec} is a snap: it can only open a profile inside your home folder, outside a hidden one — this instance keeps its data at ${root}, which the snap cannot reach` };
+  }
+  return { ok: true, dir: d, code: null, error: null };
+}
+/**
+ * The ARGV of a desktop-app browser (PURE): the row's own args, then the profile flags, then the optional URL —
+ *   chromium family: --user-data-dir=<dir> --no-first-run --no-default-browser-check --password-store=basic
+ *                    (the last: the app's display has no keyring of its own, and a window on it must never
+ *                    reach for the user's REAL session keyring — the profile's own 0700 dir holds its secrets)
+ *   firefox family:  --new-instance -profile <dir>  (+ the profile's user.js, `firefoxUserJs`, is its first-run switch)
+ * Refused by name: not a browser row, a forbidden (profile / automation) flag in the row, a bad profile dir, a bad URL.
+ * Returns `{ ok, argv, url, code, error }`.
+ */
+function browserArgv(row, { profileDir, url = null } = {}) {
+  const kind = row && BROWSER_KINDS[row.browser];
+  if (!kind) return { ok: false, argv: null, url: null, code: 'not-a-browser', error: `${row && row.label ? row.label : 'this row'} is not a browser row` };
+  const own = Array.isArray(row.args) ? row.args.slice() : [];
+  const flag = own.find(isForbiddenBrowserArg);
+  if (flag) return { ok: false, argv: null, url: null, code: 'automation-flag', error: `a browser row may not carry ${JSON.stringify(flag)}` };
+  const d = normAbs(profileDir);
+  if (!d) return { ok: false, argv: null, url: null, code: 'profile-not-owned', error: 'a desktop-app browser needs its own absolute profile directory' };
+  let u = null;
+  if (url !== null && url !== undefined && url !== '') { const v = validateBrowserUrl(url); if (!v.ok) return { ok: false, argv: null, url: null, code: v.code, error: v.error }; u = v.url; }
+  const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic'];
+  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, code: null, error: null };
+}
+/** Firefox has no --no-first-run: its profile's user.js IS the switch (written by the keeper before the launch). */
+function firefoxUserJs() {
+  return [
+    ['browser.shell.checkDefaultBrowser', false], ['browser.aboutwelcome.enabled', false], ['browser.startup.homepage_override.mstone', 'ignore'],
+    ['startup.homepage_welcome_url', ''], ['startup.homepage_welcome_url.additional', ''], ['datareporting.policy.firstRunURL', ''],
+    ['toolkit.telemetry.reportingpolicy.firstRun', false], ['trailhead.firstrun.didSeeAboutWelcome', true], ['browser.tabs.warnOnClose', false],
+  ].map(([k, v]) => `user_pref(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join('\n') + '\n';
 }
 
 // ── registry rows + launch requests ─────────────────────────────────────────
@@ -420,6 +684,14 @@ function validateAppRow(row) {
     if (!Array.isArray(row.backendPrefs) || row.backendPrefs.some((b) => !BACKEND_IDS.includes(b))) return { ok: false, error: `backendPrefs may only name ${BACKEND_IDS.join('/')}` };
   }
   if (row.needsWayland !== undefined && typeof row.needsWayland !== 'boolean') return { ok: false, error: 'needsWayland must be a boolean' };
+  // B-bfe6: a BROWSER row names its family, the bare exec names it may resolve to (first on PATH wins), and may never
+  // carry a profile or an automation flag of its own — the profile is the keeper's, and a human's browser is not driven
+  if (row.browser !== undefined && row.browser !== null) {
+    if (!Object.prototype.hasOwnProperty.call(BROWSER_KINDS, row.browser)) return { ok: false, error: `browser must be one of ${Object.keys(BROWSER_KINDS).join('/')}` };
+    if (row.execs !== undefined && !(Array.isArray(row.execs) && row.execs.length && row.execs.every((e) => typeof e === 'string' && /^[A-Za-z0-9._+-]{1,64}$/.test(e)))) return { ok: false, error: 'execs must be a non-empty array of bare binary names' };
+    const flag = (row.args || []).find(isForbiddenBrowserArg);
+    if (flag) return { ok: false, error: `a browser row may not carry ${JSON.stringify(flag)} — its profile is the keeper's and a desktop-app browser is never an automated one`, code: 'automation-flag' };
+  } else if (row.execs !== undefined) return { ok: false, error: 'execs is for a browser row only' };
   return { ok: true, error: null };
 }
 
@@ -427,25 +699,34 @@ function validateAppRow(row) {
  * The launch dialog's two shapes (§2 routes): `{appId}` or `{exec, args, cwd}`.
  * Returns { ok, error, launch } where launch is
  *   { source:'registry', row, dpr }  |  { source:'adhoc', row:{ id:null, label, exec, args, cwd }, dpr }
- * `dpr` = the launching client's devicePixelRatio (1..3, absent ⇒ 1; out of range ⇒ refused) —
- * the input `appScaleFor` turns into the app's scale under `desktop.appScale: auto`.
+ * `dpr` = the launching client's devicePixelRatio (1..3, absent ⇒ 1; out of range ⇒ refused) and
+ * `uiScale` = its UI scale (0.6..2, absent ⇒ 1; out of range ⇒ refused) — the inputs `appScaleFor`
+ * turns into the app's scale under `desktop.appScale: auto` (round 3 A3: dpr × uiScale).
  * `registry` is the array of rows the keeper serves. Nothing here checks PATH
  * or the file system — the keeper does (exec resolved on PATH, cwd must exist).
  */
 function validateLaunchRequest(body, registry = []) {
   if (!body || typeof body !== 'object') return { ok: false, error: 'expected a JSON object' };
   if (body.dpr !== undefined && body.dpr !== null && !(Number.isFinite(Number(body.dpr)) && Number(body.dpr) >= 1 && Number(body.dpr) <= 3)) return { ok: false, error: 'dpr must be a number from 1 to 3' };
+  if (body.uiScale !== undefined && body.uiScale !== null && !(Number.isFinite(Number(body.uiScale)) && Number(body.uiScale) >= UI_SCALE_RANGE[0] && Number(body.uiScale) <= UI_SCALE_RANGE[1])) return { ok: false, error: `uiScale must be a number from ${UI_SCALE_RANGE[0]} to ${UI_SCALE_RANGE[1]}` };
+  // B-bfe6: `url` + `keepProfile` belong to a BROWSER row — anywhere else they are refused by name, never ignored
+  const hasUrl = body.url !== undefined && body.url !== null && body.url !== '';
+  if (body.keepProfile !== undefined && typeof body.keepProfile !== 'boolean') return { ok: false, error: 'keepProfile must be a boolean', code: 'bad-request' };
   if (body.appId !== undefined) {
     if (!ID_RE.test(String(body.appId))) return { ok: false, error: 'appId is not a valid id' };
     const row = registry.find((r) => r.id === body.appId);
     if (!row) return { ok: false, error: `unknown appId ${JSON.stringify(body.appId)}` };
-    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr) } };
+    if (!row.browser && (hasUrl || body.keepProfile !== undefined)) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app — ${row.label} is not one`, code: 'not-a-browser' };
+    let url = null;
+    if (hasUrl) { const u = validateBrowserUrl(body.url); if (!u.ok) return { ok: false, error: u.error, code: u.code }; url = u.url; }
+    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}) } };
   }
+  if (hasUrl || body.keepProfile !== undefined) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app from the catalog — a command you type is run as typed`, code: 'not-a-browser' };
   const row = { id: null, label: cleanStr(body.label, 80) ? body.label : null, exec: body.exec, args: body.args === undefined ? [] : body.args, cwd: body.cwd === undefined || body.cwd === '' ? null : body.cwd };
   if (!row.label) row.label = typeof row.exec === 'string' ? row.exec.split('/').pop().slice(0, 80) : null;
   const v = validateAppRow({ ...row, id: 'adhoc' });
   if (!v.ok) return { ok: false, error: v.error };
-  return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr) } };
+  return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale) } };
 }
 
 /** The small default registry (§2 "a small default registry"): every row is
@@ -456,8 +737,10 @@ const DEFAULT_REGISTRY = Object.freeze([
   Object.freeze({ id: 'xterm', label: 'xterm', exec: 'xterm', args: Object.freeze([]), category: 'terminal' }),
   Object.freeze({ id: 'gnome-calculator', label: 'Calculator (GNOME)', exec: 'gnome-calculator', args: Object.freeze([]), category: 'utility' }),
   Object.freeze({ id: 'gedit', label: 'gedit', exec: 'gedit', args: Object.freeze([]), category: 'editor' }),
-  Object.freeze({ id: 'firefox', label: 'Firefox', exec: 'firefox', args: Object.freeze(['--new-instance']), category: 'browser' }),
-  Object.freeze({ id: 'chromium', label: 'Chromium', exec: 'chromium', args: Object.freeze([]), category: 'browser' }),
+  // B-bfe6 — a browser AS AN APP: the human's own window with its OWN profile (browserArgv); `exec` is the family's
+  // first name, the keeper serves the row with the first of `execs` found on PATH (browserRowFor)
+  Object.freeze({ id: 'chromium', label: 'Chromium', exec: 'chromium', execs: BROWSER_KINDS.chromium.execs, args: Object.freeze([]), category: 'browser', browser: 'chromium' }),
+  Object.freeze({ id: 'firefox', label: 'Firefox', exec: 'firefox', execs: BROWSER_KINDS.firefox.execs, args: Object.freeze([]), category: 'browser', browser: 'firefox' }),
   Object.freeze({ id: 'code', label: 'VS Code', exec: 'code', args: Object.freeze(['--new-window', '--wait']), category: 'editor' }),
 ]);
 
@@ -555,14 +838,15 @@ function streamTargetOf(rec) {
 }
 
 /** New record shape (§4) — facts only. */
-function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now, scale = 1, dpi = 96 }) {
+function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now, scale = 1, dpi = 96, scaleOrigin = null, scaleFrom = null }) {
   return {
     id, label, exec, args: Array.isArray(args) ? args.slice() : [], cwd: cwd || null, env: env && Object.keys(env).length ? { ...env } : undefined,
     source, backend, via: via || null, fallbackWhy: fallbackWhy || null,
     display: null, port: null, pids: { x: null, app: null, server: null, wm: null }, starts: { x: null, app: null, server: null, wm: null },
     startedAt: now, state: 'launching', exitCode: null, lastError: null,
     idleTimeoutMs: Number(idleTimeoutMs) || 0, lastInputAt: now,
-    scale: APP_SCALES.includes(Number(scale)) ? Number(scale) : 1, dpi: Number.isInteger(dpi) && dpi >= 48 && dpi <= 288 ? dpi : 96, // HiDPI (2.369.158): the app's scale + the display's font dpi, fixed at launch
+    scale: normalizeScale(scale), dpi: Number.isInteger(dpi) && dpi >= 48 && dpi <= 288 ? dpi : 96, // HiDPI (2.369.158): the app's scale + the display's font dpi, fixed at launch
+    scaleOrigin: ['auto', 'setting', 'chosen'].includes(scaleOrigin) ? scaleOrigin : null, scaleFrom: scaleFrom && typeof scaleFrom === 'object' ? { dpr: normalizeDpr(scaleFrom.dpr), uiScale: normalizeUiScale(scaleFrom.uiScale) } : null, // round 3 A3: where the scale came from (the chip says it)
   };
 }
 
@@ -571,6 +855,9 @@ module.exports = {
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
   validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs,
+  SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel,
+  OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
+  BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX,
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, runawayVerdict, runawayParkVerdict, adoptVerdict, streamTargetOf, newRecord,
 };

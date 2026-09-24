@@ -47,7 +47,7 @@ export function registerCommandModeCommands() {
   registerCommand({ id: 'activeWindow.snapTop', title: 'Snap window top', run: snap('top') });
   registerCommand({ id: 'activeWindow.snapBottom', title: 'Snap window bottom', run: snap('bottom') });
   registerCommand({ id: 'activeWindow.toggleMaximize', title: 'Toggle maximize', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.toggleMaximize(wm.activeWindowId); } });
-  registerCommand({ id: 'activeWindow.close', title: 'Close window', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.closeWindow(wm.activeWindowId); } });
+  registerCommand({ id: 'activeWindow.close', title: 'Close window', run: (c) => { const wm = c.app.wm; if (activeWin(c.app)) wm.requestClose(wm.activeWindowId); } });
   registerCommand({
     id: 'activeWindow.cycle', title: 'Cycle windows',
     run: (c) => {

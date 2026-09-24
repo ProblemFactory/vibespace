@@ -1,0 +1,46 @@
+{
+ "dir": "c",
+ "name": "desktop-zh",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-c-desktop-zh.png",
+ "expected": [
+  "app",
+  "agent"
+ ],
+ "faces": [
+  {
+   "face": "app",
+   "text": "浏览器",
+   "x": 1055,
+   "y": 7,
+   "w": 72,
+   "h": 26,
+   "pixels": 1872,
+   "light": 297,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "",
+   "x": 2,
+   "y": 407,
+   "w": 40,
+   "h": 38,
+   "pixels": 1520,
+   "light": 52,
+   "colours": 44,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

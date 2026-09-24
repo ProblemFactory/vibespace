@@ -326,5 +326,25 @@ console.log('§7 x5 (docs/design-desktop-apps §7 P8-2): only the ACTIVE pane dr
   v2.dispose();
 }
 
+console.log('§8 (desktop A r1) a gesture copy hands the keyboard focus BACK to whatever held it — the next key reaches the app');
+{
+  const S = await import('../src/lib/picture-shell.js');
+  // a fake document that tracks focus the way a browser does: select() focuses the textarea, remove() of the focused
+  // element drops focus to <body> (the verifier's measured real-rung trace: activeElement ime → BODY after Ctrl+C)
+  const body = new El('body');
+  const fdoc = { body, activeElement: body, createElement: (t) => { const e = new El(t); e.select = () => { fdoc.activeElement = e; }; e.setSelectionRange = () => {}; e.remove = () => { body.children = body.children.filter((c) => c !== e); if (fdoc.activeElement === e) fdoc.activeElement = body; }; return e; }, execCommand: (c) => c === 'copy' };
+  const ime = new El('textarea'); let focusOpts = null;
+  ime.focus = (o) => { fdoc.activeElement = ime; focusOpts = o; };
+  fdoc.activeElement = ime;
+  const okCopy = S.copyViaSelection('1234', fdoc);
+  ok(okCopy === true && fdoc.activeElement === ime && focusOpts && focusOpts.preventScroll === true && body.children.length === 0, 'copyViaSelection writes, removes its textarea and RESTORES the focus to the element that held it ({preventScroll}) — the pane\'s IME, not <body>', { active: fdoc.activeElement === ime ? 'ime' : fdoc.activeElement?.tagName, focusOpts });
+  // nothing held focus (body) ⇒ nothing to restore, and a refused write restores too
+  fdoc.activeElement = body; fdoc.execCommand = () => false;
+  const refused = S.copyViaSelection('x', fdoc);
+  ok(refused === false && fdoc.activeElement === body, 'a refused write returns false; from <body> nothing is focused afterwards (no stray focus)');
+  fdoc.activeElement = ime; fdoc.execCommand = () => { throw new Error('boom'); };
+  ok(S.copyViaSelection('y', fdoc) === false && fdoc.activeElement === ime, 'a throwing execCommand still hands the focus back');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

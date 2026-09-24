@@ -230,8 +230,16 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   // ── list ──
   /** The registry ids an agent may `open` — with the keeper's presence verdict (never hidden). */
+  /** The keeper's registry rows; a keeper without one (or one that throws) answers the PURE default registry, so
+   *  the browser-row refusal below never fails OPEN on a missing lookup. */
+  function registryRowsNow() {
+    try { if (typeof keeper.registry === 'function') return keeper.registry() || []; } catch { /* fall through */ }
+    return require('../desktop-apps').DEFAULT_REGISTRY;
+  }
+  /** The ids an agent may open: every registry row EXCEPT a browser row (B-bfe6 — a desktop-app browser is the
+   *  human's; the agent's web road is `vibespace-browser`). */
   function registryApps() {
-    try { return (typeof keeper.registry === 'function' ? keeper.registry() : []).map((r) => ({ id: r.id, label: r.label, available: !!r.available, reason: r.reason || null })); } catch { return []; }
+    try { return registryRowsNow().filter((r) => !r.browser).map((r) => ({ id: r.id, label: r.label, available: !!r.available, reason: r.reason || null })); } catch { return []; }
   }
   async function list(facts) {
     load();
@@ -274,7 +282,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // finding: `open --exec /usr/bin/xterm --args '-e sh'` rode the keeper's lease).
     const b = body && typeof body === 'object' ? body : {};
     if (b.exec !== undefined || b.args !== undefined || b.cwd !== undefined) throw namedError('exec_is_human', 'an agent opens a REGISTRY app by id (`vibespace-window open <app-id>`; `vibespace-window list` prints the ids and which are available) — an arbitrary executable is the user\'s act in the Desktop apps dialog, never an agent\'s', { apps: registryApps() });
-    const rec = await keeper.launch({ appId: b.appId || b.app || undefined, label: b.label || b.title || undefined });
+    // A BROWSER ROW IS A HUMAN'S TOO (B-bfe6, design-desktop-apps §7.7): the desktop-app browser is the user's own
+    // window with no CDP judge, no action trace, no egress proxy, no takeover — an agent that drove it through the
+    // tree would bypass every rule of the agent browser. Refused BY NAME, and so are the browser row's options
+    // (`url` / `keepProfile`) — never silently dropped (2026-09-23, the verifier's finding).
+    if ((b.url !== undefined && b.url !== null && b.url !== '') || b.keepProfile !== undefined) throw namedError('browser_is_human', `${b.url !== undefined && b.url !== null && b.url !== '' ? 'url' : 'keepProfile'} belongs to a desktop-app BROWSER, and a desktop-app browser is the user's own window, never an agent's — for anything on the web use the agent browser: \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
+    const appId = b.appId || b.app || undefined;
+    const bRow = appId !== undefined ? registryRowsNow().find((r) => r && r.id === String(appId) && r.browser) : null;
+    if (bRow) throw namedError('browser_is_human', `${bRow.label || bRow.id} is a desktop-app browser — the user's own window with its own profile, never an agent's (no mediation, no action trace, no egress policy): for anything on the web use the agent browser, \`vibespace-browser\` (\`vibespace-docs browser\`)`, { apps: registryApps() });
+    const rec = await keeper.launch({ appId, label: b.label || b.title || undefined });
     const l = newLease(rec, facts);
     leases.set(rec.id, l);
     audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb: 'open', by: 'keeper', ok: true, exec: rec.exec });

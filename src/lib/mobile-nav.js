@@ -36,7 +36,7 @@ export class MobileNav {
 
     document.getElementById('mobile-nav-close').onclick = () => {
       const activeId = app.wm.activeWindowId;
-      if (activeId) app.wm.closeWindow(activeId);
+      if (activeId) app.wm.requestClose(activeId);
     };
 
     this._titleEl.onclick = () => this._showWindowSwitcher();
@@ -241,7 +241,7 @@ export class MobileNav {
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
-    closeBtn.onclick = (e) => { e.stopPropagation(); wm.closeWindow(win.id); item.remove(); };
+    closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); };
 
     if (billChip) item.append(icon, label, billChip, closeBtn);
     else item.append(icon, label, closeBtn);

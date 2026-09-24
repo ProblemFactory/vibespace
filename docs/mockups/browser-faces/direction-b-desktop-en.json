@@ -1,0 +1,59 @@
+{
+ "dir": "b",
+ "name": "desktop-en",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-b-desktop-en.png",
+ "expected": [
+  "web",
+  "app",
+  "agent"
+ ],
+ "faces": [
+  {
+   "face": "web",
+   "text": "Web view",
+   "x": 1037,
+   "y": 7,
+   "w": 86,
+   "h": 26,
+   "pixels": 2236,
+   "light": 218,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "Apps",
+   "x": 1128,
+   "y": 7,
+   "w": 64,
+   "h": 26,
+   "pixels": 1664,
+   "light": 164,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "",
+   "x": 2,
+   "y": 407,
+   "w": 40,
+   "h": 38,
+   "pixels": 1520,
+   "light": 52,
+   "colours": 44,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 8,
+  "painted": false
+ },
+ "verdict": "ok"
+}

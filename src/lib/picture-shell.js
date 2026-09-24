@@ -15,24 +15,49 @@
 // inc-mubu8xdg-pvwa — a dead view says so; a refused / empty / API-less
 // clipboard opens a textarea whose native paste works on plain http and on a
 // touch screen; every send hands the focus back) and the COPY CHIP (a copy
-// made inside the remote app goes to navigator.clipboard on a secure context,
-// else — and when the API refuses — "Copied in the app — click to copy",
-// which copies through the click's user gesture). A view hands in only its
+// made inside the remote app goes to navigator.clipboard on a secure context;
+// on plain http a copy the user's OWN copy chord caused, arriving inside the
+// browser's 5 s activation window, is written by execCommand with no click
+// (round 3, A1 — the view stamps the chord, `clipboardDelivery` judges its
+// age); anything else — and an API refusal — is "Copied in the app — click to
+// copy", which copies through the click's user gesture; the first chip on a
+// plain-http page of this device also shows the one-time "Enable HTTPS for
+// seamless copy" hint with the docs link). A view hands in only its
 // own send / focus / secure-context facts. scripts/test-vnc-view.mjs pins the literals
 // (the retired desktop-window.js is its control) across vnc-view.js AND this
 // file; scripts/test-xpra-client.mjs censuses that `.desktop-bar` is built
 // here and nowhere else.
 import { t } from './i18n.js';
 import { COUNTER_ZOOM, showToast } from './utils.js';
+import { UI_ICONS } from './icons.js';
 
 /** The bounded auto-reconnect ladder (ms) a caller may opt into. */
 export const RECONNECT_LADDER = [1000, 2000, 4000, 8000, 15000];
 
-/** Where a copy made inside the remote app goes: the async Clipboard API when
- *  the page is a secure context and has it, else the click-to-copy chip —
- *  never a silent no-op (owner acceptance 2). */
-export function clipboardDelivery({ secure = false, canWrite = false } = {}) {
-  return secure && canWrite ? 'api' : 'chip';
+/** Chrome's transient user activation lasts 5 s (MEASURED 2026-09-23, docs/design-desktop-apps-seamless §2.1 M1: an
+ *  asynchronous execCommand('copy') on plain http succeeds 0…4800 ms after a trusted Ctrl+C, fails from 5200 ms). */
+export const GESTURE_WINDOW_MS = 5000;
+
+/** Where a copy made inside the remote app goes (round 3, A1 — docs/design-desktop-apps-seamless §3.1):
+ *    'api'     — the async Clipboard API: a secure context that has it (unchanged);
+ *    'gesture' — plain http, and the user's OWN copy chord in this pane (Ctrl/⌘+C, +X) was pressed `gestureAge` ms
+ *                ago, inside the browser's activation window: execCommand('copy') on a hidden textarea, NO click
+ *                (the browser's own return value is the second gate — false ⇒ the chip);
+ *    'chip'    — anything else (a copy nobody made on this page: an agent, a timer, another client; a stale or
+ *                missing gesture): the click-to-copy chip — never a silent no-op (owner acceptance 2). */
+export function clipboardDelivery({ secure = false, canWrite = false, gestureAge = null } = {}) {
+  if (secure && canWrite) return 'api';
+  return typeof gestureAge === 'number' && Number.isFinite(gestureAge) && gestureAge >= 0 && gestureAge < GESTURE_WINDOW_MS ? 'gesture' : 'chip';
+}
+
+/** THE ONE-TIME HTTPS HINT (A1): the first time this DEVICE needs the chip on a plain-http page, one line says how the
+ *  copy becomes seamless and links the docs section (three routes; the product serves no TLS). Per device = localStorage. */
+export const COPY_HINT_KEY = 'vibespace.desktopCopyHintShown';
+export const HTTPS_DOCS_URL = 'https://github.com/ProblemFactory/vibespace/blob/master/docs/getting-started.md#https-for-seamless-copy';
+/** Is the hint due? Only on a NON-secure page, only while this device has never shown it (storage unreadable ⇒ not due). */
+export function copyHintDue({ secure = false, storage = null } = {}) {
+  if (secure || !storage) return false;
+  try { return !storage.getItem(COPY_HINT_KEY); } catch { return false; }
 }
 
 /** The page's secure-context fact ('unknown' outside a browser counts as NOT secure). */
@@ -40,8 +65,11 @@ export function pageIsSecure() {
   return typeof isSecureContext !== 'undefined' ? !!isSecureContext : false;
 }
 
-/** Copies through a user gesture without the async API (plain http). */
+/** Copies through a user gesture without the async API (plain http). select() FOCUSES the temporary textarea and its
+ *  removal drops the focus to <body>, so the element that held it (the pane's IME) gets it back ({preventScroll}) —
+ *  else every key after a Ctrl+C in the app is swallowed with no sign (desktop A r1, measured on the real rung). */
 export function copyViaSelection(text, doc = document) {
+  const prev = doc.activeElement && doc.activeElement !== doc.body ? doc.activeElement : null;
   const ta = doc.createElement('textarea');
   ta.value = String(text ?? '');
   ta.setAttribute('readonly', '');
@@ -50,6 +78,7 @@ export function copyViaSelection(text, doc = document) {
   let ok = false;
   try { ta.select(); ta.setSelectionRange(0, ta.value.length); ok = !!doc.execCommand('copy'); } catch { ok = false; }
   ta.remove();
+  if (prev && doc.activeElement !== prev && typeof prev.focus === 'function') { try { prev.focus({ preventScroll: true }); } catch {} }
   return ok;
 }
 
@@ -106,7 +135,27 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
   copyChip.style.display = 'none';
   copyChip.textContent = t('Copied in the app — click to copy');
   copyChip.title = t('The application put text on its clipboard; this page cannot write yours without a click (plain http)');
-  bar.append(status, pasteBtn, reBtn, copyChip);
+  // the one-time HTTPS hint (A1) rides beside the chip: a sentence, a docs link, a dismiss — hidden until due
+  const copyHint = document.createElement('span');
+  copyHint.className = 'desktop-copy-hint';
+  copyHint.style.display = 'none';
+  const hintText = document.createElement('span');
+  hintText.className = 'desktop-copy-hint-text';
+  hintText.textContent = t('Enable HTTPS for seamless copy');
+  const hintLink = document.createElement('a');
+  hintLink.className = 'desktop-copy-hint-link';
+  hintLink.href = HTTPS_DOCS_URL; hintLink.target = '_blank'; hintLink.rel = 'noopener';
+  hintLink.textContent = t('How to enable HTTPS');
+  hintLink.title = t('Three ways to serve this page over HTTPS (the docs)');
+  const hintClose = document.createElement('button');
+  hintClose.type = 'button';
+  hintClose.className = 'file-tool-btn desktop-copy-hint-close';
+  hintClose.title = t('Dismiss');
+  hintClose.setAttribute('aria-label', t('Dismiss'));
+  hintClose.innerHTML = UI_ICONS.close;
+  hintClose.onclick = () => { copyHint.style.display = 'none'; };
+  copyHint.append(hintText, hintLink, hintClose);
+  bar.append(status, pasteBtn, reBtn, copyChip, copyHint);
 
   const mount = document.createElement('div');
   mount.style.cssText = 'flex:1;min-height:0;position:relative;overflow:hidden';
@@ -191,22 +240,40 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
   // ── app → browser: the API on a secure context, else the COPY CHIP ──
   let copiedText = null;
   const hideCopied = () => { copiedText = null; copyChip.style.display = 'none'; };
-  const showCopied = (text) => { copiedText = String(text); copyChip.style.display = ''; };
+  const hintStorage = () => { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; } };
+  /** `insecure` = the chip is shown because the PAGE is plain http (not an API refusal) — the one case the hint names. */
+  const showCopied = (text, { insecure = false } = {}) => {
+    copiedText = String(text); copyChip.style.display = '';
+    const st = hintStorage();
+    if (insecure && copyHintDue({ secure: false, storage: st })) {
+      copyHint.style.display = '';
+      try { st.setItem(COPY_HINT_KEY, String(Date.now())); } catch {}
+    }
+  };
   copyChip.onclick = () => {
     if (copiedText == null) return;
     if (copyViaSelection(copiedText)) { showToast(t('Copied to your clipboard')); hideCopied(); }
     else showToast(t('Could not copy — select the text in the app and press Ctrl+C again'), { type: 'error' });
   };
-  /** A copy made inside the remote app. `toast` = say so when the API took it. */
-  const deliverCopy = (text, { secure = false, clipboard = null, toast = true } = {}) => {
-    if (!text) return;
-    if (clipboardDelivery({ secure, canWrite: !!(clipboard && typeof clipboard.writeText === 'function') }) !== 'api') { showCopied(text); return; }
+  /** A copy made inside the remote app. `toast` = say so when the API or the gesture took it; `gestureAge` = ms since
+   *  the user's own copy chord in this view (null = none). Returns the route taken: 'api' | 'gesture' | 'chip' | null. */
+  const deliverCopy = (text, { secure = false, clipboard = null, toast = true, gestureAge = null } = {}) => {
+    if (!text) return null;
+    const how = clipboardDelivery({ secure, canWrite: !!(clipboard && typeof clipboard.writeText === 'function'), gestureAge });
+    if (how === 'gesture') {
+      // inside the activation window the browser lets a script copy: no click, no chip — its false ⇒ the chip after all
+      if (copyViaSelection(text)) { hideCopied(); if (toast) showToast(t('Copied to your clipboard')); return 'gesture'; }
+      showCopied(text, { insecure: !secure });
+      return 'chip';
+    }
+    if (how !== 'api') { showCopied(text, { insecure: !secure }); return 'chip'; }
     let p = null;
-    try { p = clipboard.writeText(text); } catch { showCopied(text); return; }
+    try { p = clipboard.writeText(text); } catch { showCopied(text); return 'chip'; }
     Promise.resolve(p).then(() => { hideCopied(); if (toast) showToast(t('Copied to your clipboard')); }, () => showCopied(text));
+    return 'api';
   };
 
   const close = () => { closed = true; unwant(); closePasteBox({ refocus: false }); };
 
-  return { container, bar, mount, status, pasteBtn, reBtn, copyChip, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; } };
+  return { container, bar, mount, status, pasteBtn, reBtn, copyChip, copyHint, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; }, get hintShown() { return copyHint.style.display !== 'none'; } };
 }

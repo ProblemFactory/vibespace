@@ -3,6 +3,8 @@
 > owner 2026-09-13："顺便把通用桌面 app 支持（浏览器 based X11 渲染啥的）都支持一下，注意维护良好的代码结构确保后续可维护性，组件合理拆分。"
 > 本文是 docs/design-agent-browser-v2.zh.md §4.7（原生客户端窗口）与 §4.9（窗口目标）的**实现规范**，把"一个原生窗口"推广成"任意本地桌面应用"。它取代原 P8 的范围；P9/P10（agent 操作窗口）建立在它之上。英文孪生：docs/design-desktop-apps.md。
 
+> **2026-09-23 · 三张"浏览器"的脸（B-d03a）：** 浏览器作为桌面应用（本设计的 xpra 档，B-bfe6）是产品里第三张叫"浏览器"的脸——与工具栏的 iframe 网页视图、agent 浏览器（design-agent-browser-v2）并列。三者的边界、代码里的七处混淆、三个渲染出来的方向与打分见 `docs/design-browser-faces.zh.md`（建议：先改名——网页视图 / Agent 浏览器 / 浏览器应用——Apps 目录里 `category:'browser'` 的卡副标签写"浏览器应用"）。
+
 ## 0. 一段话概括
 
 任何本地桌面应用（`exec` + 参数 + cwd）都可以在 VibeSpace 里作为一个**窗口类型 `desktop-app`** 打开：服务端为它起一个**自己的** X 显示与画面服务器，浏览器端用一个共享的**画面视图组件**渲染并转发输入。画面服务器按**能力阶梯**选：`xpra`（逐窗口 seamless、自适应编码，装了就用）→ `vnc-display`（每应用一个 Xvnc，或 Xvfb + x11vnc，整显示）→ 现有的单例整桌面（D10 的兜底，不新建）。每一级是**一行能力记录**，不是 if 链；一个应用的记录只存它选了哪一级和为什么。所有东西经**一个 keeper**（数量上限 + runaway 守卫 + 开机收养，与浏览器 keeper 同一套纪律）和**一个 ws 桥**（`/api/desktop/:id/stream`，cookie 鉴权，服务端桥接，原始端口永不暴露）。
@@ -55,6 +57,7 @@
 - `exec` 来自注册表或用户在对话框里输入——**不是 agent**；agent 侧（P9）只拿窗口目标句柄，不拿 exec。
 - 应用继承 `agentEnv()` 那种净化过的 env（不是 `process.env`），DISPLAY/XAUTHORITY 由 keeper 注入；secrets 不进 argv。
 - 每应用 idle timeout（默认 30 min 无输入 ⇒ 停，状态栏可见倒计时；"保持运行"是一次显式动作）。
+- （B-bfe6，§7.7）浏览器应用是**人**的窗口，带它**自己的**配置目录（`data/desktop-apps/<id>/profile`，0700，会话结束即删，除非选了保留）——绝不是 agent 浏览器的配置，绝不是用户真正的 `~/.config/chromium` / `~/.mozilla`（按名拒绝），argv 里永远没有自动化 flag（`--remote-debugging-*`、`--enable-automation`、`--headless`、marionette……按名拒绝 `automation-flag`）。
 
 ## 6. 测试 gate
 
@@ -232,6 +235,56 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 
 **诚实的限制。** xpra 仍然是**像素流**，不是矢量渲染：清晰来自“按屏幕分辨率渲染 + 1:1 显示”，文字仍可能经过有损编码（h264/jpeg 在大面积变化时）；缩放只在启动时决定（改设置要重启应用）；另一台 DPR 不同的客户端看同一个应用时，按它自己的 DPR 映射设备像素（清晰，但应用的尺寸按启动时的缩放；r2：放不进它的工作区时缩放适配并显示角标）；Qt 的旋钮未实测；vnc-display 级的画面仍是 CSS px（缩放只作用于 xpra 级——在整屏级上放大应用只会让它显得更大）。**GTK Broadway**（GTK3 自带的 HTML5 后端，把 GTK 窗口画进浏览器）记为一个可能的、只限 GTK 的未来一级，**未做**。
 
+### 7.7 B-bfe6 — 浏览器作为桌面应用（2.369.166；owner 2026-09-23 "应用里面也可以加入一下浏览器"；本机：google-chrome（deb）+ snap firefox 156.0-1，xpra 6.5.3）
+
+**关系先说清。** 桌面应用里的浏览器是**人**的浏览器：一行注册表（§5——exec 绝不来自 agent），和其他应用一样走 xpra 逐窗口级，带一个由应用会话**自己拥有**的配置目录。它**不是** Agent 浏览器（design-agent-browser-v2 §3：配置在 `data/browser-*` 下，由浏览器配置 keeper 经 CDP 驱动——桌面应用浏览器没有 CDP 端口、没有任何自动化 flag），也绝不打开用户真正的配置。启动器用一句话说明，写在"Browsers"分区里，也写在每张浏览器卡片的 tooltip 里：*This is your own browser window (an app); the Agent browser (Browser profiles) is separate.*（中文：这是你自己的浏览器窗口（一个应用）；Agent 浏览器（浏览器配置）是另一回事。）
+
+| 部分 | 位置 | 内容 |
+|---|---|---|
+| 行 | PURE `DEFAULT_REGISTRY` | `chromium`（chromium → chromium-browser → google-chrome，PATH 上第一个）· `firefox`（firefox → firefox-esr）；`browser` + `execs` 字段；行里不许带配置或自动化 flag |
+| 选二进制 | PURE `browserRowFor(row, bins)` | `execs` 里第一个在 PATH 上的成为实际 exec 与标签（"Google Chrome"）；都不在 ⇒ `browser-absent` 并列出全部候选 |
+| argv | PURE `browserArgv(row, {profileDir, url})` | chromium `--user-data-dir=<dir> --no-first-run --no-default-browser-check --password-store=basic`；firefox `--new-instance -profile <dir>`（+ `user.js` 就是它的首次运行开关）；**然后**才是 URL |
+| URL | PURE `validateBrowserUrl`（对话框与服务端同一个函数） | 只允许 http/https，不含空白/控制字符，≤ 2048，否则按名 `bad-url` |
+| 配置目录 | PURE `profileDirVerdict` + keeper | `data/desktop-apps/<id>/profile`，创建时 0700；必须在 keeper 自己的根下（否则 `profile-not-owned`），绝不是 $HOME 或真实浏览器的配置根（`profile-is-users`）；每条终止路径上**异步**删除，除非选了"保留配置"（开机补完被中断的删除） |
+| snap | SHARED `browserConfinement` + PURE 判定 | snap 看到的是私有 /tmp，看不到 `~/.隐藏目录` ⇒ 只有数据目录在 $HOME 里的非隐藏文件夹下才提供，否则变灰 / 按名拒绝 `snap-profile-unreachable` |
+| 对话框 | CLIENT 启动器 | Applications 之后的"Browsers"标题、那句说明、"Open URL (optional)"、"Keep the profile after it closes" |
+
+**实测（test-desktop-xpra-window §8，本机真 google-chrome，从对话框启动）：** 在 xpra 级进入 ready；我们的客户端画出窗口，标题栏为 `vs-bfe6 <pid> - Google Chrome`（xpra 报告的页面标题；X 一致）；我们自己的 http 服务器收到了 URL 参数的那次 GET；运行中进程的 argv（Chrome 把自己的 /proc cmdline 改写成**一个**空格拼接的字符串）带 `--user-data-dir=<keeper 的目录>` 与该 URL，没有自动化 flag；Chrome 把配置写进了 keeper 的 0700 目录；Stop ⇒ exited、所有 pid 消失、然后删除配置。runaway 守卫的采样：两次运行分别为 **2 个进程 133 MB / 9 个进程 487 MB**（采样落在 Chrome 启动期间——是下限，不是稳态）。无论 `--user-data-dir` 怎么写，Chrome **还会**创建 `~/.config/google-chrome/Crash Reports`（它的 crashpad 数据库：settings.dat + 四个空目录）并打开 `~/.local/share/pki/nssdb`（用户共享的 NSS 证书库）（strace，2026-09-23）——两者都不是配置（没有 cookie、历史或登录）；HOME **刻意不重定向**，所以下载落在用户真正的 Downloads 文件夹。本机的 Firefox 是 snap（`/usr/bin/firefox` = 2,377 字节的脚本 → `/snap/bin/firefox`），而套件的 scratch 数据目录在 /tmp：它的启动被按名拒绝（409），窗口那条腿带着这个理由 SKIP。
+
+**r1（2026-09-23，验证者三条）。** ① agent 的 `POST /api/agent/window/open` 曾能启动浏览器行（一个真 Chrome，agent 送来的 url/keepProfile 被**静默丢弃**），再用 `vibespace-window snapshot/click/type` 经 AT-SPI 驱动它——绕过 Agent 浏览器的全部规则（CDP 裁判、动作轨迹、强制出口代理、接管/交还）。现在 window-targets 引擎在 exec 三元组之后、问 keeper 之前，按名拒绝带 `browser` 的注册表行以及 body 里的 `url` / `keepProfile`：`browser_is_human`（403），提示 agent 去用 `vibespace-browser`；`list` 的"你可以打开的应用"不再列浏览器行。② "Keep the profile after it closes" 的复选框曾堆在文字上方（`.dialog-body label` 的纵向 flex 优先级更高）——现在 `.dialog-body label.desktop-launch-check` 横向一行。③ 变灰的 snap 浏览器卡片曾把 204 字符的英文句子塞进 10 px 单行（1512 宽只剩约 27 字符，手机上无 tooltip、也不翻译）——现在按 keeper 的 `reasonCode` 显示一句短的、翻译过的理由（"Snap: cannot reach the data folder"），整句留在 tooltip，变灰卡片的副标题最多两行。门：test-window-targets §4、test-desktop-app-window §B（1200×800 / 375×667）。
+
+**未决。** (a) 2 GiB 的 runaway RSS 上限按整个会话集合计（xpra + Xvfb + 所有浏览器进程，共享页按进程重复计）：重度浏览可能触发并被当作 runaway 停掉——守卫按决定不变；按行设上限要 owner 定。(b) 保留下来的配置留在 `data/desktop-apps/<id>/profile`；目前没有"用它重新启动"的入口（记录里写着路径）。(c) Firefox 的 `user.js` 首次运行设置与非 snap 的 Firefox 本机未实测（只装了 snap）。(d) 数据目录在 $HOME 里时的 snap 浏览器本机未启动过（套件都跑在 /tmp）。(e) 人自己启动的浏览器窗口，agent 仍可 `vibespace-window attach` 到它（与其他 VibeSpace 启动的应用一样，P9 D27 (a)）——r1 只拒绝 agent **启动**浏览器；是否也拒绝 attach 要 owner 定。
+
+### 7.8 第三轮 Lane A — 无缝复制、关闭、DPI（docs/design-desktop-apps-seamless.zh.md；owner 2026-09-23 试用 .156/.158）
+
+精简集的 Lane A（seamless 设计 §4），在一个分支上分三块建。状态：
+
+| 项 | 状态 | 已交付 / 下一步 |
+|---|---|---|
+| **A1 剪贴板**（§3.1） | **已交付**（2.369.166） | 明文 http：用户自己在 xpra pane 里按下的、可信的复制组合键打开一个 5 s 窗口；窗口内到达的应用 token 由 `execCommand('copy')` 写入，**无需点击**；其余情况保留 chip；每台设备一次的提示 "Enable HTTPS for seamless copy" 链接到 docs/getting-started.md（三条路线，产品本身不做 TLS） |
+| **A2 关闭**（§3.2） | **已交付**（2.369.166） | 应用结束（自己的 ✕、退出、Stop、空闲停止）⇒ 每个客户端各自从广播关掉窗口，并弹 toast「<app> exited / stopped」；`failed` 保留红色句子、agent 租约保留窗口与标记、退出时显示器上仍留有窗口（fork 型启动器）保留窗口；布局重放遇到已死的记录不开窗；外层 ✕（及 tab ✕、任务栏菜单、Ctrl+\\ x、手机 ✕）在活跃 xpra pane 上向应用主窗口发 `close-window`，5 s 内再按一次 = Stop |
+| **A3 DPI**（§3.4） | **已交付**（2.369.166） | 启动带上发起客户端的 `uiScale`；`desktop.appScale: auto` 由 `devicePixelRatio × UI 缩放` 推导（整数部分按比例就近——中点 √2 / 2√2——进 GDK_SCALE，余数只向上进字体 dpi；显式 1.5× 仍是 GTK 只放大文字）；记录带 `scaleOrigin`（auto / setting / chosen）与 `scaleFrom`，芯片写「2.5× · auto」；窗口 ⋯（及标题栏 / 任务栏菜单）Scale ▸ 自动 / 1× / 1.5× / 2× ⇒ 确认 ⇒ `POST …/relaunch`：同一个应用以新缩放先起、旧记录写 `replacedBy` 再停，同一个 VibeSpace 窗口在每个客户端上换到新会话 |
+
+**A1 实测（2026-09-23，本机：xpra v6.5.3、GNOME Calculator 50、无头 Chrome 打开 `http://<hostname>:<port>`——不是 loopback；从安全的 loopback 页面读回：一个浏览器、一个剪贴板；test-desktop-xpra-window §9）：** 页面不是安全上下文、没有 `navigator.clipboard`；用户输入 1234 并在 pane 里按 Ctrl+C ⇒ 计算器自己的剪贴板 token **约 30 ms** 后到达视图（多次运行 28–30 ms），浏览器剪贴板读到 `1234`——零点击、没有 chip、一个 "Copied to your clipboard" toast；Ctrl+C 之后 **5.5 s** 才到的 token ⇒ chip，剪贴板不动（Chrome 的窗口是 5000 ms；M1：4800 ms 成功、5200 ms 被拒）；按了一个普通数字键**约 0.1 s** 后出现的复制（页面**有**瞬时激活，但没有复制组合键）⇒ chip，剪贴板不动——手势窗口属于用户的**复制**，不是任何一次激活；第二次 Ctrl+C 写入 `12345` 并清掉待处理的 chip。这个 origin 上的第一个 chip（§2 的 xterm 那条腿）显示了提示并记下；§9 在同一 origin 上的 chip 不再显示。
+
+**规则的组成。** PURE `clipboardDelivery({secure, canWrite, gestureAge})` → `api | gesture | chip` 与 `GESTURE_WINDOW_MS = 5000`（picture-shell.js——xpra-proto.js 里没人用的孪生删掉）；xpra 视图的 stamp = `client.keyDown` 回答 `'copy'`（已转发给应用）且事件 `isTrusted`、不是 `repeat` 的那次 keydown；每次投递都消耗它（一次组合键，最多一次写入）；被客户端去重的 token 不消耗。`execCommand` 自己返回的 `false` 落回 chip。
+
+**A2 实测（2026-09-24，本机：xpra v6.5.3、GNOME Calculator 50、Tk 8.6 wish、两个无头 Chrome 页面；test-desktop-xpra-window §10 + test-desktop-app-keeper §19，两次运行）：** 计算器**自己的** ✕（点在 pane 里它的 CSD 标题栏）⇒ 两个页面上的 VibeSpace 窗口都在点击后 **1028–1033 ms** 消失，各自弹「Calculator exited」；**外层** ✕（标题栏，可信点击）⇒ verdict `ask-app` ⇒ `close-window` ⇒ 计算器进程 **257–775 ms** 后消失，两个窗口 **231–750 ms** 后消失（记录 `exited`、无 `stoppedBy`、`windowsAtExit 0`——是应用退出，不是 Stop）；一个用自己的「Save?」对话框回应 WM_DELETE_WINDOW 的 Tk 应用：第一次 ✕ ⇒ 对话框画在 pane 里、两边窗口都在、toast 提示再按一次；对话框自己关掉 ⇒ 记录仍 `ready`（对话框关闭不是应用退出）；**1.5–1.8 s** 后第二次 ✕ ⇒ Stop（`stoppedBy user`）⇒ 两边窗口 **416–738 ms** 后消失，「vs-a2-tk stopped」；被 block 的 pane 的 ✕ 不去问应用（应用继续跑）；布局里存着一个窗口、无客户端时应用被停掉、新页面恢复布局 ⇒ 窗口以 `desktop-app-pending` 出生、**从未显示**、带 toast 关掉。keeper：应用自己退出 ⇒ `windowsAtExit 0`，携带它的广播在状态翻转后 **153 ms**（xpra）/ **261 ms**（vnc-display：Xvfb+x11vnc）到达；`sh -c 'xterm & sleep 3; exit 0'` ⇒ 两个级都是 **1**（fork 出的 xterm 还在）。实测事实：xpra 把受管的应用窗口放在 Corral 包装窗口里，**只有有客户端连着时**它才是 mapped——没有客户端时存活的 xterm 读成 viewable=false，所以 xpra 级只按窗口是否**存在**计数。对照组：窗口从不自关的副本 ⇒ 同一个 ✕ 之后窗口停在「Exited: application exited (code 0)」（M3c 的现状）；没有普查的 keeper 副本 ⇒ fork 型启动器的记录没有计数，verdict 会关掉一个仍在屏幕上的窗口。
+
+**A2 规则的组成。** PURE（src/desktop-apps.js）`windowsLeftCount` / `exitCloseVerdict(rec, {leased})`（每个窗口在记录首次进入终态时**只判一次**——之后租约掉了也不再重判）/ `outerCloseVerdict` / `OUTER_CLOSE_AGAIN_MS = 5000`（设计写 10 s，本轮按 Lane A 的规格取 5 s）；keeper 在应用退出时、teardown **之前**做一次窗口普查（`EXIT_CENSUS_MS` 2000 为上限）写进 `windowsAtExit`，再 teardown、再 commit 广播——所有客户端（包括没有协议窗口可数的 blocked pane）按同一个事实判定；`WindowManager.requestClose` 是用户关闭的唯一否决点（程序性关闭——布局同步、窗口自关——永不被否决）；xpra-client `closeMain()` 只对主窗口、不在 Watch / 只读时发。
+
+**未决（A2）。** (a) 布局是共享的：被 block 的 pane 按 ✕ 关掉窗口，会经布局同步把其他客户端的这份也关掉（与 A2 之前相同；应用继续跑）。(b) RFB 级（vnc-display / 单例）没有逐窗口协议，外层 ✕ 仍只关 pane。(c) fork 型启动器：keeper 仍在启动器退出时 teardown 整个会话（把真正的应用 pid 记为 `pids.app` 是后续项，本轮不做）——窗口保留它的句子而不是自关。
+
+**A3 实测（2026-09-24，本机：xpra v6.5.3、GNOME Calculator 50、xterm、无头 Chrome DPR 2 + `vibespace.uiScale` 125；test-desktop-xpra-window §11 + test-desktop-app-keeper §20，各两次运行）：** 从启动器自己的目录卡片启动 ⇒ 记录 `2.5×、120 dpi、auto、from {dpr 2, uiScale 1.25}`；在应用的显示里量到计算器 environ 的 GDK_SCALE=2、资源库 `Xft.dpi: 120`（xdpyinfo 120x120），芯片「2.5× · auto」。文字那一半：同一个 40×10 的 xterm 在 2.5×（120 dpi）比 2×（96 dpi）大 1.23 倍（644×324 对 524×264 设备 px）。GNOME Calculator 的最小尺寸在 2.5× 仍是 720×1232——它由按钮决定（120 dpi 的文字放得进 2× 的按钮），所以文字倍数在 xterm 上量。⋯ → Scale ▸ 1.5× → Relaunch ⇒ 两个页面上**同一个** VibeSpace 窗口在确认后 102–103 ms 指向新会话，新会话在确认后 1534–1549 ms ready（keeper 侧 1349 ms），以 `1.5×、144 dpi、chosen` 运行（量到 GDK_SCALE=1、Xft.dpi 144，最小尺寸回到 360×616），芯片「1.5× · chosen」；旧会话 `exited` / `relaunch` / `replacedBy`，它的计算器进程已消失；每个客户端一个窗口。对照 = 用 A3 之前挑选规则（只看设置 + dpr）的 keeper 副本：同一个客户端得到 2×、Xft.dpi 96。
+
+**A3 规则的组成。** PURE（src/desktop-apps.js）`effectiveScale(dpr, uiScale)`（夹到 1..3）/ `appScaleFor(setting, dpr, uiScale)`（auto = 文字倍数：< √2 原值、< 2 取 2、< 2√2 原值、否则 3）/ `scaleKnobs`（任意 1..3：GDK_SCALE = floor，dpi = 96 × scale / GDK_SCALE）/ `scalePick`（来源 auto / setting / chosen；重启的 auto 从**发起重启的**客户端重新推导）/ `validateRelaunchRequest` / `relaunchVerdict`（只有 ready 的 xpra 应用；浏览器应用拒绝——它的 profile 属于它自己的会话）/ `relaunchBodyOf` / `scaleMenuModel`（原因码 lease / seat / 判定码）；`exitCloseVerdict` 对带 `replacedBy` 的记录答 `relaunched`（窗口跟随，不关）。keeper `relaunch(id, body)` 先起后停；窗口 `retarget(nextId)` 重置每一个按记录的事实并换 `id` / `_desktopAppId` / `_openSpec`。
+
+**未决（A3）。** (a) 菜单与设置只给 1× / 1.5× / 2×（auto 仍可推导到 3×，如 DPR 2 × UI 150 %）；seamless 设计里的 2.5× / 3× 显式行没做。(b) agent 租约只在客户端挡（keeper 看不到 window 租约；agent 路由到不了 `/relaunch`）。(c) Qt 的小数 QT_SCALE_FACTOR、Electron 的 `--force-device-scale-factor` 未实测（D9）。(d) vnc-display 一级不缩放（整屏按浏览器像素）。
+
+**A r1（修复轮，2.369.166；验证者的六条，全部先复现、红腿先行）。** ① **手势复制后键盘焦点丢了**：`copyViaSelection` 的 `ta.select()` 把焦点给了临时 textarea，`ta.remove()` 把它丢到 `<body>`——复制之后按的每个键都无声消失（验证者：1234 + Ctrl+C 落地，之后 5 + Ctrl+C 毫无反应、计算器仍是 1234）。修复：写入前记住 `activeElement`、移除后 `{preventScroll:true}` 交还（拒写/抛错同样交还）。实测（§9，真 xpra 级、hostname 页面）：两次手势复制后 `activeElement` 都是 pane 的 IME；`5` **不经任何脚本 refocus** 就到了计算器，第二次复制读回 `12345`（token 在组合键后 30 ms）。② **Scale ▸ 重启把座位交给了之前被 block 的客户端**：`replacedBy` 广播先到，其他客户端先连上继任者，发起重启的客户端要等 HTTP 应答（旧会话 teardown 之后）才连，于是永远输掉首连选举。修复：keeper `carrySeat` 在提交 `replacedBy` 之前把旧窗口的活跃 pane 作为**无计时器**的 grace 放到继任者上（其他客户端连上即 blocked），旧会话 stop 之后（失败也一样）才开始 `RELAUNCH_SEAT_MS` = 10 s 的等待。实测：keeper §20 (b) 另一客户端在 teardown 期间先连、被 block 且广播已写 pL 活跃，发起者应答后连上即活跃；§11 (4) 两个真页面：选刻度的页面在继任者上 `active`、无遮罩、没按 Resume，另一页 blocked。③ **xterm 的外层 ✕**：WM_DELETE_WINDOW 是被遵守的——xterm 给子进程发 SIGHUP、子进程退了它就退；交互式 bash 第一次 ✕ 即结束（两边窗口 375–418 ms, two runs 后消失）；验证者的裸 `xterm` 跑的是 $SHELL = zsh、HOME 里没有 .zshrc，zsh 首次运行菜单扛得住 SIGHUP（Xvfb 上手测：同一个 HOME 放一个空 .zshrc 就退）——这时第二次 ✕（toast 已写明）就是 Stop；不做自动 Stop（用自己的「保存？」对话框回应的应用从外面看一模一样）。确定性替身：忽略 SIGHUP 的子进程（第一次 ✕ 后 2 s 记录仍 `ready`，3.0 s 后第二次 ✕ ⇒ Stop，两边窗口 846–847 ms 后消失）。④ 两个 lane 提交的 Co-Authored-By 行改正。⑤ 两行 CLAUDE.md 索引缩到 300 字符内。⑥ seamless 设计（中英）§3.2 与影响表、D2 行改为 5 s。门：test-vnc-view §8（73）、test-desktop-viewers §6（102）、test-desktop-apps（367）、heavy test-desktop-app-keeper §20 (b)（331）、heavy test-desktop-xpra-window §9 / §10 (3b) / §11 (4)。
+
+**未决（A1）。** (a) 用**鼠标**复制（应用的 编辑 ▸ 复制 菜单）仍是 chip：给点击盖 stamp 会让应用里一次点击之后的任何复制（agent 的、定时器的）在用户背后写剪贴板——seamless 设计把菜单点击列为可能，等 owner 定。(b) RFB 级（vnc-display / 单例）不传 stamp（noVNC 自己管画布的按键）——chip。(c) Firefox / Safari 未实测（退路是 chip）。(d) Chrome flag 这条 HTTPS 路线是文档行为，本机未实测。
+
 ## 8. 决定（owner 已批：按建议）
 
 | # | 决定 | 建议 |
@@ -255,3 +308,4 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 9. （x4）override-redirect 弹窗（菜单）与对话框在裸 X 上无法区分（都是 root 的直接子窗口）：贴合步骤只在**越界**时推回（尺寸不动）——菜单通常在帧缓冲内所以不受影响；一个被打开时越界的菜单会被移动，未观察到副作用但也未专门实测。
 10. （x4 收尾）vnc-display 级的窗口**图标**：xpra 级的图标走协议（x2）；vnc-display 级只有标题（`appTitle`，来自已有的枚举）。读 `_NET_WM_ICON` 需要每个 tick 多一次 xprop spawn 再在服务端编码 PNG（spawn 的 fork 税与 RSS 成正比）——未做，OPEN。COMPOUND_TEXT 标题（没有 `_NET_WM_NAME` 的 xterm 用非 Latin-1 标题时）读不出，窗口显示 label。
 11. （r8，2026-09-22 实测；**x5 已关**——`configure-window` 与 `unmap-window` 离开 watch 名单，前者保留并在接管时重放；视图决定按 owner 裁定：Watch 缩放适配、非 active 的人类观看者整个挡住，§7.5）Watch 观看者的 `configure-window` 曾会改变持有者在共享显示里的**应用窗口**尺寸：桥已经把被拒观看者的键盘映射（r7）和显示尺寸报文（r8，保留并在其接管时重放）隔开，但 `configure-window` 仍是 watch 类型——经真实桥，一个观看者的 480x360 把持有者的 xterm 从 898x589 改成 478x355，观看者离开后也不恢复（xpra seamless.py 的 `do_process_window_configure` 对任何非只读客户端都应用其几何）。隔开它之前要先定**视图**：xpra 窗口按 net zoom 1 绘制，比持有者窗口小的 Watch pane 必须缩放或裁剪画面（随附客户端乐观地贴合，否则会把更大的窗口画进更小的 canvas）。rfb 级没有逐窗口几何（noVNC 缩放整个帧缓冲）。
+12. （B-bfe6，§7.7）浏览器应用：重度浏览可能触及 runaway 守卫的 2 GiB 会话 RSS（启动期间实测 133–487 MB）；保留的配置尚不能复用；Firefox 的 `user.js` 与非 snap Firefox 本机未实测。

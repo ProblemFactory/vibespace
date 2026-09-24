@@ -35,6 +35,8 @@ vibespace-window list                          windows I may address + what each
 vibespace-window open <app> [--title <t>]      start an app on a private display and attach to it
        (`--exec` / `--args` / `--cwd` are refused `exec_is_human`: an executable is the
         user's act in their Desktop apps dialog — you open registry ids, `list` prints them)
+       (a BROWSER row — chromium / firefox — is refused `browser_is_human`, and so are
+        `url` / `keepProfile`: it is the user's own window; the web is `vibespace-browser`)
 vibespace-window attach <handle>               take the lease (one holder per window)
 vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]
 vibespace-window screenshot <handle> [--out <file.png>]

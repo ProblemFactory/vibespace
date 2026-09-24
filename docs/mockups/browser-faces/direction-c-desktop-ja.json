@@ -1,0 +1,46 @@
+{
+ "dir": "c",
+ "name": "desktop-ja",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-c-desktop-ja.png",
+ "expected": [
+  "app",
+  "agent"
+ ],
+ "faces": [
+  {
+   "face": "app",
+   "text": "ブラウザ",
+   "x": 1033,
+   "y": 7,
+   "w": 83,
+   "h": 26,
+   "pixels": 2158,
+   "light": 235,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "",
+   "x": 2,
+   "y": 407,
+   "w": 40,
+   "h": 38,
+   "pixels": 1520,
+   "light": 52,
+   "colours": 44,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

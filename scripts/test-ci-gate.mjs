@@ -509,7 +509,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
       return out;
     };
     // THIS suite is the one file that TALKS about doc paths without reading
-    // them — its own controls below hand `docs/getting-started.md` and friends
+    // them — its own controls below hand `docs/sessions.md` and friends
     // to the classifier, and scanning itself made the derivation demand that
     // the hook call them code, which would have emptied the escape hatch.
     // The exclusion is MEASURED, not assumed: if test-ci-gate ever really
@@ -567,7 +567,9 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
       ok(verdicts.length === derived.length && !stillDocs.length,
         `every derived gate input is a CODE path to the shipped hook (${derived.length} paths)${stillDocs.length ? ' — STILL DOCS: ' + stillDocs.join(', ') + ' (add it to is_code_path)' : ''}`);
       // …and ordinary documentation still skips, or the escape hatch is gone.
-      const docs = ['README.md', 'docs/getting-started.md', 'docs/terminal.md', 'docs/screenshots/overview.png', 'docs/window-manager.md'];
+      // (docs/getting-started.md left this list in 2.369.166: test-xpra-client reads its "## HTTPS for seamless copy"
+      // section — the link target of the desktop copy hint — so it is a gate input now, derived above.)
+      const docs = ['README.md', 'docs/sessions.md', 'docs/terminal.md', 'docs/screenshots/overview.png', 'docs/window-manager.md'];
       const dv = classifyWith(shipped, docs);
       ok(dv.every((v) => v === 'DOCS'), `real documentation is still documentation (${docs.join(', ')})`);
       ok(classifyWith(shipped, ['src/a.js', 'server.js', 'package.json']).every((v) => v === 'CODE'), 'and code is still code');

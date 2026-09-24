@@ -137,7 +137,7 @@ const SETTINGS_SCHEMA = {
       { value: '1.5', label: t('1.5× (text only in GTK apps)') },
       { value: '2', label: '2×' },
     ], label: t('Desktop app scale (xpra)'),
-    description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: 2× when the screen you launch it from is scaled 150 % or more, else 1×. 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). A change takes effect when the app is launched again; the window shows its scale in the status bar.'),
+    description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×: widgets 2×, text 2.5×). 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). The scale is fixed when the app starts; a window\'s ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.'),
     category: t('Window'), liveApply: true,
   },
   'desktop.backendPrefs': {

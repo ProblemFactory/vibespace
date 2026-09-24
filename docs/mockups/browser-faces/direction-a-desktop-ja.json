@@ -1,0 +1,72 @@
+{
+ "dir": "a",
+ "name": "desktop-ja",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-a-desktop-ja.png",
+ "expected": [
+  "hub-entry",
+  "web",
+  "agent",
+  "app"
+ ],
+ "faces": [
+  {
+   "face": "hub-entry",
+   "text": "ブラウザ",
+   "x": 1033,
+   "y": 7,
+   "w": 83,
+   "h": 26,
+   "pixels": 2158,
+   "light": 179,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "web",
+   "text": "ウェブビューあなた VibeSpace のウィンドウ内にページを埋め込みます。マシン上では何も動かず、埋め込みを拒否する",
+   "x": 385,
+   "y": 274,
+   "w": 223,
+   "h": 221,
+   "pixels": 49283,
+   "light": 1493,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "エージェントブラウザエージェント エージェントが操作するブラウザ — 名前付きプロファイル、ライブビュー、引き継ぎと返却",
+   "x": 618,
+   "y": 274,
+   "w": 223,
+   "h": 221,
+   "pixels": 49283,
+   "light": 2498,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "ブラウザアプリあなた このマシンの Chromium / Firefox を、マウスとキーボードで操作するウィンドウで。",
+   "x": 852,
+   "y": 274,
+   "w": 223,
+   "h": 221,
+   "pixels": 49283,
+   "light": 1719,
+   "colours": 64,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

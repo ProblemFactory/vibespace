@@ -1,0 +1,72 @@
+{
+ "dir": "a",
+ "name": "desktop-zh",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-a-desktop-zh.png",
+ "expected": [
+  "hub-entry",
+  "web",
+  "agent",
+  "app"
+ ],
+ "faces": [
+  {
+   "face": "hub-entry",
+   "text": "浏览器",
+   "x": 1055,
+   "y": 7,
+   "w": 72,
+   "h": 26,
+   "pixels": 1872,
+   "light": 241,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "web",
+   "text": "网页视图你 在 VibeSpace 窗口里嵌入一个网页。机器上不跑任何东西；拒绝被嵌入的站点走代理。 不是真浏览器：没有",
+   "x": 385,
+   "y": 287,
+   "w": 223,
+   "h": 195,
+   "pixels": 43485,
+   "light": 1598,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "Agent 浏览器agent agent 驾驶的浏览器——命名的 profile、实时视图、接管与交还。 不是给你自己上",
+   "x": 618,
+   "y": 287,
+   "w": 223,
+   "h": 195,
+   "pixels": 43485,
+   "light": 1878,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "浏览器应用你 这台机器上的 Chromium / Firefox，在一个你用鼠标键盘操作的窗口里。 不是 agent 的",
+   "x": 852,
+   "y": 287,
+   "w": 223,
+   "h": 195,
+   "pixels": 43485,
+   "light": 1776,
+   "colours": 64,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

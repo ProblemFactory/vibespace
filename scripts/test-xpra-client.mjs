@@ -133,6 +133,16 @@ console.log('§1 the PURE words (xpra-proto.js)');
   ok(K('Process', 'KeyA', 229) === null && K('Dead', 'Quote', 222) === null && K('Unidentified', '', 0) === null && P.keyActionFor({ key: 'a', code: 'KeyA', keyCode: 65, mods: {}, composing: true }) === null, 'an IME in flight (229 / composing), a dead key and an unidentified key send NOTHING — composition delivers the text');
   ok(P.clipboardShortcut({ key: 'v', control: true }) === 'paste' && P.clipboardShortcut({ key: 'V', meta: true }) === 'paste' && P.clipboardShortcut({ key: 'c', control: true }) === 'copy' && P.clipboardShortcut({ key: 'x', control: true }) === 'copy' && P.clipboardShortcut({ key: 'v' }) === null && P.clipboardShortcut({ key: 'a', control: true }) === null, 'Ctrl/⌘+V is the browser\'s (the paste event carries the text on plain http); Ctrl+C/X go to the app AND the browser; everything else is the app\'s');
   ok(S.clipboardDelivery({ secure: true, canWrite: true }) === 'api' && S.clipboardDelivery({ secure: false, canWrite: true }) === 'chip' && S.clipboardDelivery({ secure: true, canWrite: false }) === 'chip', 'a copy in the app goes to the Clipboard API only on a secure context that has it — else the click-to-copy chip, never a silent no-op (the rule is the SHARED shell\'s: every rung, RFB too)');
+  // round 3, A1 (docs/design-desktop-apps-seamless §3.1): the GESTURE WINDOW — a token that follows the user's own copy chord by
+  // less than Chrome's 5 s transient activation (MEASURED M1: 4800 ms ok, 5200 ms refused) is written with no click
+  const G = (gestureAge, o = {}) => S.clipboardDelivery({ secure: false, canWrite: false, gestureAge, ...o });
+  const gTable = [[0, 'gesture'], [23, 'gesture'], [300, 'gesture'], [4800, 'gesture'], [4999, 'gesture'], [5000, 'chip'], [5200, 'chip'], [7000, 'chip'], [null, 'chip'], [undefined, 'chip'], [-1, 'chip'], [NaN, 'chip'], [Infinity, 'chip'], ['100', 'chip']];
+  ok(S.GESTURE_WINDOW_MS === 5000 && gTable.every(([a, want]) => G(a) === want), 'A1 DOM-FREE: the gesture stamp\'s AGE decides execCommand vs the chip — 0/23/300/4800/4999 ms ⇒ gesture, 5000/5200/7000 ms ⇒ chip, no stamp / a negative / NaN / ∞ / a string ⇒ chip', gTable.filter(([a, want]) => G(a) !== want).map(([a, want]) => ({ age: a, want, got: G(a) })));
+  ok(S.clipboardDelivery({ secure: true, canWrite: true, gestureAge: 10 }) === 'api' && S.clipboardDelivery({ secure: true, canWrite: false, gestureAge: 10 }) === 'gesture' && S.clipboardDelivery({ secure: false, canWrite: true, gestureAge: 10 }) === 'gesture', 'A1: a secure page with the API keeps the API (the gesture is not needed); a page without it uses the gesture however it is served');
+  ok(!('clipboardDelivery' in P), 'A1: the delivery rule lives ONLY in the shell — the dead xpra-proto.js twin is gone (one rule, every rung)');
+  const store = (v) => ({ getItem: (k) => (k === S.COPY_HINT_KEY ? v : null), setItem() {} });
+  ok(S.COPY_HINT_KEY === 'vibespace.desktopCopyHintShown' && S.copyHintDue({ secure: false, storage: store(null) }) === true && S.copyHintDue({ secure: false, storage: store('1') }) === false && S.copyHintDue({ secure: true, storage: store(null) }) === false && S.copyHintDue({ secure: false, storage: null }) === false && S.copyHintDue({ secure: false, storage: { getItem() { throw new Error('denied'); } } }) === false, 'A1: the HTTPS hint is due only on a NON-secure page of a device that never showed it (a secure page, a shown one, no / an unreadable storage ⇒ not due)');
+  ok(/^https:\/\/github\.com\/ProblemFactory\/vibespace\/blob\/master\/docs\/getting-started\.md#https-for-seamless-copy$/.test(S.HTTPS_DOCS_URL) && /^## HTTPS for seamless copy$/m.test(read('docs/getting-started.md')), 'A1: the hint links the docs section that EXISTS (docs/getting-started.md "## HTTPS for seamless copy" — its GitHub anchor)');
   const fit = (pane, c) => P.fitGeometry(pane, c);
   ok(same(fit({ paneW: 900, paneH: 600 }, null), { x: 0, y: 0, w: 900, h: 600 }), 'fit: no hints ⇒ the whole pane at 0,0');
   ok(same(fit({ paneW: 900, paneH: 600 }, { increment: [9, 17], 'base-size': [10, 20], 'minimum-size': [100, 50] }), { x: 0, y: 0, w: 892, h: 598 }), 'fit: xterm-like hints snap DOWN to the cell grid from the base (10+98×9, 20+34×17)');
@@ -355,6 +365,30 @@ console.log('§2b THE BELT (2026-09-22): a second top-level placed inside, the a
   client.close();
 }
 
+console.log('§2c round 3 A2 (docs/design-desktop-apps-seamless §3.2): the outer ✕ asks the app — close-window to its MAIN window, never a dialog, never from Watch');
+{
+  FakeWorker.instances.length = 0;
+  const c = C.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null });
+  ok(typeof c.closeMain === 'function' && c.closeMain() === false, 'closeMain() before any session sends nothing (false)');
+  c.connect();
+  const w = await until(() => FakeWorker.instances[0]);
+  await until(() => w.sent('hello').length);
+  w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+  ok(c.closeMain() === false && w.sent('close-window').length === 0, 'connected but no window yet: nothing to ask (false)');
+  w.feed(['new-window', 4, 0, 0, 360, 616, { title: 'Calculator', 'window-type': ['NORMAL'] }]);
+  w.feed(['new-window', 5, 40, 40, 200, 100, { title: 'Save?', 'transient-for': 4, 'window-type': ['DIALOG'] }]);
+  c.focusWindow(5);
+  ok(c.closeMain() === true && same(w.sent('close-window'), [['close-window', 4]]), 'the ✕ ⇒ ONE close-window naming the MAIN window (4) — not the focused dialog (5): WM_DELETE_WINDOW to the app, which may answer with its own save dialog', w.sent('close-window'));
+  c.watch = true;
+  ok(c.closeMain() === false && w.sent('close-window').length === 1, 'x5 Watch: the pane may not ask (false, nothing sent — the bridge would drop it anyway)');
+  c.watch = false; c.viewOnly = true;
+  ok(c.closeMain() === false && w.sent('close-window').length === 1, 'view-only: nothing sent');
+  c.viewOnly = false;
+  w.feed(['lost-window', 4]);
+  ok(c.mainWid === 0 && c.closeMain() === false && w.sent('close-window').length === 1, 'the main window lost (a dialog left, no main): nothing to ask — the outer ✕ is the pane\'s own close then');
+  c.close();
+}
+
 console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard branches, the keyboard, the pointer, the ladder');
 {
   const mk = (opts) => {
@@ -498,6 +532,103 @@ console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard bran
   Bd.view.dispose();
   ok(!Bd.view.pasteOpen, 'dispose closes an open paste box');
   B.view.dispose();
+}
+
+console.log('§3c A1 (round 3): the plain-http GESTURE WINDOW — the user\'s own Ctrl+C in the pane ⇒ the app\'s token copied with NO click; any other token ⇒ the chip; the one-time HTTPS hint');
+{
+  let clock = 100000;
+  const store = new Map();
+  const realLS = globalThis.localStorage;
+  globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+  const mkC = (opts = {}) => {
+    const host = new El('div');
+    const view = V.createXpraView(host, { url: () => 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async (b) => ({ bitmap: str(b), close() {} }), secure: false, clipboardApi: false, now: () => clock, ...opts });
+    return { host, view };
+  };
+  const up = async (C) => {
+    const pane = C.host.children[0].children[1].children[0];
+    pane.clientWidth = 400; pane.clientHeight = 300;
+    await C.view.connect();
+    const wk = await until(() => FakeWorker.instances[FakeWorker.instances.length - 1]);
+    await until(() => wk.sent('hello').length);
+    wk.feed(['hello', { 'packet-types': ['keyboard-config'] }]);
+    wk.feed(['new-window', 1, 0, 0, 300, 200, { title: 'calc' }]);
+    return { wk, ime: pane.children[1] };
+  };
+  const tokenIn = (s) => ['clipboard-token', 'CLIPBOARD', ['UTF8_STRING'], 'UTF8_STRING', 'UTF8_STRING', 8, 'bytes', bytes(s), true, true, true];
+  const ctrlC = (ime, extra = {}) => ime.fire('keydown', { key: 'c', code: 'KeyC', keyCode: 67, ctrlKey: true, isTrusted: true, getModifierState: () => false, ...extra });
+  const C = mkC();
+  const { wk, ime } = await up(C);
+  // (a) the hint is not shown before any chip; a Ctrl+C is forwarded to the app AND left to the browser (not prevented)
+  ok(C.view.hintShown === false && C.view.copyHint && C.view.copyHint.className === 'desktop-copy-hint' && C.view.copyHint.style.display === 'none', 'the HTTPS hint exists in the bar, hidden, before any chip');
+  wk.posted.length = 0;
+  const kc = ctrlC(ime);
+  ok(!kc.prevented && wk.sent('key-action').length === 1 && wk.sent('key-action')[0][2] === 'c', 'a trusted Ctrl+C: forwarded to the app (it copies) and NOT prevented');
+  // (b) the token arrives 300 ms later: written by execCommand, NO chip, a toast
+  execCalls.length = 0; toasts.length = 0; clock += 300;
+  wk.feed(tokenIn('42'));
+  ok(execCalls.length === 1 && execCalls[0][0] === 'copy' && same(execCalls[0][1], ['42']) && C.view.chip.style.display === 'none' && C.view.chipText === null && toastTexts().some((x) => /Copied to your clipboard/.test(x)), 'A1: the app\'s token 300 ms after the user\'s Ctrl+C is copied through execCommand on a hidden textarea — NO chip, NO click, a toast', { exec: execCalls, chip: C.view.chip.style.display });
+  ok(C.view.hintShown === false && !store.has(S.COPY_HINT_KEY), '…and a seamless copy shows no HTTPS hint (the hint is for the chip)');
+  // (c) the stamp is SPENT: a second token with no new chord ⇒ the chip (an agent / a timer / another client copying)
+  execCalls.length = 0; clock += 200;
+  wk.feed(tokenIn('an agent copied this'));
+  ok(execCalls.length === 0 && C.view.chip.style.display === '' && C.view.chipText === 'an agent copied this', 'A1: ONE chord, at most ONE write — a later token with no new chord (an agent, a timer, another client) keeps the chip, execCommand never tried');
+  // (d) the FIRST chip on this plain-http device shows the one-time hint and remembers it
+  ok(C.view.hintShown === true && store.has(S.COPY_HINT_KEY) && C.view.copyHint.children[0].textContent === 'Enable HTTPS for seamless copy' && C.view.copyHint.children[1].tagName === 'a' && C.view.copyHint.children[1].href === S.HTTPS_DOCS_URL && C.view.copyHint.children[1].target === '_blank' && C.view.copyHint.children[1].rel === 'noopener' && C.view.copyHint.children[1].textContent === 'How to enable HTTPS', 'A1: the first chip on a plain-http device shows "Enable HTTPS for seamless copy" + the docs link (new tab, noopener), and the device remembers it', { shown: C.view.hintShown, stored: [...store.keys()] });
+  ok(/<svg[^>]*>/.test(C.view.copyHint.children[2].innerHTML) && C.view.copyHint.children[2].attrs['aria-label'] === 'Dismiss', 'the hint\'s dismiss is an SVG icon with an accessible name (never a ✕ character)');
+  C.view.copyHint.children[2].onclick();
+  ok(C.view.hintShown === false, 'dismiss hides the hint');
+  C.view.chip.onclick();
+  // (e) a Ctrl+C whose token arrives AFTER the window (5.2 s) ⇒ the chip, execCommand never tried
+  ctrlC(ime); execCalls.length = 0; clock += 5200;
+  wk.feed(tokenIn('late token'));
+  ok(execCalls.length === 0 && C.view.chip.style.display === '' && C.view.chipText === 'late token', 'A1: a token 5.2 s after the Ctrl+C (outside Chrome\'s activation window, measured 5200 ms refused) ⇒ the chip, execCommand never tried');
+  C.view.chip.onclick();
+  // (f) the window's edge: 4.8 s ⇒ written
+  ctrlC(ime); execCalls.length = 0; clock += 4800;
+  wk.feed(tokenIn('edge token'));
+  ok(execCalls.length === 1 && C.view.chip.style.display === 'none', 'A1: a token 4.8 s after the Ctrl+C (inside the window, measured ok) is written with no click');
+  // (g) the browser's own answer is the second gate: execCommand false inside the window ⇒ the chip, said
+  ctrlC(ime); execOk = false; execCalls.length = 0; clock += 100;
+  wk.feed(tokenIn('refused by the browser'));
+  execOk = true;
+  ok(execCalls.length === 1 && C.view.chip.style.display === '' && C.view.chipText === 'refused by the browser', 'A1: a refused execCommand inside the window falls to the chip (the browser\'s own answer is the second gate — never silent)');
+  C.view.chip.onclick();
+  // (h) an UNTRUSTED Ctrl+C (a script's synthetic event), a held key's auto-repeat and a plain letter never stamp
+  execCalls.length = 0;
+  ctrlC(ime, { isTrusted: false }); clock += 50; wk.feed(tokenIn('synthetic chord'));
+  const synth = execCalls.length;
+  C.view.chip.onclick(); execCalls.length = 0;
+  ctrlC(ime, { repeat: true }); clock += 50; wk.feed(tokenIn('auto-repeat'));
+  const rep = execCalls.length;
+  C.view.chip.onclick(); execCalls.length = 0;
+  ime.fire('keydown', { key: 'a', code: 'KeyA', keyCode: 65, isTrusted: true, getModifierState: () => false }); clock += 50; wk.feed(tokenIn('after a letter'));
+  ok(synth === 0 && rep === 0 && execCalls.length === 0 && C.view.chipText === 'after a letter', 'A1: only the user\'s own trusted copy chord stamps — a synthetic Ctrl+C, an auto-repeat and a plain letter leave the chip', { synth, rep, letter: execCalls.length });
+  C.view.chip.onclick();
+  // (i) Ctrl+X and ⌘+C are copy chords too
+  execCalls.length = 0;
+  ime.fire('keydown', { key: 'x', code: 'KeyX', keyCode: 88, ctrlKey: true, isTrusted: true, getModifierState: () => false }); clock += 40; wk.feed(tokenIn('cut'));
+  ime.fire('keydown', { key: 'c', code: 'KeyC', keyCode: 67, metaKey: true, isTrusted: true, getModifierState: () => false }); clock += 40; wk.feed(tokenIn('mac copy'));
+  ok(execCalls.length === 2 && C.view.chip.style.display === 'none', 'A1: Ctrl+X and ⌘+C stamp like Ctrl+C (the chords clipboardShortcut names "copy")');
+  // (j) a view-only / Watch pane forwards nothing, so its chord stamps nothing
+  C.view.setViewOnly(true); execCalls.length = 0;
+  ctrlC(ime); clock += 40; wk.feed(tokenIn('while view-only'));
+  ok(execCalls.length === 0 && C.view.chipText === 'while view-only', 'A1: a view-only pane\'s Ctrl+C never reaches the app, so it never stamps (the chip)');
+  C.view.setViewOnly(false); C.view.chip.onclick();
+  // (k) the hint is ONE per device: a second view on the same device shows the chip without the hint
+  const C2 = mkC();
+  const s2 = await up(C2);
+  s2.wk.feed(tokenIn('second view copy'));
+  ok(C2.view.chip.style.display === '' && C2.view.hintShown === false, 'A1: the hint is one-time per DEVICE — a second view after it was shown gets the chip alone');
+  // (l) a SECURE page whose API refuses: the chip, never the HTTPS hint (the page IS https)
+  store.clear();
+  const C3 = mkC({ secure: true, clipboardApi: { writeText: async () => { throw new Error('denied'); } } });
+  const s3 = await up(C3);
+  s3.wk.feed(tokenIn('secure but refused'));
+  await sleep(0);
+  ok(C3.view.chip.style.display === '' && C3.view.hintShown === false && !store.has(S.COPY_HINT_KEY), 'A1: a secure page\'s refused API write shows the chip but never the HTTPS hint (and leaves the device\'s hint unspent)');
+  C.view.dispose(); C2.view.dispose(); C3.view.dispose();
+  globalThis.localStorage = realLS;
 }
 
 console.log('§5 x5 — ONE active viewer (docs/design-desktop-apps §7 P8-2): Watch sends no geometry and is fit-scaled, a dormant (blocked) pane never times out, a held hello re-sizes');
@@ -824,7 +955,9 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   // the launch half: the launcher sends THIS client's devicePixelRatio as `dpr` (clamped to the route's 1..3)
   const L = await import('../src/lib/desktop-app-launcher.js');
   ok(L.launchDpr(2) === 2 && L.launchDpr(1.25) === 1.25 && L.launchDpr(0.9) === 1 && L.launchDpr(4) === 3 && L.launchDpr('x') === 1, 'launchDpr: the page\'s devicePixelRatio, clamped to 1..3 (a zoomed-out page launches at 1)');
-  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\) \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()`');
+  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\), uiScale: launchUiScale\(\) \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()` and (round 3 A3) `uiScale: launchUiScale()`');
+  // round 3 A3: the UI scale half — utils' uiScale() (the body zoom; 1 on a phone) clamped to the route's 0.6..2
+  ok(L.launchUiScale(1.25) === 1.25 && L.launchUiScale(1) === 1 && L.launchUiScale(0.5) === 0.6 && L.launchUiScale(3) === 2 && L.launchUiScale('x') === 1 && L.launchUiScale(1.333) === 1.33, 'launchUiScale: the page\'s UI scale, clamped to 0.6..2, two decimals');
 }
 
 console.log('§4 the census (grep over src/lib + style.css)');
@@ -840,7 +973,7 @@ console.log('§4 the census (grep over src/lib + style.css)');
   ok(/\.xpra-pane \{[^}]*background: var\(--/.test(read('public/style.css')) && !/#000/.test(read('src/lib/xpra-view.js')) && !/#000/.test(read('src/lib/xpra-client.js')), 'the pane is a THEME colour and no xpra file spells #000 (no root, no black — owner acceptance 1)');
   ok(/isSecureContext/.test(read('src/lib/xpra-view.js')) && /execCommand\('copy'\)/.test(read('src/lib/picture-shell.js')) && /addEventListener\('paste'/.test(read('src/lib/xpra-view.js')), 'the view consults isSecureContext and listens to the paste event; the shell copies through execCommand on plain http');
   ok(same(whereCode(/desktop-copied-chip/), ['picture-shell.js']) && same(whereCode(/vnc-paste-box/), ['picture-shell.js']) && same(whereCode(/execCommand\('copy'\)/).filter((f) => /^(picture|vnc|xpra|desktop)/.test(f)), ['picture-shell.js']), 'the copy chip, the paste box and the picture views\' execCommand copy are built in ONE file (picture-shell.js) — both views stand on them, never a twin (utils.copyText / terminal.js keep their own, result-less fallbacks)', { chip: whereCode(/desktop-copied-chip/), box: whereCode(/vnc-paste-box/), exec: whereCode(/execCommand\('copy'\)/) });
-  ok(/shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(read('src/lib/vnc-view.js')) && /shell\.deliverCopy\(text, \{ secure: isSecure\(\), clipboard: clip\(\) \}\)/.test(read('src/lib/xpra-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/vnc-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/xpra-view.js')), 'WIRING PIN: both views deliver app copies and run Paste through the shell (the RFB rung too — the fleet image\'s rung)');
+  ok(/shell\.deliverCopy\(text, \{ secure: pageIsSecure\(\), clipboard: navigator\.clipboard, toast: false \}\)/.test(read('src/lib/vnc-view.js')) && /shell\.deliverCopy\(text, \{ secure: isSecure\(\), clipboard: clip\(\), gestureAge \}\)/.test(read('src/lib/xpra-view.js')) && /else if \(r === 'copy' && e\.isTrusted === true && !e\.repeat\) copyGestureAt = clock\(\);/.test(read('src/lib/xpra-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/vnc-view.js')) && /shell\.pasteFromClipboard\(/.test(read('src/lib/xpra-view.js')), 'WIRING PIN: both views deliver app copies and run Paste through the shell (the RFB rung too — the fleet image\'s rung); the xpra view hands the shell the age of its trusted copy-chord stamp (A1)');
   ok(/import \{ createPictureShell, RECONNECT_LADDER, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/vnc-view.js')) && /import \{ createPictureShell, streamUrl[^}]*\} from '\.\/picture-shell\.js'/.test(read('src/lib/xpra-view.js')), 'both views import the shell');
   ok(/createXpraView\(winInfo\.content/.test(read('src/lib/desktop-app-window.js')) && /r && r\.stream === 'xpra' \? 'xpra' : 'rfb'/.test(read('src/lib/desktop-app-window.js')) && !/iframe/.test(read('src/lib/desktop-app-window.js').replace(/\/\/.*$/gm, '')), 'the desktop-app window picks the view by the record\'s stream KIND and hosts no iframe any more');
   ok(/img\.src = dataUrl/.test(read('src/lib/desktop-app-window.js')) && /app\.wm\.setTitle\(winInfo\.id, /.test(read('src/lib/desktop-app-window.js')), 'the icon reaches the title bar through .src and the title through setTitle (textContent)');

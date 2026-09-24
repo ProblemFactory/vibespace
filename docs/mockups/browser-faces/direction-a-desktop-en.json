@@ -1,0 +1,72 @@
+{
+ "dir": "a",
+ "name": "desktop-en",
+ "viewport": {
+  "w": 1200,
+  "h": 800
+ },
+ "png": "direction-a-desktop-en.png",
+ "expected": [
+  "hub-entry",
+  "web",
+  "agent",
+  "app"
+ ],
+ "faces": [
+  {
+   "face": "hub-entry",
+   "text": "Browser",
+   "x": 1045,
+   "y": 7,
+   "w": 79,
+   "h": 26,
+   "pixels": 2054,
+   "light": 219,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "web",
+   "text": "Web viewyou A page inside a VibeSpace window. Nothing runs o",
+   "x": 385,
+   "y": 289,
+   "w": 223,
+   "h": 190,
+   "pixels": 42370,
+   "light": 1604,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "Agent browserthe agent The browsers your agents drive — name",
+   "x": 618,
+   "y": 289,
+   "w": 223,
+   "h": 190,
+   "pixels": 42370,
+   "light": 1888,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "Browser appyou Chromium or Firefox from this machine, in a w",
+   "x": 852,
+   "y": 289,
+   "w": 223,
+   "h": 190,
+   "pixels": 42370,
+   "light": 1779,
+   "colours": 64,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

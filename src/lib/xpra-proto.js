@@ -9,9 +9,10 @@
 // `clipboard-contents`, `display-configure` (6.5.3's name; `configure-display`
 // is its legacy alias) and `keyboard-config`), the browser-key → X-keysym
 // rule, the pane FIT arithmetic (the app window IS the picture — owner
-// acceptance 1), and the clipboard DELIVERY rule (owner acceptance 2: the
-// async Clipboard API where the page is a secure context, a click-to-copy
-// chip on plain http — never a silent no-op).
+// acceptance 1), and which clipboard chords the BROWSER keeps
+// (`clipboardShortcut`; the DELIVERY rule — API / the user's gesture window /
+// the chip — is the shared shell's, picture-shell.js `clipboardDelivery`: the
+// dead twin that sat here was removed in round 3, A1).
 //
 // PROVENANCE, MEASURED 2026-09-22 on xpra v6.5.3 + xpra-html5 21: the server
 // names its packets in `xpra/server/subsystem/{display,keyboard,pointer,
@@ -189,12 +190,6 @@ export function clipboardShortcut({ key = '', control = false, meta = false } = 
   if (k === 'v') return 'paste';
   if (k === 'c' || k === 'x') return 'copy';
   return null;
-}
-
-/** Where a copy made inside the app goes: the async Clipboard API when the
- *  page is a secure context and has it, else the click-to-copy chip. */
-export function clipboardDelivery({ secure = false, canWrite = false } = {}) {
-  return secure && canWrite ? 'api' : 'chip';
 }
 
 /**

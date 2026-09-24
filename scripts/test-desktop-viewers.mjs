@@ -513,6 +513,45 @@ console.log('§5 the grace, LOW-4, LOW-3, LOW-2 (2.369.156)');
   ok(/sessionStorage\.getItem\(prevKey\)/.test(w) && /&prev=\$\{encodeURIComponent\(prevPane\)\}/.test(w), 'the window names its predecessor pane (`prev`, per tab, sessionStorage) on its stream url — the grace\'s reload successor');
 }
 
+console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to the successor — the relaunching pane is never blocked on its own window');
+{
+  const R = 150;
+  const cb = [];
+  const kr = K.create({ dataDir: path.join(root, 'rl'), env: () => ({}), broadcast: (m) => cb.push(m), viewerGraceMs: 0, relaunchSeatMs: R, log: { log() {}, warn() {} } });
+  ok(K.RELAUNCH_SEAT_MS === 10000 && typeof kr.carrySeat === 'function', 'the keeper exposes carrySeat and a RELAUNCH_SEAT_MS of 10 s (how long the carried seat waits for its pane after the relaunch answer)');
+  // L active on the old app, H blocked (x5); the relaunch carries L's seat; the OTHER client retargets from the broadcast and
+  // attaches FIRST (the measured race: the relaunching client learns its successor only from the HTTP answer, after the teardown)
+  kr.viewerJoined('da-old', { viewerId: 'v-L', pane: 'pL' }); kr.viewerJoined('da-old', { viewerId: 'v-H', pane: 'pH' });
+  const arm = kr.carrySeat('da-old', 'da-new');
+  kr.viewerJoined('da-new', { viewerId: 'v-H2', pane: 'pH' });
+  const lastNew = () => cb.filter((m) => m.type === 'desktop-app-viewers' && m.id === 'da-new').slice(-1)[0];
+  ok(kr.activeViewer('da-new') === null && lastNew() && lastNew().active === 'pL', 'the other client (pH) attaching FIRST to the successor is BLOCKED — the broadcast already names pane pL as the seat holder', lastNew());
+  kr.viewerJoined('da-new', { viewerId: 'v-L2', pane: 'pL' });
+  ok(kr.activeViewer('da-new') === 'v-L2' && lastNew().active === 'pL', 'the relaunching pane (same pane key, a new socket) attaches second and is ACTIVE with no Resume');
+  arm();
+  await sleep(R + 80);
+  ok(kr.activeViewer('da-new') === 'v-L2', 'arming after the seat was taken changes nothing');
+  // the relaunching pane never comes (its window closed): the hold waits through the teardown, then runs out after the answer
+  kr.viewerJoined('da-o2', { viewerId: 'v-P', pane: 'pP' });
+  const arm2 = kr.carrySeat('da-o2', 'da-n2');
+  kr.viewerJoined('da-n2', { viewerId: 'v-Q', pane: 'pQ' });
+  await sleep(R + 80);
+  ok(kr.activeViewer('da-n2') === null, 'unarmed (the old session is still being torn down) the carried seat is HELD whatever the time');
+  arm2();
+  await sleep(R + 80);
+  ok(kr.activeViewer('da-n2') === 'v-Q', 'armed at the answer, the hold runs out after relaunchSeatMs ⇒ the remaining viewer takes over (never a seat held forever)');
+  // nobody active on the old app ⇒ nothing to carry; an unknown old id too
+  kr.viewerJoined('da-o3', { viewerId: 'v-W', pane: 'pW' }); kr.viewerLeft('da-o3', 'v-W');
+  const arm3 = kr.carrySeat('da-o3', 'da-n3'); arm3();
+  kr.viewerJoined('da-n3', { viewerId: 'v-X', pane: 'pX' });
+  ok(kr.activeViewer('da-n3') === 'v-X' && typeof kr.carrySeat('da-none', 'da-n4') === 'function', 'no active pane on the old app ⇒ nothing carried: the first attach is active as ever (and an unknown id arms a no-op)');
+  // CONTROL — the pre-r1 relaunch (no carry): the first attach wins, and it is the OTHER client
+  const kc = K.create({ dataDir: path.join(root, 'rl-ctl'), env: () => ({}), broadcast: () => {}, viewerGraceMs: 0, log: { log() {}, warn() {} } });
+  kc.viewerJoined('da-new', { viewerId: 'v-H2', pane: 'pH' }); kc.viewerJoined('da-new', { viewerId: 'v-L2', pane: 'pL' });
+  ok(kc.activeViewer('da-new') === 'v-H2', 'CONTROL: without the carry the previously BLOCKED client wins the first-attach election (the verifier\'s server log)');
+  const ksrc = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
+  ok(/const armSeat = carrySeat\(id, next\.id\);\s*\n\s*rec\.replacedBy = next\.id;/.test(ksrc) && /finally \{ armSeat\(\); \}/.test(ksrc), 'WIRING PIN: relaunch() carries the seat BEFORE it commits replacedBy (the other clients retarget from that broadcast) and arms the hold after the old session\'s stop, even a failed one');
+}
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

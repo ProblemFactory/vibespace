@@ -1,0 +1,46 @@
+{
+ "dir": "c",
+ "name": "phone-zh",
+ "viewport": {
+  "w": 390,
+  "h": 844
+ },
+ "png": "direction-c-phone-zh.png",
+ "expected": [
+  "app-phone",
+  "agent-phone"
+ ],
+ "faces": [
+  {
+   "face": "app-phone",
+   "text": "浏览器",
+   "x": 9,
+   "y": 231,
+   "w": 372,
+   "h": 44,
+   "pixels": 16368,
+   "light": 435,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent-phone",
+   "text": "Agent 浏览器",
+   "x": 9,
+   "y": 275,
+   "w": 372,
+   "h": 44,
+   "pixels": 16368,
+   "light": 545,
+   "colours": 64,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 2400,
+  "colours": 1,
+  "painted": false
+ },
+ "verdict": "ok"
+}

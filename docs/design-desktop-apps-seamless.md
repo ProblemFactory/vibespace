@@ -1,0 +1,213 @@
+# Design: desktop apps round 3 — seamless windows, clipboard, DPI derivation, remote hosts (a design for the owner)
+
+> The owner's feedback after testing 2.369.156 + .158 (docs/design-desktop-apps.zh.md, P8-2), verbatim (Chinese) and answered point by point:
+> "我简单测试了下app功能，为啥应用里复制之后要手动点击才能复制到本机？这个不能seamless吗？以及我关闭内部窗口之后外部窗口还要额外关闭一次，以及实际上如果内部窗口具有完整的窗口控制能力（关闭按钮啥的），外部窗口就不应该显示任何东西，来达到seamless的效果（当然有没有可能有什么feature必须要在外部窗口展示东西，所以无法seamless的？你也要考虑。以及内部app的dpi也应该是可调的，最好是能从vibespace自身的dpi自动推导，保证最佳的窗口渲染效果，当然还是有必要在界面配置里加入一个remote app的dpi调整的。以及你要思考下整个app功能对于remote host的适配程度，自动seamless setup能力等等。"
+> — (1) why does a copy inside the app need a click to reach my clipboard, can that be seamless; (2) closing the inner window leaves the outer one to close again; (3) when the inner window has full controls (a close button etc.) the outer window should show nothing — and is there anything that MUST be shown outside, making seamless impossible; (4) the app's DPI should be adjustable, ideally derived from VibeSpace's own DPI, with a setting for remote apps too; (5) how well does the whole feature fit remote hosts, and "auto seamless setup".
+>
+> Design only (no code, no version bump). Every point gets a row in the IMPACT TABLE first, then ONE trimmed set to build, then the decisions only the owner can make (D1…D9, each with a recommended default). Every "measured" value is from 2026-09-23 on this box (xpra v6.5.3, gnome-calculator 50 / GTK 4.22, xterm, headless Chrome 153, a real worktree server); scripts and raw results in `/tmp/vs-design-measure/` (not committed). Chinese twin: docs/design-desktop-apps-seamless.zh.md.
+
+## 0. In one paragraph
+
+Four of the five are **small client-side changes one lane can close** (clipboard: replace "click to copy" with the 5-second gesture window the user's OWN Ctrl+C opens — measured to hold on plain http; close: the app exiting closes our window; seamless: detect the app's own header bar and hide our title bar, and dragging its header bar drags our window — xpra already sends us that drag as a packet we currently ignore; DPI: derive the app scale from VibeSpace's own effective scale `devicePixelRatio × UI scale`, per window, relaunch to apply). The fifth (remote hosts) is **one separate large lane** in the exact shape of browser-serve / browser-access (run the same code where the app lives, relay xpra's ws over the agentd data plane) and needs D5–D8 first.
+
+## 1. The impact table
+
+| # | What the owner saw | Why it is so today (file:line) | What is technically possible | The minimal change | Cost | Risk | Recommended? |
+|---|---|---|---|---|---|---|---|
+| 1 | A copy inside the app needs a chip click to reach the local clipboard | The page is `http://<hostname>`, `isSecureContext === false` (xpra-view.js:119), `navigator.clipboard` **does not exist** (measured, M1); `deliverCopy` (picture-shell.js:201–207) can only take the chip on a non-secure page, and the chip's click copies through `execCommand('copy')` (picture-shell.js:43–54 / 195–199). A browser rule: an insecure origin has no async clipboard API | **Measured M1**: `execCommand('copy')` succeeds when called **asynchronously within 5 s of a trusted key/pointer event** (0/50/150/300/1000/3000/4800 ms all succeed, 5200 ms on fails); our view's `preventDefault` on keydown does not matter (M1b); the app's clipboard token arrives 23–300 ms after the user's Ctrl+C (M3c's lost-window at 23 ms is the same link's order of magnitude; §7.2 says 50–300 ms) — **inside the window**. So: the user presses Ctrl+C in the app (or clicks Copy in its menu) ⇒ the token arrives ⇒ we write the local clipboard, **no click**. What cannot work: a copy the user did not make on THIS page (an agent's copy through P9, an app copying on a timer, a copy from another client) — outside the window, the chip stays (the browser's rule, not ours) | `deliverCopy`'s non-secure branch: try `copyViaSelection(text)` first; true ⇒ toast, no chip; false ⇒ the chip (≈5 lines); the chip gains a one-time hint "for seamless copy every time, enable HTTPS (three routes, §3.1)", remembered per device, dismissable | S (half a lane-day incl. tests) | Low: the gate is the browser's own return value; negative control = no gesture ⇒ false ⇒ chip (measured). Firefox has the same 5 s transient activation (unmeasured); Safari may require a synchronous handler (unmeasured) ⇒ falls back to the chip there | **Yes** |
+| 2 | Closing the app's own window leaves the VibeSpace window to close again | The keeper only turns the record `exited` (`onPartExit` → `fail(rec,'app-exit')` → teardown → commit, desktop-app-keeper.js:704–719); the client's `render()` merely **disconnects the picture and writes one status sentence** on a terminal record (desktop-app-window.js:362–365); the view says "The application closed its window" (xpra-view.js:238); **no code closes the window**. Measured M3c: the calculator's own ✕ ⇒ `lost-window` at 23 ms ⇒ status at 59 ms ⇒ record `exited` at 61 ms ⇒ the window stays | Terminal record + a view with zero windows ⇒ `app.wm.closeWindow` + a toast "Calculator exited"; every client closes its own pane from the same `desktop-apps-updated` broadcast (layout sync cannot reopen it: an openSpec replay that meets an `exited` record ⇒ toast, no window). The reverse: the outer ✕ today does **not** stop the app (`onClose` only disposes the view, desktop-app-window.js:406; the app lives until the idle timeout) ⇒ make the outer ✕ send the app `close-window` (xpra-proto.js:375 already exists = WM_DELETE_WINDOW; the app may ask "save?"), a second ✕ within 5 s = Stop (the build's `OUTER_CLOSE_AGAIN_MS`; the first draft said 10 s) | The terminal branch of `render()` + a dead-record gate in `openDesktopApp` + `onClose` sending `close-window` (D2b optional); a dialog / popup closing is **not** the app exiting: the rule reads the **record** (process gone) AND **zero windows in the view**, both | S–M | Low; a launcher that forks and exits (process gone, windows remain) is not mis-closed (the zero-windows condition); a `failed` record **stays** (the error must be visible — the no-silent-failures law) | **Yes** |
+| 3 | When the inner window has full controls, the outer window should show nothing | window.js:85–95 builds a title bar for every window type; desktop-app-window.js:135 calls `createWindow` like any window; the xpra seamless rung has no server-side decorations (recipe desktop-display.js:471–484: xpra is the WM and draws no frame), so GTK's header bar (CSD) is painted inside the pane and our title bar sits on top of it | **Detection (measured M2/M3a)**: in xpra's `new-window` metadata the calculator carries `decorations: 0` (from `_MOTIF_WM_HINTS` with flags∋DECORATIONS and decorations=0, xpra x11/models/window.py:844–849); xterm has **no** `decorations` key at all (no motif hints ⇒ xpra's default -1, not sent) ⇒ the rule `csd = meta.decorations === 0`; `_GTK_FRAME_EXTENTS` is absent without a compositor, `GTK_CSD` is unset, window-type is NORMAL for both — none is a signal. **Dragging (measured M3b)**: dragging the header bar ⇒ GTK sends `_NET_WM_MOVERESIZE` ⇒ xpra (the WM) sends us `initiate-moveresize [wid, x_root, y_root, direction, button, source]` (seamless.py:750–765 / source/window.py:297–302; direction 0–7 = the eight resize edges/corners, 8 = MOVE, 11 = CANCEL) ⇒ we **ignore it** today (xpra-client.js:331) and nothing moves. So the seamless "follow" = wire that packet into a drag/resize of the OUTER window (the inner X window stays fitted at 0,0; the belt is untouched). The app's own maximize/minimize buttons ⇒ `_NET_WM_STATE` ⇒ `window-metadata {maximized|iconic}` (both declared, xpra-proto.js:54) ⇒ map to `toggleMaximize/minimize` (whether GTK4 draws those two buttons under xpra is **unmeasured** — only ✕ was) | §3.3: PURE `seamlessVerdict` + the client's `on.moveresize` + WindowManager's `beginDragFromPointer/beginResizeFromPointer` + the title bar and status strip folded into a 0-height hot zone (top-edge hover reveals for 1.5 s) + a per-window toggle | M (one lane, 1–2 days) | Medium: the things that must stay on top of the app have an honest list (§3.3 table), of which the **agent lease** and the **tab chain** SUSPEND seamless instead of stacking on it; a kiosk-style app that sets decorations 0 without its own close button ends up with no ✕ — the escape is the taskbar's right-click menu (taskbar.js:239) + the top-edge hot zone, always there | **Yes**: auto-seamless when CSD is detected; a per-window toggle in the ⋯ menu |
+| 4 | The app's DPI should be adjustable, ideally derived from VibeSpace's own DPI | .158 already: the launch carries `devicePixelRatio` (launcher:186), `appScaleFor('auto', dpr)` = 2 from DPR 1.5 up else 1 (desktop-apps.js:378–385), `scaleKnobs`: integer GDK_SCALE + Xft.dpi for the fraction (386–392; GTK has no fractional GDK_SCALE on X11, 1.5 scales text only), the setting `desktop.appScale` auto/1/1.5/2 (settings-schema.js:133–141), fixed at launch, a relaunch to change (the description says so), the `2×` chip. **The UI scale is not in it**: `vibespace.uiScale` is body zoom + `--ui-scale` (utils.js:875–889) and the pane is counter-zoomed to net zoom 1 (COUNTER_ZOOM utils.js:848) ⇒ at UI scale 1.25 the chrome is 1.25× and the app 1.0×. Measured M4: DPR 2 + uiScale 125 ⇒ record scale 2 / dpi 96, pane 1123×700 CSS ⇒ X 2246×1400, body zoom 1.25 unused | VibeSpace's own effective scale = `devicePixelRatio × uiScale` (the screen's × what the user declared for this device). Derivation: the integer part by r2's nearest-in-ratio rule (geometric midpoint √2: < 1.414 ⇒ 1, else 2; ≥ 2.83 ⇒ 3), the remainder goes into dpi **upward only** (`dpi = max(96, 96 × eff / gdk)`): 1.00→(1,96); 1.25→(1,120); 1.5→(2,96); 2.0→(2,96); 2.5→(2,120); 3.0→(3,96). GTK widgets follow the integer, text follows dpi (the §7.6 measured rule); Qt derives its fraction from Xft.dpi (unmeasured); xterm faceSize × gdk; Electron/Chromium apps need `--force-device-scale-factor=<fraction>` (unmeasured; a registry row could declare it, later) | `appScaleFor` gains a `uiScale` argument + `scaleKnobs` accepts any effective value in 1..3 (the record already stores `scale` + `dpi`; the chip prints `2.5×`); the window's ⋯ menu "Scale ▸ auto / 1× / 1.5× / 2× / 2.5× / 3×" ⇒ `POST /api/desktop/apps/:id/relaunch {scale}` (a new record with the same exec/args/cwd, the same window swapping ids); the global `desktop.appScale`'s auto = the derived value; a remote app carries the same knobs in its launch op (derived on the hub, applied on the device) | S–M | Low; the honest limits stay: xpra is a pixel stream, a scale change needs a relaunch (GDK_SCALE is read at startup), the client's `dpi` must equal the record's (§7.6 — else xpra rewrites Xft.dpi and doubles the text) | **Yes** |
+| 5 | How the whole feature fits remote hosts; auto seamless setup | `hostFacts` refuses a non-local host by name (desktop-display.js:111–117 / 160–161), the keeper too (:268), the routes answer `unsupported-host` (routes/desktop-apps.js:70–74); the bridge connects to `ws://127.0.0.1:<port>/` (desktop-stream.js:837) and `net.connect(port,'127.0.0.1')` (:729). v1 says "the daemon op is not written yet" | **The shape exists**: browser-serve (a SHARED op table + runner the daemon bundles) + browser-access (`call(hostId, op)`: local in-process / a paired device through an agentd op / an ssh host without a daemon REFUSED by name `host_needs_daemon`) + `forwardCdp` (a hub-side loopback listener → `dm.tcpForward(remotePort)`, the port-forward primitive). desktop-display.js is already a `hostId`-parameterised machine-facts module (fs/child_process only); the agentd's esbuild `--bundle` (package.json:10) packs it statically like browser-serve. The xpra protocol is end to end and the bridge relays bytes ⇒ clipboard/input/geometry/x5 seats need **zero changes**. Impossible: macOS/Windows devices (no X11 — refused by name `no_x11`); ssh hosts without a daemon (an xpra session started over one ssh is an orphan on the first disconnect, with no keeper process — refused, no single-file rung) | §3.5: SHARED `src/desktop-serve.js` (the keeper's "done on the machine" half extracted: facts/launch/stop/status/list/windows/fit/keep-alive) + ORCH `src/server/desktop-access.js` (browser-access verbatim) + the agentd `desktop-serve` op (three-touch rule + capability gate) + the bridge's endpoint through `forwardPort` + `hostId` on records (a one-shot migration) + a machine picker in the launch dialog + "Install xpra on <machine>…" (owner-clicked, plan shown first, passwordless sudo; the fleet = the image) | L (two lanes) | Medium-high: the keeper's 1181 lines inline lifecycle and policy — extracting the SHARED half is the bulk of the lane; the fleet image's xpra 3.1.3 protocol remains OPEN (§9-1/§9-4) — recommend bumping the image to xpra.org's 6.x bookworm packages (D7) rather than measuring 3.1; a rebooted device loses its apps (the hub's records turn `exited` at the next `list`, honestly) | **Yes, but decide D5–D8 first; its own lane** |
+
+## 2. Measurements (2026-09-23, this box)
+
+### 2.1 M1 — clipboard, headless Chrome 153, page `http://<hostname>:<port>` (a hostname, not loopback)
+
+| Item | Result |
+|---|---|
+| `isSecureContext` / `typeof navigator.clipboard` | `false` / `undefined` (the loopback page: `true` — loopback proves nothing) |
+| `document.execCommand('copy')` with no gesture at all | `false`, clipboard unchanged |
+| `execCommand('copy')` **synchronously** inside the keydown handler (trusted Ctrl+C) | `true`, clipboard = the written value |
+| `execCommand('copy')` **asynchronously** (setTimeout) after a trusted Ctrl+C | 0 / 50 / 150 / 300 / 1000 / 3000 / **4800 ms all `true`**, `navigator.userActivation.isActive === true`; **5200 / 7000 ms `false`** (Chrome's 5 s transient-activation window) |
+| Same, with `e.preventDefault()` in keydown (our view's shape) | 150 / 300 / 4800 ms still `true` (activation is independent of preventDefault) |
+| A `copy` event listener's `clipboardData.setData` (with a selection) | works — but with **an empty focused textarea and no selection** (our IME textarea's shape) Chrome **dispatches no copy event** (0) ⇒ the "second Ctrl+C rewrites" route is **rejected** |
+| `navigator.clipboard.writeText` on http under activation | the API does not exist (`hasApi:false`) |
+| Control: Ctrl+V into a textarea on http | the paste event works (today's browser→app path is unaffected) |
+
+### 2.2 M2 — the CSD X properties on a bare Xvfb (no WM — the seamless rung's situation)
+
+| App | `_MOTIF_WM_HINTS` | `_GTK_FRAME_EXTENTS` | `_NET_WM_WINDOW_TYPE` | Other |
+|---|---|---|---|---|
+| gnome-calculator (370×616, min 370×616) | `0x3, 0x1, 0x0, 0x0, 0x0` (flags = FUNCTIONS\|DECORATIONS, functions ALL, **decorations 0**) | none (no compositor ⇒ no shadow margins) | NORMAL | `_GTK_APPLICATION_ID` org.gnome.Calculator; env `GTK_CSD` unset |
+| xterm (484×316, inc 6×13, base 4×4) | **absent** | none | absent | needs server decorations — on the seamless rung it **has no close button at all** |
+
+### 2.3 M3 — on the real product (worktree server + headless Chrome, xpra rung)
+
+| Item | Result |
+|---|---|
+| M3a calculator `new-window` metadata (the client's `client.windows`) | `decorations: 0`, window-type [NORMAL], class [gnome-calculator], size-constraints min [360,616] |
+| M3a xterm | **no `decorations` key**, size-constraints {base [4,4], inc [6,13], min [10,17]} |
+| M3b a trusted 120×64 px drag on the header bar inside the pane | **2 `initiate-moveresize` packets** received (everything else draw/ping/pointer); the VibeSpace window's `left/top` unchanged (70,45); the client's main window (0,0) unchanged; X reports `[0,0,898,616]` unchanged — today the drag **does nothing** |
+| M3c clicking the calculator's own ✕ | **23 ms** `lost-window` packet → **59 ms** view status "The application closed its window" → **61 ms** record `exited` (`exitCode 0`, log `exited: application exited (code 0)`) → the VibeSpace window **stays** (`exists:true`, view `connected`, 0 windows) |
+| M4 a DPR-2 page + `vibespace.uiScale` 125 (body zoom 1.25, `--ui-scale` 1.25) | record `scale 2, dpi 96` (DPR 2 sent); pane **1123×700 CSS** ⇒ X main window **2246×1400** device px, canvas backing 2246×1400 in a 1123×700 CSS box (ratio 2); the app's minimum 720×1232 device px. The UI scale **is not part of it**: chrome 1.25×, app 1.0×. Derived: 2 × 1.25 = 2.5 ⇒ GDK_SCALE 2 + dpi 120 |
+
+## 3. The design, point by point
+
+### 3.1 Clipboard: the gesture window + a one-time HTTPS hint
+
+Rule (PURE, `clipboardDelivery` grows to three states `api | gesture | chip`): a secure page with the API ⇒ `api` (today); else try `copyViaSelection(text)` first — it succeeds within 5 s of the user's last trusted input, and the token lands in that window (the Ctrl+C / Copy click is a trusted event OUR page received before forwarding it to the app); success ⇒ toast "Copied to your clipboard", no chip; failure ⇒ the chip (a copy from outside the window: an agent, a timer, another client). No `copy` event needed (M1b rejected it).
+
+Which routes are seamless and which cannot be, plainly:
+- **Seamless**: https pages (already today); a copy the **user triggers** on an http page (this design).
+- **Not seamless**: a copy on an http page that no gesture on this page caused — an insecure origin cannot write the clipboard without a gesture, a browser rule; the chip stays.
+- **Three routes from http to https for this owner (exact steps)**: ① zero infrastructure: Chrome `chrome://flags/#unsafely-treat-insecure-origin-as-secure`, enter `http://<hostname>:3456`, restart the browser — this browser only; `navigator.clipboard` then exists and today's code is seamless (**unmeasured**, documented Chrome behaviour); ② `tailscale serve --bg 3456` (Tailscale mints the certificate; the address becomes `https://<machine>.<tailnet>.ts.net`); ③ a reverse proxy (Caddy, two lines: `<hostname> { reverse_proxy 127.0.0.1:3456 }`, its local CA trusted once in the browser). The product does no TLS itself (server.js:159 is `http.createServer`, no TLS switch) — **not recommended to add**: a proxy / Tailscale is the usual way, and a cert-path setting would be one more TLS surface to maintain. The hint is one-time per device (`desktopCopyHintShown`) and links to a new section in docs/getting-started.md.
+
+Gate: test-xpra-client §3's fake DOM gains two legs — activation present (`copyViaSelection` injected true) ⇒ no chip + toast; absent ⇒ chip; test-desktop-xpra-window's plain-http leg becomes: a trusted Ctrl+C into the app followed by `xclip -i` within 200 ms ⇒ the secure page reads the app's clipboard, **zero clicks**; negative control = `xclip -i` with no key ⇒ the chip appears.
+
+### 3.2 Close: the app exiting closes our window; the outer ✕ is the app's own close
+
+- Client `render()`: `rec.state === 'exited'` and `windows().length === 0` ⇒ `showToast(t('{app} exited', …))` + `app.wm.closeWindow(winInfo.id)`; `failed` ⇒ the window stays with the red sentence (today). `openDesktopApp(app, id)`'s first GET meeting `exited` ⇒ toast, no window (a dead record replayed by layout sync no longer becomes an empty window). `stoppedBy === 'user'` (Stop pressed) closes too (D2d).
+- Both conditions are required: **only the process gone** (a forking launcher) ⇒ no close — the keeper's marker census already sees the real app process (`evidenceCensus`); recording it as `pids.app` is the keeper's follow-up (not this round); **only the windows gone** (the app closed its main window and keeps running, tray-style) ⇒ today's sentence "The application closed its window" + a Stop button, no auto-close.
+- The outer ✕ (seamless or not): first `client.send(P.closeWindow(mainWid))` (xpra-proto.js:375 = WM_DELETE_WINDOW; the app may ask "save?" — nothing closes then); a second ✕ within 5 s (`OUTER_CLOSE_AGAIN_MS`, the lane brief's number; the first draft said 10 s) ⇒ `POST …/stop`; the app's exit takes the path above. Measured (A r1, 2026-09-24): xterm, which has no client-side decorations, honours WM_DELETE_WINDOW by hanging up its shell and exits with it — an interactive bash ends on the first ✕; a shell that survives SIGHUP (zsh's first-run `zsh-newuser-install` menu — a HOME with no .zshrc) keeps xterm running, and the second ✕ (the toast names it) is the Stop. Multi-client: each client closes its own pane from the broadcast; the x5 seat is released as today (the socket closing = leave). An agent lease (P9b): the app exiting ⇒ the engine's `holderAlive` fails ⇒ the lease goes away through today's `window-leases-updated` path and the agent's next verb gets `window_gone` (an existing refusal).
+- Gate: test-desktop-xpra-window gains a leg — the CSD ✕ ⇒ within 2 s the window is gone from `app.wm.windows` and the toast text matches; a second page closes at the same time; control = a copy with the closing line removed.
+
+### 3.3 Seamless chrome
+
+**The verdict (PURE, `src/lib/desktop-seamless.js`, imports nothing, bundled)**:
+
+```
+seamlessVerdict({ csd, setting, userToggle, lease, chain, phone, connected })
+  → { seamless: bool, why: 'csd' | 'user' | 'setting-off' | 'ssd' | 'lease' | 'chain' | 'phone' | 'disconnected' }
+csd = meta.decorations === 0 (the main window); setting = desktop.seamless 'auto' | 'off'; userToggle = per window 'auto' | 'on' | 'off' (user state desktopAppFrame[appId])
+seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on' ∨ (userToggle==='auto' ∧ setting==='auto' ∧ csd))
+```
+
+**The window's form**: seamless ⇒ `.window.seamless` — the title bar and the status strip fold into a **0-height hot zone** (a class of its own, not `display:none`; the hot zone is the top 6 px); hovering the top edge for 250 ms or holding Alt slides both out for 1.5 s (leaving folds them); the `.window-active` 1 px border stays (focus must remain visible); the resize handles stay (eight empty divs, invisible anyway). **Not seamless** (SSD apps like xterm, or any suspension) = today's window.
+
+**The interaction map**:
+
+| The user does in the app | xpra packet | We |
+|---|---|---|
+| drags the header bar | `initiate-moveresize` direction 8 (MOVE) | `wm.beginDragFromPointer(winId)`: enter `_setupDrag`'s processMove from the current pointer (the same machinery: grid snap, shake bypass, tab-merge hit test, desktop-preview drop); release pointer capture; the X main window stays at 0,0 (the belt untouched) |
+| drags a CSD edge / corner | direction 0–7 | `wm.beginResizeFromPointer(winId, dir)`: `_setupResize`'s handle path (the minimum = the app's minimum, already); pane changes ⇒ the existing refit |
+| keyboard move/resize (Alt+F7/F8 style) | 9 / 10 | as above, the mouse takes over |
+| CANCEL | 11 | end the drag, restore |
+| clicks the app's maximize / minimize | `window-metadata {maximized}` / `{iconic}` | `toggleMaximize` / `minimize` (whether GTK4 draws those buttons under xpra is **unmeasured**; without them, the hot zone / the menu) |
+| clicks the app's ✕ | the app exits | §3.2 |
+| double-clicks the header bar | the app itself (GTK maximizes = the row above) | — |
+| right-clicks the title bar (today's window menu) | — | **the taskbar item's right-click** (taskbar.js:239 `showWindowContextMenu`, the full menu already) + a ⋯ in the hot zone |
+
+**What MUST still be shown on top of the app (the honest list) and where it lives**:
+
+| Thing | Today | In seamless mode | Justifies keeping a minimal bar? |
+|---|---|---|---|
+| the x5 blocked overlay "Active on another client / Resume here" | a whole-pane overlay | unchanged (it covers the app anyway) | no |
+| the "Scaled to fit — the app needs at least w×h" badge | a pane badge (xpra-view.js:110) | unchanged (transient) | no |
+| the plain-http copy chip | the status strip (picture-shell.js:103) | a floating chip at the pane's top-right, auto-hides after 10 s; after §3.1 only for copies from outside the window | no |
+| the disconnected status + Reconnect | the strip | a centred overlay while NOT connected (the picture is gone anyway); hidden once connected | no |
+| the `2×` scale chip, backend chip, CPU/RSS, idle countdown, Keep running, Stop | the strip (desktop-app-window.js:286–304) | visible while the hot zone is revealed; the taskbar's right-click menu "Desktop app ▸ Keep running / Stop / Scale ▸" | no |
+| the idle-stop < 1 min warning | a chip | a toast | no |
+| **the agent-held marker** (P9b: the mode badge / Take over / Hand back, desktop-app-window.js:302–316) | the strip | **seamless SUSPENDED** (the bar shows) — the user must see at a glance that an agent drives; the alternative (a 4 px coloured border + a badge in the hot zone) is cheaper and less visible | **yes** (the one real reason) |
+| the tab chain's tab bar (it lives in the title bar), icon-drag merge, P7's owner/auth badges | the title bar | **seamless SUSPENDED** (entering a chain shows the bar) | yes (structurally) |
+| the focus / active state | the title bar's active background | a 1 px border (CSS) | no |
+
+Conclusion: only the **agent lease** and the **tab chain** deserve a bar, and both are handled by suspending seamless; everything else fits the hot zone / the menu / a toast.
+
+**Default**: auto-seamless when CSD is detected; a per-window ⋯ (in the hot zone) "Window frame ▸ auto / on / off" remembered per app id in user state; a global `desktop.seamless` auto|off (`off` = one switch back to today). A phone (≤768 px) is never seamless (the window is the screen and the title bar is the only way back).
+
+**Gate**: fast test-desktop-seamless (the verdict's full matrix + the suspensions + the toggle's precedence); test-xpra-client §2 gains `initiate-moveresize` ⇒ `on.moveresize` (fake worker); heavy test-desktop-xpra-window gains two legs: the calculator ⇒ `.window.seamless`, title bar `offsetHeight 0`, a 120×64 header-bar drag ⇒ window `left/top` +120/+64 (±2) and the X main window still at (0,0); xterm ⇒ not seamless, the title bar visible; control = M3b's behaviour today (nothing moves).
+
+### 3.4 DPI: derived from VibeSpace's own scale, adjustable per window
+
+- **The derivation (PURE, `appScaleFor(setting, dpr, uiScale)`)**: `eff = clamp(dpr × uiScale, 1, 3)`; `gdk = eff < √2 ? 1 : eff < 2√2 ? 2 : 3` (r2's nearest-in-ratio rule extended to 3); `dpi = max(96, round(96 × eff / gdk))` (the remainder goes upward into dpi only, text is never shrunk below 96). `scaleKnobs(eff)` accepts any effective value and answers `{scale: eff, gdkScale, dpi, env, xresources}` (GDK_SCALE, QT_SCALE_FACTOR = gdk, XTerm faceSize = 8 × gdk × dpi/96). The table:
+
+| eff | gdk | dpi | GTK widgets | text |
+|---|---|---|---|---|
+| 1.00 | 1 | 96 | 1× | 1× |
+| 1.25 | 1 | 120 | 1× | 1.25× |
+| 1.50 | 2 | 96 | 2× (1.33× relative to the chrome) | 2× |
+| 2.00 | 2 | 96 | 2× | 2× |
+| 2.50 | 2 | 120 | 2× | 2.5× |
+| 3.00 | 3 | 96 | 3× | 3× |
+
+- **Where uiScale is read**: the launch request carries `uiScale` beside `dpr` (`uiScale()` utils.js:841); the route validates 1..2 (`UI_SCALE_MIN/MAX`). A remote app carries the same pair in its `launch` op; the device only applies env + xrdb (derived on the hub, like `dpr` today).
+- **Per-window control**: the hot zone / taskbar menu "Scale ▸ auto (2.5×) / 1× / 1.5× / 2× / 3×" ⇒ `POST /api/desktop/apps/:id/relaunch {scale}`: the keeper starts a new record with the same exec/args/cwd/host, the window's `_desktopAppId` and openSpec swap to the new id (the same VibeSpace window, the picture reconnects), the old record is stopped. The description says "changing the scale relaunches the app (unsaved work is lost)", the menu item confirms (createModalShell). The global `desktop.appScale`'s `auto` = the derivation; the explicit 1/1.5/2 stay, 3 is added.
+- **What .158 already did and this leaves alone**: device pixels end to end, `size-constraints` clamping the window, the Watch stage scaling, the client's `dpi` = the record's dpi.
+- **Honest limits**: a change needs a relaunch (GDK_SCALE is read at startup); a fraction only affects text in GTK (an X11 limit); Qt/Electron fractional knobs unmeasured; the vnc-display rung does not scale (whole display).
+- Gate: test-desktop-apps §10 gains the table (six rows + the √2 / 2√2 boundaries + a regression control: uiScale absent = 1 reproduces .158 row by row); heavy §7 gains a leg: uiScale 125 + DPR 2 ⇒ record `scale 2.5, dpi 120`, the calculator's minimum around `[900,1540]` (asserted only as ≥ the 2× values and a text line taller than 2×).
+
+### 3.5 Remote hosts: run the same code where the app lives
+
+**Layers (the CS-separation law + the browser-serve precedent)**:
+
+| Layer | Module | Content |
+|---|---|---|
+| SHARED | `src/desktop-serve.js` (new) | the op table `DESKTOP_SERVE_OPS = ['facts','launch','stop','status','list','windows','fit','keep-alive','relaunch']` + `install({env, dataDir, homeDir, log})` + `runDesktopServeOp(ds, op, params)` — the keeper's **done-on-the-machine half** extracted: X/xpra/app bring-up (today's `bringUp`), part identity (pid+starttime, the marker census), teardown, the fit belt, window enumeration, the machine's own record file (`<dataDir>/desktop-apps.json`; on a device `~/.vibespace/desktop-apps.json`). Every op answers `{ok, code, error}`, never a throw across the wire |
+| ORCH (hub) | `src/server/desktop-app-keeper.js` (slimmed) | registry + policy: hub records (`data/desktop-apps.json` + `hostId`), the cap, the idle policy, runaway thresholds (samples come from the device's `status`), the x5 election, broadcasts, boot adoption by asking every machine `list` |
+| ORCH (hub) | `src/server/desktop-access.js` (new, browser-access verbatim) | `call(hostId, op, params)`: local ⇒ the in-process runner; a paired device ⇒ `dm.desktopServe(op, params)`; an ssh host without a daemon ⇒ `host_needs_daemon` (refused by name, never a silent local fallback); `forwardPort(hostId, port)` = `forwardCdp` verbatim (a hub loopback listener → `dm.tcpForward`, reference-counted, the device resolved per connection) |
+| daemon | `src/agentd/agentd.js` + `client.js` | the `desktop-serve` op: the handler `require('./../desktop-serve.js')` (bundled) and replies `mux.control({op:'desktop-serve-result', id, result})`; client.js `desktopServe(op, params)` gated on `capabilities.includes('desktop-serve')` (an old daemon is never asked — an unknown op hangs); `'desktop-serve-result'` joins the id-keyed routing set at client.js:253 (three-touch rule, touch 1; no unsolicited pushes ⇒ touch 2 n/a; no watches ⇒ touch 3 n/a) |
+| bridge | `src/server/desktop-stream.js` | the ONE change: the upstream endpoint comes from `streamEndpointFor(rec)` — local `127.0.0.1:<port>`, remote `127.0.0.1:<forwardPort>`; the same for the xpra ws and the rfb tcp; x5 seats, backpressure, keepalive, named closes, the clipboard/input policy are **unchanged** (the protocol is end to end) |
+| routes / UI | routes + launcher + window | `host` is no longer refused: the launch dialog gains a machine picker (this machine + paired devices with the `desktop-serve` capability; ssh-only hosts greyed "needs the agent"); each machine's catalog greyed by ITS facts (never hidden); the window title carries the host label (a display string, never into a spawn) |
+
+**Remote clipboard / input**: xpra's `clipboard-token`, `key-action`, `configure-window` all ride the same ws, forwarded from the hub's loopback to the device's loopback into xpra — nothing parses them in between; §3.1's gesture window is browser-side and machine-agnostic. Latency: + the device link's RTT (the CDP forward precedent; §7.1: 265 ms per keystroke at 200 ms RTT).
+
+**Auto seamless setup**:
+- **Detectable**: the `facts` op (`binOnPath` xpra/Xvfb/xauth/xdotool/xwininfo/xdpyinfo + `xpra --version` + whether each registry row's exec is on PATH) — the dialog shows each machine's ladder verdict and reason (today's chip words).
+- **Installable, never silently**: ① fleet pods ⇒ the image only (Dockerfile:23–38 already carries xpra + xterm + xdotool + wmctrl; D7 decides the version); ② a paired Linux box ⇒ the owner clicks "Install xpra on <machine>…" (the rclone one-click shape, mounts.js:310): `facts` first for the distro and codename, **the plan shown first** (`apt install xpra xterm xdotool xauth` when the distro's xpra is ≥ 5, else add xpra.org's repository `https://xpra.org/<dist>/<codename>` + key, pinned to 6.x), passwordless sudo required (the `_sudoAvailable` probe, plugins.js:295) — else refused by name with the commands handed to the owner to paste; the run streams its log into the dialog through `runCmd`; ③ this machine ⇒ as ②.
+- **Impossible**: macOS / Windows devices — no X server, the seamless rung does not exist (XQuartz + xpra is a manual install we do not drive); the dialog says `no_x11` by name. ssh hosts without a daemon — `host_needs_daemon`; the one-click "install the agent on this host" is the existing path.
+
+**Record migration**: every record in `data/desktop-apps.json` gains `hostId: 'local'` (the one-shot migration `2026-09-desktop-apps-host-key` in src/server/migrations.js through the shared runner — ledger-keyed, retried next boot on failure); device-side records are written by the device's own op into `~/.vibespace/desktop-apps.json` (the daemon's DEVICE_MIGRATIONS table owns that shape later); a hub record = the device's record + hub-only fields (viewers, idle policy, pane facts). Boot: the hub asks the in-process `list` for this machine and `list` on every online device, adopts by `hostId:id`; an offline device's records keep an `unknown-host-offline` state and are asked again when it returns.
+
+**Tests**: fast `test-desktop-serve` (the op-table census: every op the hub calls is in the SHARED table, the daemon handler covers each by name, the hello-ack capability string; every op's failure is `{ok:false, code}`); **real-daemon** `test-desktop-remote` (the test-sysinfo-op template: an agentd started from the build output as a fake paired device in a scratch HOME ⇒ `facts` ⇒ `launch xterm` ⇒ `forwardPort` ⇒ a real hello through the bridge ⇒ a keystroke into a file ⇒ `stop`; **the capability gate**: a daemon copy with the capability removed ⇒ `host_needs_daemon` within 1 s, never a hang); heavy = the existing test-desktop-xpra-window run once more with `host=<the fake device>` on its main legs; test-migrations gains row 43.
+
+## 4. The trimmed set (build these)
+
+| Build | Content | Decide first |
+|---|---|---|
+| **A** (one lane, S+S+S–M, needs no decision) | §3.1 the gesture window + the one-time hint; §3.2 app exit ⇒ window closes, dead records open nothing, outer ✕ ⇒ `close-window` (twice = Stop); §3.4 the `DPR × uiScale` derivation + per-window Scale ▸ relaunch + `desktop.appScale` auto = derived | none (D1/D2/D4 at their defaults; the owner objects, we change) |
+| **B** (one lane, M) | §3.3 seamless: the PURE verdict + `initiate-moveresize` wired into the outer drag/resize + the hot zone + the suspensions + the per-window toggle + the global off | D3 |
+| **C** (two lanes, L) | §3.5 remote: the desktop-serve extraction + desktop-access + the daemon op + the bridge's endpoint + the record migration + the machine picker + the install rung + three suites | D5–D8 |
+| Not this round | in-product TLS; Electron/Qt fractional-scale knobs (D9); adopting a forking launcher's real pid; a GTK Broadway rung | — |
+
+## 5. The decisions only the owner can make
+
+| # | Decision | Recommended default |
+|---|---|---|
+| D1 | Write the clipboard on plain http through the gesture window (within 5 s of the user's own Ctrl+C / click), the chip outside it; a one-time HTTPS hint and which route it points to | **Yes**; one hint per device, dismissable; document three routes (Chrome flag / Tailscale serve / Caddy), no TLS in the product |
+| D2 | (a) app exit ⇒ the window closes + a toast; (b) the outer ✕ ⇒ `close-window` to the app first, a second ✕ within 5 s = Stop; (c) `failed` stays; (d) Stop closes the window too | all **yes** |
+| D3 | Seamless default: auto on detected CSD; suspensions = agent lease / tab chain / phone; the reveal = top-edge hover 250 ms or Alt; the per-window toggle remembered per app id; the global `desktop.seamless` auto/off | as recommended |
+| D4 | The derivation = `DPR × uiScale`, the integer nearest in ratio, the remainder upward into dpi only; 1.5× stays an explicit choice; per-window Scale ▸ relaunch with a confirm | as recommended |
+| D5 | Remote scope: paired devices with the daemon only; ssh hosts without a daemon refused by name (no single-file rung) | **Yes** |
+| D6 | The install rung: owner-clicked on a paired Linux box, the plan shown first, passwordless sudo required (the distro's apt when ≥ 5, else xpra.org's repo, pinned 6.x); the fleet through the image only | **Yes** |
+| D7 | The fleet image's xpra: 3.1.3 (bookworm) is unmeasured — either measure 3.1 in a bookworm container, or switch the image to xpra.org's 6.x bookworm packages so the whole fleet speaks one protocol version | **Switch the image to 6.x** (skips a measurement nobody wants; closes §9-1/§9-4) |
+| D8 | Where remote records live: the device holds `~/.vibespace/desktop-apps.json` + the hub's registry (apps survive a hub death and are adopted when it returns) vs hub-only | **Device-held + hub registry** |
+| D9 | Electron/Qt fractional-scale knobs (a registry row's `scaleArg`) | **Not this round** |
+
+## 6. What needs the owner
+
+1. Answers to D1–D9 (the defaults count as "agreed").
+2. HTTPS: pick one of the three routes (§3.1), or say "the chip is fine, no HTTPS" — lane A does not block on it.
+3. Remote: name one Linux device **paired with the daemon** for lane C's real-machine leg (an ssh-only host is not enough — it needs the agent installed first), and whether it has passwordless sudo (decides whether the install rung can be measured there).
+4. The fleet: approve bumping the image to xpra.org 6.x (D7), or ask for the 3.1 measurement first.
+5. Whether GTK4 shows minimize/maximize in the header bar under xpra — measurable here in a 30 s script, just not measured this round; if wanted, lane B measures it and pins the mapping in the suite.
+
+## 7. Proposed build order
+
+| Order | Lane | Content | Gate |
+|---|---|---|---|
+| 1 | A | §3.1 + §3.2 + §3.4 (no decision needed; each item's own fast leg + new legs in heavy test-desktop-xpra-window) | test-xpra-client, test-desktop-apps §10, test-window-minsize, test-desktop-xpra-window |
+| 2 | B | §3.3 (after D3; after merging with A it runs its heavy suites on the merged tree itself — the 2.369.134 lesson) | test-desktop-seamless (new, fast), test-xpra-client §2, test-desktop-xpra-window |
+| 3 | C1 | the desktop-serve extraction + desktop-access + the daemon op + the record migration (after D5/D8; the local behaviour stays **byte-identical** — test-desktop-app-keeper / test-desktop-xpra all green is the extraction's gate) | test-desktop-serve (new), test-migrations, test-architecture's SHARED census |
+| 4 | C2 | the bridge's endpoint + the machine picker + the install rung + the real-daemon suite (after D6/D7) | test-desktop-remote (new, real daemon), test-desktop-xpra-window's `host=` leg |
+
+## 8. Unverified / honest limits
+
+1. The gesture window in Firefox / Safari: Firefox has the same 5 s transient activation (per spec), Safari may require a synchronous handler — both unmeasured; the fallback is the chip, never worse than today.
+2. Chrome's `unsafely-treat-insecure-origin-as-secure` flag making `navigator.clipboard` appear — documented behaviour, unmeasured.
+3. Whether GTK4 draws minimize/maximize under xpra, and whether `window-metadata {maximized|iconic}` arrives as expected — unmeasured (§6-5).
+4. `initiate-moveresize` directions 0–7 from a CSD edge/corner — only MOVE (8) was measured.
+5. Qt's fractional `QT_SCALE_FACTOR`, Electron's `--force-device-scale-factor` — unmeasured (D9).
+6. The fleet image's xpra 3.1.3 protocol — still OPEN (D7 recommends bypassing it).
+7. Real latency over a device link and x5 seat switches across it — unmeasured (no paired device available); §7.1's netem numbers are an upper-bound estimate on the same ws.
+8. An app that sets `decorations` 0 without its own close button (kiosk / splash) goes seamless automatically — the escapes are always there (the hot zone, the taskbar menu, Alt), but the first time may puzzle; the global `desktop.seamless=off` is the one-switch retreat.

@@ -82,6 +82,8 @@ is_code_path() {
     # (a) GATE INPUTS that merely LOOK like documentation.
     CLAUDE.md|CHANGELOG.md|docs/kb-*.md|docs/design-*.md|docs/agent/*|docs/examples/*) return 0 ;;
     docs/README.md|docs/plugins.md|docs/settings.md|docs/keyboard-shortcuts.md) return 0 ;;
+    # the desktop copy hint links its "## HTTPS for seamless copy" section and test-xpra-client reads it (2.369.166)
+    docs/getting-started.md) return 0 ;;
     # the r4 integrations mockups: test-oauth-field-parity reads the Edit dialog's button order off one (2.369.165)
     docs/mockups/*) return 0 ;;
     # (b) documentation: nothing the gate reads.

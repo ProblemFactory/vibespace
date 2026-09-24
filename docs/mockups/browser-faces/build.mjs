@@ -1,0 +1,510 @@
+#!/usr/bin/env node
+// B-d03a — the three browser faces: MOCKUP GENERATOR (docs only, no product code).
+// Emits direction-a|b|c.html beside this file. Each file is STANDALONE: the
+// product rules it needs are copied from public/style.css, chat.css and
+// viewers.css into its own <style> block (dark theme values), under the
+// product's own class names, with the product's own SVG glyphs (icons.js /
+// index.html / sidebar-rail.js / window-types registrations). Mock-only rules
+// carry a `mock-` prefix. Labels are zh by default; `?lang=en|ja` swaps them
+// (the i18n-length column of the rubric is measured on the same DOM);
+// `?view=phone` is the 390 px variant. Reproduce: `node build.mjs`, then
+// `node shoot.mjs` (headless Chrome over CDP + a pixel check per [data-face]).
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const here = path.dirname(fileURLToPath(import.meta.url));
+
+// ── the product's glyphs, verbatim ──
+const S16 = (d, w = 12) => `<svg viewBox="0 0 16 16" width="${w}" height="${w}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const R24 = (d) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const G = {
+  web: '<circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c-2 2-2 10 0 12M8 2c2 2 2 10 0 12"/>',                       // icons.js UI_ICONS.web = #btn-browser = window type `browser`
+  live: '<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>', // window type `browser-live`
+  profiles: '<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01M4 8h4M4 10.5h6"/>', // window type `browser-profiles`
+  apps: '<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/>',                 // APPS_ICON = #btn-desktop-apps = window type `desktop-app`
+  appBrowser: '<rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9.5" r="2.6"/><path d="M5.4 9.5h5.2M8 6.9c-1 .9-1 4.3 0 5.2M8 6.9c1 .9 1 4.3 0 5.2"/>', // PROPOSED (direction C): the app window with the globe inside
+  terminal: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 6l2.5 2-2.5 2M8.5 10.5h3"/>',
+  files: '<path d="M2 3h4l2 2h6v8H2V3z"/>',
+  plus: '<path d="M8 3v10M3 8h10"/>',
+  robot: '<rect x="3" y="4" width="10" height="9" rx="2"/><circle cx="6" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="8" r="1" fill="currentColor" stroke="none"/><path d="M8 1v3M4 7h8"/><path d="M1 8v3M15 8v3"/>',
+  folder: '<path d="M2 4h4l2 2h6v7a1 1 0 01-1 1H3a1 1 0 01-1-1V4z"/>',
+  wrench: '<path d="M9.8 4.2a.67.67 0 000 .93l1.07 1.07a.67.67 0 00.93 0l2.51-2.51a4 4 0 01-5.29 5.29l-4.61 4.61a1.41 1.41 0 01-2-2l4.61-4.61a4 4 0 015.29-5.29L9.8 4.2z"/>',
+  chart: '<path d="M2 13h12M4 11V7M8 11V4M12 11V9"/>',
+  puzzle: '<path d="M9 3v4M15 3v4M7 7h10v5a5 5 0 01-10 0zM12 17v4"/>',
+  cog: '<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>',
+  key: '<circle cx="5.5" cy="10.5" r="3"/><path d="M8 8l6-6M11 5l2 2M9.5 6.5l2 2"/>',
+  chat: '<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>',
+  help: '<circle cx="8" cy="8" r="6.2"/><path d="M6 6.3a2 2 0 013.9.6c0 1.3-1.9 1.6-1.9 2.8M8 12h.01"/>',
+  brush: '<path d="M3 13c1.5 0 2.5-1 2.5-2.5L13 3l-1.5-1.5-7.5 7.5C4 9 3 10 3 11.5z"/>',
+  monitor: '<rect x="1.5" y="2.5" width="13" height="9" rx="1"/><path d="M8 11.5V14M5 14h6"/>',
+  hourglass: '<path d="M4 2h8M4 14h8M5.5 2v2.2c0 1.3 2.5 2.5 2.5 3.8s-2.5 2.5-2.5 3.8V14M10.5 2v2.2c0 1.3-2.5 2.5-2.5 3.8s2.5 2.5 2.5 3.8V14"/>',
+  lock: '<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5 7V5a3 3 0 016 0v2"/>',
+};
+const RAIL = { // sidebar-rail.js RAIL_ICONS (24-grid)
+  folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  tasks: '<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="11" width="12" height="4" rx="1"/><rect x="3" y="18" width="15" height="4" rx="1"/>',
+  mounts: '<rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><circle cx="6.5" cy="6.5" r="0.8" fill="currentColor"/><circle cx="6.5" cy="17.5" r="0.8" fill="currentColor"/>',
+  ports: '<path d="M9 7V3M15 7V3"/><rect x="6" y="7" width="12" height="8" rx="2"/><path d="M12 15v6"/>',
+  agents: '<rect x="5" y="8" width="14" height="10" rx="2"/><circle cx="9.5" cy="13" r="1" fill="currentColor"/><circle cx="14.5" cy="13" r="1" fill="currentColor"/><path d="M12 4v4M8 18v2M16 18v2"/>',
+  plugins: '<path d="M9 3v4M15 3v4M7 7h10v5a5 5 0 0 1-10 0zM12 17v4"/>',
+  jobs: '<rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M6.5 7h.01M6.5 17h.01"/>',
+  channels: '<path d="M4 5h16v10h-9l-4 3.5V15H4z"/><path d="M8 9h8M8 12h5"/>',
+  system: '<path d="M12 12l3.5-3.5"/><path d="M5 19a9 9 0 1 1 14 0"/>',
+  browser: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.3 3 14.7 0 18M12 3c-3 3.3-3 14.7 0 18"/>', // the globe again (RAIL_ICONS.browser)
+  browserLive: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M6.5 7h.01M9.5 7h.01"/><circle cx="12" cy="14" r="2.2"/>', // PROPOSED rail glyph = the `browser-live` window glyph on the 24-grid
+  diagnostics: '<path d="M3 12h4l2-7 4 14 2-7h6"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+};
+const GEAR_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>';
+
+// ── trilingual label: zh in the DOM, en/ja swapped in by ?lang= ──
+const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+const T = (en, zh, ja) => `<span class="t" data-en="${esc(en)}" data-ja="${esc(ja)}">${esc(zh)}</span>`;
+
+// ── copied product rules (public/style.css · chat.css · viewers.css, dark values) ──
+const BASE_CSS = `
+:root, [data-theme="dark"] {
+  --accent-fg: #042f2a; --magenta: #c678dd; --cyan: #56b6c2; --hover-overlay: rgba(255,255,255,0.1);
+  --bg-root: #0c0c18; --bg-workspace: #111122; --bg-window: #1a1a30;
+  --bg-titlebar: #14142a; --bg-titlebar-active: #1a1a38; --bg-toolbar: #0e0e1e;
+  --bg-taskbar: #0e0e1e; --bg-input: #12122a; --bg-hover: rgba(45,212,191,0.10);
+  --bg-dialog: #1a1a30; --bg-sidebar: #0e0e1e;
+  --accent: #2dd4bf; --accent-hover: #5eead4; --accent-dim: rgba(45,212,191,0.25);
+  --text: #e2e8f0; --text-secondary: #94a3b8; --text-dim: #8890a8;
+  --border: rgba(255,255,255,0.07); --border-active: rgba(45,212,191,0.4);
+  --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #3b82f6;
+  --radius: 8px; --radius-sm: 4px;
+  --title-height: 32px; --toolbar-height: 40px; --taskbar-height: 44px;
+  --shadow-window: 0 8px 32px rgba(0,0,0,0.4); --shadow-active: 0 12px 40px rgba(0,0,0,0.5);
+  --transition: 0.15s ease;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; font-size: 13px; color: var(--text); background: var(--bg-root); overflow: hidden; user-select: none; }
+/* ── Toolbar (style.css 879–916) ── */
+#toolbar { background: var(--bg-toolbar); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 6px 8px; gap: 8px; flex-shrink: 0; }
+.toolbar-left { display: flex; align-items: center; gap: 6px; min-width: 160px; }
+.toolbar-center { flex: 1; display: flex; justify-content: center; }
+.toolbar-right { display: flex; align-items: center; gap: 4px; min-width: 160px; justify-content: flex-end; }
+.toolbar-title { font-weight: 600; font-size: 13px; background: linear-gradient(135deg, var(--accent), var(--accent-hover)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.toolbar-action { background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-hover); padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 11px; font-weight: 500; white-space: nowrap; transition: all var(--transition); display: inline-flex; align-items: center; gap: 5px; height: 26px; line-height: 1; }
+.toolbar-action svg { display: block; flex-shrink: 0; }
+.toolbar-action:hover, .toolbar-action.mock-pressed { background: color-mix(in srgb, var(--accent) 20%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text); }
+.icon-btn { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 14px; transition: all var(--transition); }
+.icon-btn:hover { background: var(--bg-hover); color: var(--text); }
+/* ── Sidebar + activity rail (style.css 100–119, 3559–3583) ── */
+#sidebar { width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+#sidebar.rail-on { display: flex; flex-direction: row; }
+#sidebar-rail { width: 44px; flex: 0 0 44px; display: flex; flex-direction: column; align-items: center; padding: 6px 0; gap: 2px; border-right: 1px solid var(--border); background: var(--bg-secondary); }
+.sidebar-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.sidebar-title { font-weight: 600; font-size: 14px; color: var(--text); }
+.session-items { padding: 6px; }
+.session-item-card { padding: 5px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; transition: all var(--transition); font-size: 12px; }
+.session-item-card .mock-sub { font-size: 10px; color: var(--text-dim); margin-top: 2px; display: flex; align-items: center; gap: 4px; }
+.rail-item { position: relative; width: 40px; height: 38px; display: flex; align-items: center; justify-content: center; background: none; border: none; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); transition: var(--transition); }
+.rail-item:hover { color: var(--text); background: var(--hover-overlay); }
+.rail-item.active { color: var(--text); }
+.rail-item.active::before { content: ''; position: absolute; left: -2px; top: 7px; bottom: 7px; width: 2.5px; border-radius: 2px; background: var(--accent); }
+.rail-spacer { flex: 1; }
+.rail-badge { position: absolute; top: 2px; right: 2px; min-width: 13px; height: 13px; padding: 0 3px; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font-size: 9px; font-weight: 700; line-height: 13px; text-align: center; pointer-events: none; }
+/* ── Workspace + windows (style.css 923, 981–1032) ── */
+#workspace { position: relative; flex: 1; background: var(--bg-workspace); overflow: clip; }
+.window { position: absolute; background: var(--bg-window); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); display: flex; flex-direction: column; overflow: hidden; min-width: 320px; min-height: 180px; }
+.window.window-active { border-color: var(--border-active); box-shadow: var(--shadow-active); }
+.window-titlebar { height: var(--title-height); background: var(--bg-titlebar); display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 10px; cursor: grab; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+.window-active .window-titlebar { background: var(--bg-titlebar-active); }
+.window-icon-stack { display: inline-flex; align-items: center; gap: 4px; margin-right: 6px; flex-shrink: 0; color: var(--text-secondary); }
+.window-title { font-size: 11px; font-weight: 500; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px; }
+.window-active .window-title { color: var(--text); }
+.window-controls { display: flex; gap: 3px; align-items: center; flex-shrink: 0; }
+.win-btn { width: 20px; height: 20px; border: none; background: transparent; color: var(--text-dim); border-radius: 3px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; line-height: 1; }
+.window-content { flex: 1; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+/* ── Taskbar (style.css 1231, 1386–1408) ── */
+#taskbar { height: var(--taskbar-height); background: var(--bg-taskbar); border-top: 1px solid var(--border); display: flex; align-items: center; padding: 0 6px; gap: 3px; flex-shrink: 0; }
+.taskbar-item { padding: 3px 8px; background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer; max-width: 200px; min-width: 60px; overflow: hidden; display: flex; align-items: center; gap: 6px; }
+.taskbar-item.active { background: var(--accent-dim); border-color: var(--border-active); color: var(--text); }
+.taskbar-icon { flex-shrink: 0; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.taskbar-text { display: flex; flex-direction: column; min-width: 0; }
+.taskbar-title { font-size: 10px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbar-subtitle { font-size: 9px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ── Dialogs / createModalShell (style.css 1449–1510) ── */
+.dialog-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); z-index: 99998; display: flex; align-items: center; justify-content: center; }
+.dialog { background: var(--bg-dialog); border: 1px solid var(--border); border-radius: calc(var(--radius) * 1.5); box-shadow: 0 16px 48px rgba(0,0,0,0.5); width: 440px; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column; }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.dialog-header h3 { font-size: 14px; font-weight: 600; }
+.dialog-close { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 2px 5px; border-radius: var(--radius-sm); }
+.dialog-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+.dialog-hint { font-size: 11px; color: var(--text-dim); line-height: 1.45; margin: 0; }
+.dialog-footer { padding: 10px 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 6px; }
+.btn-create { padding: 5px 14px; background: var(--accent); border: 1px solid var(--accent); color: var(--accent-fg, #fff); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-weight: 500; }
+.btn-cancel { padding: 5px 14px; background: transparent; border: 1px solid var(--border); color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; }
+.mounts-btn { border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); border-radius: var(--radius-sm); padding: 3px 9px; font-size: 11px; cursor: pointer; }
+.mounts-btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.file-tool-btn { background: transparent; border: 1px solid transparent; color: var(--text-secondary); width: 24px; height: 24px; border-radius: var(--radius-sm); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.file-path-input { flex: 1; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 2px 6px; border-radius: var(--radius-sm); font-size: 11px; font-family: 'SF Mono', 'Fira Code', monospace; }
+/* ── ⚙ popover + gear tree (style.css 95–99, 2407–2451, 2728) ── */
+.global-settings-popover { position: absolute; background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 6px 10px; min-width: 210px; z-index: 20000; }
+.gs-menu { display: flex; flex-direction: column; }
+.gs-menu-item { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin: 0 -4px; border-radius: var(--radius-sm); font-size: 12px; color: var(--text); cursor: pointer; }
+.gs-menu-item:hover, .gs-menu-item[aria-expanded="true"] { background: var(--bg-hover); }
+.gs-menu-item.has-sub .gs-menu-label { flex: 1 1 auto; min-width: 0; }
+.gs-menu-item.has-sub::after { content: '\\25C2'; margin-left: 8px; opacity: 0.5; flex: 0 0 auto; }
+.gs-head-caption { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.gs-flyout { position: absolute; right: 100%; top: -4px; min-width: 200px; display: none; flex-direction: column; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); padding: 4px; z-index: 1; cursor: default; }
+.gs-flyout.open { display: flex; }
+.gs-flyout .gs-menu-item { margin: 0; white-space: nowrap; }
+.gs-menu-sep { height: 1px; background: var(--border); margin: 5px -4px; }
+.gs-menu-icon { display: inline-flex; width: 15px; justify-content: center; color: var(--text-secondary); }
+/* ── Desktop apps catalog cards (style.css 2284–2331) ── */
+.dialog.desktop-launch { width: min(760px, 94vw); }
+.desktop-launch-intro { margin: 0; font-size: 12px; line-height: 1.5; color: var(--text); }
+.desktop-launch-avail { font-size: 11px; color: var(--text-secondary); }
+.desktop-launch-sec { min-width: 0; }
+.desktop-launch-sec h4 { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
+.desktop-launch-count { font-weight: 400; font-size: 11px; }
+.desktop-launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.desktop-launch-card { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 8px; row-gap: 1px; align-items: center; text-align: left; min-width: 0; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); color: inherit; cursor: pointer; font: inherit; }
+.desktop-launch-card-icon { grid-row: 1 / span 2; display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; color: var(--accent); font-size: 18px; }
+.desktop-launch-card-icon svg { width: 18px !important; height: 18px !important; }
+.desktop-launch-card-label { font-size: 12px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-launch-card-sub { font-size: 10px; color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-launch-card.is-unavailable { opacity: .55; }
+.desktop-launch-run-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; }
+.desktop-launch-run-row .desktop-app-row-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-app-row-state { font-size: 10px; color: var(--text-secondary); }
+.desktop-app-chip { font-size: 10px; color: var(--text-secondary); padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; }
+.desktop-app-chip-backend { color: var(--accent); }
+/* ── Chat status bar (chat.css 42–44, 90–101, 131) ── */
+.chat-status-bar { display: flex; align-items: center; gap: 10px; padding: 3px 16px; font-size: 10px; color: var(--text-dim); border-top: 1px solid var(--border); flex-shrink: 0; min-height: 20px; background: var(--bg-taskbar); white-space: nowrap; overflow: hidden; }
+.chat-status-model { font-weight: 700; color: var(--bg-root); background: var(--accent); padding: 0 6px; border-radius: var(--radius-sm); font-size: 9px; letter-spacing: 0.3px; }
+.chat-status-browser { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; }
+.chat-status-browser.amber { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; }
+.chat-status-browser svg { width: 10px; height: 10px; flex-shrink: 0; }
+.chat-status-clickable { cursor: pointer; }
+.chat-status-dim { color: var(--text-dim); margin-left: 1px; }
+.chat-status-perm { display: inline-flex; align-items: center; gap: 3px; }
+/* ── Context menu + the phone sheet (viewers.css 487–496, style.css 2050–2055) ── */
+.context-menu { position: absolute; background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 4px 0; z-index: 99999; min-width: 160px; }
+.context-menu-item { padding: 5px 12px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.context-menu-item:hover { background: var(--bg-hover); }
+.context-menu.mobile-sheet { left: 8px; right: 8px; top: 48px; bottom: auto; width: auto; max-width: none; padding: 6px 0; z-index: 90001; }
+.mobile-sheet .context-menu-item { min-height: 44px; font-size: 14px; gap: 12px; padding: 8px 16px; }
+.mobile-sheet .context-menu-item svg { width: 20px; height: 20px; flex-shrink: 0; }
+/* ── Phone nav (style.css 1867) ── */
+#mobile-nav { display: none; height: 44px; align-items: center; gap: 8px; padding: 0 12px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+#mobile-nav-menu, #mobile-nav-new { background: none; border: none; color: var(--text); font-size: 22px; cursor: pointer; padding: 4px 8px; flex-shrink: 0; }
+.mobile-nav-title { flex: 1; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.empty-hint { padding: 12px; text-align: center; color: var(--text-dim); font-size: 11px; }
+`;
+
+// ── mock-only frame (never product CSS) ──
+const MOCK_CSS = `
+body { display: flex; flex-direction: column; }
+#main { flex: 1; display: flex; min-height: 0; }
+.mock-chat { flex: 1; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.mock-msg { border-radius: var(--radius-sm); padding: 6px 10px; font-size: 11px; line-height: 1.5; color: var(--text-secondary); border: 1px solid var(--border); background: var(--bg-input); max-width: 78%; }
+.mock-msg.user { align-self: flex-end; border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.mock-page { flex: 1; background: #fff; color: #1e293b; padding: 18px 22px; font-size: 12px; line-height: 1.6; overflow: hidden; }
+.mock-page h2 { font-size: 18px; margin-bottom: 6px; }
+.mock-page p { margin-bottom: 8px; color: #475569; }
+.mock-page .mock-line { height: 8px; border-radius: 4px; background: #e2e8f0; margin: 6px 0; }
+.mock-xpra { flex: 1; background: #202124; display: flex; flex-direction: column; overflow: hidden; }
+.mock-xpra-tabs { height: 34px; background: #35363a; display: flex; align-items: flex-end; padding: 0 8px; gap: 4px; }
+.mock-xpra-tab { height: 28px; padding: 0 14px; border-radius: 8px 8px 0 0; background: #202124; color: #e8eaed; font-size: 11px; display: flex; align-items: center; gap: 6px; }
+.mock-xpra-tab.dim { background: transparent; color: #9aa0a6; }
+.mock-xpra-url { height: 32px; background: #202124; display: flex; align-items: center; padding: 0 10px; gap: 8px; color: #9aa0a6; font-size: 11px; }
+.mock-xpra-url span { flex: 1; background: #303134; border-radius: 14px; padding: 4px 12px; color: #e8eaed; }
+.mock-bar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--bg-titlebar); font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
+.mock-bar .mock-url { flex: 1; font-family: 'SF Mono', 'Fira Code', monospace; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mock-mode { font-weight: 600; color: var(--accent); }
+.mock-live { flex: 1; background: #0b0b14; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.mock-live .mock-page { position: absolute; inset: 14px; border-radius: 4px; }
+.mock-cursor { position: absolute; left: 46%; top: 42%; display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--accent); }
+.mock-cursor i { display: block; width: 12px; height: 12px; border: 2px solid var(--accent); border-radius: 50%; }
+.mock-callout { position: fixed; z-index: 100000; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: var(--yellow); color: #1a1a1a; font-size: 11px; font-weight: 700; box-shadow: 0 0 0 2px rgba(0,0,0,0.5); pointer-events: none; }
+.mock-legend { position: absolute; left: 14px; bottom: 12px; z-index: 100000; font-size: 10px; color: var(--text-secondary); background: color-mix(in srgb, var(--bg-dialog) 88%, transparent); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 8px; line-height: 1.5; max-width: 420px; }
+.mock-legend b { color: var(--yellow); }
+.mock-tip { position: fixed; background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 3px 8px; font-size: 11px; color: var(--text); white-space: nowrap; z-index: 30000; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+.mock-tip::before { content: ''; position: absolute; left: -5px; top: 50%; width: 8px; height: 8px; background: var(--bg-dialog); border-left: 1px solid var(--border-active); border-bottom: 1px solid var(--border-active); transform: translateY(-50%) rotate(45deg); }
+.mock-ws-note { position: absolute; right: 12px; bottom: 10px; font-size: 10px; color: var(--text-dim); z-index: 100000; }
+/* the 390 px phone variant: one surface, the product's ≤768 px shape */
+body[data-view="phone"] #toolbar, body[data-view="phone"] #sidebar, body[data-view="phone"] #taskbar, body[data-view="phone"] .mock-desktop-only { display: none !important; }
+body[data-view="phone"] #mobile-nav { display: flex; }
+body[data-view="phone"] .window { left: 0 !important; top: 0 !important; width: 100% !important; height: 100% !important; border-radius: 0; border: none; box-shadow: none; min-width: 0; }
+body[data-view="phone"] .window.mock-phone-hide { display: none !important; }
+body[data-view="phone"] .mock-legend, body[data-view="phone"] .mock-callout, body[data-view="phone"] .mock-tip, body[data-view="phone"] .mock-ws-note { display: none !important; }
+`;
+
+const SWAP_JS = `<script>(function(){var q=new URLSearchParams(location.search);var v=q.get('view');if(v)document.body.dataset.view=v;var l=q.get('lang');if(l==='en'||l==='ja'){document.documentElement.lang=l;document.querySelectorAll('.t').forEach(function(e){var s=e.getAttribute('data-'+l);if(s!=null)e.textContent=s;});}
+var note=document.querySelector('.mock-ws-note');if(note)note.textContent='Direction '+document.body.dataset.dir.toUpperCase()+' · '+innerWidth+'×'+innerHeight+' · dark';
+requestAnimationFrame(function(){document.querySelectorAll('.mock-callout[data-for]').forEach(function(c){var t=document.querySelector(c.dataset.for);if(!t)return;var r=t.getBoundingClientRect();if(!r.width){c.style.display='none';return;}c.style.left=(r.left-9)+'px';c.style.top=(r.top-9)+'px';});
+document.querySelectorAll('.mock-tip[data-for]').forEach(function(c){var t=document.querySelector(c.dataset.for);if(!t)return;var r=t.getBoundingClientRect();if(!r.width){c.style.display='none';return;}c.style.left=(r.right+8)+'px';c.style.top=(r.top+r.height/2-c.offsetHeight/2)+'px';});
+document.body.dataset.ready='1';});})();</script>`;
+
+// ── shared frame pieces ──
+const railItem = (id, glyph, label, opts = {}) => `<button class="rail-item${opts.active ? ' active' : ''}" data-rail="${id}" title="${esc(label)}"${opts.face ? ` data-face="${opts.face}"` : ''}>${R24(glyph)}${opts.badge ? `<span class="rail-badge">${opts.badge}</span>` : ''}</button>`;
+const railStd = (browserEntry) => `
+<div id="sidebar-rail">
+  ${railItem('folders', RAIL.folders, 'Folders', { active: true })}
+  ${railItem('tasks', RAIL.tasks, 'Task Groups')}
+  ${railItem('mounts', RAIL.mounts, 'Remote')}
+  ${railItem('ports', RAIL.ports, 'Ports')}
+  ${railItem('agents', RAIL.agents, 'Agents')}
+  ${railItem('plugins', RAIL.plugins, 'Plugins')}
+  ${railItem('jobs', RAIL.jobs, 'Background Work', { badge: 2 })}
+  ${railItem('channels', RAIL.channels, 'Channels')}
+  ${railItem('system', RAIL.system, 'System')}
+  ${browserEntry}
+  <div class="rail-spacer"></div>
+  ${railItem('diagnostics', RAIL.diagnostics, 'Diagnostics report…')}
+  ${railItem('settings', RAIL.settings, 'Settings')}
+</div>`;
+const sidebarMain = (extraCard = '') => `
+<div class="sidebar-main">
+  <div class="sidebar-header"><span class="sidebar-title">${T('Sessions', '会话', 'セッション')}</span><button class="icon-btn" title="New">${S16(G.plus, 14)}</button></div>
+  <div class="session-items">
+    <div class="session-item-card">vibespace · claude<div class="mock-sub">${S16(G.robot, 10)} ${T('running · 12 min', '运行中 · 12 分钟', '実行中 · 12 分')}</div></div>
+    <div class="session-item-card">shop-scraper · codex<div class="mock-sub">${S16(G.robot, 10)} ${T('waiting for you', '等你', '待機中')}</div></div>
+    ${extraCard}
+  </div>
+</div>`;
+const toolbar = (rightButtons) => `
+<header id="toolbar">
+  <div class="toolbar-left"><span class="toolbar-title">VibeSpace</span></div>
+  <div class="toolbar-center"></div>
+  <div class="toolbar-right">
+    <button id="btn-global-settings" class="icon-btn" title="Global settings">${GEAR_SVG}</button>
+    <button id="btn-new-session" class="toolbar-action">${S16(G.plus)}${T('New Session', '新建会话', '新規セッション')}</button>
+    <button id="btn-terminal" class="toolbar-action">${S16(G.terminal)}${T('Terminal', '终端', 'ターミナル')}</button>
+    <button id="btn-file-explorer" class="toolbar-action">${S16(G.files)}${T('Files', '文件', 'ファイル')}</button>
+    ${rightButtons}
+  </div>
+</header>`;
+const mobileNav = `<div id="mobile-nav"><button id="mobile-nav-menu" title="Sessions">☰</button><span class="mobile-nav-title">vibespace · claude</span><button id="mobile-nav-new" title="New">+</button></div>`;
+const chatWindow = (chip, { left = 16, top = 16, width = 560, height = 470, active = true } = {}) => `
+<div class="window${active ? ' window-active' : ''}" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px" data-win="chat">
+  <div class="window-titlebar"><span class="window-icon-stack">${S16(G.robot, 14)}</span><span class="window-title">vibespace · claude</span><div class="window-controls"><button class="win-btn">▭</button><button class="win-btn">✕</button></div></div>
+  <div class="window-content">
+    <div class="mock-chat">
+      <div class="mock-msg user">${T('Compare the three vendors’ prices for the K2 and put a table in docs/.', '把三家供应商 K2 的价格比一下，表放到 docs/。', '3社のK2価格を比較して docs/ に表を置いて。')}</div>
+      <div class="mock-msg">${T('Opening the vendor pages in my browser profile “Shopping”…', '正在用我的浏览器 profile “Shopping” 打开供应商页面…', 'ブラウザプロファイル「Shopping」でベンダーページを開いています…')}</div>
+      <div class="mock-msg">${T('Two of three prices captured; the third site needs a login — take over the browser if you want me to continue there.', '三家里拿到两家的价格；第三家要登录——如果要我继续，请接管一下浏览器。', '3社中2社の価格を取得。3社目はログインが必要です。続けるにはブラウザを引き継いでください。')}</div>
+    </div>
+    <div class="chat-status-bar"><span class="chat-status-model">opus</span><span>45% <span class="chat-status-dim">[90k/200k]</span></span><span class="chat-status-perm">${S16(G.lock, 10)} ${T('default', '默认', '既定')}</span>${chip}<span class="chat-status-dim">$0.42</span></div>
+  </div>
+</div>`;
+const taskbar = (items) => `<div id="taskbar">${items.map(([glyph, title, sub, active]) => `<div class="taskbar-item${active ? ' active' : ''}"><span class="taskbar-icon">${S16(glyph, 14)}</span><span class="taskbar-text"><span class="taskbar-title">${title}</span><span class="taskbar-subtitle">${sub}</span></span></div>`).join('')}</div>`;
+const callout = (n, sel) => `<span class="mock-callout" data-for="${esc(sel)}">${n}</span>`;
+const legend = (rows) => `<div class="mock-legend">${rows.map(([n, t]) => `<div><b>${n}</b> ${t}</div>`).join('')}</div>`;
+
+const page = ({ title, dir, css, body }) => `<!doctype html>
+<html lang="zh" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<!-- B-d03a mockup — generated by build.mjs; standalone: the product rules below are COPIED from
+     public/style.css · chat.css · viewers.css (dark values). ?view=phone = 390 px; ?lang=en|ja swaps labels. -->
+<style>${BASE_CSS}${MOCK_CSS}${css}</style>
+</head>
+<body data-dir="${dir}">
+${body}
+${SWAP_JS}
+</body>
+</html>
+`;
+
+// ═══════════════ Direction A — ONE "Browser" hub entry, three cards ═══════════════
+const A_CSS = `
+.dialog.browser-hub { width: min(720px, 94vw); }
+.browser-hub-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.browser-hub-card { display: flex; flex-direction: column; gap: 6px; padding: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); min-width: 0; }
+.browser-hub-card:hover { border-color: var(--accent); }
+.browser-hub-card .desktop-launch-card-icon { width: 26px; height: 26px; }
+.browser-hub-card .desktop-launch-card-icon svg { width: 22px !important; height: 22px !important; }
+.browser-hub-card-head { display: flex; align-items: center; gap: 8px; }
+.browser-hub-card-label { font-size: 13px; font-weight: 600; }
+.browser-hub-card-who { font-size: 10px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); border-radius: 999px; padding: 0 6px; margin-left: auto; white-space: nowrap; }
+.browser-hub-card-sub { font-size: 11px; color: var(--text-secondary); line-height: 1.45; min-height: 48px; }
+.browser-hub-card-not { font-size: 10px; color: var(--text-dim); line-height: 1.4; }
+.browser-hub-card-actions { display: flex; gap: 6px; align-items: center; margin-top: auto; flex-wrap: wrap; }
+.browser-hub-card-actions .file-path-input { min-width: 0; }
+.browser-hub-running .desktop-launch-run-row { border-top: 1px solid var(--border); }
+body[data-view="phone"] .dialog-overlay { align-items: flex-end; }
+body[data-view="phone"] .dialog.browser-hub { width: 100%; max-height: 92vh; border-radius: calc(var(--radius) * 1.5) calc(var(--radius) * 1.5) 0 0; }
+body[data-view="phone"] .browser-hub-grid { grid-template-columns: 1fr; }
+body[data-view="phone"] .browser-hub-card-sub { min-height: 0; }
+`;
+const hubCard = (face, glyph, label, who, sub, not, actions) => `
+<div class="browser-hub-card" data-face="${face}">
+  <div class="browser-hub-card-head"><span class="desktop-launch-card-icon">${S16(glyph, 22)}</span><span class="browser-hub-card-label">${label}</span><span class="browser-hub-card-who">${who}</span></div>
+  <div class="browser-hub-card-sub">${sub}</div>
+  <div class="browser-hub-card-not">${not}</div>
+  <div class="browser-hub-card-actions">${actions}</div>
+</div>`;
+const A_BODY = `
+${toolbar(`<button id="btn-browser" class="toolbar-action mock-pressed" data-face="hub-entry">${S16(G.web)}${T('Browser', '浏览器', 'ブラウザ')}</button>
+    <button id="btn-desktop-apps" class="toolbar-action">${S16(G.apps)}${T('Apps', '应用', 'アプリ')}</button>`)}
+${mobileNav}
+<div id="main">
+  <div id="sidebar" class="rail-on">
+    ${railStd(railItem('browser', RAIL.browser, 'Browser', { active: false }))}
+    ${sidebarMain()}
+  </div>
+  <div id="workspace">
+    ${chatWindow(`<span class="chat-status-browser chat-status-clickable" title="Agent browser">${S16(G.web, 10)} Shopping</span>`, { left: 24, top: 20, width: 600, height: 460 })}
+    <div class="dialog-overlay">
+      <div class="dialog browser-hub" id="browser-hub-dialog">
+        <div class="dialog-header"><h3>${T('Browser', '浏览器', 'ブラウザ')}</h3><button class="dialog-close">✕</button></div>
+        <div class="dialog-body">
+          <p class="desktop-launch-intro">${T('Three things in VibeSpace are called a browser. Pick by who drives it.', 'VibeSpace 里有三样东西都叫“浏览器”。按谁来操作它选。', 'VibeSpace には「ブラウザ」と呼ばれるものが三つあります。誰が操作するかで選んでください。')}</p>
+          <div class="browser-hub-grid">
+            ${hubCard('web', G.web, T('Web view', '网页视图', 'ウェブビュー'), T('you', '你', 'あなた'),
+              T('A page inside a VibeSpace window. Nothing runs on the machine; sites that refuse framing go through the proxy.', '在 VibeSpace 窗口里嵌入一个网页。机器上不跑任何东西；拒绝被嵌入的站点走代理。', 'VibeSpace のウィンドウ内にページを埋め込みます。マシン上では何も動かず、埋め込みを拒否するサイトはプロキシ経由。'),
+              T('Not a real browser: no tabs, no logins kept, agents never see it.', '不是真浏览器：没有标签页、不保留登录，agent 看不到它。', '本物のブラウザではありません：タブなし、ログイン保持なし、エージェントには見えません。'),
+              `<input class="file-path-input" value="https://" readonly><button class="mounts-btn mounts-btn-primary">${T('Open', '打开', '開く')}</button>`)}
+            ${hubCard('agent', G.live, T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ'), T('the agent', 'agent', 'エージェント'),
+              T('The browsers your agents drive — named profiles, a live view, take over and hand back.', 'agent 驾驶的浏览器——命名的 profile、实时视图、接管与交还。', 'エージェントが操作するブラウザ — 名前付きプロファイル、ライブビュー、引き継ぎと返却。'),
+              T('Not for your own browsing: a window here is a view of the agent’s tab.', '不是给你自己上网用的：这里的窗口是 agent 标签页的一个视图。', '自分の閲覧用ではありません：ここのウィンドウはエージェントのタブのビューです。'),
+              `<button class="mounts-btn mounts-btn-primary">${T('Live view', '实时视图', 'ライブビュー')}</button><button class="mounts-btn">${T('Profiles…', '配置…', 'プロファイル…')}</button><span class="desktop-app-chip">${T('1 session live', '1 个会话在用', '1 セッション使用中')}</span>`)}
+            ${hubCard('app', G.apps, T('Browser app', '浏览器应用', 'ブラウザアプリ'), T('you', '你', 'あなた'),
+              T('Chromium or Firefox from this machine, in a window you drive with mouse and keyboard.', '这台机器上的 Chromium / Firefox，在一个你用鼠标键盘操作的窗口里。', 'このマシンの Chromium / Firefox を、マウスとキーボードで操作するウィンドウで。'),
+              T('Not the agent’s browser: it opens on its own X display; agents cannot reach it.', '不是 agent 的浏览器：它开在自己的 X 显示上，agent 够不到。', 'エージェントのブラウザではありません：独自の X ディスプレイで開き、エージェントは届きません。'),
+              `<button class="mounts-btn mounts-btn-primary">Chromium</button><button class="mounts-btn">Firefox</button><span class="desktop-launch-avail">${T('via xpra', '经 xpra', 'xpra 経由')}</span>`)}
+          </div>
+          <div class="desktop-launch-sec browser-hub-running">
+            <h4>${T('Running', '正在运行', '実行中')}<span class="desktop-launch-count">2</span></h4>
+            <div class="desktop-launch-run-row"><span class="desktop-app-row-label">${S16(G.live, 12)} Shopping <span class="desktop-app-chip">${T('agent · vibespace', 'agent · vibespace', 'エージェント · vibespace')}</span></span><span class="desktop-app-row-state">${T('agent is driving', 'agent 正在操作', 'エージェントが操作中')}</span><button class="file-tool-btn" style="width:auto;padding:0 8px;font-size:10px">${T('Open', '打开', '開く')}</button></div>
+            <div class="desktop-launch-run-row"><span class="desktop-app-row-label">${S16(G.apps, 12)} Chromium <span class="desktop-app-chip desktop-app-chip-backend">xpra</span></span><span class="desktop-app-row-state">${T('running · 4 min', '运行中 · 4 分钟', '実行中 · 4 分')}</span><button class="file-tool-btn" style="width:auto;padding:0 8px;font-size:10px">${T('Open', '打开', '開く')}</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    ${legend([[1, T('ONE toolbar button, ONE rail item, ONE gear row (Tools ▸ Browser…) — all open this hub.', '工具栏、rail、⚙ Tools ▸ 各只剩一个入口——都打开这个 hub。', 'ツールバー・レール・⚙ Tools ▸ の各入口は一つ — すべてこのハブを開く。')], [2, T('Three cards, each says who drives it and what it is NOT.', '三张卡，各自写明谁来操作、以及它不是什么。', '三枚のカード。誰が操作するか、何ではないかを明記。')], [3, T('Running things of all three kinds in one list.', '三类正在运行的东西列在同一张表里。', '三種の実行中のものを一つの一覧に。')]])}
+    <div class="mock-ws-note">Direction A · 1200×800 · dark</div>
+  </div>
+</div>
+${taskbar([[G.robot, 'vibespace', 'claude', true], [G.live, 'Shopping', T('Browser (live)', '浏览器(实时)', 'ブラウザ(ライブ)'), false], [G.apps, 'Chromium', T('Desktop app', '桌面应用', 'デスクトップアプリ'), false]])}
+${callout(1, '#btn-browser')}${callout(1, '[data-rail=browser]')}${callout(2, '.browser-hub-grid')}${callout(3, '.browser-hub-running h4')}
+`;
+
+// ═══════════════ Direction B — rename the faces, keep three entries ═══════════════
+const B_CSS = `
+.global-settings-popover { right: 8px; top: 40px; }
+.gs-flyout.open { right: 100%; }
+.mock-gear-anchor { position: relative; }
+.chat-status-browser .mock-kind { color: var(--text-dim); }
+`;
+const gsItem = (glyph, label, opts = {}) => `<div class="gs-menu-item${opts.sub ? ' has-sub' : ''}${opts.cls ? ' ' + opts.cls : ''}"${opts.expanded ? ' aria-expanded="true"' : ''}${opts.face ? ` data-face="${opts.face}"` : ''}><span class="gs-menu-icon">${S16(glyph, 13)}</span><span class="gs-menu-label">${label}</span>${opts.caption ? `<span class="gs-head-caption">${opts.caption}</span>` : ''}${opts.flyout || ''}</div>`;
+const B_BODY = `
+${toolbar(`<button id="btn-browser" class="toolbar-action" data-face="web" title="${esc('Open a page in a window (iframe)')}">${S16(G.web)}${T('Web view', '网页视图', 'ウェブビュー')}</button>
+    <button id="btn-desktop-apps" class="toolbar-action" data-face="app">${S16(G.apps)}${T('Apps', '应用', 'アプリ')}</button>`)}
+${mobileNav}
+<div id="main">
+  <div id="sidebar" class="rail-on">
+    ${railStd(railItem('browser', RAIL.browserLive, 'Agent browser', { face: 'agent' }) + `<div class="mock-tip mock-desktop-only" data-for="[data-rail=browser]">${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')}</div>`)}
+    ${sidebarMain()}
+  </div>
+  <div id="workspace">
+    ${chatWindow(`<span class="chat-status-browser chat-status-clickable" title="Agent browser: last used Shopping · pinned Shopping">${S16(G.live, 10)} <span class="mock-kind">${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')} ·</span> Shopping</span>`, { left: 16, top: 16, width: 470, height: 440 })}
+    <div class="window mock-phone-hide" style="left:500px;top:358px;width:410px;height:165px" data-win="web">
+      <div class="window-titlebar"><span class="window-icon-stack">${S16(G.web, 14)}</span><span class="window-title">example.com — ${T('Web view', '网页视图', 'ウェブビュー')}</span><div class="window-controls"><button class="win-btn">▭</button><button class="win-btn">✕</button></div></div>
+      <div class="window-content">
+        <div class="mock-bar"><input class="file-path-input" value="https://example.com/pricing" readonly><button class="file-tool-btn" style="width:28px">→</button><button class="file-tool-btn" style="width:auto;padding:0 6px;font-size:10px">Proxy: Off</button><button class="file-tool-btn" style="width:28px">↗</button></div>
+        <div class="mock-page"><h2>Pricing</h2><p>K2 — from $1,290</p><div class="mock-line" style="width:70%"></div><div class="mock-line" style="width:45%"></div><div class="mock-line" style="width:60%"></div></div>
+      </div>
+    </div>
+    <div class="window mock-phone-hide" style="left:500px;top:528px;width:410px;height:160px" data-win="app">
+      <div class="window-titlebar"><span class="window-icon-stack">${S16(G.apps, 14)}</span><span class="window-title">Chromium — ${T('Browser app', '浏览器应用', 'ブラウザアプリ')}</span><div class="window-controls"><button class="win-btn">▭</button><button class="win-btn">✕</button></div></div>
+      <div class="window-content">
+        <div class="mock-bar"><span class="desktop-app-chip desktop-app-chip-backend">xpra</span><span class="desktop-app-chip">1.0×</span><span>${T('you are driving', '你在操作', 'あなたが操作中')}</span><span style="margin-left:auto">${T('Stop', '停止', '停止')}</span></div>
+        <div class="mock-xpra"><div class="mock-xpra-tabs"><div class="mock-xpra-tab">${S16(G.web, 10)} Vendor C — Sign in</div><div class="mock-xpra-tab dim">New tab</div></div><div class="mock-xpra-url">←&nbsp;→&nbsp;⟳ <span>vendor-c.example/login</span></div><div class="mock-page" style="margin:0"><h2>Sign in</h2><div class="mock-line" style="width:50%"></div><div class="mock-line" style="width:50%"></div></div></div>
+      </div>
+    </div>
+    <div class="global-settings-popover mock-desktop-only">
+      <div class="gs-menu">
+        ${gsItem(G.brush, T('Appearance', '外观', '外観'), { sub: true, caption: T('Dark · 13px · 100%', '深色 · 13px · 100%', 'ダーク · 13px · 100%') })}
+        <div class="gs-menu-sep"></div>
+        ${gsItem(G.key, T('Manage agents…', '管理 agent…', 'エージェント管理…'))}
+        ${gsItem(G.cog, T('All Settings...', '全部设置...', 'すべての設定...'))}
+        ${gsItem(G.wrench, T('Tools', '工具', 'ツール'), { sub: true, expanded: true, flyout: `<div class="gs-flyout open">
+          ${gsItem(G.chart, T('Usage…', '用量…', '使用量…'))}
+          ${gsItem(G.chart, T('Background Work…', '后台工作…', 'バックグラウンド作業…'))}
+          ${gsItem(G.apps, T('Desktop apps…', '桌面应用…', 'デスクトップアプリ…'))}
+          ${gsItem(G.live, T('Agent browser…', 'Agent 浏览器…', 'エージェントブラウザ…'), { cls: 'mock-gear-agent' })}
+          ${gsItem(G.puzzle, T('Plugins…', '插件…', 'プラグイン…'))}
+        </div>` })}
+        ${gsItem(G.chat, T('Communication', '沟通', 'コミュニケーション'), { sub: true })}
+        ${gsItem(G.cog, T('System', '系统', 'システム'), { sub: true })}
+        ${gsItem(G.help, T('Help', '帮助', 'ヘルプ'), { sub: true })}
+      </div>
+    </div>
+    <div class="context-menu mobile-sheet" style="display:none" id="mock-sheet">
+      <div class="context-menu-item">${S16(G.robot, 20)}<span>${T('Agent session', 'Agent 会话', 'エージェントセッション')}</span></div>
+      <div class="context-menu-item">${S16(G.terminal, 20)}<span>${T('Terminal', '终端', 'ターミナル')}</span></div>
+      <div class="context-menu-item">${S16(G.folder, 20)}<span>${T('Files', '文件', 'ファイル')}</span></div>
+      <div class="context-menu-item" data-face="web-phone">${S16(G.web, 20)}<span>${T('Web view', '网页视图', 'ウェブビュー')}</span></div>
+      <div class="context-menu-item" data-face="app-phone">${S16(G.apps, 20)}<span>${T('Desktop app…', '桌面应用…', 'デスクトップアプリ…')}</span></div>
+      <div class="context-menu-item" data-face="agent-phone">${S16(G.live, 20)}<span>${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')}</span></div>
+    </div>
+    ${legend([[1, T('Toolbar: the globe now means ONLY the iframe — “Web view”.', '工具栏：地球图标只表示 iframe——“网页视图”。', 'ツールバー：地球アイコンは iframe だけ — 「ウェブビュー」。')], [2, T('Rail + ⚙ Tools ▸ + status chip: “Agent browser”, with the live-view glyph, never the globe.', 'rail + ⚙ Tools ▸ + 状态栏芯片：“Agent 浏览器”，用实时视图的图标，不再用地球。', 'レール + ⚙ Tools ▸ + ステータスチップ：「エージェントブラウザ」、ライブビューの図形で、地球は使わない。')], [3, T('“Browser app” = a catalog card under Apps; its window says so in the title.', '“浏览器应用” = Apps 目录里的一张卡；窗口标题写明。', '「ブラウザアプリ」= Apps カタログのカード。ウィンドウタイトルに明記。')]])}
+    <div class="mock-ws-note">Direction B · 1200×800 · dark</div>
+  </div>
+</div>
+${taskbar([[G.robot, 'vibespace', 'claude', true], [G.web, 'example.com', T('Web view', '网页视图', 'ウェブビュー'), false], [G.apps, 'Chromium', T('Browser app', '浏览器应用', 'ブラウザアプリ'), false]])}
+${callout(1, '#btn-browser')}${callout(2, '[data-rail=browser]')}${callout(2, '.chat-status-browser')}${callout(2, '.mock-gear-agent')}${callout(3, '#btn-desktop-apps')}${callout(3, '[data-win=app] .window-title')}
+<style>body[data-view="phone"] #mock-sheet { display: block !important; }</style>
+`;
+
+// ═══════════════ Direction C — fold the web view into the browser app; two faces ═══════════════
+const C_CSS = `
+.mock-fallback { padding: 5px 8px; font-size: 10px; color: var(--text-dim); border-top: 1px solid var(--border); background: var(--bg-titlebar); display: flex; gap: 6px; align-items: center; }
+.mock-fallback b { color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
+`;
+const C_BODY = `
+${toolbar(`<button id="btn-browser" class="toolbar-action mock-pressed" data-face="app" title="${esc('Chromium on this machine, in a window (xpra); without a display backend, a page in a frame')}">${S16(G.appBrowser)}${T('Browser', '浏览器', 'ブラウザ')}</button>
+    <button id="btn-desktop-apps" class="toolbar-action">${S16(G.apps)}${T('Apps', '应用', 'アプリ')}</button>`)}
+${mobileNav}
+<div id="main">
+  <div id="sidebar" class="rail-on">
+    ${railStd(railItem('browser', RAIL.browserLive, 'Agent browser', { face: 'agent' }) + `<div class="mock-tip mock-desktop-only" data-for="[data-rail=browser]">${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')}</div>`)}
+    ${sidebarMain()}
+  </div>
+  <div id="workspace">
+    <div class="window window-active" style="left:16px;top:16px;width:560px;height:520px" data-win="browser">
+      <div class="window-titlebar"><span class="window-icon-stack">${S16(G.appBrowser, 14)}</span><span class="window-title">Chromium — ${T('Browser', '浏览器', 'ブラウザ')}</span><div class="window-controls"><button class="win-btn">▭</button><button class="win-btn">✕</button></div></div>
+      <div class="window-content">
+        <div class="mock-bar"><span class="desktop-app-chip desktop-app-chip-backend">xpra</span><span class="desktop-app-chip">${T('this machine', '这台机器', 'このマシン')}</span><span class="desktop-app-chip">1.0×</span><span>${T('you are driving', '你在操作', 'あなたが操作中')}</span><span style="margin-left:auto">${T('Stop', '停止', '停止')}</span></div>
+        <div class="mock-xpra"><div class="mock-xpra-tabs"><div class="mock-xpra-tab">${S16(G.web, 10)} Pricing — Vendor A</div><div class="mock-xpra-tab dim">Vendor B</div><div class="mock-xpra-tab dim">Sign in — Vendor C</div></div><div class="mock-xpra-url">←&nbsp;→&nbsp;⟳ <span>vendor-a.example/k2/pricing</span></div><div class="mock-page" style="margin:0"><h2>K2 — Pricing</h2><p>From $1,290 · 3-year warranty</p><div class="mock-line" style="width:70%"></div><div class="mock-line" style="width:45%"></div><div class="mock-line" style="width:60%"></div><div class="mock-line" style="width:30%"></div></div></div>
+        <div class="mock-fallback">${S16(G.web, 10)} <b>${T('Without a display backend', '没有画面后端时', 'ディスプレイバックエンドがない場合')}</b> ${T('the same button opens the page in a frame (URL bar + proxy) — the old web view becomes this window’s fallback rung, not a face.', '同一个按钮改为把网页嵌进窗口（地址栏 + 代理）——旧的网页视图变成这个窗口的兜底档，不再是一张“脸”。', '同じボタンがページをフレームに埋め込みます（URL バー + プロキシ）— 旧ウェブビューはこのウィンドウの最終段になり、独立の顔ではなくなります。')}</div>
+      </div>
+    </div>
+    <div class="window mock-phone-hide" style="left:592px;top:16px;width:332px;height:400px" data-win="live">
+      <div class="window-titlebar"><span class="window-icon-stack">${S16(G.live, 14)}</span><span class="window-title">Shopping — ${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')} · vibespace</span><div class="window-controls"><button class="win-btn">▭</button><button class="win-btn">✕</button></div></div>
+      <div class="window-content">
+        <div class="mock-bar"><span class="mock-mode">${T('Agent is driving', 'Agent 正在操作', 'エージェントが操作中')}</span><span class="mock-url">vendor-c.example/login</span><button class="mounts-btn">${T('Take over', '接管', '引き継ぐ')}</button></div>
+        <div class="mock-live"><div class="mock-page"><h2>Sign in</h2><div class="mock-line" style="width:50%"></div><div class="mock-line" style="width:50%"></div></div><div class="mock-cursor"><i></i> claude</div></div>
+      </div>
+    </div>
+    <div class="context-menu mobile-sheet" style="display:none" id="mock-sheet">
+      <div class="context-menu-item">${S16(G.robot, 20)}<span>${T('Agent session', 'Agent 会话', 'エージェントセッション')}</span></div>
+      <div class="context-menu-item">${S16(G.terminal, 20)}<span>${T('Terminal', '终端', 'ターミナル')}</span></div>
+      <div class="context-menu-item">${S16(G.folder, 20)}<span>${T('Files', '文件', 'ファイル')}</span></div>
+      <div class="context-menu-item" data-face="app-phone">${S16(G.appBrowser, 20)}<span>${T('Browser', '浏览器', 'ブラウザ')}</span></div>
+      <div class="context-menu-item" data-face="agent-phone">${S16(G.live, 20)}<span>${T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ')}</span></div>
+    </div>
+    ${legend([[1, T('ONE “Browser” for you: a real Chromium on this machine (xpra); the iframe is its fallback rung, not an entry.', '给你的只剩一个“浏览器”：这台机器上的真 Chromium（xpra）；iframe 是它的兜底档，不再是入口。', 'あなた用の「ブラウザ」は一つ：このマシンの本物の Chromium（xpra）。iframe は最終段で、入口ではない。')], [2, T('The other face is the agent’s: rail + ⚙ Tools ▸ “Agent browser”, live view + take over.', '另一张脸是 agent 的：rail + ⚙ Tools ▸ “Agent 浏览器”，实时视图 + 接管。', 'もう一つの顔はエージェントのもの：レール + ⚙ Tools ▸「エージェントブラウザ」、ライブビュー + 引き継ぎ。')], [3, T('Apps keeps its catalog; its Chromium card and the toolbar button are the same thing.', 'Apps 目录保留；里面的 Chromium 卡和工具栏按钮是同一个东西。', 'Apps カタログはそのまま。Chromium カードとツールバーのボタンは同じもの。')]])}
+    <div class="mock-ws-note">Direction C · 1200×800 · dark</div>
+  </div>
+</div>
+${taskbar([[G.appBrowser, 'Chromium', T('Browser', '浏览器', 'ブラウザ'), true], [G.live, 'Shopping', T('Agent browser', 'Agent 浏览器', 'エージェントブラウザ'), false], [G.robot, 'vibespace', 'claude', false]])}
+${callout(1, '#btn-browser')}${callout(1, '.mock-fallback')}${callout(2, '[data-rail=browser]')}${callout(2, '[data-win=live] .window-title')}${callout(3, '#btn-desktop-apps')}
+<style>body[data-view="phone"] #mock-sheet { display: block !important; }</style>
+`;
+
+const out = [
+  ['direction-a.html', page({ title: 'Direction A — one Browser hub, three cards', dir: 'a', css: A_CSS, body: A_BODY })],
+  ['direction-b.html', page({ title: 'Direction B — rename the faces, keep three entries', dir: 'b', css: B_CSS, body: B_BODY })],
+  ['direction-c.html', page({ title: 'Direction C — fold the web view into the browser app, two faces', dir: 'c', css: C_CSS, body: C_BODY })],
+];
+for (const [name, html0] of out) { const html = html0.replace(/[ \t]+$/gm, ''); fs.writeFileSync(path.join(here, name), html); console.log('wrote', name, html.length, 'bytes'); }

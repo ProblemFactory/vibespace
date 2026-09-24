@@ -1581,6 +1581,8 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
   而一个没有任何一行列出的分类就是一个没人够得到的设置项（那道 build 普查之所以存在，就是因为有十个
   设置项、包括每一个花钱天花板，都是够不到的）。
 
+* **命名（2026-09-23，B-d03a）：** 这一节里的每个面都是产品里第二张叫"浏览器"的脸（另两张：工具栏的 iframe 网页视图、作为桌面应用的 Chromium）。地球图标今天同时指三者；三个方向的渲染稿、打分与建议（改名为 网页视图 / **Agent 浏览器** / 浏览器应用，agent 面统一用 `browser-live` 的"带点的窗口"图标）见 `docs/design-browser-faces.zh.md`。
+
 ---
 
 ## 6. 安全模型

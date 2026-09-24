@@ -694,6 +694,34 @@ console.log('§6 P8-2 x4 — the display\'s size, the fit act, depth in the tree
   }
 }
 
+console.log('§7 B-bfe6 — the browser binaries: probed beside the rungs, the first family member on PATH, and the SNAP fact');
+{
+  // fakes on a scratch PATH (never the machine's own inventory — the .131 lesson): a plain google-chrome, a firefox that
+  // is Ubuntu's snap shim (a script that execs /snap/bin/firefox — measured shape of this box's /usr/bin/firefox),
+  // a chromium-browser symlinked to the plain one
+  const bdir = path.join(dir, 'browser-bin');
+  fs.mkdirSync(bdir, { recursive: true });
+  fs.writeFileSync(path.join(bdir, 'google-chrome'), '#!/bin/sh\nexec /opt/google/chrome/chrome "$@"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(bdir, 'firefox'), '#!/bin/sh\nif ! [ -x /snap/bin/firefox ]; then echo missing >&2; exit 1; fi\nexec /snap/bin/firefox "$@"\n', { mode: 0o755 });
+  fs.symlinkSync(path.join(bdir, 'google-chrome'), path.join(bdir, 'chromium-browser'));
+  fs.writeFileSync(path.join(bdir, 'firefox-esr'), Buffer.concat([Buffer.from([0x7f, 0x45, 0x4c, 0x46]), Buffer.alloc(64)]), { mode: 0o755 }); // an ELF-shaped binary — never a snap by content
+  D.resetBinMemo();
+  const f = await D.hostFacts({ env: { PATH: bdir } });
+  D.resetBinMemo();
+  ok(D.BROWSER_BINS.every((b) => b in f.bins), `hostFacts probes every browser binary name beside the rung binaries (${D.BROWSER_BINS.join(', ')})`, Object.keys(f.bins));
+  ok(f.bins.chromium === null && f.bins['google-chrome'] === path.join(bdir, 'google-chrome') && f.bins['chromium-browser'] === path.join(bdir, 'chromium-browser') && f.bins.firefox === path.join(bdir, 'firefox'), 'present ⇒ its path, absent ⇒ null (chromium absent here)', f.bins);
+  ok(same(Object.keys(f.browsers).sort(), ['chromium-browser', 'firefox', 'firefox-esr', 'google-chrome']), '`browsers` names the present ones only', f.browsers);
+  ok(f.browsers.firefox.confinement === 'snap', 'a script that execs /snap/bin/firefox is a SNAP (its profile reach is the snap\'s, not ours)', f.browsers.firefox);
+  ok(f.browsers['google-chrome'].confinement === null && f.browsers['chromium-browser'].confinement === null && f.browsers['firefox-esr'].confinement === null, 'a plain script, a symlink to it and an ELF are not snaps', f.browsers);
+  ok(D.browserConfinement(path.join(bdir, 'nope')) === null && D.browserConfinement('') === null && D.browserConfinement(null) === null, 'a missing path / nothing ⇒ no claim (null), never a throw');
+  const M = require('../src/desktop-apps.js');
+  const served = M.browserRowFor(M.DEFAULT_REGISTRY.find((r) => r.id === 'chromium'), f.bins);
+  ok(served.ok && served.row.exec === 'chromium-browser' && served.row.path === path.join(bdir, 'chromium-browser'), 'the FACTS feed the PURE pick: chromium absent ⇒ chromium-browser (the next in the family), before google-chrome', served);
+  // this box, for the record (never asserted — an inventory is not a fact the suite owns)
+  D.resetBinMemo();
+  const real = await D.hostFacts({});
+  console.log(`  (this box: ${Object.entries(real.browsers).map(([n, b]) => `${n} ${b.path}${b.confinement ? ' [' + b.confinement + ']' : ''}`).join(', ') || 'no browser on PATH'})`);
+}
 
 // ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

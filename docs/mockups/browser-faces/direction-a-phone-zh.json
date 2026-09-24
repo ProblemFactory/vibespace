@@ -1,0 +1,59 @@
+{
+ "dir": "a",
+ "name": "phone-zh",
+ "viewport": {
+  "w": 390,
+  "h": 844
+ },
+ "png": "direction-a-phone-zh.png",
+ "expected": [
+  "web",
+  "agent",
+  "app"
+ ],
+ "faces": [
+  {
+   "face": "web",
+   "text": "网页视图你 在 VibeSpace 窗口里嵌入一个网页。机器上不跑任何东西；拒绝被嵌入的站点走代理。 不是真浏览器：没有",
+   "x": 15,
+   "y": 307,
+   "w": 360,
+   "h": 140,
+   "pixels": 50400,
+   "light": 1536,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "agent",
+   "text": "Agent 浏览器agent agent 驾驶的浏览器——命名的 profile、实时视图、接管与交还。 不是给你自己上",
+   "x": 15,
+   "y": 457,
+   "w": 360,
+   "h": 124,
+   "pixels": 44640,
+   "light": 1913,
+   "colours": 64,
+   "painted": true
+  },
+  {
+   "face": "app",
+   "text": "浏览器应用你 这台机器上的 Chromium / Firefox，在一个你用鼠标键盘操作的窗口里。 不是 agent 的",
+   "x": 15,
+   "y": 591,
+   "w": 360,
+   "h": 136,
+   "pixels": 48960,
+   "light": 1826,
+   "colours": 64,
+   "painted": true
+  }
+ ],
+ "control": {
+  "pixels": 2400,
+  "light": 0,
+  "colours": 5,
+  "painted": false
+ },
+ "verdict": "ok"
+}

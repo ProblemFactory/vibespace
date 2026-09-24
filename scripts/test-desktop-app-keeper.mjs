@@ -24,7 +24,7 @@
 // the reason when Xvfb/x11vnc are absent. Per-pid scratch, free ports, no
 // fixed names; the patched keeper/bridge copies (negative controls) are written
 // OUTSIDE the tree (scripts/mutant-copy.mjs, `require` re-bound to the real
-// module's path) — §18 measures that while they exist.
+// module's path) — §tree measures that while they exist.
 // §14 (r6, 2026-09-22): a negotiated Watch-mode viewer through the real bridge to
 // the real xpra — its picture flows (hello, new-window, draws) and its
 // shutdown-server / exit-server never arrive; the r5 bridge as a patched copy is
@@ -834,7 +834,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const bogus = { apps: { 'da-me': { pids: { app: process.pid, x: null, server: null, wm: null }, starts: { app: 12345, x: null, server: null, wm: null } }, 'da-me2': { pids: { app: process.pid }, starts: { app: D.procStart(process.pid) } } } };
   ok(sweepTargets(bogus.apps).length === 0, 'a fixture naming THIS process — wrong starttime or even the right one — is never a sweep target');
   ok(alive(process.pid), 'CONTROL: the round-1 predicate (`alive(p)`) would have selected it — this process is alive');
-  // (the patched copies' placement: no longer a gitignored path in src/ — §18 measures they never touch the tree)
+  // (the patched copies' placement: no longer a gitignored path in src/ — §tree measures they never touch the tree)
 }
 
 console.log('§9 r3 — the round-2 verifier\'s findings, each reproduced on the real keeper and closed with a control');
@@ -1741,16 +1741,266 @@ console.log('§17 the exit sweep\'s Xvfb-for-Xpra rule — by EVIDENCE (dead own
   for (const c of [gone, live, ownerAlive]) { try { process.kill(c.pid, 'SIGKILL'); } catch {} }
 }
 
+console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (created 0700, the argv names it, removed with the session unless kept), refusals by name, the boot belt');
+{
+  // a stand-in browser of the chromium family on a scratch PATH (the real Chrome runs in the heavy xpra-window leg):
+  // it records its argv INTO the profile it was handed and writes a file there (what a browser does), then lives until
+  // stopped — or exits by itself when its URL asks (`?exit=1`: the app-exit terminal path, not a stop)
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  const fakeBin = path.join(root, 'browser-bin'), fakeHome = path.join(root, 'browser-home');
+  fs.mkdirSync(fakeBin, { recursive: true }); fs.mkdirSync(fakeHome, { recursive: true });
+  const FAKE = `vs-fake-chromium-${process.pid}`;
+  fs.writeFileSync(path.join(fakeBin, FAKE), '#!/bin/sh\nfor a in "$@"; do case "$a" in --user-data-dir=*) P="${a#--user-data-dir=}";; esac; done\n[ -n "$P" ] && printf \'%s\\n\' "$@" > "$P/argv.txt" && echo cookie > "$P/Cookies"\ncase "$*" in *exit=1*) sleep 1; exit 0;; esac\nsleep 600\n', { mode: 0o755 });
+  const SNAPPY = `vs-fake-snapbrowser-${process.pid}`;
+  fs.writeFileSync(path.join(fakeBin, SNAPPY), `#!/bin/sh\nexec /snap/bin/${SNAPPY} "$@"\n`, { mode: 0o755 });
+  const rows = [
+    { id: 'vs-browser', label: 'Fake browser', exec: FAKE, execs: [FAKE], args: [], category: 'browser', browser: 'chromium' },
+    { id: 'vs-snap-browser', label: 'Snap browser', exec: SNAPPY, execs: [SNAPPY], args: [], category: 'browser', browser: 'firefox' },
+  ];
+  const benv = () => ({ ...baseEnv(), PATH: `${fakeBin}${path.delimiter}${process.env.PATH}`, HOME: fakeHome });
+  const mkB = (name, K0 = K) => { const dataDir = path.join(root, name); fs.mkdirSync(dataDir, { recursive: true }); const k = K0.create({ dataDir, env: benv, broadcast: () => {}, serverSetting: (key) => PIN[key], backends: XVFB_TABLE, registryRows: rows, log: { log() {}, warn() {}, error() {} } }); keepers.push(k); return k; };
+  const k = mkB('k18');
+  await k.adoptAll(); k.start();
+  const l = await k.list();
+  const served = l.registry.find((r) => r.id === 'vs-browser'), snapRow = l.registry.find((r) => r.id === 'vs-snap-browser');
+  ok(served && served.available && served.exec === FAKE && served.path === path.join(fakeBin, FAKE), 'the catalog serves the browser row with the family member found on PATH', served);
+  ok(snapRow && snapRow.available === false && /is a snap: it can only open a profile inside your home folder/.test(snapRow.reason), 'a SNAP browser whose profile could not live under this keeper\'s /tmp root is DIMMED with the verdict\'s own sentence (never hidden)', snapRow);
+  // (a) launch with a URL: the profile is the session's own, 0700, named by the argv, the URL after the profile flags
+  const a = await k.launch({ appId: 'vs-browser', url: 'https://example.com/vs-bfe6' });
+  const prof = path.join(k.logRoot, a.id, 'profile');
+  ok(a.browser === 'chromium' && a.profileDir === prof && a.keepProfile === false && a.url === 'https://example.com/vs-bfe6', 'the record names the family, its OWN profile dir (data/desktop-apps/<id>/profile), the URL and keepProfile false', a);
+  ok(fs.existsSync(prof) && (fs.statSync(prof).mode & 0o777) === 0o700, 'the profile dir exists before the app starts, mode 0700');
+  ok(!prof.startsWith(fakeHome + path.sep) && !prof.startsWith(process.env.HOME + path.sep), `the profile is NOT under $HOME (the apps' HOME ${fakeHome}, nor the real one) — it lives in the keeper's data dir`);
+  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', 'https://example.com/vs-bfe6']), 'the record\'s argv: the profile flags, THEN the URL', a.args);
+  const ready = await until(() => { const r = k.get(a.id); return r.state === 'ready' || r.state === 'failed' ? r : null; });
+  ok(ready && ready.state === 'ready', 'the browser session reaches ready on the private display', ready && ready.lastError);
+  const argvFile = await until(() => { try { return fs.readFileSync(path.join(prof, 'argv.txt'), 'utf8'); } catch { return null; } }, 8000);
+  ok(!!argvFile && argvFile.split('\n').filter(Boolean).join(' ') === a.args.join(' '), 'the browser PROCESS got exactly that argv and wrote into the profile it was handed', argvFile);
+  const stopped = await k.stop(a.id);
+  ok(stopped.state === 'exited' && !fs.existsSync(prof) && stopped.profileRemovedAt > 0 && !stopped.profileKept, 'stop ⇒ the session is verified gone, THEN its profile is removed (profileRemovedAt on the record)', { state: stopped.state, exists: fs.existsSync(prof), removed: stopped.profileRemovedAt });
+  ok(fs.existsSync(path.join(k.logRoot, a.id, 'app.log')), 'the session\'s app.log stays (only the profile goes)');
+  // (b) keep profile
+  const b = await k.launch({ appId: 'vs-browser', keepProfile: true });
+  const profB = path.join(k.logRoot, b.id, 'profile');
+  await until(() => k.get(b.id).state !== 'launching');
+  await until(() => fs.existsSync(path.join(profB, 'Cookies')), 8000);
+  const sb = await k.stop(b.id);
+  ok(sb.keepProfile === true && sb.profileKept === true && !sb.profileRemovedAt && fs.existsSync(path.join(profB, 'Cookies')), '"keep profile" ⇒ the profile (and what the browser wrote) STAYS after stop, and the record says so', { kept: sb.profileKept, exists: fs.existsSync(profB) });
+  // (c) the browser exits by itself (not a stop): the app-exit terminal path retires the profile too
+  const c = await k.launch({ appId: 'vs-browser', url: 'https://example.com/?exit=1' });
+  const profC = path.join(k.logRoot, c.id, 'profile');
+  const endedC = await until(() => { const r = k.get(c.id); return r.state === 'exited' && r.profileRemovedAt ? r : null; }, 15000);
+  ok(!!endedC && /application exited/.test(endedC.lastError || '') && !fs.existsSync(profC), 'a browser that EXITS by itself: the session ends (app-exit) and its profile is removed on that path too', k.get(c.id));
+  // (d) refusals by name — nothing recorded, nothing created
+  const before = Object.keys(k._store().apps).length;
+  const refusal = async (body) => { try { await k.launch(body); return null; } catch (e) { return e; } };
+  const e1 = await refusal({ appId: 'vs-browser', url: 'javascript:alert(1)' });
+  const e2 = await refusal({ appId: 'vs-browser', url: 'file:///etc/passwd' });
+  const e3 = await refusal({ exec: appBin, url: 'https://example.com' });
+  const e4 = await refusal({ appId: 'vs-snap-browser' });
+  ok(e1 && e1.code === 'bad-url' && e2 && e2.code === 'bad-url' && /http:\/\/ or https:\/\//.test(e1.message), 'a bad URL is refused by name (`bad-url`)', [e1 && e1.message, e2 && e2.message]);
+  ok(e3 && e3.code === 'not-a-browser', 'a URL on a typed command is refused by name (`not-a-browser`)', e3 && e3.message);
+  ok(e4 && e4.code === 'snap-profile-unreachable', 'the snap browser is refused by name at launch (`snap-profile-unreachable`)', e4 && e4.message);
+  ok(Object.keys(k._store().apps).length === before, 'a refused launch records nothing');
+  // (e) the routes speak the codes (400 / 409)
+  {
+    const express = require('express');
+    const { router, setup } = require('../src/routes/desktop-apps.js');
+    setup({ keeper: k, vnc: { status: async () => ({ available: false, running: false, port: 0 }), ensureRunning: async () => { throw new Error('none'); } } });
+    const app = express(); app.use(express.json()); app.use(router);
+    const port = await freePort();
+    const srv = await new Promise((r) => { const s = app.listen(port, '127.0.0.1', () => r(s)); });
+    const post = async (body) => { const res = await fetch(`http://127.0.0.1:${port}/api/desktop/apps`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: res.status, body: await res.json() }; };
+    const r1 = await post({ appId: 'vs-browser', url: 'ftp://x' }), r2 = await post({ appId: 'vs-snap-browser' });
+    ok(r1.status === 400 && r1.body.code === 'bad-url' && r2.status === 409 && r2.body.code === 'snap-profile-unreachable', `POST /api/desktop/apps: bad-url 400, snap-profile-unreachable 409 (${r1.status}/${r2.status})`, [r1, r2]);
+    srv.close();
+  }
+  k.shutdown();
+  // (f) THE BOOT BELT: a SIGKILL of the server between a stop's verdict and the profile's removal leaves a terminal record
+  // with its profile on disk — the next keeper removes it at adoptAll (and never a kept one)
+  {
+    const dataDir = path.join(root, 'k18b'); const logRoot = path.join(dataDir, 'desktop-apps');
+    const p1 = path.join(logRoot, 'da-boot1', 'profile'), p2 = path.join(logRoot, 'da-boot2', 'profile');
+    for (const p of [p1, p2]) { fs.mkdirSync(p, { recursive: true, mode: 0o700 }); fs.writeFileSync(path.join(p, 'Cookies'), 'x'); }
+    const recOf = (id, profileDir, keepProfile) => ({ ...M.newRecord({ id, label: 'Fake browser', exec: FAKE, source: 'registry', backend: 'vnc-display', now: Date.now() - 1000 }), state: 'exited', endedAt: Date.now() - 500, browser: 'chromium', profileDir, keepProfile });
+    fs.writeFileSync(path.join(dataDir, 'desktop-apps.json'), JSON.stringify({ apps: { 'da-boot1': recOf('da-boot1', p1, false), 'da-boot2': recOf('da-boot2', p2, true) }, runawayParkedUntil: {} }));
+    const kb = mkB('k18b');
+    await kb.adoptAll();
+    ok(!fs.existsSync(p1) && kb.get('da-boot1').profileRemovedAt > 0, 'boot belt: an exited record\'s leftover profile is removed at adoption');
+    ok(fs.existsSync(p2) && !kb.get('da-boot2').profileRemovedAt, 'boot belt: a KEPT profile is never removed');
+    kb.shutdown();
+  }
+  // (g) CONTROL — a keeper copy whose stop never retires the profile: the same stop leaves it behind (the leg above is the fix)
+  {
+    const { mod } = mutant('noretire', [['      if (rec.profileDir) await retireProfile(rec, { clean, why: `stopped (${why})` });', '      // pre-fix: no retire at stop']]);
+    const kc = mkB('k18c', mod);
+    await kc.adoptAll(); kc.start();
+    const x = await kc.launch({ appId: 'vs-browser' });
+    const profX = path.join(kc.logRoot, x.id, 'profile');
+    await until(() => kc.get(x.id).state !== 'launching');
+    const sx = await kc.stop(x.id);
+    ok(sx.state === 'exited' && fs.existsSync(profX), 'CONTROL: without the retire at stop, the stopped session\'s profile is LEFT on disk — the leg above proves the removal, not a coincidence');
+    kc.shutdown();
+  }
+}
 
-// ── §18 THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
+console.log('§19 round 3 A2 (docs/design-desktop-apps-seamless §3.2) — an app EXIT: the record + the broadcast carry the windows LEFT on the display (the census before the teardown)');
+{
+  const XT = D.binOnPath('xterm', { env: process.env });
+  const exitedOf = (k, id) => k._events.filter((m) => m.type === 'desktop-apps-updated').map((m) => (m.apps || []).find((a) => a.id === id)).filter((a) => a && a.state === 'exited');
+  /** launch, wait ready, then time the exit: the record's state flip and the broadcast that carries it */
+  const runExit = async (k, body, label) => {
+    const r0 = await k.launch(body);
+    await until(() => (k.get(r0.id).state !== 'launching' ? true : null), 40000);
+    const r1 = k.get(r0.id);
+    if (r1.state !== 'ready') return { r1, label };
+    const flipAt = await until(() => (k.get(r0.id).state === 'exited' ? Date.now() : null), 20000, 10);
+    const castAt = await until(() => (exitedOf(k, r0.id).length ? Date.now() : null), 10000, 10);
+    return { id: r0.id, r1, rec: k.get(r0.id), cast: exitedOf(k, r0.id)[0] || null, flipAt, castAt, label };
+  };
+  if (!XT) skip('§19: xterm not on PATH — no app that exits by itself and a forking launcher to drive');
+  else {
+    const rungs = [['xpra', XPRA_BIN && D.binOnPath('xauth', { env: process.env }) ? { settings: { 'desktop.backendPrefs': '' } } : null], ['vnc-display', {}]];
+    for (const [rung, opts] of rungs) {
+      if (!opts) { skip(`§19 ${rung}: the rung cannot be driven on this box`); continue; }
+      const k = mk(`k19-${rung}`, opts);
+      await k.adoptAll(); k.start();
+      // (a) the app exits by itself (xterm running a 2.5 s shell): the windows went with it ⇒ 0, and the broadcast says so
+      const a = await runExit(k, { exec: XT, args: ['-T', 'vs-a2-exit', '-geometry', '40x10', '-e', 'sh', '-c', 'sleep 2.5'], label: 'a2-exit' }, 'exit');
+      ok(a.r1.state === 'ready' && a.r1.backend === rung, `§19 ${rung}: the app reaches ready on the ${rung} rung`, a.r1);
+      if (a.rec) {
+        console.log(`  §19 ${rung} (a): the record flipped to exited, the broadcast carrying it arrived ${a.castAt && a.flipAt ? a.castAt - a.flipAt : '?'} ms later (the census + the teardown); windowsAtExit ${a.rec.windowsAtExit}`);
+        ok(a.rec.state === 'exited' && a.rec.exitCode === 0 && !a.rec.stoppedBy && a.rec.windowsAtExit === 0, `§19 ${rung} (a): an app that EXITS ⇒ exited (code 0), no stoppedBy, windowsAtExit 0 on the record (${a.rec.windowsAtExit})`, { state: a.rec.state, exitCode: a.rec.exitCode, windowsAtExit: a.rec.windowsAtExit, lastError: a.rec.lastError });
+        ok(!!a.cast && a.cast.windowsAtExit === 0 && a.castAt - a.flipAt < 2000, `§19 ${rung} (a): the desktop-apps-updated broadcast carries the exited record WITH windowsAtExit 0, within 2 s of the exit (${a.castAt - a.flipAt} ms)`, a.cast && { state: a.cast.state, windowsAtExit: a.cast.windowsAtExit });
+        ok(M.exitCloseVerdict(a.cast).close === true, `§19 ${rung} (a): …and the PURE client verdict over that broadcast closes the window (${JSON.stringify(M.exitCloseVerdict(a.cast))})`);
+        ok([a.r1.pids.x, a.r1.pids.server, a.r1.pids.app].filter(Boolean).every((p) => !alive(p)) && markerPids(a.id).length === 0, `§19 ${rung} (a): the teardown still ran after the census — nothing of the session left`, markerPids(a.id));
+      }
+      // (b) a FORKING launcher: the shell exits 0 after 3 s while the xterm it started keeps its window ⇒ the census counts it
+      const b = await runExit(k, { exec: '/bin/sh', args: ['-c', `${XT} -T vs-a2-child -geometry 40x10 & sleep 3; exit 0`], label: 'a2-fork' }, 'fork');
+      if (b.rec) {
+        ok(b.rec.state === 'exited' && b.rec.windowsAtExit >= 1, `§19 ${rung} (b): a forking launcher exits while its child still shows a window ⇒ windowsAtExit ${b.rec.windowsAtExit} (≥ 1) — "the app exited" is not claimed for a window that is still there`, { windowsAtExit: b.rec.windowsAtExit, lastError: b.rec.lastError });
+        ok(M.exitCloseVerdict(b.rec).close === false && M.exitCloseVerdict(b.rec).why === 'windows-left', `§19 ${rung} (b): …the client verdict keeps that window with its sentence (${JSON.stringify(M.exitCloseVerdict(b.rec))})`);
+        ok(markerPids(b.id).length === 0, `§19 ${rung} (b): the teardown reaps the child too (the marker census is empty)`, markerPids(b.id));
+      } else ok(false, `§19 ${rung} (b): the forking launcher reached ready`, b.r1);
+      // (c) Stop: a stop is not an exit — no census, stoppedBy names it (the client closes on that)
+      const c0 = await k.launch({ exec: XT, args: ['-T', 'vs-a2-stop', '-geometry', '40x10'], label: 'a2-stop' });
+      await until(() => (k.get(c0.id).state !== 'launching' ? true : null), 40000);
+      const c1 = await k.stop(c0.id);
+      ok(c1.state === 'exited' && c1.stoppedBy === 'user' && c1.windowsAtExit === undefined && M.exitCloseVerdict(c1).why === 'stopped', `§19 ${rung} (c): Stop ⇒ exited, stoppedBy user, no census (${c1.windowsAtExit}) — the verdict closes on the stop`, { state: c1.state, stoppedBy: c1.stoppedBy, windowsAtExit: c1.windowsAtExit });
+      k.shutdown();
+    }
+    // (d) CONTROL — a keeper copy without the census (the pre-A2 keeper): the same forking launcher's record carries no count,
+    // so the verdict would close a window that is still on the display — the (b) leg above is the census, not a coincidence
+    const { mod } = mutant('noexitcensus', [['        rec.windowsAtExit = await windowsLeftAtExit(rec);', '        // pre-A2: no census at the exit']]);
+    fs.mkdirSync(path.join(root, 'k19-ctl'), { recursive: true });
+    const kxEvents = [];
+    const kx = mod.create({ dataDir: path.join(root, 'k19-ctl'), env: baseEnv, broadcast: (m) => kxEvents.push(m), serverSetting: (key) => ({ ...PIN, ...(XPRA_BIN ? { 'desktop.backendPrefs': '' } : {}) })[key], backends: XVFB_TABLE, log: { log() {}, warn() {}, error() {} } });
+    kx._events = kxEvents; keepers.push(kx);
+    await kx.adoptAll(); kx.start();
+    const x = await runExit(kx, { exec: '/bin/sh', args: ['-c', `${XT} -T vs-a2-child -geometry 40x10 & sleep 3; exit 0`], label: 'a2-fork-ctl' }, 'fork-ctl');
+    ok(!!x.rec && x.rec.state === 'exited' && x.rec.windowsAtExit === undefined && M.exitCloseVerdict(x.rec).close === true, `CONTROL: without the census the forking launcher's record carries no count (${x.rec && x.rec.windowsAtExit}) and the verdict would CLOSE the window its child still shows`, x.rec && { windowsAtExit: x.rec.windowsAtExit });
+    kx.shutdown();
+  }
+}
+
+console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the scale DERIVED from dpr × UI scale, measured inside the app\'s display; the per-window relaunch');
+{
+  const XT = D.binOnPath('xterm', { env: process.env }), XRDB = D.binOnPath('xrdb', { env: process.env });
+  const envOf = (pid) => { try { return Object.fromEntries(fs.readFileSync(`/proc/${pid}/environ`, 'latin1').split('\0').filter(Boolean).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])); } catch { return {}; } };
+  const xftDpiOf = (k, r) => { try { const out = execFileSync(XRDB, ['-query'], { env: { PATH: process.env.PATH, DISPLAY: r.display, XAUTHORITY: path.join(k.logRoot, r.id, 'Xauthority') }, encoding: 'utf8', timeout: 5000 }); return Number((out.match(/^Xft\.dpi:\s+(\d+)/m) || [])[1]) || null; } catch { return null; } };
+  const readyOf = async (k, id) => { await until(() => (k.get(id).state !== 'launching' ? true : null), 40000); return k.get(id); };
+  if (!XPRA_BIN || !D.binOnPath('xauth', { env: process.env }) || !XT || !XRDB) skip('§20: xpra / xauth / xterm / xrdb not all on PATH — the xpra rung\'s scale cannot be measured on this box');
+  else {
+    const k = mk('k20', { settings: { 'desktop.backendPrefs': '', 'desktop.appScale': 'auto' } });
+    await k.adoptAll(); k.start();
+    // (a) a DPR-2 client at UI scale 125 % under `auto`: 2.5× = GDK_SCALE 2 in the app's environ + Xft.dpi 120 on its display
+    const a0 = await k.launch({ exec: XT, args: ['-T', 'vs-a3-scale', '-geometry', '40x10'], label: 'a3-scale', dpr: 2, uiScale: 1.25 });
+    const a1 = await readyOf(k, a0.id);
+    const aEnv = envOf(a1.pids.app), aDpi = xftDpiOf(k, a1);
+    // the TEXT half, measured: xterm's 40×10 cells are drawn by its Xft face (faceSize 8 × GDK_SCALE) at the display's dpi —
+    // its window at 120 dpi against the same face at 96 dpi (the CONTROL (f) below) is the text scale 2.5 / 2 = 1.25
+    const xtermWin = async (kk, id, title) => { const w = await until(async () => { const r = await kk.windows(id).catch(() => null); return ((r && r.windows) || []).find((x) => x.title === title && x.w > 16) || null; }, 10000).catch(() => null); return w ? { w: w.w, h: w.h } : null; };
+    const aWin = await xtermWin(k, a0.id, 'vs-a3-scale');
+    console.log(`  §20 (a): record scale ${a1.scale} dpi ${a1.dpi} origin ${a1.scaleOrigin} from ${JSON.stringify(a1.scaleFrom)}; inside the display: GDK_SCALE=${aEnv.GDK_SCALE}, Xft.dpi ${aDpi}`);
+    ok(a1.state === 'ready' && a1.backend === 'xpra' && a1.scale === 2.5 && a1.dpi === 120 && a1.scaleOrigin === 'auto' && a1.scaleFrom && a1.scaleFrom.dpr === 2 && a1.scaleFrom.uiScale === 1.25, '§20 (a): dpr 2 × uiScale 1.25 under auto ⇒ the record says 2.5×, 120 dpi, origin auto, and the numbers it came from', { state: a1.state, scale: a1.scale, dpi: a1.dpi, origin: a1.scaleOrigin, from: a1.scaleFrom, lastError: a1.lastError });
+    ok(aEnv.GDK_SCALE === '2' && aDpi === 120, `§20 (a): MEASURED inside the app's display — GDK_SCALE=${aEnv.GDK_SCALE} in the app's environ, Xft.dpi ${aDpi} in its resource database`, { GDK_SCALE: aEnv.GDK_SCALE, xft: aDpi });
+    // (b) the per-window relaunch at 1.5×: the successor first, the old one names it BEFORE its stop broadcasts, then stops
+    const castsBefore = k._events.length;
+    // desktop A r1: two clients on the window — L active, H blocked (x5). H follows the `replacedBy` broadcast and attaches to
+    // the successor FIRST (in the old-record broadcast itself, before the old session's teardown even starts); L (the one
+    // that chose the scale) attaches only after the HTTP answer. L must hold the successor's seat with no Resume.
+    k.viewerJoined(a0.id, { viewerId: 'v-L', pane: 'pL' }); k.viewerJoined(a0.id, { viewerId: 'v-H', pane: 'pH' });
+    let hJoinedAt = null;
+    const castsWatch = setInterval(() => { if (hJoinedAt) return; const m = k._events.slice(castsBefore).find((x) => x.type === 'desktop-apps-updated' && (x.apps || []).some((a) => a.id === a0.id && a.replacedBy)); if (m) { const succ = m.apps.find((a) => a.id === a0.id).replacedBy; hJoinedAt = { succ, activeAtJoin: (k.viewerJoined(succ, { viewerId: 'v-H2', pane: 'pH' }) || {}).active }; } }, 5);
+    const t0 = Date.now();
+    const rl = await k.relaunch(a0.id, { scale: 1.5, dpr: 2, uiScale: 1.25 });
+    clearInterval(castsWatch);
+    const lView = k.viewerJoined(rl.app.id, { viewerId: 'v-L2', pane: 'pL' });
+    console.log(`  §20 (b) r1: H attached to the successor during the teardown (active then: ${hJoinedAt && JSON.stringify(hJoinedAt.activeAtJoin)}); after the answer L attached — active ${k.activeViewer(rl.app.id)} (${lView && lView.active})`);
+    ok(!!hJoinedAt && hJoinedAt.succ === rl.app.id && hJoinedAt.activeAtJoin === 'pL' && k.activeViewer(rl.app.id) === 'v-L2', '§20 (b) desktop A r1: the relaunch CARRIES the seat — the blocked client H attaching to the successor first (from the replacedBy broadcast, during the teardown) is blocked with pane pL named active, and L attaching after the answer is ACTIVE with no Resume', { hJoinedAt, active: k.activeViewer(rl.app.id) });
+    k.viewerLeft(rl.app.id, 'v-L2'); k.viewerLeft(rl.app.id, 'v-H2');
+    const b1 = await readyOf(k, rl.app.id);
+    const readyMs = Date.now() - t0;
+    const bEnv = envOf(b1.pids.app), bDpi = xftDpiOf(k, b1);
+    const olds = k._events.slice(castsBefore).filter((m) => m.type === 'desktop-apps-updated').map((m) => (m.apps || []).find((x) => x.id === a0.id)).filter(Boolean);
+    const firstNamed = olds.findIndex((x) => x.replacedBy === rl.app.id), firstExited = olds.findIndex((x) => x.state === 'exited');
+    console.log(`  §20 (b): relaunched ${a0.id} → ${rl.app.id} in ${readyMs} ms to ready; record scale ${b1.scale} dpi ${b1.dpi} origin ${b1.scaleOrigin}; GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}; old: ${rl.replaced.state} stoppedBy ${rl.replaced.stoppedBy} replacedBy ${rl.replaced.replacedBy}; broadcasts of the old record: named at #${firstNamed}, exited at #${firstExited}`);
+    ok(rl.app.id !== a0.id && b1.state === 'ready' && b1.scale === 1.5 && b1.dpi === 144 && b1.scaleOrigin === 'chosen' && b1.exec === a1.exec && JSON.stringify(b1.args) === JSON.stringify(a1.args) && b1.label === a1.label, '§20 (b): the successor is the SAME command at the CHOSEN 1.5× (144 dpi, origin chosen)', { scale: b1.scale, dpi: b1.dpi, origin: b1.scaleOrigin, state: b1.state });
+    ok(bEnv.GDK_SCALE === '1' && bDpi === 144, `§20 (b): MEASURED — 1.5× is text only for GTK: GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}`);
+    ok(rl.replaced.state === 'exited' && rl.replaced.stoppedBy === 'relaunch' && rl.replaced.replacedBy === rl.app.id && [a1.pids.x, a1.pids.app].every((p) => !alive(p)) && markerPids(a0.id).length === 0, '§20 (b): the old session is stopped (stoppedBy relaunch, replacedBy the successor) and nothing of it is left', { state: rl.replaced.state, stoppedBy: rl.replaced.stoppedBy, replacedBy: rl.replaced.replacedBy, left: markerPids(a0.id) });
+    ok(firstNamed >= 0 && firstExited >= 0 && firstNamed <= firstExited && M.exitCloseVerdict(olds[firstExited]).why === 'relaunched', `§20 (b): every client learns the successor no later than the stop (named at broadcast #${firstNamed}, exited at #${firstExited}) — the window follows it instead of closing (${JSON.stringify(M.exitCloseVerdict(olds[firstExited] || null))})`);
+    // (c) refusals by name: an ended record, an unknown scale, an unknown id
+    const r1 = await k.relaunch(a0.id, { scale: 2 }).then(() => null, (e) => e.code);
+    const r2 = await k.relaunch(rl.app.id, { scale: 3 }).then(() => null, (e) => e.code);
+    const r3 = await k.relaunch('da-nope', { scale: 2 }).then(() => null, (e) => e.code);
+    ok(r1 === 'not-ready' && r2 === 'bad-request' && r3 === 'not-found', `§20 (c): relaunch refuses by name — an ended record ${r1}, scale 3 ${r2}, an unknown id ${r3}`);
+    // (d) the cap: the app being replaced does not count (a keeper at its ceiling can still change a window's scale)
+    const kc = mk('k20c', { settings: { 'desktop.backendPrefs': '' }, limits: { ...M.LIMITS, CONCURRENT_CAP: 1 } });
+    await kc.adoptAll(); kc.start();
+    const c0 = await kc.launch({ exec: XT, args: ['-T', 'vs-a3-cap', '-geometry', '40x10'], label: 'a3-cap', dpr: 1 });
+    await readyOf(kc, c0.id);
+    const blocked = await kc.launch({ exec: XT, args: [], label: 'a3-cap2' }).then(() => null, (e) => e.code);
+    const cr = await kc.relaunch(c0.id, { scale: 2 }).then((r) => r, (e) => ({ error: e.code }));
+    ok(blocked === 'cap' && cr.app && cr.app.scale === 2 && cr.app.scaleOrigin === 'chosen', `§20 (d): at a ceiling of 1 a second launch is refused (${blocked}) yet the relaunch goes through (${cr.app ? cr.app.scale + '×' : cr.error})`);
+    if (cr.app) await readyOf(kc, cr.app.id);
+    kc.shutdown();
+    // (e) the vnc-display rung has no scale: its record says 1× with no origin whatever the client, and a relaunch is refused by name
+    const kv = mk('k20v');
+    await kv.adoptAll(); kv.start();
+    const v0 = await kv.launch({ exec: appBin, args: appArgs, label: 'a3-vnc', dpr: 2, uiScale: 1.25 });
+    const v1 = await readyOf(kv, v0.id);
+    const vr = await kv.relaunch(v0.id, { scale: 2 }).then(() => null, (e) => e.code);
+    ok(v1.backend === 'vnc-display' && v1.scale === 1 && v1.scaleOrigin === null && vr === 'not-xpra', `§20 (e): a whole-display rung stays 1× with no origin (${v1.scale}, ${v1.scaleOrigin}) and its relaunch is refused (${vr})`);
+    await kv.stop(v0.id); kv.shutdown();
+    await k.stop(rl.app.id);
+    k.shutdown();
+    // (f) CONTROL — the pre-A3 keeper (the scale from the setting + dpr only): the same client gets 2× / 96 — the UI scale never reached the app
+    const { mod } = mutant('prea3scale', [["const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });", "const pick = { scale: [1, 1.5, 2].includes(Number(serverSetting('desktop.appScale'))) ? Number(serverSetting('desktop.appScale')) : (v.launch.dpr >= 1.5 ? 2 : 1), origin: null, from: null }; // pre-A3"]]);
+    fs.mkdirSync(path.join(root, 'k20-ctl'), { recursive: true });
+    const kx = mod.create({ dataDir: path.join(root, 'k20-ctl'), env: baseEnv, broadcast: () => {}, serverSetting: (key) => ({ ...PIN, 'desktop.backendPrefs': '', 'desktop.appScale': 'auto' })[key], backends: XVFB_TABLE, log: { log() {}, warn() {}, error() {} } });
+    keepers.push(kx);
+    await kx.adoptAll(); kx.start();
+    const x0 = await kx.launch({ exec: XT, args: ['-T', 'vs-a3-ctl', '-geometry', '40x10'], label: 'a3-ctl', dpr: 2, uiScale: 1.25 });
+    const x1 = await readyOf(kx, x0.id);
+    const xDpi = xftDpiOf(kx, x1);
+    const xWin = await xtermWin(kx, x0.id, 'vs-a3-ctl');
+    const rw = aWin && xWin ? aWin.w / xWin.w : 0, rh = aWin && xWin ? aWin.h / xWin.h : 0;
+    console.log(`  §20 (a)/(f): xterm 40×10 at 2.5× (120 dpi) ${aWin && `${aWin.w}×${aWin.h}`} vs at 2× (96 dpi) ${xWin && `${xWin.w}×${xWin.h}`} device px — ratio ${rw.toFixed(3)} × ${rh.toFixed(3)}`);
+    ok(rw >= 1.15 && rw <= 1.35 && rh >= 1.15 && rh <= 1.35, `§20 (a): MEASURED the text half — the same 40×10 xterm is ${rw.toFixed(2)}× wider and ${rh.toFixed(2)}× taller at 2.5× (120 dpi) than at 2× (96 dpi): the text is drawn at 2.5×, the fraction carried by the dpi`, { aWin, xWin });
+    ok(x1.scale === 2 && x1.dpi === 96 && xDpi === 96, `CONTROL: the pre-A3 pick gives the same DPR-2 / 125 % client ${x1.scale}× at Xft.dpi ${xDpi} — the (a) leg is the derivation, not a coincidence`, { scale: x1.scale, dpi: x1.dpi, xft: xDpi });
+    await kx.stop(x0.id); kx.shutdown();
+  }
+}
+
+// ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix
 // placement too). The copies used to be SIBLINGS inside src/ (gitignored, so
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
-console.log('\n§18 the patched copies never touch the tree');
-for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§18 ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+console.log('\n§tree the patched copies never touch the tree');
+for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

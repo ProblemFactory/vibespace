@@ -107,6 +107,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');
+const { BROWSER_BINS } = require('./desktop-apps'); // B-bfe6: the browser families' binary names — ONE list, the PURE model's
 
 const LOCAL_HOST_IDS = new Set([null, undefined, '', 'local']);
 function assertLocal(hostId, what) {
@@ -156,13 +157,44 @@ function assertExecutable(binPath, name) {
 /** Every binary a backend rung, a light WM or the enumeration may need. */
 const PROBE_BINS = Object.freeze(['xpra', 'Xvnc', 'Xtigervnc', 'Xvfb', 'x11vnc', 'xfwm4', 'openbox', 'xdotool', 'wmctrl', 'xwininfo', 'xdpyinfo', 'xauth', 'xrdb']);
 
-/** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, at }`. */
+/**
+ * B-bfe6 — IS THIS BROWSER BINARY A SNAP? (a FACT; the PURE `profileDirVerdict`
+ * decides what it means). Ubuntu ships `/usr/bin/firefox` and
+ * `/usr/bin/chromium-browser` as small shell scripts that `exec /snap/bin/<name>`
+ * (measured on this box, 2026-09-23: /usr/bin/firefox = a 2,377-byte POSIX
+ * script ending `exec /snap/bin/firefox "$@"`, snap firefox 156.0-1), and a
+ * snap sees a PRIVATE /tmp and no hidden top-level folder of $HOME — a profile
+ * dir outside that is silently replaced by one the snap can see. Answers
+ * 'snap' when the resolved path lies under /snap/, or the file is a script
+ * (≤ 64 KiB, `#!`) that names /snap/bin/; else null. Remembered per
+ * (path, mtime, size) — a package swap re-reads.
+ */
+const _confMemo = new Map();
+function browserConfinement(binPath) {
+  if (typeof binPath !== 'string' || !binPath) return null;
+  let st, real;
+  try { real = fs.realpathSync(binPath); st = fs.statSync(real); } catch { return null; }
+  const key = `${real}|${st.mtimeMs}|${st.size}`;
+  if (_confMemo.has(key)) return _confMemo.get(key);
+  let out = null;
+  if (real.startsWith('/snap/')) out = 'snap';
+  else if (st.isFile() && st.size <= 65536) {
+    try { const head = fs.readFileSync(real, 'latin1'); if (head.startsWith('#!') && /\/snap\/bin\//.test(head)) out = 'snap'; } catch { /* unreadable ⇒ no claim */ }
+  }
+  _confMemo.set(key, out);
+  return out;
+}
+
+/** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, browsers: { name: { path, confinement } }, at }`.
+ *  The browser families' binaries (B-bfe6) are probed beside the rung binaries; `browsers` names the present ones. */
 async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now } = {}) {
   assertLocal(hostId, 'hostFacts');
   const out = {};
-  for (const b of bins) out[b] = binOnPath(b, { env, now });
+  for (const b of [...bins, ...BROWSER_BINS]) if (!(b in out)) out[b] = binOnPath(b, { env, now });
   const xpra = out.xpra ? { ...(await xpraVersion({ binPath: out.xpra, env })), www: xpraWwwDir({ binPath: out.xpra, env }) } : null;
-  return { hostId: 'local', bins: out, xpra, at: now() };
+  const browsers = {};
+  for (const b of BROWSER_BINS) if (out[b]) browsers[b] = { path: out[b], confinement: browserConfinement(out[b]) };
+  return { hostId: 'local', bins: out, xpra, browsers, at: now() };
 }
 
 // ── env for a process on a private X display ─────────────────────────────────
@@ -943,7 +975,7 @@ async function xpraVersion({ binPath, env = process.env } = {}) {
 }
 
 module.exports = {
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, hostFacts, x11Env,
+  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, x11Env,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,

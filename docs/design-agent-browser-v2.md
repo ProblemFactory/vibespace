@@ -1901,6 +1901,8 @@ deliberately, and while it is open every such row is marked as "your desktop".
   settings render loop, and a category no row lists is a setting nobody can reach (the build
   census exists because ten settings, including every money ceiling, were unreachable).
 
+* **Naming (2026-09-23, B-d03a):** every surface in this section is the product's SECOND face called "browser" (the other two: the toolbar's iframe web view and Chromium as a desktop app). The globe glyph means all three today; the rendered directions, the scores and the recommendation (rename to Web view / **Agent browser** / Browser app; the agent face on the `browser-live` "window with a dot" glyph everywhere) are in `docs/design-browser-faces.md`.
+
 ---
 
 ## 6. Security model

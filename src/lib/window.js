@@ -118,7 +118,7 @@ class WindowManager {
     };
     controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.minimize(winInfo.id); };
     controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.toggleMaximize(winInfo.id); };
-    controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.closeWindow(winInfo.id); };
+    controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.requestClose(winInfo.id); };
     el.addEventListener('mousedown', () => this.focusWindow(winInfo.id));
     titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) this.toggleMaximize(winInfo.id); });
     // Right-click on title bar (2.212.0): full window menu — the old direct
@@ -1150,6 +1150,20 @@ class WindowManager {
     return true;
   }
 
+  /** A USER'S close (the title-bar ✕, a tab ✕, the taskbar menu, Ctrl+\\ x, the phone nav ✕): the window may answer
+   *  first — `winInfo.onCloseRequest()` returning false keeps it (round 3 A2: a desktop-app window asks its APP to
+   *  close, docs/design-desktop-apps-seamless §3.2). Programmatic closes (layout sync, a window closing itself) call
+   *  closeWindow directly and are never vetoed. Returns true when the window closed. */
+  requestClose(id) {
+    const win = this.windows.get(id); if (!win) return false;
+    if (typeof win.onCloseRequest === 'function') {
+      let go = true;
+      try { go = win.onCloseRequest() !== false; } catch (e) { console.warn('[window] onCloseRequest threw — closing', e); }
+      if (!go) return false;
+    }
+    this.closeWindow(id);
+    return true;
+  }
   closeWindow(id) {
     this._app?.stage?.onWindowClosed(id);
     // A user-closed window must die in every cached desktop record too —

@@ -35,6 +35,7 @@ See [CLAUDE.md](../CLAUDE.md) in the project root for:
 - Bug fix history
 
 - **[Collaboration Design](design-collaboration.md)** — Remote sessions, multi-host gateway, shared storage, session migration (roadmap)
+- **[The three browser faces](design-browser-faces.md)** — B-d03a design: iframe web view vs agent browser vs browser-as-desktop-app; confusions named from code, three rendered directions (`mockups/browser-faces/`), rubric, recommendation (中文原文: `design-browser-faces.zh.md`)
 - **[Side-by-side UX](design-split-ux.md)** — Why a drag never splits, the explicit ⫿ entry after a tab merge, the visual-order strip, undo; three pixel-checked mockups ([zh original](design-split-ux.zh.md))
 - **[Codex Support Plan](codex-support-plan.md)** — Research notes, parity gaps, and phased integration plan for first-class Codex support
 

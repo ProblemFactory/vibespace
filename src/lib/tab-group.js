@@ -584,7 +584,7 @@ const tabGroupMethods = {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'tab-close';
       closeBtn.textContent = '\u2715';
-      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); this.removeFromTabChain(chain, tabWinId); });
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); if (tabWin.onCloseRequest && tabWin.onCloseRequest() === false) return; this.removeFromTabChain(chain, tabWinId); }); // a user close: the window may answer first (WindowManager.requestClose)
 
       // A grouped guest's own titlebar is hidden — the tab carries its
       // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).

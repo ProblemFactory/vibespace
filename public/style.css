@@ -2242,6 +2242,16 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
   background: var(--bg-panel, var(--bg-titlebar)); border-bottom: 1px solid var(--border); }
 .desktop-status { flex: 1; font-size: 11px; color: var(--text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* round 3, A1: the one-time "Enable HTTPS for seamless copy" hint beside the plain-http copy chip (picture-shell.js) */
+.desktop-copy-hint { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-secondary);
+  padding: 1px 2px 1px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); white-space: nowrap;
+  flex: 0 1 auto; min-width: 0; }
+/* in a narrow window the sentence gives way first; the chip and the link keep their words */
+.desktop-copy-hint-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.desktop-copy-hint-link { color: var(--accent); text-decoration: underline; flex-shrink: 0; }
+.desktop-copied-chip { white-space: nowrap; flex-shrink: 0; }
+.desktop-copy-hint-close { width: 18px; height: 18px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.desktop-copy-hint-close svg { width: 10px; height: 10px; }
 
 /* ── Desktop-app windows + the launch dialog (docs/design-desktop-apps §2, P8-1) ── */
 .desktop-app-chip { font-size: 10px; color: var(--text-secondary); padding: 1px 6px; border: 1px solid var(--border);
@@ -2252,6 +2262,8 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-app-chip-agent { color: var(--accent); }
 .window-live-driving .desktop-app-mount { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .desktop-app-stop { color: var(--red, #e55); }
+/* round 3 A2: a desktop-app window is unseen until its first record answers — a dead record (a layout replay) closes it before it paints */
+.window.desktop-app-pending { opacity: 0; pointer-events: none; }
 /* P8-2 x2 (2026-09-22) — the xpra seamless pane (xpra-view.js): the pane is the X root and it is a THEME colour, never
    black (owner acceptance 1); one absolutely placed canvas per xpra window; the IME textarea sits under everything,
    invisible but focusable so an IME can compose; a view-only pane (window-live Watch) shows the default cursor. */
@@ -2295,6 +2307,15 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-sec h4, .desktop-launch-col h4 { margin: 2px 0 6px; font-size: 12px; color: var(--text-secondary); font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
 .desktop-launch-count { font-weight: 400; font-size: 11px; }
 .desktop-launch-running-sec.is-empty { display: none; } /* no global .hidden in this project */
+/* B-bfe6: the Browsers section — the note that separates it from the Agent browser, the optional URL + keep-profile row */
+.desktop-launch-browsers-sec.is-empty { display: none; }
+.desktop-launch-browser-note { margin: 0 0 6px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); }
+.desktop-launch-browser-opts { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; }
+.desktop-launch-browser-opts .desktop-launch-url-field { flex: 1 1 260px; min-width: 0; margin-bottom: 6px; }
+/* r1: `.dialog-body label` (0,1,1) is a COLUMN flex — the box sat above its text; this must out-rank it (the
+   `.dialog-check-row` precedent above) */
+.dialog-body label.desktop-launch-check { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); margin-bottom: 10px; cursor: pointer; }
+.dialog-body label.desktop-launch-check input { margin: 0; width: auto; flex: none; }
 /* The catalog: app CARDS in an auto-filling grid, one click launches. An
    unavailable app stays visible, dimmed, with its reason — never hidden. */
 .desktop-launch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
@@ -2309,6 +2330,8 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-card:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .desktop-launch-card:disabled { cursor: not-allowed; }
 .desktop-launch-card.is-unavailable { opacity: .55; }
+/* r1: a dimmed card's reason may take TWO lines (a short, translated reason fits; the sentence is the tooltip) */
+.desktop-launch-card.is-unavailable .desktop-launch-card-sub { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.3; }
 .desktop-launch-card.is-unavailable .desktop-launch-card-icon { color: var(--text-dim); }
 .desktop-launch-card.is-launching { border-color: var(--accent); cursor: progress; opacity: 1; }
 .desktop-launch-card.is-launching .desktop-launch-card-icon svg { animation: usage-refresh-spin 0.9s linear infinite; }

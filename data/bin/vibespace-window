@@ -86,6 +86,7 @@ function printRefusal(r, status) {
   else if (r.code === 'no_live_view') console.error('  the user is looking at this window on their own desktop; there is no live pane to point them at — describe what you need in your reply instead');
   else if (r.code === 'capture_needs_portal' || r.code === 'capture_unavailable') console.error('  pixels of this window cannot be read here (the refusal says why); `snapshot` still reads its tree');
   else if (r.code === 'desktop_window_gone') console.error('  the application exited — `vibespace-window list` again');
+  else if (r.code === 'browser_is_human') console.error('  a desktop-app browser is the user\'s own window — for the web use YOUR browser: `vibespace-browser` (`vibespace-docs browser`); do not look for another road to that window');
 }
 const usageOf = (line) => { console.error('usage: ' + line); process.exit(2); };
 const handleArg = (usage) => { const h = args[1]; if (!h || h.startsWith('-') || h.startsWith('@')) usageOf(usage); return h; };

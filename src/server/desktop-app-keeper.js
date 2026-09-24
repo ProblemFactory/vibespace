@@ -172,6 +172,7 @@
  * settings `desktop.backendPrefs` (a row's own `backendPrefs` still wins).
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const M = require('../desktop-apps');
 const LIMITS = require('../keeper-limits');
@@ -224,10 +225,17 @@ const FIT_SLOW_BELT_MS = 60000;
  *  reconnecting inside the grace takes the seat back, and only when the
  *  grace runs out is the most recently active remaining viewer elected. */
 const VIEWER_GRACE_MS = 5000;
+/** Desktop A r1: a Scale ▸ relaunch CARRIES the old window's active pane to the successor — held (every other joiner
+ *  blocked) through the old session's teardown, then for RELAUNCH_SEAT_MS after the answer for that pane to attach.
+ *  Without it the relaunching client (it learns the successor from the HTTP answer, after the teardown) always lost the
+ *  first-attach election to a client that retargeted from the `replacedBy` broadcast (measured: the blocked one won). */
+const RELAUNCH_SEAT_MS = 10000;
 /** The xpra rung's app title for a BLOCKED pane (it has no protocol session
  *  to read it from): re-read from X (`windows(id)`, two spawns) when a
  *  blocked seat appears and on the tick while one exists, at most this often. */
 const XPRA_TITLE_EVERY_MS = 10000;
+// round 3 A2: the one window census at an app's exit (two X spawns, ~10 ms measured) never holds the teardown longer
+const EXIT_CENSUS_MS = 2000;
 /** The env marker every process of a session inherits — its identity when
  *  the leader is gone (KEEPER_ENV in the PURE model reserves the name). */
 const SESSION_ENV = 'VIBESPACE_DESKTOP_APP';
@@ -260,9 +268,10 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *   log, now, tickMs, geometry, hostId
  *   fitSlowBeltMs  — the settled belt's cadence (default FIT_SLOW_BELT_MS; the suite shrinks it)
  *   viewerGraceMs  — x5: how long the active pane's seat is held after its socket closed (default VIEWER_GRACE_MS; 0 = re-elect at once)
+ *   relaunchSeatMs — A r1: how long a relaunch's carried seat waits for its pane after the answer (default RELAUNCH_SEAT_MS)
  */
 function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, singleton = null,
-  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, viewerGraceMs = VIEWER_GRACE_MS } = {}) {
+  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, viewerGraceMs = VIEWER_GRACE_MS, relaunchSeatMs = RELAUNCH_SEAT_MS } = {}) {
   if (!dataDir) throw new Error('desktop-app-keeper: dataDir is required');
   if (typeof env !== 'function') throw new Error('desktop-app-keeper: env must be a function returning the sanitised base env');
   display.assertLocal(hostId, 'keeper');
@@ -437,6 +446,30 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     return tr.inflight;
   }
   function activeViewer(id) { const s = viewerSets.get(id); return s ? s.active : null; }
+  /** Desktop A r1 — a relaunch CARRIES the seat: the old window's active pane (or the pane its grace holds) holds the
+   *  successor's seat as a grace with NO timer (the old session is still being torn down — however long that takes,
+   *  every other joiner is blocked; the same pane attaching takes it through viewerJoined's grace branch). The returned
+   *  `arm()` starts the RELAUNCH_SEAT_MS countdown once the answer is out; nobody active on the old window ⇒ nothing
+   *  carried (arm is a no-op). */
+  function carrySeat(fromId, toId) {
+    const from = viewerSets.get(fromId);
+    const pane = from ? (paneOf(from, from.active) || (from.grace ? from.grace.pane : null)) : null;
+    if (!pane || !toId) return () => {};
+    const s = seatOf(toId);
+    if (s.active != null) return () => {}; // somebody already holds the successor (never overridden)
+    clearGrace(s);
+    const hold = { pane, timer: null, until: null };
+    s.grace = hold;
+    if (from.paneActiveAt.has(pane)) s.paneActiveAt.set(pane, from.paneActiveAt.get(pane));
+    log.log?.(`[desktop] ${toId}: the relaunch of ${fromId} carries the seat — pane ${pane} holds it, other clients attach blocked`);
+    publishViewers(toId);
+    return () => {
+      if (s.grace !== hold || viewerSets.get(toId) !== s) return; // taken (or the set is gone): nothing to arm
+      hold.until = now() + relaunchSeatMs;
+      hold.timer = setTimeout(() => graceExpired(toId), relaunchSeatMs);
+      hold.timer.unref?.();
+    };
+  }
   /** The bridge's hook: every change of a window's viewer set (join / leave / takeover / the session ended). */
   function onViewers(fn) { if (typeof fn !== 'function') return () => {}; viewerListeners.add(fn); return () => viewerListeners.delete(fn); }
 
@@ -471,11 +504,54 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   function registry(hostFacts) {
     const bins = (hostFacts && hostFacts.bins) || {};
+    const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
     return registryRows.map((row) => {
-      const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : (bins[row.exec] !== undefined ? bins[row.exec] : display.binOnPath(row.exec, { env: env() }));
       const park = M.runawayParkVerdict(row.id, store.runawayParkedUntil, now());
+      if (row.browser) return browserRegistryRow(row, binOf, park);
+      const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? (park ? park.error : null) : `${row.exec} not on PATH`, parkedUntil: park ? park.until : null };
     });
+  }
+  // ── B-bfe6: a BROWSER as a desktop app — the human's own window, its OWN profile (PURE verdicts in desktop-apps.js) ──
+  /** $HOME as the apps see it (the sanitised base env), for the "never the user's real profiles" verdict. */
+  const homeOf = () => { let e = null; try { e = env(); } catch { e = null; } return (e && e.HOME) || os.homedir(); };
+  /** The profile directory an app session OWNS: inside its own per-app dir, so the session's teardown is its owner. */
+  const profileDirOf = (id) => path.join(logRoot, id, 'profile');
+  /** A browser row as the catalog serves it: the family's first binary on PATH (`M.browserRowFor`) and, when that
+   *  binary is a snap (desktop-display's fact), whether the snap can reach a profile under this keeper's root — a
+   *  row that cannot launch is DIMMED with the verdict's own sentence, never hidden. */
+  function browserRegistryRow(row, binOf, park) {
+    const probe = {};
+    for (const e of (row.execs && row.execs.length ? row.execs : (M.BROWSER_KINDS[row.browser] || { execs: [] }).execs)) probe[e] = binOf(e);
+    const b = M.browserRowFor(row, probe);
+    const base = { ...(b.row || row), args: [...(row.args || [])], parkedUntil: park ? park.until : null };
+    // `reasonCode` = the verdict's CODE beside its sentence: the catalog card says a short, translated reason by
+    // code and keeps the sentence for its tooltip (B-bfe6 r1 — a 204-char sentence in a 10 px card was cut to ~27 chars)
+    if (!b.ok) return { ...base, available: false, path: null, confinement: null, reason: b.error, reasonCode: b.code };
+    const confinement = display.browserConfinement ? display.browserConfinement(b.row.path) : null;
+    const pv = M.profileDirVerdict(profileDirOf('da-probe'), { home: homeOf(), ownedRoot: logRoot, confinement, exec: b.row.exec });
+    return { ...base, available: pv.ok, path: b.row.path, confinement, reason: pv.ok ? (park ? park.error : null) : pv.error, reasonCode: pv.ok ? (park ? park.code : null) : pv.code };
+  }
+  /**
+   * Retire a finished browser session's profile: removed (async — a Chrome profile is thousands of files and data/
+   * may sit on NFS: never a sync walk on the event loop) unless the user chose "keep profile"; re-proven OURS by the
+   * PURE verdict before any recursive delete; left in place — and said so on the record — when a process of the
+   * session survived its teardown (it could still be writing). Facts on the record: `profileRemovedAt` /
+   * `profileKept` / `profileError`. Called from every terminal path (teardown of a terminal record, stop()'s
+   * verdict, boot adoption for a SIGKILL between a verdict and its removal).
+   */
+  async function retireProfile(rec, { clean = true, why = 'ended' } = {}) {
+    if (!rec || !rec.profileDir || rec.profileRemovedAt || M.isLiveState(rec.state)) return null;
+    if (rec.keepProfile) { if (!rec.profileKept) { rec.profileKept = true; log.log?.(`[desktop] ${rec.id}: kept ${rec.label}'s profile at ${rec.profileDir} (the user chose "keep profile")`); } return 'kept'; }
+    if (!clean) { rec.profileError = `the profile at ${rec.profileDir} was left in place: a process of the session survived its teardown`; log.warn?.(`[desktop] ${rec.id}: ${rec.profileError}`); return 'left'; }
+    const pv = M.profileDirVerdict(rec.profileDir, { home: homeOf(), ownedRoot: logRoot });
+    if (!pv.ok) { rec.profileError = `not removed: ${pv.error}`; log.warn?.(`[desktop] ${rec.id}: profile ${rec.profileError}`); return 'refused'; }
+    try {
+      await fs.promises.rm(pv.dir, { recursive: true, force: true });
+      rec.profileRemovedAt = now(); delete rec.profileError;
+      log.log?.(`[desktop] ${rec.id}: removed ${rec.label}'s profile ${pv.dir} (${why})`);
+      return 'removed';
+    } catch (e) { rec.profileError = `could not remove ${pv.dir}: ${e.message}`; log.warn?.(`[desktop] ${rec.id}: ${rec.profileError}`); return 'failed'; }
   }
 
   // ── views ──
@@ -520,21 +596,36 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   }
   function newId() { return `da-${now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
 
-  async function launch(body) {
+  /** `opts` (internal — the relaunch's): `scaleChoice` = the Scale ▸ row ('auto' | 1 | 1.5 | 2), `replacing` = the
+   *  id this launch replaces (it is about to stop, so it does not count against the cap). */
+  async function launch(body, opts = {}) {
     const f = await facts();
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
-    if (!v.ok) throw namedError('bad-request', v.error);
+    if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
     const row = v.launch.row;
-    const cap = M.capVerdict(liveRecords(), limits);
+    const cap = M.capVerdict(liveRecords().filter((r) => r.id !== opts.replacing), limits);
     if (cap) throw namedError(cap.code, cap.error);
     if (v.launch.source === 'registry') {
       const park = M.runawayParkVerdict(row.id, store.runawayParkedUntil, now());
       if (park) throw namedError(park.code, park.error);
     }
     if (row.needsWayland) throw namedError('needs-wayland', `${row.label} needs a Wayland compositor and cannot run on a private X display`);
+    if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
     const execPath = resolveExec(row.exec);
     const cwd = resolveCwd(row.cwd);
+    const id = newId();
+    // B-bfe6: a browser row gets its OWN profile dir (the app session's), its argv from the PURE model (profile flags,
+    // then the optional URL) — every refusal by name BEFORE anything is recorded or started
+    let browser = null;
+    if (row.browser) {
+      const confinement = display.browserConfinement ? display.browserConfinement(execPath) : null;
+      const pv = M.profileDirVerdict(profileDirOf(id), { home: homeOf(), ownedRoot: logRoot, confinement, exec: row.exec });
+      if (!pv.ok) throw namedError(pv.code, pv.error);
+      const av = M.browserArgv(row, { profileDir: pv.dir, url: v.launch.url });
+      if (!av.ok) throw namedError(av.code, av.error);
+      browser = { kind: row.browser, profileDir: pv.dir, argv: av.argv, url: av.url, keepProfile: v.launch.keepProfile === true, confinement };
+    }
     const resolved = resolve(f, row);
     if (!resolved.backend) throw namedError('no-backend', `no display backend on this machine (${resolved.fallbackWhy})`);
     const backend = M.backendById(resolved.backend, backends);
@@ -542,13 +633,24 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (!resolved.recipe || typeof display.RECIPES?.[resolved.recipe] !== 'function') throw namedError('no-recipe', `${resolved.backend} via ${resolved.via} names no bring-up recipe (${resolved.recipe || 'none'}) — the capability table and desktop-display disagree`);
     const line = M.fallbackLogLine(resolved);
     if (line) log.log?.(line);
-    const id = newId();
     // HiDPI (2.369.158): the app's SCALE is decided ONCE, here, from `desktop.appScale` and the launching
     // client's devicePixelRatio — on the xpra rung only (its client maps CSS px → device px; a whole-display
     // rung's picture is CSS px, so an app scaled there would only look twice as big). A change needs a relaunch.
-    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr)) : M.scaleKnobs(1);
-    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: row.args || [], cwd, env: row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin() * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi });
+    // Round 3 A3: × the client's UI scale (VibeSpace's own effective scale), and a relaunch's Scale ▸ choice wins;
+    // the ORIGIN (auto | setting | chosen) is recorded beside the value — the chip says which.
+    const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });
+    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale) : M.scaleKnobs(1);
+    if (browser) {
+      // created 0700 (the profile holds the browser's cookies and saved secrets); firefox's first-run switch is its user.js
+      try {
+        await fs.promises.mkdir(browser.profileDir, { recursive: true, mode: 0o700 });
+        await fs.promises.chmod(browser.profileDir, 0o700);
+        if (browser.kind === 'firefox') await fs.promises.writeFile(path.join(browser.profileDir, 'user.js'), M.firefoxUserJs(), { mode: 0o600 });
+      } catch (e) { throw namedError('profile-dir', `could not create the browser profile ${browser.profileDir}: ${e.message}`); }
+    }
+    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: browser ? browser.argv : (row.args || []), cwd, env: row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin() * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
     if (v.launch.source === 'registry') rec.appId = row.id;
+    if (browser) { rec.browser = browser.kind; rec.profileDir = browser.profileDir; rec.keepProfile = browser.keepProfile; rec.url = browser.url; rec.confinement = browser.confinement; }
     rec.recipe = resolved.recipe;
     store.apps[id] = rec;
     pruneHistory();
@@ -557,6 +659,29 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     inflight.set(id, p);
     p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
     return view(rec);
+  }
+
+  /** Round 3 A3 (docs/design-desktop-apps-seamless §3.4): the per-window Scale ▸ — the SAME app (catalog row or typed
+   *  command) launched again at the chosen scale (GDK_SCALE is read once, at the app's start: a relaunch is the only
+   *  way), then the old session stopped. The successor starts FIRST (a refusal — the cap, a vanished binary — leaves
+   *  the running app untouched), the old record names it (`replacedBy`, committed before its stop broadcasts) so every
+   *  client showing it follows the successor in the SAME window instead of closing it.
+   *  → { app: <the new record>, replaced: <the old record, exited, stoppedBy 'relaunch'> } */
+  async function relaunch(id, body) {
+    const rec = store.apps[id];
+    if (!rec) throw namedError('not-found', `no desktop app ${id}`);
+    const rv = M.validateRelaunchRequest(body || {});
+    if (!rv.ok) throw namedError(rv.code, rv.error);
+    const why = M.relaunchVerdict(rec, backends) || (stopping.has(id) || rec.replacedBy ? { code: 'not-ready', error: `${rec.label || id} is already stopping` } : null);
+    if (why) throw namedError(why.code, why.error);
+    const next = await launch({ ...M.relaunchBodyOf(rec), dpr: rv.dpr, uiScale: rv.uiScale }, { scaleChoice: rv.choice, replacing: id });
+    const armSeat = carrySeat(id, next.id);
+    rec.replacedBy = next.id;
+    commit();
+    let old;
+    try { old = await stop(id, { why: 'relaunch' }); } finally { armSeat(); }
+    log.log?.(`[desktop] ${id} relaunched as ${next.id} at ${next.scale}× (${next.scaleOrigin}): ${rec.label}`);
+    return { app: get(next.id) || next, replaced: old };
   }
 
   function appDir(id) { const d = path.join(logRoot, id); fs.mkdirSync(d, { recursive: true }); return d; }
@@ -713,10 +838,44 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (part === 'app') {
       rec.exitCode = code;
       fail(rec, 'app-exit', signal ? `application ended by ${signal}` : `application exited (code ${code})`);
+      // round 3 A2 (docs/design-desktop-apps-seamless §3.2): the windows LEFT on the display at the exit — ONE census
+      // while X is still up, BEFORE the teardown, recorded on the record the commit broadcasts. Every client decides
+      // "the app exited ⇒ close my window" from this one fact (M.exitCloseVerdict): 0 = the app took its windows with it
+      // (the app's own ✕, a quit), > 0 = a forking launcher exited while its child still shows one, null = not counted.
+      const handles = children.get(id);
+      (async () => {
+        rec.windowsAtExit = await windowsLeftAtExit(rec);
+        await teardown(rec, handles);
+        commit();
+      })().catch((e) => { log.warn?.(`[desktop] ${id}: app-exit teardown failed: ${e.message}`); commit(); });
+      return;
     } else if (part === 'x') fail(rec, 'display-gone', `X display ${rec.display} exited (${signal || `code ${code}`})`);
     else if (part === 'wm') { log.warn?.(`[desktop] ${id}: the window manager exited (${signal || `code ${code}`}) — the app keeps running bare`); return; }
     else fail(rec, 'display-gone', `picture server exited (${signal || `code ${code}`})`);
     teardown(rec, children.get(id)).then(() => commit());
+  }
+
+  /** round 3 A2: how many windows a person could still see on the record's OWN display right after its app exited
+   *  (the keeper's app-window rows through M.windowsLeftCount); null = not counted — a SHARED display (the singleton:
+   *  other apps' windows are not this app's), no display, or a census that failed / outlived EXIT_CENSUS_MS. */
+  async function windowsLeftAtExit(rec) {
+    if (!rec.display || rec.backend === M.DESKTOP_SINGLETON_ID) return null;
+    const xenv = x11EnvFor(rec.id);
+    if (!xenv) return null;
+    let timer = null;
+    try {
+      const r = await Promise.race([
+        display.enumerateWindows({ hostId, display: rec.display, authFile: xenv.XAUTHORITY, env: xenv }),
+        new Promise((res) => { timer = setTimeout(() => res({ ok: false, why: `no answer in ${EXIT_CENSUS_MS} ms` }), EXIT_CENSUS_MS); }),
+      ]);
+      if (!r || !r.ok) { log.warn?.(`[desktop] ${rec.id}: the window census at the app's exit could not run (${r && r.why}) — not counted`); return null; }
+      // xpra keeps each managed app window inside a Corral wrapper that is MAPPED only while a client is connected
+      // (measured 6.5.3: with no client the forking launcher's surviving xterm read viewable=false) — on that rung the
+      // window's existence is the fact, not X's viewability; the other rungs keep X's mapped state
+      const rows = M.streamKindOf(rec, backends) === 'xpra' ? display.seamlessWindows(r.windows).map((w) => ({ ...w, mapped: null })) : M.appWindows(r.windows);
+      return M.windowsLeftCount(rows);
+    } catch (e) { log.warn?.(`[desktop] ${rec.id}: the window census at the app's exit threw (${e.message}) — not counted`); return null; }
+    finally { clearTimeout(timer); }
   }
 
   // ── identity (rule 8): is this recorded part STILL the process we mean? ──
@@ -814,6 +973,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       if (!(await signalVerified(rec, 'session marker leftover', escaped, null))) clean = false;
     }
     children.delete(rec.id); guard.delete(rec.id); live.delete(rec.id); clearFit(rec.id);
+    if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)
     return clean;
   }
   async function stop(id, { why = 'user' } = {}) {
@@ -849,8 +1009,10 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       rec.endedAt = now();
       rec.stoppedBy = why;
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(rec.idleTimeoutMs / 60000)} min without input (idle timeout)`;
+      else if (why === 'relaunch') rec.lastError = `relaunched as ${rec.replacedBy || 'a new session'} at another scale`;
       else if (why !== 'user' && why !== 'runaway') rec.lastError = why;
       if (!clean) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}a process survived SIGKILL — check ${LOG_DIR}/${id}/app.log`;
+      if (rec.profileDir) await retireProfile(rec, { clean, why: `stopped (${why})` }); // B-bfe6: every part is verified gone — the profile goes with the session
       log.log?.(`[desktop] ${id} stopped (${why}): ${rec.label}${clean ? '' : ' — NOT clean'}`);
       commit();
       return view(rec);
@@ -1102,6 +1264,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       }
     }
     await reapTerminalLeftovers();
+    // B-bfe6: a browser profile whose removal a SIGKILL of this server interrupted (the verdict was written, the rm was not)
+    for (const rec of Object.values(store.apps)) if (rec.profileDir && !rec.profileRemovedAt && !rec.keepProfile && !M.isLiveState(rec.state)) await retireProfile(rec, { why: 'boot' });
     pruneHistory();
     commit();
   }
@@ -1173,9 +1337,9 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function shutdown() { if (timer) clearInterval(timer); timer = null; for (const id of [...fits.keys()]) clearFit(id); for (const s of viewerSets.values()) clearGrace(s); if (dirty) save(); }
 
   load();
-  return { launch, stop, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
-    viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, // P8-2 x5
+  return { launch, relaunch, stop, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
+    viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
 
-module.exports = { create, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, VIEWER_GRACE_MS, XPRA_TITLE_EVERY_MS };
+module.exports = { create, STORE_FILE, LOG_DIR, TICK_MS, STOP_GRACE_MS, RFB_DEADLINE_MS, SETTLE_BRINGUP_MS, SESSION_ENV, FIT_DEBOUNCE_MS, FIT_FIRST_STEP_MS, FIT_FIRST_WINDOW_MS, FIT_REFUSED_RETRY_MS, FIT_SETTLE_RUNS, FIT_ACTIVE_MS, FIT_SLOW_BELT_MS, VIEWER_GRACE_MS, RELAUNCH_SEAT_MS, XPRA_TITLE_EVERY_MS, EXIT_CENSUS_MS };

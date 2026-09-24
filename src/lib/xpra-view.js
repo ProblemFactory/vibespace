@@ -22,9 +22,14 @@
 //   app → browser: a copy inside the app arrives as a token; on a secure
 //     context it lands in navigator.clipboard; on plain http (the owner's
 //     real address is http://<hostname>:port, NOT loopback — loopback is a
-//     secure context and proves nothing) the shell's "Copied in the app —
-//     click to copy" chip copies through the click's user gesture
-//     (execCommand) and goes away; a refused API write falls to the chip too.
+//     secure context and proves nothing) a token that follows the user's OWN
+//     Ctrl/⌘+C (or +X) in this pane within the browser's 5 s activation
+//     window is written by execCommand with NO click (round 3, A1 — the
+//     gesture stamp below); any other token gets the shell's "Copied in the
+//     app — click to copy" chip, which copies through the click's user
+//     gesture and goes away (the first one on this device also shows the
+//     one-time "Enable HTTPS for seamless copy" hint); a refused API write
+//     falls to the chip too.
 // The pane's background is a THEME VAR: no root, no black (acceptance 1).
 // x5 (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"):
 // `setMode('active'|'watch'|'blocked')`. WATCH (an agent drives) draws the
@@ -251,7 +256,17 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   };
 
   // ── the clipboard, both ways (the shell's chrome; this view's facts) ───────
-  const onClipboard = (text) => shell.deliverCopy(text, { secure: isSecure(), clipboard: clip() });
+  // THE GESTURE STAMP (round 3, A1): the instant of the user's OWN trusted copy chord (Ctrl/⌘+C or +X) that this pane
+  // forwarded to the app — the app's token arriving inside the browser's 5 s activation window is written to the local
+  // clipboard with no click on plain http. ONE chord, at most ONE write: every delivery spends the stamp, so a later
+  // copy nobody made here (an agent, a timer, another client) meets no stamp and keeps the chip.
+  const clock = typeof now === 'function' ? now : () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+  let copyGestureAt = null;
+  const onClipboard = (text) => {
+    const gestureAge = copyGestureAt == null ? null : clock() - copyGestureAt;
+    copyGestureAt = null;
+    shell.deliverCopy(text, { secure: isSecure(), clipboard: clip(), gestureAge });
+  };
   const connectedNow = () => !!client && client.state === 'connected';
   const sendPaste = (text) => {
     if (!connectedNow()) { showToast(t('The application is not connected'), { type: 'error' }); return false; }
@@ -271,6 +286,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!client || e.isComposing || e.keyCode === 229) return;
     const r = client.keyDown(keyInputOf(e));
     if (r === 'sent') e.preventDefault();
+    else if (r === 'copy' && e.isTrusted === true && !e.repeat) copyGestureAt = clock(); // forwarded to the app: its token may follow
   });
   ime.addEventListener('keyup', (e) => {
     if (!client || e.isComposing || e.keyCode === 229) return;
@@ -424,5 +440,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const windows = () => (client ? [...client.windows.values()].map((w) => ({ wid: w.wid, x: w.x, y: w.y, w: w.w, h: w.h, kind: w.kind, title: w.title })) : []);
 
   const resnap = () => { if (client) fitStage(); };
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get pasteOpen() { return shell.pasteOpen; } };
+  /** round 3 A2: the outer ✕ — ask the app to close its main window (xpra-client closeMain); false = nothing to ask. */
+  const closeApp = () => (client ? client.closeMain() : false);
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }
