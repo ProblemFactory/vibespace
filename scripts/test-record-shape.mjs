@@ -12,6 +12,9 @@
 //      +{qux} MERGES into the same card (edit op), telemetry once; codex token_count.info +{baz}; an
 //      unknown TYPE is the fall-back card only (never double-reported as drift); the redactor.
 //   §3 enum drift: an undeclared enum value is a card AND the handler still runs.
+//   §4a the extractor on every spelling the minifier has used (2.1.280 `u(`, 2.1.281 `d(`, a future
+//      rename, an unminified form) — the helper names are read off an anchor; an unknown form is an error
+//      naming the anchor, never a silent 0 / 0 / 0.
 //   §4 the BINARY ORACLE: the installed claude's zod union, read with the census's own extractor —
 //      every system subtype / stream type on exactly ONE of HANDLED ∪ KNOWN_IGNORED ∪
 //      DECLARED_UPSTREAM_UNSEEN, every declared shape's binary fields ⊆ known ∪ ignored, no dead list
@@ -235,6 +238,74 @@ console.log('§3 enum drift — an undeclared enum value is a card, and the hand
   ok('…a declared value is silent (negative control)', driftCards(w).length === 0);
 }
 
+// ── THE EXTRACTOR (§4a, §4) ──
+// The SDK record union in the installed binary is a run of zod object literals
+// `<obj>({type:<lit>("…")[,subtype:<lit>("…")]…})`. The minifier RENAMES the helpers between builds —
+// 2.1.274 … 2.1.280 spelled them `u(` / `R(`, 2.1.281 spells the object helper `d(` (2026-09-23: the
+// literal extractor found `union 0 shapes` and five §4 legs went red the moment the CLI auto-updated).
+// So the helper names are never written here: they are READ off an ANCHOR — the system/compact_boundary
+// object (else init / task_started), which exists only in that union — and every object literal spelled
+// with the anchor's pair is walked (string literals skipped, the depth-1 keys collected). The guard in
+// front of the helper keeps a method call that merely ENDS in the helper's letter out: 2.1.281's MCP
+// content blocks carry `QVt.extend({type:R("resource_link")})`, which a bare `d(` matched. No anchor ⇒
+// an ERROR NAMING THE ANCHOR, never a silent 0 / 0 / 0.
+const UNION_ANCHORS = ['compact_boundary', 'init', 'task_started'];
+const HELPER = '[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)*';
+const NOT_AFTER_IDENT = '(?<![A-Za-z0-9_$.])';
+const reEsc = (s) => s.replace(/[$.]/g, '\\$&');
+function extractZodUnion(text) {
+  const pairs = new Map();
+  for (const a of UNION_ANCHORS) {
+    const re = new RegExp(NOT_AFTER_IDENT + '(' + HELPER + ')\\(\\{type:(' + HELPER + ')\\("system"\\),subtype:\\2\\("' + a + '"\\)', 'g');
+    let m;
+    while ((m = re.exec(text))) { const k = m[1] + ' ' + m[2]; if (!pairs.has(k)) pairs.set(k, { obj: m[1], lit: m[2], anchor: 'system/' + a }); }
+  }
+  if (!pairs.size) return { union: {}, helpers: [], error: 'NO ANCHOR: none of ' + UNION_ANCHORS.map((a) => '<obj>({type:<lit>("system"),subtype:<lit>("' + a + '")').join(' · ') + ' is in the bundle — the union\'s spelling changed again: read the binary around "compact_boundary" and teach extractZodUnion the new form' };
+  const walkTo = (i) => { let depth = 0; for (let j = i; j < text.length && j < i + 40000; j++) { const c = text[j]; if (c === '"' || c === "'" || c === '`') { const q = c; j++; while (j < text.length && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; } if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return j; } } return -1; };
+  const union = {};
+  for (const { obj, lit } of pairs.values()) {
+    const re = new RegExp(NOT_AFTER_IDENT + reEsc(obj) + '\\(\\{type:' + reEsc(lit) + '\\("([a-z_]+)"\\)(?:,subtype:' + reEsc(lit) + '\\("([a-z_]+)"\\))?', 'g');
+    let m;
+    while ((m = re.exec(text))) {
+      const key = m[1] + (m[2] ? '/' + m[2] : '');
+      if (union[key]) continue;
+      const i = m.index + m[0].indexOf('{'); const j = walkTo(i); if (j < 0) continue;
+      const body = text.slice(i, j + 1);
+      let d = 0, cur = ''; const fields = [];
+      for (let k = 0; k < body.length; k++) {
+        const c = body[k];
+        if (c === '"' || c === "'" || c === '`') { const q = c; k++; while (k < body.length && body[k] !== q) { if (body[k] === '\\') k++; k++; } cur = ''; continue; }
+        if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d--;
+        if (d === 1) { if (/[A-Za-z0-9_$]/.test(c)) cur += c; else { if (c === ':' && cur) fields.push(cur); cur = ''; } } else cur = '';
+      }
+      union[key] = fields.filter((f) => f !== 'type' && f !== 'subtype');
+    }
+  }
+  return { union, helpers: [...pairs.values()], error: null };
+}
+
+console.log('§4a the extractor on every spelling the minifier has used — a rename is FOLLOWED, a new form fails BY NAME');
+{
+  // Each fixture keeps the real bundle's layout (the lazy `p(()=>…)` wrapper, `.describe(…)` with braces
+  // inside the string, a nested object, the envelope pair), shortened. 2.1.280 = `u(`/`R(`,
+  // 2.1.281 = `d(`/`R(` + the MCP content-block `.extend(` trap copied from its bundle.
+  const body = (o, l) => `Cz=p(()=>${o}({type:${l}("system"),subtype:${l}("compact_boundary"),compact_metadata:${o}({trigger:V(["manual","auto"]),pre_tokens:k().int()}).describe("a } inside a string, and ({ too"),logical_parent_uuid:_().optional(),uuid:_(),session_id:o()})),Hz=p(()=>${o}({type:${l}("system"),subtype:${l}("init"),cwd:o(),model:o(),uuid:_(),session_id:o()})),Jz=p(()=>${o}({type:${l}("tombstone"),message:C(ae()),uuid:_(),session_id:o()}))`;
+  const EXPECT = { 'system/compact_boundary': 'compact_metadata,logical_parent_uuid,uuid,session_id', 'system/init': 'cwd,model,uuid,session_id', tombstone: 'message,uuid,session_id' };
+  const same = (u) => Object.keys(EXPECT).every((k) => (u[k] || []).join(',') === EXPECT[k]);
+  const f280 = extractZodUnion('var ' + body('u', 'R') + ';');
+  ok('the 2.1.274–2.1.280 spelling `u({type:R(…)` — helpers read off the anchor, three shapes with their depth-1 keys (the string\'s braces skipped)', !f280.error && f280.helpers.map((h) => h.obj + '/' + h.lit).join() === 'u/R' && same(f280.union) && Object.keys(f280.union).length === 3, f280);
+  const trap = ',gt=d({type:R("resource"),resource:Fe([G,D]),annotations:p.optional()}),St=QVt.extend({type:R("resource_link")}),w=Fe([E,L,_,St,gt])';
+  const f281 = extractZodUnion('var ' + body('d', 'R') + trap + ';');
+  ok('the 2.1.281 spelling `d({type:R(…)` — the same three shapes, helpers d/R', !f281.error && f281.helpers.map((h) => h.obj + '/' + h.lit).join() === 'd/R' && same(f281.union), f281);
+  ok('…and `QVt.extend({type:R("resource_link")})` is NOT a shape (a method name ending in the helper\'s letter — the identifier guard)', !('resource_link' in f281.union) && 'resource' in f281.union, Object.keys(f281.union));
+  const fNext = extractZodUnion('var ' + body('$q', 'Zt') + ';');
+  ok('a FUTURE rename (`$q({type:Zt(…)` — `$` in a helper name escaped) is followed with no code change', !fNext.error && fNext.helpers[0].obj === '$q' && same(fNext.union), fNext);
+  const fDotted = extractZodUnion('var ' + body('z.object', 'z.literal') + ';');
+  ok('an unminified `z.object({type:z.literal(…)` bundle reads the same', !fDotted.error && same(fDotted.union), fDotted);
+  const fNone = extractZodUnion('var Cz=p(()=>u({subtype:R("compact_boundary"),type:R("system"),uuid:_(),session_id:o()}));');
+  ok('a form the extractor does not know (keys reordered) is an ERROR NAMING THE ANCHOR — never a silent 0 / 0 / 0', !!fNone.error && /NO ANCHOR/.test(fNone.error) && /compact_boundary/.test(fNone.error) && Object.keys(fNone.union).length === 0, fNone.error);
+}
+
 console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the three lists + the declared shapes');
 {
   const HANDLED = MM.HANDLED_SYSTEM_SUBTYPES, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, IGNT = MM.KNOWN_IGNORED_RECORD_TYPES;
@@ -251,7 +322,9 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   ok('no top-level type is both routed and ignored/unseen', both2.length === 0, both2);
 
   const findBinary = () => {
-    const cands = [];
+    // VIBESPACE_ORACLE_BINARY pins the file the oracle reads (an older build under
+    // ~/.local/share/claude/versions/, or a scratch dump with a planted field — the drift-alarm proof).
+    const cands = process.env.VIBESPACE_ORACLE_BINARY ? [process.env.VIBESPACE_ORACLE_BINARY] : [];
     for (const d of String(process.env.PATH || '').split(':')) if (d) cands.push(path.join(d, 'claude'));
     cands.push(path.join(os.homedir(), '.local/bin/claude'), path.join(os.homedir(), '.claude/local/claude'));
     for (const c of cands) { try { const real = fs.realpathSync(c); if (fs.statSync(real).isFile()) return real; } catch { } }
@@ -271,69 +344,66 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   if (!bin || size < 4 * 1024 * 1024) {
     skip('binary oracle', bin ? `${bin} is ${size} bytes — a launcher/shim, not the CLI binary (install the native build to run this leg)` : 'no claude binary on PATH / ~/.local/bin / ~/.claude/local');
   } else {
-    // THE EXTRACTOR (ported verbatim from the census: walk every `u({type:R("…")[,subtype:R("…")]…})`
-    // object literal, skipping string literals, collecting the depth-1 keys). `strings` keeps memory
+    // THE EXTRACTOR (§4a): the helper names read off the anchor, never spelled. `strings` keeps memory
     // sane on a 230 MB ELF; the raw latin1 read is the fallback.
     let text = '';
     try { text = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' }); } catch { try { text = fs.readFileSync(bin, 'latin1'); } catch { } }
-    const union = {};
-    const re = /u\(\{type:R\("([a-z_]+)"\)(?:,subtype:R\("([a-z_]+)"\))?/g;
-    const walkTo = (i) => { let depth = 0; for (let j = i; j < text.length && j < i + 40000; j++) { const c = text[j]; if (c === '"' || c === "'" || c === '`') { const q = c; j++; while (j < text.length && text[j] !== q) { if (text[j] === '\\') j++; j++; } continue; } if (c === '(' || c === '{' || c === '[') depth++; else if (c === ')' || c === '}' || c === ']') { depth--; if (depth === 0) return j; } } return -1; };
-    let m;
-    while ((m = re.exec(text))) {
-      const key = m[1] + (m[2] ? '/' + m[2] : '');
-      if (union[key]) continue;
-      const i = m.index + 2; const j = walkTo(i); if (j < 0) continue;
-      const body = text.slice(i, j + 1);
-      let d = 0, cur = ''; const fields = [];
-      for (let k = 0; k < body.length; k++) {
-        const c = body[k];
-        if (c === '"' || c === "'" || c === '`') { const q = c; k++; while (k < body.length && body[k] !== q) { if (body[k] === '\\') k++; k++; } cur = ''; continue; }
-        if (c === '(' || c === '{' || c === '[') d++; else if (c === ')' || c === '}' || c === ']') d--;
-        if (d === 1) { if (/[A-Za-z0-9_$]/.test(c)) cur += c; else { if (c === ':' && cur) fields.push(cur); cur = ''; } } else cur = '';
-      }
-      union[key] = fields.filter((f) => f !== 'type' && f !== 'subtype');
-    }
+    const { union, helpers, error: exErr } = extractZodUnion(text);
+    text = '';
+    oracleOk('the extractor found the union\'s anchor in the installed bundle (a new spelling fails HERE, by name)', !exErr, exErr);
     const keys = Object.keys(union);
     const sys = keys.filter((k) => k.startsWith('system/')).map((k) => k.slice(7));
     const EXPLICIT = new Set(['user', 'transcript_mirror', 'control_request', 'control_response', 'control_cancel_request', 'keep_alive', 'update_environment_variables', 'result', 'result/success']);
     const recs = keys.filter((k) => !k.startsWith('system/') && ((union[k].includes('uuid') && union[k].includes('session_id')) || EXPLICIT.has(k)));
     const types = [...new Set(recs.map((k) => k.replace(/\/.*$/, '')))];
     let ver = '?'; try { ver = execFileSync(bin, ['--version'], { encoding: 'utf8', timeout: 15000 }).trim().slice(0, 40); } catch { }
-    console.log(`    binary ${bin} (${(size / 1048576).toFixed(0)} MB, ${ver}) · union ${keys.length} shapes · ${sys.length} system subtypes · ${types.length} stream record types`);
-    oracleOk('the extractor read a plausible union (≥ 40 system subtypes, ≥ 25 stream types — the 2.1.274 census had 51 / 34)', sys.length >= 40 && types.length >= 25, { sys: sys.length, types: types.length });
+    console.log(`    binary ${bin} (${(size / 1048576).toFixed(0)} MB, ${ver}) · helpers ${helpers.map((h) => h.obj + '/' + h.lit + ' @' + h.anchor).join(', ') || '(none)'} · union ${keys.length} shapes · ${sys.length} system subtypes · ${types.length} stream record types`);
+    oracleOk('the extractor read a plausible union (≥ 40 system subtypes, ≥ 25 stream types — the design\'s 2.1.274 census said 51 / 34; this extractor reads 51 / 35 on 2.1.274 and 2.1.280, 52 / 35 on 2.1.281)', sys.length >= 40 && types.length >= 25, { sys: sys.length, types: types.length });
     const missSys = sys.filter((s) => !HANDLED.has(s) && !IGN.has(s) && !(s in UNSEEN.system));
     oracleOk(`every binary system subtype is on exactly one list (${sys.length} checked) — a new one FAILS HERE, named`, missSys.length === 0, 'UNLISTED: ' + missSys.join(', '));
     const missT = types.filter((t) => !cases.has(t) && !IGNT.has(t) && !(t in UNSEEN.types));
     oracleOk(`every binary stream record type is routed, declared-ignored or declared-unseen (${types.length} checked)`, missT.length === 0, 'UNLISTED: ' + missT.join(', '));
     // declared shapes: binary fields − envelope ⊆ known ∪ ignored
     const env = R.ENVELOPES['claude:stream'];
-    const viol = [];
-    let checked = 0;
-    for (const k of keys) {
-      const shape = 'claude:stream:' + (k === 'result/success' ? 'result' : k);
-      const spec = R.SHAPES[shape];
-      if (!spec) continue;
-      checked++;
-      for (const f of union[k]) if (!env.has(f) && !spec.known.has(f) && !spec.ignored.has(f) && !R.isOurs(f)) viol.push(shape + '.' + f);
-    }
+    const undeclared = (u) => {
+      const out = [];
+      let n = 0;
+      for (const k of Object.keys(u)) {
+        const shape = 'claude:stream:' + (k === 'result/success' ? 'result' : k);
+        const spec = R.SHAPES[shape];
+        if (!spec) continue;
+        n++;
+        for (const f of u[k]) if (!env.has(f) && !spec.known.has(f) && !spec.ignored.has(f) && !R.isOurs(f)) out.push(shape + '.' + f);
+      }
+      return { viol: out, checked: n };
+    };
+    const { viol, checked } = undeclared(union);
     oracleOk(`every declared claude stream shape's binary field set ⊆ known ∪ ignored (${checked} shapes, incl. the result union)`, viol.length === 0 && checked >= 60, viol.length ? 'UNDECLARED: ' + viol.join(', ') : { checked });
-    // reverse: no dead list entry, no declared stream shape the binary does not have
+    // …NEGATIVE CONTROL on the real union: one planted field on one declared shape is named by the same leg
+    const planted = { ...union, 'system/init': [...(union['system/init'] || []), 'planted_drift_field'] };
+    const pv = undeclared(planted).viol;
+    ok('…NEGATIVE CONTROL: the real union with ONE planted field on system/init fails that leg, naming exactly it', pv.length === viol.length + 1 && pv.includes('claude:stream:system/init.planted_drift_field'), pv);
+    // reverse: no dead list entry, no declared stream shape the binary does not have. A row a NEWER build
+    // declared (R.SHAPE_SINCE) is excused on an older installed build — printed, never silent.
+    const verCmp = (a, b) => { const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number); for (let i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0); } return 0; };
+    const newer = (k) => !!(installed && R.SHAPE_SINCE[k] && verCmp(R.SHAPE_SINCE[k], installed) > 0);
+    const excused = Object.keys(R.SHAPE_SINCE).filter(newer);
+    if (excused.length) console.log(`    excused as newer than the installed ${installed}: ${excused.map((k) => k + ' (' + R.SHAPE_SINCE[k] + ')').join(', ')}`);
     const bsys = new Set(sys);
-    const dead = [...HANDLED, ...IGN, ...Object.keys(UNSEEN.system)].filter((s) => !bsys.has(s) && !(s in R.CORPUS_ONLY_SUBTYPES));
+    const dead = [...HANDLED, ...IGN, ...Object.keys(UNSEEN.system)].filter((s) => !bsys.has(s) && !(s in R.CORPUS_ONLY_SUBTYPES) && !newer('system/' + s));
     oracleOk('no DEAD system-subtype entry (every list name is in the binary or on CORPUS_ONLY_SUBTYPES with a note)', dead.length === 0, 'DEAD: ' + dead.join(', '));
     const bt = new Set(types);
-    const deadT = Object.keys(UNSEEN.types).filter((t) => !bt.has(t));
+    const deadT = Object.keys(UNSEEN.types).filter((t) => !bt.has(t) && !newer(t));
     oracleOk('no DEAD declared-unseen top-level type', deadT.length === 0, 'DEAD: ' + deadT.join(', '));
     const bkeys = new Set(keys.map((k) => (k === 'result/success' ? 'result' : k)));
-    const ghost = Object.keys(R.SHAPES).filter((s) => s.startsWith('claude:stream:')).map((s) => s.slice(14)).filter((k) => !bkeys.has(k));
+    const ghost = Object.keys(R.SHAPES).filter((s) => s.startsWith('claude:stream:')).map((s) => s.slice(14)).filter((k) => !bkeys.has(k) && !newer(k));
     oracleOk('every declared claude STREAM shape exists in the binary union (no ghost shape)', ghost.length === 0, 'GHOST: ' + ghost.join(', '));
   }
 }
 
-console.log('§4b the CLI 2.1.280 pass (2026-09-22): the pinned build, the latency reason told true, the lists moved by corpus evidence');
+console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told true, the lists moved by corpus evidence');
 {
-  ok('SCHEMA_CLI_VERSION is the build the oracle was re-run STRICT against (2.1.280)', R.SCHEMA_CLI_VERSION === '2.1.280', R.SCHEMA_CLI_VERSION);
+  ok('the 2.1.280 additions keep their notes after the 2.1.281 pass (scratchpad_path / staged_files / no_query_first / decision_reason_code / initiator / narration_hint)', [['system/init', 'scratchpad_path'], ['system/turn_handoff_available', 'staged_files'], ['system/turn_handoff_available', 'no_query_first'], ['system/permission_denied', 'decision_reason_code'], ['user', 'initiator'], ['assistant', 'narration_hint']].every(([k, f]) => /2\.1\.280/.test(R.SHAPES['claude:stream:' + k].ignored.get(f) || '')));
   const res = R.SHAPES['claude:stream:result'];
   const LAT = ['first_stream_post_queue_wait_ms', 'first_stream_post_queued_behind', 'frame_received_wall_ms', 'frame_enqueued_wall_ms', 'turn_started_wall_ms', 'first_text_post_ms', 'first_text_post_wall_ms'];
   ok('the seven 2.1.280 result latency fields are declared ignored, each with a reason that no longer claims a surface shows ttft', LAT.every((f) => res.ignored.has(f) && !/shows ttft/.test(res.ignored.get(f)) && /nothing in VibeSpace reads it/.test(res.ignored.get(f))), LAT.map((f) => res.ignored.get(f)));
@@ -362,6 +432,26 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the pinned build, the laten
     { type: 'artifact-comment-monitor', v: 1, sessionId: 's', artifacts: { a1: {} } },
   ]);
   ok('a history carrying all five renders NO card of any kind (neither unknown-event nor drift)', unknownCards(mm).length === 0 && driftCards(mm).length === 0, mm.messages.map((m) => m.noticeKind));
+}
+
+console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
+{
+  ok('SCHEMA_CLI_VERSION is the build the oracle was re-run STRICT against (2.1.281)', R.SCHEMA_CLI_VERSION === '2.1.281', R.SCHEMA_CLI_VERSION);
+  const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
+  ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
+  const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
+  ok('system/per_turn_effort_changed has a shape row (its own 2.1.281 declaration) and SHAPE_SINCE names the build', pte && [...pte.known].join() === 'per_turn_effort_active' && R.SHAPE_SINCE['system/per_turn_effort_changed'] === '2.1.281');
+  const U = R.DECLARED_UPSTREAM_UNSEEN.system, IGN = MM.KNOWN_IGNORED_SYSTEM_SUBTYPES, H = MM.HANDLED_SYSTEM_SUBTYPES;
+  ok('…and sits on DECLARED_UPSTREAM_UNSEEN with a disposition that names the COST (neither handled nor ignored — a user may need to see it)', 'per_turn_effort_changed' in U && /cache/.test(U.per_turn_effort_changed) && !IGN.has('per_turn_effort_changed') && !H.has('per_turn_effort_changed'));
+  const mm = createMessageManager('claude', 'test-shape-281');
+  mm.processLive({ type: 'system', subtype: 'per_turn_effort_changed', per_turn_effort_active: false, uuid: 'u-pte', session_id: 's' });
+  ok('a live per_turn_effort_changed renders the fall-back Unknown-event card — and no drift card on top of it', unknownCards(mm).length === 1 && driftCards(mm).length === 0, mm.messages.map((m) => m.noticeKind));
+  const mi = createMessageManager('claude', 'test-shape-281-init');
+  mi.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-i', tools: [], mcp_servers: [], model: 'claude-fable-5-1', permissionMode: 'default', slash_commands: [], apiKeySource: 'none', claude_code_version: '2.1.281', output_style: 'default', skills: [], plugins: [], per_turn_effort_active: true, view_mode: 'default' });
+  ok('a 2.1.281 init carrying per_turn_effort_active + view_mode is clean (no drift card)', driftCards(mi).length === 0 && unknownCards(mi).length === 0, mi.messages.map((m) => m.noticeKind));
+  const mj = createMessageManager('claude', 'test-shape-281-init2');
+  mj.processLive({ type: 'system', subtype: 'init', cwd: '/w/proj', session_id: 's', uuid: 'u-j', model: 'claude-fable-5-1', view_mode: 'focus', per_turn_effort_mode: 'x' });
+  ok('…NEGATIVE CONTROL: a near-miss name (per_turn_effort_mode) is still drift, named', driftCards(mj).length === 1 && driftCards(mj)[0].content[0].fields.join() === 'per_turn_effort_mode', driftCards(mj).map((m) => m.content[0].fields));
 }
 
 console.log('§5 negative control — a scratch copy with every `ignored` map emptied goes red on §1');
