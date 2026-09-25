@@ -274,6 +274,7 @@ class App {
       this.layoutManager.scheduleAutoSave();
       this._notifySidebarFocus();
       this._updateMobileNavTitle();
+      this._syncInboxBadges?.(); // a window opened/closed/re-tabbed ⇒ its title-bar mini inbox badge (design-user-inbox-reply §3; coalesced)
     };
     this.sidebar = new Sidebar(this);
 

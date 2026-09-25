@@ -390,7 +390,7 @@ const HEADER_NAME = /(?:function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za
 // round closed — a new `formatChatInput` in src/jobs.js must still be caught by
 // the row that excuses its `deliverToConversation` call.
 const ALLOW = [
-  { file: 'src/ws-handler.js', prim: 'user-frame', why: 'THE HUMAN PATH: a ws `input` message is the owner typing, and the codex reset-credit case is the owner clicking it. Owner-typed turns are never counted (D6) — this row IS that rule' },
+  { file: 'src/server/user-input.js', prim: 'user-frame', why: 'THE HUMAN PATH: the ws chat-input case is the owner typing, and the For-you reply route (src/routes/user-todos-reply.js, owner-only, agent tokens refused) is the second caller of the SAME function — the owner clicking Reply. Owner-typed turns are never counted (D6) — this row IS that rule (design-user-inbox-reply D1.1)' },
   { file: 'src/adapters/claude-code.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/codex.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/acp.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },

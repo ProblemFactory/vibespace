@@ -223,7 +223,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('…and no producer keeps a private disarm-on-reading any more (the 32h stall)',
     !/noteRecovered\?\.\([^)]*fresh non-rejected reading/.test(eng) && !/noteRecovered\?\.\([^)]*fresh non-limited codex reading/.test(eng));
   const wsh = read('src/ws-handler.js');
-  ok('a user prompt disarms it', wsh.includes("autoResume?.noteRecovered?.(data.sessionId, 'user sent a prompt')"));
+  ok('a user prompt disarms it (THE typing path, src/server/user-input.js — the ws chat-input case and the For-you reply share it)', read('src/server/user-input.js').includes("autoResume?.noteRecovered?.(sessionId, 'user sent a prompt')") && wsh.includes('sendUserInput(data.sessionId, data.text'));
   ok('the live toggle is a ws case', wsh.includes("case 'auto-resume'") && wsh.includes('autoResume?.setEnabled'));
   ok('attach carries the state (a reconnecting tab sees the pending wait)', wsh.includes('autoResume: autoResume?.statusFor?.(data.sessionId)'));
   const sv = read('server.js');

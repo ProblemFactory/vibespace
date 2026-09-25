@@ -1363,6 +1363,70 @@ html, body {
 .ut-item-resolved .ut-text { text-decoration: line-through; }
 .ut-sess { color: var(--text-secondary); }
 .ut-item:hover .ut-sess { color: var(--accent); }
+/* design-user-inbox-reply (chunk 2): the reply controls, option chips and the running dot */
+.ut-reply-btn { display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+.ut-reply-btn svg, .ut-reply-send svg { width: 11px; height: 11px; }
+.ut-reply-btn:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
+.ut-act:disabled { opacity: 0.4; cursor: not-allowed; }
+.ut-opts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.ut-opt {
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text);
+  border-radius: 999px; padding: 1px 9px; font-size: 10px; line-height: 16px; cursor: pointer; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ut-opt:not(:disabled):hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ut-opt:disabled { opacity: 0.45; cursor: not-allowed; }
+.ut-reply { display: flex; gap: 4px; align-items: flex-end; margin-top: 4px; cursor: default; }
+.ut-reply-input {
+  flex: 1; min-width: 0; resize: none; overflow-y: auto; min-height: 22px; max-height: 140px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 3px 6px; font: inherit; font-size: 11px; line-height: 1.4;
+}
+.ut-reply-input:focus { outline: none; border-color: var(--accent); }
+.ut-reply-send { display: inline-flex; align-items: center; justify-content: center; padding: 0; height: 22px; width: 22px; color: var(--accent); }
+.ut-live-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; box-sizing: border-box; border: 1.5px solid var(--text-dim); background: var(--text-dim); }
+.ut-live-dot[data-state="running"] { border-color: var(--green, #3fb950); background: var(--green, #3fb950); }
+.ut-live-dot[data-state="idle"] { border-color: var(--green, #3fb950); background: transparent; }
+.ut-live-dot[data-state="waiting"] { border-color: var(--yellow, #e5c07b); background: transparent; }
+.ut-live-dot[data-state="unreachable"] { border-style: dashed; background: transparent; }
+.ut-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* design-user-inbox-reply chunk 4: the group bar (head + "Mark all seen"), the board chip, the flood fold's expander */
+.ut-group-bar { display: flex; align-items: center; gap: 4px; }
+.ut-group-bar > .ut-group-head { flex: 1 1 auto; min-width: 0; width: auto; }
+.ut-seen-all {
+  flex: 0 0 auto; background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text-secondary); font-size: 10px; line-height: 14px; padding: 1px 6px; cursor: pointer; white-space: nowrap;
+}
+.ut-seen-all:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
+.ut-seen-all:disabled { opacity: 0.5; cursor: progress; }
+.ut-board {
+  flex: 0 0 auto; font-size: 9px; font-weight: 400; line-height: 13px; padding: 0 5px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap;
+}
+.ut-board[data-state="needs-input"], .ut-board[data-state="review"] { border-color: var(--yellow, #e5c07b); color: var(--yellow, #e5c07b); }
+.ut-board[data-state="blocked"] { border-color: var(--red, #e55); color: var(--red, #e55); }
+.ut-board[data-state="working"] { border-color: var(--green, #3fb950); color: var(--green, #3fb950); }
+.ut-fold {
+  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  color: var(--accent); font-size: 10px; padding: 3px 8px 3px 22px; border-radius: var(--radius-sm);
+}
+.ut-fold:hover { background: var(--hover-overlay, rgba(255,255,255,0.05)); text-decoration: underline; }
+/* B-328d: the tab counts (keyed spans, patched in place), the notice filter strip and the per-origin groups */
+.ut-tab { display: inline-flex; align-items: center; gap: 4px; }
+.ut-tab .ut-count + .ut-count { margin-left: 0; }
+.ut-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 4px; }
+.ut-chip {
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
+  border-radius: 999px; padding: 1px 8px; font-size: 10px; line-height: 16px;
+}
+.ut-chip:hover { border-color: var(--accent); color: var(--accent); }
+.ut-chip.on { background: color-mix(in srgb, var(--accent) 18%, transparent); border-color: var(--accent); color: var(--accent); }
+.ut-chip-n { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ut-chip.on .ut-chip-n { color: inherit; }
+.ut-notice-group { padding: 2px 0; }
+.ut-notice-group + .ut-notice-group { border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent); }
+.ut-notice-group-head { display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: 10px; font-weight: 600; color: var(--text-secondary); }
 .usage-section-backend { width: 14px; height: 14px; font-size: 8px; }
 /* Per-account usage switcher (usage popup) — one chip per viewable identity */
 .usage-acct-switch { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
@@ -2088,6 +2152,30 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #user-todos-popup .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
   #user-todos-popup .ut-actions { opacity: 1; gap: 4px; }
   #user-todos-popup .ut-group-head { min-height: 36px; }
+  /* the reply controls are touch targets too (design-user-inbox-reply chunk 2) */
+  #user-todos-popup .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
+  #user-todos-popup .ut-reply-input { min-height: 36px; font-size: 13px; padding: 7px 8px; }
+  #user-todos-popup .ut-reply-send { min-width: 36px; min-height: 36px; }
+  #user-todos-popup .ut-reply-btn svg, #user-todos-popup .ut-reply-send svg { width: 15px; height: 15px; }
+  #user-todos-popup .ut-live-dot { width: 9px; height: 9px; }
+  /* chunk 4: "Mark all seen" and the fold's expander are touch targets too */
+  #user-todos-popup .ut-seen-all { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #user-todos-popup .ut-fold { min-height: 36px; font-size: 12px; }
+  #user-todos-popup .ut-board { font-size: 11px; line-height: 16px; }
+  /* B-328d: the notice filter chips are touch targets too */
+  #user-todos-popup .ut-chip { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+  #user-todos-popup .ut-notice-group-head { font-size: 12px; min-height: 28px; }
+  /* the title-bar mini inbox (chunk 3) takes the same full-width sheet shape and the same ≥36 px targets */
+  .ut-mini-popover {
+    left: 8px !important; right: 8px !important; top: 48px !important;
+    width: auto !important; max-width: none; max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px); z-index: 90002 !important;
+  }
+  .ut-mini-popover .ut-act { min-width: 36px; min-height: 36px; width: auto; height: auto; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+  .ut-mini-popover .ut-actions { opacity: 1; gap: 4px; }
+  .ut-mini-popover .ut-opt { min-height: 36px; padding: 6px 14px; font-size: 12px; line-height: 22px; }
+  .ut-mini-popover .ut-reply-input { min-height: 36px; font-size: 13px; padding: 7px 8px; }
+  .ut-mini-popover .ut-reply-send { min-width: 36px; min-height: 36px; }
+  .ut-mini-popover .ut-reply-btn svg, .ut-mini-popover .ut-reply-send svg { width: 15px; height: 15px; }
   /* chat search bar (#4): Ctrl+F's touch face opened a bar with 17–20 px
      prev / next / close — parent-qualified, chat.css restates the padding */
   .chat-view .chat-search-bar button { min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; }
@@ -4577,6 +4665,27 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* the ownership badge (§4.6): one dot per owner session, names in the title */
 .win-owner-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex-shrink: 0; }
 .tab-item .win-owner-badge { margin-left: 2px; }
+/* THE MINI INBOX badge (design-user-inbox-reply §3): a small pill after the title
+   (or on the tab) = this session's open For-you asks, coloured by the worst urgency */
+.win-inbox-badge {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex-shrink: 0;
+  height: 16px; padding: 0 5px; border-radius: 999px; border: 1px solid transparent; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg, #fff); font-family: inherit; font-size: 9px; font-weight: 700; line-height: 1;
+}
+.win-inbox-badge[data-urgency="high"] { background: var(--yellow, #e5c07b); color: #000; }
+.win-inbox-badge[data-urgency="urgent"] { background: var(--red, #e55); color: #fff; }
+.win-inbox-badge[data-urgency="low"] { background: var(--bg-secondary); color: var(--text-secondary); border-color: var(--border); }
+.win-inbox-badge:hover { filter: brightness(1.12); }
+.win-inbox-badge:focus-visible { outline: 1px solid var(--border-active); outline-offset: 1px; }
+.win-inbox-badge svg { width: 10px; height: 10px; display: block; }
+.tab-item .win-inbox-badge { margin-left: 3px; }
+.ut-mini-popover {
+  background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 8px 10px; width: 340px; max-width: calc(100vw - 16px); max-height: 420px; overflow-y: auto;
+}
+.ut-mini-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text); padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.ut-mini-name { font-weight: 400; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ut-mini-empty { padding: 6px 2px; }
 .win-owner-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--bg-window); box-shadow: 0 0 0 1px var(--border); }
 .browser-live-strip-owners { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
 .browser-live-strip-owners .win-owner-dot { width: 7px; height: 7px; }

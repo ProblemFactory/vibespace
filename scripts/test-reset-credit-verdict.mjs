@@ -194,8 +194,8 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
   {
     const tdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-rcverdict-todos-'));
     const um = new UserTodoManager({ dataDir: tdir, expirySweepMs: 0 });
-    const it = um.add('codex:t1', { text: 'Use a stored reset credit on A?', kind: 'action', action: { type: 'reset-credit', sessionId: 'cx1' } });
-    const again = um.add('codex:t1', { text: 'Use a stored reset credit on A?', kind: 'action', action: { type: 'reset-credit', sessionId: 'cx1' } });
+    const it = um.add('codex:t1', { origin: 'pool', text: 'Use a stored reset credit on A?', kind: 'action', action: { type: 'reset-credit', sessionId: 'cx1' } });
+    const again = um.add('codex:t1', { origin: 'pool', text: 'Use a stored reset credit on A?', kind: 'action', action: { type: 'reset-credit', sessionId: 'cx1' } });
     ok('a filed item keeps its action; the same text re-filed is the SAME item (one per limit event)', it.action?.type === 'reset-credit' && again.id === it.id && again.existing === true && um.snapshot().open.length === 1);
     um.stop(); um.flush(); fs.rmSync(tdir, { recursive: true, force: true });
   }

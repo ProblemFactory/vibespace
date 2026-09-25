@@ -68,7 +68,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     try {
       const key = sessionKeyFor(sess.s, sess.id);
       if (!key) return false;
-      userTodos.add(key, { ...item, by: 'agent', sessionName: sess.s.name || sess.s.webuiName || null });
+      userTodos.add(key, { ...item, by: 'agent', origin: 'browser', sessionName: sess.s.name || sess.s.webuiName || null });
       return true;
     } catch (e) { log.warn?.(`[browser] handback inbox item not filed — ${e && e.message}`); return false; }
   }

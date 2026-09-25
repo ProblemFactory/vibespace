@@ -1255,7 +1255,7 @@ if (!probe) {
   const AUDIT = [
     // file                              why                               worked  because
     ['src/server/usage-pool-engine.js', 'turn completed normally', true],   //  the turn ended with real output: WORK
-    ['src/ws-handler.js', 'user sent a prompt', true],                      //  a human took the conversation over: WORK
+    ['src/server/user-input.js', 'user sent a prompt', true],               //  a human took the conversation over (THE typing path: ws chat-input + the For-you reply): WORK
     // 2026-09-08: the two READING producers no longer call noteRecovered
     // directly — they route through ONE shared edge (noteQuotaReadingForResume)
     // which keeps the round-4 classification for an un-armed session and asks

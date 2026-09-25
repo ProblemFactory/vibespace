@@ -38,6 +38,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
           if ((s.claudeSessionId || s.backendSessionId) === ownerCid) { sessName = s.name || null; break; }
         }
         userTodos.add(sessKey, {
+          origin: 'jobs', // B-328d
           text, urgency: urgency || 'normal', by: 'agent', jobId,
           detail: (jobId ? `Background job ${jobId}` : '') + (ownerCid && jobName ? ` · via ${jobName}` : ''),
           sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),

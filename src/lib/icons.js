@@ -105,6 +105,9 @@ export const UI_ICONS = {
   // branch dots joined by the merge arc. SVG only.
   pullRequest: _s('<circle cx="4" cy="3.5" r="1.6"/><circle cx="4" cy="12.5" r="1.6"/><circle cx="12" cy="12.5" r="1.6"/><path d="M4 5.1v5.8"/><path d="M8.5 3.5H10a2 2 0 012 2v5.4"/><path d="M10 2l-1.5 1.5L10 5"/>'),
   inbox:     _s('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/>'),
+  // A For-you inbox reply (design-user-inbox-reply, 2026-09-23): the arrow
+  // that turns back toward its sender. SVG only.
+  reply:     _s('<path d="M6.5 3.5L2.5 7.5l4 4"/><path d="M2.5 7.5h6.5a4.5 4.5 0 014.5 4.5v1"/>'),
   copy:      _s('<rect x="5.5" y="5.5" width="8" height="8" rx="1.2"/><path d="M10.5 5.5V3.5a1 1 0 00-1-1h-6a1 1 0 00-1 1v6a1 1 0 001 1h2"/>'),
   globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
   monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),

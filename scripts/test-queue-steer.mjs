@@ -188,7 +188,7 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
     const wrapperCap = Number(/const QUEUE_EDIT_MAX_CHARS = (\d+);/.exec(read('data/bin/codex-chat-wrapper.js'))?.[1]);
     ok(`…and the server's cap IS the wrapper's own (${QUEUE_EDIT_MAX_CHARS} = ${wrapperCap}) — refusing at a limit the wrapper does not share would refuse edits it would have accepted`,
       QUEUE_EDIT_MAX_CHARS === 20000 && wrapperCap === QUEUE_EDIT_MAX_CHARS, { QUEUE_EDIT_MAX_CHARS, wrapperCap });
-    ok('…and the transport ceiling is the SAME 64KiB the `input` case treats as the shredding threshold', QUEUE_OP_MAX_BYTES === 64 * 1024 && /stdinPayload\.length > 64 \* 1024/.test(src));
+    ok('…and the transport ceiling is the SAME 64KiB the chat-input typing path (src/server/user-input.js) treats as the shredding threshold', QUEUE_OP_MAX_BYTES === 64 * 1024 && /stdinPayload\.length > 64 \* 1024/.test(read('src/server/user-input.js'))); // THE typing path moved out of the ws case (design-user-inbox-reply D1.1)
   }
   // ── finding 3 (server half): a ws refusal never becomes a `queue_op_result`,
   // so the strip could not find the row it had marked pending. The refusal

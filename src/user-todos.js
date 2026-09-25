@@ -11,6 +11,10 @@
  * - The AGENT files/(un)resolves items via `vibespace-ask` (per-session vsst_
  *   token → POST /api/agent/user-todo, scoped to its own session).
  * - The USER resolves/dismisses/reopens from the panel (cookie-authed route).
+ * - SERVER producers (spend guard, login watch, pool, jobs, channels, browser)
+ *   file with their own keys. Every writer NAMES ITSELF: `origin` (B-328d) is a
+ *   closed set of producers (src/inbox-origin.js) the Notices area groups by,
+ *   declared at the add() call (test-user-todos-layout ⑪ is the census).
  *
  * Follows the SessionStatusManager persistence pattern: memory + broadcast are
  * synchronous, disk (data/user-todos.json) is debounced + content-compared,
@@ -21,6 +25,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
+const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
 
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
@@ -76,6 +82,9 @@ const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (defau
 const STATUSES = ['open', 'done', 'dismissed'];
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
+const RESOLVED_TAIL = 15;                    // the snapshot's resolved tail: always the newest 15…
+const RESOLVED_RECENT_MS = 60 * 60 * 1000;   // …plus every item resolved within the last hour (an open popup's in-place rows, chunk 4)…
+const RESOLVED_SNAPSHOT_MAX = 250;           // …never more than this (one resolve-many is ≤ 200 ids)
 const EXPIRY_SWEEP_MS = 5 * 60 * 1000; // 2.369.152: how often an open item whose `expiresAt` passed is resolved 'expired'
 
 /** An `expiresAt` a producer may stamp: a finite ms epoch in the FUTURE, else
@@ -114,8 +123,14 @@ class UserTodoManager {
     }
   }
 
-  /** stop the expiry timer (suites, a migration's private manager) */
-  stop() { if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; } }
+  /** The manager's last act (suites, a migration's private manager): the
+   *  expiry timer cleared AND a pending debounced write flushed NOW (r2: the
+   *  500 ms write timer outlived stop() and fired into a data dir its owner had
+   *  already removed — ENOENT from a timer nobody could catch). */
+  stop() {
+    if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; }
+    this.flush();
+  }
 
   /** Resolve every OPEN item whose `expiresAt` has passed — `resolvedBy:
    *  'expired'`, status 'done', the record kept (the ledger is history). An
@@ -175,13 +190,25 @@ class UserTodoManager {
   _notify() { try { this._onChange(this.snapshot()); } catch { } }
 
   // Everything the UI needs: open items + a short tail of recently-resolved
-  // ones (shown dimmed for context). Sorted urgent-first, then newest.
+  // ones (shown dimmed for context). Sorted urgent-first, then DECISIONS
+  // first (an item with option chips is answerable in one click — design-user-
+  // inbox-reply D3f, every client agrees because the store sorts), then newest.
   snapshot() {
     const rank = (u) => URGENCIES.indexOf(u || 'normal');
+    const hasOpts = (i) => (Array.isArray(i.options) && i.options.length ? 1 : 0);
     const open = this._state.items.filter((i) => i.status === 'open')
-      .sort((a, b) => (rank(b.urgency) - rank(a.urgency)) || (b.createdAt - a.createdAt));
+      .sort((a, b) => (rank(b.urgency) - rank(a.urgency)) || (hasOpts(b) - hasOpts(a)) || (b.createdAt - a.createdAt));
+    // The resolved tail: the newest 15 (the popup's "Recently resolved" shows 6)
+    // PLUS everything resolved in the last hour, ≤ 250 (chunk 4): an OPEN popup
+    // keeps a row resolved while it was open in its slot only while the row is
+    // still in the snapshot (nextLayout drops ids the store no longer lists) —
+    // with a flat 15, "Mark all seen" on a 30-ask group made 15 struck rows
+    // vanish from under the pointer (test-inbox-reply-ui ⑮ caught it).
+    const now = Date.now();
     const resolved = this._state.items.filter((i) => i.status !== 'open')
-      .sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0)).slice(0, 15);
+      .sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0))
+      .filter((i, k) => k < RESOLVED_TAIL || (now - (i.resolvedAt || 0)) < RESOLVED_RECENT_MS)
+      .slice(0, RESOLVED_SNAPSHOT_MAX);
     return { open, resolved };
   }
 
@@ -192,7 +219,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null } = {}) {
     text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
     expiresAt = validExpiry(expiresAt);
@@ -205,6 +232,16 @@ class UserTodoManager {
     // approval in …". Validated here; a malformed shape is refused by name.
     i18n = normalizeI18n(i18n);
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
+    options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
+    // ORIGIN (B-328d, 2026-09-24): WHO filed it — a closed set (src/inbox-origin.js).
+    // REQUIRED (r2, fail closed): a caller naming none THROWS `origin required
+    // (one of …)` and a value outside the set THROWS by name — either files
+    // nothing. There is no default: the old `agent` default let a producer the
+    // census could not see (an aliased store, `?.add`) file under Agents with
+    // nothing red anywhere. Every caller declares at the call — the agent route
+    // `agent`, each server producer its own, every fixture explicitly
+    // (test-user-todos-layout ⑪ is the census beside this throw).
+    origin = normalizeOrigin(origin);
     if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
@@ -229,6 +266,7 @@ class UserTodoManager {
         // a re-file of a resolved item is a NEW filing: its own expiry or none
         // (the old one is past — kept, it would expire the item on the next sweep)
         existing.expiresAt = expiresAt;
+        existing.reply = null; // a re-filed ask is a NEW question: the last reply answered the old filing
         changed = true;
       } else if (expiresAt && existing.expiresAt != null && expiresAt > existing.expiresAt) {
         // an OPEN item merges to the LATER end; one with no expiresAt is lasting
@@ -240,6 +278,10 @@ class UserTodoManager {
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
+      if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set
+      // a DECLARED origin is kept (the item's producer does not change on a re-file);
+      // an item filed before the field existed takes the re-filer's declaration
+      if (!existing.origin) { existing.origin = origin; changed = true; }
       if (changed) { this._save(); this._notify(); }
       return { ...existing, existing: true };
     }
@@ -255,6 +297,9 @@ class UserTodoManager {
       i18n, // the words as structure, or null (an agent's own item is its own words)
       action, // what the item's button does ({type, …facts}), or null — a server producer's only
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
+      options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
+      reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
+      origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
       createdAt: Date.now(), resolvedAt: null, resolvedBy: null,
     };
     this._state.items.push(item);
@@ -292,10 +337,63 @@ class UserTodoManager {
     return item;
   }
 
+  /** THE BATCH of setStatus (design-user-inbox-reply §4 d, chunk 4: "Mark all
+   *  seen" on a group head — POST /api/user-todos/resolve-many). Every KNOWN id
+   *  gets `status` with setStatus's exact semantics (an already-resolved one is
+   *  re-stamped: a done item becomes dismissed); an unknown id is reported BY ID,
+   *  never a throw — the rest of the batch still applies. ONE save + ONE
+   *  broadcast for the whole batch (N setStatus calls would push N snapshots to
+   *  every client). An invalid status throws by name before anything changes.
+   *  @returns {{changed: string[], unknown: string[]}} */
+  setStatusMany(ids, status, by = 'user') {
+    if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
+    const changed = [], unknown = [];
+    const now = Date.now();
+    for (const id of new Set(Array.isArray(ids) ? ids : [])) {
+      const item = this._state.items.find((i) => i.id === id);
+      if (!item) { unknown.push(id); continue; }
+      item.status = status;
+      if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; }
+      else { item.resolvedAt = now; item.resolvedBy = by; }
+      changed.push(id);
+    }
+    if (changed.length) { this._save(); this._notify(); }
+    return { changed, unknown };
+  }
+
+  /** The user REPLIED to this item from the inbox and the reply reached the
+   *  session (src/routes/user-todos-reply.js calls this only after the send
+   *  succeeded). An OPEN item becomes done with `resolvedBy:'reply'`; an item
+   *  already resolved or dismissed keeps its status and `resolvedBy` (a reply
+   *  is refused for delivery reasons only, never bookkeeping) — either way the
+   *  reply is kept on it as `{text ≤4000, at}`. ONE save + ONE broadcast. */
+  resolveByReply(id, text, now = Date.now()) {
+    const item = this._state.items.find((i) => i.id === id);
+    if (!item) throw new Error('item not found');
+    item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
+    if (item.status === 'open') { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
+    this._save(); this._notify();
+    return item;
+  }
+
+  /** One item of the caller's OWN session, whatever its status (`vibespace-ask
+   *  show <id>`: the reply quote cuts a long detail and points here). */
+  getForSession(keys, id) {
+    const set = new Set(Array.isArray(keys) ? keys : [keys]);
+    const it = this._state.items.find((i) => i.id === id);
+    return it && set.has(it.sessionKey) ? it : null;
+  }
+
   // Agent-side resolve by id OR unique text substring (its own session only).
+  // An id of an item of this session that is ALREADY resolved (the user
+  // replied from the inbox, or ticked it) is an idempotent no-op answering
+  // the item as it is — the agent was told to resolve on an answer, and the
+  // reply WAS the answer.
   resolveByAgent(sessionKey, ref) {
     ref = String(ref || '').trim();
     if (!ref) throw new Error('pass the item id or a unique text fragment');
+    const done = this._state.items.find((i) => i.id === ref && i.sessionKey === sessionKey && i.status !== 'open');
+    if (done) return done;
     const mine = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open');
     let hit = mine.find((i) => i.id === ref);
     if (!hit) {
@@ -316,4 +414,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, validExpiry, normalizeAction };
+module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, validExpiry, normalizeAction };

@@ -217,7 +217,8 @@ console.log('\n§4 THE three entry points open ONE dialog');
   }
   ok('manage-agents: BOTH rosters route the button to it (codex live, claude disabled until it can)', (read('src/lib/manage-agents.js').match(/openResetCreditDialog\(this, \{ accountKey: useBtn\.dataset\.resetKey \}\)/g) || []).length === 2);
   ok('chat-renderers: the button rides a peer card only when the offer names an account', /if \(rc && rc\.accountKey && Number\(rc\.available\) > 0\) \{/.test(read('src/lib/chat-renderers.js')));
-  ok('user-todos-panel: the button only on a reset-credit action item', /i\.action\.type === 'reset-credit' && i\.action\.accountKey/.test(read('src/lib/user-todos-panel.js')));
+  // 2.369.169: the row markup moved to THE row renderer (src/lib/user-todos-row.js) the panel imports
+  ok('user-todos-panel: the button only on a reset-credit action item (drawn by THE row renderer the panel imports)', /i\.action\.type === 'reset-credit' && i\.action\.accountKey/.test(read('src/lib/user-todos-row.js')) && /from '\.\/user-todos-row\.js'/.test(read('src/lib/user-todos-panel.js')));
   const all = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n/.test(f)).map((f) => ['src/lib/' + f, read('src/lib/' + f)]);
   const definers = all.filter(([, s]) => /function openResetCreditDialog\b/.test(s)).map(([f]) => f);
   ok('exactly ONE client file defines the dialog', JSON.stringify(definers) === '["src/lib/reset-credit-dialog.js"]', JSON.stringify(definers));

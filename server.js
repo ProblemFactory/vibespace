@@ -1235,13 +1235,11 @@ const userTodos = new UserTodoManager({
 });
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
 app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
-// User actions from the panel: done / dismissed / open (reopen)
-app.post('/api/user-todos/:id', (req, res) => {
+require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id
+app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: done / dismissed / open (reopen)
   try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user') }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-// Agent endpoint (vibespace-ask) — per-session vsst_ token, same auth model as
-// /api/agent/session-status; writes scoped to the calling agent's own session.
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');
 // ── Background Work (2.342.0): jobs engine — constructed here, INITIALIZED
@@ -1635,6 +1633,8 @@ app.get('/api/session-options', (req, res) => {
 });
 
 // ── WebSocket Terminal Handler (extracted to src/ws-handler.js) ──
+const sendUserInput = require('./src/server/user-input.js').createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, log: (...a) => console.log(...a) }).send; require('./src/routes/user-todos-reply.js').registerUserTodoReplyRoutes(app, { userTodos, activeSessions, sendUserInput, sessionStatusKey }); // THE typing path, ONE implementation: the ws chat-input case AND the For-you reply route (POST /api/user-todos/:id/reply, owner-only — design-user-inbox-reply D1)
+{ const { turnDigest } = require('./src/server/turn-facts.js'); let lastTurns = ''; setInterval(() => { const d = turnDigest(activeSessions); if (d !== lastTurns) { lastTurns = d; broadcastActiveSessions(); } }, 1000).unref(); } // the payload's `turn` column ('running'|'idle'|'waiting' — the inbox's running dot; carried, never gating) is DERIVED: one 1 s digest over _isStreaming/_turnState, a list broadcast only when it moved — never a hook at the nine flip sites (design-user-inbox-reply D1.7)
 const { registerWsHandler, noConvoRef, pickCodexThreadCandidate } = require('./src/ws-handler');
 registerWsHandler(wss, {
   poolChooser: poolChooserForModel,
@@ -1651,7 +1651,7 @@ registerWsHandler(wss, {
   NODE_CMD, DTACH_CMD, ENV_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,
   adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
   accounts, scheduleCtxSync, activeSessionsPayload, serverNotice,
-  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, // telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1)
+  USAGE_STATUSLINE_CMD, userStatuslineCmd, telemetry, sendUserInput, // telemetry: the ws switch's `default:` counts unknown message types (Plugin Ph1); sendUserInput = THE typing path (src/server/user-input.js), shared with the For-you reply route
 });
 
 // Billing identity for the card badge. Precedence: env-key spawn (definite) →
@@ -1749,7 +1749,7 @@ function activeSessionsPayload() {
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       // outputStyle = the EFFECTIVE style (2.369.58; null = the agent's own config decides); worktree/worktreePath = the per-session git worktree (owner ruling 9) — the card badge + the path the CLI ITSELF announced in its init frame
       vcs: s._vcs || null, prLinks: Array.isArray(s._prLinks) && s._prLinks.length ? s._prLinks : null, // design-unknown-records: the last VCS fact (git chip) + the published changes (PR chips)
-      mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, browserKey: s._browserKey || null, browserVariant: s._browserVariant || null, browserProfileId: s._browserProfileId || null, browserPinOrigin: s._browserPinOrigin || null, browserProfileActive: s._browserProfileActive === undefined ? null : s._browserProfileActive, browserInput: (() => { try { const v = browserKeeper?.inputSummaryFor?.(s._browserKey); return v ? v.input : null; } catch { return null; } })(), // + agent browser P3 (§4.3): 'user' while somebody drives one of this conversation's browsers, 'agent' when it has one, null when none — the card badge / status-bar chip // + agent browser P2 (§3.8 ③): the profile the agent LAST USED (null = never, '' = the ephemeral one) beside the PINNED one — the status-bar Browser chip's pair, each with its own LIVE_SESSION_FACTS digest // + agent browser P1 (§3.2.5): the conversation's browser key/rung, the PINNED profile and which rung chose it (Session Properties' Browser section, the card picker) // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
+      turn: require('./src/server/turn-facts.js').turnOf(s), mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, browserKey: s._browserKey || null, browserVariant: s._browserVariant || null, browserProfileId: s._browserProfileId || null, browserPinOrigin: s._browserPinOrigin || null, browserProfileActive: s._browserProfileActive === undefined ? null : s._browserProfileActive, browserInput: (() => { try { const v = browserKeeper?.inputSummaryFor?.(s._browserKey); return v ? v.input : null; } catch { return null; } })(), // + agent browser P3 (§4.3): 'user' while somebody drives one of this conversation's browsers, 'agent' when it has one, null when none — the card badge / status-bar chip // + agent browser P2 (§3.8 ③): the profile the agent LAST USED (null = never, '' = the ephemeral one) beside the PINNED one — the status-bar Browser chip's pair, each with its own LIVE_SESSION_FACTS digest // + agent browser P1 (§3.2.5): the conversation's browser key/rung, the PINNED profile and which rung chose it (Session Properties' Browser section, the card picker) // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
     });
   }
   return activeList;

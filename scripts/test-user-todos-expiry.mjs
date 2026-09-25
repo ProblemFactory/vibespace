@@ -56,11 +56,11 @@ try {
   const addLeg = (Mod) => {
     const { m } = mk(Mod);
     const now = Date.now();
-    const fut = m.add('accounts', { text: 'future', expiresAt: now + HOUR });
-    const past = m.add('accounts', { text: 'past', expiresAt: now - 1 });
-    const nan = m.add('accounts', { text: 'nan', expiresAt: NaN });
-    const str = m.add('accounts', { text: 'str', expiresAt: String(now + HOUR) });
-    const none = m.add('accounts', { text: 'none' });
+    const fut = m.add('accounts', { origin: 'spend', text: 'future', expiresAt: now + HOUR });
+    const past = m.add('accounts', { origin: 'spend', text: 'past', expiresAt: now - 1 });
+    const nan = m.add('accounts', { origin: 'spend', text: 'nan', expiresAt: NaN });
+    const str = m.add('accounts', { origin: 'spend', text: 'str', expiresAt: String(now + HOUR) });
+    const none = m.add('accounts', { origin: 'spend', text: 'none' });
     return { fut: fut.expiresAt, past: past.expiresAt, nan: nan.expiresAt, str: str.expiresAt, none: none.expiresAt, now };
   };
   const a = addLeg(UT);
@@ -77,17 +77,17 @@ try {
   const mergeLeg = (Mod) => {
     const { m } = mk(Mod);
     const now = Date.now();
-    m.add('accounts', { text: 'w', expiresAt: now + HOUR });
-    const later = m.add('accounts', { text: 'w', expiresAt: now + 3 * HOUR }).expiresAt;
-    const earlier = m.add('accounts', { text: 'w', expiresAt: now + 2 * HOUR }).expiresAt;
-    m.add('accounts', { text: 'lasting' });
-    const lasting = m.add('accounts', { text: 'lasting', expiresAt: now + HOUR }).expiresAt;
+    m.add('accounts', { origin: 'spend', text: 'w', expiresAt: now + HOUR });
+    const later = m.add('accounts', { origin: 'spend', text: 'w', expiresAt: now + 3 * HOUR }).expiresAt;
+    const earlier = m.add('accounts', { origin: 'spend', text: 'w', expiresAt: now + 2 * HOUR }).expiresAt;
+    m.add('accounts', { origin: 'spend', text: 'lasting' });
+    const lasting = m.add('accounts', { origin: 'spend', text: 'lasting', expiresAt: now + HOUR }).expiresAt;
     // a RESOLVED item re-filed is a new filing: its own end, or none
-    const r = m.add('accounts', { text: 'r', expiresAt: now + HOUR });
+    const r = m.add('accounts', { origin: 'spend', text: 'r', expiresAt: now + HOUR });
     m.setStatus(r.id, 'done', 'user');
-    const reopenedWith = m.add('accounts', { text: 'r', expiresAt: now + 5 * HOUR });
+    const reopenedWith = m.add('accounts', { origin: 'spend', text: 'r', expiresAt: now + 5 * HOUR });
     m.setStatus(r.id, 'done', 'user');
-    const reopenedWithout = m.add('accounts', { text: 'r' });
+    const reopenedWithout = m.add('accounts', { origin: 'spend', text: 'r' });
     return { now, later, earlier, lasting, reopenedWith: reopenedWith.expiresAt, reopenedStatus: reopenedWith.status, reopenedWithout: reopenedWithout.expiresAt };
   };
   const g = mergeLeg(UT);
@@ -105,11 +105,11 @@ try {
     let broadcasts = 0;
     const { m, d } = mk(Mod, { onChange: () => { broadcasts++; } });
     const now = Date.now();
-    const due1 = m.add('accounts', { text: 'due1', expiresAt: now + MIN });
-    const due2 = m.add('accounts', { text: 'due2', expiresAt: now + 2 * MIN });
-    const later = m.add('accounts', { text: 'later', expiresAt: now + HOUR });
-    const lasting = m.add('accounts', { text: 'lasting' });
-    const done = m.add('accounts', { text: 'done', expiresAt: now + MIN });
+    const due1 = m.add('accounts', { origin: 'spend', text: 'due1', expiresAt: now + MIN });
+    const due2 = m.add('accounts', { origin: 'spend', text: 'due2', expiresAt: now + 2 * MIN });
+    const later = m.add('accounts', { origin: 'spend', text: 'later', expiresAt: now + HOUR });
+    const lasting = m.add('accounts', { origin: 'spend', text: 'lasting' });
+    const done = m.add('accounts', { origin: 'spend', text: 'done', expiresAt: now + MIN });
     m.setStatus(done.id, 'done', 'user');
     const doneAt = m.get(done.id).resolvedAt;
     const b0 = broadcasts;
@@ -163,7 +163,7 @@ try {
     m.flush();
     // the interval actually sweeps
     const { m: m2 } = mk(UT, { expirySweepMs: 25 });
-    const it = m2.add('accounts', { text: 'soon', expiresAt: Date.now() + 30 });
+    const it = m2.add('accounts', { origin: 'spend', text: 'soon', expiresAt: Date.now() + 30 });
     await sleep(120);
     ok(m2.get(it.id).resolvedBy === 'expired', 'the interval resolves an item once it is due, with nobody calling expireDue', m2.get(it.id));
     m2.stop(); m2.flush();
@@ -181,7 +181,7 @@ try {
   // ── reopen by the user makes it lasting ────────────────────────────────────
   {
     const { m } = mk(UT);
-    const i = m.add('accounts', { text: 'x', expiresAt: Date.now() + MIN });
+    const i = m.add('accounts', { origin: 'spend', text: 'x', expiresAt: Date.now() + MIN });
     m.expireDue(Date.now() + 2 * MIN);
     m.setStatus(i.id, 'open', 'user');
     const n = m.expireDue(Date.now() + 3 * MIN);

@@ -713,7 +713,7 @@ console.log('— §4 warning ladder (fake clock, persisted ledger)');
     {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-lewrec2-'));
       const todos = new UserTodoManager({ dataDir: dir, onChange: () => {} });
-      const agentItem = todos.add('claude:abc-123', { text: 'Which database should I use?', by: 'agent', urgency: 'high' });
+      const agentItem = todos.add('claude:abc-123', { origin: 'agent', text: 'Which database should I use?', by: 'agent', urgency: 'high' });
       let clock = NOW;
       const state = { a: wiped(NOW - 20 * MIN), b: wiped(NOW - 30 * MIN) };
       const w = watch.create({
@@ -995,7 +995,8 @@ console.log('— §5 wiring');
   // resolved tail credits 'agent' for agent-resolved items, and the watch's
   // retraction is neither the user nor an agent.
   ck("the resolved tail labels a watch-retracted item 'automatically' (not the user, not an agent)",
-    /by === 'system' \? t\('automatically'\)/.test(panel) /* 2.369.152 moved the wording into resolvedByText(); the panel still says it */);
+    /by === 'system'\) return t\('automatically'\)/.test(fs.readFileSync(path.join(REPO, 'src/lib/user-todos-row.js'), 'utf8')) && /import \{ renderRow[^}]*\} from '\.\/user-todos-row\.js'/.test(panel)
+    /* 2.369.169 (inbox chunk 2) moved every row string into THE row renderer src/lib/user-todos-row.js — its resolvedByText() says it, the panel imports it */);
   // ROUND 3: the item text asks the STATE what happened, not the rung how
   // urgent it is — warnStageFor collapses 'logged-out' onto 'expired'.
   const lew = fs.readFileSync(path.join(REPO, 'src/server/login-expiry-watch.js'), 'utf8');

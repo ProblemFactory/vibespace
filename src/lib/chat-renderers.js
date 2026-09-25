@@ -29,6 +29,7 @@ import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHt
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
 import { openResetCreditDialog } from './reset-credit-dialog.js';
+import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
 // Agent-memory files get their own card treatment (user ask: a memory write
 // is a different concern than a project write — render "记忆更新 <name>"
@@ -440,6 +441,14 @@ class ChatRenderers {
     if (isNotification) {
       return this._renderNotificationMsg(rawText);
     }
+    // A FOR-YOU INBOX REPLY (design-user-inbox-reply D1.8): the user's own
+    // message, sent from the inbox, opening with `[For you reply #<id>]` + the
+    // quoted item. Recognised from the TEXT (the marker is a protocol value), so
+    // the live stream and a history rebuild draw the same card: a head naming
+    // the item, the quote folded, the reply as the body. Every piece escaped /
+    // markdown-sanitized like any user message.
+    const inboxReply = parseInboxReply(rawText);
+    if (inboxReply) return this._renderInboxReply(msg, inboxReply);
 
     const el = document.createElement('div');
     el.className = 'chat-msg chat-msg-user';
@@ -457,6 +466,21 @@ class ChatRenderers {
       : parts;
 
     this.wrapMsg(el, 'user', t('You'), textHtml);
+    ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
+    return el;
+  }
+
+  _renderInboxReply(msg, r) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-user chat-msg-inbox-reply';
+    el._rawMsg = msg;
+    const qLines = String(r.quote || '').split('\n');
+    // the summary names the item by its own words (quote line 2 = the item's text), else its id
+    const gist = (qLines[1] || r.id).slice(0, 120);
+    const html = `<div class="chat-peer-head chat-inbox-reply-head">${UI_ICONS.inbox || ''} ${escHtml(t('For you · reply to #{id}', { id: r.id }))}</div>`
+      + `<details class="chat-inbox-quote"><summary>${escHtml(gist)}</summary><div class="chat-inbox-quote-body">${escHtml(r.quote)}</div></details>`
+      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`;
+    this.wrapMsg(el, 'user', t('You'), html);
     ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
     return el;
   }

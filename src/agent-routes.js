@@ -124,15 +124,16 @@ app.post('/api/agent/user-todo', (req, res) => {
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
   if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
-  const { add, list, resolve } = req.body || {};
+  const { add, list, resolve, show } = req.body || {};
   try {
     if (list) return res.json({ success: true, sessionKey: key, items: userTodos.forSession([key, `webui:${id}`]) });
     if (resolve) return res.json({ success: true, item: userTodos.resolveByAgent(key, resolve) });
+    if (show) { const it = userTodos.getForSession([key, `webui:${id}`], String(show)); return it ? res.json({ success: true, item: it }) : res.status(404).json({ error: `no item ${String(show).slice(0, 40)} in this session` }); } // `vibespace-ask show <id>`: one item of THIS session whatever its status (a reply's quote cuts a long detail and points here)
     if (add && add.text) {
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', sessionName: s.name || null, kind: add.kind || null }); // kind: 'notice' = FYI only (vibespace-ask --notice), validated by the store
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options }); // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       return res.json({ success: true, item });
     }
-    res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"}' });
+    res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"}' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot() }));
@@ -1694,8 +1695,9 @@ function sessionToolsIntro(T, facts = {}) {
   if (T.ask) {
     L.push(
       'Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it on their global inbox with `vibespace-ask`. They are often NOT watching this window; the inbox is how they find waiting questions across all sessions:',
-      '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent]',
-      '  vibespace-ask list  /  vibespace-ask resolve <id|text>',
+      '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"]',
+      '  vibespace-ask list  /  vibespace-ask resolve <id|text>  /  vibespace-ask show <id>',
+      'The user can reply from the inbox: that message opens with `[For you reply #<id>]` and quotes your item; an option chip replies with the label itself.',
       'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
       'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).');
   }

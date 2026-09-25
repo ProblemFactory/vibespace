@@ -232,6 +232,7 @@ const WS_CTX_CONTRACT = [
   'adapterRegistry', 'pty', 'path', 'fs', 'os', 'execFileSync', 'ensureDir', 'hosts',
   'accounts', 'scheduleCtxSync', 'activeSessionsPayload',
   'USAGE_STATUSLINE_CMD', 'userStatuslineCmd', 'serverNotice', 'otelEnv', 'telemetry',
+  'sendUserInput', // THE typing path (src/server/user-input.js) — the chat-input case and the For-you reply route share it
 ];
 
 function registerWsHandler(wss, ctx) {
@@ -247,6 +248,7 @@ function registerWsHandler(wss, ctx) {
     adapterRegistry, pty, path, fs, os, execFileSync, ensureDir, hosts,
     accounts, scheduleCtxSync, activeSessionsPayload,
     USAGE_STATUSLINE_CMD, userStatuslineCmd, otelEnv, telemetry,
+    sendUserInput,
   } = ctx;
 
   // Monotonic sequence for layout-sync rebroadcasts (shared across all
@@ -476,135 +478,14 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'chat-input': {
-          const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat') {
-            session._userInputAt = Date.now();   // the owner's own turn (§22 D2: next-turn reports ride THIS kind of turn only)
-            const adapter = adapterRegistry.get(session.backend);
-            if (!adapter) break;
-            // New input means prior interrupt succeeded (or user proceeded) —
-            // cancel any pending SIGINT fallback to avoid killing mid-stream.
-            if (session._interruptTimer) {
-              clearTimeout(session._interruptTimer);
-              session._interruptTimer = null;
-            }
-            const msgId = data.msgId || (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
-            // NOTE: the user's message text is sent VERBATIM. Task context and
-            // status-override notices are delivered through the harness's OWN
-            // native hooks (SessionStart / UserPromptSubmit → vibespace-hook.mjs),
-            // never by rewriting the user's input — modifying the message stream
-            // is unstable and bypasses the CLI's mechanisms (user directive).
-            let stdinPayload, userMsg;
-            try { ({ stdinPayload, userMsg } = adapter.formatChatInput(data.text, msgId)); }
-            catch (e) {
-              // POISON GUARD tripped (2.360.0): a shredded frame must reach
-              // the USER as an error, never the transcript as text.
-              // code marks it a SEND refusal — without it the client's error
-              // handler read EVERY per-session error as an attach failure and
-              // flipped the LIVE window read-only (inc-mt2arppw, userW: "发消息
-              // 就会直接中断"), and the text rode a field the client never read.
-              try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: e.message, message: e.message })); } catch { }
-              break;
-            }
-            // Large frames (image pastes) ride a FILE, not the pty stdin —
-            // multi-MB single lines get shredded by the pty/dtach channel
-            // (the 79928a2b 38MB poisoning; local chat only — a remote
-            // wrapper can't see this filesystem). The condition is TRANSPORT
-            // + CAPABILITY, never a backend id: until design-harness-plugins
-            // §1 P1 it also excluded the codex backend by id, which left the
-            // shredding class OPEN for codex (its wrapper had no _frame_file
-            // verb and dropped unparseable lines silently) instead of letting
-            // the capability gate below say "old wrapper" honestly.
-            let payloadLine = stdinPayload;
-            if (stdinPayload.length > 64 * 1024 && !session.host && session.socketPath) {
-              // WRAPPER CAPABILITY GATE (2.361.1, the c1206711 lost-image
-              // incident): the _frame_file pointer is only understood by
-              // wrappers spawned from 2.360.0+ code. Wrappers are LONG-LIVED
-              // (dtach survives updates) — an old wrapper forwards the pointer
-              // verbatim to claude, which drops the unknown type SILENTLY and
-              // the message vanishes (frame file orphaned). Capability = the
-              // caps marker the wrapper writes into its SIDECAR at boot
-              // (data/session-buffers/<id>.json, read through the collision-
-              // aware resolver — 2.364.1: the 2.361.1 gate read the SERVER's
-              // data/session-meta record, which never carries caps, so every
-              // wrapper tested "old", every >1MB paste was refused for two
-              // releases and the refusal sent users to Terminate+Resume
-              // sessions that were already new; owner did it three times).
-              // Unmarked wrappers keep the historical raw-stdin path (single-
-              // screenshot sized frames rode it safely for months) and
-              // anything past the shredding-risk range is REFUSED with a
-              // visible, EVIDENCED error instead of lost (no-silent-failures
-              // law). Only a POSITIVE verdict is cached — a wrapper still
-              // booting a huge resume must not be locked out by its first read.
-              let caps = null;
-              if (session._wrapperFrameFile !== true) {
-                caps = wrapperCaps(BUFFERS_DIR, data.sessionId, session.socketPath);
-                if (caps.frameFile) session._wrapperFrameFile = true;
-              }
-              if (session._wrapperFrameFile === true) {
-                try {
-                  const fdir = path.join(__dirname, '..', 'data', 'chat-frames');
-                  fs.mkdirSync(fdir, { recursive: true });
-                  const fp = path.join(fdir, `${data.sessionId}-${Date.now()}.json`);
-                  fs.writeFileSync(fp, stdinPayload);
-                  payloadLine = JSON.stringify({ type: '_frame_file', path: fp });
-                } catch (e) { console.log(`[${data.sessionId}] frame-file bypass failed (${e.message}) — falling back to direct stdin`); }
-              } else if (stdinPayload.length > 1024 * 1024) {
-                const mb = (stdinPayload.length / 1048576).toFixed(1);
-                const started = caps?.startedAt ? new Date(caps.startedAt).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : 'unknown time';
-                const why = caps?.reason === 'no-sidecar'
-                  ? 'its wrapper has not reported its capabilities yet (still starting up?) — wait a moment and send it again'
-                  : `its wrapper (started ${started}) predates the frame-file update — Terminate + Resume the session, then send it again`;
-                const refusal = `Message too large (${mb}MB) for this session: it was NOT sent — ${why}.`;
-                console.log(`[${data.sessionId}] chat-input REFUSED (${mb}MB): wrapper caps ${caps?.reason} (pid ${caps?.pid}, started ${caps?.startedAt})`);
-                try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: refusal, message: refusal })); } catch { }
-                break;
-              }
-            }
-            session._isStreaming = true;
-            // WORK (the default classification, round 4): the user took the
-            // conversation over by hand — the one non-turn signal allowed to
-            // clear the loop breaker, because a human at the keyboard is
-            // exactly who the budget was protecting
-            try { autoResume?.noteRecovered?.(data.sessionId, 'user sent a prompt'); } catch { }
-            // /compact turn (2.365.0, the userN "Compaction canceled." case):
-            // a large conversation compacts for 1–2 minutes behind a bare
-            // "thinking…" spinner, and the CLI's ONLY "Compaction canceled."
-            // path is an abort signal — one reflexive Stop click threw the
-            // whole attempt away. Label the turn for every client (the label
-            // resets with the turn like any other) so Stop can be guarded.
-            if (typeof data.text === 'string' && /^\/compact\b/.test(data.text.trim())) {
-              session._streamingLabel = 'Compacting context… (a large conversation takes 1–2 minutes — Stop cancels it)';
-              session._streamingKind = 'compacting';
-              broadcastToSession(session, data.sessionId, { type: 'streaming-label', sessionId: data.sessionId, label: session._streamingLabel, kind: 'compacting' });
-            }
-            session.pty.write(payloadLine + '\n');
-            if (userMsg) {
-              session.buffer = (session.buffer + JSON.stringify(userMsg) + '\n').slice(-500000);
-              feedLive(session, userMsg);
-            }
-            // Detect broken pty stdin: the wrapper writes _stdin_ack on
-            // stdout immediately when it receives stdin input. If no ack
-            // AND no byte at all came back from the pty within 5s, the pipe
-            // is dead. Both signals checked for compat with old wrappers that
-            // don't send _stdin_ack (wrapper only updates on server restart).
-            // 2026-09-09: the "did anything come back" half asks the LIVENESS
-            // STAMP (`ptyQuietSince`) instead of `session.buffer.length` — the
-            // same fact read at the source, and a superset (a chat consumer
-            // need not append every byte to session.buffer, and the terminal
-            // branch swallows dtach's attach preamble outright). The HEAL is
-            // the shared `reattachLocalPty`, which the restore-path attach
-            // probe also uses: two triggers, one implementation.
-            if (session.socketPath) {
-              const inputPayload = payloadLine;
-              const sentAt = Date.now();
-              session._stdinAckReceived = false;
-              setTimeout(() => {
-                if (!activeSessions.has(data.sessionId)) return;
-                if (session._stdinAckReceived) return;
-                if (!ptyQuietSince(session, sentAt)) return; // bytes came back — the pty is working (old wrapper without ack)
-                reattachLocalPty(data.sessionId, session, 'Broken pty stdin detected', { resend: inputPayload });
-              }, 5000);
-            }
+          // THE TYPING PATH lives in src/server/user-input.js (design-user-inbox-reply
+          // D1.1): ONE implementation shared with the For-you reply route. Only the
+          // two SEND refusals answer this socket (code 'input-rejected' — a send
+          // refusal, never an attach failure: inc-mt2arppw); no live session / not a
+          // chat session stay a silent no-op, exactly as before the extraction.
+          const r = sendUserInput(data.sessionId, data.text, { msgId: data.msgId, origin: 'ws' });
+          if (!r.ok && (r.code === 'input_rejected' || r.code === 'too_large')) {
+            try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: r.error, message: r.error })); } catch { }
           }
           break;
         }

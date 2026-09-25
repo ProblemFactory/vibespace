@@ -26,16 +26,26 @@ const opt = (name) => {
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const urgency = opt('urgency');
 const detail = opt('detail');
+// --options "A|B|C" (2.369.169, design-user-inbox-reply D3a): one-click answers
+// the user can pick in the inbox — the chip's reply IS the label. ≤6 labels of
+// ≤40 chars, distinct; the server refuses anything else by name.
+const optionsRaw = opt('options');
+// Labels go to the route AS TYPED (trimmed only): an empty label ("A||B", a trailing '|')
+// is the store's to refuse BY NAME (`options[1] is empty`), never dropped here (inbox r1).
+const options = optionsRaw === undefined ? undefined : optionsRaw.split('|').map((x) => x.trim());
 // --notice (2.369.118): the item is FOR THE USER'S INFORMATION, not an ask — it
 // lands in the inbox's own Notices section with a grey count, never the red badge.
 const noticeIdx = rawArgs.indexOf('--notice');
 const kind = noticeIdx >= 0 ? (rawArgs.splice(noticeIdx, 1), 'notice') : undefined;
 const USAGE = [
   'usage — mirror questions for the USER onto their global inbox (they may not be watching this window):',
-  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent] [--notice]',
+  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice]',
+  '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
   '  vibespace-ask list                    print this session\'s open items',
   '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
+  '  vibespace-ask show <id>               print one item of this session in full (any status, with the user\'s inbox reply)',
+  '  a reply from the inbox arrives as a user message opening with [For you reply #<id>] and a quote of your item',
   '  (whenever you ask in chat, ALSO file it here — both channels, always; the FULL content goes in your CHAT reply, this inbox only notifies; your own working steps still belong in your todo list)',
 ].join('\n');
 
@@ -52,8 +62,14 @@ async function call(body) {
 const printItems = (items) => {
   if (!items.length) { console.log('  (no open items for this session)'); return; }
   for (const i of items) {
-    console.log('  ' + i.id + '  [' + (i.urgency || 'normal') + '] ' + i.text + (i.detail ? '\n      ' + i.detail.split('\n').join('\n      ') : ''));
+    console.log('  ' + i.id + '  [' + (i.urgency || 'normal') + '] ' + i.text + (i.detail ? '\n      ' + i.detail.split('\n').join('\n      ') : '')
+      + (Array.isArray(i.options) && i.options.length ? '\n      options: ' + i.options.join(' | ') : ''));
   }
+};
+const printOne = (i) => {
+  printItems([i]);
+  console.log('      status: ' + i.status + (i.resolvedBy ? ' (by ' + i.resolvedBy + ')' : ''));
+  if (i.reply && i.reply.text) console.log('      the user replied: ' + i.reply.text.split('\n').join('\n        '));
 };
 
 async function main() {
@@ -72,6 +88,12 @@ async function main() {
     return;
   }
   if (cmd === 'list') { printItems((await call({ list: true })).items || []); return; }
+  if (cmd === 'show') {
+    const ref = rest.join(' ').trim();
+    if (!ref) { console.error('vibespace-ask: show needs an item id\n' + USAGE); process.exit(1); }
+    printOne((await call({ show: ref })).item);
+    return;
+  }
   if (cmd === 'resolve' || cmd === 'done') {
     const ref = rest.join(' ').trim();
     if (!ref) { console.error('vibespace-ask: resolve needs an item id or unique text fragment\n' + USAGE); process.exit(1); }
@@ -91,8 +113,9 @@ async function main() {
 }
 async function fileItem(text) {
   if (!text) { console.error(USAGE); process.exit(1); }
-  const { item } = await call({ add: { text, detail, urgency, kind } });
+  const { item } = await call({ add: { text, detail, urgency, kind, options } });
   console.log((item.existing ? 'already filed (refreshed): ' : 'filed for the user: ') + item.text + '  (' + item.id + ')');
+  if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
   console.log('REMINDER: the inbox is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the inbox as the only copy.');
 }
 main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });

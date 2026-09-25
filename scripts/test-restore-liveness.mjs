@@ -679,11 +679,14 @@ e2e: {
 console.log('— §5 the attach probe and the input detector share ONE re-attach —');
 {
   const wsSrc = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf-8');
-  ok(/reattachLocalPty\(data\.sessionId, session, 'Broken pty stdin detected'/.test(wsSrc),
+  // the detector moved with THE typing path into src/server/user-input.js
+  // (design-user-inbox-reply D1.1: the ws chat-input case + the For-you reply share it)
+  const uiSrc = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf-8');
+  ok(/reattachLocalPty\(sessionId, session, 'Broken pty stdin detected'/.test(uiSrc) && /sendUserInput\(data\.sessionId, data\.text/.test(wsSrc),
     'WIRING PIN: the broken-stdin detector calls the shared reattachLocalPty');
   ok(!/pty\.spawn\(DTACH_CMD/.test(wsSrc),
     'WIRING PIN: ws-handler no longer spawns its own dtach attach (one implementation, not two)');
-  ok(/ptyQuietSince\(session, sentAt\)/.test(wsSrc),
+  ok(/ptyQuietSince\(session, sentAt\)/.test(uiSrc),
     'WIRING PIN: the detector asks the liveness STAMP, not session.buffer.length');
   const stdoutSrc = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf-8');
   ok((stdoutSrc.match(/pty\.spawn\(DTACH_CMD/g) || []).length === 2,

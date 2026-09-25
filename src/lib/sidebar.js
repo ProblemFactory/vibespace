@@ -75,6 +75,11 @@ const LIVE_SESSION_FACTS = Object.freeze({
   accountId: { digest: null }, accountName: { digest: null }, accountTail: { digest: null },
   auth: { digest: null },                             // object (source/name/poolTarget)
   todo: { digest: null },                             // object, changes per TodoWrite
+  // design-user-inbox-reply D1.7: 'running'|'idle'|'waiting' — the For-you
+  // inbox's running dot. CARRIED-ONLY: it flips twice per turn and no card
+  // draws it, so gating on it would re-render the list every turn (the
+  // 2.72.0/2.106.1 churn); the panel patches its dots from the payload itself.
+  turn: { digest: null },
   outputStyle: { digest: (v) => v || '' },            // 2.369.58 response-style row
   // The B-6b6d spawn knobs and the origin each one came from. CARRIED-ONLY:
   // nothing on the CARD draws them (Session Properties does, and it re-reads

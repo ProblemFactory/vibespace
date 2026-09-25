@@ -673,7 +673,7 @@ function createSessionMessages(session, sessionId) {
       // "For you" item to the owner — zero billed turns, the inbox is the channel
       propose: (sessionId, session, { text, detail, by = 'agent' } = {}) => {
         if (!userTodos || !sessionStatusKey) return null;
-        return userTodos.add(sessionStatusKey(session, sessionId), { text, detail, urgency: 'normal', by, sessionName: session && (session.name || session.webuiName) || null });
+        return userTodos.add(sessionStatusKey(session, sessionId), { origin: 'browser', text, detail, urgency: 'normal', by, sessionName: session && (session.name || session.webuiName) || null }); // origin: the BROWSER routes' switch proposal (this file only wires them)
       },
       tasksForSession: (s, id) => taskIdsFor(s, id),
       // §3.8 layer ②: a USER's pin/attach/detach queues one typed notice that

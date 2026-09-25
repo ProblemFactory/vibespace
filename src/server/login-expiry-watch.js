@@ -293,6 +293,7 @@ function create({ accounts, userTodos, dataDir, log = () => {}, now = () => Date
       const text = itemTextFor(emit, name, info, { spanMs: span });
       try {
         const filedItem = userTodos.add(INBOX_KEY, {
+          origin: 'login', // B-328d
           text,
           urgency: URGENCY[emit] || 'normal',
           by: 'agent',

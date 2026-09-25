@@ -196,7 +196,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
     // it sits in the popup's own Notices section and never in the red badge
     // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
-    try { userTodos.add(INBOX_KEY, { text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
+    try { userTodos.add(INBOX_KEY, { origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 

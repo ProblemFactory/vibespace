@@ -267,8 +267,12 @@ setInterval(() => {}, 1e3);
   c = wrapperCaps(bufs, id, null);
   ok(c.frameFile === true, 'verdict comes from the wrapper sidecar alone (a caps-less server meta beside it changes nothing)');
   // wiring pins: the gate calls the sidecar reader, caches only TRUE, refuses with evidence
-  const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  ok(ws.includes('wrapperCaps(BUFFERS_DIR, data.sessionId, session.socketPath)'), 'chat-input gate reads capability through wrapperCaps (sidecar + collision-aware resolver)');
+  // THE typing path moved out of the ws case into src/server/user-input.js
+  // (design-user-inbox-reply D1.1: ONE sender shared with the For-you reply
+  // route) — the gate lives there now, verbatim; the ws case is a thin caller.
+  const ws = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
+  ok(/sendUserInput\(data\.sessionId, data\.text/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')), 'the ws chat-input case sends through THE sender (the gate below is the only one)');
+  ok(ws.includes('wrapperCaps(BUFFERS_DIR, sessionId, session.socketPath)'), 'chat-input gate reads capability through wrapperCaps (sidecar + collision-aware resolver)');
   ok(!/readSessionMeta\([^)]*\)\?\.caps/.test(ws), 'NEGATIVE: the gate no longer consults data/session-meta for caps (the 2.361.1 wrong-file read)');
   ok(/session\._wrapperFrameFile !== true\)/.test(ws) && /if \(session\._wrapperFrameFile === true\) \{/.test(ws), 'only a POSITIVE verdict is cached; pointer line only to capability-advertising wrappers');
   ok(/1024 \* 1024\)/.test(ws) && ws.includes('it was NOT sent') && ws.includes('Terminate + Resume') && ws.includes('wait a moment'), 'oversized + incapable → VISIBLE refusal with the evidenced reason (old wrapper vs still-starting)');
@@ -302,7 +306,8 @@ setInterval(() => {}, 1e3);
 //      and the refusal text rode msg.error which it never read) ──
 {
   const ws = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-  ok((ws.match(/code: 'input-rejected'/g) || []).length >= 2, 'both chat-input refusal sites carry code:input-rejected');
+  const ui = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
+  ok((ws.match(/code: 'input-rejected'/g) || []).length === 1 && /r\.code === 'input_rejected' \|\| r\.code === 'too_large'/.test(ws) && /code: 'input_rejected'/.test(ui) && /code: 'too_large'/.test(ui), "both chat-input refusals (the sender's input_rejected + too_large) reach the socket as code:input-rejected");
   ok(/code: 'input-rejected',[^\n]*message:/.test(ws.replace(/\n\s*/g, ' ')), 'refusals carry the text in the message field the client reads');
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8');
   // The rule is now an EXPLICIT set of scoped codes rather than a single

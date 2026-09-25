@@ -1221,6 +1221,39 @@ class WindowManager {
     win._ownerBadgeKey = key;
   }
 
+  /** THE MINI INBOX BADGE (design-user-inbox-reply §3, chunk 3) — setOwnerBadge's
+   *  twin: `{ count, urgency }` = the open For-you ACTION items of the session
+   *  this window shows (the panel module computes it after every broadcast and
+   *  calls this; count 0 / null removes it). A `.win-inbox-badge` <button> is a
+   *  SIBLING after the title span (setTitle writes the span's textContent), keyed
+   *  `count:urgency` so an unchanged badge is never rebuilt; grouped in a tab
+   *  chain it rides the window's TAB (_renderTabBar) and no standalone bar shows
+   *  it. A click opens the session's mini inbox (app.openMiniInbox). */
+  setInboxBadge(id, badge) {
+    const win = this.windows.get(id); if (!win) return;
+    const count = badge && Number.isFinite(Number(badge.count)) ? Math.max(0, Math.floor(Number(badge.count))) : 0;
+    const urgency = count ? String((badge && badge.urgency) || 'normal') : '';
+    const key = count ? `${count}:${urgency}` : '';
+    win._inboxBadge = count ? { count, urgency } : null;
+    this._placeInboxBadge(win);
+    if (win._tabChain && (win._inboxBadgeKey || '') !== key) this._renderTabBar(win._tabChain);
+    win._inboxBadgeKey = key;
+  }
+
+  /** Put (or take off) the STANDALONE title-bar badge for `win`: none while the
+   *  window is in a tab chain (the tab carries it), none at 0, rebuilt only when
+   *  its key changed. Called by setInboxBadge and whenever a chain dissolves. */
+  _placeInboxBadge(win) {
+    if (!win) return;
+    const el = win.titleBar.querySelector(':scope > .win-inbox-badge');
+    const b = win._inboxBadge;
+    if (!b || win._tabChain) { el?.remove(); return; }
+    const key = `${b.count}:${b.urgency}`;
+    if (el && el.dataset.key === key) return;
+    const fresh = this._inboxBadgeEl(win.id, b);
+    if (el) el.replaceWith(fresh); else win.titleSpan.insertAdjacentElement('afterend', fresh);
+  }
+
   // Billing identity indicator in the TITLE BAR (mirrors the session card's
   // amber key badge): API-billed sessions show a key, unknown live ones a
   // dashed '?', subscription stays quiet. Synced from active-sessions via

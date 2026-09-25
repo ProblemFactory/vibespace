@@ -3651,6 +3651,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       const who = nameOf(key);
       try {
         const item = todos.add(sessionKey, {
+          origin: 'pool', // B-328d: the pool engine's reset-credit decision
           text: `Use a stored reset credit on ${who}? (limit resets ${R ? new Date(R * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'at an unknown time'})`,
           detail: desc.text, urgency: 'normal', kind: 'action', sessionName: session.name || null,
           i18n: { text: { key: i18nKey('Use a stored reset credit on {account}?'), params: { account: who } }, detail: desc.lines },

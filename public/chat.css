@@ -1409,3 +1409,11 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-reset-credit-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 6px; padding: 2px 8px; font-size: 11px; color: var(--accent); background: transparent; border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-sm); cursor: pointer; }
 .chat-reset-credit-btn:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .chat-reset-credit-btn svg { width: 12px; height: 12px; }
+
+/* A For-you inbox reply (design-user-inbox-reply D1.8): the user's own message
+   sent from the inbox — a head naming the item, the quote folded, the reply. */
+.chat-msg-inbox-reply .chat-inbox-reply-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.chat-msg-inbox-reply .chat-inbox-reply-head svg { width: 12px; height: 12px; }
+.chat-inbox-quote { margin: 0 0 6px; border-left: 2px solid var(--border); padding-left: 8px; }
+.chat-inbox-quote > summary { font-size: 11px; color: var(--text-secondary); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-inbox-quote-body { font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 4px; max-height: 240px; overflow-y: auto; }

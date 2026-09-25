@@ -95,6 +95,7 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // answer AUTHORISES A BILLED TURN — that decision must be unit-testable
   // without a server.
   'src/auto-resume-signal.js',
+  'src/inbox-reply.js', // a reply to a For-you item (design-user-inbox-reply D1): the quote block, its parser, the ONE availability verdict — the route and the panel ask the same rule
   'src/turn-state.js', // authoritative turn state: the live consumer and the attach reconciliation must decide identically
   'src/opencode-remote.js', // S9 remainder: the OpenCode-serve OP TABLE + runOpencodeOp — one definition the local rung, the agentd op and the shipped ssh script all obey
   'src/permission-rules.js', // READ-ONLY permission-rule model + DOM-free tree renderer (owner ruling 10) — shared server (readers) + browser (the view)

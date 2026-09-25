@@ -46,7 +46,8 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // ── 2. wiring pins (the unstaged-wiring class) ──
 {
   const ws = read('src/ws-handler.js');
-  ok(/\^\\\/compact\\b/.test(ws) && ws.includes("_streamingKind = 'compacting'") && ws.includes("kind: 'compacting'"), 'ws-handler labels a /compact send kind=compacting and broadcasts it');
+  const ui = read('src/server/user-input.js'); // THE typing path (design-user-inbox-reply D1.1) — the ws chat-input case calls it
+  ok(/\^\\\/compact\\b/.test(ui) && ui.includes("_streamingKind = 'compacting'") && ui.includes("kind: 'compacting'") && /sendUserInput\(data\.sessionId, data\.text/.test(ws), 'the typing path labels a /compact send kind=compacting and broadcasts it (the ws chat-input case sends through it)');
   ok(ws.includes('streamingKind: isStreaming ? (session._streamingKind || null) : null'), 'attach meta carries streamingKind (reconnect mid-compaction keeps the guard)');
   // S5: the parse pipelines live in src/server/stdout/<protocol>.js
   const so = ['claude-stream-json', 'codex-events', 'acp-events'].map((m) => read(`src/server/stdout/${m}.js`)).join('\n');

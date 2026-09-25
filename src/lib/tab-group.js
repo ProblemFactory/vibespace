@@ -519,6 +519,33 @@ const tabGroupMethods = {
     return el;
   },
 
+  /** The MINI INBOX badge element (design-user-inbox-reply §3): a <button> with
+   *  the inbox SVG (aria-hidden, icons.js) + the count as TEXT, coloured by
+   *  `data-urgency`, labelled in plain words (never the session name — a peer-
+   *  controlled string; the popover names the session as text). The mousedown
+   *  stops HERE so the title bar's drag / focus and the For-you panel's
+   *  outside-click closer never see it; the click opens this window's mini inbox. */
+  _inboxBadgeEl(winId, badge) {
+    const n = Math.max(0, Math.floor(Number(badge && badge.count) || 0));
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'win-inbox-badge';
+    el.dataset.key = `${n}:${(badge && badge.urgency) || ''}`;
+    el.dataset.urgency = String((badge && badge.urgency) || 'normal');
+    el.innerHTML = UI_ICONS.inbox;
+    const num = document.createElement('span');
+    num.className = 'win-inbox-n';
+    num.textContent = String(n);
+    el.appendChild(num);
+    const label = t('{n} items from this agent', { n });
+    el.title = label;
+    el.setAttribute('aria-label', label);
+    el.addEventListener('mousedown', (e) => e.stopPropagation());
+    el.addEventListener('dblclick', (e) => e.stopPropagation());
+    el.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); this._app?.openMiniInbox?.(el, winId); });
+    return el;
+  },
+
   _renderTabBar(chain) {
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
@@ -537,6 +564,8 @@ const tabGroupMethods = {
     // on mouseup in _setupTabDrag) instead of per-render, so re-rendering the
     // tab bar mid-drag no longer kills an in-flight drag.
     const titleBar = hostWin.titleBar;
+    // the mini inbox badge rides each window's TAB while grouped — never a stray standalone one
+    for (const tid of chain.tabs) this.windows.get(tid)?.titleBar.querySelector(':scope > .win-inbox-badge')?.remove();
     const existing = titleBar.querySelector('.tab-bar-tabs');
     if (existing) existing.remove();
     titleBar.querySelector(':scope > .tab-split-btn')?.remove();
@@ -600,6 +629,7 @@ const tabGroupMethods = {
       }
       tab.append(iconWrap, label);
       if (tabWin._ownerBadge && tabWin._ownerBadge.dots && tabWin._ownerBadge.dots.length) tab.appendChild(this._ownerBadgeEl(tabWin._ownerBadge));
+      if (tabWin._inboxBadge && tabWin._inboxBadge.count) tab.appendChild(this._inboxBadgeEl(tabWinId, tabWin._inboxBadge));
       tab.appendChild(closeBtn);
       tab.addEventListener('mousedown', (e) => {
         if (e.target.closest('.tab-close')) return;
@@ -937,6 +967,7 @@ const tabGroupMethods = {
     win.titleSpan.style.display = '';
     const existingTabBar = win.titleBar.querySelector('.tab-bar-tabs');
     if (existingTabBar) existingTabBar.remove();
+    this._placeInboxBadge(win); // standalone again ⇒ its mini inbox badge is back on its own bar
 
     this._normalizeChain(chain); // a pair member that left ⇒ layout collapses to tabs (never a dangling id)
     if (chain.tabs.length <= 1) {
@@ -1001,6 +1032,7 @@ const tabGroupMethods = {
     lastWin.titleSpan.style.display = '';
     const tabBar = lastWin.titleBar.querySelector('.tab-bar-tabs');
     if (tabBar) tabBar.remove();
+    this._placeInboxBadge(lastWin);
     lastWin.element.style.display = '';
     requestAnimationFrame(() => { if (lastWin.onResize) lastWin.onResize(); });
   },

@@ -252,6 +252,7 @@ function create(deps = {}) {
         ? { text: `Channels: ${q.file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved`, key: i18nKey('Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved'), params: { file: q.file } }
         : { text: `Channels: ${q.file} could not be read and was set aside as ${q.to}`, key: i18nKey('Channels: {file} could not be read and was set aside as {where}'), params: { file: q.file, where: q.to } };
       userTodos.add(INBOX_KEY, {
+        origin: 'channels', // B-328d
         text: head.text,
         detail: `${q.file} was ${q.why}.\n${q.to ? `Its bytes are kept as data/channels/${q.to} — nothing was deleted; the store started empty.` : 'It could NOT be renamed, so writes to it are refused until the file is fixed or moved.'}\n\nRestore it by fixing the JSON and moving it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.`,
         urgency: 'high', by: 'agent', sessionName: 'Channels',
@@ -1342,6 +1343,7 @@ function create(deps = {}) {
     const vendorWords = String((err && err.message) || err || '').slice(0, 600);
     try {
       const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels', // B-328d
         text,
         detail: `Adapter: ${rec.label || rec.id} (${rec.kind})\nFailure: ${code}\nVendor said: ${vendorWords}\n\nWhat to do: ${remedyFor(rec, code)}\n\nThis item is retracted automatically by the channels engine when a pass succeeds again.`,
         urgency: code === 'auth-expired' ? 'high' : 'normal',
@@ -2844,6 +2846,7 @@ function create(deps = {}) {
     try {
       const title = String(p.title || p.convId).slice(0, 120);
       const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels', // B-328d
         text: `Outbox: a send to ${title} has an UNKNOWN outcome`,
         detail: `Proposal ${p.id} (${p.adapterId}): the adapter did not answer whether the message landed. It is NOT retried automatically — a duplicate in somebody else's room is worse than asking. Check the conversation on the platform; the Outbox window shows the proposal.\n\n${p.reason || ''}`,
         urgency: 'high', by: 'agent', sessionName: 'Channels',
@@ -3043,7 +3046,7 @@ function create(deps = {}) {
         source: INBOX_SOURCE,
       };
       try {
-        const item = userTodos.add(INBOX_KEY, { text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n });
+        const item = userTodos.add(INBOX_KEY, { origin: 'channels', text, detail, urgency: 'normal', by: 'agent', sessionName: 'Channels', i18n });
         if (item && item.id) await store.index.update(() => { const e2 = store.index.entry(en.adapterId, en.id, { create: false }); if (e2) e2.pendingTodoId = item.id; });
       } catch (e) {
         // DEGRADE, never fail the proposal: the rail badge and the Outbox
@@ -3119,6 +3122,7 @@ function create(deps = {}) {
       try {
         const title = String(en.title || en.id).slice(0, 120);
         const item = userTodos.add(INBOX_KEY, {
+          origin: 'channels', // B-328d
           text: `${ctx.name || ctx.id} requests access to ${title}`,
           detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${en.title || en.id}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels',
