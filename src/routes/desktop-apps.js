@@ -61,11 +61,34 @@
  *                                     else a plain swap; `no_viewer` 409 when
  *                                     that socket is not open
  *
- * EVERY route takes `host` (query or body) and REFUSES a non-local host by
- * name (v1 has no daemon op yet) — `hostId` is a parameter, never a silent
- * local fallback. EVERY failure answers `{ error, code }`: fetchJson never
- * throws, so a route that returned 200-with-nothing would be a silent failure
- * of a user action.
+ *   GET  /api/desktop/machines               lane C2 (design-desktop-apps-seamless §3.5): the
+ *                                     launch dialog's machine picker — this machine + every
+ *                                     paired machine, each with the PURE picker verdict
+ *                                     (`selectable`, `code`: ready | connect | offline |
+ *                                     host_needs_daemon | no_x11) — greyed, never hidden
+ *   GET  /api/desktop/install-plan?host=     the xpra INSTALL RUNG's plan for a machine (its facts +
+ *                                     the PURE plan: source apt | xpra.org, the commands, canRun)
+ *                                     — SHOWN before anything runs
+ *   POST /api/desktop/install-xpra {host}    run it: NDJSON streamed back ({log} lines, then ONE
+ *                                     {done} or {error, code, plan}); no passwordless sudo ⇒
+ *                                     `no_sudo` by name with the commands to copy; macOS /
+ *                                     Windows ⇒ `no_x11`; the install runs DETACHED on the
+ *                                     machine (its log + pidfile in the machine's state dir —
+ *                                     verify r2 F3/F4): a live one is RE-ATTACHED (a first
+ *                                     `{reattached, pid, since}` line, then its log from the
+ *                                     start), never a second apt; THIS hub following one ⇒
+ *                                     `busy` 409 (held past a timed-out / link-lost run until
+ *                                     the machine's facts say it is gone); `install_timeout` /
+ *                                     `install_link_lost` / `install_unrecorded` by name
+ *
+ * `host` (lane C2): GET /api/desktop/apps and the launch take `host` (query /
+ * body) and run on THAT machine through src/server/desktop-access.js — this
+ * machine in-process, a paired machine through the `desktop-serve` agentd op,
+ * an agent that predates the op refused `host_needs_daemon` by name (never a
+ * silent local fallback). Every other route names a record by its id, which
+ * resolves on whichever machine holds it. EVERY failure answers
+ * `{ error, code }`: fetchJson never throws, so a route that returned
+ * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
 const { streamKindOf } = require('../desktop-apps');
@@ -75,50 +98,85 @@ let ctx = null;
 function setup(deps) { ctx = deps; }
 
 const LOCAL = new Set(['', 'local']);
+const HOST_RE = /^[A-Za-z0-9._-]{1,80}$/;
 function hostOf(req) { const h = (req.method === 'GET' ? req.query.host : req.body?.host); return h == null ? '' : String(h); }
-function refuseHost(req, res) {
+/** lane C2: the machine a route runs on — '' / 'local' = this machine; anything else must LOOK like a host id (the
+ *  access layer then refuses an unknown one by name). A bad shape answers 400 and returns null. */
+function hostParam(req, res) {
   const h = hostOf(req);
-  if (LOCAL.has(h)) return false;
-  res.status(400).json({ error: `desktop apps are local-only in v1 — host ${JSON.stringify(h)} refused`, code: 'unsupported-host' });
-  return true;
+  if (LOCAL.has(h)) return 'local';
+  if (!HOST_RE.test(h)) { res.status(400).json({ error: `bad host ${JSON.stringify(h.slice(0, 40))}`, code: 'bad-request' }); return null; }
+  return h;
 }
+/** The launch body without the routing field (the machine is not part of the app's request). */
+function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; return b; }
 function fail(res, e) {
   const code = e?.code || null;
-  const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' ? 400
-    : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable' ? 409
-      : code === 'no-engine' || code === 'xpra-ui-unavailable' ? 503 : 500;
-  res.status(status).json({ error: String(e?.message || e), code });
+  const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host' ? 400
+    : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
+      || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' ? 409
+      : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' ? 503 : code === 'install_timeout' ? 504 : 500;
+  res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}) });
 }
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
 router.get('/api/desktop/apps', async (req, res) => {
-  if (refuseHost(req, res)) return;
-  try { res.json(await ctx.keeper.list()); } catch (e) { fail(res, e); }
+  const host = hostParam(req, res); if (!host) return;
+  try { res.json(host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host })); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps', async (req, res) => {
-  if (refuseHost(req, res)) return;
-  try { res.json(await ctx.keeper.launch(req.body || {})); } catch (e) { fail(res, e); }
+  const host = hostParam(req, res); if (!host) return;
+  try { res.json(host === 'local' ? await ctx.keeper.launch(bodyOf(req)) : await ctx.keeper.launch(bodyOf(req), { host })); } catch (e) { fail(res, e); }
+});
+// lane C2: the machine picker, the install rung's plan, and the install itself (streamed)
+router.get('/api/desktop/machines', async (req, res) => {
+  try { res.json({ machines: ctx.access ? await ctx.access.machines() : [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, selectable: true, code: 'ready' }] }); } catch (e) { fail(res, e); }
+});
+router.get('/api/desktop/install-plan', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
+  try { res.json(await ctx.access.installPlan(host)); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/install-xpra', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
+  // ONE install per machine — the access layer owns the slot (it is held past a timed-out run until the child is
+  // gone, which a per-request Set here could not see); asked BEFORE the stream starts so a busy machine answers 409
+  const busy = typeof ctx.access.installBusy === 'function' ? ctx.access.installBusy(host) : null;
+  if (busy) return fail(res, { code: 'busy', message: `an install is already running on this machine (started ${new Date(busy.since).toISOString()}) — wait for it to finish, then check again` });
+  res.status(200).set({ 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  const line = (o) => { try { res.write(JSON.stringify(o) + '\n'); } catch { /* the dialog closed */ } };
+  let carry = '';
+  const onData = (d) => { carry += Buffer.isBuffer(d) ? d.toString('utf8') : String(d); const parts = carry.split(/\r?\n/); carry = parts.pop(); for (const p of parts) line({ log: p.slice(0, 2000) }); if (carry.length > 4000) { line({ log: carry.slice(0, 2000) }); carry = ''; } };
+  try {
+    // a live install on that machine (a restarted hub, another tab's run) is RE-ATTACHED, never started twice — the
+    // dialog says so before its log replays from the start (verify r2 F3 + F4)
+    const onReattach = (o) => line({ reattached: true, pid: o && o.pid, since: o && o.since });
+    const r = await ctx.access.installXpra(host, { onData, onReattach });
+    if (carry) line({ log: carry });
+    line({ done: true, installed: r.after && r.after.xpra, source: r.plan.source, hostId: r.hostId, reattached: !!r.reattached });
+    try { ctx.keeper.facts?.({ fresh: true })?.catch?.(() => { }); } catch { /* the local ladder is re-read on the next list */ }
+  } catch (e) {
+    if (carry) line({ log: carry });
+    line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}) });
+  } finally { try { res.end(); } catch { /* gone */ } }
 });
 router.get('/api/desktop/apps/:id', (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const r = ctx.keeper.get(req.params.id);
   if (!r) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
   res.json(r);
 });
 router.post('/api/desktop/apps/:id/stop', async (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   try { res.json(await ctx.keeper.stop(req.params.id, { why: 'user' })); } catch (e) { fail(res, e); }
 });
-router.post('/api/desktop/apps/:id/keep-alive', (req, res) => {
-  if (refuseHost(req, res)) return;
+router.post('/api/desktop/apps/:id/keep-alive', async (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
-  try { res.json(ctx.keeper.keepAlive(req.params.id)); } catch (e) { fail(res, e); }
+  try { res.json(await ctx.keeper.keepAlive(req.params.id)); } catch (e) { fail(res, e); } // a paired machine's answers through the op (async)
 });
 
 router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   try { res.json(await ctx.keeper.relaunch(req.params.id, req.body || {})); } catch (e) { fail(res, e); }
 });
@@ -126,7 +184,6 @@ router.post('/api/desktop/apps/:id/relaunch', async (req, res) => {
 // P8-2: the app's windows on its display — an on-demand snapshot (two spawns),
 // never a poll; the LIVE title/icon a window shows ride the picture protocol
 router.get('/api/desktop/apps/:id/windows', async (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   try { res.json(await ctx.keeper.windows(req.params.id)); } catch (e) { fail(res, e); }
 });
@@ -141,6 +198,7 @@ router.get('/api/desktop/apps/:id/windows', async (req, res) => {
 // construction), sound/printing/file transfer/remote logging off by name.
 const XPRA_UI_RE = /^\/api\/desktop\/([A-Za-z0-9._-]{1,80})\/xpra-ui(?:\/(.*))?$/;
 const xpraStatics = new Map(); // www dir → express.static handler
+const XPRA_UI_TYPES = Object.freeze({ js: 'application/javascript', mjs: 'application/javascript', html: 'text/html', css: 'text/css', json: 'application/json', png: 'image/png', svg: 'image/svg+xml', ico: 'image/x-icon', wasm: 'application/wasm', txt: 'text/plain', map: 'application/json', woff: 'font/woff', woff2: 'font/woff2' });
 async function xpraUiGate(req, res) {
   const m = XPRA_UI_RE.exec(req.path);
   if (!m) { res.status(404).json({ error: 'not a desktop route', code: 'not-found' }); return null; }
@@ -149,9 +207,10 @@ async function xpraUiGate(req, res) {
   if (!rec) { res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' }); return null; }
   if (streamKindOf(rec) !== 'xpra') { fail(res, { code: 'not-xpra', message: `desktop app ${id} runs on ${rec.backend} — the xpra client cannot show it` }); return null; }
   let www = null;
-  try { www = await ctx.keeper.xpraWww(); } catch { www = null; }
-  if (!www) { fail(res, { code: 'xpra-ui-unavailable', message: 'the installed xpra ships no html5 client (no www/index.html found)' }); return null; }
-  return { id, rec, www, rest: m[2] || '' };
+  try { www = ctx.keeper.xpraWwwFor ? await ctx.keeper.xpraWwwFor(id) : { hostId: 'local', dir: await ctx.keeper.xpraWww() }; } catch { www = null; }
+  if (!www || !www.dir) { fail(res, { code: 'xpra-ui-unavailable', message: 'the installed xpra ships no html5 client (no www/index.html found)' }); return null; }
+  // lane C2: the hub's OWN xpra client when it has one; else the paired machine's tree, read through its agent
+  return { id, rec, www: www.dir, wwwHost: www.hostId || 'local', rest: m[2] || '' };
 }
 router.get(XPRA_UI_RE, async (req, res) => {
   const g = await xpraUiGate(req, res);
@@ -166,6 +225,14 @@ router.get(XPRA_UI_RE, async (req, res) => {
     return;
   }
   if (/(^|\/)\.|\.\.|\0/.test(g.rest)) { res.status(404).json({ error: 'not found', code: 'not-found' }); return; }
+  if (g.wwwHost !== 'local') { // a hub without xpra: the device's html5 client, read through its agent (a closed set of kinds)
+    const ext = (/\.([a-z0-9]+)$/i.exec(g.rest) || [])[1];
+    const type = ext ? XPRA_UI_TYPES[ext.toLowerCase()] : null;
+    if (!type || !/^[A-Za-z0-9._/-]{1,200}$/.test(g.rest) || !ctx.access || typeof ctx.access.readFile !== 'function') { res.status(404).json({ error: `no such file in the xpra client: ${g.rest}`, code: 'not-found' }); return; }
+    try { const data = await ctx.access.readFile(g.wwwHost, `${g.www.replace(/\/$/, '')}/${g.rest}`); res.type(type).send(data); }
+    catch (e) { res.status(e && e.code === 'host_unavailable' ? 503 : 404).json({ error: `${g.rest}: ${e && e.message}`, code: e && e.code === 'host_unavailable' ? 'host_unavailable' : 'not-found' }); }
+    return;
+  }
   let handler = xpraStatics.get(g.www);
   if (!handler) { handler = express.static(g.www, { index: false, redirect: false, dotfiles: 'deny', etag: false, lastModified: false, maxAge: 0, fallthrough: true }); xpraStatics.set(g.www, handler); }
   req.url = '/' + g.rest; // the static handler sees the path under the www root
@@ -178,7 +245,6 @@ router.get(XPRA_UI_RE, async (req, res) => {
 const VIEWER_RE = /^[A-Za-z0-9._-]{1,64}$/;
 function engineOr503(res) { if (ctx?.windowEngine) return ctx.windowEngine; res.status(503).json({ error: 'window leases are not available in this process', code: 'no-engine' }); return null; }
 router.get('/api/desktop/apps/:id/lease', (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const engine = engineOr503(res); if (!engine) return;
   const r = ctx.keeper.get(req.params.id);
@@ -186,7 +252,6 @@ router.get('/api/desktop/apps/:id/lease', (req, res) => {
   try { res.json({ id: r.id, origin: engine.ORIGIN, lease: engine.leaseOf(r.id), idleMs: engine.takeoverIdleMs() }); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/takeover', (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const engine = engineOr503(res); if (!engine) return;
   const viewerId = String(req.body?.viewerId || '');
@@ -200,13 +265,11 @@ router.post('/api/desktop/apps/:id/takeover', (req, res) => {
 });
 // P8-2 x5: ONE active viewer per app window — who watches, and "Resume here"
 router.get('/api/desktop/apps/:id/viewers', (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
   res.json(ctx.keeper.viewersView(req.params.id));
 });
 router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
-  if (refuseHost(req, res)) return;
   const id = req.params.id;
   if (!ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const viewerId = String(req.body?.viewerId || '');
@@ -229,7 +292,6 @@ router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/handback', (req, res) => {
-  if (refuseHost(req, res)) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const engine = engineOr503(res); if (!engine) return;
   const viewerId = req.body?.viewerId != null && VIEWER_RE.test(String(req.body.viewerId)) ? String(req.body.viewerId) : null;

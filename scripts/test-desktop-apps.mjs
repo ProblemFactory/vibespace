@@ -15,6 +15,9 @@ const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
+// LANE C1 (2026-09-25): the keeper is TWO files — the hub's registry + policy (src/server/desktop-app-keeper.js) and the
+// machine half moved verbatim to the SHARED src/desktop-serve.js (the daemon bundles it). Every keeper pin reads both.
+const keeperSrc = () => read('src/server/desktop-app-keeper.js') + '\n' + read('src/desktop-serve.js');
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
 // Patched copies of the bridge (negative controls) are written OUTSIDE the tree
@@ -45,7 +48,7 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
   // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
-  const consumers = ['src/server/desktop-app-keeper.js', 'src/desktop-display.js', 'src/server/desktop-stream.js', 'src/routes/desktop-apps.js', 'src/desktop-apps.js', 'src/vnc.js'];
+  const consumers = ['src/server/desktop-app-keeper.js', 'src/desktop-serve.js', 'src/desktop-display.js', 'src/server/desktop-stream.js', 'src/routes/desktop-apps.js', 'src/desktop-apps.js', 'src/vnc.js'];
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const GUARD_NAMES = /(GUARD_SAMPLE_MS|GUARD_CPU_PCT|GUARD_CPU_SUSTAIN_MS|GUARD_MEM_BYTES|RUNAWAY_COOLDOWN_MS|CONCURRENT_CAP)/;
   const bareUses = [], literals = [], reads = [];
@@ -666,7 +669,7 @@ console.log('§8 the xpra client stream, classified (P8-2) — the sieve, the ne
   });
   // the bridge refuses NOTHING by rung any more: an xpra target is relayed (the keeper suite drives it against a fake upstream + the real xpra)
   const src = read('src/server/desktop-stream.js');
-  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(ws, id, target\.port, viewerId, netem, req\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra');
+  ok(!/501, 'xpra stream not wired/.test(src) && /bridgeXpra\(ws, id, port, viewerId, netem, req\)/.test(src) && /const ep = streamEndpointFor\(target\)/.test(src), 'the 501-by-name refusal for xpra is gone; handleUpgrade hands an xpra target to bridgeXpra (lane C2: at the port streamEndpointFor answered — this machine\'s own, or the hub forward of a paired one)');
   ok(/netemEnabled \? /.test(src) && !/parseNetem\(q\)/.test(src.replace(/netemEnabled\) \{ const q = netemOfUrl[^\n]*/, '')), 'netem is read ONLY behind the netemEnabled gate (never on by default)');
   ok(/VIBESPACE_DESKTOP_NETEM === '1'/.test(read('server.js')), 'server.js flips the gate from VIBESPACE_DESKTOP_NETEM=1 and nothing else');
 }
@@ -739,12 +742,12 @@ console.log('§9 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: the
   ok(M.windowTitleOf('  a\tb\u0007c\u009b\n ') === 'abc' && M.windowTitleOf('\u0000\u0001') === null && M.windowTitleOf('') === null && M.windowTitleOf(null) === null && M.windowTitleOf(42) === null, 'control characters (C0, DEL, C1) are dropped and the rest trimmed; nothing left / not a string ⇒ null (the label stays)');
   const longT = M.windowTitleOf('中'.repeat(250) + '😀');
   ok(Array.from(longT).length === M.APP_TITLE_MAX && M.APP_TITLE_MAX === 200 && M.windowTitleOf('a'.repeat(199) + '😀') === 'a'.repeat(199) + '😀', `capped at APP_TITLE_MAX (${M.APP_TITLE_MAX}) CODE POINTS — a surrogate pair is never split`);
-  ok(/const title = M\.windowTitleOf\(plan\.main\.name\)/.test(read('src/server/desktop-app-keeper.js')) && /rec\.appTitle = title/.test(read('src/server/desktop-app-keeper.js')) && /appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\)/.test(read('src/lib/desktop-app-window.js')) && /const label = titleText\(\);/.test(read('src/lib/desktop-app-window.js')), 'WIRING PIN: the keeper records the fitted main\'s title as `appTitle` and the window shows it before the label (titleText — the title bar and the blocked overlay read the same name)');
+  ok(/const title = M\.windowTitleOf\(plan\.main\.name\)/.test(keeperSrc()) && /rec\.appTitle = title/.test(keeperSrc()) && /appTitle \|\| \(rec && rec\.appTitle\)\) \|\| \(rec && rec\.label\)/.test(read('src/lib/desktop-app-window.js')) && /const label = titleText\(\);/.test(read('src/lib/desktop-app-window.js')), 'WIRING PIN: the keeper records the fitted main\'s title as `appTitle` and the window shows it before the label (titleText — the title bar and the blocked overlay read the same name)');
   { const one = (p2) => M.appMainWindow(p2); const rows = [{ id: 1, name: 'Xpra-CorralWindow-0x5', cls: null, instance: null, w: 640, h: 472, depth: 1 }, { id: 5, name: 'app "t"', cls: 'XTerm', instance: 'xterm', w: 640, h: 472, depth: 2 }];
     const seam = rows.filter((w) => !/^Xpra/.test(w.name));
     ok(M.appMainWindow(seam, { seamless: true })?.id === 5 && one(seam) === null, 'appMainWindow({seamless}) picks the app among xpra\'s seamless rows (depth 2, its Corral parent dropped) — CONTROL: the frame grouping (seamless off) drops that orphaned row and finds nothing'); }
-  ok(/onDesktopSize: \(id, w, h\) => keeper\.noteDesktopSize/.test(read('src/server/window-live-wiring.js')) && /noteDesktopSize\(id, w, h\)/.test(read('src/server/desktop-app-keeper.js')), 'WIRING PIN: the bridge\'s SetDesktopSize report reaches keeper.noteDesktopSize through the desktop scene\'s wiring (the 2.331.0 dead-fix lesson)');
-  ok(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js')) && /beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(read('src/server/desktop-app-keeper.js')), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
+  ok(/onDesktopSize: \(id, w, h\) => keeper\.noteDesktopSize/.test(read('src/server/window-live-wiring.js')) && /noteDesktopSize\(id, w, h\)/.test(keeperSrc()), 'WIRING PIN: the bridge\'s SetDesktopSize report reaches keeper.noteDesktopSize through the desktop scene\'s wiring (the 2.331.0 dead-fix lesson)');
+  ok(/^\s*keeper\.setWatchProbe\?\.\(\(id\) => stream\.connections\(id\) > 0\);/m.test(read('src/server/window-live-wiring.js')) && /beltDue\(rec\.id, fitState\(rec\.id\), t\)/.test(keeperSrc()), 'WIRING PIN: the fit belt\'s "somebody watches" fact is the bridge\'s open-socket count, wired as CODE at the start of a line (never text after a mid-line //)');
 }
 
 console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the app scale, its knobs, the launch dpr');
@@ -778,7 +781,7 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   const rec = M.newRecord({ id: 'da-1', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'xpra', now: 1, scale: 2, dpi: 96 });
   const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
   ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
-  const keeper = read('src/server/desktop-app-keeper.js'), disp = read('src/desktop-display.js');
+  const keeper = keeperSrc(), disp = read('src/desktop-display.js');
   ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px); the pick itself is §13\'s pin');
   ok(/\.\.\.\(M\.streamKindOf\(rec, backends\) === 'xpra' \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
   { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
@@ -862,7 +865,7 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   const uj = M.firefoxUserJs();
   ok(uj.split('\n').filter(Boolean).every((l) => /^user_pref\("[a-z.A-Z_]+", (false|true|"[^"]*")\);$/.test(l)) && /"browser\.shell\.checkDefaultBrowser", false/.test(uj) && /"browser\.aboutwelcome\.enabled", false/.test(uj), 'firefox\'s first-run switch is its profile\'s user.js (user_pref lines only; no default-browser check, no welcome page)');
   // WIRING PINS — the keeper / the launcher / the display name the PURE functions (never a re-spelled rule)
-  const keeper = read('src/server/desktop-app-keeper.js'), launcher = read('src/lib/desktop-app-launcher.js'), disp = read('src/desktop-display.js');
+  const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), disp = read('src/desktop-display.js');
   ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
   ok(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper) && /const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
   ok(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper) && /fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
@@ -928,7 +931,7 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
   ok(M.OUTER_CLOSE_AGAIN_MS === 5000 && obad.length === 0, `outerCloseVerdict: ${otable.length} rows — ask the app first, a second ✕ within ${M.OUTER_CLOSE_AGAIN_MS} ms stops it, today's pane-only close everywhere the app cannot be asked`, obad);
   // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
   // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
-  const keeper = read('src/server/desktop-app-keeper.js'), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
+  const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
   ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up) and before the commit that broadcasts it');
   ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
   ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(winInfo\.id\); \}/.test(wm), 'WIRING PIN: the title bar ✕ asks WindowManager.requestClose (the veto point), never closeWindow directly');
@@ -993,9 +996,9 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   ok(same(M.exitCloseVerdict(old), { close: false, why: 'relaunched', replacedBy: 'da-10' }) && same(M.exitCloseVerdict({ state: 'ready', replacedBy: 'da-10' }), { close: false, why: 'relaunched', replacedBy: 'da-10' }), 'exitCloseVerdict: a record replaced by a relaunch never closes its window — it names the successor (even before the old one has stopped)');
   // (i) WIRING PINS — the keeper decides the scale ONCE through scalePick (the launch's dpr + uiScale, or the relaunch's choice);
   // the launcher sends THIS client's UI scale; the window offers the menu and follows a replacement
-  const keeper = read('src/server/desktop-app-keeper.js'), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
+  const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
   ok(/const pick = opts\.scaleChoice \? M\.scalePick\(\{ choice: opts\.scaleChoice, dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\) : M\.scalePick\(\{ setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (the setting, or a relaunch\'s choice) from the request\'s dpr + uiScale, on the xpra STREAM only');
-  ok(/const armSeat = carrySeat\(id, next\.id\);\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ armSeat\(\); \}/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
+  ok(/const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ if \(typeof armSeat === 'function'\) armSeat\(\); \}/.test(keeper) && /return machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\);/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
   ok(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes) && /ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
   ok(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
   ok(/r\.replacedBy/.test(win) && /retarget\(/.test(win) && /\/relaunch`/.test(win) && /showConfirmDialog\(/.test(win), 'WIRING PIN: the window follows a replacement (retarget) and relaunches through the route after a confirm');

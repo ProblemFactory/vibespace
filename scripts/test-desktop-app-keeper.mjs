@@ -131,10 +131,24 @@ const cleanup = () => {
  *  re-bound to the real path), each replacement asserted to hit exactly once —
  *  the negative controls of §8. */
 function mutant(tag, replacements) {
-  const src = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
-  let out = src;
-  for (const [from, to] of replacements) { const n = out.split(from).length - 1; if (n !== 1) throw new Error(`mutant ${tag}: expected exactly one hit for ${JSON.stringify(from)}, got ${n}`); out = out.replace(from, to); }
-  const file = MUTK.write('src/server/desktop-app-keeper.js', out, tag);
+  // LANE C1 (2026-09-25): the keeper is TWO files — the hub's registry + policy and the machine half moved verbatim to
+  // the SHARED src/desktop-serve.js. Each anchor must hit exactly once across the PAIR; a patched machine half is
+  // written beside the keeper copy and the copy's require of it re-bound to the patched one.
+  let k = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
+  let s = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  let sPatched = false;
+  for (const [from, to] of replacements) {
+    const nk = k.split(from).length - 1, ns = s.split(from).length - 1;
+    if (nk + ns !== 1) throw new Error(`mutant ${tag}: expected exactly one hit for ${JSON.stringify(from)}, got ${nk} in the keeper + ${ns} in desktop-serve`);
+    if (nk) k = k.replace(from, to); else { s = s.replace(from, to); sPatched = true; }
+  }
+  if (sPatched) {
+    const sfile = MUTK.write('src/desktop-serve.js', s, tag + '-serve');
+    const req = "require('../desktop-serve')";
+    if (k.split(req).length !== 2) throw new Error(`mutant ${tag}: the keeper must require the machine half exactly once`);
+    k = k.replace(req, `require(${JSON.stringify(sfile)})`);
+  }
+  const file = MUTK.write('src/server/desktop-app-keeper.js', k, tag);
   return { mod: require(file), file };
 }
 // in-tree copies a PRE-FIX run stranded are swept (DEAD pids only — two checkouts may run this suite at once)
@@ -591,7 +605,7 @@ console.log('§5 the resource REPORT (shared limits shrunk): an app a person use
   const k4key = `desktop-app-resource:${o4.id}:1`;
   ok(JSON.stringify(n4) === JSON.stringify([k4key, k4key, k4key]), 'DELIVERY on the real keeper: two undelivered attempts re-sent under the SAME key, the third delivered, then silence', n4);
   await k4.stop(o4.id); k4.shutdown();
-  const { mod: Kstop } = mutant('stops-on-over', [["        if (lvl.fire) {", "        if (lvl.fire) { stop(rec.id, { why: 'runaway' }).catch(() => { });"]]);
+  const { mod: Kstop } = mutant('stops-on-over', [["    if (lvl.fire) {", "    if (lvl.fire) { stop(rec.id, { why: 'runaway' }).catch(() => { });"]]); // lane C1: the report is the hub's reportSample (one nesting level shallower)
   const dataDirC = path.join(root, 'k6-ctl'); fs.mkdirSync(dataDirC, { recursive: true });
   const kc = Kstop.create({ ...PINNED, dataDir: dataDirC, env: baseEnv, broadcast: () => {}, guardSampleMs: 300, tickMs: 150, display: { ...NO_XVNC, sessionSample: bigMem }, log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
   await kc.adoptAll(); kc.start();
@@ -603,7 +617,7 @@ console.log('§5 the resource REPORT (shared limits shrunk): an app a person use
   await kc.stop(mc.id).catch(() => { }); kc.shutdown();
 }
 
-console.log('§6 the routes (express) — host refusal, launch, stop, keep-alive, 404');
+console.log('§6 the routes (express) — host without an access layer, launch, stop, keep-alive, 404');
 {
   const express = require('express');
   const { router, setup } = require('../src/routes/desktop-apps.js');
@@ -617,9 +631,12 @@ console.log('§6 the routes (express) — host refusal, launch, stop, keep-alive
   const list = await j('GET', '/api/desktop/apps');
   ok(list.status === 200 && list.body.availability.backend === 'vnc-display' && Array.isArray(list.body.registry) && list.body.cap.cap === M.LIMITS.CONCURRENT_CAP, 'GET /api/desktop/apps: registry + availability ladder + cap');
   const remote = await j('GET', '/api/desktop/apps?host=box-2');
-  ok(remote.status === 400 && remote.body.code === 'unsupported-host' && /local-only/.test(remote.body.error), 'a non-local host is refused BY NAME (400 unsupported-host) — v1');
+  // lane C2 (design-desktop-apps-seamless §3.5): `host` is no longer refused — it names the machine the keeper asks
+  // through src/server/desktop-access.js; THIS keeper has no access layer wired, so a non-local host is refused by name
+  // (host_unavailable, 503), never served locally (the paired-machine legs are test-desktop-serve §7 / test-desktop-remote §7)
+  ok(remote.status === 503 && remote.body.code === 'host_unavailable' && /not wired/.test(remote.body.error) && !remote.body.registry, 'a non-local host with no access layer is refused BY NAME (503 host_unavailable) — never a local answer');
   const remotePost = await j('POST', '/api/desktop/apps', { host: 'box-2', exec: appBin });
-  ok(remotePost.status === 400 && remotePost.body.code === 'unsupported-host', 'POST with a host is refused the same way');
+  ok(remotePost.status === 503 && remotePost.body.code === 'host_unavailable' && k.listApps().length === 0, 'POST with a host is refused the same way, nothing launched here');
   const bad = await j('POST', '/api/desktop/apps', { exec: '' });
   ok(bad.status === 400 && bad.body.code === 'bad-request', 'an empty exec is 400 bad-request with the reason');
   const missing = await j('POST', '/api/desktop/apps', { exec: 'no-such-binary-vs' });
@@ -864,7 +881,7 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   await new Promise((r) => rfb.close(r));
 }
 { // (f) the bring-up is a TABLE LOOKUP: a fourth rung = one row + one recipe, driven end to end with the keeper UNCHANGED
-  const src = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8').replace(/^\s*(\/\/|\*).*$/gm, '');
+  const src = (fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8') + '\n' + fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8')).replace(/^\s*(\/\/|\*).*$/gm, ''); // lane C1: the keeper = the hub half + the machine half
   ok(!/rec\.via ===|'Xvfb\+x11vnc'|'Xvnc'|unknown bring-up/.test(src), 'the keeper source spells no rung (no `rec.via ===`, no Xvnc / Xvfb+x11vnc literal, no "unknown bring-up")');
   ok(/display\.RECIPES\[/.test(src) && /M\.recipeFor|resolved\.recipe/.test(src), 'it looks the recipe UP by the name the PURE table gives it');
   const fourth = Object.freeze({ id: 'fake-rung', label: 'fake', perWindow: true, adaptive: false, stream: 'rfb', needs: Object.freeze([Object.freeze(['Xvfb', 'x11vnc'])]), recipes: Object.freeze({ 'Xvfb+x11vnc': 'x-then-server-copy' }), wired: true });

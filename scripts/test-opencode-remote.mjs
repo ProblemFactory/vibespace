@@ -128,7 +128,7 @@ console.log('\n— THE DEVICE RUNG (three-touch rule) —');
   ok('the daemon handles the op and runs THE SHARED runOpencodeOp (not a re-implementation)', /msg\.op === 'opencode-serve'/.test(agentd) && /runOpencodeOp/.test(agentd) && /require\('\.\/\.\.\/opencode-serve\.js'\)/.test(agentd));
   ok('the reply carries `op` (an op-less reply times out — the 2.300.0 rule)', /op: 'opencode-serve-result'/.test(agentd));
   ok('…and the client ROUTES that op in its id-keyed set', /m\.op === 'opencode-serve-result'/.test(client));
-  ok('the capability is advertised in the hello-ack', /'opencode-serve'\]/.test(agentd) || /'peer-post', 'opencode-serve'/.test(agentd));
+  ok('the capability is advertised in the hello-ack', /capabilities: \[[^\]]*'opencode-serve'[^\]]*\]/.test(agentd)); // by content, never the list's tail (test-architecture §56)
   ok('the client GATES on the capability (an old daemon is never asked — unknown ops HANG)', /capabilities\?\.includes\?\.\('opencode-serve'\)/.test(client));
   // ONE PER PROCESS, and the shape of the mistake matters: inside a Mux
   // control handler `this` is the CONNECTION, so a `this._ocFacts` cache is

@@ -573,7 +573,9 @@ function prevOf(url) {
 /**
  * @param {object} deps
  *   auth          — { requestAuthed(req) }
- *   resolveTarget — (id) => { kind:'rfb'|'xpra', port } | null   (sync)
+ *   resolveTarget — (id) => { kind:'rfb'|'xpra', port, hostId? } | null   (sync; `hostId` = a PAIRED machine's app — lane C2)
+ *   forwardPort   — (hostId, port) => Promise<{ localPort, close }>  (lane C2: src/server/desktop-access.js forwardPort —
+ *                   a paired machine's loopback picture port as a hub loopback port; absent ⇒ a remote target is refused 502)
  *   onInput       — (id) => void  (throttled here; RELAYED input only)
  *   onDesktopSize — (id, w, h, viewerId) => void  (P8-2 x4: every SetDesktopSize a client sends, unthrottled — the keeper debounces)
  *   inputPolicy   — (id, viewerId) => { relay, code, why }  (P9b; absent = relay everything)
@@ -586,7 +588,7 @@ function prevOf(url) {
  *                   answering anything but 'free'), never elected, never blocked. `refresh(id)` re-applies it.
  *   log
  */
-function create({ auth, resolveTarget, onInput = () => { }, onDesktopSize = null, inputPolicy = null, onViewerLeft = null, viewerSeats = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
+function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, onDesktopSize = null, inputPolicy = null, onViewerLeft = null, viewerSeats = null, log = console, now = Date.now, pingMs = PING_MS, netemEnabled = false, WebSocketClient = WebSocket } = {}) {
   if (!auth || typeof auth.requestAuthed !== 'function') throw new Error('desktop-stream: auth.requestAuthed is required');
   if (typeof resolveTarget !== 'function') throw new Error('desktop-stream: resolveTarget is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: WS_MAX_MESSAGE_BYTES });
@@ -912,6 +914,24 @@ function create({ auth, resolveTarget, onInput = () => { }, onDesktopSize = null
     ws.on('error', (e) => { closedBy = closedBy || wsOversize(e, id, viewerId, 'xpra') || `browser socket error ${(e && e.code) || ''}`.trim(); try { upstream?.terminate(); } catch { /* gone */ } });
   }
 
+  /**
+   * THE UPSTREAM ENDPOINT of a target (lane C2, docs/design-desktop-apps-seamless §3.5 — the ONLY change lane C
+   * made to this bridge): an app on THIS machine is reached at 127.0.0.1:<its port>, exactly as before; an app on a
+   * PAIRED machine at 127.0.0.1:<the hub-side forward port> (desktop-access.forwardPort: a hub loopback listener
+   * piped over the agentd data plane, reference-counted — this bridge holds one reference per socket and releases
+   * it when the socket closes). The protocol is end to end, so the x5 seats, the backpressure, the heartbeat, the
+   * named closes and the clipboard / input policy below are untouched: they never learn which machine it is.
+   * → `{ port, release }` (sync for this machine) or a Promise of it (a paired machine).
+   */
+  function streamEndpointFor(target) {
+    if (!target.hostId || target.hostId === 'local') return { port: target.port, release: () => { }, local: true };
+    if (typeof forwardPort !== 'function') return Promise.reject(Object.assign(new Error('this bridge cannot reach another machine (no picture forward wired)'), { code: 'host_unavailable' }));
+    return Promise.resolve(forwardPort(target.hostId, target.port)).then((f) => {
+      let released = false;
+      return { port: f.localPort, release: () => { if (released) return; released = true; try { f.close?.(); } catch { /* gone */ } }, local: false };
+    });
+  }
+
   /** The upgrade handler for BOTH paths. `id` = upgradeId(pathname). */
   function handleUpgrade(req, socket, head, id) {
     if (!auth.requestAuthed(req)) { refuse(socket, 401, 'Unauthorized'); return; }
@@ -926,17 +946,39 @@ function create({ auth, resolveTarget, onInput = () => { }, onDesktopSize = null
     // takeover (the old map `.set` REPLACED the holder). Refused 409 by name; a
     // pane reconnecting after a silent drop mints a fresh id (desktop-app-window).
     if (viewerId && viewerAlive(id, viewerId)) { stats.held++; log.warn?.(`[desktop-stream] ${id}: a second socket claimed live viewer ${viewerId} — refused (409 viewer id held)`); refuse(socket, 409, 'viewer id held'); return; }
-    if (target.kind === 'xpra') {
-      // dev-only netem: the upgrade url's own `?netem=` wins, else what the hosted-client route remembered for this id
-      let netem = null;
-      if (netemEnabled) { const q = netemOfUrl(req.url); netem = q != null ? parseNetem(q) : netemOf(id); }
-      wss.handleUpgrade(req, socket, head, (ws) => bridgeXpra(ws, id, target.port, viewerId, netem, req));
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => bridgeRfb(ws, id, target.port, viewerId, req));
+    const upgrade = (port, release) => {
+      if (target.kind === 'xpra') {
+        // dev-only netem: the upgrade url's own `?netem=` wins, else what the hosted-client route remembered for this id
+        let netem = null;
+        if (netemEnabled) { const q = netemOfUrl(req.url); netem = q != null ? parseNetem(q) : netemOf(id); }
+        wss.handleUpgrade(req, socket, head, (ws) => { ws.once('close', release); bridgeXpra(ws, id, port, viewerId, netem, req); });
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => { ws.once('close', release); bridgeRfb(ws, id, port, viewerId, req); });
+    };
+    const ep = streamEndpointFor(target);
+    if (ep.local) { upgrade(ep.port, ep.release); return; }
+    // A SOCKET PARKED ON A PROMISE HAS NO ERROR LISTENER (verify r2 F1, 2026-09-25): node's http server removed its own
+    // at 'upgrade' and ws attaches one only inside wss.handleUpgrade — which this path reaches AFTER the forward (4–600
+    // ms). A viewer whose connection RESETS meanwhile (a phone switching networks, a killed browser, ETIMEDOUT) emitted
+    // an unhandled 'error' ⇒ server.js's uncaughtException ⇒ process.exit(1): the whole hub. Attached BEFORE the park;
+    // an error destroys the socket (its 'close' — or the destroyed check below — releases the forward, once), and it
+    // is handed to ws's own listener at the upgrade so the live socket carries exactly what a local one does.
+    const parkedError = (err) => { log.warn?.(`[desktop-stream] ${id}: the viewer's connection failed while the forward to ${target.hostId} opened — ${(err && (err.code || err.message)) || 'error'}`); try { socket.destroy(); } catch { /* gone */ } };
+    socket.on('error', parkedError);
+    ep.then((e) => {
+      // The reference rides the SOCKET's own close too (release is idempotent): a viewer that half-closed while the
+      // forward resolved is not destroyed yet, and ws then drops the handshake WITHOUT its callback (`!socket.readable
+      // || !socket.writable` ⇒ destroy) — `ws.once('close')` would never be registered and the forward leaked a ref.
+      socket.once('close', e.release);
+      if (socket.destroyed || !socket.readable || !socket.writable) { e.release(); try { socket.destroy(); } catch { /* gone */ } return; }
+      log.log?.(`[desktop-stream] ${id}: upstream on ${target.hostId}:${target.port} through the hub forward 127.0.0.1:${e.port}`);
+      socket.removeListener('error', parkedError); // ws attaches its own, synchronously, at the top of handleUpgrade
+      upgrade(e.port, e.release);
+    }, (e) => { log.warn?.(`[desktop-stream] ${id}: ${target.hostId} unreachable — ${e && e.message}`); refuse(socket, 502, 'Machine unreachable'); });
   }
 
-  return { handleUpgrade, upgradeId, streamPath, stats: () => ({ ...stats }), wss, viewersOf, viewerAlive, connections, setNetem, netemOf, netemEnabled: !!netemEnabled, refresh, refreshAll };
+  return { handleUpgrade, streamEndpointFor, upgradeId, streamPath, stats: () => ({ ...stats }), wss, viewersOf, viewerAlive, connections, setNetem, netemOf, netemEnabled: !!netemEnabled, refresh, refreshAll };
 }
 
 module.exports = { create, upgradeId, streamPath, viewerOf, paneOf, prevOf, rfbInputSieve, RFB_INPUT_TYPES, RFB_FIXED_LEN, xpraInputSieve, xpraPacketType, xpraStrings, XPRA_INPUT_TYPES, XPRA_WATCH_TYPES, XPRA_KEYMAP_TYPES, XPRA_KEYMAP_HOLD_BYTES, XPRA_DISPLAY_TYPES, XPRA_DISPLAY_HOLD_BYTES, XPRA_GEOMETRY_TYPES, XPRA_GEOMETRY_HOLD_BYTES, XPRA_HELLO_HOLD_BYTES, XPRA_HELD_KINDS, XPRA_LIFECYCLE_TYPES, XPRA_MAX_PACKET_BYTES, RFB_MAX_MESSAGE_BYTES, WS_MAX_MESSAGE_BYTES, OVERSIZE_CLOSE, OVERSIZE_REASON, parseNetem, netemQueue, netemOfUrl, STREAM_RE, INPUT_REPORT_MS, WS_HIGH_WATER, WS_LOW_WATER, PING_MS, VIEWER_RE };

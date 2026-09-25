@@ -1054,7 +1054,7 @@ console.log('§6b HiDPI r2 — the verifier\'s findings: fractional ratios stay 
   // the launch half: the launcher sends THIS client's devicePixelRatio as `dpr` (clamped to the route's 1..3)
   const L = await import('../src/lib/desktop-app-launcher.js');
   ok(L.launchDpr(2) === 2 && L.launchDpr(1.25) === 1.25 && L.launchDpr(0.9) === 1 && L.launchDpr(4) === 3 && L.launchDpr('x') === 1, 'launchDpr: the page\'s devicePixelRatio, clamped to 1..3 (a zoomed-out page launches at 1)');
-  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\), uiScale: launchUiScale\(\) \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()` and (round 3 A3) `uiScale: launchUiScale()`');
+  ok(/body: JSON\.stringify\(\{ \.\.\.payload, dpr: launchDpr\(\), uiScale: launchUiScale\(\)(, \.\.\.\(host !== 'local' \? \{ host \} : \{\}\))? \}\)/.test(read('src/lib/desktop-app-launcher.js')), 'WIRING PIN: every launch POST carries `dpr: launchDpr()` and (round 3 A3) `uiScale: launchUiScale()` (lane C2: + the chosen machine\'s `host` when it is not this one)');
   // round 3 A3: the UI scale half — utils' uiScale() (the body zoom; 1 on a phone) clamped to the route's 0.6..2
   ok(L.launchUiScale(1.25) === 1.25 && L.launchUiScale(1) === 1 && L.launchUiScale(0.5) === 0.6 && L.launchUiScale(3) === 2 && L.launchUiScale('x') === 1 && L.launchUiScale(1.333) === 1.33, 'launchUiScale: the page\'s UI scale, clamped to 0.6..2, two decimals');
 }

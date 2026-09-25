@@ -549,8 +549,13 @@ console.log('§6 (desktop A r1) a Scale ▸ relaunch CARRIES the active seat to 
   const kc = K.create({ dataDir: path.join(root, 'rl-ctl'), env: () => ({}), broadcast: () => {}, viewerGraceMs: 0, log: { log() {}, warn() {} } });
   kc.viewerJoined('da-new', { viewerId: 'v-H2', pane: 'pH' }); kc.viewerJoined('da-new', { viewerId: 'v-L2', pane: 'pL' });
   ok(kc.activeViewer('da-new') === 'v-H2', 'CONTROL: without the carry the previously BLOCKED client wins the first-attach election (the verifier\'s server log)');
+  // LANE C1: ONE relaunch (src/desktop-serve.js), the hub keeper's seat carry passed as its `onSuccessor` hook
   const ksrc = fs.readFileSync(path.join(repo, 'src/server/desktop-app-keeper.js'), 'utf8');
-  ok(/const armSeat = carrySeat\(id, next\.id\);\s*\n\s*rec\.replacedBy = next\.id;/.test(ksrc) && /finally \{ armSeat\(\); \}/.test(ksrc), 'WIRING PIN: relaunch() carries the seat BEFORE it commits replacedBy (the other clients retarget from that broadcast) and arms the hold after the old session\'s stop, even a failed one');
+  const msrc = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  ok(/machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\)/.test(ksrc)
+    && /const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*\n\s*rec\.replacedBy = next\.id;/.test(msrc)
+    && /const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(nextId\) : null;\s*\n\s*rec\.replacedBy = nextId;/.test(msrc)
+    && (msrc.match(/finally \{ [^}]*if \(typeof armSeat === 'function'\) armSeat\(\); \}/g) || []).length === 2, 'WIRING PIN: relaunch() carries the seat BEFORE it commits replacedBy (the other clients retarget from that broadcast) and arms the hold after the old session\'s stop, even a failed one — both arms (a browser too) of the ONE machine relaunch, the carry the hub keeper\'s onSuccessor');
 }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──

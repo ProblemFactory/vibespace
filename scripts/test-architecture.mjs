@@ -221,6 +221,11 @@ const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine
   // allocation, the Xauthority writer, the RFB banner read-probe, window enumeration (P9 reuses
   // it), the xpra version probe; hostId is a parameter — node builtins + cli-identity only
   'src/desktop-display.js',
+  // DESKTOP APPS LANE C1 (design-desktop-apps-seamless §3.5): THE MACHINE HALF of the desktop-app keeper —
+  // bring-up, part identity, the marker census, teardown, the fit belt, the resource sample, the record file —
+  // + the `desktop-serve` op table and runner; the daemon bundles it and the hub keeper runs it in-process for
+  // device #0 (fs/os/path + the PURE model + desktop-display). The policy stays in src/server/desktop-app-keeper.js
+  'src/desktop-serve.js',
   // WINDOW TARGETS (design-agent-browser-v2 §4.9, P9 first half): the AT-SPI snapshot / @ref
   // minting / input-backend probe ladder / the acts — node builtins + desktop-display; the
   // traversal itself is a bounded SUBPROCESS (src/window-targets-helper.py), never in-process
@@ -1939,6 +1944,39 @@ console.log('§55 a suite that kills a wrapper waits for its exit before removin
   const bareKill = "spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta]);\ntry { w.stdin.end(); w.kill(); } catch {}\nfs.rmSync(dir, { recursive: true, force: true });";
   ok(judge(blind) !== null && judge(bareKill) !== null && judge(idiom) === null && judge(waiter) === null && judge(noWrapper) === null && judge(sigkill) === null,
     '§55 NEGATIVE CONTROL: the kill-then-rm shape is caught (SIGTERM and the bare kill()); the stopWrapper import passes; an explicit exit wait passes; a suite that spawns no wrapper is out of scope; a SIGKILL (the record never runs) is out of scope');
+}
+
+// §56 A CAPABILITY IS PINNED BY CONTENT, NEVER BY THE LIST'S TAIL (desktop lane C verify r2 F5, 2026-09-25).
+// The daemon's hello-ack capability list GROWS at its end: lane C1 appended desktop-serve after browser-serve and
+// test-browser-providers' `"browser-serve"]` pin went red (fixed in C2 verify); test-desktop-remote pinned
+// `desktop-serve"]` twice the same way, and test-opencode-remote survived only on an adjacency fallback. A suite
+// that finds a capability by the `]` after it goes red the day ANY capability is added after it. DERIVED: no
+// scripts/test-*.mjs spells an `-serve` capability followed by the closing bracket — as a regex (`serve["']\]`,
+// `serve'\]`) or as esbuild's string (`serve"]'`); the list is found by its key (`capabilities: [ … ]`).
+console.log('§56 a capability is pinned by content, never by the capability list\'s tail');
+{
+  const TAIL = /-serve(?:(?:\["'\]|["'])\\\]|"\](?=['`]))/;
+  const suites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f) && f !== 'test-architecture.mjs').sort();
+  const hits = [];
+  for (const f of suites) {
+    const lines = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8').split('\n');
+    lines.forEach((l, i) => { if (TAIL.test(l)) hits.push(`${f}:${i + 1}`); });
+  }
+  ok(suites.length > 100, `§56 census scope is every suite (${suites.length})`);
+  ok(hits.length === 0, `§56 no suite pins a capability by the list's tail${hits.length ? ' — ' + hits.join(' ') : ''}`);
+  const planted = [
+    `ok(/["']desktop-serve["']\\]/.test(bundleText));`,
+    `ok(/'opencode-serve'\\]/.test(agentd));`,
+    `const capFrom = '"browser-serve", "desktop-serve"]';`,
+    'const capFrom = `"browser-serve"]`;',
+  ];
+  const clean = [
+    `ok(/capabilities: \\[[^\\]]*"desktop-serve"[^\\]]*\\]/.test(b));`,
+    `mkDm(['desktop-serve'])`,
+    `R({ hostId: 'a', connected: true, capabilities: ['desktop-serve'], platform: 'linux' })`,
+    `argv: ['opencode', 'serve']`,
+  ];
+  ok(planted.every((l) => TAIL.test(l)) && !clean.some((l) => TAIL.test(l)), `§56 NEGATIVE CONTROL: the four tail spellings (regex both quotes, esbuild's string, a template) are caught; the by-content regex, a stub capability array and a plain argv are not (${JSON.stringify(planted.filter((l) => !TAIL.test(l)).concat(clean.filter((l) => TAIL.test(l))))})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

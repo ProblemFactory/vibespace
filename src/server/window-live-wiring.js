@@ -33,18 +33,20 @@
  */
 const path = require('path');
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, log = console } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, log = console } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
   const DV = require('../desktop-viewers.js');
   let streamRef = null;
   // a lease change re-applies every viewer's state (x5): the engine publishes through this broadcast
   const leaseBroadcast = (m) => { broadcast?.(m); if (m && m.type === 'window-leases-updated') { try { streamRef?.refreshAll(); } catch (e) { log.warn?.(`[window] viewer refresh failed — ${e && e.message}`); } } };
-  const engine = require('./window-targets-engine.js').create({ keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, log });
+  // lane C2: the engine's world is THIS machine's windows (xdotool / AT-SPI act here) — a paired machine's app is not an agent window target
+  const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, log });
   const governed = (id) => id !== DESKTOP_SINGLETON_ID && typeof keeper.viewerJoined === 'function';
   const stream = require('./desktop-stream.js').create({
     auth, onInput: (id) => { keeper.noteInput(id); engine.noteUserInput(id); },
     onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4: the client asked the display to follow its pane ⇒ the keeper fits the app to it
     resolveTarget: (id) => (id === DESKTOP_SINGLETON_ID ? { kind: 'rfb', port: vnc.port } : keeper.streamTarget(id)),
+    forwardPort: access ? (hostId, port) => access.forwardPort(hostId, port) : null, // lane C2: a paired machine's picture port, forwarded (src/server/desktop-access.js)
     inputPolicy: (id, viewerId) => (id === DESKTOP_SINGLETON_ID ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
     onViewerLeft: (id, viewerId) => { if (id !== DESKTOP_SINGLETON_ID) engine.viewerLeft(id, viewerId); },
     viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
@@ -59,7 +61,7 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   keeper.onViewers?.((id) => stream.refresh(id)); // x5: join / leave / Resume here / the session ended ⇒ every socket of that window re-applied
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
   keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
-  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream }); app.use(router); }
+  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access }); app.use(router); }
   { const wt = require('../routes/window-targets'); wt.setup({ engine }); app.use(wt.router); }
   let announced = false;
   if (browserHandback && typeof browserHandback.installWindow === 'function') { try { announced = browserHandback.installWindow(engine); } catch (e) { log.warn?.(`[window] handback announcer not attached — ${e && e.message}`); } }

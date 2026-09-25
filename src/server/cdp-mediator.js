@@ -29,6 +29,11 @@
  *   · the client is upgraded only AFTER the upstream socket is open, so no
  *     message is ever queued into a socket that may not come — an upstream
  *     that cannot be reached answers 502 on the upgrade;
+ *   · a client PARKED on that open is wired only if its grant still stands:
+ *     revoke / repoint / shutdown terminate the grant's parked upstreams, and
+ *     the open re-checks the grant (still granted, the mediator not closed,
+ *     the url it dialed still the target's CURRENT one) — else 503 by name,
+ *     never a connection no grant owns (verify r3 M3);
  *   · nothing is logged with a token or a raw url in it.
  * Gate: test-browser-mediation (fast: the real proxy over a fake CDP upstream)
  * + test-browser-mediation-chrome (heavy: the real chrome — the §6.2 exit).
@@ -41,6 +46,9 @@ const M = require('../browser-mediation.js');
 const MAX_PAYLOAD = 256 * 1024 * 1024; // a Page.captureScreenshot / printToPDF answer can be tens of MB
 const UPSTREAM_OPEN_MS = 8000;
 const FETCH_MS = 4000;
+/** The status text a PARKED client is refused with (503) when its grant moved during the upstream's open — keyed by
+ *  the close reason the grant's live connections get (verify r3 M3). */
+const REFUSE_TEXT = Object.freeze({ lease_gone: 'Lease Gone', browser_restarting: 'Browser Restarting', browser_stopped: 'Browser Stopped', server_shutdown: 'Server Shutting Down' });
 
 function create({ log = console, now = Date.now } = {}) {
   const grants = new Map();   // token → grant
@@ -104,10 +112,36 @@ function create({ log = console, now = Date.now } = {}) {
     let up;
     try { up = new WebSocket(upUrl, { maxPayload: MAX_PAYLOAD, perMessageDeflate: false, handshakeTimeout: UPSTREAM_OPEN_MS }); } catch { return rawRefuse(socket, 502, 'Bad Upstream'); }
     let settled = false;
-    up.once('error', (e) => { if (!settled) { settled = true; log.warn?.(`[cdp-mediator] upstream refused a ${p.kind} connection for ${g.profileId}/${g.browserKey}: ${e && e.message}`); rawRefuse(socket, 502, 'Upstream Unreachable'); } });
+    // THE PARK IS THE GRANT'S (verify r3 M3): revoke / repoint / shutdown end it by name (closeConns) — a connection
+    // opened for a grant that is gone would be in no grant's `conns`, so no revoke, repoint or shutdown could reach it
+    const park = { up, why: null };
+    g.pendingUps.add(park);
+    // THE CLIENT SOCKET IS PARKED while the upstream opens (up to UPSTREAM_OPEN_MS) with NO error listener of its own
+    // (node's http server removed its at 'upgrade'; ws adds one only inside handleUpgrade) — a client that RESETS
+    // meanwhile was an unhandled 'error' ⇒ the hub's uncaughtException exit (the desktop bridge's verify r2 F1, the
+    // same shape here). Listened BEFORE the park; a client gone before the upstream opened closes that upstream
+    // (it was left open — a CDP connection nobody reads), and the listener is handed to ws's own at the upgrade.
+    const parkedError = () => { try { socket.destroy(); } catch { /* gone */ } };
+    const parkedGone = () => { if (!settled) { settled = true; try { up.terminate(); } catch { /* none */ } } };
+    socket.on('error', parkedError);
+    socket.once('close', parkedGone);
+    up.once('error', (e) => {
+      g.pendingUps.delete(park);
+      if (settled) return;
+      settled = true;
+      if (park.why) return rawRefuse(socket, 503, park.why); // terminated by revoke / repoint / shutdown — said by name
+      log.warn?.(`[cdp-mediator] upstream refused a ${p.kind} connection for ${g.profileId}/${g.browserKey}: ${e && e.message}`);
+      rawRefuse(socket, 502, 'Upstream Unreachable');
+    });
     up.once('open', () => {
+      g.pendingUps.delete(park);
       if (settled) { try { up.close(); } catch { /* none */ } return; }
       settled = true;
+      socket.removeListener('close', parkedGone);
+      const why = park.why || (closed ? REFUSE_TEXT.server_shutdown : grants.get(g.token) !== g ? REFUSE_TEXT.lease_gone : !g.upstream ? REFUSE_TEXT.browser_stopped : upUrl !== (p.kind === 'browser' ? g.upstream : upstreamPageUrl(g, p.targetId)) ? REFUSE_TEXT.browser_restarting : null);
+      if (why) { try { up.close(); } catch { /* none */ } return rawRefuse(socket, 503, why); } // the grant moved while the client waited (verify r3 M3)
+      if (socket.destroyed || !socket.readable || !socket.writable) { try { up.close(); } catch { /* none */ } try { socket.destroy(); } catch { /* gone */ } return; } // half-closed: ws would drop it without its callback
+      socket.removeListener('error', parkedError); // ws attaches its own, synchronously, at the top of handleUpgrade
       wss.handleUpgrade(req, socket, head, (ws) => wire(g, p, ws, up));
     });
   }
@@ -178,7 +212,7 @@ function create({ log = console, now = Date.now } = {}) {
     const key = M.grantKey(profileId, browserKey);
     let g = byKey.has(key) ? grants.get(byKey.get(key)) : null;
     if (!g) {
-      g = { token: mintToken(), key, profileId: String(profileId), browserKey: String(browserKey), upstream: null, scope: M.newScope({}), paused: null, conns: new Set(), createdAt: now(), lastUsedAt: 0, refusals: 0, dropped: 0 };
+      g = { token: mintToken(), key, profileId: String(profileId), browserKey: String(browserKey), upstream: null, scope: M.newScope({}), paused: null, conns: new Set(), pendingUps: new Set(), createdAt: now(), lastUsedAt: 0, refusals: 0, dropped: 0 };
       grants.set(g.token, g); byKey.set(key, g.token);
       log.log?.(`[cdp-mediator] grant minted for ${g.browserKey} on ${g.profileId}`);
     }
@@ -192,7 +226,11 @@ function create({ log = console, now = Date.now } = {}) {
     g.upstream = upstream ? String(upstream) : null;
     if (was && was !== g.upstream) closeConns(g, 1012, g.upstream ? 'browser_restarting' : 'browser_stopped');
   }
-  function closeConns(g, code, reason) { for (const c of [...g.conns]) { g.conns.delete(c); try { c.ws.close(code, reason); } catch { /* gone */ } try { c.up.close(); } catch { /* gone */ } } }
+  function closeConns(g, code, reason) {
+    for (const c of [...g.conns]) { g.conns.delete(c); try { c.ws.close(code, reason); } catch { /* gone */ } try { c.up.close(); } catch { /* gone */ } }
+    // a client still PARKED on its upstream's open: that upstream is terminated and the client answered 503 by name (verify r3 M3)
+    for (const pk of [...g.pendingUps]) { g.pendingUps.delete(pk); pk.why = pk.why || REFUSE_TEXT[reason] || REFUSE_TEXT.lease_gone; try { pk.up.terminate(); } catch { /* gone */ } }
+  }
   /** The profile's browser restarted (a new upstream url) or stopped (null):
    *  every grant on it is re-pointed; live connections close by name. */
   function repoint(profileId, upstream) {
@@ -250,4 +288,4 @@ function create({ log = console, now = Date.now } = {}) {
   return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
-module.exports = { create, MAX_PAYLOAD };
+module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT };

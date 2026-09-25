@@ -25,7 +25,16 @@
 //      a page endpoint out of scope 403; the paused reader read LIVE per
 //      message; revoke closes 1008 AND closes the lease's tabs upstream;
 //      repoint closes 1012 / null answers 503; a raw endpoint never in any
-//      answer or view.
+//      answer or view;
+//   ③b a client socket PARKED while its upstream opens: a reset is no uncaught
+//      error (the hub's exit — the desktop bridge's verify r2 F1, same shape),
+//      a client gone before the upstream opened closes that upstream (CONTROL:
+//      the pre-fix copy through scripts/mutant-copy.mjs).
+//   ③c (verify r3 M3) a grant that MOVES while its client is parked on the
+//      upstream open: revoked ⇒ 503 (never 101), no upstream left open; re-
+//      pointed ⇒ 503, then the same url reaches the NEW browser; shut down ⇒
+//      503, no uncaught error — each fix layer alone refuses, and the pre-fix
+//      copy (both removed) upgrades the client (CONTROLS via mutant-copy).
 // The real-chrome exit proof is test-browser-mediation-chrome (heavy).
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged by
 // the proxy, never a navigation of VibeSpace's own page (§47's declared exemption).
@@ -35,6 +44,8 @@ import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import net from 'node:net';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
@@ -289,6 +300,133 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
   const cs = await c3.closed;
   ok(cs.code === 1001 && med.port() === null && med.list().length === 0, 'shutdown closes every connection 1001 and forgets every grant');
   fake.close();
+}
+
+// ═══ ③b a client that RESETS while its upstream opens (the desktop bridge's verify r2 F1, the same shape here) ═══
+console.log('— ③b a client socket parked on the upstream open: a reset is no uncaught error, a client gone first closes that upstream');
+{
+  const MUT = mutantCopies('mediation', path.resolve(new URL('..', import.meta.url).pathname));
+  const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+  /** A CDP upstream whose handshake takes 300 ms; the client resets (or half-closes) 60 ms into it. */
+  const parked = async (Mod, how) => {
+    const upWss = new WebSocketServer({ noServer: true });
+    const st = { opened: 0, closed: 0 };
+    const up = http.createServer((q, r) => r.end('{}'));
+    up.on('upgrade', (req, sock, head) => { sock.on('error', () => { }); setTimeout(() => upWss.handleUpgrade(req, sock, head, (ws) => { st.opened++; ws.on('close', () => st.closed++); }), 300); });
+    await new Promise((r) => up.listen(0, '127.0.0.1', r));
+    const med = Mod.create({ log: { log() { }, warn() { } } });
+    const g = await med.grantFor({ profileId: 'bp-00000009', browserKey: 'bk-00000009', upstream: `ws://127.0.0.1:${up.address().port}/devtools/browser/RAW-ID` });
+    const u = new URL(g.url);
+    const uncaught = []; const trap = (e) => uncaught.push(String((e && (e.code || e.message)) || e));
+    process.on('uncaughtException', trap);
+    const c = net.connect(Number(u.port), '127.0.0.1'); c.on('error', () => { });
+    await new Promise((r) => c.once('connect', r));
+    c.write(`GET ${u.pathname} HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`);
+    await sleep(60);
+    if (how === 'rst') c.resetAndDestroy(); else c.end();
+    await sleep(700);
+    process.removeListener('uncaughtException', trap);
+    try { c.destroy(); } catch { /* gone */ }
+    const conns = med.list()[0].connections;
+    med.shutdown(); up.close();
+    return { uncaught, ...st, conns };
+  };
+  const r1 = await parked(MED, 'rst'), r2 = await parked(MED, 'half');
+  ok(r1.uncaught.length === 0 && r1.opened === r1.closed && r1.conns === 0, `a client that RESETS while its upstream opens ⇒ no uncaught error (the hub lives: ${JSON.stringify(r1.uncaught)}), no upstream left open (${r1.opened} opened / ${r1.closed} closed)`, JSON.stringify(r1));
+  ok(r2.uncaught.length === 0 && r2.opened === r2.closed && r2.conns === 0, `a client that HALF-CLOSES while its upstream opens ⇒ that upstream is closed, not left reading nobody (${r2.opened} opened / ${r2.closed} closed)`, JSON.stringify(r2));
+  const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+  const a = "    socket.on('error', parkedError);\n", b = "    socket.once('close', parkedGone);\n", c2 = "      if (socket.destroyed || !socket.readable || !socket.writable) { try { up.close(); } catch { /* none */ } try { socket.destroy(); } catch { /* gone */ } return; } // half-closed: ws would drop it without its callback\n";
+  ok(src.split(a).length === 2 && src.split(b).length === 2 && src.split(c2).length === 2, 'CONTROL setup: the parked listeners and the half-closed guard are spelled once');
+  const pre = MUT.load('src/server/cdp-mediator.js', src.replace(a, '\n').replace(b, '\n').replace(c2, '\n'), 'parked');
+  const m1 = await parked(pre, 'rst'), m2 = await parked(pre, 'half');
+  ok(m1.uncaught.some((x) => /ECONNRESET/.test(x)), `CONTROL: the pre-fix mediator lets the reset escape as an uncaught ${JSON.stringify(m1.uncaught)} — the hub's exit`, JSON.stringify(m1));
+  ok(m2.opened > m2.closed, `CONTROL: the pre-fix mediator leaves the half-closed client's upstream OPEN (${m2.opened} opened / ${m2.closed} closed)`, JSON.stringify(m2));
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1 })) ok(r.pass, '③b tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
+// ═══ ③c a grant that moves while its client is parked on the upstream open (verify r3 M3) ═══
+console.log('— ③c a lease revoked / re-pointed / shut down while its client waits on the upstream open: 503 by name, never a connection no grant owns');
+{
+  const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+  const MUT3 = mutantCopies('mediation-r3', REPO);
+  /** A CDP upstream whose handshake takes `delay` ms; every message answered, every open / close / message counted. */
+  const slowUp = async (delay) => {
+    const upWss = new WebSocketServer({ noServer: true });
+    const st = { opened: 0, closed: 0, msgs: 0 };
+    const srv = http.createServer((q, r) => r.end('{}'));
+    srv.on('upgrade', (req, sock, head) => { sock.on('error', () => { }); setTimeout(() => upWss.handleUpgrade(req, sock, head, (ws) => { st.opened++; ws.on('error', () => { }); ws.on('close', () => st.closed++); ws.on('message', (d) => { st.msgs++; const m = JSON.parse(String(d)); ws.send(JSON.stringify({ id: m.id, result: { product: 'Fake/1.0' } })); }); }), delay); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    return { st, url: `ws://127.0.0.1:${srv.address().port}/devtools/browser/RAW-ID`, close: () => { for (const c of upWss.clients) { try { c.terminate(); } catch { /* gone */ } } srv.close(); } };
+  };
+  /** A raw client that sends the upgrade and reads the status line the mediator answers. */
+  const rawClient = async (url) => {
+    const u = new URL(url);
+    const c = net.connect(Number(u.port), '127.0.0.1'); c.on('error', () => { });
+    let resp = ''; c.on('data', (d) => { resp += d.toString('latin1'); });
+    await new Promise((r) => c.once('connect', r));
+    c.write(`GET ${u.pathname} HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n`);
+    return { status: () => (resp.split('\r\n')[0] || '').replace(/^HTTP\/1\.1 /, ''), destroy: () => { try { c.destroy(); } catch { /* gone */ } } };
+  };
+  const trapped = async (fn) => { const uncaught = []; const trap = (e) => uncaught.push(String((e && (e.message || e.code)) || e).slice(0, 120)); process.on('uncaughtException', trap); try { return { ...(await fn()), uncaught }; } finally { process.removeListener('uncaughtException', trap); } };
+  // the lease ends (revoke) 100 ms into a 300 ms upstream handshake
+  const revokeLeg = (Mod) => trapped(async () => {
+    const U = await slowUp(300); const med = Mod.create({ log: { log() { }, warn() { } } });
+    const g = await med.grantFor({ profileId: 'bp-0000000c', browserKey: 'bk-0000000c', upstream: U.url });
+    const c = await rawClient(g.url);
+    await sleep(100); med.revoke({ profileId: 'bp-0000000c', browserKey: 'bk-0000000c', closeTargets: false });
+    await sleep(600);
+    const status = c.status(), grantsLeft = med.list().length;
+    med.shutdown(); await sleep(150);
+    const r = { status, grantsLeft, ...U.st }; c.destroy(); U.close(); return r;
+  });
+  // the profile's browser restarts (repoint) 100 ms into the old upstream's handshake; the client then reconnects
+  const repointLeg = (Mod) => trapped(async () => {
+    const U1 = await slowUp(300), U2 = await slowUp(10); const med = Mod.create({ log: { log() { }, warn() { } } });
+    const g = await med.grantFor({ profileId: 'bp-0000000d', browserKey: 'bk-0000000d', upstream: U1.url });
+    const first = { status: null, reply: null };
+    const w1 = new WebSocket(g.url); w1.on('error', (e) => { const m = /Unexpected server response: (\d+)/.exec(e && e.message); if (m) first.status = Number(m[1]); });
+    w1.on('open', () => { first.status = 101; w1.send(JSON.stringify({ id: 8, method: 'Browser.getVersion', params: {} })); }); w1.on('message', (d) => { first.reply = JSON.parse(String(d)); });
+    await sleep(100); med.repoint('bp-0000000d', U2.url);
+    await sleep(600);
+    let second = null;
+    if (first.status !== 101) {
+      const w2 = new WebSocket(g.url); w2.on('error', () => { });
+      second = await new Promise((resolve) => { const t = setTimeout(() => resolve({ timeout: true }), 3000); w2.on('open', () => w2.send(JSON.stringify({ id: 9, method: 'Browser.getVersion', params: {} }))); w2.on('message', (d) => { clearTimeout(t); resolve(JSON.parse(String(d))); }); });
+      try { w2.close(); } catch { /* gone */ }
+    }
+    med.shutdown(); await sleep(150);
+    const r = { first, second, old: { ...U1.st }, now: { ...U2.st } }; try { w1.terminate(); } catch { /* gone */ } U1.close(); U2.close(); return r;
+  });
+  // the mediator shuts down 100 ms into the handshake (L7: the nulled wss was an uncaught TypeError)
+  const shutdownLeg = (Mod) => trapped(async () => {
+    const U = await slowUp(300); const med = Mod.create({ log: { log() { }, warn() { } } });
+    const g = await med.grantFor({ profileId: 'bp-0000000e', browserKey: 'bk-0000000e', upstream: U.url });
+    const c = await rawClient(g.url);
+    await sleep(100); med.shutdown(); await sleep(600);
+    const r = { status: c.status(), ...U.st }; c.destroy(); U.close(); return r;
+  });
+  const rv = await revokeLeg(MED);
+  ok(/^503 /.test(rv.status) && rv.grantsLeft === 0 && rv.opened === rv.closed && rv.msgs === 0 && !rv.uncaught.length, `a lease REVOKED while its client waits on the upstream open ⇒ "${rv.status}" (never 101), no grant left, the upstream never left open (${rv.opened} opened / ${rv.closed} closed)`, JSON.stringify(rv));
+  const rp = await repointLeg(MED);
+  ok(rp.first.status === 503 && rp.second && rp.second.id === 9 && rp.now.msgs === 1 && rp.old.msgs === 0 && rp.old.opened === rp.old.closed && !rp.uncaught.length, `a browser RE-POINTED while its client waits ⇒ that client is refused 503 (never wired to the OLD browser: old ${rp.old.msgs} message(s), ${rp.old.opened} opened / ${rp.old.closed} closed), the same url then reaches the NEW one (${rp.now.msgs} message)`, JSON.stringify(rp));
+  const sd = await shutdownLeg(MED);
+  ok(/^503 /.test(sd.status) && sd.opened === sd.closed && !sd.uncaught.length, `the mediator SHUT DOWN while a client waits ⇒ "${sd.status}", no uncaught error (${JSON.stringify(sd.uncaught)}), no upstream left open`, JSON.stringify(sd));
+  // CONTROLS (scripts/mutant-copy.mjs): the fix is two layers — the parked upstream terminated by closeConns, and the
+  // grant re-checked at the open. Each alone refuses; both removed (the pre-fix mediator) wires the parked client.
+  const src = fs.readFileSync(path.join(REPO, 'src/server/cdp-mediator.js'), 'utf8');
+  const termLine = src.split('\n').find((l) => l.includes('for (const pk of [...g.pendingUps])')) + '\n';
+  const checkLines = src.split('\n').filter((l) => l.startsWith('      const why = park.why ||') || l.startsWith('      if (why) { try { up.close(); }')).map((l) => l + '\n');
+  ok(src.split(termLine).length === 2 && checkLines.length === 2 && checkLines.every((l) => src.split(l).length === 2), 'CONTROL setup: the parked-upstream termination and the open-time grant check are spelled once each');
+  const noTerm = MUT3.load('src/server/cdp-mediator.js', src.replace(termLine, '\n'), 'noterm');
+  const noCheck = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), src), 'nocheck');
+  const preFix = MUT3.load('src/server/cdp-mediator.js', checkLines.reduce((t, l) => t.replace(l, '\n'), src.replace(termLine, '\n')), 'prefix');
+  const [a1, a2] = [await revokeLeg(noTerm), await revokeLeg(noCheck)];
+  ok(/^503 /.test(a1.status) && a1.opened === a1.closed && /^503 /.test(a2.status) && a2.opened === a2.closed, `each layer ALONE refuses the revoked lease's parked client (check only: "${a1.status}", ${a1.opened}/${a1.closed}; termination only: "${a2.status}", ${a2.opened}/${a2.closed})`, JSON.stringify({ a1, a2 }));
+  const [p1, p2, p3] = [await revokeLeg(preFix), await repointLeg(preFix), await shutdownLeg(preFix)];
+  ok(/^101 /.test(p1.status) && p1.opened > p1.closed, `CONTROL: the pre-fix mediator UPGRADES the revoked lease's client ("${p1.status}") and its upstream outlives even shutdown (${p1.opened} opened / ${p1.closed} closed)`, JSON.stringify(p1));
+  ok(p2.first.status === 101 && p2.old.msgs === 1 && p2.now.msgs === 0, `CONTROL: the pre-fix mediator wires the re-pointed lease's client to the OLD browser (old ${p2.old.msgs} / new ${p2.now.msgs} message(s))`, JSON.stringify(p2));
+  ok(p3.uncaught.some((x) => /handleUpgrade/.test(x)), `CONTROL: the pre-fix mediator throws past a shutdown mid-connect (${JSON.stringify(p3.uncaught)})`, JSON.stringify(p3));
+  for (const r of copiesCensus(MUT3.files, MUT3.dir, REPO, { minCopies: 3 })) ok(r.pass, '③c tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 // ═══ ④ the real keeper with the proxy injected ══════════════════════════════

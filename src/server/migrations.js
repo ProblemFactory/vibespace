@@ -401,6 +401,15 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-desktop-apps-host-key',
+      note: "desktop apps lane C1 (docs/design-desktop-apps-seamless.zh.md §3.5, D8): a desktop app may now run on a PAIRED device (the `desktop-serve` agentd op), so the hub's registry names the MACHINE of every record. Every record in data/desktop-apps.json without a `hostId` gains `hostId: 'local'` — every record written before this lane ran on this machine (the keeper refused any other host). Through the live keeper when there is one (its in-memory store is what it saves next), else the file itself (atomic tmp+rename, its mode kept). A record that already names a machine is left alone; a missing file is not a failure and nothing is created.",
+      run() {
+        const rep = stampDesktopHostKey(path.join(dataDir, 'desktop-apps.json'), desktopKeeper);
+        console.log('[migrate] desktop-apps-host-key:', JSON.stringify(rep));
+        return rep;
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {
@@ -457,6 +466,30 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
     fs.renameSync(tmp, file);
     return { file: path.basename(file), via: 'file', parks: parksOnDisk, rewritten };
+  }
+
+  /** The 2026-09-desktop-apps-host-key reshape: every record without `hostId` gains 'local'. Through the live keeper
+   *  when there is one (voidRunaway's reason), else the file (atomic, its mode kept). Returns the counts. */
+  function stampDesktopHostKey(file, keeperOrGetter) {
+    let disk = null;
+    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }
+    const shape = (doc) => {
+      let stamped = 0;
+      const recs = doc && doc.apps && typeof doc.apps === 'object' ? Object.values(doc.apps) : [];
+      for (const r of recs) if (r && typeof r === 'object' && !(typeof r.hostId === 'string' && r.hostId)) { r.hostId = 'local'; stamped++; }
+      return stamped;
+    };
+    if (!disk) return { file: path.basename(file), via: 'none', records: 0, stamped: 0 }; // no store: nothing to stamp — and a keeper is never made to CREATE one here
+    const records = disk.apps && typeof disk.apps === 'object' ? Object.keys(disk.apps).length : 0;
+    const k = typeof keeperOrGetter === 'function' ? keeperOrGetter() : keeperOrGetter;
+    if (k && typeof k.reshapeStore === 'function') return { file: path.basename(file), via: 'keeper', records, stamped: Number(k.reshapeStore(shape)) || 0 };
+    const stamped = shape(disk);
+    if (!stamped) return { file: path.basename(file), via: 'file', records, stamped: 0 };
+    let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
+    fs.renameSync(tmp, file);
+    return { file: path.basename(file), via: 'file', records, stamped };
   }
 
   function runLocalMigrations() {

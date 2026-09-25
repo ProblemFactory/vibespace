@@ -248,7 +248,7 @@ console.log('— ③ a real agentd answers browser-serve; an old daemon is never
   const daemon = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
   ok(/m\.op === 'browser-serve-result'/.test(cli) && /daemon lacks browser-serve \(capabilities gate\)/.test(cli), 'client: the reply op is in the id-keyed routing set and the method is gated');
-  ok(/'browser-serve'\]/.test(daemon) && /msg\.op === 'browser-serve'/.test(daemon) && /op: 'browser-serve-result'/.test(daemon) && /^let bsFacts = null;/m.test(daemon), 'daemon: capability in the hello-ack, the handler, the reply op, ONE facts singleton per process');
+  ok(/capabilities: \[[^\]]*'browser-serve'[^\]]*\]/.test(daemon) && /msg\.op === 'browser-serve'/.test(daemon) && /op: 'browser-serve-result'/.test(daemon) && /^let bsFacts = null;/m.test(daemon), 'daemon: capability in the hello-ack, the handler, the reply op, ONE facts singleton per process');
   ok(/\/\/ src\/browser-serve\.js/.test(bundle), 'the daemon bundle carries src/browser-serve.js (the SHARED module, one implementation)');
   try { await dmReal.stop?.(); } catch { /* gone */ }
   dmReal = null;

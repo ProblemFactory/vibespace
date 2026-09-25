@@ -815,7 +815,7 @@ const { _srvConsoleRing } = require('./src/server/incident-wiring.js').create({
   readLayouts: (...a) => readLayouts(...a),
   sysinfo,
   listLayoutHistory: () => { try { return persistenceRouter.listLayoutHistory(); } catch { return []; } },
-  getDesktop: () => ({ vnc, keeper: desktopKeeper, stream: desktopStream }), // 2.369.118: the desktop scene (late-bound — created further down)
+  getDesktop: () => ({ vnc, keeper: desktopKeeper, stream: desktopStream, access: desktopAccess }), // 2.369.118: the desktop scene (late-bound — created further down)
 });
 app.get('/api/sysinfo', async (req, res) => {
   try {
@@ -1775,11 +1775,14 @@ const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
   dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), broadcast: (m) => bcastAll(m),
   serverSetting: (k) => serverSetting(k), getTelemetry: () => { try { return telemetry; } catch { return null; } }, singleton: () => vnc.singletonFacts(),
   serverNotice: (...a) => serverNotice(...a), // 2026-09-25: the ONE report per resource crossing (the keeper never stops an app for a resource)
+  access: () => desktopAccess, hostLabel: (h) => { try { return hosts.get(h).name || h; } catch { return h; } }, // lane C2: a paired machine's apps (late-bound — the access layer needs this keeper's machine half)
+  remoteHosts: () => { try { return hosts.list().filter((h) => (h.transport === 'dial' ? h.online : h.dialLive)).map((h) => h.id); } catch { return []; } }, // boot: every dialed-in machine is asked what it runs
 });
+const desktopAccess = require('./src/server/desktop-access.js').create({ hosts, local: () => desktopKeeper.machine, env: () => require('./src/ws-handler').agentEnv(), log: console }); // lane C1 (design-desktop-apps-seamless §3.5): the ONE transport to an app's machine — device #0 in-process against the keeper's OWN machine half, a paired device / an ssh host (its daemon installed over ssh) through the `desktop-serve` agentd op, a handle that cannot run the op refused host_needs_daemon
 // P9 window targets (design-agent-browser-v2 §4.9 / §6.6): ONE wiring — the RFB bridge's input policy IS the engine's lease verdict, the routes (user + agent) and the shared handback announcer ride the same engine (src/server/window-live-wiring.js)
 const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({
   app, auth, vnc, keeper: desktopKeeper, DESKTOP_SINGLETON_ID, dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), activeSessions: () => activeSessions, serverSetting: (k) => serverSetting(k), broadcast: (m) => bcastAll(m), browserHandback,
-  netemEnabled: process.env.VIBESPACE_DESKTOP_NETEM === '1' }); // P8-2 D21 (c) validation slice: a dev-only latency/bit-rate injector on the xpra relay, never on by default
+  netemEnabled: process.env.VIBESPACE_DESKTOP_NETEM === '1', access: desktopAccess }); // P8-2 D21 (c) validation slice: a dev-only latency/bit-rate injector on the xpra relay, never on by default
 desktopKeeper.adoptAll().then(() => desktopKeeper.start()).catch((e) => console.warn('[desktop] boot adoption failed:', e.message)); browserKeeper?.setOtherHolders?.(() => desktopKeeper.liveRecords().map((r) => ({ id: r.id, label: r.label || r.appId || r.id, kind: 'desktop-app' }))); // takeover C3 (D2): the ONE ceiling (CONCURRENT_CAP) counts the live desktop apps beside every browser
 const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B dial-in (2.144.0)
 
@@ -2032,7 +2035,7 @@ function shutdown() {
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release
-  try { desktopKeeper.shutdown(); shutdownWindowLeases(); } catch {} // timers only — desktop apps SURVIVE a restart by design (adopted at boot); window leases persist, their input side is a handback by construction
+  try { desktopKeeper.shutdown(); desktopAccess.shutdown(); shutdownWindowLeases(); } catch {} // timers only — desktop apps SURVIVE a restart by design (adopted at boot); window leases persist, their input side is a handback by construction
   try { browserTrace?.shutdown(); } catch {} try { browserStream?.shutdown(); } catch {} try { browserHandback?.shutdown(); } catch {} try { browserKeeper?.shutdown(); } catch {} // agent browser P5 trace + screencast writers, P2 live-view bridge, P3 handback timers, P1 keeper timers only — the profile browsers survive and are adopted next boot
   process.exit(0);
 }

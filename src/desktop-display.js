@@ -108,6 +108,7 @@ const crypto = require('crypto');
 const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');
 const { BROWSER_BINS } = require('./desktop-apps'); // B-bfe6: the browser families' binary names — ONE list, the PURE model's
+const { INSTALL_FILES } = require('./desktop-apps'); // lane C verify r2 (F3/F4): the detached install's log / pidfile / exit file names — ONE spelling, the launcher's
 
 const LOCAL_HOST_IDS = new Set([null, undefined, '', 'local']);
 function assertLocal(hostId, what) {
@@ -997,6 +998,78 @@ async function xpraVersion({ binPath, env = process.env } = {}) {
   return { version: m ? m[1] : null, raw: raw.slice(0, 200), error: r.err ? r.err.message : null };
 }
 
+/**
+ * LANE C2 (docs/design-desktop-apps-seamless §3.5 "auto seamless setup") — the
+ * facts the xpra INSTALL RUNG plans from, read on the machine the app would run
+ * on (the `facts` op with `install: true`; the PURE plan is
+ * src/desktop-apps.js xpraInstallPlan). Every probe is bounded and async —
+ * never a sync spawn on the loop — and a probe that cannot answer says so
+ * (null), never a guess:
+ *   platform / arch        process.platform / process.arch (a macOS or Windows
+ *                          machine has no X11 server: `no_x11` by name)
+ *   distro / like / codename  /etc/os-release ID / ID_LIKE / UBUNTU_CODENAME, else
+ *                          VERSION_CODENAME (a derivative names its Ubuntu base there)
+ *   apt                    apt-get on PATH (the only package manager the rung drives)
+ *   aptXpra                `apt-cache policy xpra` → the Candidate the machine's
+ *                          OWN sources offer (null = none / unreadable)
+ *   sudo                   `sudo -n true` answered 0 (the plugins.js _sudoAvailable
+ *                          probe, async) — root counts as yes
+ *   xpra                   the installed xpra's version (null = not installed)
+ *   stateDir / installing / lastInstall   (verify r2 F3 + F4) the machine's install SLOT: `stateDir` = where the
+ *                          detached install keeps its log + pidfile (the machine keeper's data dir), `installing` =
+ *                          {pid, since, lock} while the recorded pid + starttime still lives (a restarted hub, a
+ *                          re-created access layer, a reconnected link RE-ATTACHES instead of starting a second apt),
+ *                          `lastInstall` = {code, at (ms), lock} of the last one that ended; `lock` (verify r4) = the lock
+ *                          file on local storage the install held — installState()
+ */
+/** THE INSTALL SLOT of a machine, read from its state dir (see src/desktop-apps.js INSTALL_LAUNCHER): `installing` only
+ *  when the pidfile's pid is alive AND has the recorded starttime (a recycled pid is not the install). `lock` = the lock
+ *  file the launcher named and the install holds (verify r4 — on local storage, never in the state dir; null for a
+ *  record written before r4). Never throws. */
+const slotLine = (txt) => { const m = /^(\S+)(?:\s+(\S+))?(?:\s+(.+))?$/.exec(String(txt).trim()); return m ? { a: Number(m[1]), b: Number(m[2]), lock: m[3] || null } : null; }; // "<a> [<b> [<lock…>]]"
+async function installState(stateDir) {
+  const out = { installing: null, lastInstall: null };
+  if (!stateDir) return out;
+  const pidFile = path.join(String(stateDir), INSTALL_FILES.pid);
+  try {
+    const r = slotLine(await fs.promises.readFile(pidFile, 'utf8'));
+    if (r && Number.isInteger(r.a) && r.a > 0 && Number.isFinite(r.b) && r.b > 0 && procStart(r.a) === r.b) {
+      let since = null; try { since = Math.round((await fs.promises.stat(pidFile)).mtimeMs); } catch { since = null; }
+      out.installing = { pid: r.a, since, lock: r.lock };
+    }
+  } catch { /* no pidfile: nothing recorded as running */ }
+  try {
+    const r = slotLine(await fs.promises.readFile(path.join(String(stateDir), INSTALL_FILES.exit), 'utf8'));
+    if (r && Number.isInteger(r.a)) out.lastInstall = { code: r.a, at: Number.isFinite(r.b) ? Math.round(r.b / 1e6) : null, lock: r.lock }; // the exit file's nanoseconds (verify r5 L1) → ms
+  } catch { /* none ended here yet */ }
+  return out;
+}
+async function installFacts({ env = process.env, now = Date.now, osRelease = '/etc/os-release', stateDir = null } = {}) {
+  const out = { platform: process.platform, arch: process.arch, distro: null, like: [], codename: null, prettyName: null, apt: null, aptXpra: null, sudo: false, root: false, xpra: null, at: now(), stateDir: stateDir ? String(stateDir) : null, installing: null, lastInstall: null };
+  Object.assign(out, await installState(stateDir));
+  try {
+    const txt = await fs.promises.readFile(osRelease, 'utf8');
+    const kv = {};
+    for (const line of txt.split('\n')) { const m = /^([A-Z_]+)=(.*)$/.exec(line.trim()); if (m) kv[m[1]] = m[2].replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1'); }
+    out.distro = kv.ID ? String(kv.ID).toLowerCase() : null;
+    out.like = kv.ID_LIKE ? String(kv.ID_LIKE).toLowerCase().split(/\s+/).filter(Boolean) : [];
+    out.codename = (kv.UBUNTU_CODENAME || kv.VERSION_CODENAME || '').toLowerCase() || null; // a derivative (Mint) names its BASE in UBUNTU_CODENAME — the repo is keyed by the base
+    out.prettyName = kv.PRETTY_NAME ? String(kv.PRETTY_NAME).slice(0, 80) : null;
+  } catch { /* no os-release (macOS, a minimal image): distro stays null */ }
+  if (process.platform !== 'linux') return out;
+  out.apt = binOnPath('apt-get', { env }) || null;
+  if (out.apt) {
+    const r = await run('apt-cache', ['policy', 'xpra'], { env: { ...env, LC_ALL: 'C' }, timeout: 8000 });
+    const m = /Candidate:\s*(\S+)/.exec(r.stdout || '');
+    out.aptXpra = m && m[1] !== '(none)' ? m[1] : null;
+  }
+  out.root = typeof process.getuid === 'function' && process.getuid() === 0;
+  if (!out.root && binOnPath('sudo', { env })) { const r = await run('sudo', ['-n', 'true'], { env, timeout: 4000 }); out.sudo = !r.err; }
+  const xb = binOnPath('xpra', { env });
+  if (xb) { const v = await xpraVersion({ binPath: xb, env }); out.xpra = v ? v.version : null; }
+  return out;
+}
+
 module.exports = {
   assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, x11Env,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
@@ -1005,5 +1078,5 @@ module.exports = {
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
-  parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion,
+  parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion, installFacts, installState,
 };

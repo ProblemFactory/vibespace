@@ -1147,6 +1147,40 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(JSON.parse(fs.readFileSync(da4, 'utf-8')).apps['da-8'].lastError === OLD, 'CONTROL: a file-only edit beside a loaded keeper is lost at its next save (the store it holds in memory wins)');
     K4.shutdown();
   }
+  // ── 2026-09-desktop-apps-host-key (desktop apps lane C1, design-desktop-apps-seamless §3.5 / D8) ──
+  {
+    console.log('2026-09-desktop-apps-host-key');
+    const ID = '2026-09-desktop-apps-host-key';
+    const mkInst = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    // (a) the FILE path: every record without a machine gains 'local'; one that names a machine is left alone
+    const r1 = mkInst('hk-file');
+    const f1 = path.join(r1, 'data', 'desktop-apps.json');
+    fs.writeFileSync(f1, JSON.stringify({ apps: { 'da-1': { id: 'da-1', label: 'xterm', state: 'exited' }, 'da-2': { id: 'da-2', label: 'calc', state: 'ready', pids: {}, starts: {} }, 'da-3': { id: 'da-3', label: 'remote', state: 'exited', hostId: 'dev-abc' } } }), { mode: 0o640 });
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
+    ok(res1 && res1.status === 'ran' && d1.apps['da-1'].hostId === 'local' && d1.apps['da-2'].hostId === 'local', 'every record written before the lane names THIS machine (hostId: local)', d1);
+    ok(d1.apps['da-3'].hostId === 'dev-abc' && res1.report.stamped === 2 && res1.report.records === 3 && res1.report.via === 'file', 'a record that already names a machine is left alone; the report counts what it stamped', res1.report);
+    ok((fs.statSync(f1).mode & 0o777) === 0o640 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, the file keeps its mode, no temp left');
+    ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) no store ⇒ ran, nothing created
+    const r2 = mkInst('hk-none');
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    // (c) THROUGH THE LIVE KEEPER (its in-memory store is what it saves next) — the same reason as runaway-parks-void (c)/(d)
+    const r3 = mkInst('hk-keeper');
+    const f3 = path.join(r3, 'data', 'desktop-apps.json');
+    fs.writeFileSync(f3, JSON.stringify({ apps: { 'da-7': { id: 'da-7', label: 'xterm', state: 'exited', pids: {}, starts: {} } } }));
+    const K = require('../src/server/desktop-app-keeper.js').create({ dataDir: path.join(r3, 'data'), env: () => ({ PATH: process.env.PATH, HOME: scratchHomeDir }), broadcast: () => { }, log: { log() { }, warn() { }, error() { } } });
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, desktopKeeper: K }), r3).find((x) => x.id === ID);
+    ok(res3.status === 'ran' && res3.report.via === 'keeper' && K.get('da-7').hostId === 'local' && JSON.parse(fs.readFileSync(f3, 'utf-8')).apps['da-7'].hostId === 'local', 'with a live keeper the IN-MEMORY record is stamped and the keeper\'s own save puts it on disk', res3.report);
+    K.shutdown();
+    // (d) a record born after the lane already names its machine — the migration is for the past only
+    const M = require('../src/desktop-apps.js');
+    ok(M.newRecord({ id: 'da-n', label: 'n', exec: '/x', source: 'adhoc', backend: 'xpra', now: 1 }).hostId === 'local', 'a NEW record is born with hostId: local (M.newRecord)');
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

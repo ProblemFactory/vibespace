@@ -1172,13 +1172,91 @@ let ocFacts = null;
 /** THE daemon's browser-serve facts (agent browser P4) — one per PROCESS,
  *  for the same reason as `ocFacts`. */
 let bsFacts = null;
+/** THE daemon's desktop-app MACHINE KEEPER (desktop apps lane C1, docs/design-
+ *  desktop-apps-seamless §3.5) — one per PROCESS, for the same reason as
+ *  `ocFacts`: it owns detached app sessions, a tick and a record file
+ *  (~/.vibespace/desktop-apps.json); a per-connection keeper would fork a
+ *  second tick on every reconnect and reap the first one's sessions. */
+let dsKeeper = null;
+let dsReady = null;
+function desktopServe() {
+  if (dsKeeper) return dsReady;
+  const dsv = require('./../desktop-serve.js');
+  dsKeeper = dsv.install({
+    dataDir: path.join(process.env.HOME || require('os').homedir(), '.vibespace'),
+    env: () => daemonEnv(process.env),
+    log: { log: (m) => log(String(m)), warn: (m) => log(String(m)), error: (m) => log(String(m)) },
+  });
+  // adoption FIRST (a restarted daemon re-proves every recorded session by pid+starttime), then the tick; an op
+  // waits for it, so nothing is launched beside an unadopted record
+  dsReady = dsKeeper.adoptAll().catch((e) => log(`desktop-serve adoption failed: ${e && e.message}`)).then(() => { dsKeeper.start(); return dsKeeper; });
+  return dsReady;
+}
+
+// ── A RUN-STREAM CHILD WHOSE LINK DIED IS NEVER LEFT PAUSED (desktop lane C verify r2 F2, 2026-09-25) ──
+// run-stream pauses a child's stdout under window pressure and resumes it on the peer's credit (onWritable). When the
+// HUB's side of the link dies mid-stream the credit never comes: `mux.data()` on the dead mux answers false, the child
+// is paused with no resumer and wedges in its next write (measured: a 4 MB producer stuck at ~440 KB for good, still
+// stuck after the hub re-dialed; a wedged dpkg dies mid-transaction when this daemon later re-execs). So at the link's
+// death every orphaned child's stdout is RESUMED into a bounded per-process log on the machine,
+// ~/.vibespace/run-stream/<pid>.log (0600, capped at RUN_STREAM_LOG_CAP with a marker, the tail dropped past it) —
+// the child runs to its end, its output kept for a person to read. Never a signal: the child is not ours to end.
+// verify r3: the log's failure is never the child's (M2 — resumed on drain / error / close, an errored log a pure drain),
+// and the cap is per FILE (L6 — a pid wrap appends to the same <pid>.log; its existing size counts).
+const RUN_STREAM_LOG_CAP = 8 * 1024 * 1024;
+const RUN_STREAM_LOG_KEEP_MS = 7 * 24 * 3600 * 1000;
+function runStreamLogDir() { return path.join(process.env.HOME || os.homedir(), '.vibespace', 'run-stream'); }
+function orphanRunStream(rec, reason) {
+  const child = rec && rec.child;
+  if (!child || rec.sink) return;
+  const dir = runStreamLogDir();
+  const file = path.join(dir, `${child.pid}.log`);
+  let out = null, written = 0, capped = false;
+  const resumeChild = () => { try { child.stdout.resume(); } catch { } };
+  // THE CHILD NEVER DEPENDS ON THE LOG'S HEALTH (verify r3 M2): a Writable that ERRORS (ENOSPC, EISDIR, EACCES) never
+  // emits 'drain' — a child paused on it was paused for good. An errored log becomes a pure drain (out = null: the
+  // output is dropped, the child runs on), and a pause is lifted by 'drain' OR 'error' OR 'close', once.
+  const resumeOnce = (w) => {
+    let done = false;
+    const go = () => { if (done) return; done = true; w.removeListener('drain', go); w.removeListener('error', go); w.removeListener('close', go); resumeChild(); };
+    w.on('drain', go); w.on('error', go); w.on('close', go);
+  };
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    // THE CAP IS PER FILE (verify r3 L6): after a pid wrap the same <pid>.log is appended — its bytes count
+    try { const st0 = fs.statSync(file); if (st0.isFile()) written = st0.size; } catch { /* a new file */ }
+    out = fs.createWriteStream(file, { flags: 'a', mode: 0o600 });
+    out.on('error', () => { out = null; resumeChild(); });
+  } catch { out = null; }
+  // an old log is swept here, off the hot path (the only writer of the dir)
+  fs.promises.readdir(dir).then((names) => Promise.all(names.filter((n) => /^\d+\.log$/.test(n) && n !== path.basename(file)).map((n) => fs.promises.stat(path.join(dir, n)).then((st) => (Date.now() - st.mtimeMs > RUN_STREAM_LOG_KEEP_MS ? fs.promises.unlink(path.join(dir, n)) : null)).catch(() => null)))).catch(() => { });
+  const stamp = () => new Date().toISOString();
+  const room = Math.max(0, RUN_STREAM_LOG_CAP - written);
+  try { out?.write(`[vibespace-agentd ${stamp()}] the hub's link was lost (${reason || 'link lost'}) while pid ${child.pid} streamed its output — it runs on; ${room ? `the rest of its output follows (at most ${room} more bytes in this file)` : `this file is at its ${RUN_STREAM_LOG_CAP}-byte cap — the output is dropped`}\n`); } catch { /* none */ }
+  if (!room) capped = true;
+  rec.sink = (d) => {
+    if (!out || capped) return; // past the cap (or on a log that failed) the output is DRAINED — the child must never block on it — not kept
+    if (written + d.length > RUN_STREAM_LOG_CAP) {
+      capped = true;
+      try { out.write(d.subarray(0, Math.max(0, RUN_STREAM_LOG_CAP - written))); out.write(`\n[vibespace-agentd ${stamp()}] log capped at ${RUN_STREAM_LOG_CAP} bytes — output past this point is dropped\n`); } catch { /* none */ }
+      return;
+    }
+    written += d.length;
+    const w = out;
+    let more = true; try { more = w.write(d); } catch { more = true; }
+    if (!more && out === w) { try { child.stdout.pause(); } catch { } resumeOnce(w); }
+  };
+  rec.onOrphanExit = (code, error) => { try { out?.end(`\n[vibespace-agentd ${stamp()}] pid ${child.pid} ended: ${error ? `error ${error}` : `exit ${code}`}\n`); } catch { /* none */ } };
+  try { child.stdout.resume(); } catch { }
+  log(`run-stream pid ${child.pid}: the hub's link was lost — its output continues into ${file}`);
+}
 
 function serveConnection(sock) {
   let authed = false;
   let upgrade = null;
   const sessions = new Map(); // chan → { proc, credit accounting is per-mux }
   const tcpChans = new Map(); // chan → net.Socket (M4 tcp-forward)
-  const streamChans = new Map(); // chan → run-stream child (stdout paused under window pressure)
+  const streamChans = new Map(); // chan → { child, sink } of a run-stream child (stdout paused under window pressure; at the link's death resumed into a log — orphanRunStream)
   const writableWaiters = new Map(); // chan → [resolve] (read-range window pacing)
   const waitWritable = (chan) => new Promise((res) => {
     const list = writableWaiters.get(chan) || [];
@@ -1201,7 +1279,7 @@ function serveConnection(sock) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'desktop-serve'],
         });
         return;
       }
@@ -1710,6 +1788,25 @@ function serveConnection(sock) {
         })();
         return;
       }
+      if (msg.op === 'desktop-serve') {
+        // A desktop application on THIS machine (desktop apps lane C1, design
+        // §3.5 / D5 / D8): the daemon bundles src/desktop-serve.js and runs the
+        // very same runDesktopServeOp() the hub runs for device #0 — facts /
+        // launch / stop / status / list / windows / fit / keep-alive /
+        // relaunch, WHERE the app lives, against the device-held record
+        // (~/.vibespace/desktop-apps.json). The picture port it answers is its
+        // own loopback (the hub tcpForwards it). ONE machine keeper per daemon
+        // PROCESS (module-level, never on `this` = the connection).
+        (async () => {
+          try {
+            const dsv = require('./../desktop-serve.js');
+            const r = await dsv.runDesktopServeOp(await desktopServe(), String(msg.action || ''), msg.params || {});
+            // op REQUIRED on the reply (the 2.300.0 three-touch rule)
+            mux.control({ op: 'desktop-serve-result', id: msg.id, result: r });
+          } catch (e) { mux.control({ op: 'desktop-serve-result', id: msg.id, error: String(e.message || e) }); }
+        })();
+        return;
+      }
       if (msg.op === 'proc-list') {
         // Full process table for the System panel's process manager
         // (2.354.0) — same shared module as the sysinfo op; successive calls
@@ -1831,17 +1928,20 @@ function serveConnection(sock) {
           // queued tail overtaken by the control-channel exit = silent
           // truncation); pause on window pressure, resume via onWritable.
           let sentS = 0, exitedS = false;
+          const recS = { child, sink: null, onOrphanExit: null }; // sink: set by orphanRunStream when the link dies
           const sendExit = (code, error) => {
             if (exitedS) return; exitedS = true;
             streamChans.delete(chanS);
+            if (recS.onOrphanExit) recS.onOrphanExit(code, error);
             mux.control({ op: 'stream-exit', chan: chanS, code, error, sent: sentS });
           };
           child.stdout.on('data', (d) => {
+            if (recS.sink) { recS.sink(d); return; }
             sentS += d.length;
             let ok = true; try { ok = mux.data(chanS, d); } catch { }
             if (!ok) { try { child.stdout.pause(); } catch { } }
           });
-          streamChans.set(chanS, child);
+          streamChans.set(chanS, recS);
           child.stderr.on('data', () => { });
           // 'close' (stdio fully drained), NOT 'exit' — the count must be final
           child.on('close', (code) => sendExit(code ?? 0, undefined));
@@ -1967,12 +2067,15 @@ function serveConnection(sock) {
     },
     onWritable(chan) {
       try { tcpChans.get(chan)?.resume?.(); } catch { }
-      try { streamChans.get(chan)?.stdout?.resume?.(); } catch { }
+      try { const r = streamChans.get(chan); if (r && !r.sink) r.child.stdout.resume(); } catch { }
       const w = writableWaiters.get(chan);
       if (w) { writableWaiters.delete(chan); for (const f of w) { try { f(); } catch { } } }
     },
-    onDead() {
+    onDead(reason) {
       if (this._countedServer) { authedServers = Math.max(0, authedServers - 1); this._countedServer = false; }
+      // run-stream children outlive THIS link: their stdout resumes into a bounded log, never left paused (verify r2 F2)
+      for (const rec of streamChans.values()) orphanRunStream(rec, reason);
+      streamChans.clear();
       // connection gone: dtach-attach ptys are DETACH points — killing the
       // attach does NOT kill the dtach session (invariant #1: session survives
       // server/daemon death). So we DETACH (kill the attach proc) but the
@@ -2001,6 +2104,13 @@ server.listen(SOCK, () => {
   log('listening on ' + SOCK);
 });
 server.on('error', (e) => { log('server error: ' + e.message); process.exit(1); });
+// desktop apps (lane C1): a daemon restarted (a self-upgrade, a crash) with a LIVE app session on its record re-adopts
+// it at boot — owning a detached session must not wait for the hub's next op (its idle/tick/teardown would lapse)
+try {
+  const dsRec = JSON.parse(fs.readFileSync(path.join(process.env.HOME || require('os').homedir(), '.vibespace', 'desktop-apps.json'), 'utf8'));
+  const { isLiveState } = require('./../desktop-apps.js');
+  if (dsRec && dsRec.apps && Object.values(dsRec.apps).some((r) => r && isLiveState(r.state))) desktopServe();
+} catch { /* no record on this machine — nothing to adopt */ }
 
 // ── Transport B: dial-out (M4-lite). `--dial <wss-url> --dial-token <t>`
 // persists the dial config; every boot re-dials. The outbound ws is served by

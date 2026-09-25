@@ -895,6 +895,13 @@ class HostManager {
    *  remote bug (and vice versa: the remote twin is the one that silently
    *  lags). Passing a falsy id now yields device #0, so a consumer can be
    *  written ONCE and run on any machine including this one. */
+  /** The cached machine handle ONLY when it is connected right now — never a connect ladder (lane C2: the desktop
+   *  launch dialog's machine picker draws a row per machine and must not bootstrap an ssh host to do it). */
+  connectedDevice(id) {
+    if (this.isLocal(id)) return this._localDevice || null;
+    const dm = this._devices?.get(id);
+    try { return dm && dm.status().connected ? dm : null; } catch { return null; }
+  }
   setLocalDevice(dm) { this._localDevice = dm; }
   isLocal(id) { return !id || id === 'local'; }
 

@@ -219,6 +219,17 @@ export function endedText(rec) {
   return '';
 }
 
+/** lane C2: the window title of an app on a PAIRED machine carries the machine's name (the host record's label — a
+ *  DISPLAY string: it only ever reaches textContent / setTitle, never a spawn); an app on this machine is untouched. */
+export function hostTitleText(label, rec) {
+  return rec && rec.hostLabel && rec.hostId && rec.hostId !== 'local' ? t('{label} — on {machine}', { label, machine: rec.hostLabel }) : label;
+}
+/** lane C2: the host chip's words ('' on this machine): the machine's name, or that it is not answering. */
+export function hostChipText(rec) {
+  if (!rec || !rec.hostLabel || !rec.hostId || rec.hostId === 'local') return '';
+  return rec.state === 'unknown-host-offline' ? t('{machine} is not answering', { machine: rec.hostLabel }) : t('on {machine}', { machine: rec.hostLabel });
+}
+
 /** round 3 A2: the toast a window closing on its app's end shows ("Calculator exited" / "… stopped"). */
 export function exitToastText(rec, name) {
   const app = name || (rec && (rec.appTitle || rec.label)) || t('Desktop app');
@@ -455,6 +466,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
   const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend';
+  const hostChip = document.createElement('span'); hostChip.className = 'desktop-app-chip desktop-app-chip-host'; // lane C2: which machine the app runs on (a paired one only)
   const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch
   const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
   fitChip.title = t('This rung’s display cannot resize: the app is fitted to the fixed framebuffer and scaled in the browser. With TigerVNC (Xvnc) the display follows the window.');
@@ -474,7 +486,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // round 3 A3: the ⋯ button — the window's own menu (Scale ▸ today); the same rows ride the title-bar / taskbar menu
   const moreBtn = document.createElement('button'); moreBtn.type = 'button'; moreBtn.className = 'file-tool-btn desktop-app-more'; moreBtn.style.cssText = 'width:auto;padding:0 6px';
   moreBtn.innerHTML = UI_ICONS.more; moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
-  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, hostChip, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
   // the badge's words come from the PURE table; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause')];
   const renderLease = () => {
@@ -521,7 +533,10 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const render = () => {
     if (!rec) return;
     const label = titleText(); // the app window's own title — xpra's protocol names it, on a keeper-fitted rung (and for a blocked xpra pane) the record does — else the label
-    app.wm.setTitle(winInfo.id, lease ? t('{label} — agent window', { label }) : label);
+    app.wm.setTitle(winInfo.id, hostTitleText(lease ? t('{label} — agent window', { label }) : label, rec));
+    const hc = hostChipText(rec); hostChip.textContent = hc; hostChip.style.display = hc ? '' : 'none';
+    hostChip.classList.toggle('is-offline', rec.state === 'unknown-host-offline');
+    hostChip.title = rec.state === 'unknown-host-offline' ? t('The machine this app runs on is not answering — the app may still be running there; the window reconnects when it returns') + (rec.hostError ? ` (${rec.hostError})` : '') : '';
     blockedTitle.textContent = label; // x5: the overlay names the app (textContent — the title is peer-controlled)
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });

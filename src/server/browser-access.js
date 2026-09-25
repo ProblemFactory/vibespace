@@ -11,10 +11,15 @@
  *                     the local rung is the transport with zero hops)
  *   paired device   → the `browser-serve` agentd op (the daemon bundles the
  *                     same module and runs the same runBrowserServeOp)
- *   ssh host w/o a daemon → REFUSED by name (`host_needs_daemon`): there is
- *                     no shipped single-file rung for a browser yet, and a
- *                     silent local fallback would start the browser on the
- *                     wrong machine
+ *   a handle that cannot run the op → REFUSED by name (`host_needs_daemon`):
+ *                     there is no shipped single-file rung for a browser yet,
+ *                     and a silent local fallback would start the browser on
+ *                     the wrong machine. ON THE REAL HostManager an ssh host
+ *                     is given the bundled daemon over ssh (device() →
+ *                     ensureAgentdOnHost) and SERVED; a failed bootstrap is
+ *                     host_unavailable naming the reason; host_needs_daemon on
+ *                     a real DeviceManager = its capability gate (an agent
+ *                     predating browser-serve) — test-desktop-serve §5
  *
  * THE CDP FORWARD (§7.3 "transport is nearly free", §6.1): a browser's
  * loopback CDP port on a paired machine becomes a hub-side loopback url —

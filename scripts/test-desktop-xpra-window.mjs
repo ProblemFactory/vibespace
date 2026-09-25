@@ -70,6 +70,12 @@
 //     the app (X meta maximized false; one click maximizes again — control: onResize muted ⇒ X stays maximized);
 //     (4) revealed, the top edge is still the resize band (control: the title bar back at z-index 25 hits it);
 //     (9) the chip and hint clear the header bar's ─ □ ✕ (control: the top placement covers them).
+//   • §13 (lane C2 — docs/design-desktop-apps-seamless §3.5) THE MAIN LEGS AGAIN WITH host=<a paired device>: a
+//     scratch daemon from the BUILT bundle under its own HOME is PAIRED to this server as a person pairs one
+//     (POST /api/device/dial-pair, the daemon dials /api/device-dial), the machine picker offers it, ITS ladder
+//     answers, the launch runs on it (the record the device's, never this machine's store), the window connects
+//     through the hub forward, the pane covers the app, the title names the machine, typed keys land in the app's
+//     file on the device, the dialog's picker re-reads its catalog, Stop closes the window, no marker left.
 // SKIPs with evidence without chrome / xpra / xauth / xterm; the xclip legs
 // SKIP without xclip; the plain-http leg SKIPs when the hostname does not
 // resolve. Worktree-isolated (own data/, scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1),
@@ -137,7 +143,8 @@ const srvLog = [];
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
 bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskxpra-chrome')}`, 'about:blank'], { stdio: 'ignore' });
-const worktrees = [wt]; // + §5's pre-x5 CONTROL copy while it exists
+const worktrees = [wt];
+const devProcs = [], devHomes = []; // §13 (lane C2): the paired scratch devices (their daemons + HOMEs) // + §5's pre-x5 CONTROL copy while it exists
 const ctlServers = [];
 const appsOf = (w) => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(w, 'data/desktop-apps.json'), 'utf8')).apps).map((a) => ({ ...a, _wt: w })); } catch { return []; } };
 const recordedApps = () => worktrees.flatMap(appsOf);
@@ -173,6 +180,15 @@ const cleanup = () => {
   }
   for (const p of sessionHit) { try { process.kill(p, 'SIGKILL'); } catch {} }
   if (sessionHit.length) console.log(`  (exit sweep reaped ${sessionHit.length} process(es) of §5's agent session: ${sessionHit.join(', ')})`);
+  // §13: the paired scratch device — its dialing daemon (the process group we spawned, then its pidfile), then every
+  // process still carrying one of ITS records' session marker (by evidence: the ids in its own record file)
+  for (const d of devProcs) { try { process.kill(-d.pid, 'SIGKILL'); } catch {} try { d.kill('SIGKILL'); } catch {} }
+  for (const h of devHomes) {
+    try { const pid = Number(fs.readFileSync(path.join(h, 'agentd-root', 'state', 'agentd.pid'), 'utf8')); if (pid > 0) process.kill(pid, 'SIGKILL'); } catch {}
+    let ids = []; try { ids = Object.keys(JSON.parse(fs.readFileSync(path.join(h, '.vibespace', 'desktop-apps.json'), 'utf8')).apps || {}); } catch {}
+    if (ids.length) for (const d of fs.readdirSync('/proc')) { if (/^\d+$/.test(d) && ids.some((id) => D.environHas(Number(d), `VIBESPACE_DESKTOP_APP=${id}`))) { try { process.kill(Number(d), 'SIGKILL'); } catch {} } }
+    try { fs.rmSync(h, { recursive: true, force: true }); } catch {}
+  }
   for (const w of worktrees) { try { execSync(`git worktree remove --force ${w}`, { cwd: repo, stdio: 'ignore' }); } catch {} }
   try { fs.rmSync(scratch('deskxpra-chrome'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-x5ctl-home'), { recursive: true, force: true }); } catch {}
@@ -930,7 +946,7 @@ try {
     fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
     const patches = [
       ['src/lib/xpra-view.js', "  const ratio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);", '  const ratio = () => 1; // pre-fix CONTROL'],
-      ['src/server/desktop-app-keeper.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'], // round 3 A3 respelled the lever (the pick is scalePick's)
+      ['src/desktop-serve.js', "const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale) : M.scaleKnobs(1);", 'const knobs = M.scaleKnobs(1); // pre-fix CONTROL'], // round 3 A3 respelled the lever (the pick is scalePick's)
       ['src/lib/xpra-proto.js', "'title', 'size-hints', 'size-constraints', 'class-instance'", "'title', 'size-hints', 'class-instance'"],
     ];
     let allOnce = true;
@@ -1082,7 +1098,7 @@ try {
       ['src/lib/xpra-view.js', "      if (mode === 'watch') {\n        for (const w of client.windows.values())", "      if (true) {\n        for (const w of client.windows.values())"],
       ['src/lib/xpra-client.js', '    return { width: Math.max(pane.width, g ? g.x + g.w : 0), height: Math.max(pane.height, g ? g.y + g.h : 0) };', '    return { width: pane.width, height: pane.height };'],
       ['src/lib/window.js', '  _ownMinOf(win) { return minOf(win, this._workspaceBox()); }', '  _ownMinOf(win) { return minOf(win); }'],
-      ['src/server/desktop-app-keeper.js', "      if (own && M.streamKindOf(rec, backends) === 'xpra') {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
+      ['src/desktop-serve.js', "      if (own && M.streamKindOf(rec, backends) === 'xpra') {\n        const xd = await display.waitForXftDpi(", "      if (false) {\n        const xd = await display.waitForXftDpi("],
       ['src/desktop-apps.js', '  if (eff < Math.SQRT2) return eff;', '  return Math.min(2, Math.max(1, Math.round(normalizeDpr(dpr) * 2) / 2)); // r1 CONTROL (round 3 A3 respelled the auto rule: the lever is its first line)'],
     ];
     let once = true;
@@ -1652,10 +1668,10 @@ try {
       for (const f of ['src', 'public', 'server.js', 'scripts', 'package.json']) execSync(`rm -rf ${wtc}/${f} && cp -r ${wt}/${f} ${wtc}/${f}`);
       fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtc, 'node_modules'));
       fs.mkdirSync(path.join(wtc, 'data'), { recursive: true });
-      const kSrc = fs.readFileSync(path.join(wtc, 'src/server/desktop-app-keeper.js'), 'utf8');
+      const kSrc = fs.readFileSync(path.join(wtc, 'src/desktop-serve.js'), 'utf8'); // lane C1: the launch is the machine half's
       const pickLine = "const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });";
       check('CONTROL: the keeper\'s scale pick is spelled exactly once (the control replaces exactly it)', kSrc.split(pickLine).length === 2);
-      fs.writeFileSync(path.join(wtc, 'src/server/desktop-app-keeper.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
+      fs.writeFileSync(path.join(wtc, 'src/desktop-serve.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-a3ctl-home', fs);
       const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
@@ -2026,6 +2042,92 @@ try {
       for (const id of ids12) await fetch(`${O12}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
       await dropPage(A); await dropPage(B); await dropPage(H);
     }
+  }
+
+  // ── §13 (lane C2 — docs/design-desktop-apps-seamless §3.5): THE MAIN LEGS AGAIN FOR AN APP ON A PAIRED MACHINE — a
+  // scratch daemon (the BUILT bundle, its own HOME) PAIRED to this server the way a person pairs one (POST
+  // /api/device/dial-pair, the daemon dials /api/device-dial with the token), then: the machine picker offers it, ITS
+  // ladder answers (GET /api/desktop/apps?host=), the launch runs THERE (the record is the device's, the hub
+  // re-labels it), the window connects through the hub forward (the bridge's streamEndpointFor), the pane covers the
+  // app, the title names the machine, typed keys land in the app's file on the device, Stop closes the window. ──
+  {
+    console.log('§13 lane C2: the main legs with host=<a paired device> (a scratch daemon dialed in to this server)');
+    const devHome = scratchHome('deskxpra-dev-home', fs, ['.vibespace']);
+    const devRoot = path.join(devHome, 'agentd-root');
+    fs.mkdirSync(path.join(devRoot, 'state'), { recursive: true, mode: 0o700 });
+    devHomes.push(devHome);
+    const devTyped = path.join(devHome, 'typed-remote.txt');
+    // its OWN page (the earlier sections navigated / replaced the suite's page): a fresh tab on this server
+    const t12 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+    const p12 = await page(t12);
+    await openPage(p12, `http://127.0.0.1:${PORT}`);
+    let devId = null;
+    const devName = `vs-deskxpra-dev-${process.pid}`;
+    try {
+      const pair = await p12.evalJs(`fetch('/api/device/dial-pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: ${JSON.stringify(devName)} }) }).then((r) => r.json())`);
+      check('§13: the server mints a pairing (dial token + host token) for the scratch device', !!(pair && pair.dialToken && pair.hostToken && pair.deviceId), pair);
+      fs.writeFileSync(path.join(devRoot, 'state', 'token'), pair.hostToken, { mode: 0o600 });
+      const dev = spawn(process.execPath, [path.join(wt, 'data', 'bin', 'vibespace-agentd.js'), '--dial', `ws://127.0.0.1:${PORT}/api/device-dial?device=${pair.deviceId}`, '--dial-token', pair.dialToken], { cwd: devHome, env: { ...process.env, HOME: devHome, VIBESPACE_AGENTD_ROOT: devRoot }, stdio: 'ignore', detached: true });
+      devProcs.push(dev); dev.unref();
+      const row = await until(async () => { const r = await p12.evalJs(`fetch('/api/desktop/machines').then((r) => r.json())`); const m = r && r.machines && r.machines.find((x) => x.label === devName); return m && m.code === 'ready' ? m : null; }, 30000, 500);
+      check(`§13: the paired device dialed in and the machine picker offers it (${row && row.hostId}: ${row && row.code}, platform ${row && row.platform})`, !!row && row.selectable === true, row);
+      devId = row && row.hostId;
+      if (devId) {
+        const av = await p12.evalJs(`fetch('/api/desktop/apps?host=${encodeURIComponent(devId)}').then((r) => r.json())`);
+        check(`§13: THE DEVICE's ladder answers (GET /api/desktop/apps?host=): ${av && av.availability && av.availability.backend}, ${av && av.registry && av.registry.length} catalog rows`, av && av.availability && av.availability.backend === 'xpra' && av.host && av.host.hostId === devId, av && (av.error || av.availability));
+        const L = await p12.evalJs(`fetch('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify({ host: devId, exec: XTERM, args: ['-T', 'vs-remote-title', '-geometry', '80x24', '-e', 'sh', '-c', `cat > ${devTyped}`], label: 'remote xterm' }))} }).then((r) => r.json())`);
+        const rid = L && L.id;
+        check(`§13: POST /api/desktop/apps with host ⇒ launched ON THE DEVICE (hostId ${L && L.hostId}, backend ${L && L.backend})`, !!rid && L.hostId === devId && L.backend === 'xpra', L);
+        const rr = rid && await until(() => p12.evalJs(`fetch('/api/desktop/apps/${rid}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 40000, 300);
+        check(`§13: the record reaches ready on the device (port ${rr && rr.port}, the hub label ${rr && rr.hostLabel})`, !!rr && rr.hostId === devId && !!rr.hostLabel, rr);
+        const onDev = (() => { try { return JSON.parse(fs.readFileSync(path.join(devHome, '.vibespace', 'desktop-apps.json'), 'utf8')).apps[rid]; } catch { return null; } })();
+        const onHub = (() => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'desktop-apps.json'), 'utf8')).apps[rid]; } catch { return null; } })();
+        check('§13: the record is the DEVICE\'s (its ~/.vibespace/desktop-apps.json), never in this machine\'s store (D8)', !!onDev && !onHub);
+        if (rr) {
+          await p12.evalJs(`app.openDesktopApp(${JSON.stringify(rid)}); true`);
+          const t0 = Date.now();
+          const conn = await until(async () => { const s = await p12.evalJs(WIN(rid)); return s && s.status === 'Connected' && s.windows.length ? s : null; }, 30000, 250);
+          check(`§13: the window connects through the hub forward (Connected ${conn ? Date.now() - t0 : '—'} ms after open, the xpra view)`, !!conn && conn.kind === 'xpra', conn || p12.logs.slice(-8));
+          const srvSaw = srvLog.join('').includes(`${rid}: upstream on ${devId}:${rr.port} through the hub forward`);
+          check('§13: the bridge resolved the upstream to the hub forward (its log line names the device and the port)', srvSaw);
+          await p12.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(rid)}); w.element.style.width = '900px'; w.element.style.height = '620px'; if (w.onResize) w.onResize(); return true; })()`);
+          const settled = await until(async () => { const s = await p12.evalJs(WIN(rid)); const m = s && s.windows.find((w) => w.kind === 'main'); return m && s.pane.w - m.w < 16 && s.pane.h - m.h < 24 && m.x === 0 && m.y === 0 ? s : null; }, 15000, 300);
+          await sleep(1200);
+          const m = await measurePane(p12, rid);
+          check(`§13: the device's app window covers the pane up to one xterm cell (${m && m.main && `${m.main.w}×${m.main.h}`} of ${m && `${m.pane.w}×${m.pane.h}`}), ${m && m.blackOut} black px outside it`, !!settled && !!m && !!m.main && m.blackOut === 0 && m.inBrightFrac > 0.5, m && { main: m.main, blackOut: m.blackOut });
+          const tt = await until(async () => { const s = await p12.evalJs(WIN(rid)); return s && /vs-remote-title/.test(s.title) && s.title.includes(rr.hostLabel) ? s.title : null; }, 10000, 250);
+          check(`§13: the title bar carries the app's own title AND the machine's name ("${tt}")`, !!tt);
+          const s1 = await p12.evalJs(WIN(rid));
+          await trustedClickAt(p12, s1.pane.x + s1.pane.w / 2, s1.pane.y + s1.pane.h / 2);
+          await sleep(300);
+          const keyOf = (ch) => ({ key: ch, code: ch === ' ' ? 'Space' : /[a-z]/.test(ch) ? 'Key' + ch.toUpperCase() : /[0-9]/.test(ch) ? 'Digit' + ch : '', windowsVirtualKeyCode: ch === ' ' ? 32 : ch.toUpperCase().charCodeAt(0), text: ch, unmodifiedText: ch });
+          const tk = Date.now();
+          for (const ch of 'on the device 7') { const k = keyOf(ch); await p12.cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k }); await p12.cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k }); }
+          await p12.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+          await p12.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+          const typed = await until(() => { try { const s = fs.readFileSync(devTyped, 'utf8'); return s.includes('on the device 7\n') ? s : null; } catch { return null; } }, 15000, 50);
+          check(`§13: trusted key events typed in the page land in the app's file ON THE DEVICE (${typed ? Date.now() - tk : '—'} ms for 16 keys through page → hub bridge → forward → the device's xpra)`, !!typed, (() => { try { return JSON.stringify(fs.readFileSync(devTyped, 'utf8')); } catch { return 'no file'; } })());
+          // the launch dialog: the machine picker shows the device, selectable (our own controls' structure)
+          await p12.evalJs(`document.getElementById('btn-desktop-apps') ? (document.getElementById('btn-desktop-apps').click(), true) : false`);
+          const pick = await until(() => p12.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-machine[data-host=${JSON.stringify(devId)}]'); return b ? { disabled: b.disabled, n: document.querySelectorAll('#desktop-launch-dialog .desktop-launch-machine').length } : null; })()`), 10000, 250);
+          check(`§13: the launch dialog's machine picker has a row for the device, enabled (${pick && pick.n} machines)`, !!pick && pick.disabled === false && pick.n >= 2, pick);
+          await p12.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-machine[data-host=${JSON.stringify(devId)}]'); if (b) b.click(); return true; })()`);
+          const cat = await until(() => p12.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-machine[data-host=${JSON.stringify(devId)}]'); const cards = document.querySelectorAll('#desktop-launch-dialog .desktop-launch-registry .desktop-launch-card'); return b && b.getAttribute('aria-pressed') === 'true' && cards.length ? { cards: cards.length } : null; })()`), 10000, 250);
+          check('§13: choosing the device re-reads ITS catalog (the cards are the device\'s)', !!cat, cat);
+          await p12.evalJs(`(() => { const o = document.getElementById('desktop-launch-dialog'); if (o) o.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return true; })()`);
+          await sleep(300);
+          // Stop ⇒ the device verifies every part gone; the window closes itself
+          const sp = await p12.evalJs(`fetch('/api/desktop/apps/${rid}/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json())`);
+          check(`§13: Stop through the route ⇒ the device answers exited (${sp && sp.state}, ${sp && sp.stoppedBy})`, sp && sp.state === 'exited' && sp.stoppedBy === 'user', sp);
+          const closed = await until(() => p12.evalJs(`!${WIN(rid)}`), 10000, 250);
+          check('§13: the window closes itself when the device\'s app ended (A2 over the paired machine)', !!closed);
+          await sleep(500);
+          const left = []; for (const d of fs.readdirSync('/proc')) { if (/^\d+$/.test(d) && D.environHas(Number(d), `VIBESPACE_DESKTOP_APP=${rid}`)) left.push(Number(d)); }
+          check(`§13: nothing on the device still carries the session marker (${left.length})`, left.length === 0, left);
+        }
+      }
+    } catch (e) { failed++; console.error('  ✗ §13 threw:', e.stack || e.message); }
+    finally { p12.close(); try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t12.id}`); } catch {} }
   }
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);

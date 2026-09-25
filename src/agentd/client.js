@@ -250,7 +250,7 @@ class DeviceManager {
             mux.onWritable = (chan) => { sessions.get(chan)?.onWritable?.(); };
             const prevControl = mux.onControl;
             mux.onControl = (m) => {
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'proc-list-result' || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -292,6 +292,14 @@ class DeviceManager {
               // until a page reload (real report, 3× in one evening).
               for (const s of sessions.values()) { try { s.onClose?.(); } catch { } try { s.onExit?.(-1); } catch { } }
               sessions.clear();
+              // FAIL EVERY IN-FLIGHT REQUEST NOW (lane C2 fix, 2026-09-25): a
+              // request already written to THIS mux can never be answered — a
+              // re-dial is a NEW connection with its own pending map — yet each
+              // one used to wait out its own timeoutMs (desktop-serve 60 s,
+              // browser-serve 90 s) while the device was back in ~110 ms. The
+              // reply shape carries `linkLost` so _request names it by code.
+              for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }
+              pending.clear();
               this._conn = null;
               this._log('[agentd] connection lost');
             };
@@ -408,7 +416,7 @@ class DeviceManager {
     const conn = await this.connect();
     const id = conn.nextId++;
     return new Promise((resolve, reject) => {
-      conn.pending.set(id, (m) => (m.error ? reject(new Error(m.error)) : resolve(m)));
+      conn.pending.set(id, (m) => (m.error ? reject(Object.assign(new Error(m.error), m.linkLost ? { code: 'link_lost' } : {})) : resolve(m)));
       conn.mux.control({ ...payload, id });
       setTimeout(() => { if (conn.pending.delete(id)) reject(new Error(payload.op + ' timeout')); }, payload.timeoutMs || 30000);
     });
@@ -560,12 +568,12 @@ class DeviceManager {
    *  credit-gated tail can't be overtaken and silently dropped (truncated
    *  usage harvests / streamed downloads). Old daemons omit it → resolve at
    *  exit as before. A 15s post-exit stall resolves {truncated:true}. */
-  runStream(cmd, args = [], { env, cwd, stdin, onData } = {}) {
-    return this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData });
+  runStream(cmd, args = [], { env, cwd, stdin, onData, timeoutMs } = {}) {
+    return this._streamOp({ op: 'run-stream', cmd, args, env, cwd, stdin64: stdin ? Buffer.from(stdin).toString('base64') : undefined }, { onData, timeoutMs });
   }
   /** ONE streaming-op consumer (run-stream + usage-scan): count-gated settle
    *  (stream-exit's `sent` vs received), link-death settles, deadline belt. */
-  async _streamOp(req, { onData } = {}) {
+  async _streamOp(req, { onData, timeoutMs = 120000 } = {}) {
     const conn = await this.connect();
     const chan = conn.nextChan++;
     let exitR;
@@ -593,7 +601,10 @@ class DeviceManager {
     });
     // Overall deadline belt: even absent a clean onClose/onExit (a wedged
     // half-open link that never errors), never leave the caller hanging.
-    const deadline = setTimeout(() => settle({ error: 'run-stream timed out' }), 120000);
+    // `timeoutMs` (default 120 s, every pre-C2 caller): a caller that runs something LONG (the desktop install rung —
+    // apt on a small VM) names its own; `timedOut` tells a deadline apart from a real exit (the child is NOT killed —
+    // the belt only stops waiting).
+    const deadline = setTimeout(() => settle({ error: 'run-stream timed out', timedOut: true }), timeoutMs);
     if (deadline.unref) deadline.unref();
     done.finally?.(() => clearTimeout(deadline));
     const ack = await this._request({ ...req, chan });
@@ -659,6 +670,19 @@ class DeviceManager {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('browser-serve')) { const e = new Error('daemon lacks browser-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     const r = await this._request({ op: 'browser-serve', action, params, timeoutMs });
+    if (r.error) throw new Error(r.error);
+    return r.result || {};
+  }
+
+  /** One `desktop-serve` op on THIS device (desktop apps lane C1, docs/design-desktop-apps-seamless §3.5): facts /
+   *  launch / stop / status / list / windows / fit / keep-alive / relaunch of a desktop application WHERE it runs. The
+   *  op names and shapes are the SHARED table src/desktop-serve.js — the daemon runs the same runDesktopServeOp()
+   *  against its own machine keeper. Capability-gated: an old daemon that does not know the op would HANG (the
+   *  2.300.0 rule), so it is never asked — refused by name `host_needs_daemon`. */
+  async desktopServe(action, params = {}, { timeoutMs = 60000 } = {}) {
+    const conn = await this.connect();
+    if (!conn.info?.capabilities?.includes?.('desktop-serve')) { const e = new Error('daemon lacks desktop-serve (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    const r = await this._request({ op: 'desktop-serve', action, params, timeoutMs });
     if (r.error) throw new Error(r.error);
     return r.result || {};
   }
