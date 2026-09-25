@@ -2184,11 +2184,26 @@ class HostManager {
         # rule picks the first non-injected one); a .zst rollout is read through
         # zstd(1) when the host has it, else it lists nameless. CO = rollouts held
         # OPEN by a codex process = RUNNING threads (no lock files in codex).
-        [ -n "$CDX" ] && printf '%s\\n' "$CDX" | head -30 | while read -r c m s f; do
-          case "$f" in *.zst) HD=$( (command -v zstd >/dev/null 2>&1 && zstd -dc -- "$f" 2>/dev/null) | head -c 200000 );; *) HD=$(head -c 200000 -- "$f" 2>/dev/null);; esac
-          printf 'HC %s\\t' "$f"; printf '%s' "$HD" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
-          printf '%s' "$HD" | grep -m3 '"role":"user"' | while IFS= read -r u; do printf 'NC %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
-        done
+        # HC/NC ride the 30 NEWEST rollouts only (a head read each; an older
+        # primary lists nameless); SC rides EVERY listed rollout (verifier r1,
+        # 2026-09-24: inside the 30-slot loop 25 of 48 real sub-agents listed
+        # as primary). The own session_meta is line 0 (~22 KB measured), so an
+        # SC-only read takes 128 KiB. The daemon's HEAD_FACTS/SC_HEAD_BYTES twin.
+        [ -n "$CDX" ] && printf '%s\\n' "$CDX" | { i=0; while read -r c m s f; do
+          i=$((i+1)); if [ "$i" -le 30 ]; then N=200000; else N=131072; fi
+          case "$f" in *.zst) HD=$( (command -v zstd >/dev/null 2>&1 && zstd -dc -- "$f" 2>/dev/null) | head -c "$N" );; *) HD=$(head -c "$N" -- "$f" 2>/dev/null);; esac
+          if [ "$i" -le 30 ]; then
+            printf 'HC %s\\t' "$f"; printf '%s' "$HD" | grep -o '"cwd":"[^"]*"' | head -n 1; echo
+            printf '%s' "$HD" | grep -m3 '"role":"user"' | while IFS= read -r u; do printf 'NC %s\\t' "$f"; printf '%s' "$u" | head -c 2000; printf '\\n'; done
+          fi
+          # SC = the thread's classification (2026-09-24): thread_source /
+          # parent_thread_id / agent_* from its OWN session_meta (the one whose
+          # "id" is the file's thread id — a v2 sub-agent also copies its
+          # parent's meta) — discovery-facts.classifyCodexThread reads them, so
+          # a remote sub-agent lists as a sub-agent, never as the owner's own.
+          TID=$(printf '%s' "$f" | sed -n 's/.*\\([0-9a-fA-F]\\{8\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{4\\}-[0-9a-fA-F]\\{12\\}\\)\\.jsonl.*/\\1/p')
+          [ -n "$TID" ] && printf '%s\\n' "$HD" | grep '"type":"session_meta"' | grep -m1 "\\"id\\":\\"$TID\\"" | { IFS= read -r ML || true; case "$ML" in *'"thread_source":"subagent"'*|*'"subagent":'*) printf 'SC %s\\t' "$f"; printf '%s' "$ML" | grep -oE '"(thread_source|parent_thread_id|agent_nickname|agent_path|agent_role|subagent)":"[^"]*"|"thread_spawn":[{]' | tr '\\n' ' '; echo;; esac; }
+        done; }
 ${codexOpenRolloutsShell()}
       fi
     `.trim();

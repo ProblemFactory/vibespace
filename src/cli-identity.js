@@ -391,6 +391,20 @@ function ppidFromStat(procRoot, pid) {
   } catch { return null; }
 }
 
+/** /proc/<pid>/stat field 22 (starttime, clock ticks since boot) as the
+ *  string the claude lock's `procStart` carries, or null when unreadable. The
+ *  ONE reader (session-store's discovery and the lock capture's writer
+ *  witness both ask it). Counted from the LAST ')' — rest[0] is field 3. */
+function procStartTicks(pid, opts = {}) {
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  try {
+    const stat = fs.readFileSync(`${opts.procRoot || PROC_ROOT}/${n}/stat`, 'utf8');
+    const v = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    return v ? String(v) : null;
+  } catch { return null; }
+}
+
 /** The ONE parent/children table per sweep — built by walking /proc (zero
  *  fork) or, where there is no /proc, by ONE `ps -eo pid=,ppid=`. Memoised for
  *  PROC_TABLE_TTL_MS: the callers ask about many pids back to back. */
@@ -823,6 +837,6 @@ function pidAliveShellFn() {
 
 module.exports = {
   isCliProcess, cliIdentityShellFns, pidAliveShellFn, procArgv, procExe, readPsIdentity, procCmdline, procUid, procSample, procSampleAsync, parseProcSample, setMemory, setSample, MEM_METRICS,
-  hasProcfs, readPpid, readChildPids, readSid, sessionIndex, sessionMembers, pidsMatchingCmdline, resetProcTables,
+  hasProcfs, readPpid, readChildPids, procStartTicks, readSid, sessionIndex, sessionMembers, pidsMatchingCmdline, resetProcTables,
   PS_IDENTITY_TTL_MS, PROC_TABLE_TTL_MS, PROCFS_RECHECK_MS, INTERPRETERS, MAX_INTERP_FLAGS,
 };

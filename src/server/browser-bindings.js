@@ -44,9 +44,10 @@
  * namespace, and NOT ONE journal line (rung 1 answered confidently). Note the
  * claim r5 made here — "a fork binds under ITS OWN new id" — was true of the
  * ADOPTION write and false of every write before it; and `forkRequested` is
- * not the fact to ask, because it stays `true` in the file after a claude
- * adoption (the adoption write spreads the old record and never re-lists it)
- * and for ever on a codex or opencode fork (nothing clears it).
+ * not the fact to ask, because it stayed `true` in the file after a claude
+ * adoption (the adoption write spread the old record and never re-listed it —
+ * re-listed `false` since the fork-group round 2, but older records keep it)
+ * and stays `true` for ever on a codex or opencode fork (nothing clears it).
  *
  * TWO LAYERS, each with its own control (test-browser-profiles §⑳,
  * test-browser-continuity §②):

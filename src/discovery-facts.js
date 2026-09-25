@@ -253,6 +253,179 @@ function deriveCodexSessionName(text) {
   return firstLine.slice(0, 120);
 }
 
+/** The role label a codex sub-agent's name carries ('code_reviewer' →
+ *  'Code Reviewer'). Moved here with deriveCodexAgentName (2026-09-24) so the
+ *  ssh script's SC lines and the daemon snapshot name a sub-agent exactly
+ *  like the local listing. */
+function formatCodexRoleLabel(role) {
+  const value = String(role || '').trim();
+  if (!value) return '';
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function deriveCodexAgentName(agentKind, agentRole, agentNickname) {
+  const roleLabel = formatCodexRoleLabel(agentRole);
+  const nick = String(agentNickname || '').trim();
+
+  if (agentKind === 'review') return 'Review';
+  if (agentKind === 'subagent') {
+    if (nick && roleLabel) return `${nick} (${roleLabel})`.slice(0, 120);
+    if (nick) return nick.slice(0, 120);
+    if (roleLabel) return `Subagent: ${roleLabel}`.slice(0, 120);
+    return 'Subagent';
+  }
+
+  if (nick && roleLabel) return `${nick} (${roleLabel})`.slice(0, 120);
+  if (nick) return nick.slice(0, 120);
+  if (roleLabel) return roleLabel.slice(0, 120);
+  return '';
+}
+
+/** THE codex thread classification — primary / subagent / review — ONE rule
+ *  for the local listing (adapters/codex extractCodexThreadMeta), the live
+ *  wrapper_meta (codex-events via normalizeCodexSource), the daemon snapshot
+ *  and the ssh script's SC lines (2026-09-24, the sub-agent flood report).
+ *  Input = a thread's OWN session_meta payload (or the SC-line fields rebuilt
+ *  into that shape). Measured shape of a 0.153 multi-agent v2 child (keys
+ *  only): {session_id, id, parent_thread_id, timestamp, cwd, originator,
+ *  cli_version, source: {subagent: {thread_spawn: {parent_thread_id, depth,
+ *  agent_path, agent_nickname, agent_role}}}, thread_source: "subagent",
+ *  agent_nickname, agent_path, …, multi_agent_version: "v2"} — the nested
+ *  `thread_spawn` and the top-level `thread_source` are two spellings of the
+ *  same fact; either one makes the thread a SUB-AGENT (a machine-spawned
+ *  thread, never the owner's own conversation). A USER fork (thread/fork:
+ *  `forked_from_id`, no thread_source "subagent", no source.subagent) stays
+ *  PRIMARY — it is its own conversation. `agent_role` is whatever codex
+ *  declared (null on every v2 child measured) — never synthesized from the
+ *  path: a path leaf is a task slug, not a role, and a made-up role badge
+ *  would be a claim codex never made. */
+function classifyCodexThread(meta) {
+  const p = meta && typeof meta === 'object' ? meta : {};
+  const source = p.source === undefined ? null : p.source;
+  const str = (v) => (typeof v === 'string' ? v : '');
+  const topRole = str(p.agent_role) || str(p.agentRole);
+  const topNick = str(p.agent_nickname) || str(p.agentNickname);
+  const topParent = str(p.parent_thread_id) || str(p.parentThreadId) || null;
+  const topPath = str(p.agent_path) || str(p.agentPath);
+  const obj = source && typeof source === 'object' ? source : null;
+  const subAgent = obj ? (obj.subAgent || obj.subagent || obj.sub_agent || null) : null;
+  const spawn = (subAgent && typeof subAgent === 'object' ? (subAgent.thread_spawn || subAgent.threadSpawn) : null) || (obj && obj.thread_spawn) || null;
+  if (spawn) {
+    return {
+      raw: source,
+      sourceKind: 'subagent',
+      agentKind: 'subagent',
+      agentRole: str(spawn.agent_role) || topRole,
+      agentNickname: str(spawn.agent_nickname) || topNick,
+      parentThreadId: str(spawn.parent_thread_id) || topParent,
+      // 0.153.4 multi-agent v2 (B-7473): the child's own path in the agent tree
+      // ('/root/water_research') and its depth — the ONLY server-side way to
+      // answer "which rollout is this collab row's sub-agent?" for a rollout
+      // that predates SubAgentActivity items.
+      agentPath: str(spawn.agent_path) || topPath,
+      depth: Number.isInteger(spawn.depth) ? spawn.depth : null,
+    };
+  }
+  if (subAgent === 'review') {
+    return {
+      raw: source,
+      sourceKind: 'review',
+      agentKind: 'review',
+      agentRole: str(obj.agentRole) || str(obj.agent_role) || topRole,
+      agentNickname: str(obj.agentNickname) || str(obj.agent_nickname) || topNick,
+      parentThreadId: str(obj.parentThreadId) || str(obj.parent_thread_id) || topParent,
+    };
+  }
+  const review = obj ? (obj.review || obj.review_mode || null) : null;
+  if (review) {
+    return {
+      raw: source,
+      sourceKind: 'review',
+      agentKind: 'review',
+      agentRole: str(review.agent_role) || topRole,
+      agentNickname: str(review.agent_nickname) || topNick,
+      parentThreadId: str(review.parent_thread_id) || topParent,
+    };
+  }
+  // The top-level marker (and any other `source.subagent` shape — 'compact',
+  // {other: …}): still a machine-spawned thread.
+  if (p.thread_source === 'subagent' || subAgent) {
+    return {
+      raw: source,
+      sourceKind: 'subagent',
+      agentKind: 'subagent',
+      agentRole: topRole,
+      agentNickname: topNick,
+      parentThreadId: topParent,
+      agentPath: topPath,
+      depth: null,
+    };
+  }
+  if (typeof source === 'string') {
+    return { raw: source, sourceKind: source, agentKind: 'primary', agentRole: '', agentNickname: '', parentThreadId: null };
+  }
+  return {
+    raw: source || null,
+    sourceKind: source ? 'structured' : null,
+    agentKind: 'primary',
+    agentRole: (obj && (str(obj.agentRole) || str(obj.agent_role))) || '',
+    agentNickname: (obj && (str(obj.agentNickname) || str(obj.agent_nickname))) || '',
+    parentThreadId: (obj && (str(obj.parentThreadId) || str(obj.parent_thread_id))) || null,
+  };
+}
+
+/** The SC line (ssh script) / snapshot `agent` record → the payload shape
+ *  classifyCodexThread reads. SC = `SC <path>\t<tokens>`, tokens = grep -o
+ *  matches over the rollout's OWN session_meta line: `"k":"v"` for k in
+ *  SC_KEYS plus the bare `"thread_spawn":{` marker. First occurrence wins —
+ *  the nested thread_spawn copy carries the same values as the top level. */
+const SC_KEYS = ['thread_source', 'parent_thread_id', 'agent_nickname', 'agent_path', 'agent_role', 'subagent'];
+function codexAgentFieldsFromScTokens(rest) {
+  const f = {};
+  const s = String(rest || '');
+  const re = /"(thread_source|parent_thread_id|agent_nickname|agent_path|agent_role|subagent)":"((?:[^"\\]|\\.)*)"/g;
+  let m;
+  while ((m = re.exec(s))) {
+    if (f[m[1]] !== undefined) continue;
+    let v = m[2];
+    try { v = JSON.parse('"' + v + '"'); } catch { }
+    f[m[1]] = v;
+  }
+  f.thread_spawn = /"thread_spawn":\{/.test(s);
+  return f;
+}
+function codexMetaFromAgentFields(f) {
+  if (!f) return null;
+  const spawn = f.thread_spawn ? { parent_thread_id: f.parent_thread_id, agent_path: f.agent_path, agent_nickname: f.agent_nickname, agent_role: f.agent_role } : null;
+  const source = spawn ? { subagent: { thread_spawn: spawn } } : (f.subagent ? { subagent: f.subagent } : null);
+  return { source, thread_source: f.thread_source, parent_thread_id: f.parent_thread_id, agent_nickname: f.agent_nickname, agent_path: f.agent_path, agent_role: f.agent_role };
+}
+/** The daemon's half: a rollout head → the same SC token string the ssh
+ *  script prints (from the OWN session_meta — the one whose id is the file's
+ *  thread id; a sub-agent rollout also carries a COPY of its parent's meta). */
+function codexScTokensFromHead(head, tid) {
+  for (const line of String(head || '').split('\n')) {
+    if (!line.includes('"session_meta"')) continue;
+    let r; try { r = JSON.parse(line); } catch { continue; }
+    const p = r && r.type === 'session_meta' ? r.payload : null;
+    if (!p || (tid && String(p.id || '').toLowerCase() !== String(tid).toLowerCase())) continue;
+    const toks = [];
+    const add = (k, v) => { if (typeof v === 'string') toks.push(`"${k}":${JSON.stringify(v)}`); };
+    for (const k of SC_KEYS) if (k !== 'subagent') add(k, p[k]);
+    const sa = p.source && typeof p.source === 'object' ? (p.source.subagent || p.source.subAgent || p.source.sub_agent) : null;
+    if (typeof sa === 'string') add('subagent', sa);
+    const sp = sa && typeof sa === 'object' ? (sa.thread_spawn || sa.threadSpawn) : null;
+    if (sp) { toks.push('"thread_spawn":{'); for (const k of ['parent_thread_id', 'agent_nickname', 'agent_path', 'agent_role']) add(k, sp[k]); }
+    return toks.join(' ');
+  }
+  return '';
+}
+
 /** A codex user record (`response_item` message role user) → name via the
  *  codex rule, over a RAW rollout line that may be TRUNCATED (the ssh script
  *  caps NC lines at 2000 bytes): full parse first, then every "text":"…"
@@ -409,7 +582,7 @@ function pidLooksClaude(pid) {
 
 /**
  * interpretDiscoveryLines — the ONE interpretation of the discovery fact
- * lines (LOCK/J/H/N/T/C/HC/K) into resumable session cards. It was ~120 lines
+ * lines (LOCK/J/H/N/T/C/HC/NC/SC/CO/K) into resumable session cards. It was ~120 lines
  * inline in hosts.discoverSessions; extracting it (R5 step 2 of
  * docs/design-three-tier.md) lets the DEVICE compute its own claims (the
  * `discovery.v2` op) with the byte-identical logic the server used to run
@@ -427,6 +600,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
   const codexCwd = new Map(); // rollout path -> cwd
   const codexNames = new Map(); // rollout path -> name (S3: NC lines, codex naming rule)
   const codexOpen = new Set(); // thread ids held open by a codex process (S3: CO lines)
+  const codexAgent = new Map(); // rollout path -> SC tokens (sub-agent classification, 2026-09-24)
   const tailIds = new Map(); // jsonl path -> [sessionIds in tail, last = current writer]
   for (const line of out.split('\n')) {
     if (line.startsWith('K ')) {
@@ -466,6 +640,12 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
           if (name) codexNames.set(fp, name);
         }
       }
+    } else if (line.startsWith('SC ')) {
+      // codex thread classification (2026-09-24): "SC <path>\t<tokens>" — the
+      // OWN session_meta's thread_source / parent_thread_id / agent_* fields
+      // (grep -o over the line; classifyCodexThread is the one rule)
+      const t = line.indexOf('\t');
+      if (t > 3 && !codexAgent.has(line.slice(3, t))) codexAgent.set(line.slice(3, t), line.slice(t + 1));
     } else if (line.startsWith('CO ')) {
       // rollout held OPEN by a codex process (S3): "CO <path>" — the thread
       // is RUNNING there (resume must not put a second app-server on it)
@@ -571,16 +751,36 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
     const plain = !isZstPath(r.path);
     const cwd = codexCwd.get(r.path) || null;
     const name = codexNames.get(r.path) || null;
+    const sc = codexAgent.has(r.path) ? codexAgent.get(r.path) : null;
     const cur = byTid.get(key);
-    if (!cur) { byTid.set(key, { tid, plain, cwd, name, mtime: r.mtime }); continue; }
+    if (!cur) { byTid.set(key, { tid, plain, cwd, name, sc, mtime: r.mtime }); continue; }
     cur.mtime = Math.max(cur.mtime, r.mtime);
-    if (plain && !cur.plain) { cur.plain = true; cur.tid = tid; if (cwd) cur.cwd = cwd; if (name) cur.name = name; }
+    if (plain && !cur.plain) { cur.plain = true; cur.tid = tid; if (cwd) cur.cwd = cwd; if (name) cur.name = name; if (sc != null) cur.sc = sc; }
     if (!cur.cwd && cwd) cur.cwd = cwd;
     if (!cur.name && name) cur.name = name;
+    if (cur.sc == null && sc != null) cur.sc = sc;
   }
   for (const [key, r] of byTid) {
     const running = codexOpen.has(key);
-    sessions.push({ sessionId: r.tid, backend: 'codex', cwd: r.cwd || null, name: r.name || null, status: running ? 'remote-running' : 'remote-stopped', host: hostId, hostName: hostName, mtime: r.mtime });
+    const card = { sessionId: r.tid, backend: 'codex', cwd: r.cwd || null, name: r.name || null, status: running ? 'remote-running' : 'remote-stopped', host: hostId, hostName: hostName, mtime: r.mtime };
+    // A SUB-AGENT (or review) thread says so, with its parent — the listing
+    // and the sidebar's agent-kind filter treat it exactly like a local one.
+    // Its NC name would be the PARENT's first message (a v2 child copies the
+    // inherited context below its own history), so it is named by the codex
+    // agent rule instead. Primary cards keep their shape byte-for-byte.
+    if (r.sc != null) {
+      const c = classifyCodexThread(codexMetaFromAgentFields(codexAgentFieldsFromScTokens(r.sc)));
+      if (c.agentKind !== 'primary') {
+        card.sourceKind = c.sourceKind;
+        card.agentKind = c.agentKind;
+        card.agentRole = c.agentRole || '';
+        card.agentNickname = c.agentNickname || '';
+        card.parentThreadId = c.parentThreadId || null;
+        if (c.agentPath) card.agentPath = c.agentPath;
+        card.name = deriveCodexAgentName(c.agentKind, c.agentRole, c.agentNickname) || card.name;
+      }
+    }
+    sessions.push(card);
   }
   return sessions;
 }
@@ -588,7 +788,7 @@ function interpretDiscoveryLines(out, { hostId, hostName, claimJsonls }) {
 
 /**
  * synthesizeDiscoveryLines — device SNAPSHOT (raw facts) → the LOCK/J/H/N/T/
- * C/HC line format interpretDiscoveryLines consumes. It was inline in
+ * C/HC/NC/SC/CO line format interpretDiscoveryLines consumes. It was inline in
  * hosts.discoverSessions; extracted with the interpreter (R5) so the whole
  * chain (snapshot → synthesize → interpret) can run ON the device — the
  * `discovery.v2` op — with byte-identical logic. The ssh script emits these
@@ -608,6 +808,7 @@ function synthesizeDiscoveryLines(snap) {
     lines.push(`C ${(r.mtimeMs / 1000).toFixed(4)} ${r.size} ${r.path}`);
     if (r.headCwd) lines.push(`HC ${r.path}\t"cwd":"${r.headCwd}"`);
     for (const u of r.userLines || []) lines.push(`NC ${r.path}\t${u}`); // S3: name candidates
+    if (r.agentTokens) lines.push(`SC ${r.path}\t${r.agentTokens}`); // sub-agent classification (2026-09-24)
   }
   for (const p of (snap?.codexOpen || [])) lines.push(`CO ${p}`); // S3: open rollouts = running threads
   return lines.join('\n');
@@ -616,6 +817,8 @@ function synthesizeDiscoveryLines(snap) {
 module.exports = {
   extractTailIds, nameFromUserRecord, nameFromUserLine, nameFromText, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines, NAME_MAX,
   // S3 (codex facts + zstd rollouts)
-  deriveCodexSessionName, nameFromCodexUserLine, listOpenCodexRolloutPaths, listOpenRolloutPathsViaLsof, LSOF_BUDGET_MS, isCliProcess, CODEX_TID_RE, CODEX_ROLLOUT_RE, codexThreadIdOf,
+  deriveCodexSessionName, nameFromCodexUserLine,
+  // codex thread classification (2026-09-24): ONE rule for local/daemon/ssh
+  classifyCodexThread, formatCodexRoleLabel, deriveCodexAgentName, codexAgentFieldsFromScTokens, codexMetaFromAgentFields, codexScTokensFromHead, SC_KEYS, listOpenCodexRolloutPaths, listOpenRolloutPathsViaLsof, LSOF_BUDGET_MS, isCliProcess, CODEX_TID_RE, CODEX_ROLLOUT_RE, codexThreadIdOf,
   ZSTD_SUPPORTED, ZSTD_MAGIC, isZstPath, isZstBuffer, zstdDecompressFrames, zstdDecompressHead, readHeadText,
 };

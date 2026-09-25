@@ -1733,7 +1733,7 @@ class App {
     // opened from the task board, freely pickable otherwise. Picking a task
     // prefills the cwd from its first auto-include folder (never clobbers a
     // path the user already typed); the created session is bound to the task
-    // and spawned with VIBESPACE_TASK_ID.
+    // and spawned into it (the server's _initialGroupId).
     const taskSel = document.getElementById('input-task');
     if (taskSel) {
       taskSel.innerHTML = `<option value="">${t('None')}</option>`;

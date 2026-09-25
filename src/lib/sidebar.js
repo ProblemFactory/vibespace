@@ -1,7 +1,7 @@
 import { Resizer } from './resizer.js';
 import { agoText, escHtml, createPopover, hostStateChip, sessionMatchesFilter, showContextMenu } from './utils.js';
 import { t as tr } from './i18n.js';
-import { BACKEND_META, createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey } from './agent-meta.js';
+import { BACKEND_META, createAgentKindIcon, createBackendIcon, getAgentKindMeta, getBackendMeta, getSessionKey, AGENT_KIND_FILTER_KEY, agentKindFilterAtLoad, passesAgentKindFilter, agentKindsIn } from './agent-meta.js';
 import { installSidebarState } from './sidebar-state.js';
 import { installSidebarRender } from './sidebar-render.js';
 import { installSidebarRenderMobile } from './sidebar-render-mobile.js';
@@ -169,9 +169,13 @@ class Sidebar {
     this._backendFilter = new Set(JSON.parse(localStorage.getItem('backendFilter') || '[]'));
     this._hostFilter = new Set(JSON.parse(localStorage.getItem('hostFilter') || '[]')); // empty = all; 'local' or host ids
     // Default = PRIMARY only (owner report 2.369.32: codex sub-agent threads
-    // flooded the list). '' = ALL, chosen explicitly (persisted as 'all').
-    const storedKind = localStorage.getItem('agentKindFilter');
-    this._agentKindFilter = storedKind == null ? 'primary' : (storedKind === 'all' ? '' : storedKind);
+    // flooded the list). '' = ALL. A choice is a VIEW of this page, kept in
+    // sessionStorage only (2026-09-24: a persisted ALL/↳ from one click kept
+    // flooding every later load) — the legacy localStorage key is dropped.
+    try { localStorage.removeItem(AGENT_KIND_FILTER_KEY); } catch { }
+    let storedKind = null;
+    try { storedKind = sessionStorage.getItem(AGENT_KIND_FILTER_KEY); } catch { }
+    this._agentKindFilter = agentKindFilterAtLoad(storedKind);
     this._collapsedFolders = new Set(JSON.parse(localStorage.getItem('collapsedFolders') || '[]'));
     this._expandedFolders = new Set(JSON.parse(localStorage.getItem('expandedFolders') || '[]'));
     this._expandedCardId = null; // only one card expanded at a time
@@ -658,12 +662,40 @@ class Sidebar {
     }
   }
 
+  // The census spans the local list AND every loaded remote host (verifier r1,
+  // 2026-09-24): the remote zones filter by kind too, so a sub-agent that
+  // lives only on an ssh/paired box needs the ↳ tab to be reachable at all.
   _getAvailableAgentKinds() {
-    const kinds = new Set();
-    for (const session of this._allSessions || []) {
-      kinds.add(session.agentKind || 'primary');
-    }
-    return [...kinds];
+    const lists = [this._allSessions || []];
+    for (const st of this._wbRemoteHosts?.values() || []) if (st?.sessions) lists.push(st.sessions);
+    return agentKindsIn(lists);
+  }
+
+  // ALL, for this page — the kind tabs' ALL button and every "hidden by the
+  // agent-kind filter" row share it.
+  _showAllAgentKinds() {
+    this._agentKindFilter = '';
+    try { sessionStorage.setItem(AGENT_KIND_FILTER_KEY, 'all'); } catch { } // this page only (the default is primary-only)
+    this._renderAgentKindQuickTabs();
+    this._render();
+  }
+
+  // A remote zone / search whose matches the kind filter removed says so,
+  // with the way to show them (verifier r1: "No sessions found on Box" for a
+  // host holding only sub-agents read as an empty machine).
+  _kindHiddenRow(n, host) {
+    const row = document.createElement('div');
+    row.className = 'wb-empty sidebar-kind-hint wb-kind-hidden-row';
+    const label = document.createElement('span');
+    label.textContent = tr('{n} more on {host} hidden by the agent-kind filter.', { n, host }) + ' ';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sidebar-kind-hint-btn';
+    btn.textContent = tr('Show all agent types');
+    btn.onclick = (e) => { e.stopPropagation(); this._showAllAgentKinds(); };
+    row.append(label, btn);
+    this.listEl.appendChild(row);
+    return row;
   }
 
   _renderAgentKindQuickTabs() {
@@ -677,12 +709,7 @@ class Sidebar {
     if (!this._agentKindFilter) allBtn.classList.add('active');
     allBtn.textContent = tr('ALL');
     allBtn.title = tr('Show all agent types');
-    allBtn.onclick = () => {
-      this._agentKindFilter = '';
-      localStorage.setItem('agentKindFilter', 'all'); // explicit ALL survives reloads (the default is primary-only)
-      this._renderAgentKindQuickTabs();
-      this._render();
-    };
+    allBtn.onclick = () => this._showAllAgentKinds();
     container.appendChild(allBtn);
 
     for (const kind of kinds.sort()) {
@@ -694,7 +721,7 @@ class Sidebar {
       btn.style.setProperty('--tab-color', meta.color);
       btn.onclick = () => {
         this._agentKindFilter = kind;
-        localStorage.setItem('agentKindFilter', kind);
+        try { sessionStorage.setItem(AGENT_KIND_FILTER_KEY, kind); } catch { }
         this._renderAgentKindQuickTabs();
         this._render();
       };
@@ -1026,6 +1053,31 @@ class Sidebar {
     });
   }
 
+  // Agent-kind disclosure (2026-09-24, the sub-agent flood): a list that is
+  // NOT primary-only says so in words, with the one-click way back — the ALL /
+  // ↳ tabs are 12 px icons, and a flood with no visible cause read as a bug.
+  _appendKindHint() {
+    if (this._agentKindFilter === 'primary' || !this._getAvailableAgentKinds().some((k) => k !== 'primary')) return;
+    const row = document.createElement('div');
+    row.className = 'empty-hint sidebar-kind-hint';
+    const label = document.createElement('span');
+    label.textContent = (this._agentKindFilter
+      ? tr('Showing only {kind} threads.', { kind: tr(getAgentKindMeta(this._agentKindFilter).label) })
+      : tr('Sub-agent and review threads are listed too.')) + ' ';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'sidebar-kind-hint-btn';
+    back.textContent = tr('Main conversations only');
+    back.onclick = () => {
+      this._agentKindFilter = 'primary';
+      try { sessionStorage.setItem(AGENT_KIND_FILTER_KEY, 'primary'); } catch { }
+      this._renderAgentKindQuickTabs();
+      this._render();
+    };
+    row.append(label, back);
+    this.listEl.appendChild(row);
+  }
+
   _renderInner() {
     const f = (document.getElementById('session-filter')?.value || '').toLowerCase();
     let sessions = this._allSessions;
@@ -1041,7 +1093,7 @@ class Sidebar {
       sessions = sessions.filter(s => this._hostFilter.has(s.host || 'local'));
     }
     if (this._agentKindFilter) {
-      sessions = sessions.filter(s => (s.agentKind || 'primary') === this._agentKindFilter);
+      sessions = sessions.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
     }
 
     // Archive filter: hide archived sessions unless 'archived' filter is on
@@ -1114,6 +1166,10 @@ class Sidebar {
       }));
       this.listEl.appendChild(row);
     }
+
+    // Agent-kind disclosure (2026-09-24) — also drawn by the workbench, which
+    // re-wipes the list (sidebar-workbench.js _renderWorkbench)
+    this._appendKindHint();
 
     // "New Session" card at the top — NOT on the Tasks tab (it has its own
     // "+ New Task Group" card; a bare New Session there is meaningless).

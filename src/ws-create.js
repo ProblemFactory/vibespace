@@ -19,6 +19,8 @@ const { execFile } = require('child_process');
 const { REMOTE_PRELUDE, buildRemoteExec, nodeFinder, buildRemoteShellPrelude } = require('./remote-shell');
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
 const { sweepWriters } = require('./writer-sweep');
+const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
+const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
 const browserProfiles = require('./browser-profiles'); // agent-browser P0: the browser key's continuity ladder + the env composition (PURE)
@@ -2218,49 +2220,44 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // FALSE-MATCH a same-cwd local session and adopt the WRONG id.
           // Remote sessions get their id from the stream parser's first-capture
           // (2.156.1), which every stream-json line feeds.
-          if (backend === 'claude' && !session.claudeSessionId && !session.host) {
+          // A TERMINAL-MODE FORK too (2026-09-25): its row is seeded with the
+          // PARENT's id and terminal mode has no stream parser to adopt the
+          // fork's own — the one predicate lives in src/claude-lock-capture.js
+          // (re-asked on every attempt: a stream parser that won the race ends
+          // the chain, so a seeded fork can never make its parent adopt the
+          // fork's lock).
+          if (lockCaptureWanted(session)) {
             const { SESSIONS_DIR } = require('./session-store');
-            const tryCapture = (attempts) => {
-              if (attempts <= 0 || !activeSessions.has(id)) return;
-              try {
-                // Exclude lock sessionIds already claimed by other webui
-                // sessions — two new same-cwd sessions within the retry window
-                // would otherwise both claim the FIRST matching lock
-                const claimed = new Set();
-                for (const [oid, os] of activeSessions) {
-                  if (oid !== id && os.backend === 'claude' && os.claudeSessionId) claimed.add(os.claudeSessionId);
-                }
-                const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json'));
-                for (const f of files) {
-                  const lockData = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
-                  if (claimed.has(lockData.sessionId)) continue;
-                  if (lockData.cwd === cwd && lockData.startedAt > session.createdAt - 5000) {
-                    session.claudeSessionId = lockData.sessionId;
-                    session.backendSessionId = lockData.sessionId;
-                    // MERGE into the existing meta (spread base) — a hardcoded
-                    // field list here silently dropped later-added keys
-                    // (agentToken, taskId, accountId) on id capture.
-                    // Spread the base ONLY when the on-disk meta is ours — a
-                    // foreign meta (sockName collision) would graft another
-                    // session's name/cwd/account onto this record, which is
-                    // exactly how the identity crossing was produced.
-                    const base = readSessionMeta(sockName) || {};
-                    const own = !base.webuiSessionId || base.webuiSessionId === id;
-                    if (!own) console.error(`[session] refusing to inherit foreign meta ${sockName} (owner ${base.webuiSessionId}, me ${id})`);
-                    writeSessionMeta(sockName, {
-                      ...(own ? base : {}),
-                      webuiSessionId: id,
-                      backendSessionId: session.backendSessionId,
-                      claudeSessionId: session.claudeSessionId,
-                    });
-                    broadcastActiveSessions();
-                    return;
-                  }
-                }
-              } catch {}
-              setTimeout(() => tryCapture(attempts - 1), 1000);
-            };
-            setTimeout(() => tryCapture(15), 2000);
+            // THE WITNESS IS THE PID (src/claude-lock-capture.js): a lock is
+            // this session's iff its pid is alive and descends from THIS
+            // session's wrapper (the sidecar names the wrapper's pid) — never
+            // the first same-cwd lock by clock, which swapped the ids of two
+            // sessions created together. Armed until adopted / exited / no
+            // longer wanted (no attempt cap: a slow fork's CLI once outlived
+            // the old ~17 s window and kept its parent's id for life).
+            armLockCapture({
+              id, session, activeSessions,
+              attempt: () => captureLockId({ session, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath: metaFileW, readPpid }),
+              onAdopt: (lockId) => {
+                const adopted = adoptCapturedId(session, lockId);
+                // MERGE into the existing meta (spread base) — a hardcoded
+                // field list here silently dropped later-added keys
+                // (agentToken, taskId, accountId) on id capture.
+                // Spread the base ONLY when the on-disk meta is ours — a
+                // foreign meta (sockName collision) would graft another
+                // session's name/cwd/account onto this record, which is
+                // exactly how the identity crossing was produced.
+                const base = readSessionMeta(sockName) || {};
+                const own = !base.webuiSessionId || base.webuiSessionId === id;
+                if (!own) console.error(`[session] refusing to inherit foreign meta ${sockName} (owner ${base.webuiSessionId}, me ${id})`);
+                writeSessionMeta(sockName, {
+                  ...(own ? base : {}),
+                  webuiSessionId: id,
+                  ...adopted,
+                });
+                broadcastActiveSessions();
+              },
+            });
           }
 
           if (backend === 'codex' && !session.backendSessionId) {

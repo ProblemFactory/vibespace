@@ -86,7 +86,10 @@ ok(['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => read(f).includes('"
 
 // ── sidebar: primary-only default ──
 const sb = read('src/lib/sidebar.js');
-ok(/this\._agentKindFilter = storedKind == null \? 'primary' : \(storedKind === 'all' \? '' : storedKind\);/.test(sb) && /localStorage\.setItem\('agentKindFilter', 'all'\)/.test(sb), 'sidebar: no stored choice ⇒ PRIMARY only; ALL persists explicitly');
+// 2026-09-24 (the sub-agent flood): the default stays PRIMARY; an explicit
+// ALL is now a view of THIS page (sessionStorage) — persisting it let one
+// click flood every later load. The full pins live in test-codex-subagents ④.
+ok(/this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\);/.test(sb) && /sessionStorage\.setItem\(AGENT_KIND_FILTER_KEY, 'all'\)/.test(sb) && /if \(sessionValue == null \|\| sessionValue === ''\) return 'primary';/.test(read('src/lib/agent-meta.js')), 'sidebar: no stored choice ⇒ PRIMARY only; ALL is chosen per page (sessionStorage)');
 
 // ── usage popup: codex ⟳ dispatch + not-started reset ──
 const um2 = read('src/lib/usage-meter.js');

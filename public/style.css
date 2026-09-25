@@ -582,6 +582,11 @@ html, body {
 .task-detail-progress-exp[open] summary::after { content: ''; }
 .task-detail-progress-detail { margin: 3px 0 4px 14px; padding-left: 8px; border-left: 2px solid var(--border); white-space: pre-wrap; color: var(--text-secondary); font-size: 10px; line-height: 1.45; }
 .empty-hint { padding: 12px; text-align: center; color: var(--text-dim); font-size: 11px; }
+.sidebar-kind-hint { padding: 4px 8px; text-align: left; }
+.sidebar-kind-hint-btn {
+  background: none; border: none; padding: 0; cursor: pointer; font: inherit;
+  color: var(--accent); text-decoration: underline;
+}
 /* "history is hidden — the background service is off" row (2026-09-07): a
    left-aligned notice + inline Enable action, so an incomplete session list
    always says WHY (silent-failure rule) and carries its own way out. */

@@ -2,6 +2,7 @@ import { escHtml, createPopover, showContextMenu, showInputDialog, showConfirmDi
 import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
+import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -57,7 +58,7 @@ export function installSidebarTasks(SidebarClass) {
     this._taskViewSortMode = ls('vibespace.taskViewSort', 'urgency'); // urgency|status|recent|name
     try { this._taskViewStatusFilter = JSON.parse(localStorage.getItem('vibespace.taskViewFilter') || 'null'); } catch { this._taskViewStatusFilter = null; }
     this._sessionStatuses = {}; // sessionKey → {state, urgency, reason, setBy, at}
-    this._pendingTaskBinds = new Map(); // webuiId → taskId (new-session-in-task, bound once the backend id appears)
+    this._pendingTaskBinds = new Map(); // webuiId → {taskIds[], notId} (new-session-in-task + a fork's inherited groups, bound once the session's OWN backend id appears — fork-groups.js)
     this._fetchTasks();
     fetch('/api/session-status').then(r => r.ok ? r.json() : null).then(d => {
       if (d?.statuses) {
@@ -184,25 +185,32 @@ export function installSidebarTasks(SidebarClass) {
 
   // ── New-session-in-task binding (backend id unknown at creation) ──
 
-  proto._registerPendingTaskBind = function(webuiId, taskId) {
-    this._pendingTaskBinds.set(webuiId, taskId);
+  // A LIST per webuiId (a fork inherits EVERY group its source is tagged with,
+  // 2026-09-25) and the id it must NOT bind (`notId` = a fork's source: until
+  // the harness announces the fork's own id the live row carries the PARENT's,
+  // and binding then would tag the parent and consume the entry). The verdict
+  // and the sweep are PURE (src/lib/fork-groups.js); this only applies them.
+  proto._registerPendingTaskBind = function(webuiId, taskIds, { notId = null } = {}) {
+    if (!webuiId) return;
+    const entry = mergePendingBind(this._pendingTaskBinds.get(webuiId), taskIds, notId);
+    if (entry) this._pendingTaskBinds.set(webuiId, entry);
   };
 
   proto._processPendingTaskBinds = function() {
     if (!this._pendingTaskBinds?.size) return;
-    for (const [webuiId, taskId] of [...this._pendingTaskBinds]) {
+    for (const [webuiId, entry] of [...this._pendingTaskBinds]) {
       const live = (this._webuiSessions || []).find(s => s.id === webuiId);
-      if (!live) continue; // not in the list yet (or died — retried until sweep below)
-      const bsid = live.backendSessionId || live.claudeSessionId;
-      if (!bsid) continue; // id not adopted yet
+      const v = pendingBindVerdict(entry, live);
+      if (v.drop) { this._pendingTaskBinds.delete(webuiId); continue; } // listed once, now gone (died before its own id appeared)
+      if (live && !entry.seen) entry.seen = true;
+      if (v.wait) continue; // not listed yet / id not adopted yet / still the fork source's id
       this._pendingTaskBinds.delete(webuiId);
-      this._taskBind(taskId, `${live.backend || 'claude'}:${bsid}`);
+      for (const taskId of v.taskIds) this._taskBind(taskId, v.sessionKey);
     }
-    // sweep entries whose session vanished without ever getting an id
-    if (this._pendingTaskBinds.size > 20) {
-      for (const [webuiId] of [...this._pendingTaskBinds]) {
-        if (!(this._webuiSessions || []).some(s => s.id === webuiId)) this._pendingTaskBinds.delete(webuiId);
-      }
+    // sweep entries whose session vanished without ever being LISTED (a
+    // listed-then-gone one was dropped above by the verdict)
+    for (const webuiId of sweepPendingBinds(this._pendingTaskBinds.keys(), (this._webuiSessions || []).map(s => s.id))) {
+      this._pendingTaskBinds.delete(webuiId);
     }
   };
 

@@ -92,6 +92,13 @@ if (process.argv.includes('--usage-scan-child')) {
   return;
 }
 const fs = require('fs');
+// os/path BEFORE the --discovery-snapshot-child branch below (2026-09-24):
+// they were declared after it, so the child died on the TDZ ("Cannot access
+// 'os' before initialization"; the bundle's var form: "reading 'homedir'")
+// on EVERY run since 2.288.0 and the daemon silently fell back to the inline
+// scan on its own loop — the exact stall the child exists to prevent.
+const os = require('os');
+const path = require('path');
 const { extractTailIds, pidLooksClaude, interpretDiscoveryLines, synthesizeDiscoveryLines } = require('./../discovery-facts.js');
 const machineProbes = require('./../machine-probes.js');
 const { ClaudeCodeAdapter: { parseLimitBanner } } = require('./../adapters/claude-code.js');
@@ -199,15 +206,29 @@ function computeDiscoverySnapshot() {
     codexRollouts.length = Math.min(codexRollouts.length, 100);
     // head facts (S3): cwd + the first user records (name candidates, the codex
     // naming rule runs orchestrator-side in discovery-facts.interpret) — read
-    // through readHeadText so a .zst rollout yields its plain text
-    const { readHeadText, listOpenCodexRolloutPaths } = require('../discovery-facts');
-    for (const r of codexRollouts.slice(0, 30)) {
+    // through readHeadText so a .zst rollout yields its plain text. HC/NC stay
+    // on the 30 NEWEST (a rollout past them lists nameless unless it is a
+    // sub-agent — its SC fact names it); the ssh script's `i -le 30` twin.
+    const { readHeadText, listOpenCodexRolloutPaths, codexScTokensFromHead, codexThreadIdOf } = require('../discovery-facts');
+    const HEAD_FACTS = 30, SC_HEAD_BYTES = 131072;
+    codexRollouts.forEach((r, i) => {
       try {
-        const head = readHeadText(r.path, 200000);
-        r.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
-        r.userLines = head.split('\n').filter((l) => l.includes('"role":"user"')).slice(0, 3).map((l) => l.slice(0, 2000));
+        const full = i < HEAD_FACTS;
+        const head = readHeadText(r.path, full ? 200000 : SC_HEAD_BYTES);
+        if (full) {
+          r.headCwd = (head.match(/"cwd":"((?:[^"\\]|\\.)*)"/) || [])[1] || null;
+          r.userLines = head.split('\n').filter((l) => l.includes('"role":"user"')).slice(0, 3).map((l) => l.slice(0, 2000));
+        }
+        // SC facts (2026-09-24): the OWN session_meta's sub-agent fields, the
+        // same token string the ssh script prints — primary threads carry none.
+        // EVERY listed rollout (verifier r1: inside the 30-slot loop, 25 of 48
+        // real sub-agents listed as primary); the own meta is line 0, ~22 KB
+        // measured, so SC_HEAD_BYTES (128 KiB) carries it with ~6x margin.
+        const tid = codexThreadIdOf(r.path);
+        const toks = codexScTokensFromHead(head, tid);
+        if (toks && /"thread_source":"subagent"|"subagent":/.test(toks)) r.agentTokens = toks;
       } catch { }
-    }
+    });
     // CO facts: rollouts held open by a codex process on this device = RUNNING threads
     var codexOpen = []; try { codexOpen = listOpenCodexRolloutPaths({ sessionsDir: croot }); } catch { codexOpen = []; }
   } catch { }
@@ -220,8 +241,6 @@ if (process.argv.includes('--discovery-snapshot-child')) {
   } catch (e) { console.error(e.message); process.exit(1); }
   return;
 }
-const os = require('os');
-const path = require('path');
 const net = require('net');
 const { Mux, PROTO_VERSION } = require('./mux.js');
 // PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()

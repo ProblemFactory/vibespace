@@ -51,6 +51,33 @@ const USER_FILE_EXT_TYPES = new Map(Object.entries({
 
 const protocol = 'stream-json';
 
+/** dtach's clear-screen kickoff to an attaching client (the terminal branch in
+ *  session-stdout.js strips the same burst from its first chunk). */
+const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
+/** A line that was MEANT to be a record: a JSON OBJECT/ARRAY prefix (`{"`,
+ *  `{}`, `[{`, `[[`, `["`, `[]`), possibly behind escape codes. Round 4: the
+ *  old `[[{]` accepted ANY bracket, and dtach's own banners — `[EOF - dtach
+ *  terminating]` on every natural exit, `[detached]`, `[got signal N -
+ *  dying]`, `[read returned an error]`, `[select failed]` (the five in the
+ *  binary's strings; `\e[999H` arrives on its OWN line before each) — start
+ *  with `[`, so each session end was reported as a dropped record. THIS PREFIX
+ *  TEST IS THE WHOLE RULE (round 5): a `[` followed by a letter is never JSON,
+ *  so every dtach banner, present or future, is raw output by construction;
+ *  a separate banner list had no behaviour of its own and was removed. */
+const LOOKS_LIKE_RECORD = /^(?:\x1b\[[0-9;?]*[A-Za-z]|\s)*(?:\{\s*["}]|\[\s*[[{"\]])/;
+
+/** A stream line the consumer could not use — logged AND sent to telemetry
+ *  (first 3 per session per kind, then every 100th; the count is exact in
+ *  `_droppedLines`); never a silent drop, never one telemetry event per line
+ *  from a chatty producer (round 4). */
+function noteDroppedLine(session, id, kind, line, err) {
+  const c = session._droppedLines || (session._droppedLines = {});
+  const n = (c[kind] = (c[kind] || 0) + 1);
+  if (!(n <= 3 || n % 100 === 0)) return;
+  global.__vsEvent?.(kind, `#${n} ${String(err?.message || err).slice(0, 80)} | ${JSON.stringify(line.slice(0, 60))}`);
+  console.warn(`[claude] ${kind} #${n} on ${id}: ${String(err?.message || err).slice(0, 120)} — ${JSON.stringify(line.slice(0, 120))}`);
+}
+
 function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,
   checkClaudeGoalStatus, noteModelSeen, sbSeenFirst, hosts, usageHistory, pagesRef, brainRef = null }) {
   const { _vsuPending, armWorkflowUsageWatcher, kickPoolEval, markLimitBanner,
@@ -433,11 +460,18 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
       lineBuf += output;
       let nlIdx;
       while ((nlIdx = lineBuf.indexOf('\n')) !== -1) {
-        const line = lineBuf.substring(0, nlIdx).replace(/\r/g, '').trim();
+        // dtach's re-attach preamble (\e[H\e[J — session-stdout's terminal
+        // branch swallows the same burst) arrives glued to the FIRST line a
+        // re-attached chat consumer sees; a JSON record never starts with ESC,
+        // so a leading clear burst is always the preamble (round 3: a
+        // restored fork's init lost this way never adopted its id).
+        const line = lineBuf.substring(0, nlIdx).replace(/\r/g, '').trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();
         lineBuf = lineBuf.substring(nlIdx + 1);
         if (!line) continue;
+        let parsed = false;
         try {
           const msg = JSON.parse(line);
+          parsed = true;
           // BREADCRUMB for CLI evolution (2.227.8): the claude stream gained
           // `tool_progress` and it silently rode the subagent branch for
           // weeks (2.227.7) — the SECOND time a new upstream record type
@@ -525,6 +559,10 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 agentNickname: session.agentNickname || '',
                 parentThreadId: session.parentThreadId || null,
                 forkedFrom: session.forkedFrom || null,
+                // the flag is DONE — re-listed, never left to the spread: a
+                // stale `true` came back from a restart as a pending fork whose
+                // OWN id then claimed nothing (src/claude-lock-capture.js)
+                forkRequested: false,
                 permissionMode: session._permissionMode || null,
                 effort: session._effort || null,
                 createdAt: session.createdAt,
@@ -1341,7 +1379,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // Feed into MessageManager (emits normalized msg ops to all clients)
           // — through the rebuild gate, never processLive directly (2.369.16)
           feedLive(session, msg);
-        } catch {
+        } catch (e) {
+          // A dropped RECORD is never silent (round 3): a line that looks like
+          // JSON but does not parse, or a record whose handling threw, is
+          // logged + counted; plain non-JSON noise stays raw output as before.
+          if (parsed || LOOKS_LIKE_RECORD.test(line)) noteDroppedLine(session, id, parsed ? 'cli-line-handler-error' : 'cli-unparsable-line', line, e);
           // Non-JSON line (e.g. dtach noise) — send as raw output
           broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' });
         }

@@ -13,7 +13,7 @@ const os = require('os');
 const crypto = require('crypto');
 // S3: the codex naming rule + zstd rollout readers live in discovery-facts
 // (the tiny module the daemon bundle and every discovery collector share)
-const { deriveCodexSessionName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
+const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
 const { capsOf } = require('../backend-caps');   // responseStyle enum — the ONE list, never a second copy here
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
@@ -754,79 +754,13 @@ function parseCodexSessionJsonl(threadId) {
   return messages;
 }
 
-function formatCodexRoleLabel(role) {
-  const value = String(role || '').trim();
-  if (!value) return '';
-  return value
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (ch) => ch.toUpperCase());
-}
-
+// formatCodexRoleLabel + the thread classification: MOVED to
+// discovery-facts.js (2026-09-24, the sub-agent flood) — ONE rule for the
+// local listing, the live wrapper_meta, the daemon snapshot and the ssh
+// script's SC lines. normalizeCodexSource keeps its old signature (the live
+// wrapper_meta hands a bare `source`).
 function normalizeCodexSource(source) {
-  if (typeof source === 'string') {
-    return {
-      raw: source,
-      sourceKind: source,
-      agentKind: 'primary',
-      agentRole: '',
-      agentNickname: '',
-      parentThreadId: null,
-    };
-  }
-
-  const subAgent = source?.subAgent || source?.subagent || source?.sub_agent || null;
-  const spawn = subAgent?.thread_spawn || subAgent?.threadSpawn || source?.thread_spawn || null;
-  if (spawn) {
-    return {
-      raw: source,
-      sourceKind: 'subagent',
-      agentKind: 'subagent',
-      agentRole: spawn.agent_role || '',
-      agentNickname: spawn.agent_nickname || '',
-      parentThreadId: spawn.parent_thread_id || null,
-      // 0.153.4 multi-agent v2 (B-7473): the child's own path in the agent tree
-      // ('/root/water_research') and its depth — the ONLY server-side way to
-      // answer "which rollout is this collab row's sub-agent?" for a rollout
-      // that predates SubAgentActivity items.
-      agentPath: spawn.agent_path || '',
-      depth: Number.isInteger(spawn.depth) ? spawn.depth : null,
-    };
-  }
-
-  if (subAgent === 'review') {
-    return {
-      raw: source,
-      sourceKind: 'review',
-      agentKind: 'review',
-      agentRole: source?.agentRole || source?.agent_role || '',
-      agentNickname: source?.agentNickname || source?.agent_nickname || '',
-      parentThreadId: source?.parentThreadId || source?.parent_thread_id || null,
-    };
-  }
-
-  const review = source?.review || source?.review_mode || null;
-  if (review) {
-    return {
-      raw: source,
-      sourceKind: 'review',
-      agentKind: 'review',
-      agentRole: review.agent_role || '',
-      agentNickname: review.agent_nickname || '',
-      parentThreadId: review.parent_thread_id || null,
-    };
-  }
-
-  return {
-    raw: source || null,
-    sourceKind: source ? 'structured' : null,
-    agentKind: 'primary',
-    agentRole: source?.agentRole || source?.agent_role || '',
-    agentNickname: source?.agentNickname || source?.agent_nickname || '',
-    parentThreadId: source?.parentThreadId || source?.parent_thread_id || null,
-  };
+  return classifyCodexThread({ source });
 }
 
 // deriveCodexSessionName: MOVED to discovery-facts.js (S3) — ONE naming rule
@@ -856,23 +790,7 @@ function deriveCodexReviewName(target, hint) {
   return fallback ? `Review: ${fallback}`.slice(0, 120) : 'Review';
 }
 
-function deriveCodexAgentName(agentKind, agentRole, agentNickname) {
-  const roleLabel = formatCodexRoleLabel(agentRole);
-  const nick = String(agentNickname || '').trim();
-
-  if (agentKind === 'review') return 'Review';
-  if (agentKind === 'subagent') {
-    if (nick && roleLabel) return `${nick} (${roleLabel})`.slice(0, 120);
-    if (nick) return nick.slice(0, 120);
-    if (roleLabel) return `Subagent: ${roleLabel}`.slice(0, 120);
-    return 'Subagent';
-  }
-
-  if (nick && roleLabel) return `${nick} (${roleLabel})`.slice(0, 120);
-  if (nick) return nick.slice(0, 120);
-  if (roleLabel) return roleLabel.slice(0, 120);
-  return '';
-}
+// deriveCodexAgentName: MOVED to discovery-facts.js with the classifier.
 
 // mtime-keyed cache: listCodexThreads runs extractCodexThreadMeta on EVERY
 // thread JSONL per /api/sessions poll (and per user-state normalization) —
@@ -976,9 +894,13 @@ function extractCodexThreadMeta(filePath) {
           if (ownHistoryStartOrdinal === null) ownHistoryStartOrdinal = ord(p.subagent_history_start_ordinal);
           if (!historyMode && typeof p.history_mode === 'string') historyMode = p.history_mode;
         }
-        if (!source) {
+        // The FIRST session_meta is the thread's own (threadId is taken from
+        // it above) — classify from the WHOLE payload, not just `source`:
+        // 0.153 v2 children also say `thread_source: "subagent"` at the top
+        // level (classifyCodexThread, the one rule; 2026-09-24).
+        if (!source && (msg.payload?.id || '') === threadId) {
           source = msg.payload?.source || null;
-          sourceMeta = normalizeCodexSource(source);
+          sourceMeta = classifyCodexThread(msg.payload || {});
         }
         sessionAgentRole = msg.payload?.agent_role || msg.payload?.agentRole || sessionAgentRole;
         sessionAgentNickname = msg.payload?.agent_nickname || msg.payload?.agentNickname || sessionAgentNickname;

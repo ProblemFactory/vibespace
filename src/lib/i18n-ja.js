@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Showing only {kind} threads.": "{kind} スレッドのみ表示しています。",
+  "Sub-agent and review threads are listed too.": "サブエージェントとレビューのスレッドも表示しています。",
+  "{n} more on {host} hidden by the agent-kind filter.": "{host} のさらに {n} 件がエージェントタイプのフィルターで非表示です。",
+  "Main conversations only": "メインの会話のみ",
   "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×: widgets 2×, text 2.5×). 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). The scale is fixed when the app starts; a window's ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.": "デスクトップアプリ自体の描画サイズ（高解像度画面で文字をくっきり表示するため）。自動：起動した画面から導出 —— ピクセル比 × UI スケール（2× 画面で UI スケール 125 % = 2.5×：ウィジェット 2×、文字 2.5×）。1.5× は GTK アプリの文字だけを拡大します —— ボタンは 1× のまま（X11 の GTK は小数倍に拡大できません）。スケールはアプリ起動時に固定されます。ウィンドウの ⋯ → スケール で別のスケールで再起動でき、ステータスバーにスケールとその由来が表示されます。",
   "chosen": "選択",
   "⋯ → Scale relaunches the app at another scale.": "⋯ → スケール で別のスケールで再起動できます。",

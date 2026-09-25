@@ -11,6 +11,7 @@ import { api, escHtml, estDisplayPair, fetchJson, hostStateChip, showConfirmDial
 // collab-row), so "the instance default is a NEW-session default" is ONE law
 // with two callers instead of two `||` chains that drift.
 import { resumeSpawnPick } from '../resume-continuity.js';
+import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 
 export function installSessionLifecycle(App, ctx = {}) {
@@ -41,7 +42,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, ephemeral = false, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -171,7 +172,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // char on remote helper terminals ("claude /login" → "laude").
       initialCommand: initialCommand || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
-      taskId: taskId || undefined, // spawns VIBESPACE_TASK_ID into the agent env
+      taskId: taskId || undefined, // the server's _initialGroupId + session-meta taskId (the task context over the session token from the first turn; no spawn env carries it since the Task refactor P2)
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
       lockModel: lockModel || undefined, // explicit lock TARGET (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
@@ -382,7 +383,12 @@ export function installSessionLifecycle(App, ctx = {}) {
         // up in active-sessions (unknown at creation for claude; folder
         // auto-include already covers tasks with linked folders, this makes
         // the explicit tag stick for folder-less tasks too).
-        if (taskId) this.sidebar?._registerPendingTaskBind?.(msg.sessionId, taskId);
+        // A FORK also carries `extraTaskBinds` (every other group its source is
+        // tagged with — forkGroupPlan) and waits PAST its source's id: until
+        // the harness announces the fork's own id the live row carries the
+        // parent's, and binding then would tag the parent instead.
+        const bindIds = [taskId, ...(extraTaskBinds || [])].filter(Boolean);
+        if (bindIds.length) this.sidebar?._registerPendingTaskBind?.(msg.sessionId, bindIds, { notId: fork ? (backendSessionId || resumeId || null) : null });
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
           this.sessions.set(winInfo.id, chatView); this.wm.syncHiddenViews?.(); // a view born hidden (mobile/tab/minimized) starts suspended (inc-mu6bfv1t-4drq)
@@ -847,8 +853,8 @@ export function installSessionLifecycle(App, ctx = {}) {
     // didn't specify — covers card click, resume-all, chat resume bar, etc.
     const savedCfg = this.sidebar?.getSessionConfig?.({ backend, sessionId, backendSessionId: targetBackendId }) || {};
     // Context task rides across resumes: the first task this session is
-    // explicitly tagged with becomes VIBESPACE_TASK_ID again, so the
-    // SessionStart hook re-injects task context on every resume.
+    // explicitly tagged with becomes the server's _initialGroupId again, so
+    // the task context covers the pre-bind window on every resume.
     const contextTask = this.sidebar?._getSessionTasks?.({ backend, backendSessionId: targetBackendId })?.[0];
     this.createSession({
       cwd,
@@ -1390,6 +1396,15 @@ export function installSessionLifecycle(App, ctx = {}) {
     // pick if there is one, else what the run being forked turned out to be.
     const forkCfg = this.sidebar?.getSessionConfig?.(sessionInfo) || {};
     const forkWorktree = worktreePick({ saved: forkCfg.worktree, live: sessionInfo.worktree });
+    // TASK GROUPS (owner 2026-09-25: "fork的会话不会自动分配到和fork之前的会话
+    // 相同的group里"). The fork inherits EVERY group its source is explicitly
+    // tagged with — read off the sidebar's store, never the DOM. The first
+    // rides the spawn as `taskId` (the server's _initialGroupId: the task
+    // context from the first turn); the rest are pending binds written once
+    // the fork's own id appears (chat: the stream parser; terminal: the lock
+    // capture, src/claude-lock-capture.js). Folder auto-include needs nothing
+    // (same cwd). The star is NOT inherited (not asked for).
+    const forkGroups = forkGroupPlan(this.sidebar?._getSessionTasks?.(sessionInfo) || []);
     this.createSession({
       cwd: sessionInfo.cwd,
       name: forkName,
@@ -1407,6 +1422,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       initialMessage,
       forkAtUuid: resumeAt || undefined,
       forkTitle: forkName,
+      taskId: forkGroups.taskId || undefined,
+      extraTaskBinds: forkGroups.pendingBinds,
     });
   },
 

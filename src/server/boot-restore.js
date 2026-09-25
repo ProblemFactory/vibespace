@@ -14,6 +14,8 @@ const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck h
 const { cwdToProjectDir, dedupWebuiSockets } = require('../session-store');
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
+const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
+const { readPpid } = require('../cli-identity');
 
 const { mk } = require('./lazy.js');
 
@@ -103,6 +105,29 @@ function migrateLegacyHomeProjects() {
   } catch (e) { console.warn('[migrate] legacy home projects check failed:', e.message); }
 }
 
+// THE CLAUDE LOCK CAPTURE for a restored session (src/claude-lock-capture.js):
+// the same pid witness and the same no-cap backoff as ws-create's create
+// chain — a restored pending TERMINAL fork included (its source's lock
+// excluded, its borrowed id claims nothing). A lock is adopted only when its
+// pid is alive and descends from THIS session's wrapper: the old clock window
+// adopted an external same-cwd claude's lock started 3 s before the fork and
+// cleared the fork flag on that guess, irreversibly. Arming twice is a no-op.
+const restoredSidecars = new Map();
+function armRestoredCapture(id, s) {
+  if (!s || s.host || s.backend !== 'claude' || !lockCaptureWanted(s)) return;
+  const { SESSIONS_DIR } = require('../session-store');
+  const sidecarPath = restoredSidecars.get(id) || path.join(BUFFERS_DIR, id + '.json');
+  armLockCapture({
+    id, session: s, activeSessions,
+    attempt: () => captureLockId({ session: s, id, activeSessions, sessionsDir: SESSIONS_DIR, sidecarPath, readPpid }),
+    onAdopt: (lockId) => {
+      const adopted = adoptCapturedId(s, lockId);
+      if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), ...adopted }); } catch {} }
+      broadcastActiveSessions();
+    },
+  });
+}
+
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
@@ -132,10 +157,17 @@ function restoreSessions() {
   // minted a SECOND dtach session for the SAME claudeSessionId → two sidebar
   // cards (real owner report; userW's local double-writer class). Keep one
   // socket per conversation (alive-claude > dead, then newest), retire the rest.
+  // A PENDING FORK IS NOT A CLAIM (round 3, reproduced on a scratch server):
+  // its meta carries its SOURCE's id (ws-create seeds it), so the dedup called
+  // the live PARENT the stale duplicate of its own fork and SIGTERMed +
+  // unlinked it — at every restart inside a fork's pending window, and at the
+  // update boot for every terminal fork an older server left naming its
+  // parent for life. `ownsItsId` = the claimedLockIds rule (a borrowed id is
+  // not a claim); two sockets that each hold the id AS THEIR OWN still dedup.
   const dedupMetas = [];
   for (const sockFile of sockets) {
     let m; try { m = readSessionMeta(sockFile); } catch { continue; }
-    if (m && m.claudeSessionId) dedupMetas.push({ sockFile, m });
+    if (ownsItsId(m)) dedupMetas.push({ sockFile, m });
   }
   // ONE /proc pass: which conversations have a live claude holding their JSONL?
   // (a lingering dtach husk whose claude crashed has a DEAD conversation and
@@ -268,6 +300,7 @@ function restoreSessions() {
     let restoredRemote = null;
     let wrapperAgentTasks = null;
     const wrapperFiles = require('./wrapper-files.js').resolveWrapperFiles(BUFFERS_DIR, id, path.join(SOCKETS_DIR, sockFile));
+    restoredSidecars.set(id, wrapperFiles.sidecar); // the lock capture's pid witness (the wrapper's own pid)
     try {
       const wrapperMeta = JSON.parse(fs.readFileSync(wrapperFiles.sidecar, 'utf-8'));
       if (wrapperMeta.mode === 'chat') sessionMode = 'chat';
@@ -317,7 +350,11 @@ function restoreSessions() {
       _restoreAgentTasks: wrapperAgentTasks, // re-armed post-attach (setupSessionPty defines the watcher)
       _pendingEditor: meta.pendingEditor || null, // Ctrl+G edit in flight — re-broadcast on attach
       _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
-      _forkRequested: !!meta.forkRequested, // pending fork-id adoption survives restart
+      // pending fork-id adoption survives restart — but only while the record
+      // still names its source: an adopted chat fork's meta kept
+      // `forkRequested: true` (the stream adoption write never re-listed it),
+      // and a restored stale flag made the fork's OWN id claim nothing
+      _forkRequested: restoredForkPending(meta),
       _resumeSpawn: !!meta.resumeSpawn, // implicit-fork adoption stays armed across restarts (B-b87b)
       _sawFirstId: !!meta.sawFirstId,
       _dialDeviceId: meta.dialDeviceId || null,
@@ -445,31 +482,18 @@ function restoreSessions() {
   // have NO other backfill and stayed id-less for life (sessionKey '' → no
   // status/config/star binding, no transcript link). LOCAL sessions only —
   // scanning the local lock dir for a remote session false-matches (2.156.2).
-  // Idempotent: same claimed-id + cwd + startedAt guards as the create chains.
+  // CLAUDE: the ONE capture (src/claude-lock-capture.js), armed per restored
+  // session by armRestoredCapture (above restoreSessions) — 2 s after the loop,
+  // where the old recaptureIds first ran at +4 s; R6 pipe sessions arm from
+  // their own re-open.
+  setTimeout(() => { for (const [id, s] of activeSessions) armRestoredCapture(id, s); }, 2000);
+  // CODEX: no lock file to witness — the thread candidate pick keeps its own
+  // bounded re-arm.
   const recaptureIds = (attempts) => {
     let changed = false, missing = false;
-    const claimed = new Set();
-    for (const [, s] of activeSessions) { if (s.backend === 'claude' && s.claudeSessionId) claimed.add(s.claudeSessionId); }
     for (const [id, s] of activeSessions) {
       if (s.host) continue;
-      if (s.backend === 'claude' && !s.claudeSessionId) {
-        try {
-          const { SESSIONS_DIR } = require('../session-store');
-          for (const f of fs.readdirSync(SESSIONS_DIR).filter((n) => n.endsWith('.json'))) {
-            const lockData = JSON.parse(fs.readFileSync(path.join(SESSIONS_DIR, f), 'utf-8'));
-            if (claimed.has(lockData.sessionId)) continue;
-            if (lockData.cwd === s.cwd && lockData.startedAt > s.createdAt - 5000) {
-              s.claudeSessionId = lockData.sessionId;
-              s.backendSessionId = lockData.sessionId;
-              claimed.add(lockData.sessionId);
-              if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), backendSessionId: s.backendSessionId, claudeSessionId: s.claudeSessionId }); } catch {} }
-              changed = true;
-              break;
-            }
-          }
-        } catch {}
-        if (!s.claudeSessionId) missing = true;
-      } else if (s.backend === 'codex' && !s.backendSessionId) {
+      if (s.backend === 'codex' && !s.backendSessionId) {
         try {
           const matched = pickCodexThreadCandidate({ activeSessions, webuiSessionId: id, cwd: s.cwd, createdAt: s.createdAt, baselineThreadIds: null, pathLib: path });
           // no create-time baseline here — refuse clearly-stale threads (the
@@ -539,6 +563,7 @@ function restoreAgentdPipeSessions() {
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // design-reset-credits r2: the member the surviving pipe process holds
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       backendSessionId: meta.claudeSessionId || meta.backendSessionId || null,
+      _forkRequested: restoredForkPending(meta), // a pending fork re-opened by the daemon still adopts its own id (parser or lock capture) — round 3
       agentdSession: true, keeperSid: id, agentdPipe: true,
       _permissionMode: meta.permissionMode || null, _effort: meta.effort || null,
       _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
@@ -565,6 +590,7 @@ function restoreAgentdPipeSessions() {
       session._webuiId = id;
       setupSessionPty(session, id, shim);
       console.log(`[restore] re-opened daemon pipe session ${id} "${session.name}"`);
+      armRestoredCapture(id, session); // a pipe session's capture arms from its own re-open (the sweep above may run before it)
     }).catch((e) => console.warn(`[restore] daemon pipe session ${id} not re-opened (view-only rescue covers it): ${e.message}`));
   }
 }

@@ -10,6 +10,7 @@
 // Starred sessions float to the top of their zone.
 import { t as tr } from './i18n.js'; // sidebar cluster convention
 import { agoText, escHtml, hostStateChip, showConfirmDialog, showToast, stripCwdHostLabel, sessionMatchesFilter } from './utils.js';
+import { passesAgentKindFilter } from './agent-meta.js';
 
 const RECENT_MS = 7 * 86400e3;
 const HISTORY_PAGE = 60;
@@ -50,7 +51,7 @@ export function installSidebarWorkbench(Sidebar) {
       const cutoff = Date.now() - RECENT_MS;
       const count = recentHost
         ? (st?.sessions
-          ? st.sessions.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running').length : '…')
+          ? st.sessions.filter(s => ((s.mtime || 0) >= cutoff || s.status === 'remote-running') && passesAgentKindFilter(s, this._agentKindFilter)).length : '…')
         : localCount;
       const h = zoneHead(tr('Recent'), count);
       this._ensureHostsData();
@@ -176,6 +177,7 @@ export function installSidebarWorkbench(Sidebar) {
         } else {
           map.set(id, { loading: false, sessions: msg.sessions || [], error: null, fetchedAt: msg.at || Date.now(), lastFailAt: 0 });
         }
+        this._renderAgentKindQuickTabs?.(); // the kind census spans remote lists (a remote-only ↳ needs its tab)
         if (this._wbRecentHost === id || this._wbHistoryHost === id || (document.getElementById('session-filter')?.value || '').trim()) this._render();
       });
     },
@@ -207,6 +209,7 @@ export function installSidebarWorkbench(Sidebar) {
         })
         .then(d => {
           map.set(hostId, { loading: false, sessions: d.sessions || [], error: null, fetchedAt: Date.now(), lastFailAt: 0 });
+          this._renderAgentKindQuickTabs?.(); // the kind census spans remote lists (a remote-only ↳ needs its tab)
           if (relevant()) this._render();
         })
         .catch(e => {
@@ -279,7 +282,9 @@ export function installSidebarWorkbench(Sidebar) {
       this.listEl.appendChild(e);
     },
 
-    _wbFilterRemote(sessions) {
+    // `kind: false` = everything but the agent-kind filter — the caller counts
+    // what the filter alone removed and says so (_wbKindHidden).
+    _wbFilterRemote(sessions, { kind = true } = {}) {
       // Dedup vs the live list: a remote session that's CURRENTLY a live
       // webui-managed session (resumed/attached here) already shows in the
       // Running list — don't ALSO render its stale discovered card. Remote chat
@@ -292,6 +297,9 @@ export function installSidebarWorkbench(Sidebar) {
         const id = x.backendSessionId || x.claudeSessionId; if (id) liveIds.add(id);
       }
       let list = liveIds.size ? sessions.filter(s => !liveIds.has(s.sessionId)) : sessions;
+      // the SAME agent-kind filter as the local list (2026-09-24): a remote
+      // codex sub-agent carries agentKind from its SC discovery line
+      if (kind && this._agentKindFilter) list = list.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
       const f = (document.getElementById('session-filter')?.value || '').toLowerCase().trim();
       if (!f) return list;
       return list.filter(s => this._wbMatchRemote(s, f));
@@ -303,6 +311,15 @@ export function installSidebarWorkbench(Sidebar) {
     // ONE remote codex rollout — the same query silently meant different
     // things per machine.
     _wbMatchRemote(s, f) { return sessionMatchesFilter(s, f); },
+
+    // How many rows of a remote list the agent-kind filter ALONE removed
+    // (verifier r1, 2026-09-24): a host holding only sub-agents must not read
+    // as "No sessions found" — the zone says what is hidden and how to show it.
+    _wbKindHidden(sessions, pred = null) {
+      if (!this._agentKindFilter) return 0;
+      const all = this._wbFilterRemote(sessions || [], { kind: false });
+      return (pred ? all.filter(pred) : all).filter(s => !passesAgentKindFilter(s, this._agentKindFilter)).length;
+    },
 
     // Cross-host remote search: when the sidebar filter is active, surface
     // matching sessions from EVERY loaded remote host (skipping skipHost, which
@@ -339,8 +356,11 @@ export function installSidebarWorkbench(Sidebar) {
         if (!st || (st.loading && !st.sessions)) { stateRow('pending', tr('Searching {host}…', { host: hname }), tr('scanning…')); continue; }
         if (st.error && !st.sessions?.length) { stateRow('error', tr('Search on {host} failed.', { host: hname }), tr('unreachable'), st.error); continue; }
         if (!st.sessions) continue;
-        const matches = st.sessions.filter(s => !liveIds.has(s.sessionId) && this._wbMatchRemote(s, f));
+        const textHits = st.sessions.filter(s => !liveIds.has(s.sessionId) && this._wbMatchRemote(s, f));
+        const matches = textHits.filter(s => passesAgentKindFilter(s, this._agentKindFilter));
+        const kindHidden = textHits.length - matches.length; // matches the kind filter alone removed
         if (st.error) stateRow('error', tr('Showing cached results — {host} is unreachable.', { host: hname }), tr('unreachable'), st.error);
+        if (kindHidden) { ensureHead(); this._kindHiddenRow(kindHidden, hname); }
         if (!matches.length) continue;
         ensureHead();
         const hlabel = hname;
@@ -378,7 +398,12 @@ export function installSidebarWorkbench(Sidebar) {
       // the text filter (name/cwd/session id).
       const searching = !!(document.getElementById('session-filter')?.value || '').trim();
       const sessions = searching ? all : all.filter(s => (s.mtime || 0) >= cutoff || s.status === 'remote-running');
-      if (!all.length) { empty('No sessions found on ' + hostLabelFallback); return; }
+      if (!all.length) {
+        const hidden = this._wbKindHidden(st.sessions);
+        if (hidden) this._kindHiddenRow(hidden, hostLabelFallback);
+        else empty('No sessions found on ' + hostLabelFallback);
+        return;
+      }
       if (!sessions.length) { empty(tr('Nothing in the last 7 days on {host} — check History below', { host: hostLabelFallback })); return; }
       const byProj = new Map();
       for (const s of sessions) {
@@ -442,6 +467,13 @@ export function installSidebarWorkbench(Sidebar) {
         cwd: s.cwd || '',
         host: s.host,
         hostName: s.hostName,
+        // a remote sub-agent / review thread keeps its identity (2026-09-24:
+        // the SC discovery line) — the card's ↳ icon, View, and the filter
+        agentKind: s.agentKind || 'primary',
+        sourceKind: s.sourceKind || null,
+        agentRole: s.agentRole || '',
+        agentNickname: s.agentNickname || '',
+        parentThreadId: s.parentThreadId || null,
         // keeper-managed remote claude (B-4058): the remote daemon+claude
         // survived a pod rebuild/local loss — present as resumable; Resume
         // ADOPTS the live process via keeper-attach instead of respawning.
@@ -595,6 +627,7 @@ export function installSidebarWorkbench(Sidebar) {
       // and the apply/clear controls. Marks are collected on the cards; this
       // bar commits them all at once so the list never reshuffles mid-select.
       if (this._manageMode) this.listEl.appendChild(this._buildManageBar());
+      this._appendKindHint?.(); // the list is not primary-only — say so (2026-09-24)
       // A harness whose STOPPED conversations live behind an opt-in background
       // service (opencode → the 'opencode-serve' plugin, OFF by default since
       // 2026-09-07) must SAY that its history is missing — otherwise this list
@@ -812,7 +845,10 @@ export function installSidebarWorkbench(Sidebar) {
         } else if (histHost && histState?.error && !histState.sessions?.length) {
           this._wbEmptyRow(tr('Discovery failed: {err}', { err: histState.error }));
         } else if (!histList.length) {
-          this._wbEmptyRow(histHost ? `No sessions older than 7 days on ${histLabel}` : 'No older sessions');
+          const hidden = histHost && !(searchingH && histHost === (this._wbRecentHost || ''))
+            ? this._wbKindHidden(histState?.sessions, s => (s.mtime || 0) < cutoffH && s.status !== 'remote-running') : 0;
+          if (hidden) this._kindHiddenRow(hidden, histLabel);
+          else this._wbEmptyRow(histHost ? `No sessions older than 7 days on ${histLabel}` : 'No older sessions');
         }
         const cap = this._wbHistoryCap || HISTORY_PAGE;
         for (const s of histList.slice(0, cap)) {

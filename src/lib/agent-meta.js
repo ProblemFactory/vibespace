@@ -734,6 +734,37 @@ export const AGENT_KIND_META = {
   },
 };
 
+/** The sidebar's agent-kind filter (2026-09-24, owner: "这么多subagent啥情况，
+ *  为啥没自动filter掉"). The choice is a VIEW of this page, never a saved
+ *  preference: 2.369.32 persisted an explicit ALL (and any kind tab) in
+ *  localStorage, so one click — the ↳ / ALL tabs are 12 px icons — flooded
+ *  the list with every codex sub-agent on every later load (35 of 48 rollouts
+ *  on a real box are v2 children). Now the choice lives in sessionStorage
+ *  (this tab; a reload keeps it, a new page starts clean) and the legacy
+ *  localStorage key is dropped at load. `null` / unknown ⇒ PRIMARY; 'all' ⇒ ''. */
+export const AGENT_KIND_FILTER_KEY = 'agentKindFilter';
+export function agentKindFilterAtLoad(sessionValue) {
+  if (sessionValue == null || sessionValue === '') return 'primary';
+  if (sessionValue === 'all') return '';
+  return Object.prototype.hasOwnProperty.call(AGENT_KIND_META, sessionValue) ? sessionValue : 'primary';
+}
+/** Does a session row pass the agent-kind filter ('' = ALL)? ONE predicate
+ *  for the local list and every remote zone (a remote codex sub-agent carries
+ *  agentKind from the SC discovery line since 2026-09-24). */
+export function passesAgentKindFilter(session, filter) {
+  return !filter || ((session && session.agentKind) || 'primary') === filter;
+}
+/** The kinds present across EVERY list the filter is applied to (verifier r1,
+ *  2026-09-24): the ↳ / ALL tabs and the kind hint were derived from the local
+ *  sessions alone, so a remote-only sub-agent was hidden by the primary-only
+ *  default with no tab to show it. `lists` = the local sessions plus each
+ *  loaded remote host's discovered sessions. */
+export function agentKindsIn(lists) {
+  const kinds = new Set();
+  for (const list of lists || []) for (const s of list || []) kinds.add((s && s.agentKind) || 'primary');
+  return [...kinds];
+}
+
 export function getAgentKindMeta(kind) {
   return AGENT_KIND_META[kind] || {
     id: kind || 'unknown',

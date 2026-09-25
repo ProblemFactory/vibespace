@@ -3,6 +3,10 @@
 // Generated after each i18n sweep; hand-edited for quality. Missing entries
 // fall back to English automatically.
 export default {
+  "Showing only {kind} threads.": "只显示 {kind} 线程。",
+  "Sub-agent and review threads are listed too.": "子 agent 与 review 线程也列在其中。",
+  "{n} more on {host} hidden by the agent-kind filter.": "{host} 上还有 {n} 条被 agent 类型筛选隐藏。",
+  "Main conversations only": "只看主对话",
   "How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×: widgets 2×, text 2.5×). 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). The scale is fixed when the app starts; a window's ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.": "桌面应用自身的绘制尺寸，让高分辨率屏幕上的文字清晰。自动：由你启动它的那块屏幕推导 —— 像素比 × 你的界面缩放（2× 屏幕、界面缩放 125 % = 2.5×：控件 2×，文字 2.5×）。1.5× 只放大 GTK 应用的文字 —— 按钮仍是 1×（X11 上 GTK 不能按小数缩放）。缩放在应用启动时固定；窗口的 ⋯ → 缩放 会以另一个缩放重启它，状态栏显示缩放值及其来源。",
   "chosen": "已选",
   "⋯ → Scale relaunches the app at another scale.": "⋯ → 缩放 可以用另一个缩放重启应用。",

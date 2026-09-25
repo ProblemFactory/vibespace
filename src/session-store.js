@@ -180,17 +180,9 @@ async function isProcessClaudeAsync(pid) {
 
 // /proc/<pid>/stat field 22 (starttime, clock ticks since boot). Verified
 // byte-equal to the claude lock's `procStart` across 6/6 real locks (2.248.x).
-function procStartTicks(pid) {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
-    // comm may contain spaces/parens — start after the LAST ')' (skips
-    // "pid (comm) "), so rest[0] = state (field 3); starttime is field 22 →
-    // index 22-3 = 19.
-    const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const v = rest[19];
-    return v ? String(v) : null;
-  } catch { return null; }
-}
+// comm may contain spaces/parens — counted from the LAST ')'; ONE reader in
+// src/cli-identity.js (the lock capture's writer witness asks the same one).
+function procStartTicks(pid) { return require('./cli-identity').procStartTicks(pid); }
 
 // B-2104: identity-verify a lock's pid WITHOUT a per-lock `ps` fork — the
 // 2.242.0 event-loop stall was 22 locks × serial `ps`. claude's own lock

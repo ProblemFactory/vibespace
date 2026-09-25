@@ -18,8 +18,26 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { fixtureSid, scratchHome } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+
+// THIS PROCESS IS RE-HOMED before any fixture exists (test-fixture-isolation
+// (c): ④ mints fixtureSid() ids, so the suite isolates its own process — the
+// test-fork-groups shape): HOME and os.homedir point at a scratch home, every
+// scratch home this suite makes is cleaned on exit AND on signals, and the
+// real ~/.claude/projects is censused at the end. Every child still gets an
+// explicit HOME of its own scratch store.
+const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
+const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
+const { fixtureLitter } = require(path.join(REPO, 'src/fixture-guard.js'));
+const fakeHome = scratchHome('codex-subagents-self', fs);
+const scratchHomes = [fakeHome];
+const cleanupHomes = () => { for (const h of scratchHomes) { try { fs.rmSync(h, { recursive: true, force: true }); } catch { } } };
+process.on('exit', cleanupHomes);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanupHomes(); process.exit(143); });
+process.env.HOME = fakeHome;
+os.homedir = () => fakeHome;
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
@@ -298,6 +316,323 @@ const srv = app.listen(0, '127.0.0.1', async () => {
   ok(out.missing?.status === 400, 'a missing threadId is a 400');
   ok((out.stranger?.body?.subagents || []).length === 0, 'a conversation with no children answers with an empty roster');
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+console.log('— ④ a v2 sub-agent is NEVER listed as the owner\'s own conversation (local listing · daemon snapshot · ssh script · sidebar)');
+{
+  // Owner 2026-09-25: "截图里这么多subagent啥情况，为啥没自动filter掉" — dozens
+  // of codex v2 sub-agents (Singer, Pasteur, …, each with the 12 px ↳ kind icon
+  // that reads as an orange "L") in the Sessions list. The fixture is the REAL
+  // 0.153 v2 key shape (keys measured on this box's rollouts, values synthetic):
+  // a parent, two children (the 32/35 forked+parent-copy shape and the 3/35
+  // bare shape), and a USER fork of the parent that must stay primary.
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const DF = require(path.join(REPO, 'src/discovery-facts.js'));
+  const FIX = path.join(REPO, 'scripts/fixtures/codex-subagent-v2');
+  // minted, never spelled (test-fixture-isolation (c)): the fixture files are named by these ids
+  const P = fixtureSid('a001'), C1 = fixtureSid('a002'), C2 = fixtureSid('a003'), F = fixtureSid('a004');
+  const metaOf = (f) => JSON.parse(fs.readFileSync(path.join(FIX, fs.readdirSync(FIX).find((n) => n.includes(f))), 'utf8').split('\n')[0]).payload;
+
+  // ── the PURE rule (one classifier for every transport) ──
+  const kid = DF.classifyCodexThread(metaOf(C1));
+  ok(kid.agentKind === 'subagent' && kid.parentThreadId === P && kid.agentNickname === 'Alice' && kid.agentPath === '/root/parser_audit' && kid.depth === 1 && kid.agentRole === '',
+    'a real-shaped v2 child is a SUB-AGENT with its parent, nickname and path (agent_role null ⇒ no role invented)', JSON.stringify(kid));
+  const topOnly = { ...metaOf(C2) }; delete topOnly.source;               // constructed: the top-level marker alone
+  const t1 = DF.classifyCodexThread(topOnly);
+  ok(t1.agentKind === 'subagent' && t1.parentThreadId === P && t1.agentNickname === 'Bob' && t1.agentPath === '/root/docs_sweep',
+    'the top-level `thread_source: "subagent"` alone (no source.subagent) still classifies — the two spellings are one fact', JSON.stringify(t1));
+  const fork = DF.classifyCodexThread(metaOf(F));
+  ok(fork.agentKind === 'primary' && fork.parentThreadId === null, 'a USER fork (forked_from_id, no thread_source subagent) stays PRIMARY — it is its own conversation', JSON.stringify(fork));
+  ok(DF.classifyCodexThread({ source: 'cli', thread_source: 'user' }).agentKind === 'primary' && DF.classifyCodexThread({ source: { subagent: 'review' } }).agentKind === 'review' && DF.classifyCodexThread({ source: { subagent: 'compact' } }).agentKind === 'subagent',
+    'thread_source "user" = primary; source.subagent "review" = review; any other source.subagent shape = a machine-spawned thread');
+  const { normalizeCodexSource } = require(path.join(REPO, 'src/adapters/codex.js'));
+  ok(normalizeCodexSource(metaOf(C1).source).agentKind === 'subagent' && normalizeCodexSource('vscode').agentKind === 'primary' && normalizeCodexSource(null).agentKind === 'primary',
+    'normalizeCodexSource (the live wrapper_meta path) is the same rule over a bare source');
+
+  // ── one judge for every listing ──
+  const judge = (rows) => {
+    const by = new Map(rows.map((r) => [r.sessionId || r.threadId, r]));
+    const bad = [];
+    const kind = (r) => (r && r.agentKind) || 'primary';
+    if (!by.has(P) || kind(by.get(P)) !== 'primary') bad.push('parent not primary');
+    for (const [id, nick] of [[C1, 'Alice'], [C2, 'Bob']]) {
+      const r = by.get(id);
+      if (!r) { bad.push(nick + ' missing'); continue; }
+      if (kind(r) !== 'subagent') bad.push(`${nick} listed as ${kind(r)}`);
+      if (r.parentThreadId !== P) bad.push(`${nick} parent ${r.parentThreadId}`);
+      if (r.name !== nick) bad.push(`${nick} named ${JSON.stringify(r.name)}`);
+    }
+    if (!by.has(F) || kind(by.get(F)) !== 'primary' || by.get(F).parentThreadId) bad.push('user fork not primary');
+    return bad;
+  };
+
+  // ── a temp HOME holding the fixture (+ the depth-2 native-fork children) ──
+  const home = scratchHome('codex-subagents', fs, ['.codex/sessions/2026/09/20', '.claude/projects', '.claude/sessions']);
+  scratchHomes.push(home);
+  const day = path.join(home, '.codex/sessions/2026/09/20');
+  for (const n of fs.readdirSync(FIX)) fs.copyFileSync(path.join(FIX, n), path.join(day, n));
+  const NF = path.join(REPO, 'scripts/fixtures/codex-native-fork');
+  for (const n of fs.readdirSync(NF)) fs.copyFileSync(path.join(NF, n), path.join(day, n));
+
+  // mutants: M_TS ignores the top-level marker; M_NONE is the "nothing sets
+  // agentKind" state the report was filed against (only review survives)
+  const M = mutantCopies('codex-subagents', REPO);
+  const dfSrc = fs.readFileSync(path.join(REPO, 'src/discovery-facts.js'), 'utf8');
+  const TS_LEG = "if (p.thread_source === 'subagent' || subAgent) {";
+  const SPAWN_LEG = 'if (spawn) {';
+  ok(dfSrc.includes(TS_LEG) && dfSrc.includes(SPAWN_LEG), 'the mutated legs exist verbatim in the classifier (else the controls judge nothing)');
+  const dfTs = M.write('src/discovery-facts.js', dfSrc.replace(TS_LEG, 'if (subAgent) {'), 'ignore-thread-source');
+  const dfNone = M.write('src/discovery-facts.js', dfSrc.replace(SPAWN_LEG, 'if (false && spawn) {').replace(TS_LEG, 'if (false) {'), 'no-subagents');
+  const mTs = require(dfTs);
+  ok(mTs.classifyCodexThread(topOnly).agentKind === 'primary', 'NEGATIVE CONTROL: a classifier that ignores thread_source lists the top-level-only child as PRIMARY (the leg above is load-bearing)');
+  const cxSrc = fs.readFileSync(path.join(REPO, 'src/adapters/codex.js'), 'utf8');
+  const cxNone = M.write('src/adapters/codex.js', cxSrc.replace("require('../discovery-facts')", `require(${JSON.stringify(dfNone)})`), 'no-subagents');
+  const stSrc = fs.readFileSync(path.join(REPO, 'src/codex-session-store.js'), 'utf8');
+  const stNone = M.write('src/codex-session-store.js', stSrc.replace("require('./adapters/codex')", `require(${JSON.stringify(cxNone)})`), 'no-subagents');
+
+  const probe = `
+const path = require('path');
+const out = {};
+(async () => {
+  const store = require(${JSON.stringify(path.join(REPO, 'src/codex-session-store.js'))});
+  const pick = (l) => l.map((s) => ({ sessionId: s.sessionId, agentKind: s.agentKind, parentThreadId: s.parentThreadId, name: s.name, forkedFromId: s.forkedFromId }));
+  out.async = pick(await store.listCodexThreadsAsync({ activeSessions: new Map() }));
+  out.sync = pick(store.listCodexThreads({ activeSessions: new Map() }));
+  out.mutant = pick(require(${JSON.stringify(stNone)}).listCodexThreads({ activeSessions: new Map() }));
+  const express = require(${JSON.stringify(path.join(REPO, 'node_modules/express'))});
+  const { setup, router } = require(${JSON.stringify(path.join(REPO, 'src/routes/sessions.js'))});
+  setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => {}, createSessionMessages: () => null, BUFFERS_DIR: '/tmp', PERMISSION_MODES: [], execFileSync: () => '', hosts: { get: () => null }, serverSetting: () => null });
+  const app = express(); app.use(router);
+  const srv = app.listen(0, '127.0.0.1', async () => {
+    const base = 'http://127.0.0.1:' + srv.address().port;
+    out.sub = await (await fetch(base + '/api/subagents?backend=codex&threadId=${P}')).json();
+    out.subFork = await (await fetch(base + '/api/subagents?backend=codex&threadId=${F}')).json();
+    console.log('@@' + JSON.stringify(out));
+    process.exit(0);
+  });
+})().catch((e) => { console.log('@@' + JSON.stringify({ error: String(e && e.stack || e) })); process.exit(1); });
+`;
+  const r = spawnSync(process.execPath, ['-e', probe], { env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 90000 });
+  const line = (r.stdout || '').split('\n').find((l) => l.startsWith('@@'));
+  const o = line ? JSON.parse(line.slice(2)) : {};
+  ok(!!line && !o.error, 'the listing probe ran (HOME = a scratch home holding the fixture)', o.error || (r.stderr || '').slice(-400));
+  const a = judge(o.async || []);
+  ok(a.length === 0, 'the 5 s-poll listing (listCodexThreadsAsync, the worker path) marks both children SUB-AGENT under their parent, named by nickname; the parent and the user fork stay primary', a.join('; '));
+  ok(judge(o.sync || []).length === 0, 'the sync listing (user-action consumers) agrees', judge(o.sync || []).join('; '));
+  const nf = (o.async || []).filter((s) => s.sessionId.startsWith('01a072d7-'));
+  ok(nf.length === 2 && nf.every((s) => s.agentKind === 'subagent') && nf.some((s) => s.parentThreadId === '01a072d7-92f1-7c20-987b-a96af83c2e76'),
+    'the depth-2 native-fork children (a grandchild under a child) list as sub-agents too', JSON.stringify(nf));
+  const mj = judge(o.mutant || []);
+  ok(mj.length > 0 && mj.some((x) => /Alice listed as primary/.test(x)), 'NEGATIVE CONTROL: a store whose classifier never marks a sub-agent FAILS the same judge (the pre-classification state the report describes)', mj.join('; '));
+  const subs = (o.sub && o.sub.subagents) || [];
+  ok(subs.length === 2 && subs.map((s) => s.threadId).sort().join() === [C1, C2].sort().join() && subs.every((s) => s.nickname && s.agentPath),
+    "the parent's GET /api/subagents lists exactly its two children (with nickname + agent path) — the parent card's View sub-agents", JSON.stringify(subs));
+  ok(((o.subFork && o.subFork.subagents) || []).length === 0, 'a user fork has no sub-agents of its own (its forked_from_id never makes the parent ITS child, nor it a child)');
+
+  // ── the device rung: the daemon snapshot child → synthesize → interpret ──
+  const snapRun = spawnSync(process.execPath, [path.join(REPO, 'src/agentd/agentd.js'), '--discovery-snapshot-child'], { env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+  let snap = null; try { snap = JSON.parse(snapRun.stdout); } catch { }
+  ok(!!snap && Array.isArray(snap.codexRollouts), 'the daemon snapshot child ran over the scratch home', (snapRun.stderr || '').slice(-300));
+  const snapLines = DF.synthesizeDiscoveryLines(snap || {});
+  ok((snapLines.match(/^SC /mg) || []).length === 4 && !snapLines.includes(`SC ${path.join(day, fs.readdirSync(day).find((n) => n.includes(P)))}`),
+    'the snapshot carries an SC fact for every sub-agent rollout and none for a primary', (snapLines.match(/^SC [^\t]*/mg) || []).join(' | '));
+  const dev = DF.interpretDiscoveryLines(snapLines, { hostId: 'hdev', hostName: 'Dev', claimJsonls: () => new Map() });
+  ok(judge(dev).length === 0, 'the device rung lists the children as sub-agents under their parent, named by nickname (not the PARENT\'s first message the inherited copy carries)', judge(dev).join('; ') + ' ' + JSON.stringify(dev.map((s) => [s.sessionId.slice(-4), s.agentKind, s.name])));
+  const devP = dev.find((s) => s.sessionId === P);
+  ok(devP && !('agentKind' in devP) && !('parentThreadId' in devP), 'a primary remote card keeps its shape byte-for-byte (no new keys)', JSON.stringify(devP));
+
+  // ── the ssh rung: the REAL composed script, run by sh over the scratch home ──
+  const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
+  const dataDir = path.join(home, 'hostdata'); fs.mkdirSync(dataDir, { recursive: true });
+  const hm = new HostManager({ dataDir });
+  hm._state.hosts.push({ id: 'hssh', name: 'Box', transport: 'ssh' });
+  let ranScript = '';
+  hm._ssh = async (h, script) => {
+    ranScript = script;
+    const rr = spawnSync('sh', ['-c', script], { env: { ...process.env, HOME: home }, encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+    return rr.stdout || '';
+  };
+  let sshCards = [];
+  try { sshCards = await hm.discoverSessions('hssh', { ttlMs: 0 }); } catch (e) { ok(false, 'ssh discovery ran', e.message); }
+  const codexSsh = sshCards.filter((s) => s.backend === 'codex');
+  ok(/printf 'SC %s\\t'/.test(ranScript) && codexSsh.length === 6, 'the composed ssh script ran for real (sh, scratch HOME) and listed every rollout', `${codexSsh.length} codex cards`);
+  ok(judge(codexSsh).length === 0, 'the ssh rung classifies exactly like the local listing (SC line → the one classifier)', judge(codexSsh).join('; ') + ' ' + JSON.stringify(codexSsh.map((s) => [s.sessionId.slice(-4), s.agentKind, s.name])));
+  const sig = (l) => l.filter((s) => s.backend === 'codex' || s.agentKind !== undefined).map((s) => [s.sessionId, s.agentKind || 'primary', s.parentThreadId || null, s.name || null].join('|')).sort().join('\n');
+  ok(sig(codexSsh) === sig(dev), 'device rung ≡ ssh rung (sessionId, kind, parent, name) — no twin drift', sig(codexSsh) + '\n≠\n' + sig(dev));
+  const localSig = (o.async || []).map((s) => [s.sessionId, s.agentKind || 'primary', s.parentThreadId || null].join('|')).sort().join('\n');
+  ok(localSig === sig(codexSsh).split('\n').map((l) => l.split('|').slice(0, 3).join('|')).join('\n'), 'local listing ≡ remote rungs on (sessionId, kind, parent)', localSig);
+
+  // ── EVERY listed rollout is classified, not only the 30 with head facts ──
+  // (verifier 2026-09-24: the SC leg sat INSIDE the capped head-fact loop —
+  // `head -30` in the ssh script, `slice(0, 30)` in the daemon — while the C
+  // listing names up to 100 rollouts; on the owner's real store 25 of 48
+  // sub-agents still listed as primary, nameless conversations.) A generated
+  // store of 45 rollouts (5 primaries, 40 sub-agents interleaved by mtime so
+  // children sit at positions 31–45), each own meta padded to the measured
+  // real size (~22 KB of base_instructions), judged on ALL rows by all rungs.
+  {
+    const bigHome = scratchHome('codex-subagents-big', fs, ['.codex/sessions/2026/09/21', '.claude/projects', '.claude/sessions']);
+    scratchHomes.push(bigHome);
+    const bday = path.join(bigHome, '.codex/sessions/2026/09/21');
+    const pad = 'x'.repeat(22000);
+    const metaLine = (p, ord) => JSON.stringify({ timestamp: p.timestamp, ordinal: ord, type: 'session_meta', payload: p });
+    const userLine = (text, ord) => JSON.stringify({ timestamp: '2026-09-21T10:00:01.000Z', ordinal: ord, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+    const primaryMeta = (id) => ({ session_id: id, id, timestamp: '2026-09-21T10:00:00.000Z', cwd: '/work/demo', originator: 'claude-code-webui', cli_version: '0.153.4', source: 'vscode', model_provider: 'openai', base_instructions: { text: pad }, history_mode: 'paginated' });
+    const want = new Map(); // id -> kind|parent
+    const t0 = Date.now() / 1000;
+    let lastPrimary = null;
+    for (let i = 0; i < 45; i++) {
+      const id = fixtureSid('b' + (i + 1).toString(16).padStart(3, '0'));
+      const fn = path.join(bday, `rollout-2026-09-21T10-${String(i).padStart(2, '0')}-00-${id}.jsonl`);
+      let body;
+      if (i % 9 === 0) {
+        lastPrimary = id;
+        body = [metaLine(primaryMeta(id), 0), userLine(`fixture task number ${i}`, 1)];
+        want.set(id, 'primary|');
+      } else {
+        const nick = `Helper${i}`;
+        const own = { ...primaryMeta(id), session_id: lastPrimary, forked_from_id: lastPrimary, parent_thread_id: lastPrimary, source: { subagent: { thread_spawn: { parent_thread_id: lastPrimary, depth: 1, agent_path: `/root/task_${i}`, agent_nickname: nick, agent_role: null } } }, thread_source: 'subagent', agent_nickname: nick, agent_path: `/root/task_${i}`, multi_agent_version: 'v2' };
+        body = [metaLine(own, 0), metaLine(primaryMeta(lastPrimary), 1), userLine('the parent task the copy carries', 2), userLine(`sub-task ${i}`, 3)];
+        want.set(id, 'subagent|' + lastPrimary);
+      }
+      fs.writeFileSync(fn, body.join('\n') + '\n');
+      fs.utimesSync(fn, t0 - i * 60, t0 - i * 60); // i = mtime rank (0 = newest)
+    }
+    const wantSig = [...want].map(([id, v]) => id + '|' + v).sort().join('\n');
+    const sigOf = (rows) => rows.filter((s) => s.backend === 'codex' || s.agentKind !== undefined || s.threadId).map((s) => [s.sessionId || s.threadId, s.agentKind || 'primary', s.parentThreadId || ''].join('|')).sort().join('\n');
+    const miss = (rows) => { const got = new Set(sigOf(rows).split('\n')); return [...want].filter(([id, v]) => !got.has(id + '|' + v)).map(([id, v]) => id.slice(-4) + ':' + v.split('|')[0]); };
+    // local listing
+    const lr = spawnSync(process.execPath, ['-e', `require(${JSON.stringify(path.join(REPO, 'src/codex-session-store.js'))}).listCodexThreadsAsync({ activeSessions: new Map() }).then((l) => { console.log('@@' + JSON.stringify(l.map((s) => ({ sessionId: s.sessionId, agentKind: s.agentKind, parentThreadId: s.parentThreadId, backend: 'codex' })))); process.exit(0); })`], { env: { ...process.env, HOME: bigHome }, encoding: 'utf8', timeout: 90000 });
+    const lline = (lr.stdout || '').split('\n').find((l) => l.startsWith('@@'));
+    const local = lline ? JSON.parse(lline.slice(2)) : [];
+    ok(local.length === 45 && miss(local).length === 0, 'the local listing over a 45-rollout store: 40 sub-agents + 5 primaries, every parent right (the truth the remote rungs must match)', `${local.length} rows; wrong: ${miss(local).join(' ')}`);
+    // daemon rung (real + a mutant that re-caps the SC leg at 30)
+    const snapOf = (entry) => {
+      const rr = spawnSync(process.execPath, [entry, '--discovery-snapshot-child'], { env: { ...process.env, HOME: bigHome }, encoding: 'utf8', timeout: 60000, maxBuffer: 64 * 1024 * 1024 });
+      let j = null; try { j = JSON.parse(rr.stdout); } catch { }
+      return j ? DF.interpretDiscoveryLines(DF.synthesizeDiscoveryLines(j), { hostId: 'hbig', hostName: 'Big', claimJsonls: () => new Map() }) : [];
+    };
+    const devBig = snapOf(path.join(REPO, 'src/agentd/agentd.js'));
+    ok(devBig.filter((s) => s.backend === 'codex').length === 45 && miss(devBig).length === 0, 'the device rung classifies ALL 45 rollouts (children past the 30 head-fact slots included)', `${devBig.filter((s) => s.backend === 'codex').length} codex cards; wrong: ${miss(devBig).join(' ')}`);
+    const agSrcBig = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+    const SC_ALL = 'codexRollouts.forEach((r, i) => {';
+    ok(agSrcBig.includes(SC_ALL), 'the daemon SC leg walks every listed rollout (the mutated line exists verbatim)');
+    const devCap = snapOf(M.write('src/agentd/agentd.js', agSrcBig.replace(SC_ALL, 'codexRollouts.slice(0, 30).forEach((r, i) => {'), 'sc-cap-30'));
+    const capMiss = miss(devCap);
+    ok(devCap.length > 0 && capMiss.length >= 10 && capMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: a daemon whose SC leg is re-capped at 30 lists the older children as PRIMARY (the uncapped leg is load-bearing)', `${capMiss.length} wrong: ${capMiss.join(' ')}`);
+    // ssh rung (real composed script + a mutant that re-caps the SC leg at 30)
+    const sshOf = async (HM) => {
+      const d = path.join(bigHome, 'hostdata-' + Math.random().toString(36).slice(2)); fs.mkdirSync(d, { recursive: true });
+      const h = new HM({ dataDir: d });
+      h._state.hosts.push({ id: 'hbig', name: 'Big', transport: 'ssh' });
+      h._ssh = async (_h, script) => spawnSync('sh', ['-c', script], { env: { ...process.env, HOME: bigHome }, encoding: 'utf8', timeout: 90000, maxBuffer: 64 * 1024 * 1024 }).stdout || '';
+      try { return (await h.discoverSessions('hbig', { ttlMs: 0 })).filter((s) => s.backend === 'codex'); } catch (e) { return []; }
+    };
+    const sshBig = await sshOf(HostManager);
+    ok(sshBig.length === 45 && miss(sshBig).length === 0, 'the ssh rung classifies ALL 45 rollouts (the SC leg runs outside the head -30 slot)', `${sshBig.length} codex cards; wrong: ${miss(sshBig).join(' ')}`);
+    ok(sigOf(sshBig) === wantSig && sigOf(devBig.filter((s) => s.backend === 'codex')) === wantSig && sigOf(local) === wantSig, 'device ≡ ssh ≡ local on (id, kind, parent) for EVERY row of the 45-rollout store');
+    const byIdBig = new Map(sshBig.map((s) => [s.sessionId, s]));
+    const nameless = [...want].filter(([, v]) => v.startsWith('subagent|')).map(([id]) => byIdBig.get(id) || { sessionId: id }).filter((s) => !/^Helper\d+$/.test(s.name || ''));
+    ok(nameless.length === 0, 'every remote child is named by its nickname, past the head-fact slots too (the NC name leg stays capped at 30 — documented)', nameless.map((s) => s.sessionId.slice(-4) + '=' + JSON.stringify(s.name)).join(' '));
+    const hsSrcBig = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+    const SSH_SC = `[ -n "$TID" ] && printf '%s\\\\n' "$HD" | grep '"type":"session_meta"'`;
+    ok(hsSrcBig.includes(SSH_SC), 'the ssh SC leg exists verbatim (else the ssh control judges nothing)');
+    const hsCap = M.write('src/hosts.js', hsSrcBig.replace(SSH_SC, `[ "$i" -le 30 ] && ${SSH_SC}`), 'sc-cap-30');
+    const sshCap = await sshOf(require(hsCap).HostManager);
+    const sshCapMiss = miss(sshCap);
+    ok(sshCap.length === 45 && sshCapMiss.length >= 10 && sshCapMiss.every((x) => /:subagent$/.test(x)), 'NEGATIVE CONTROL: an ssh script whose SC leg is re-capped at 30 lists the older children as PRIMARY', `${sshCap.length} cards, ${sshCapMiss.length} wrong`);
+  }
+
+  // ── the sidebar: primary-only by default, the choice a page VIEW, remote zones filtered ──
+  const AM = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  ok(AM.agentKindFilterAtLoad(null) === 'primary' && AM.agentKindFilterAtLoad('all') === '' && AM.agentKindFilterAtLoad('subagent') === 'subagent' && AM.agentKindFilterAtLoad('bogus') === 'primary',
+    'agentKindFilterAtLoad: nothing chosen ⇒ primary only; all ⇒ ALL; an unknown value ⇒ primary');
+  ok(AM.passesAgentKindFilter({ agentKind: 'subagent' }, 'primary') === false && AM.passesAgentKindFilter({}, 'primary') === true && AM.passesAgentKindFilter({ agentKind: 'subagent' }, '') === true,
+    'passesAgentKindFilter: a sub-agent never passes primary-only; a kind-less (legacy) row is primary');
+  const sbSrc = read('src/lib/sidebar.js'), wbSrc = read('src/lib/sidebar-workbench.js');
+  ok(!/localStorage\.setItem\(['"]agentKindFilter/.test(sbSrc) && /localStorage\.removeItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /sessionStorage\.getItem\(AGENT_KIND_FILTER_KEY\)/.test(sbSrc) && /this\._agentKindFilter = agentKindFilterAtLoad\(storedKind\)/.test(sbSrc),
+    'WIRING: the sidebar never PERSISTS a kind choice (sessionStorage only) and drops the legacy localStorage key at load — a one-click ALL/↳ can no longer flood every later load');
+  ok(/passesAgentKindFilter\(s, this\._agentKindFilter\)/.test(sbSrc) && /sidebar-kind-hint/.test(sbSrc) && /tr\('Main conversations only'\)/.test(sbSrc),
+    'WIRING: the local list filters through the ONE predicate, and a non-primary view says so in words with the way back');
+  ok((wbSrc.match(/passesAgentKindFilter\(s, this\._agentKindFilter\)/g) || []).length >= 3 && /agentKind: s\.agentKind \|\| 'primary',\n\s*sourceKind: s\.sourceKind/.test(wbSrc),
+    'WIRING: every remote zone (Recent count, Recent/History list, cross-host search) applies the same filter, and a remote card keeps its agent identity');
+  // ── a sub-agent that lives ONLY on a remote host is reachable and disclosed ──
+  // (verifier r1, 2026-09-24: the ↳ / ALL tabs and the kind hint read the local
+  // sessions alone, so with a primary-only local list a remote host's children
+  // were filtered out with no tab to show them, and a cross-host search for one
+  // answered "No sessions found".) Driven on the REAL Sidebar prototype over a
+  // minimal DOM stand-in; the mutant reads `_allSessions` alone and goes red.
+  {
+    const mkEl = (tag) => {
+      const el = {
+        tagName: tag, children: [], className: '', textContent: '', title: '', style: { setProperty() { } },
+        classList: { add: (c) => { el.className = (el.className + ' ' + c).trim(); }, contains: (c) => el.className.split(/\s+/).includes(c) },
+        setAttribute() { }, append(...c) { el.children.push(...c); }, appendChild(c) { el.children.push(c); return c; },
+      };
+      Object.defineProperty(el, 'innerHTML', { get: () => el._html || '', set: (v) => { el._html = v; el.children = []; } });
+      return el;
+    };
+    // import BEFORE the stand-in exists: utils.js binds document listeners at load
+    const { Sidebar } = await import(path.join(REPO, 'src/lib/sidebar.js'));
+    const byId = new Map();
+    const mem = new Map();
+    globalThis.document = { createElement: mkEl, getElementById: (id) => byId.get(id) || null };
+    globalThis.sessionStorage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
+    const subLabel = AM.getAgentKindMeta('subagent').label;
+    const drive = async (SB) => {
+      const tabs = mkEl('div'); byId.set('agent-kind-quick-tabs', tabs);
+      const self = Object.create(SB.prototype);
+      Object.assign(self, {
+        _allSessions: [{ sessionId: 'local-1', name: 'local work' }],
+        _wbRemoteHosts: new Map([['hbox', { loading: false, sessions: [{ sessionId: P, name: 'audit the parser', hostName: 'Box', backend: 'codex' }, { sessionId: C1, agentKind: 'subagent', parentThreadId: P, name: 'Alice', hostName: 'Box', backend: 'codex' }] }]]),
+        _hostsData: { hosts: [{ id: 'hbox', name: 'Box' }] },
+        _agentKindFilter: 'primary', listEl: mkEl('div'), _render() { },
+      });
+      const out = {};
+      self._renderAgentKindQuickTabs();
+      out.subTab = tabs.children.some((b) => b.title === subLabel);
+      out.allTab = tabs.children.some((b) => b.textContent === 'ALL');
+      self._renderRemoteSearchAll('alice', null);
+      const txt = (el) => [el.textContent || '', ...(el.children || []).map(txt)].join(' ');
+      out.searchHidden = self.listEl.children.some((c) => /wb-kind-hidden-row/.test(c.className) && /1 more on Box/.test(txt(c)));
+      out.hiddenCount = self._wbKindHidden(self._wbRemoteHosts.get('hbox').sessions);
+      self.listEl = mkEl('div'); self._agentKindFilter = ''; self._appendKindHint();
+      out.hint = self.listEl.children.some((c) => /sidebar-kind-hint/.test(c.className));
+      const showAll = self.listEl.children.length ? null : 'none';
+      self._agentKindFilter = 'primary'; self.listEl = mkEl('div');
+      self._kindHiddenRow(3, 'Box').children.find((c) => c.type === 'button').onclick({ stopPropagation() { } });
+      out.showAll = showAll || (self._agentKindFilter === '' && mem.get('agentKindFilter') === 'all');
+      return out;
+    };
+    const real = await drive(Sidebar);
+    ok(real.subTab && real.allTab, 'a primary-only local list + a remote host holding a sub-agent ⇒ the ↳ and ALL tabs are drawn (the kind census spans the remote lists)', JSON.stringify(real));
+    ok(real.hint, 'the ALL view discloses itself (sub-agent threads are listed too) when only a REMOTE host holds them', JSON.stringify(real));
+    ok(real.searchHidden && real.hiddenCount === 1, 'a cross-host search whose only match is a filtered sub-agent says "1 more on Box hidden by the agent-kind filter" — never a silent "No sessions found"', JSON.stringify(real));
+    ok(real.showAll === true, 'the hidden-row button shows ALL for this page (sessionStorage only, never localStorage)', JSON.stringify(real));
+    const sbSrcUi = fs.readFileSync(path.join(REPO, 'src/lib/sidebar.js'), 'utf8');
+    const UNION = 'for (const st of this._wbRemoteHosts?.values() || []) if (st?.sessions) lists.push(st.sessions);';
+    ok(sbSrcUi.includes(UNION), 'the union line exists verbatim (else the control judges nothing)');
+    const { Sidebar: SbLocal } = await import(M.write('src/lib/sidebar.js', sbSrcUi.replace(UNION, '/* local only */'), 'kinds-local-only', { esm: true }));
+    const mut = await drive(SbLocal);
+    ok(!mut.subTab && !mut.hint, 'NEGATIVE CONTROL: a census that reads `_allSessions` alone draws no ↳ tab and no hint — the remote-only sub-agent is unreachable (the verifier\'s repro)', JSON.stringify(mut));
+    ok((read('src/lib/sidebar-workbench.js').match(/^\s*this\._renderAgentKindQuickTabs\?\.\(\); \/\/ the kind census spans remote lists/mg) || []).length === 2,
+      'WIRING: a landing remote list re-draws the kind tabs (fetch + the remote-sessions push)');
+    delete globalThis.document; delete globalThis.sessionStorage;
+  }
+
+  const hsSrc = read('src/hosts.js'), agSrc = read('src/agentd/agentd.js');
+  ok(/printf 'SC %s\\\\t'/.test(hsSrc) && /codexScTokensFromHead\(head, tid\)/.test(agSrc) && /lines\.push\(`SC \$\{r\.path\}\\t\$\{r\.agentTokens\}`\)/.test(dfSrc),
+    'STANDING SWEEP: the ssh script, the daemon snapshot and the synthesizer all carry the SC fact');
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(c.pass, c.name, c.detail);
+}
+
+// ── the REAL home is untouched (this process was re-homed before any fixture was written) ──
+{
+  const after = (() => { try { return fs.readdirSync(REAL_PROJECTS, { withFileTypes: true }); } catch { return []; } })();
+  const added = after.filter((d) => !realBefore.has(d.name))
+    .map((d) => ({ name: d.name, mtimeMs: (() => { try { return fs.statSync(path.join(REAL_PROJECTS, d.name)).mtimeMs; } catch { return Date.now(); } })() }));
+  const lit = fixtureLitter(added);
+  ok(lit.offenders.length === 0, `the real ~/.claude/projects gained no fixture entry (${added.length} new from concurrent real sessions, 0 fixtures)`, JSON.stringify(lit.offenders.slice(0, 3)));
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
