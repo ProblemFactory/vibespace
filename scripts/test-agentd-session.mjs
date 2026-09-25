@@ -58,6 +58,27 @@ console.log('— M1: a pty session runs in the daemon, bytes relay both ways —
   check('session-exit propagated to the server', exitCode !== null, String(exitCode));
 }
 
+console.log('— R6 pipe session: the exit sentinel names a signal death (B-3052 r2) —');
+{
+  // node hands the daemon's waiter `code null` + the signal for a killed CLI;
+  // the sentinel keeps `code: code ?? 0` (every reader's exit) and ADDS
+  // `signal`, so chat-wrapper can record the kill instead of a clean 0.
+  const sentinelOf = async (sid, script) => {
+    let out = '';
+    const p = await dm.openPipeSession({ sid, cmd: '/bin/sh', args: ['-c', script], cwd: tmp, env: {} });
+    p.onData = (b) => { out += b.toString('utf-8'); };
+    await p.ready;
+    const t0 = Date.now();
+    while (!out.includes('"_remote_exit"') && Date.now() - t0 < 5000) await sleep(50);
+    const line = out.split('\n').find((l) => l.includes('"_remote_exit"'));
+    try { return JSON.parse(line); } catch { return { raw: out.slice(-200) }; }
+  };
+  const killed = await sentinelOf('exit-signal-term', 'echo PIPE_UP; kill -TERM $$');
+  check('a CLI killed by SIGTERM: sentinel {code: 0, signal: "SIGTERM"}', killed.code === 0 && killed.signal === 'SIGTERM', JSON.stringify(killed));
+  const clean = await sentinelOf('exit-signal-clean', 'echo PIPE_UP; exit 4');
+  check('a CLI that exits 4: sentinel {code: 4} with no signal field (the shape older readers know)', clean.code === 4 && !('signal' in clean), JSON.stringify(clean));
+}
+
 console.log('— M1: resize reaches the device pty (stty reports new size) —');
 {
   let out = '';

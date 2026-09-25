@@ -286,7 +286,7 @@ if (mode === 'run') {
       child.stdout.on('data', (d) => { try { fs.writeSync(outFd, d); } catch { } });
       child.stderr.on('data', (d) => { try { fs.appendFileSync(P.err, d); } catch { } });
     }
-    child.on('exit', (code) => finalize(code));
+    child.on('exit', (code, signal) => finalize(code, signal));
     child.on('error', () => finalize(1));
     if (!fifoMode) {
       var pipeStdin = child.stdin; // socket data sink in pipe mode
@@ -309,11 +309,15 @@ if (mode === 'run') {
   server.listen(P.sock, () => { try { fs.chmodSync(P.sock, 0o600); } catch { } });
 
   let done = false;
-  const finalize = (code) => {
+  // `signal` (B-3052 r2): node hands a killed claude `code null` + the signal;
+  // `code ?? 0` stays what every reader treats as the exit, the signal is an
+  // ADDED field (the sentinel shape is otherwise unchanged) so the wrapper can
+  // tell a clean exit from a kill.
+  const finalize = (code, signal) => {
     if (done) return; done = true;
-    try { fs.writeSync(outFd, Buffer.from(JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n')); } catch { }
+    try { fs.writeSync(outFd, Buffer.from(JSON.stringify({ type: '_remote_exit', code: code ?? 0, ...(signal ? { signal } : {}) }) + '\n')); } catch { }
     const m = readMeta() || {};
-    writeMeta({ ...m, exited: code ?? 0, exitedAt: Date.now() });
+    writeMeta({ ...m, exited: code ?? 0, ...(signal ? { exitSignal: signal } : {}), exitedAt: Date.now() });
     try { server.close(); } catch { }
     try { fs.unlinkSync(P.sock); } catch { }
     try { fs.unlinkSync(P.in); } catch { }

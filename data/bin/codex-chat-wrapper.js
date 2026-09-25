@@ -328,6 +328,7 @@ const baseCwd = process.env.CODEX_WEBUI_CWD || process.cwd();
 const REMOTE_SID = process.env.VIBESPACE_REMOTE_SID || '';
 let remoteOffset = 0;      // bytes consumed from the keeper buffer (byte-exact)
 let remoteExited = null;   // set by the _remote_exit sentinel = codex REALLY ended
+let remoteExitSignal = null; // the sentinel's `signal` (B-3052 r3): the app-server's signal death ON THE HOST
 let reconnectAttempts = 0;
 let reconnectTimer = null;
 let shuttingDown = false;
@@ -446,6 +447,7 @@ let nextId = 1;
 let pendingRequests = new Map();
 let pendingServerRequests = new Map();
 let child = null;
+let childExit = null;      // {code, signal} of the LAST child exit, null while a child runs (B-3052 r3)
 let stdoutBuf = '';
 let stdinBuf = '';
 let currentTurnId = null;
@@ -3262,8 +3264,12 @@ function handleStdoutLine(line) {
   // keeper sentinel: codex REALLY ended on the host (vs a mere ssh drop)
   if (msg.type === '_remote_exit') {
     remoteExited = msg.code ?? 0;
-    log(`remote session ended (code ${remoteExited}${msg.crashed ? ', crashed' : ''}${msg.missing ? ', missing' : ''})`);
-    finalizeExit(remoteExited);
+    // B-3052 r3 (the third wrapper): the keeper/daemon waiter ADDS the signal
+    // node gave it (`code` stays `code ?? 0`); a sentinel without it (an older
+    // writer on the host) records null — never invented, never the transport's.
+    remoteExitSignal = (typeof msg.signal === 'string' && msg.signal) || null;
+    log(`remote session ended (code ${remoteExited} signal ${remoteExitSignal}${msg.crashed ? ', crashed' : ''}${msg.missing ? ', missing' : ''})`);
+    finalizeExit(remoteExited, remoteExitSignal);
     return;
   }
 
@@ -3287,18 +3293,79 @@ function handleStdoutLine(line) {
 }
 
 // Shared exit body (natural child exit locally, or the remote sentinel).
-function finalizeExit(code) {
+// B-3052 r3: the exit RECORD the server's "[session] exited" line reads —
+// `childExitCode` + `childExitSignal` in the wrapper meta, the same shape as
+// chat-wrapper.js/pty-wrapper.js (this wrapper wrote neither, so every codex
+// exit read `wrapper=unfinalized`, the SIGKILL/crash fate). The exit status is
+// unchanged: `process.exit(code ?? 0)`.
+function finalizeExit(code, signal) {
   shuttingDown = true;
   meta.streaming = false;
   meta.activeTurnId = null;
+  meta.childExitCode = code ?? null;
+  meta.childExitSignal = signal || null;   // which signal ended the app-server (null = it exited by itself)
   scheduleMeta();
   if (writeTimer) clearTimeout(writeTimer);
   if (metaTimer) clearTimeout(metaTimer);
   persistBuffer();
   persistMeta();
-  log(`session ended code=${code}`);
+  log(`session ended code=${code} signal=${signal || null}`);
   process.exit(code ?? 0);
 }
+
+// WRAPPER SIGNAL RECORD (B-3052; this wrapper since r3 — the same handler as
+// chat-wrapper.js, read that essay). A RECORD, not a rescue: synchronous only,
+// the child is handed nothing (what it receives is what the default action
+// handed it), the wrapper still dies with 128+signo. THE RECORD NEVER CREATES
+// A FILE: the kill path unlinks <id>.json/<id>.buf in the tick it SIGTERMs the
+// dtach master and this handler runs ms later (SIGHUP) — the meta is written
+// only into a file that still exists ('r+'), a pending buffer only into an
+// existing .buf or while the meta still exists.
+// r4: a META is overwritten in ONE write at offset 0, padded with spaces to the
+// old length (JSON.parse ignores trailing whitespace) and never truncated — a
+// reader never sees the empty or half-written file an ftruncate-then-write
+// left readable between two syscalls (measured torn on the FUSE workspace).
+// A buffer (`pad` off) may legitimately shrink and keeps the truncating form.
+function overwriteIfPresent(file, data, { pad = false } = {}) {
+  let fd;
+  try { fd = fs.openSync(file, 'r+'); } catch { return false; }
+  try {
+    let b = Buffer.from(data);
+    if (pad) {
+      const old = fs.fstatSync(fd).size;
+      if (b.length < old) b = Buffer.concat([b, Buffer.alloc(old - b.length, 0x20)]);
+    } else fs.ftruncateSync(fd, 0);
+    fs.writeSync(fd, b, 0, b.length, 0);
+  } finally { try { fs.closeSync(fd); } catch {} }
+  return true;
+}
+const WRAPPER_SIGNO = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 };
+function onWrapperSignal(sig) {
+  try {
+    const childDead = !child || !!childExit;
+    if (metaTimer) { clearTimeout(metaTimer); metaTimer = null; }
+    // THE RECORD FIRST (r4): the meta is written before the buffer flush and
+    // before the log line — the server's teardown is racing this handler (the
+    // dtach master's death EOFs its attach client and SIGHUPs us at once), and
+    // on the FUSE workspace a log append alone is ~3.5 ms, an 800 KB buffer
+    // flush up to ~200 ms. The record lands first, everything else after.
+    meta.wrapperSignal = sig;
+    meta.wrapperSignalAt = Date.now();
+    if (childDead && childExit) {
+      if (meta.childExitCode === undefined) meta.childExitCode = childExit.code;
+      if (meta.childExitSignal === undefined) meta.childExitSignal = childExit.signal;
+    }
+    const recorded = overwriteIfPresent(metaFile, JSON.stringify(meta), { pad: true });
+    if (writeTimer) {
+      clearTimeout(writeTimer); writeTimer = null;
+      if (!overwriteIfPresent(bufferFile, buffer) && fs.existsSync(metaFile)) persistBuffer();
+    }
+    log(`wrapper received ${sig} (child pid ${child ? child.pid : null}, childDead=${childDead})`);
+    if (!recorded) log(`wrapper record skipped: ${path.basename(metaFile)} is gone (the server tore the session down first)`);
+  } catch {}
+  process.exit(128 + WRAPPER_SIGNO[sig]);
+}
+for (const sig of Object.keys(WRAPPER_SIGNO)) process.on(sig, () => onWrapperSignal(sig));
 
 let lineBufB = Buffer.alloc(0); // Buffer-based: byte-exact offsets + no multibyte splits
 
@@ -3322,6 +3389,7 @@ function startChild() {
   }
 
   meta.childPid = child.pid;
+  childExit = null;
   scheduleMeta();
   log(`spawned ${cmd} ${spawnArgs.length !== args.length ? '(offset-substituted) ' : ''}pid=${child.pid}${REMOTE_SID ? ` offset=${remoteOffset} attempt=${reconnectAttempts}` : ''}`);
 
@@ -3354,7 +3422,11 @@ function startChild() {
     if (text) log(`[stderr] ${text}`);
   });
 
-  child.on('exit', (code) => {
+  // (code, signal): node passes BOTH — a killed app-server is `code null` and
+  // only the second argument says which signal (B-3052 r3).
+  child.on('exit', (code, signal) => {
+    childExit = { code: code ?? null, signal: signal || null };
+    log(`Child exited with code ${code} signal ${signal || null}`);
     // remote + no sentinel + not told to die = TRANSPORT death → reconnect
     if (REMOTE_SID && remoteExited === null && !shuttingDown) {
       meta.remote = { state: 'reconnecting', attempts: reconnectAttempts + 1, at: Date.now() };
@@ -3362,7 +3434,9 @@ function startChild() {
       scheduleReconnect();
       return;
     }
-    finalizeExit(remoteExited !== null ? remoteExited : code);
+    // On the sentinel path the code AND signal come from the host; the
+    // transport's own (code, signal) describe only the ssh/attach process.
+    finalizeExit(remoteExited !== null ? remoteExited : code, remoteExited !== null ? remoteExitSignal : signal);
   });
 
   child.on('error', (err) => {

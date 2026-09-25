@@ -824,11 +824,14 @@ const pipeSessions = {
       log(`pipe-session ${sid} spawn error: ${e && e.message}`);
     });
     // we CAN wait on our own detached child — write the real exit sentinel
-    child.on('exit', (code) => {
+    // (code, signal) — B-3052 r2: a killed CLI is `code null` + the signal;
+    // `code ?? 0` stays the exit every reader acts on, `signal` is ADDED so the
+    // wrapper's record (and the server's exit line) can name the kill.
+    child.on('exit', (code, signal) => {
       this._own.delete(child.pid);
-      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: code ?? 0 }) + '\n'); } catch { }
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: code ?? 0, ...(signal ? { signal } : {}) }) + '\n'); } catch { }
       const cur = this._meta(sid) || {};
-      fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: code ?? 0, exitedAt: Date.now() }));
+      fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: code ?? 0, ...(signal ? { exitSignal: signal } : {}), exitedAt: Date.now() }));
     });
     fs.closeSync(outFd); fs.closeSync(errFd); // child holds its own copies
     log(`pipe-session ${sid} spawned pid=${child.pid}`);

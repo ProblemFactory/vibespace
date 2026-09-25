@@ -13,6 +13,7 @@ const { classifyCliDeath } = require('./agent-tool-generators.js');
 const { feedLive } = require('../normalizers');
 const { capsOf } = require('../backend-caps.js'); // streamProtocol picks the parse pipeline — never the backend id (P4)
 const { createStdoutRegistry } = require('./stdout/index.js'); // protocol → consumer (S5)
+const { exitFacts, tombExpired, awaitsWrapper, WRAPPER_SETTLE_MS, WRAPPER_SETTLE_STEP_MS } = require('../exit-facts.js'); // PURE: the exit record's facts (B-3052)
 const fs = require('fs');
 const path = require('path');
 const pty = require('node-pty');
@@ -225,8 +226,27 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     // Child exit code from the wrapper's final meta (2.207.0 — wrappers keep
     // it instead of unlinking; a crash-looping claude previously left zero
     // process-level evidence).
-    let childCode = null;
-    try { childCode = JSON.parse(fs.readFileSync(path.join(BUFFERS_DIR, id + '.json'), 'utf-8')).childExitCode ?? null; } catch {}
+    // B-3052: the SAME read also carries the child's exit SIGNAL and — when
+    // the wrapper itself was signalled — which signal (`wrapperSignal`); the
+    // socket's fate at this instant is the third fact. ONE pure reader
+    // (src/exit-facts.js) builds the line, the event and the tomb.
+    // r4: THE READ WAITS FOR THE WRAPPER. When the dtach master dies first
+    // (the 2026-09-24 shape) this onExit and the wrapper's SIGHUP record are
+    // two consequences of one event; a read at once saw no record (or a
+    // half-written one) and printed `wrapper=unfinalized`. settleWrapperMeta
+    // polls, bounded (WRAPPER_SETTLE_MS), while the meta names a wrapper that
+    // is still running without a finalized record — the common exits
+    // (finalized, Terminate's unlinked meta, a SIGKILLed wrapper) read ONCE,
+    // synchronously, exactly as before.
+    const wrapperMetaPath = path.join(BUFFERS_DIR, id + '.json');
+    const finishTeardown = (wrapperMeta, settle) => { // (body at its pre-r4 indentation: the diff is the wait)
+    // The wait yielded the loop: a Terminate (the kill path deletes the
+    // session and unlinks its files itself) or a replacement owns it now.
+    if (activeSessions.get(id) !== session) return;
+    let socketExists = false;
+    try { socketExists = !!session.socketPath && fs.existsSync(session.socketPath); } catch {}
+    const facts = exitFacts({ meta: wrapperMeta, socketPath: session.socketPath || null, socketExists, wrapperRunning: settle.running });
+    const childCode = facts.code;
     // CLI-death classifier (2.226.0, user directive "不要静默失败"): known
     // canned errors become a machine reason + the matched line, which rides
     // the `exited` broadcast so the window shows WHY it died (read-only bar /
@@ -252,9 +272,9 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     // Lifecycle line for the ops log (2.206.0) — tonight's black-window
     // forensics found NOTHING in opslog about session deaths; this is the
     // minimum breadcrumb an incident needs.
-    console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${childCode != null ? ' code=' + childCode : ''}${exitReason ? ' reason=' + exitReason : ''}`);
-    global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}`);
-    broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail });
+    console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${childCode != null ? ' code=' + childCode : ''}${exitReason ? ' reason=' + exitReason : ''}${facts.suffix}`);
+    global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}${facts.eventSuffix}`);
+    broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail, ...(facts.signal ? { signal: facts.signal } : {}) });
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
     // Buffer + wrapper-meta files are only meaningful while the dtach session
@@ -265,7 +285,14 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     // crash's stack trace/stderr lives ONLY in the buffer, and deleting it
     // on exit blinded three "why did this session die" investigations in one
     // night (a claude that crash-looped 4× left zero process-level evidence).
+    // THE META IS PART OF THE TOMB (B-3052): the wrapper meta is the one file
+    // that says whether the wrapper finalized (childExitCode/childExitSignal)
+    // or was signalled (wrapperSignal); unlinking it left the .tail without
+    // the record that explains it. `<id>.meta.json` = the parsed meta + the
+    // teardown's own facts, beside the .tail, under the same 7-day sweep.
     if (cleanupOnExit) {
+      const tombDir = path.join(rootDir, 'data', 'exit-tombs');
+      try { fs.mkdirSync(tombDir, { recursive: true }); } catch {}
       try {
         const bufPath = path.join(BUFFERS_DIR, id + '.buf');
         const st = fs.statSync(bufPath);
@@ -274,19 +301,62 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
         const tail = Buffer.alloc(take);
         fs.readSync(fd, tail, 0, take, st.size - take);
         fs.closeSync(fd);
-        const tombDir = path.join(rootDir, 'data', 'exit-tombs');
-        fs.mkdirSync(tombDir, { recursive: true });
         fs.writeFileSync(path.join(tombDir, `${id}.tail`), tail);
-        // opportunistic sweep: tombs older than 7 days
-        for (const f of fs.readdirSync(tombDir)) {
-          try { const s = fs.statSync(path.join(tombDir, f)); if (Date.now() - s.mtimeMs > 7 * 86400e3) fs.unlinkSync(path.join(tombDir, f)); } catch {}
-        }
       } catch { /* no buffer / read failed — nothing to keep */ }
+      try {
+        const tomb = { ...(wrapperMeta && typeof wrapperMeta === 'object' ? wrapperMeta : (settle.torn ? { metaUnreadable: true } : { metaMissing: true })),
+          exitedAt: Date.now(), socketFate: facts.socketFate, wrapperFate: facts.wrapperFate, settleMs: settle.waitedMs };
+        const tombPath = path.join(tombDir, `${id}.meta.json`), tmp = tombPath + '.tmp-' + process.pid;
+        fs.writeFileSync(tmp, JSON.stringify(tomb)); fs.renameSync(tmp, tombPath); // atomic: tmp + rename
+      } catch (e) { console.warn(`[session] exit tomb meta for ${id} not written: ${e.message}`); }
+      // opportunistic sweep: tombs (.tail AND .meta.json) older than 7 days
+      try {
+        const now = Date.now();
+        for (const f of fs.readdirSync(tombDir)) {
+          try { const s = fs.statSync(path.join(tombDir, f)); if (tombExpired(s.mtimeMs, now)) fs.unlinkSync(path.join(tombDir, f)); } catch {}
+        }
+      } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
     }
     broadcastActiveSessions();
+    };
+    settleWrapperMeta(wrapperMetaPath, WRAPPER_SETTLE_MS, finishTeardown);
   });
+}
+
+// Is `pid` still the wrapper that writes `metaPath`? (B-3052 r4) — its argv
+// carries the meta path (`node <wrapper> <buf> <meta> …`, the dtach tail), so
+// a recycled pid, a zombie (empty cmdline) or a gone process all answer no.
+// One sync read of /proc/<pid>/cmdline (procfs, never a mountpoint). Without
+// /proc (macOS) the answer degrades to "a process with that pid exists".
+const HAS_PROC = (() => { try { return fs.existsSync('/proc/self/cmdline'); } catch { return false; } })();
+function wrapperProcessLive(pid, metaPath) {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  if (!HAS_PROC) { try { process.kill(pid, 0); return true; } catch { return false; } }
+  let argv;
+  try { argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf-8').split('\0'); } catch { return false; }
+  const base = path.basename(metaPath);
+  return argv.some((a) => a === metaPath || path.basename(a) === base);
+}
+// Read the wrapper meta for the teardown (B-3052 r4): once, synchronously,
+// unless the meta names a wrapper still running without a finalized record
+// (`awaitsWrapper`) or the read is torn — then re-read every
+// WRAPPER_SETTLE_STEP_MS until that wrapper is gone / the read parses, for at
+// most `maxMs`. Calls `done(meta, {running, torn, waitedMs})` exactly once.
+function settleWrapperMeta(metaPath, maxMs, done) {
+  const t0 = Date.now();
+  const attempt = () => {
+    let meta = null, torn = false;
+    try {
+      const raw = fs.readFileSync(metaPath, 'utf-8');
+      try { meta = JSON.parse(raw); } catch { torn = true; }
+    } catch { /* absent: Terminate unlinked it, or it was never written */ }
+    const running = !torn && awaitsWrapper(meta) && wrapperProcessLive(meta.pid, metaPath);
+    if ((torn || running) && Date.now() - t0 < maxMs) { setTimeout(attempt, WRAPPER_SETTLE_STEP_MS); return; }
+    done(meta, { running, torn, waitedMs: Date.now() - t0 });
+  };
+  attempt();
 }
 
 // Read/write session metadata

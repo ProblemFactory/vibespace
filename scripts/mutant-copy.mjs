@@ -72,10 +72,15 @@ export function mutantCopies(name, repo) {
   let seq = 0;
   /** `name` (optional) = the copy's file name inside `dir` without extension,
    *  for a CLOSED WORLD of copies that require each other by absolute path
-   *  (M.pathFor gives that path before the file exists). */
+   *  (M.pathFor gives that path before the file exists).
+   *  `selfPath: true` (CJS only) = a SELF-SPAWNING script (it re-runs itself as
+   *  `spawn(node, [__filename, …])`, e.g. data/bin/vibespace-remote-keeper's
+   *  daemon): only `require` is rebound to the original — `__filename` and
+   *  `__dirname` stay the COPY's own, or the copy would hand its daemon role to
+   *  the real, unpatched file and the control would judge the original. */
   const extOf = (orig, src, esm) => (esm ?? (/\.mjs$/.test(orig) || (/^(import|export)\b/m.test(src) && !/\bmodule\.exports\b|\brequire\s*\(/.test(src)))) ? '.mjs' : '.cjs';
   function pathFor(name, ext = '.cjs') { return path.join(dir, String(name).replace(/[^\w.-]/g, '_') + ext); }
-  function write(origRel, src, tag, { esm, name } = {}) {
+  function write(origRel, src, tag, { esm, name, selfPath = false } = {}) {
     const orig = path.isAbsolute(origRel) ? origRel : path.join(repo, origRel);
     // ESM by the original's own syntax unless told: top-level import/export and
     // no CommonJS surface (src/lib/*.js are ESM, the server tree is CJS).
@@ -84,10 +89,13 @@ export function mutantCopies(name, repo) {
     const f = pathFor(stem, ext);
     let body;
     if (ext === '.mjs') {
+      if (selfPath) throw new Error('mutantCopies: selfPath is a CJS option (an ESM copy has no __filename to keep)');
       body = rebaseEsm(src, orig);
     } else {
       const at = cjsInsertAt(src);
-      const bind = `var require = require('node:module').createRequire(${JSON.stringify(orig)}), __filename = ${JSON.stringify(orig)}, __dirname = ${JSON.stringify(path.dirname(orig))};`;
+      const bind = selfPath
+        ? `var require = require('node:module').createRequire(${JSON.stringify(orig)});`
+        : `var require = require('node:module').createRequire(${JSON.stringify(orig)}), __filename = ${JSON.stringify(orig)}, __dirname = ${JSON.stringify(path.dirname(orig))};`;
       body = src.slice(0, at) + bind + src.slice(at);
     }
     fs.writeFileSync(f, body);
