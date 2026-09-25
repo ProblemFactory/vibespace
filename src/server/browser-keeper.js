@@ -9,7 +9,7 @@
  * (profile, browserKey) — the tab a conversation holds in a profile's browser,
  * §3.4), the BROWSER records (one running `agent-browser` daemon per profile,
  * reuse-or-spawn, adopted across a restart), the concurrency ceiling and the
- * runaway guard from src/keeper-limits.js (the ONE constants home every keeper
+ * resource REPORT from src/keeper-limits.js (the ONE constants home every keeper
  * shares), and the conversation's PIN (browserKey → profile, §3.2.5 — the fact
  * the spawn path reads for the `conversation` rung).
  *
@@ -29,8 +29,16 @@
  *     back (a Terminate → Resume) never costs a cold browser, and a lease on
  *     disk can never keep a chromium open with nothing to collect it.
  *   · CEILING: a start past `CONCURRENT_CAP` is refused, naming the holders.
- *   · RUNAWAY: one /proc sample per GUARD_SAMPLE_MS over the daemon's tree,
- *     provider-scaled thresholds; stop + park + telemetry + a server notice.
+ *   · RESOURCES, REPORTED — NEVER A STOP (the owner's 2026-09-25 ruling: a
+ *     browser a person or an agent is using is not ended by a resource
+ *     guard; Chrome legitimately passes any fixed ceiling): one /proc sample
+ *     per GUARD_SAMPLE_MS over the daemon's tree, memory = ΣPss (never a sum
+ *     of VmRSS), provider-scaled thresholds judged by src/runaway-guard.js;
+ *     OVER ⇒ the live row names it, a server notice when a crossing begins
+ *     (r2: hysteresis + an hourly floor + re-sent when nobody received it —
+ *     runaway-guard.reportTransition), telemetry `browser-resource`. No stop, no
+ *     park (the pre-2026-09-25 `runawayParkedUntil` is gone), no directory
+ *     touched — the headless OpenCode serve is the only keeper that stops.
  *   · STOP = the CLI's own `close --all` under that namespace, then the
  *     recorded pid signalled ONLY when pid+starttime prove it is ours.
  *   · SPAWN HYGIENE: the sanitised base env, secrets never on argv (the proxy
@@ -41,7 +49,7 @@
  *     ns `vs-<browserKey>`, ONE lease aliased `ephemeral` that is never an
  *     attachment) started under EXACTLY the session's spawn pairs — never a
  *     re-run of the ladder. It counts against the ceiling (`browser_cap`),
- *     the runaway guard samples it, an idle-out is `stopped` (not an error),
+ *     the resource report samples it, an idle-out is `stopped` (not an error),
  *     a restart adopts it, and when no live session carries its key any more
  *     the lease drops, the browser stops and the RECORD IS REMOVED BY ITSELF
  *     (a named profile never is). It emits no lease events: the live view,
@@ -59,13 +67,16 @@ const T = require('../browser-takeover.js');
 const M = require('../browser-mediation.js'); // P6: the per-session url + env of a MEDIATED lease
 const VERBS = require('../browser-verbs.js'); // takeover r3: the ONE config rule (sanctionedConfig)
 const LIMITS = require('../keeper-limits.js');
+const RG = require('../runaway-guard.js'); // the ONE resource verdict + per-provider numbers + report level (2026-09-25: report only)
 
 const STORE_FILE = 'browser-profiles.json';
 const AUDIT_FILE = 'browser-audit.jsonl';
 const TICK_MS = 5000;
 const STOP_GRACE_MS = 3000;
 const FILE_MODE = 0o600;
-const RUNAWAY_METRIC = 'browser-runaway';
+/** The telemetry event of a resource crossing (report only — it was
+ *  `browser-runaway` while the guard stopped and parked, until 2026-09-25). */
+const RESOURCE_METRIC = 'browser-resource';
 
 function writeJsonAtomic(file, obj) {
   const tmp = file + '.tmp-' + crypto.randomBytes(4).toString('hex');
@@ -87,7 +98,7 @@ function keeper() { return installed; }
  *   env            — () => sanitised base env (ws-handler.agentEnv), NEVER process.env
  *   broadcast      — (msg) => void  (`browser-profiles-updated`)
  *   serverSetting  — (key) => value (browser.idleTimeoutMs / browser.headed / browser.defaultProfile)
- *   serverNotice   — (key, text, opts) => void  (runaway / ceiling notices)
+ *   serverNotice   — (key, text, opts) => number (resource-crossing / ceiling notices; the clients reached — 0 ⇒ re-sent)
  *   getTelemetry   — () => telemetry | null
  *   liveKeys       — () => Set of the browser keys live sessions carry (activeSessions)
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
@@ -180,8 +191,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   // ── state ──
   let reg = B.normalizeRegistry(null);
-  const guard = new Map();      // profileId → { prev, hotSince, lastSampleAt }
-  const live = new Map();       // profileId → { cpuPct, rssBytes, pids, sampledAt }
+  const guard = new Map();      // profileId → { prev, hotSince, lastSampleAt, report: { reported, crossings }, memOffSaid }
+  const live = new Map();       // profileId → { cpuPct, memBytes, memMetric, rssBytes (deprecated), pids, over, since, sampledAt }
   const starting = new Map();   // profileId → in-flight start promise (single flight)
   const stopping = new Set();
   const switching = new Set();  // P4 (§7.4): profiles mid-switch — attach/resolve answer `browser_restarting`, never a timeout
@@ -438,7 +449,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) delete reg.pins[k];
-    ephPairs.delete(id); delete reg.runawayParkedUntil[id];
+    ephPairs.delete(id);
     commit();
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
@@ -562,7 +573,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /**
    * takeover C3 (§5.2 row 1): START a conversation's managed ephemeral
-   * browser — the ceiling (`browser_cap`, D2), the runaway park, then ADOPT a
+   * browser — the ceiling (`browser_cap`, D2), then ADOPT a
    * daemon an escaped command may already have started (`session info` under
    * the very pairs), else `open about:blank` under them with the idle setting.
    * NEVER a re-run of the browser-env ladder: the pairs are the session's.
@@ -573,8 +584,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!pairs || !pairs.length) throw namedError('not_managed', `"${p.label}" has no spawn pairs recorded — run the command again from its session`);
     const cap = ceilingNow({ ephemeral: true });
     if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders, remedy: cap.remedy });
-    const park = B.runawayParkVerdict(profileId, reg.runawayParkedUntil, now());
-    if (park) throw namedError(park.code, park.error.replace('this profile\'s browser', 'this conversation\'s browser'));
     const p0 = (async () => {
       const ns = nsOf(profileId);
       const env0 = pairsEnv(pairs);
@@ -678,8 +687,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (B.isLiveBrowser(cur)) return browserView(cur);
     if (starting.has(profileId)) return starting.get(profileId);
     if (isEph(p)) return startEphemeral(p, { why });
-    const park = B.runawayParkVerdict(profileId, reg.runawayParkedUntil, now());
-    if (park) throw namedError(park.code, park.error);
     const cap = ceilingNow({ ephemeral: false });
     if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders });
     const fence = B.configFence(userConfig());
@@ -847,10 +854,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         let left = null;
         if (!rec.external) { try { const r = await acc().call(rec.hostId, 'stop', { profileId }); if (r.left) left = `${rec.hostId}: ${r.left}`; } catch (e) { left = `${rec.hostId} could not be asked to stop it (${e.message}) — the browser may still run there`; } }
         if (rec.forward) acc().closeForward(`${rec.hostId}:${rec.forward.remotePort}`);
-        rec.state = why === 'runaway' || why === 'failed' ? 'failed' : 'stopped';
+        rec.state = why === 'failed' ? 'failed' : 'stopped';
         rec.endedAt = now(); rec.stoppedBy = why;
         if (why === 'idle') rec.lastError = `stopped after ${Math.round(idleMs() / 60000)} min with no lease (idle timeout)`;
-        else if (why !== 'user' && why !== 'runaway') rec.lastError = why;
+        else if (why !== 'user') rec.lastError = why;
         if (left) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}${left}`;
         guard.delete(profileId); live.delete(profileId);
         if (mediator) mediator.repoint(profileId, null); // P6: a mediated url answers browser_stopped until the next start
@@ -875,11 +882,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
           if (F.pidAlive(rec.pid)) left = `daemon pid ${rec.pid} survived SIGKILL`;
         } else left = `daemon pid ${rec.pid} is still alive but not provably ours (${v}) — left alone, never signalled`;
       }
-      rec.state = why === 'runaway' || why === 'failed' ? 'failed' : 'stopped';
+      rec.state = why === 'failed' ? 'failed' : 'stopped';
       rec.endedAt = now(); rec.stoppedBy = why;
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(idleMs() / 60000)} min with no lease (idle timeout)`;
       else if (why === 'switch') rec.lastError = 'stopped to switch backend (§7.4) — restarted on the new one';
-      else if (why !== 'user' && why !== 'runaway') rec.lastError = why;
+      else if (why !== 'user') rec.lastError = why;
       if (left) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}${left}`;
       guard.delete(profileId); live.delete(profileId);
       if (mediator) mediator.repoint(profileId, null); // P6
@@ -1603,7 +1610,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return { droppedLeases: r.dropped.length, browsers: Object.values(reg.browsers).filter(B.isLiveBrowser).length };
   }
 
-  // ── the tick: carrier grace, idle, runaway ──
+  // ── the tick: carrier grace, idle, the resource REPORT ──
   async function tick() {
     ensureLoaded();
     const t = now();
@@ -1623,23 +1630,33 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (idle.expired) { stop(rec.profileId, { why: 'idle' }).catch(() => { }); continue; }
       const g = guard.get(rec.profileId) || { prev: null, hotSince: 0, lastSampleAt: 0 };
       if (isLocalRec(rec) && t - g.lastSampleAt >= sampleEvery) {
-        const s = rec.pid ? F.treeUsage(rec.pid) : null;
-        const v = B.runawayVerdict(s, g.prev, g.hotSince, t, { limits: B.providerGuard(p ? p.provider : 'chromium', limits) });
-        g.prev = s ? { at: t, cpuTicks: s.cpuTicks } : null; g.hotSince = v.hotSince; g.lastSampleAt = t;
+        // 2026-09-25: the tree sample is AWAITED (ΣPss via smaps_rollup, ≈1.1 ms per pid, on the libuv pool); the slot
+        // is claimed first so an overlapping tick never samples twice, and a record stopped meanwhile is left alone
+        g.lastSampleAt = t; guard.set(rec.profileId, g);
+        const s = rec.pid ? await F.treeUsage(rec.pid) : null;
+        if (stopping.has(rec.profileId) || reg.browsers[rec.profileId] !== rec || !B.isLiveBrowser(rec)) continue;
+        // ONE verdict module (src/runaway-guard.js): memory = the sample's footprint metric (PSS), never an RSS sum.
+        // REPORT ONLY (the owner's 2026-09-25 ruling): the browser keeps running whatever the sample says.
+        const lim = RG.providerGuard(p ? p.provider : 'chromium', limits);
+        const v = RG.resourceVerdict(s, g.prev, g.hotSince, t, { limits: lim });
+        g.prev = s ? { at: t, cpuTicks: s.cpuTicks } : null; g.hotSince = v.hotSince;
+        const lvl = RG.reportTransition(g.report, v, { now: t, limits: lim }); g.report = lvl.state;
         guard.set(rec.profileId, g);
-        if (s) { live.set(rec.profileId, { cpuPct: v.cpuPct, rssBytes: s.rssBytes, pids: s.pids.length, sampledAt: t }); dirty = true; }
-        if (v.why) {
-          log.error?.(`[browser] RUNAWAY — ${rec.profileId} "${p ? p.label : ''}" (${s.pids.length} process(es)) stopped: ${v.why}; not starting it again for ${Math.round(limits.RUNAWAY_COOLDOWN_MS / 60000)} min`);
-          reg.runawayParkedUntil[rec.profileId] = t + limits.RUNAWAY_COOLDOWN_MS;
-          try { getTelemetry()?.record?.({ kind: 'event', name: RUNAWAY_METRIC, detail: `${p ? p.label : rec.profileId}: ${v.why}`, value: Math.round((s.rssBytes || 0) / 1048576) }); } catch { /* optional */ }
-          try { serverNotice?.('browser-runaway:' + rec.profileId, `The browser of profile "${p ? p.label : rec.profileId}" was stopped as a runaway (${v.why}). It will not be started again for ${Math.round(limits.RUNAWAY_COOLDOWN_MS / 60000)} min.`, { level: 'warn' }); } catch { /* optional */ }
-          rec.lastError = `stopped as a runaway: ${v.why}`;
-          stop(rec.profileId, { why: 'runaway' }).catch(() => { });
-          continue;
+        if (s) { const was = live.get(rec.profileId); live.set(rec.profileId, { cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, never judged — one release */, pids: s.pids.length, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
+        if (v.memGuard === 'unavailable' && !g.memOffSaid) { g.memOffSaid = true; log.warn?.(`[browser] ${RG.memGuardOffLine(rec.profileId, s)}`); }
+        const label = p ? p.label : rec.profileId;
+        if (lvl.fire) {
+          log.warn?.(`[browser] ${rec.profileId} "${label}" (${s.pids.length} process(es)) is over the reporting threshold: ${v.over} — reported, left running`);
+          try { getTelemetry()?.record?.({ kind: 'event', name: RESOURCE_METRIC, detail: `${label}: ${v.over}`, value: Math.round((s.memBytes || 0) / 1048576) }); } catch { /* optional */ }
+        }
+        if (lvl.notify) {
+          const who = isEph(p) ? `The agent browser of "${label}"` : `The agent browser of profile "${label}"`;
+          let delivered;
+          try { delivered = serverNotice?.(`browser-resource:${rec.profileId}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Browser panel', verdict: v, sample: s }), { level: 'warn' }); } catch (e) { log.warn?.(`[browser] ${rec.profileId}: the resource notice failed: ${e && e.message}`); }
+          g.report = RG.reportDelivery(g.report, delivered);
         }
       }
     }
-    for (const [id, until] of Object.entries(reg.runawayParkedUntil)) if (Number(until) <= t) { delete reg.runawayParkedUntil[id]; dirty = true; }
     if (dirty) commit();
     // P3 (§4.3): a takeover somebody walked away from hands back by itself, a
     // pending confirmation the daemon has already auto-denied is forgotten.
@@ -1697,6 +1714,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   const api = {
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile,
+    reshapeStore: (fn) => { ensureLoaded(); const r = fn(reg); commit(); return r; }, // MIGRATIONS ONLY (2026-09-runaway-parks-void): reshape the in-memory registry, then the ONE atomic save
+    usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
@@ -1727,4 +1746,4 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   return api;
 }
 
-module.exports = { create, keeper, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, RUNAWAY_METRIC };
+module.exports = { create, keeper, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, RESOURCE_METRIC };

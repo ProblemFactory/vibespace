@@ -39,6 +39,7 @@ import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDia
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { UI_ICONS } from './icons.js';
+import { memoryText } from '../runaway-guard.js';
 import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, EPHEMERAL_SCOPE, TRACE_RETENTION_MS, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -427,6 +428,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
 
   const section = (title, sub) => { const s = el('div', 'bprof-section'); const h = el('div', 'bprof-section-head'); h.appendChild(el('span', 'bprof-section-title', title)); if (sub) h.appendChild(el('span', 'bprof-section-sub chat-status-dim', sub)); s.appendChild(h); body.appendChild(s); return s; };
   const cell = (row, cls, text, title) => { const c = el('span', 'bprof-cell ' + cls, text); if (title) c.title = title; row.appendChild(c); return c; };
+  // 2026-09-25: the keeper's live resource reading (memBytes labelled by its metric — "412 MB (PSS)"), and its REPORT
+  // sentence as the tooltip when over the threshold; the keeper never stops a browser for it
+  const usageLine = (host, u) => { const txt = u ? memoryText(u.memBytes, u.memMetric) : ''; if (!txt) return; const s = el('span', 'bprof-usage' + (u.over ? ' bprof-usage-over' : ''), txt); if (u.over) s.title = String(u.over); host.appendChild(s); };
 
   function renderHint(v) {
     const days = Math.round((v?.limits?.retentionMs || TRACE_RETENTION_MS) / 86400000), mb = Math.round((v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) / 1048576);
@@ -452,6 +456,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     row.appendChild(ident);
     const state = cell(row, 'bprof-state state-' + String(r.state || '').replace(/[^a-z-]/g, ''), stateText(r.state), String(r.why || ''));
     state.appendChild(el('span', 'bprof-why', String(r.why || '')));
+    usageLine(state, r.usage);
     cell(row, 'bprof-size', r.bytes === null || r.bytes === undefined ? t('not measured') : bytesText(r.bytes), r.dir ? String(r.dir) : '');
     const tr = r.trace || { n: 0, bytes: 0 };
     cell(row, 'bprof-trace', tr.n ? t('{n} action(s)', { n: tr.n }) + ' · ' + bytesText(tr.bytes) : t('no actions'), tr.last ? t('last {ago}', { ago: agoText(Date.now() - tr.last) }) : '');
@@ -491,6 +496,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     cell(row, 'bprof-conv bprof-mono', String(e.browserKey || ''), e.sessionId ? t('session {id}', { id: String(e.sessionId) }) : '');
     const st = cell(row, 'bprof-state state-' + (e.live ? 'live' : 'kept'), ephemeralStateText(e));
     if (e.lastError) st.title = String(e.lastError);
+    if (e.live) usageLine(st, e.usage);
     cell(row, 'bprof-age', e.startedAt ? t('started {ago}', { ago: agoText(Date.now() - Number(e.startedAt)) }) : '');
     const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
     stop.disabled = !e.live;

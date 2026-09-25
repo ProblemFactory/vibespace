@@ -3,7 +3,7 @@
 // P8-1, 2026-09-13): registry-row validation, the resolveBackend ladder over
 // the FULL presence matrix (every missing combination, each fallback reason
 // spelled exactly as §3's log line states it), the app-session state machine,
-// the cap / runaway / idle / adoption verdicts, and the ONE constants home
+// the cap / idle / adoption / profile-retirement verdicts, and the ONE constants home
 // (src/keeper-limits.js) that opencode-serve and this model both read.
 // No process, no file system, no fixed name. Run: node scripts/test-desktop-apps.mjs
 import fs from 'node:fs';
@@ -31,12 +31,12 @@ const D = require('../src/desktop-display.js');
 
 console.log('§1 the ONE constants home');
 ok(M.LIMITS === L, 'desktop-apps.LIMITS IS keeper-limits (the same object, not a copy)');
-ok(L.GUARD_CPU_PCT === 150 && L.GUARD_CPU_SUSTAIN_MS === 300000 && L.GUARD_RSS_BYTES === 2 * 1024 ** 3 && L.RUNAWAY_COOLDOWN_MS === 3600000 && L.GUARD_SAMPLE_MS === 60000, 'the guard numbers are the 2.369.42 incident numbers (150 % / 5 min / 2 GiB / 1 h / 60 s)');
+ok(L.GUARD_CPU_PCT === 150 && L.GUARD_CPU_SUSTAIN_MS === 300000 && L.GUARD_MEM_BYTES === 2 * 1024 ** 3 && !('GUARD_RSS_BYTES' in L) && L.RUNAWAY_COOLDOWN_MS === 3600000 && L.GUARD_SAMPLE_MS === 60000, 'the guard numbers are the 2.369.42 incident numbers (150 % / 5 min / 2 GiB / 1 h / 60 s); the memory number is GUARD_MEM_BYTES (a footprint — the RSS-sum name is gone)');
 ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP is a positive integer (${L.CONCURRENT_CAP})`);
 {
   const oc = read('src/opencode-serve.js');
   ok(/require\('\.\/keeper-limits'\)/.test(oc) && !/const GUARD_CPU_PCT = 150/.test(oc), 'opencode-serve READS keeper-limits — its own literals are gone (the twin this home exists to end)');
-  ok(/cliIdentity\.procSample\(pid\)/.test(oc), 'opencode-serve samples /proc through cli-identity.procSample — the same reader the desktop keeper uses');
+  ok(/cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(oc) && /cliIdentity\.setMemory\(/.test(oc), 'opencode-serve samples /proc through cli-identity.procSample (memory = PSS) and the ONE set rule — the same reader the desktop keeper uses');
   const kl = read('src/keeper-limits.js');
   ok(!/require\(/.test(kl), 'keeper-limits imports nothing');
   const da = read('src/desktop-apps.js');
@@ -47,7 +47,7 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
   const consumers = ['src/server/desktop-app-keeper.js', 'src/desktop-display.js', 'src/server/desktop-stream.js', 'src/routes/desktop-apps.js', 'src/desktop-apps.js', 'src/vnc.js'];
   const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
-  const GUARD_NAMES = /(GUARD_SAMPLE_MS|GUARD_CPU_PCT|GUARD_CPU_SUSTAIN_MS|GUARD_RSS_BYTES|RUNAWAY_COOLDOWN_MS|CONCURRENT_CAP)/;
+  const GUARD_NAMES = /(GUARD_SAMPLE_MS|GUARD_CPU_PCT|GUARD_CPU_SUSTAIN_MS|GUARD_MEM_BYTES|RUNAWAY_COOLDOWN_MS|CONCURRENT_CAP)/;
   const bareUses = [], literals = [], reads = [];
   for (const f of consumers) {
     const code = strip(read(f));
@@ -55,11 +55,15 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
     for (const m of code.matchAll(new RegExp(`\\b(?:limits|LIMITS)\\.${GUARD_NAMES.source}\\b`, 'g'))) reads.push(m[1]);
     for (const re of [new RegExp(`\\b${GUARD_NAMES.source}\\s*=\\s*\\d`), /2 \* 1024 \* 1024 \* 1024|2 \* 1024 \*\* 3/, /(?<!\d\s*\*\s*)5 \* 60 \* 1000/, /(?<!\d\s*\*\s*)60 \* 60 \* 1000/]) if (re.test(code)) literals.push(`${f}: ${re}`);
   }
-  ok(reads.length >= 6 && new Set(reads).size >= 5, `census scope is non-vacuous (${reads.length} reads of ${new Set(reads).size} guard names through the home)`, reads);
+  // 2026-09-25: the thresholds are compared ONLY in src/runaway-guard.js (test-architecture's census), so the desktop
+  // consumers read the cadence + the cap through the home, and the verdict module reads the three thresholds
+  ok(reads.length >= 4 && new Set(reads).size >= 2, `census scope is non-vacuous (${reads.length} reads of ${new Set(reads).size} guard names through the home)`, reads);
+  const rg = strip(read('src/runaway-guard.js'));
+  ok(/require\('\.\/keeper-limits'\)/.test(rg) && ['GUARD_MEM_BYTES', 'GUARD_CPU_PCT', 'GUARD_CPU_SUSTAIN_MS'].every((n) => new RegExp(`\\bL\\.${n}\\b`).test(rg)), 'the verdict module reads the three thresholds through the home (limits injected, keeper-limits by default)');
   ok(bareUses.length === 0, 'no consumer names a guard number except through `limits.`/`LIMITS.` — imported, not copied', bareUses);
   ok(literals.length === 0, 'no consumer re-spells a guard literal (150 / 5 min / 2 GiB / 1 h / the cap)', literals);
   ok(/const GUARD_CPU_PCT = 150;/.test(strip(read('src/keeper-limits.js'))) && !!strip(`const X = 1; // GUARD_CPU_PCT = 150\n`).match(/const X = 1;\s*$/), 'CONTROL: the literal lives exactly once, in the home; the census strips comments (a quoted "150" in a comment is not a copy)');
-  const neg = [...strip('const CONCURRENT_CAP = 6; x = limits.GUARD_CPU_PCT; // GUARD_RSS_BYTES\n').matchAll(new RegExp(`(?<![\\w.])${GUARD_NAMES.source}\\b`, 'g'))].map((m) => m[1]);
+  const neg = [...strip('const CONCURRENT_CAP = 6; x = limits.GUARD_CPU_PCT; // GUARD_MEM_BYTES\n').matchAll(new RegExp(`(?<![\\w.])${GUARD_NAMES.source}\\b`, 'g'))].map((m) => m[1]);
   ok(same(neg, ['CONCURRENT_CAP']), 'NEGATIVE CONTROL: a bare re-definition is what the census catches — a `limits.` read and a comment are not', neg);
 }
 
@@ -202,7 +206,7 @@ console.log('§5 the state machine');
 ok(same(M.APP_STATES, ['launching', 'ready', 'exited', 'failed']), 'four states');
 ok(M.transition('launching', 'server-listening') === 'ready', 'launching → ready on server-listening');
 ok(M.transition('launching', 'spawn-error') === 'failed' && M.transition('launching', 'app-exit') === 'exited' && M.transition('launching', 'stop') === 'exited', 'launching → failed on spawn-error, → exited on app-exit / stop');
-ok(M.transition('ready', 'app-exit') === 'exited' && M.transition('ready', 'stop') === 'exited' && M.transition('ready', 'runaway') === 'failed' && M.transition('ready', 'display-gone') === 'failed', 'ready → exited (app-exit/stop), → failed (runaway/display-gone)');
+ok(M.transition('ready', 'app-exit') === 'exited' && M.transition('ready', 'stop') === 'exited' && M.transition('ready', 'runaway') === null && M.transition('launching', 'runaway') === null && M.transition('ready', 'display-gone') === 'failed', 'ready → exited (app-exit/stop), → failed (display-gone); there is NO runaway edge (2026-09-25: a resource guard never ends an app)');
 ok(M.transition('ready', 'server-listening') === null, 'ready has no server-listening edge (idempotence is the keeper\'s, not the machine\'s)');
 ok(M.transition('exited', 'stop') === null && M.transition('failed', 'app-exit') === null && M.transition('nope', 'stop') === null, 'terminal states and unknown states have no edges');
 ok(M.isLiveState('launching') && M.isLiveState('ready') && !M.isLiveState('exited') && M.isTerminalState('failed'), 'isLiveState / isTerminalState');
@@ -224,20 +228,26 @@ console.log('§6 verdicts');
   ok(M.capVerdict(live(2), { CONCURRENT_CAP: 2 }).code === 'cap' && M.capVerdict(live(1), { CONCURRENT_CAP: 2 }) === null, 'the cap is the injected limits\' (the suite can shrink it)');
 }
 {
-  const lim = { ...L, GUARD_CPU_SUSTAIN_MS: 1000 };
-  const t0 = 10_000;
-  let v = M.runawayVerdict({ cpuTicks: 0, rssBytes: 100 }, null, 0, t0, { limits: lim });
-  ok(v.cpuPct === null && v.hotSince === 0 && v.why === null, 'first sample: no rate yet, not hot');
-  v = M.runawayVerdict({ cpuTicks: 200, rssBytes: 100 }, { at: t0, cpuTicks: 0 }, 0, t0 + 1000, { limits: lim });
-  ok(Math.round(v.cpuPct) === 200 && v.hotSince === t0 + 1000 && v.why === null, '200 % over one second ⇒ hot starts, no verdict yet');
-  v = M.runawayVerdict({ cpuTicks: 400, rssBytes: 100 }, { at: t0 + 1000, cpuTicks: 200 }, t0 + 1000, t0 + 2000, { limits: lim });
-  ok(/^200% CPU sustained for \d+ min \(limit 150%\)$/.test(v.why || ''), 'sustained past the limit ⇒ the runaway sentence names the numbers', v);
-  v = M.runawayVerdict({ cpuTicks: 410, rssBytes: 100 }, { at: t0 + 2000, cpuTicks: 400 }, t0 + 1000, t0 + 3000, { limits: lim });
-  ok(v.hotSince === 0 && v.why === null, 'CPU drops ⇒ hot resets (a one-off spike is not a runaway)');
-  v = M.runawayVerdict({ cpuTicks: 0, rssBytes: lim.GUARD_RSS_BYTES + 1 }, null, 0, t0, { limits: lim });
-  ok(/^RSS 2\.0 GB \(limit 2\.0 GB\)$/.test(v.why || ''), 'RSS over the limit ⇒ immediate verdict', v);
-  ok(M.runawayVerdict(null, null, 0, t0).why === null, 'no sample ⇒ no verdict (no evidence, never a claim)');
-  ok(M.runawayParkVerdict('xterm', { xterm: t0 + 60000 }, t0)?.code === 'runaway-parked' && M.runawayParkVerdict('xterm', { xterm: t0 - 1 }, t0) === null && M.runawayParkVerdict(null, {}, t0) === null, 'park: a future until refuses with its code; a passed one and an adhoc launch do not');
+  // the RESOURCE VERDICT moved to src/runaway-guard.js (test-runaway-guard owns it) and for an app it only REPORTS
+  // (2026-09-25, the owner's ruling) — this module carries no verdict and no park any more
+  ok(!('runawayVerdict' in M) && !('runawayParkVerdict' in M), 'desktop-apps carries NO resource verdict and NO park (a launch is never refused by a past sample)');
+  // WHO MAY REMOVE A BROWSER ROW'S PROFILE: only a PERSON's ending
+  const base = { profileDir: '/x/data/desktop-apps/da-1/profile', pids: { app: 42 } };
+  const RV = (r) => M.profileRetireVerdict({ ...base, ...r });
+  const rows = [
+    [{ state: 'exited', stoppedBy: 'user' }, true],
+    [{ state: 'exited', stoppedBy: 'relaunch' }, true],
+    [{ state: 'exited', lastError: 'application exited (code 0)' }, true],       // the app's own exit (its user closed it)
+    [{ state: 'exited', stoppedBy: 'idle', lastError: 'stopped after 30 min without input (idle timeout)' }, false], // F: an idle-out never deletes
+    [{ state: 'failed', stoppedBy: 'runaway' }, false],                            // an old record of the retired guard
+    [{ state: 'failed', lastError: 'X display :9 exited' }, false],                // the display died under the app
+    [{ state: 'exited', stoppedBy: 'user', keepProfile: true }, false],            // the user's "keep profile"
+    [{ state: 'ready', stoppedBy: 'user' }, false],                                // live
+    [{ state: 'failed', lastError: 'spawn failed', pids: {} }, true],              // no app ever ran in it: the empty scaffold
+  ];
+  const bad = rows.map(([r, want]) => ({ r, want, got: RV(r) })).filter((x) => x.got.remove !== x.want);
+  ok(bad.length === 0, `profileRetireVerdict: ${rows.length} rows — removed only after Stop / a relaunch / the app's own exit / no app ever ran; an idle-out, a dead display, the old guard and "keep profile" keep it`, bad);
+  ok(/by the keeper \(idle\), not by a person/.test(RV({ state: 'exited', stoppedBy: 'idle' }).why) && M.profileRetireVerdict({ state: 'exited' }).remove === false, 'a kept profile says WHY (the record carries it); a record without a profile is never a removal');
 }
 {
   const rec = { state: 'ready', lastError: null };
@@ -253,7 +263,7 @@ ok(same(M.streamTargetOf({ state: 'ready', port: 5901, backend: 'vnc-display' })
   const r = M.newRecord({ id: 'da-1', label: 'x', exec: '/x', args: ['a'], cwd: null, source: 'adhoc', backend: 'vnc-display', via: 'Xvfb+x11vnc', fallbackWhy: 'xpra not on PATH', idleTimeoutMs: 60000, now: 5 });
   ok(r.state === 'launching' && r.startedAt === 5 && r.lastInputAt === 5 && same(Object.keys(r.pids), ['x', 'app', 'server', 'wm']) && same(Object.keys(r.starts), ['x', 'app', 'server', 'wm']) && r.display === null && r.port === null && r.idleTimeoutMs === 60000 && r.env === undefined, 'newRecord: the §4 shape, facts only, nothing derived');
 }
-ok(M.DESKTOP_SINGLETON_ID === 'desktop-singleton' && M.DEFAULT_IDLE_TIMEOUT_MIN === 30, 'DESKTOP_SINGLETON_ID + the DA3 default');
+ok(M.DESKTOP_SINGLETON_ID === 'desktop-singleton' && M.DEFAULT_IDLE_TIMEOUT_MIN === 0, 'DESKTOP_SINGLETON_ID + the DA3 default (0 = never since the 2026-09-25 owner ruling)');
 
 console.log('§7 the bridge\'s RFB input sieve — its message table DERIVED from the client we ship (r3)');
 {

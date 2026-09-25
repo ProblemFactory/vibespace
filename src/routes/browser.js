@@ -95,7 +95,7 @@ function refuseHost(req, res) {
   res.status(400).json({ error: `browser profiles are local-only in this release — host ${JSON.stringify(h)} refused`, code: 'unsupported-host' });
   return true;
 }
-const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, 'runaway-parked': 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
+const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_required: 400, label_taken: 409, provider_unknown: 400, provider_unavailable: 400, 'unsupported-host': 400, sharing_refused: 400, fence_refused: 409, bad_proxy: 400, ambiguous: 409, not_owner: 403, leased: 409, running: 409, cap: 409, launch_failed: 502, dir_unwritable: 500, unavailable: 503,
   // P4 (§7.1–§7.3): the provider rows' typed refusals, the paired-machine rungs, the cdp provider
   provider_needs_local_key: 400, provider_local_only: 400, provider_lacks_capability: 400, cdp_port_required: 400,
   // P10 (§7.6 tier 3, D27 (b)): the consent gate on the local-window row, and "tier 3 is not a profile"
@@ -570,7 +570,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       // takeover C3 (§5.1): no attachment on a local isolated rung ⇒ THIS
       // conversation's managed ephemeral browser — recorded, counted, started
       // (or adopted) under the session's OWN spawn pairs (never a re-run of
-      // the ladder); a refusal (browser_cap / runaway-parked / launch_failed)
+      // the ladder); a refusal (browser_cap / launch_failed)
       // is typed like any other
       const pairs = shared ? null : managedPairs(f);
       if (pairs && typeof k.ensureEphemeral === 'function') {

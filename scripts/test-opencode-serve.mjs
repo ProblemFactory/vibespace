@@ -310,7 +310,7 @@ console.log('— ④ locator / keeper');
   const dir8 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-loc-'));
   const mock8 = await startMockServe();
   fs.writeFileSync(path.join(dir8, 'opencode-serve.json'), JSON.stringify({ port: mock8.port, pid: 999000001, startedAt: Date.now(), cwd: path.join(dir8, 'opencode-serve', 'cwd') }));
-  let t8 = 1_000_000, proc8 = { cpuTicks: 0, rssBytes: 300 * 2 ** 20 }, killed8 = 0;
+  let t8 = 1_000_000, proc8 = { cpuTicks: 0, memBytes: 300 * 2 ** 20, memMetric: 'pss', rssBytes: 320 * 2 ** 20 }, killed8 = 0;
   const tele8 = [], errs8 = [], states8 = [];
   const loc8 = serve.createServeLocator({
     dataDir: dir8, command: 'opencode', log: { warn() { }, log() { }, error: (m) => errs8.push(m) },
@@ -319,9 +319,9 @@ console.log('— ④ locator / keeper');
     killPid: () => { killed8++; },
   });
   await loc8.client({ budgetMs: 3000 });
-  const tick = (dtMs, cpuPct, rssMb) => { t8 += dtMs; proc8 = { cpuTicks: proc8.cpuTicks + (cpuPct * dtMs / 1000), rssBytes: (rssMb ?? 300) * 2 ** 20 }; loc8._sampleGuard(); };
+  const tick = (dtMs, cpuPct, rssMb) => { t8 += dtMs; proc8 = { cpuTicks: proc8.cpuTicks + (cpuPct * dtMs / 1000), memBytes: (rssMb ?? 300) * 2 ** 20, memMetric: 'pss', rssBytes: ((rssMb ?? 300) + 20) * 2 ** 20 }; loc8._sampleGuard(); };
   tick(60000, 0); tick(60000, 20);
-  ok('the guard samples /proc without parking a calm serve (20% CPU, 300 MB)', !loc8.state().parked && Math.abs(loc8.state().cpuPct - 20) < 1 && loc8.state().rssBytes === 300 * 2 ** 20, loc8.state());
+  ok('the guard samples /proc without parking a calm serve (20% CPU, 300 MB)', !loc8.state().parked && Math.abs(loc8.state().cpuPct - 20) < 1 && loc8.state().memBytes === 300 * 2 ** 20 && loc8.state().memMetric === 'pss' && loc8.state().rssBytes === 320 * 2 ** 20, loc8.state());
   for (let i = 0; i < 5; i++) tick(60000, 165);          // the sustain clock starts at the FIRST hot sample: 4 minutes elapsed
   ok('165% CPU for 4 minutes is NOT yet a runaway (the bound is SUSTAINED, not a spike)', !loc8.state().parked, loc8.state());
   tick(60000, 165);                                       // …the 5-minute mark
@@ -340,10 +340,17 @@ console.log('— ④ locator / keeper');
   const mock9 = await startMockServe();
   fs.writeFileSync(path.join(dir9, 'opencode-serve.json'), JSON.stringify({ port: mock9.port, pid: 999000002, startedAt: Date.now(), cwd: path.join(dir9, 'opencode-serve', 'cwd') }));
   let t9 = 5_000_000; const tele9 = [];
-  const loc9 = serve.createServeLocator({ dataDir: dir9, command: 'opencode', log: null, spawnImpl: () => { throw new Error('nope'); }, now: () => t9, guardSampleMs: 0, readProc: () => ({ cpuTicks: 0, rssBytes: 5.0 * 2 ** 30 }), telemetry: (ev) => tele9.push(ev) });
+  // 2026-09-25: the serve is the ONE keeper that still STOPS for a resource (a headless service the product runs for
+  // itself — the owner's ruling separates it from an app a person uses), on the HONEST metric: a footprint (PSS)
+  // over the bound; a summed-RSS-only reading is recorded and never judged
+  let proc9 = { cpuTicks: 0, memBytes: 5.0 * 2 ** 30, memMetric: 'rss', rssBytes: 5.0 * 2 ** 30 };
+  const loc9 = serve.createServeLocator({ dataDir: dir9, command: 'opencode', log: null, spawnImpl: () => { throw new Error('nope'); }, now: () => t9, guardSampleMs: 0, readProc: () => proc9, telemetry: (ev) => tele9.push(ev) });
   await loc9.client({ budgetMs: 3000 });
   t9 += 60000; loc9._sampleGuard();
-  ok('RSS past the bound is a runaway on the FIRST sample (the owner\'s instance sat at 5.0 GB) — no sustain window', loc9.state().parked && loc9.state().parkedKind === 'runaway' && /RSS 5\.0 GB \(limit 2\.0 GB\)/.test(loc9.state().lastError) && tele9.length === 1, loc9.state());
+  ok('a SUMMED-RSS-only reading of 5.0 GB is recorded but NOT judged — the serve runs on (the metric the Chrome incident lied with)', !loc9.state().parked && loc9.state().memMetric === 'rss' && tele9.length === 0, loc9.state());
+  proc9 = { cpuTicks: 0, memBytes: 5.0 * 2 ** 30, memMetric: 'pss', rssBytes: 5.3 * 2 ** 30 };
+  t9 += 60000; loc9._sampleGuard();
+  ok('a FOOTPRINT (PSS) past the bound STOPS the headless serve on the FIRST sample (the owner\'s instance sat at 5.0 GB) — no sustain window, `why` names the metric', loc9.state().parked && loc9.state().parkedKind === 'runaway' && /memory \(PSS\) 5\.0 GB \(limit 2\.0 GB\)/.test(loc9.state().lastError) && tele9.length === 1 && tele9[0].value === 5120, loc9.state());
   ok('an unreadable /proc (a reused instance on another machine, a vanished pid) never parks anything', (() => { const l = serve.createServeLocator({ dataDir: dir9, command: 'opencode', log: null, guardSampleMs: 0, readProc: () => null }); l._sampleGuard(); const s = l.state(); l.stop(); return !s.parked && s.cpuPct === null; })());
   loc9.stop(); await mock9.close();
   for (const d of [dir, dir2, dir3, dir4, dir5, dir5b, dir6, dir7, dir8, dir9]) fs.rmSync(d, { recursive: true, force: true });
@@ -413,7 +420,7 @@ console.log('— ⑦ wiring pins');
   // 2026-09-13: the /proc sample is cli-identity.procSample (ONE reader shared
   // with the desktop-app keeper) and the five bounds live in src/keeper-limits.js
   // (the ONE constants home every keeper reads) — the pin follows the numbers.
-  ok('the runaway guard is REAL in the shipped module: /proc sampling (cli-identity.procSample), the CPU/RSS bounds from keeper-limits, the once-an-hour respawn floor, and telemetry opencode-serve-runaway', /cliIdentity\.procSample\(pid\)/.test(read('src/opencode-serve.js')) && /\/stat`/.test(read('src/cli-identity.js')) && /VmRSS:/.test(read('src/cli-identity.js')) && /require\('\.\/keeper-limits'\)/.test(read('src/opencode-serve.js')) && /GUARD_CPU_PCT = 150/.test(read('src/keeper-limits.js')) && /GUARD_RSS_BYTES = 2 \* 1024 \* 1024 \* 1024/.test(read('src/keeper-limits.js')) && /RUNAWAY_COOLDOWN_MS = 60 \* 60 \* 1000/.test(read('src/keeper-limits.js')) && /name: 'opencode-serve-runaway'/.test(read('src/opencode-serve.js')));
+  ok('the runaway guard is REAL in the shipped module: /proc sampling (cli-identity.procSample, memory = PSS via smaps_rollup), the ONE verdict (src/runaway-guard.js), the CPU/memory bounds from keeper-limits, the once-an-hour respawn floor, and telemetry opencode-serve-runaway', /cliIdentity\.procSample\(pid, \{ memory: true \}\)/.test(read('src/opencode-serve.js')) && /RG\.resourceVerdict\(/.test(read('src/opencode-serve.js')) && /\/stat`/.test(read('src/cli-identity.js')) && /smaps_rollup/.test(read('src/cli-identity.js')) && /require\('\.\/keeper-limits'\)/.test(read('src/opencode-serve.js')) && /GUARD_CPU_PCT = 150/.test(read('src/keeper-limits.js')) && /GUARD_MEM_BYTES = 2 \* 1024 \* 1024 \* 1024/.test(read('src/keeper-limits.js')) && /RUNAWAY_COOLDOWN_MS = 60 \* 60 \* 1000/.test(read('src/keeper-limits.js')) && /name: 'opencode-serve-runaway'/.test(read('src/opencode-serve.js')));
   ok('the discovery path may NEVER call the instance-booting v2 per-session family (2.369.42) — the module contains no such request', !/\/api\/session\/\$\{encodeURIComponent\(id\)\}/.test(read('src/opencode-serve.js')) && /THE NAMING LOOKUP MUST STAY ON THE v1 ROUTE/.test(read('src/opencode-serve.js')));
   ok('the serve is spawned from the isolated data/opencode-serve/cwd, never os.homedir() as the default', /cwd: state\.cwd \|\| cwd \|\| os\.homedir\(\)/.test(read('src/opencode-serve.js')) && /function serveCwdPath\(dataDir\) \{ return path\.join\(dataDir, 'opencode-serve', 'cwd'\); \}/.test(read('src/opencode-serve.js')));
   ok('harnessAvailability carries the verified caps for ACP harnesses only', /\.\.\.\(h\.acp \? \{ caps: \{ fork: !!capsOf\(h\.id\)\.fork \} \} : \{\}\)/.test(ce));

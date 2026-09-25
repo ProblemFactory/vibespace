@@ -745,8 +745,8 @@ function environHas(pid, needle, { procRoot = '/proc' } = {}) {
   try { return fs.readFileSync(`${procRoot}/${pid}/environ`).toString('utf8').split('\0').includes(needle); } catch { return false; }
 }
 /**
- * ONE sample over several pids: cpuTicks and rssBytes SUMMED, `pids` = how
- * many answered. null when none did (no evidence).
+ * ONE sample over several pids: `{ cpuTicks, memBytes, memMetric, rssBytes,
+ * pids }` — `pids` = how many answered. null when none did (no evidence).
  *
  * cpuTicks COUNTS EACH UNIT OF WORK EXACTLY ONCE (r3, 2026-09-14): a live
  * member's own utime+stime PLUS the cutime+cstime of every child it has
@@ -761,11 +761,34 @@ function environHas(pid, needle, { procRoot = '/proc' } = {}) {
  * reaped, so the sum never double-counts. BOUNDARY: a child reaped by init
  * (its parent died first — the double-fork daemon shape) leaves the set
  * entirely and is not counted.
+ *
+ * MEMORY IS A FOOTPRINT, NOT A SUM OF RSS (2026-09-25, the Chrome desktop
+ * app parked 3 s after `ready` at "RSS 2.0 GB" — 25 processes sharing one
+ * binary, its libraries and the zygote's copy-on-write heap): `memBytes` =
+ * ΣPss (smaps_rollup), else Σ(RssAnon+RssShmem) when some member's
+ * smaps_rollup is unreadable, the SAME metric for every member
+ * (cli-identity.setMemory — never a mix), named in `memMetric`
+ * ('pss'|'anon'|'anon-sum'|'rss'; 'anon' only for ONE process with an
+ * address space — over several it is 'anon-sum', a per-process sum again
+ * (CoW + shmem counted per sharer); 'anon-sum' and 'rss' = the guard's memory
+ * rule is off for this set, the reading is recorded).
+ * `rssBytes` = ΣVmRSS, a secondary fact only (deprecated in the payloads).
+ *
+ * `sessionSample` is ASYNC (the keeper's tick awaits it): smaps_rollup costs
+ * ≈1.1 ms per pid on this box (891 pids = 954 ms sync, the same pids' status
+ * = 8.7 ms), so a 25-process app is ≈27 ms of page-table walking per 60 s
+ * tick — on the libuv pool, pids read one after another (never a burst of
+ * 3×N pool jobs). `sessionSampleSync` = the same interpretation read
+ * synchronously (the parity leg of test-desktop-display drives both over
+ * one fake /proc root). `opts.procRoot` is injectable for that suite.
  */
-function sessionSample(pids) {
-  let cpuTicks = 0, rssBytes = 0, n = 0;
-  for (const pid of pids || []) { const s = procSample(pid); if (!s) continue; cpuTicks += s.cpuTicks + (s.reapedTicks || 0); rssBytes += s.rssBytes; n++; }
-  return n ? { cpuTicks, rssBytes, pids: n } : null;
+async function sessionSample(pids, opts = {}) {
+  const out = [];
+  for (const pid of pids || []) out.push(await cliIdentity.procSampleAsync(pid, opts));
+  return cliIdentity.setSample(out, { reaped: true });
+}
+function sessionSampleSync(pids, opts = {}) {
+  return cliIdentity.setSample((pids || []).map((pid) => cliIdentity.procSample(pid, { ...opts, memory: true })), { reaped: true });
 }
 /**
  * ONE /proc walk answering "which live pids carry `KEY=<id>` for ANY of these
@@ -981,6 +1004,6 @@ module.exports = {
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,
   XPRA_ARGS, XPRA_GEOMETRY_MAX, XPRA_BIND_REFUSALS, startXpra, xpraWwwDir, seamlessWindows,
   pidAlive, procStart, sameProcess, procSample,
-  sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, markerCensus, environCensus,
+  sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion,
 };

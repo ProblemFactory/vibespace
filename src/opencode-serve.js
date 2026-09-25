@@ -157,7 +157,9 @@ const CONFIG_MAX_BYTES = 512 * 1024;  // the v1 /config read (permission rules) 
 // The five numbers live in src/keeper-limits.js since 2026-09-13 — the ONE
 // home every keeper (this serve, the desktop-app keeper, the browser keeper)
 // bounds by; the literals that used to sit here were the first copy.
-const { GUARD_SAMPLE_MS, GUARD_CPU_PCT, GUARD_CPU_SUSTAIN_MS, GUARD_RSS_BYTES, RUNAWAY_COOLDOWN_MS } = require('./keeper-limits');
+const LIMITS = require('./keeper-limits');
+const { GUARD_SAMPLE_MS, GUARD_CPU_PCT, GUARD_CPU_SUSTAIN_MS, RUNAWAY_COOLDOWN_MS } = LIMITS;
+const RG = require('./runaway-guard'); // the ONE runaway verdict (2026-09-25 — this file carried an inline copy)
 // ── the RECORDED-SERVE settlement (round 10) ──
 /** A recorded serve that missed the 1.5s budget gets ONE longer probe before
  *  we conclude it is wedged: a busy 1.18.29 answers /global/health in hundreds
@@ -294,13 +296,18 @@ function unsafeWorktreeReason(worktree) {
   if (w === path.resolve(os.homedir())) return `its project worktree is the home directory (${w})`;
   return null;
 }
-/** {cpuTicks, rssBytes} for a pid, or null. procfs only (no mountpoint, no
- *  child process) — safe to read synchronously once a minute. */
+/** {cpuTicks, memBytes, memMetric, rssBytes} for a pid, or null. procfs only
+ *  (no mountpoint, no child process) — read synchronously once a minute: ONE
+ *  pid, so the smaps_rollup page-table walk is ≈1 ms (measured ≈1.1 ms per pid
+ *  on this box), and the guard's tick is a plain setInterval the suites drive
+ *  synchronously. The memory is the ONE set rule over a set of one
+ *  (cli-identity.setMemory: PSS, else RssAnon+RssShmem) — for a lone serve the
+ *  PSS is its footprint minus what it shares with other processes. */
 function readProcUsage(pid) {
   // ONE reader (cli-identity.procSample, 2026-09-13): the desktop-app keeper's
   // guard samples through the same function, so the two guards cannot drift
-  const s = cliIdentity.procSample(pid);
-  return s ? { cpuTicks: s.cpuTicks, rssBytes: s.rssBytes } : null;
+  const s = cliIdentity.procSample(pid, { memory: true });
+  return s ? { cpuTicks: s.cpuTicks, ...cliIdentity.setMemory([s]) } : null;
 }
 
 /** THE PORTABLE IDENTITY RUNG (round 11; ONE definition since B-eac2 residual
@@ -838,13 +845,14 @@ function createServeLocator({
   readCmdline = readProcCmdline, readUid = readProcUid,
   confirmTimeoutMs = RECORD_CONFIRM_TIMEOUT_MS, killWaitMs = RECORD_KILL_WAIT_MS, blockedRetryMs = BLOCKED_RETRY_MS,
   telemetry = null, now = Date.now, guardSampleMs = GUARD_SAMPLE_MS,
-  guardCpuPct = GUARD_CPU_PCT, guardCpuSustainMs = GUARD_CPU_SUSTAIN_MS, guardRssBytes = GUARD_RSS_BYTES,
+  guardCpuPct = GUARD_CPU_PCT, guardCpuSustainMs = GUARD_CPU_SUSTAIN_MS, guardLimits = null, // guardLimits: a keeper-limits-shaped override (the memory ceiling is never a loose knob — src/runaway-guard.js compares it)
   runawayCooldownMs = RUNAWAY_COOLDOWN_MS,
 } = {}) {
   if (!dataDir) throw new Error('createServeLocator: dataDir is required (the record lives at data/opencode-serve.json)');
   const recordPath = path.join(dataDir, 'opencode-serve.json');
-  const state = { client: null, port: null, pid: null, startedAt: null, source: null, child: null, crashes: 0, parked: false, parkedKind: null, runawayUntil: 0, retryAfter: 0, lastError: null, stopping: false, stopEpoch: 0, backoffUntil: 0, caps: null, version: null, capsProbed: false, cwd: cwd || null, cwdIsolated: null, cpuPct: null, rssBytes: null, sampledAt: null, skippedWorktrees: [] };
-  const guard = { prev: null, hotSince: 0, timer: null };
+  const state = { client: null, port: null, pid: null, startedAt: null, source: null, child: null, crashes: 0, parked: false, parkedKind: null, runawayUntil: 0, retryAfter: 0, lastError: null, stopping: false, stopEpoch: 0, backoffUntil: 0, caps: null, version: null, capsProbed: false, cwd: cwd || null, cwdIsolated: null, cpuPct: null, memBytes: null, memMetric: null, rssBytes: null, sampledAt: null, skippedWorktrees: [] };
+  const guard = { prev: null, hotSince: 0, timer: null, memOffSaid: false };
+  const guardL = { ...LIMITS, ...(guardLimits || {}), GUARD_CPU_PCT: guardCpuPct, GUARD_CPU_SUSTAIN_MS: guardCpuSustainMs };
   let ensuring = null;
   let respawnTimer = null;
   const autostartOn = () => !!(typeof autostart === 'function' ? autostart() : autostart);
@@ -931,9 +939,13 @@ function createServeLocator({
   // A serve is not "hung", it BURNS: 2.369.42's instance sat at 157-169% CPU
   // and 5.0 GB RSS for two hours while its file watcher crawled /tmp, and
   // nothing in the product noticed. Sample the child's own /proc every minute;
-  // sustained CPU or an RSS blowout stops it, PARKS the locator as
+  // sustained CPU or a memory blowout (PSS since 2026-09-25) stops it, PARKS the locator as
   // 'parked:runaway' (loud + telemetry + the harness availability reason) and
-  // refuses to respawn it more than once an hour.
+  // refuses to respawn it more than once an hour. THIS KEEPER ALONE STOPS FOR A
+  // RESOURCE (the owner's 2026-09-25 ruling): the serve is a HEADLESS service
+  // the product runs for itself; a desktop app or an agent browser a person or
+  // an agent is using is only REPORTED by the same verdict (src/runaway-guard.js
+  // resourceVerdict — `over` is the policy-free fact, this is the stop policy).
   function armGuard() {
     if (guard.timer || !guardSampleMs) return;
     guard.timer = setInterval(() => { try { sampleGuard(); } catch (e) { log?.warn?.(`[opencode-serve] resource sample failed: ${e.message}`); } }, guardSampleMs);
@@ -944,16 +956,14 @@ function createServeLocator({
     const s = readProc(state.pid);
     const t = now();
     if (!s) { guard.prev = null; return; }
-    let cpuPct = null;
-    if (guard.prev && t > guard.prev.at) cpuPct = (s.cpuTicks - guard.prev.cpuTicks) * 100000 / CLK_TCK / (t - guard.prev.at);
+    // ONE verdict (src/runaway-guard.js): memory by the sample's footprint metric, CPU unchanged
+    const v = RG.resourceVerdict(s, guard.prev, guard.hotSince, t, { clkTck: CLK_TCK, limits: guardL });
     guard.prev = { at: t, cpuTicks: s.cpuTicks };
-    state.cpuPct = cpuPct; state.rssBytes = s.rssBytes; state.sampledAt = t;
-    let why = null;
-    if (s.rssBytes > guardRssBytes) why = `RSS ${(s.rssBytes / 2 ** 30).toFixed(1)} GB (limit ${(guardRssBytes / 2 ** 30).toFixed(1)} GB)`;
-    else if (cpuPct !== null && cpuPct > guardCpuPct) {
-      if (!guard.hotSince) guard.hotSince = t;
-      if (t - guard.hotSince >= guardCpuSustainMs) why = `${cpuPct.toFixed(0)}% CPU sustained for ${Math.round((t - guard.hotSince) / 60000)} min (limit ${guardCpuPct}%)`;
-    } else guard.hotSince = 0;
+    guard.hotSince = v.hotSince;
+    state.cpuPct = v.cpuPct; state.memBytes = Number.isFinite(s.memBytes) ? s.memBytes : null; state.memMetric = s.memMetric || null; state.rssBytes = Number.isFinite(s.rssBytes) ? s.rssBytes : null; state.sampledAt = t;
+    if (v.memGuard === 'unavailable' && !guard.memOffSaid) { guard.memOffSaid = true; log?.warn?.(`[opencode-serve] ${RG.memGuardOffLine(`serve pid ${state.pid}`, s)}`); }
+    // the STOP policy (the serve only): `why` names the metric — "memory (PSS) 5.0 GB (limit 2.0 GB)"
+    const why = v.over;
     if (why) parkRunaway(why); else notify();
   }
   function parkRunaway(why) {
@@ -967,7 +977,7 @@ function createServeLocator({
     try { if (ch) ch.kill('SIGTERM'); else if (pid && pid !== process.pid) killPid(pid, 'SIGTERM'); } catch { }
     clearRecord({ port, pid });   // the serve we just stopped, named (round 9)
     log?.error?.(`[opencode-serve] RUNAWAY — ${state.lastError}. OpenCode boots an instance per session DIRECTORY and its file finder indexes + watches that whole tree; a session rooted at a huge directory burns the machine. Not restarting for ${Math.round(runawayCooldownMs / 60000)} min — disable the "OpenCode background service" plugin (⚙ → Plugins) if it recurs.`);
-    try { telemetry?.({ name: 'opencode-serve-runaway', detail: `${why}${port ? ` port ${port}` : ''}`, value: Math.round(state.rssBytes / 1048576) }); } catch { }
+    try { telemetry?.({ name: 'opencode-serve-runaway', detail: `${why}${port ? ` port ${port}` : ''}`, value: Math.round((state.memBytes || 0) / 1048576) }); } catch { }
     notify();
   }
   function onChildExit(child, code, signal, port) {
@@ -1420,7 +1430,7 @@ function createServeLocator({
     notify();
   }
   function snapshot() {
-    return { port: state.port, pid: state.pid, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, rssBytes: state.rssBytes, sampledAt: state.sampledAt, recordPath, ready: !!state.client };
+    return { port: state.port, pid: state.pid, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client };
   }
   if (stopOnExit) process.once('exit', () => { try { stop(); } catch { } });
   return { client, ensure, start, stop, invalidate, state: snapshot, command: commandOf, recordPath, _sampleGuard: sampleGuard };
@@ -2240,5 +2250,5 @@ module.exports = {
   normalizeAskQuestions, askAnswerMap, askAnswersToPositional, revertNoticeText, EXTERNAL_WINDOW_MS, OWN_WRITE_WINDOW_MS,
   serveEnvOverride, decideAutostart, SERVICE_PLUGIN_ID: 'opencode-serve',
   DEFAULT_TIMEOUT_MS, READ_TIMEOUT_MS, LIST_CACHE_MS, NEGATIVE_CACHE_MS, MAX_CRASHES, FORK_PATH,
-  NAME_MAX_BYTES, CONFIG_MAX_BYTES, GUARD_CPU_PCT, GUARD_RSS_BYTES, GUARD_SAMPLE_MS, RUNAWAY_COOLDOWN_MS, MIN_REFRESH_MS, PTY_TIMEOUT_MS,
+  NAME_MAX_BYTES, CONFIG_MAX_BYTES, GUARD_CPU_PCT, GUARD_SAMPLE_MS, RUNAWAY_COOLDOWN_MS, MIN_REFRESH_MS, PTY_TIMEOUT_MS,
 };

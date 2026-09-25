@@ -102,6 +102,7 @@ import { createXpraView } from './xpra-view.js';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
 import { paneState } from '../desktop-viewers.js';
 import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel } from '../desktop-apps.js';
+import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
@@ -165,12 +166,15 @@ export function fitChipText(rec) {
   const fb = rec.fb && rec.fb.w > 0 && rec.fb.h > 0 ? `${rec.fb.w}x${rec.fb.h}` : '';
   return fb ? t('fixed {geometry} ({by}) — install tigervnc for a window that follows', { geometry: fb, by }) : t('fixed display ({by}) — install tigervnc for a window that follows', { by });
 }
-/** "CPU 3% · 120 MB" or '' when the keeper has not sampled yet. */
+/** "CPU 3% · 412 MB (PSS)" or '' when the keeper has not sampled yet. The
+ *  memory is the keeper's FOOTPRINT reading labelled by its metric
+ *  (`memBytes` + `memMetric`, 2026-09-25 — never the deprecated `rssBytes`, a
+ *  per-process RSS sum that counted every shared page once per process). */
 export function liveChipText(rec) {
   const l = rec && rec.live;
-  if (!l || !Number.isFinite(l.rssBytes)) return '';
+  if (!l || !Number.isFinite(l.memBytes)) return '';
   const cpu = Number.isFinite(l.cpuPct) ? `CPU ${Math.max(0, Math.round(l.cpuPct))}% · ` : '';
-  return `${cpu}${Math.round(l.rssBytes / 1048576)} MB`;
+  return `${cpu}${memoryText(l.memBytes, l.memMetric)}`;
 }
 /** Idle countdown text from the record's own clock, computed locally each
  *  second between broadcasts; '' when the app never times out. */
@@ -445,6 +449,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     moreBtn.style.display = rec.stream === 'xpra' ? '' : 'none'; // the menu holds Scale ▸ only — nothing to offer on a whole-display rung
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
+    liveChip.title = rec.live && rec.live.over ? String(rec.live.over) : ''; // the keeper's report (never a stop) — the sentence names the metric
     const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none';
     keepBtn.style.display = rec.state === 'ready' && rec.idleTimeoutMs > 0 ? '' : 'none';
     stopBtn.style.display = rec.state === 'ready' || rec.state === 'launching' ? '' : 'none';

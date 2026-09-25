@@ -1784,5 +1784,119 @@ console.log('§51 no suite writes a patched copy into the tree');
   ok(planted.length === 2 && planted.some(([f]) => f === 'browser-live-window.js'), `§53 NEGATIVE CONTROL: the pre-rename shape (a local svgIcon16 copy in browser-live-window.js) planted into a patched listing is caught (${JSON.stringify(planted)})`);
 }
 
+// §54 (2026-09-25, the Chrome desktop-app incident + the owner's ruling "这个keeper到底是干啥的，没必要别乱加会影响
+// 使用的feature"): ONE RESOURCE VERDICT, TWO OUTCOMES. (a) the memory threshold is COMPARED only in
+// src/runaway-guard.js — three verbatim copies each compared a per-process VmRSS SUM with it and stopped a fresh
+// Google Chrome at "RSS 2.0 GB"; (b) no keeper but the HEADLESS OpenCode serve stops or parks for a resource: a
+// desktop app / an agent browser a person or an agent is using is REPORTED. Grep-derived over every src/ file
+// (comments stripped), with a planted negative control for each rule.
+console.log('§54 one resource verdict; only the headless serve stops for a resource');
+{
+  const files = [];
+  (function walk(dir) {
+    for (const e of fs.readdirSync(path.join(REPO, dir))) {
+      const p = dir + '/' + e;
+      if (fs.statSync(path.join(REPO, p)).isDirectory()) walk(p);
+      else if (/\.(js|mjs|cjs)$/.test(e)) files.push(p);
+    }
+  })('src');
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const code = Object.fromEntries(files.map((f) => [f, strip(read(f))]));
+  const CMP = /(?:[<>]=?\s*[\w.$\[\]'"]*\bGUARD_(?:MEM|RSS)_BYTES\b|\bGUARD_(?:MEM|RSS)_BYTES\b[\w.$\]'"]*\s*[<>]=?)/;
+  const cmpSites = (tx) => Object.entries(tx).filter(([, t]) => CMP.test(t)).map(([f]) => f);
+  ok(JSON.stringify(cmpSites(code)) === JSON.stringify(['src/runaway-guard.js']), `§54a the memory threshold is compared in exactly ONE file, src/runaway-guard.js (${JSON.stringify(cmpSites(code))})`);
+  ok(!Object.entries(code).some(([, t]) => /\bGUARD_RSS_BYTES\b/.test(t)), '§54a …and the RSS-sum name GUARD_RSS_BYTES is spoken by no src/ code (only a comment may remember it)');
+  ok(JSON.stringify(cmpSites({ ...code, 'src/server/desktop-app-keeper.js': code['src/server/desktop-app-keeper.js'] + '\nif (s.rssBytes > limits.GUARD_MEM_BYTES) x();' }).sort()) === JSON.stringify(['src/runaway-guard.js', 'src/server/desktop-app-keeper.js']), '§54a NEGATIVE CONTROL: a planted keeper-side comparison is counted');
+  // (b) the stop/park side. Every file that asks the verdict is a keeper; only opencode-serve may act on it by stopping.
+  const askers = files.filter((f) => /\bresourceVerdict\(/.test(code[f]) && f !== 'src/runaway-guard.js').sort();
+  ok(JSON.stringify(askers) === JSON.stringify(['src/opencode-serve.js', 'src/server/browser-keeper.js', 'src/server/desktop-app-keeper.js']), `§54b the verdict's askers are the three keepers (${askers.join(' ')})`);
+  // STRUCTURAL, not a deny-list of spellings (r2 review: `stop(id, { why: v.over })`, `why: 'over-limit'`, a bare
+  // `stop(id)` and `store.resourceHoldUntil[..] =` all walked past the old regexes). Three rules per report-only keeper:
+  //  (1) THE SAMPLED BLOCK — from `const <v> = RG.resourceVerdict(` to the loop's `if (dirty) commit();` (the scope of
+  //      the block-scoped verdict + level; nothing else can see them) — may only write the guard slot (`g.…`), `dirty`,
+  //      its own `let` locals and the two maps `guard`/`live`, and may call no stop / retire / kill / remove / fs / Set|Map add|delete|clear;
+  //  (2) EVERY stop( call in the file names a `why` from a CLOSED allow-list (the shorthand `{ why }` only where the
+  //      function's callers are themselves allow-listed: retireEphemeral);
+  //  (3) outside the sampled block the file never reads the verdict's facts (`.over`, `.overKind`, `.report`).
+  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped'];
+  const argsAt = (t, i) => { let d = 0, j = i; for (; j < t.length; j++) { const c = t[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } return t.slice(i + 1, j); };
+  const sampledBlock = (t) => {
+    const m = /const (\w+) = RG\.resourceVerdict\(/.exec(t); if (!m) return null;
+    const end = t.indexOf('if (dirty) commit();', m.index); if (end < 0) return null;
+    return { start: m.index, end, text: t.slice(m.index, end), v: m[1] };
+  };
+  const blockOffences = (tx) => {
+    const out = [];
+    const bad = [[/(?<![\w$])stop\(|\.stop\(/, 'a stop'], [/\bretire\w*\(|\bremoveProfile\(/, 'a retire'], [/\bkill\(/, 'a kill'], [/\bfs\.\w+/, 'an fs call'], [/\.(?:add|delete|clear)\(/, 'a Set/Map add|delete|clear']];
+    for (const [re, what] of bad) if (re.test(tx)) out.push(what);
+    for (const m of tx.matchAll(/(?<![\w$.])(\w+)\.set\(/g)) if (!['guard', 'live'].includes(m[1])) out.push(`a ${m[1]}.set(`);
+    const locals = new Set([...tx.matchAll(/\blet\s+([\w$]+)/g)].map((m) => m[1])); // block-local, gone with the block
+    const decl = tx.replace(/\b(?:const|let|var)\s+[\w$]+\s*=/g, '');
+    for (const m of decl.matchAll(/([A-Za-z_$][\w$]*(?:\s*(?:\.[\w$]+|\[[^\]]*\]))*)\s*(?:\+|-|\*|\/|\|\||&&|\?\?)?=(?![=>])/g)) {
+      const target = m[1].replace(/\s+/g, '');
+      if (!(target === 'dirty' || /^g\./.test(target) || locals.has(target))) out.push(`an assignment to ${target}`);
+    }
+    return out;
+  };
+  const stopOffences = (t) => {
+    const out = [];
+    for (const m of t.matchAll(/(?<![\w$.])stop\(/g)) {
+      if (/function\s+$/.test(t.slice(Math.max(0, m.index - 12), m.index))) continue; // the definition
+      const args = argsAt(t, m.index + 4);
+      const lit = /,\s*\{\s*why:\s*'([^']*)'\s*\}\s*$/.exec(args);
+      if (lit && STOP_WHYS.includes(lit[1])) continue;
+      if (/,\s*\{\s*why\s*\}\s*$/.test(args)) {
+        const defn = /function retireEphemeral\(\w+, why = '([^']*)'\)/.exec(t);
+        const callers = [...t.matchAll(/(?<!function )retireEphemeral\(([^)]*)\)/g)].map((c) => (/,\s*'([^']*)'\s*$/.exec(c[1]) || [])[1]);
+        if (defn && STOP_WHYS.includes(defn[1]) && callers.length && callers.every((w) => STOP_WHYS.includes(w)) && (t.match(/\bstop\(\w+, \{ why \}\)/g) || []).length === 1) continue;
+      }
+      out.push(`stop(${args.trim()})`);
+    }
+    return out;
+  };
+  const offenders = (tx) => {
+    const out = {};
+    for (const f of askers.filter((x) => x !== 'src/opencode-serve.js')) {
+      const t = tx[f], blk = sampledBlock(t), o = [];
+      if (!blk) o.push('no sampled block (const <v> = RG.resourceVerdict( … if (dirty) commit();)');
+      else {
+        o.push(...blockOffences(blk.text));
+        const outside = t.slice(0, blk.start) + t.slice(blk.end);
+        if (/\.(?:over|overKind|report)\b/.test(outside)) o.push('the verdict\'s facts read outside the sampled block');
+      }
+      o.push(...stopOffences(t));
+      if (o.length) out[f] = o;
+    }
+    return out;
+  };
+  ok(Object.keys(offenders(code)).length === 0, `§54b no report-only keeper stops, retires, parks or writes a store for a resource — structurally (${JSON.stringify(offenders(code))})`);
+  ok(['src/server/desktop-app-keeper.js', 'src/server/browser-keeper.js'].every((f) => { const b = sampledBlock(code[f]); return b && b.text.length > 400 && /\bRG\.reportTransition\(/.test(b.text) && /\bserverNotice\?\.\(/.test(b.text); }), '§54b CONTROL setup: both sampled blocks are found and carry the report level + the notice');
+  const PLANTS = [
+    ['lvl.fire stop with why: v.over', 'if (lvl.fire) stop(rec.id, { why: v.over }).catch(() => { });'],
+    ["why: 'over-limit'", "if (v.over) stop(rec.id, { why: 'over-limit' }).catch(() => { });"],
+    ['a bare stop after a lastError', 'if (v.over) { rec.lastError = v.over; stop(rec.id).catch(() => { }); }'],
+    ['a park under a new store key', 'if (v.over) store.resourceHoldUntil[rec.appId] = t + 3600e3;'],
+    ["why: 'user' (an allow-listed word)", "if (v.over) stop(rec.id, { why: 'user' });"],
+    ['a park in a new Map', 'if (v.over) { parkedUntil.set(rec.id, t + 3600e3); }'],
+    ['a state flip', "if (v.over) rec.state = 'failed';"],
+    ['a profile retire', "if (lvl.fire) retireProfile(rec, { why: 'idle' });"],
+  ];
+  const plantIn = (f, stmt) => { const t = code[f], b = sampledBlock(t); return { ...code, [f]: t.slice(0, b.end) + stmt + '\n        ' + t.slice(b.end) }; };
+  const caughtIn = PLANTS.map(([n, stmt]) => [n, ['src/server/desktop-app-keeper.js', 'src/server/browser-keeper.js'].every((f) => Object.keys(offenders(plantIn(f, stmt))).includes(f))]);
+  ok(caughtIn.every(([, c]) => c), `§54b NEGATIVE CONTROL: all ${PLANTS.length} planted spellings INSIDE the sampled block are caught in both keepers (${JSON.stringify(caughtIn.filter(([, c]) => !c))})`);
+  const plantEnd = (f, stmt) => ({ ...code, [f]: code[f] + '\n' + stmt });
+  const caughtEnd = PLANTS.slice(0, 5).map(([n, stmt]) => [n, Object.keys(offenders(plantEnd('src/server/desktop-app-keeper.js', stmt))).includes('src/server/desktop-app-keeper.js')]);
+  ok(caughtEnd.every(([, c]) => c), `§54b NEGATIVE CONTROL: the stop / park spellings OUTSIDE the block (a later reader of the verdict, an unlisted why, a bare stop) are caught too (${JSON.stringify(caughtEnd.filter(([, c]) => !c))})`);
+  const plantStored = plantEnd('src/server/browser-keeper.js', "function sweepHot() { for (const [id, l] of live) if (l.over) stop(id, { why: 'idle' }); }");
+  ok(Object.keys(offenders(plantStored)).includes('src/server/browser-keeper.js'), '§54b NEGATIVE CONTROL: a later sweep that stops on the STORED live row\'s `over` (with an allow-listed why) is caught');
+  ok(/if \(why\) parkRunaway\(why\)/.test(code['src/opencode-serve.js']) && /const why = v\.over;/.test(code['src/opencode-serve.js']), '§54b the headless serve alone stops + parks, on the verdict\'s `over`');
+  const parkReaders = files.filter((f) => /\brunawayParkedUntil\b/.test(code[f])).sort();
+  ok(JSON.stringify(parkReaders) === JSON.stringify(['src/server/migrations.js']), `§54b the park map lives on only in the migration that voids it (${JSON.stringify(parkReaders)})`);
+  ok(/\bRG\.reportTransition\(/.test(code['src/server/desktop-app-keeper.js']) && /\bRG\.reportTransition\(/.test(code['src/server/browser-keeper.js']), '§54b both report-only keepers route `over` through the report level (a notice when a crossing begins — hysteresis + floor + delivery in runaway-guard.reportTransition)');
+  const plantStop = { ...code, 'src/server/desktop-app-keeper.js': code['src/server/desktop-app-keeper.js'] + "\nstop(rec.id, { why: 'runaway' });" };
+  const PARK = /\brunaway(?:Parked)?Until\b|\bparkRunaway\b|\bParkedUntil\b/;
+  ok(Object.keys(offenders(plantStop)).includes('src/server/desktop-app-keeper.js') && !PARK.test(code['src/server/browser-keeper.js']) && !PARK.test(code['src/server/desktop-app-keeper.js']), '§54b NEGATIVE CONTROL: the pre-fix spelling (why: \'runaway\') is caught, and the old park names are spoken by neither report-only keeper');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -257,9 +257,9 @@ console.log('§4 r2 — spawns are awaited, a probe is not a guarantee, a socket
   ok(ident.readSid(lead.pid) === lead.pid && members.length === 2 && members.includes(lead.pid), `a detached leader is its own session (sid == pid) and the census holds it + the child it forked (${members.join(', ')})`);
   const kid = members.find((m) => m !== lead.pid);
   ok(D.environHas(kid, marker) && !D.environHas(kid, 'VIBESPACE_DESKTOP_APP=other') && !D.environHas(999999, marker), 'the forked child INHERITED the session marker; a different id / a dead pid do not carry it');
-  const ss = D.sessionSample(members);
-  ok(ss && ss.pids === 2 && ss.rssBytes > 0 && Number.isFinite(ss.cpuTicks), 'sessionSample sums the members (2 pids answered, RSS > 0)');
-  ok(D.sessionSample([]) === null && D.sessionSample([999999]) === null, 'no member answers ⇒ null (no evidence, never zero)');
+  const ss = await D.sessionSample(members);
+  ok(ss && ss.pids === 2 && ss.memBytes > 0 && ss.memMetric === 'pss' && ss.rssBytes >= ss.memBytes && Number.isFinite(ss.cpuTicks), `sessionSample sums the members (2 pids answered, ΣPss ${ss && ss.memBytes} ≤ ΣVmRSS ${ss && ss.rssBytes} — shared pages counted once)`, ss);
+  ok(await D.sessionSample([]) === null && await D.sessionSample([999999]) === null, 'no member answers ⇒ null (no evidence, never zero)');
   const plain = spawn('sleep', ['30'], { stdio: 'ignore' });
   ok(D.sessionMembers(plain.pid).length === 0, 'a NON-detached child is not a session leader — its own pid names no session');
   plain.kill('SIGKILL');
@@ -277,7 +277,7 @@ console.log('§4 r2 — spawns are awaited, a probe is not a guarantee, a socket
     const t0 = Date.now(); while (comm(parent.pid) !== 'sleep' && Date.now() - t0 < 15000) await sleep(50);
     const ps = D.procSample(parent.pid);
     ok(ps && ps.reapedTicks >= 10 && ps.cpuTicks < 5, `procSample carries reapedTicks: a parent that reaped a CPU-burning child reads own ${ps && ps.cpuTicks} / reaped ${ps && ps.reapedTicks} ticks (${Date.now() - t0} ms)`, ps);
-    const ss = D.sessionSample([parent.pid]);
+    const ss = await D.sessionSample([parent.pid]);
     ok(ss && ss.cpuTicks >= (ps ? ps.reapedTicks : 1e9), `sessionSample COUNTS the reaped work (${ss && ss.cpuTicks} ticks); the round-2 live-only sum read ${ps && ps.cpuTicks}`);
     ok(D.sameProcess(parent.pid, null) === false && D.sameProcess(parent.pid, undefined) === false && D.sameProcess(parent.pid, D.procStart(parent.pid)) === true, 'sameProcess: a null/undefined recorded starttime is NOT proven (false for a LIVE pid — round 2 answered liveness); the real starttime is');
     ok(D.sameProcess(parent.pid, D.procStart(parent.pid), { procRoot: noproc }) === false, 'BOUNDARY: with no readable /proc a recorded starttime cannot be checked now ⇒ false (no evidence is not a yes)');
@@ -423,8 +423,8 @@ console.log('§5 THE XPRA RUNG (P8-2, 2026-09-21): the argv table, the HTTP list
       let wins = null;
       for (let i = 0; i < 60 && !wins; i++) { await sleep(250); const e = await D.enumerateWindows({ display: up.display, authFile, env: base }); const s = e.ok ? D.seamlessWindows(e.windows) : []; if (s.length) wins = s; }
       ok(wins && wins.length === 1 && (wins[0].cls || wins[0].instance || wins[0].name) && !/^Xpra/.test(wins[0].name || ''), `the app is the ONE seamless window on the display (${wins && JSON.stringify(wins.map((w) => [w.name, w.cls, w.w + 'x' + w.h]))}) — no root, no wrapper rows`, wins);
-      const rss = D.sessionSample([...members, app.pid]);
-      console.log(`  (measured: displayfd ${tDisp} ms, HTTP ${tHttp} ms, session RSS ${rss ? (rss.rssBytes / 1048576).toFixed(0) : '?'} MB over ${rss ? rss.pids : 0} pids incl. ${appName})`);
+      const rss = await D.sessionSample([...members, app.pid]);
+      console.log(`  (measured: displayfd ${tDisp} ms, HTTP ${tHttp} ms, session ${rss ? (rss.memBytes / 1048576).toFixed(0) : '?'} MB ${rss ? rss.memMetric : ''} (ΣVmRSS ${rss ? (rss.rssBytes / 1048576).toFixed(0) : '?'} MB) over ${rss ? rss.pids : 0} pids incl. ${appName})`);
       try { app.kill('SIGTERM'); } catch {}
     } finally {
       // the teardown a keeper would do: the leader's GROUP, then verify the whole session is gone
@@ -730,6 +730,61 @@ console.log('§7 B-bfe6 — the browser binaries: probed beside the rungs, the f
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+console.log('§8 (2026-09-25) memory is a FOOTPRINT: ΣPss over the set, one metric per sum, never a sum of VmRSS');
+{
+  // A FAKE /proc root in the incident's shape: three processes that SHARE most of their pages (one binary, its
+  // libraries, a copy-on-write heap). Each maps 800 MB (VmRSS) but its proportional share is 150 MB (Pss): the
+  // summed RSS (2.34 GB) crosses the 2 GiB number while the footprint (450 MB) is far below it.
+  const RG = require('../src/runaway-guard.js');
+  const L = require('../src/keeper-limits.js');
+  const froot = path.join(dir, 'fakeproc');
+  const statLine = (pid, comm, ut, st, cut, cst, start) => `${pid} (${comm}) S 1 ${pid} ${pid} 0 -1 4194560 100 0 0 0 ${ut} ${st} ${cut} ${cst} 20 0 1 0 ${start} 1000000 200 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0`;
+  const mkPid = (pid, { comm = 'chrome', rssKb, anonKb = null, shmKb = null, pssKb = null, noStatusMem = false, ut = 10, st = 5, cut = 0, cst = 0, start = 5000 + pid } = {}) => {
+    const d = path.join(froot, String(pid)); fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'stat'), statLine(pid, comm, ut, st, cut, cst, start));
+    const status = [`Name:\t${comm}`, 'State:\tS (sleeping)', `Pid:\t${pid}`];
+    if (!noStatusMem) { status.push(`VmRSS:\t${rssKb} kB`); if (anonKb != null) status.push(`RssAnon:\t${anonKb} kB`); status.push('RssFile:\t1 kB'); if (shmKb != null) status.push(`RssShmem:\t${shmKb} kB`); }
+    fs.writeFileSync(path.join(d, 'status'), status.join('\n') + '\n');
+    if (pssKb != null) fs.writeFileSync(path.join(d, 'smaps_rollup'), `00400000-7fffffffffff ---p 00000000 00:00 0 [rollup]\nRss:\t${rssKb} kB\nPss:\t${pssKb} kB\nPss_Anon:\t${Math.round(pssKb / 2)} kB\n`);
+  };
+  const MB = 1024;
+  mkPid(4101, { rssKb: 800 * MB, anonKb: 200 * MB, shmKb: 10 * MB, pssKb: 150 * MB });
+  mkPid(4102, { rssKb: 800 * MB, anonKb: 200 * MB, shmKb: 10 * MB, pssKb: 150 * MB });
+  mkPid(4103, { rssKb: 800 * MB, anonKb: 200 * MB, shmKb: 10 * MB, pssKb: 150 * MB });
+  const inc = await D.sessionSample([4101, 4102, 4103], { procRoot: froot });
+  ok(inc && inc.pids === 3 && inc.memMetric === 'pss' && inc.memBytes === 450 * MB * 1024 && inc.rssBytes === 2400 * MB * 1024, `the incident shape: ΣPss ${inc && inc.memBytes / 2 ** 20} MB is the footprint; ΣVmRSS ${inc && inc.rssBytes / 2 ** 20} MB is kept as a fact`, inc);
+  ok(inc.rssBytes > L.GUARD_MEM_BYTES && inc.memBytes < L.GUARD_MEM_BYTES && RG.resourceVerdict(inc, null, 0, 1000).over === null, 'summed RSS is OVER the 2 GiB number, the footprint is not — the verdict (which reads memBytes) says nothing is over');
+  const syncTwin = D.sessionSampleSync([4101, 4102, 4103], { procRoot: froot });
+  ok(JSON.stringify(syncTwin) === JSON.stringify(inc), 'PARITY: the sync reader over the same fake root is the same sample (one interpretation, parseProcSample)', { syncTwin, inc });
+  // the MIXED-metric rule: one member without smaps_rollup ⇒ the WHOLE set drops to the next metric every member has
+  mkPid(4104, { rssKb: 800 * MB, anonKb: 200 * MB, shmKb: 10 * MB, pssKb: null });
+  const mixed = await D.sessionSample([4101, 4102, 4103, 4104], { procRoot: froot });
+  ok(mixed.memMetric === 'anon-sum' && mixed.memBytes === 4 * 210 * MB * 1024, `one member without smaps_rollup ⇒ the WHOLE set drops to Σ(RssAnon+RssShmem) of ALL four (${mixed.memBytes / 2 ** 20} MB) — never a PSS beside an anon+shm — and, several processes, it is 'anon-sum' (CoW + shmem per sharer: over ΣPss 450 MB of the three that answered)`, mixed);
+  const mv = RG.resourceVerdict({ ...mixed, memBytes: 3 * 2 ** 30 }, null, 0, 1000);
+  ok(mv.memGuard === 'unavailable' && mv.over === null, 'an anon-sum set is recorded, never judged (3 GiB of it ⇒ over null)', mv);
+  const lone = await D.sessionSample([4104], { procRoot: froot });
+  ok(lone.memMetric === 'anon' && lone.memBytes === 210 * MB * 1024 && RG.resourceVerdict({ ...lone, memBytes: 3 * 2 ** 30 }, null, 0, 1000).memGuard === 'anon', 'ONE process without smaps_rollup keeps \'anon\' — judged (its RssAnon+RssShmem is its own)', lone);
+  // the no-smaps AND no-RssAnon fallback: 'rss' — recorded, NOT judged
+  mkPid(4105, { rssKb: 3000 * MB });
+  const bare = await D.sessionSample([4101, 4105], { procRoot: froot });
+  const bv = RG.resourceVerdict(bare, null, 0, 1000);
+  ok(bare.memMetric === 'rss' && bare.memBytes === 3800 * MB * 1024 && bv.memGuard === 'unavailable' && bv.over === null, 'neither PSS nor RssAnon readable for some member ⇒ memMetric \'rss\', and the verdict does NOT judge memory (3.7 GB summed RSS, over null)', { bare, bv });
+  // a zombie member (no address space: status has no VmRSS line) holds no memory — it must not switch the set's metric off
+  mkPid(4106, { comm: 'chrome', noStatusMem: true });
+  const zomb = await D.sessionSample([4101, 4106], { procRoot: froot });
+  ok(zomb.memMetric === 'pss' && zomb.memBytes === 150 * MB * 1024 && zomb.pids === 2, 'a zombie member (no VmRSS line) counts as an exact 0 in every metric — the set stays judged by PSS', zomb);
+  // CPU: own + REAPED ticks over a set (the 2026-09-14 rule, unchanged)
+  mkPid(4107, { comm: 'launcher', rssKb: 10 * MB, anonKb: 5 * MB, shmKb: 0, pssKb: 5 * MB, ut: 3, st: 2, cut: 400, cst: 100 });
+  const cs = await D.sessionSample([4107], { procRoot: froot });
+  ok(cs.cpuTicks === 3 + 2 + 400 + 100, `the set's cpuTicks = own + reaped (${cs.cpuTicks})`);
+  // NEGATIVE CONTROL: a copy of the verdict that compares the deprecated rssBytes trips on the incident fixture
+  const src = fs.readFileSync(path.join(repo, 'src/runaway-guard.js'), 'utf8');
+  const needle = "memGuard !== 'unavailable' && sample.memBytes > L.GUARD_MEM_BYTES";
+  ok(src.split(needle).length === 2, 'CONTROL setup: the verdict\'s memory comparison is found exactly once');
+  const RGm = MUTDD.load('src/runaway-guard.js', src.replace(needle, 'sample.rssBytes > L.GUARD_MEM_BYTES'), 'rss-sum');
+  ok(RGm.resourceVerdict(inc, null, 0, 1000).over !== null, 'CONTROL: a verdict comparing rssBytes calls the incident fixture OVER (the Chrome incident, reproduced) — the shipped one does not');
+}
+
 console.log('\n§tree the patched copies never touch the tree');
 if (!MUTDD.files.length) skip('§tree: no patched copy was made this run (§5 (f) needs xpra) — nothing to measure');
 else for (const r of copiesCensus(MUTDD.files, MUTDD.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));

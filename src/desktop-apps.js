@@ -22,8 +22,9 @@
  *     (`backend fallback: xpra→vnc-display (xpra not on PATH)`), so the
  *     record's `fallbackWhy` and the window's status chip say the same words.
  *   • the app-session STATE MACHINE `launching → ready → exited | failed`
- *     (§2) and the idle / runaway / cap / adoption VERDICTS the keeper acts
- *     on — decisions here, acts in the keeper.
+ *     (§2) and the idle / cap / adoption / profile-retirement VERDICTS the
+ *     keeper acts on — decisions here, acts in the keeper (the resource
+ *     verdict is src/runaway-guard.js; for an app it only REPORTS).
  *
  * `hostFacts` is whatever desktop-display.js measured: `{ bins: { name:
  * path|null }, singletonRunning }`. Nothing in this file asks the machine.
@@ -36,8 +37,10 @@ const DESKTOP_SINGLETON_ID = 'desktop-singleton';
 
 const APP_STATES = Object.freeze(['launching', 'ready', 'exited', 'failed']);
 const LIVE_STATES = Object.freeze(['launching', 'ready']);
-/** Default idle timeout (DA3): 30 min without INPUT ⇒ stop; 0 = never. */
-const DEFAULT_IDLE_TIMEOUT_MIN = 30;
+/** Default idle timeout (DA3): 0 = never (owner ruling 2026-09-25 "30分钟那个暂停也默认关掉" —
+ *  an app a person opened is not stopped for sitting still; the setting stays for
+ *  anyone who wants a stop after N min without INPUT). */
+const DEFAULT_IDLE_TIMEOUT_MIN = 0;
 
 // ── §3 the backend ladder ───────────────────────────────────────────────────
 // `needs` = ANY of these groups fully present. `via` is the group that
@@ -492,7 +495,7 @@ function scaleMenuModel(rec, { dpr = 1, uiScale = 1, leased = false, seat = 'act
 // record's arrival in a terminal state (never re-decided when a lease drops later):
 //   · `failed` stays — its red sentence is the one place the error is said;
 //   · an agent lease holding the app keeps the window (the marker says who drove it);
-//   · a STOP (`stoppedBy` set: the user's Stop, the idle timeout, the guard) closes —
+//   · a STOP (`stoppedBy` set: the user's Stop, the idle timeout, a relaunch) closes —
 //     VibeSpace tore the display down on purpose (D2d);
 //   · an app EXIT closes only when the keeper's census at the exit found NO window
 //     left on the display (`windowsAtExit` 0, or not counted — a shared display, a
@@ -818,11 +821,13 @@ const DEFAULT_REGISTRY = Object.freeze([
 /** state × event → next state, or null when the event is not legal there.
  *  Events: 'server-listening' (the picture server answered its banner),
  *  'app-exit' (the application process ended), 'stop' (a human / idle /
- *  runaway stop that completed), 'spawn-error' (a process failed to start),
- *  'runaway' (the guard tripped), 'display-gone' (X died under the app). */
+ *  relaunch stop that completed), 'spawn-error' (a process failed to start),
+ *  'display-gone' (X died under the app). There is NO 'runaway' event since
+ *  2026-09-25 (the owner's ruling): a resource guard never ends an app a
+ *  person is using — it reports (src/runaway-guard.js). */
 const TRANSITIONS = Object.freeze({
-  launching: Object.freeze({ 'server-listening': 'ready', 'app-exit': 'exited', stop: 'exited', 'spawn-error': 'failed', 'display-gone': 'failed', runaway: 'failed' }),
-  ready: Object.freeze({ 'app-exit': 'exited', stop: 'exited', runaway: 'failed', 'display-gone': 'failed' }),
+  launching: Object.freeze({ 'server-listening': 'ready', 'app-exit': 'exited', stop: 'exited', 'spawn-error': 'failed', 'display-gone': 'failed' }),
+  ready: Object.freeze({ 'app-exit': 'exited', stop: 'exited', 'display-gone': 'failed' }),
   exited: Object.freeze({}),
   failed: Object.freeze({}),
 });
@@ -853,33 +858,38 @@ function capVerdict(live, limits = LIMITS) {
   return { code: 'cap', cap, holders: live.map((r) => r.id), error: `desktop app ceiling reached (${live.length}/${cap} running: ${names.join(', ')}) — stop one first` };
 }
 
-/**
- * ONE runaway sample (the opencode-serve guard shape, verbatim logic):
- * `sample` = { cpuTicks, rssBytes } read now, `prev` = { at, cpuTicks } from the
- * previous tick (or null), `hotSince` = when sustained-hot began (0 = not hot).
- * Returns { cpuPct, hotSince, why } — `why` non-null ⇒ stop + park.
- */
-function runawayVerdict(sample, prev, hotSince, now, { clkTck = 100, limits = LIMITS } = {}) {
-  if (!sample) return { cpuPct: null, hotSince: 0, why: null };
-  let cpuPct = null;
-  if (prev && now > prev.at) cpuPct = (sample.cpuTicks - prev.cpuTicks) * 100000 / clkTck / (now - prev.at);
-  let why = null;
-  let hot = hotSince || 0;
-  if (sample.rssBytes > limits.GUARD_RSS_BYTES) {
-    why = `RSS ${(sample.rssBytes / 2 ** 30).toFixed(1)} GB (limit ${(limits.GUARD_RSS_BYTES / 2 ** 30).toFixed(1)} GB)`;
-  } else if (cpuPct !== null && cpuPct > limits.GUARD_CPU_PCT) {
-    if (!hot) hot = now;
-    if (now - hot >= limits.GUARD_CPU_SUSTAIN_MS) why = `${cpuPct.toFixed(0)}% CPU sustained for ${Math.round((now - hot) / 60000)} min (limit ${limits.GUARD_CPU_PCT}%)`;
-  } else hot = 0;
-  return { cpuPct, hotSince: hot, why };
-}
+// NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): src/runaway-guard.js is the
+// ONE resource verdict, and for a desktop app it only REPORTS — this file's
+// verbatim copy summed VmRSS over a set and the keeper stopped a fresh Google
+// Chrome at "RSS 2.0 GB", removed its profile and parked chromium for an hour
+// (docs/kb-bugfix-invariants.md). `runawayParkVerdict` is gone with the park:
+// a launch is never refused by a past sample.
 
-/** Is a registry app still parked after a runaway? `parkedUntil` = the map
- *  the keeper persists ({ appId: until }). */
-function runawayParkVerdict(appId, parkedUntil, now) {
-  const until = appId && parkedUntil ? Number(parkedUntil[appId]) : 0;
-  if (!until || until <= now) return null;
-  return { code: 'runaway-parked', until, error: `${appId} was stopped as a runaway; not launching it again for ${Math.ceil((until - now) / 60000)} min` };
+/**
+ * WHO MAY REMOVE A BROWSER ROW'S PROFILE (2026-09-25, the owner's ruling: a
+ * profile directory goes only by a PERSON's ending, never by a keeper's
+ * decision). A terminal record's profile is removed when — and only when —
+ *   · the user did not choose "keep profile", AND
+ *   · the session ended by a person: Stop (`stoppedBy` 'user'), the Scale ▸
+ *     relaunch ('relaunch'), or the app's OWN exit (state 'exited' with no
+ *     `stoppedBy` — its user closed it), OR no app ever ran in it (`pids.app`
+ *     unset: a failed bring-up's empty scaffold).
+ * Everything else KEEPS it and says so: an idle-out ('idle'), a display that
+ * died under the app ('failed'), any future keeper-decided stop. Returns
+ * `{ remove: boolean, why }` — `why` names the rule for the record/log.
+ */
+const PERSON_ENDINGS = Object.freeze(['user', 'relaunch']);
+function profileRetireVerdict(rec) {
+  if (!rec || !rec.profileDir) return { remove: false, why: 'no profile' };
+  if (rec.keepProfile) return { remove: false, why: 'the user chose "keep profile"' };
+  if (isLiveState(rec.state)) return { remove: false, why: 'the session is live' };
+  if (!(rec.pids && rec.pids.app)) return { remove: true, why: 'no app ever ran in it' };
+  if (rec.stoppedBy) {
+    if (PERSON_ENDINGS.includes(rec.stoppedBy)) return { remove: true, why: `stopped (${rec.stoppedBy})` };
+    return { remove: false, why: `kept: the session was ended by the keeper (${rec.stoppedBy}), not by a person — remove it by hand` };
+  }
+  if (rec.state === 'exited') return { remove: true, why: 'the app exited by itself' };
+  return { remove: false, why: `kept: the session ${rec.state} (${rec.lastError || 'no reason recorded'}), not a person's ending — remove it by hand` };
 }
 
 /**
@@ -930,5 +940,5 @@ module.exports = {
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
   BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX,
   TRANSITIONS, transition, isLiveState, isTerminalState,
-  idleState, capVerdict, runawayVerdict, runawayParkVerdict, adoptVerdict, streamTargetOf, newRecord,
+  idleState, capVerdict, profileRetireVerdict, PERSON_ENDINGS, adoptVerdict, streamTargetOf, newRecord,
 };

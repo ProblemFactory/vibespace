@@ -21,7 +21,7 @@
 |---|---|---|---|
 | PURE | `src/desktop-apps.js` | 应用注册表行 `{id, label, exec, args, cwd, env, category, backendPrefs}`；**画面后端能力表** `DISPLAY_BACKENDS`（`xpra` / `vnc-display` / `desktop-singleton`，每行：`perWindow`、`adaptive`、`needs:[bins]`、`stream:'rfb'|'xpra'`）；`resolveBackend(hostFacts, prefs)` 阶梯（每次回落带理由）；应用会话状态机 `launching → ready → exited|failed`；容量与 runaway 策略数字（与 browser §3.5 共用同一份常量） | 不 import 任何东西；不碰文件系统 |
 | SHARED | `src/desktop-display.js` | **机器事实**：哪些二进制在、分配 X 显示号（`-displayfd`）、X auth cookie、枚举一个显示上的窗口（`xdotool`/`wmctrl`，P9 复用）、探测 `xpra` 版本；`hostId` 是参数（v1 只本地，daemon 以后打包它） | 不做决定；不写记录 |
-| ORCH | `src/server/desktop-app-keeper.js` | 生命周期：spawn（setsid、detached）X 显示 → 应用 → 画面服务器；`data/desktop-apps.json` 原子写 + `desktop-apps-updated` 广播；开机**收养**（按 pid+starttime+端口）；数量上限、runaway 守卫（>150% CPU 5 min 或 RSS 上限 ⇒ 停 + park + 通知，与 opencode-serve 的守卫同形）；每应用 idle timeout；stop/kill；退出即广播 | 不认识具体应用；不碰 ws |
+| ORCH | `src/server/desktop-app-keeper.js` | 生命周期：spawn（setsid、detached）X 显示 → 应用 → 画面服务器；`data/desktop-apps.json` 原子写 + `desktop-apps-updated` 广播；开机**收养**（按 pid+starttime+端口）；数量上限（启动时拒绝并点名占位者，绝不杀）、资源**报告**（**2026-09-25 owner 裁定**：「不是就算是单一内存2G也不好啊，chrome这么吃内存，完全可能超过这个量吧。这个keeper到底是干啥的，没必要别乱加会影响使用的feature」——一个人正在用的应用绝不因资源被停、被 park、被拒绝启动或被删配置；超过阈值（足迹 ΣPss，绝不是 VmRSS 之和）只在活记录上标出、越线开始时发一条通知（2026-09-25 r2：回滞——连续 3 个低于 90% 阈值的采样才重新布防、每会话每小时至多一条、无人收到则同 key 重发）、记遥测；只有产品自己跑的无头 OpenCode serve 仍会被停，判定唯一在 `src/runaway-guard.js`。起因：Google Chrome 就绪 3 s 后因 25 进程 VmRSS 之和 2.0 GB 被当 runaway 停掉、配置被删、park 60 min）；每应用 idle timeout；stop/kill；退出即广播 | 不认识具体应用；不碰 ws |
 | ORCH | `src/server/desktop-stream.js` | **一个** ws 桥：`GET /api/desktop/:id/stream`（cookie 鉴权、背压、断线即关；`rfb` 透传到 127.0.0.1 端口，`xpra` 透传到 xpra 的 ws）；`/api/vnc` 那条桥改为调用它（单例桌面 = 一个固定 id），消灭孪生 | 不起进程 |
 | ORCH | `src/routes/desktop-apps.js` | `GET /api/desktop/apps`（注册表 + 活会话 + 每级可用性与理由）、`POST /api/desktop/apps`（`{appId}` 或 `{exec,args,cwd}`）、`POST /api/desktop/apps/:id/stop`、`GET /api/desktop/apps/:id`；签名带 `host` | 不做业务判定 |
 | CLIENT | `src/lib/vnc-view.js` | **共享画面视图组件**：从 `desktop-window.js` 抽出的 noVNC 装载（`loadRFB`）、DPI 反缩放、resize/scale 策略、焦点与输入转发、断线重连与状态芯片；`desktop-window.js` 与新窗口都用它 | 不知道窗口类型 |
@@ -56,7 +56,7 @@
 - 画面端口只绑 127.0.0.1；浏览器只走 cookie 鉴权的 ws 桥（与 `/api/vnc` 同一条纪律）。
 - `exec` 来自注册表或用户在对话框里输入——**不是 agent**；agent 侧（P9）只拿窗口目标句柄，不拿 exec。
 - 应用继承 `agentEnv()` 那种净化过的 env（不是 `process.env`），DISPLAY/XAUTHORITY 由 keeper 注入；secrets 不进 argv。
-- 每应用 idle timeout（默认 30 min 无输入 ⇒ 停，状态栏可见倒计时；"保持运行"是一次显式动作）。
+- 每应用 idle timeout（默认 0 = 不停，owner 2026-09-25 定案；设了分钟数才在无输入 N 分钟后停，状态栏可见倒计时；"保持运行"是一次显式动作）。
 - （B-bfe6，§7.7）浏览器应用是**人**的窗口，带它**自己的**配置目录（`data/desktop-apps/<id>/profile`，0700，会话结束即删，除非选了保留）——绝不是 agent 浏览器的配置，绝不是用户真正的 `~/.config/chromium` / `~/.mozilla`（按名拒绝），argv 里永远没有自动化 flag（`--remote-debugging-*`、`--enable-automation`、`--headless`、marionette……按名拒绝 `automation-flag`）。
 
 ## 6. 测试 gate
@@ -253,7 +253,7 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 
 **r1（2026-09-23，验证者三条）。** ① agent 的 `POST /api/agent/window/open` 曾能启动浏览器行（一个真 Chrome，agent 送来的 url/keepProfile 被**静默丢弃**），再用 `vibespace-window snapshot/click/type` 经 AT-SPI 驱动它——绕过 Agent 浏览器的全部规则（CDP 裁判、动作轨迹、强制出口代理、接管/交还）。现在 window-targets 引擎在 exec 三元组之后、问 keeper 之前，按名拒绝带 `browser` 的注册表行以及 body 里的 `url` / `keepProfile`：`browser_is_human`（403），提示 agent 去用 `vibespace-browser`；`list` 的"你可以打开的应用"不再列浏览器行。② "Keep the profile after it closes" 的复选框曾堆在文字上方（`.dialog-body label` 的纵向 flex 优先级更高）——现在 `.dialog-body label.desktop-launch-check` 横向一行。③ 变灰的 snap 浏览器卡片曾把 204 字符的英文句子塞进 10 px 单行（1512 宽只剩约 27 字符，手机上无 tooltip、也不翻译）——现在按 keeper 的 `reasonCode` 显示一句短的、翻译过的理由（"Snap: cannot reach the data folder"），整句留在 tooltip，变灰卡片的副标题最多两行。门：test-window-targets §4、test-desktop-app-window §B（1200×800 / 375×667）。
 
-**未决。** (a) 2 GiB 的 runaway RSS 上限按整个会话集合计（xpra + Xvfb + 所有浏览器进程，共享页按进程重复计）：重度浏览可能触发并被当作 runaway 停掉——守卫按决定不变；按行设上限要 owner 定。(b) 保留下来的配置留在 `data/desktop-apps/<id>/profile`；目前没有"用它重新启动"的入口（记录里写着路径）。(c) Firefox 的 `user.js` 首次运行设置与非 snap 的 Firefox 本机未实测（只装了 snap）。(d) 数据目录在 $HOME 里时的 snap 浏览器本机未启动过（套件都跑在 /tmp）。(e) 人自己启动的浏览器窗口，agent 仍可 `vibespace-window attach` 到它（与其他 VibeSpace 启动的应用一样，P9 D27 (a)）——r1 只拒绝 agent **启动**浏览器；是否也拒绝 attach 要 owner 定。
+**未决。** (a) ~~2 GiB 的 runaway RSS 上限按整个会话集合计……守卫按决定不变~~ **已由 2026-09-25 owner 裁定关闭**：这正是事故本身（Chrome 就绪 3 s 后被停）；资源守卫对应用只报告不处置，内存按 ΣPss 计。(b) 保留下来的配置留在 `data/desktop-apps/<id>/profile`；目前没有"用它重新启动"的入口（记录里写着路径）。(c) Firefox 的 `user.js` 首次运行设置与非 snap 的 Firefox 本机未实测（只装了 snap）。(d) 数据目录在 $HOME 里时的 snap 浏览器本机未启动过（套件都跑在 /tmp）。(e) 人自己启动的浏览器窗口，agent 仍可 `vibespace-window attach` 到它（与其他 VibeSpace 启动的应用一样，P9 D27 (a)）——r1 只拒绝 agent **启动**浏览器；是否也拒绝 attach 要 owner 定。
 
 ### 7.8 第三轮 Lane A — 无缝复制、关闭、DPI（docs/design-desktop-apps-seamless.zh.md；owner 2026-09-23 试用 .156/.158）
 
@@ -291,7 +291,7 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 |---|---|---|
 | DA1 | 后端顺序 | `xpra` > `vnc-display` > `desktop-singleton`；装了 xpra 自动升级新会话，老会话不迁 |
 | DA2 | 每应用一个显示还是共享一个 | **每应用一个**（隔离、独立 idle、独立 stop）；共享桌面只是兜底 |
-| DA3 | idle 默认 | 30 min 无输入即停；设置项 `desktop.idleTimeoutMin`，0 = 不停 |
+| DA3 | idle 默认 | 0 = 不停（owner 2026-09-25："30分钟那个暂停也默认关掉"）；设置项 `desktop.idleTimeoutMin` 分钟数给想要停的人 |
 | DA4 | 谁能起应用 | 只有人（对话框）；agent 经 P9 只能操作已开的窗口 |
 | DA5 | xpra 客户端 | D21 (c) 原样 |
 

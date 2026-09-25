@@ -691,6 +691,15 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
 * **失控守卫。** 一个开了 200 个标签页的 Chromium 和那个烧掉 209 CPU 分钟的 OpenCode serve 是同一个
   故障类：采样 `/proc`；在持续高 CPU 或 RSS 爆掉时，停掉它、带一个具名理由 park 它、发遥测、告诉用户。
   Chromium 的正常地板比一个 serve 高，所以阈值是**按 provider**的，不是全局的。
+  **2026-09-25 owner 裁定（取代上面"停掉 / park"两步）：**「不是就算是单一内存2G也不好啊，chrome这么吃内存，
+  完全可能超过这个量吧。这个keeper到底是干啥的，没必要别乱加会影响使用的feature」——一个人或 agent 正在用的
+  浏览器**绝不**因资源被停、被 park 或被拒绝启动：超过阈值（足迹 ΣPss，绝不是 VmRSS 之和）只在活记录上标出、
+  越线开始时发一条通知（"… is using 4.0 GB (PSS) — Stop it from the Browser panel if that is not what you
+  expect"）、记遥测 `browser-resource`。（2026-09-25 r2：读数在阈值上下摆动时原规则每隔一个采样就发一条——
+  现在报告电平带回滞：连续 3 个采样低于阈值 90% 才重新布防、同一会话每小时至多一条、没有任何客户端收到的通知
+  在下一个仍超标的采样用同一个 key 重发；RssAnon+RssShmem 只对单进程判定，多进程时它又是逐进程之和，只记录不判定。）只有产品自己跑的无头 OpenCode serve 仍会被停；唯一判定在
+  `src/runaway-guard.js`。起因：一个作为桌面应用启动的 Google Chrome 就绪 3 s 后因 25 进程 VmRSS 之和 2.0 GB
+  被停、配置被删、park 60 min。
 * **Idle。** 不要委托给一个默认值：把超时显式设上（§3.2.3 —— 在已安装的 build 上它是关闭的，而在
   更新的版本上它豁免 headed 浏览器）。一个至少有一份**已对账**的活租约的 profile 设
   `AGENT_BROWSER_IDLE_TIMEOUT_MS=0`，并在它最后一份租约掉落时由 keeper 停掉（外加一个宽限期，

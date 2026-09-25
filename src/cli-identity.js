@@ -197,8 +197,9 @@ function procUid(pid, opts) {
   return ps && Number.isFinite(ps.uid) ? ps.uid : null;
 }
 
-/** ONE /proc sample of a pid — `{ starttime, cpuTicks, reapedTicks, rssBytes }`
- *  — or null when procfs cannot say (no /proc, hidepid, vanished). `starttime`
+/** ONE /proc sample of a pid — `{ starttime, cpuTicks, reapedTicks, rssBytes,
+ *  anonBytes, pssBytes }` — or null when procfs cannot say (no /proc,
+ *  hidepid, vanished). `starttime`
  *  is stat field 22 (clock ticks since boot: pid+starttime is the identity
  *  every keeper adopts by, never a bare pid — pids are recycled), `cpuTicks` =
  *  utime+stime (fields 14+15) = this process's OWN work, `reapedTicks` =
@@ -214,20 +215,111 @@ function procUid(pid, opts) {
  *  SUMS is the consumer's rule (desktop-display.sessionSample: a SET counts
  *  each unit of work exactly once as own+reaped; opencode-serve samples ONE
  *  pid and keeps `cpuTicks` — a lone parent's cutime arrives as a lifetime
- *  lump the moment a long-lived child exits, which is a spike, not a rate). */
-function procSample(pid, { procRoot = PROC_ROOT } = {}) {
+ *  lump the moment a long-lived child exits, which is a spike, not a rate).
+ *
+ *  MEMORY (2026-09-25, the Chrome desktop-app runaway): VmRSS counts every
+ *  page a process maps, INCLUDING the pages it shares with its siblings
+ *  (the binary, the libraries, the zygote's copy-on-write heap), so a SUM of
+ *  VmRSS over a multi-process app counts each shared page once per process —
+ *  measured on this box, 891 chrome pids: ΣVmRSS 94.67 GB vs ΣPss 15.09 GB.
+ *  `{memory: true}` also reads /proc/<pid>/smaps_rollup → `pssBytes` (the
+ *  proportional set size: a shared page split between its sharers, so a SUM
+ *  over a set counts it once) — ≈1.1 ms per pid on this box (the kernel walks
+ *  the page tables), which is why identity callers (procStart) never ask for
+ *  it. `anonBytes` = status RssAnon+RssShmem (free — the same read as VmRSS),
+ *  the fallback when smaps_rollup is unreadable (EACCES, a kernel before
+ *  4.14). null = that metric could not be read for this pid. A process with
+ *  NO address space (a zombie, a kernel thread: status carries no VmRSS
+ *  line) holds no user memory, so every metric is an exact 0 for it — a
+ *  zombie member must not switch a whole set's memory guard off. */
+function procSample(pid, { procRoot = PROC_ROOT, memory = false } = {}) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try {
     const stat = fs.readFileSync(`${procRoot}/${pid}/stat`, 'utf8');
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const cpuTicks = Number(f[11]) + Number(f[12]);
-    const reapedTicks = Number(f[13]) + Number(f[14]);
-    const starttime = Number(f[19]);
-    let rssBytes = 0;
-    try { rssBytes = Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`${procRoot}/${pid}/status`, 'utf8'))?.[1] || 0) * 1024; } catch { rssBytes = 0; }
-    if (!Number.isFinite(cpuTicks) || !Number.isFinite(starttime)) return null;
-    return { starttime, cpuTicks, reapedTicks: Number.isFinite(reapedTicks) ? reapedTicks : 0, rssBytes };
+    let status = null;
+    try { status = fs.readFileSync(`${procRoot}/${pid}/status`, 'utf8'); } catch { status = null; }
+    let smaps = null;
+    if (memory) { try { smaps = fs.readFileSync(`${procRoot}/${pid}/smaps_rollup`, 'utf8'); } catch { smaps = null; } }
+    return parseProcSample(stat, status, smaps, memory);
   } catch { return null; }
+}
+/** The async twin of procSample (same files, same parse — `parseProcSample`
+ *  is the ONE interpretation): the keepers' ticks read their sets through it
+ *  so a 25-process app's ≈27 ms of smaps_rollup page-table walks run on the
+ *  libuv pool, not on the event loop. Memory is always read. */
+async function procSampleAsync(pid, { procRoot = PROC_ROOT } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const rd = (f) => fs.promises.readFile(`${procRoot}/${pid}/${f}`, 'utf8').catch(() => null);
+  const [stat, status, smaps] = await Promise.all([rd('stat'), rd('status'), rd('smaps_rollup')]);
+  if (stat == null) return null;
+  try { return parseProcSample(stat, status, smaps, true); } catch { return null; }
+}
+const kbLine = (text, key) => { const m = new RegExp(`^${key}:\\s+(\\d+)\\s*kB`, 'm').exec(text || ''); return m ? Number(m[1]) * 1024 : null; };
+/** PURE: the three /proc texts of one pid → the sample (null when stat does
+ *  not parse). `status`/`smaps` may be null (unreadable). */
+function parseProcSample(stat, status, smaps, memory) {
+  const f = String(stat).slice(String(stat).lastIndexOf(')') + 2).split(' ');
+  const cpuTicks = Number(f[11]) + Number(f[12]);
+  const reapedTicks = Number(f[13]) + Number(f[14]);
+  const starttime = Number(f[19]);
+  if (!Number.isFinite(cpuTicks) || !Number.isFinite(starttime)) return null;
+  const vmRss = kbLine(status, 'VmRSS');
+  const noMm = status != null && vmRss == null;          // zombie / kernel thread: no address space
+  const rssBytes = vmRss || 0;
+  let anonBytes = null, pssBytes = null;
+  if (noMm) { anonBytes = 0; pssBytes = memory ? 0 : null; }
+  else {
+    const anon = kbLine(status, 'RssAnon'), shm = kbLine(status, 'RssShmem');
+    anonBytes = anon != null && shm != null ? anon + shm : null;
+    if (memory) pssBytes = kbLine(smaps, 'Pss');
+  }
+  return { starttime, cpuTicks, reapedTicks: Number.isFinite(reapedTicks) ? reapedTicks : 0, rssBytes, anonBytes, pssBytes };
+}
+/** The memory metrics a SET can be judged by, strongest first. */
+const MEM_METRICS = Object.freeze(['pss', 'anon', 'rss']);
+const MEM_FIELD = Object.freeze({ pss: 'pssBytes', anon: 'anonBytes', 'anon-sum': 'anonBytes', rss: 'rssBytes' });
+/**
+ * PURE: ONE memory reading for a SET of per-pid samples — `{ memBytes,
+ * memMetric, rssBytes }`. The set's metric is the STRONGEST one EVERY member
+ * could provide (pss > anon > rss), and the sum uses that metric for EVERY
+ * member — never a mix (a PSS for one process beside a private-RSS for its
+ * sibling is not a footprint of anything). `rssBytes` = ΣVmRSS, kept as a
+ * secondary FACT (never judged: over a multi-process set it counts every
+ * shared page once per process). 'rss' as the metric means neither PSS nor
+ * RssAnon was readable for some member — the runaway guard then SKIPS its
+ * memory rule (src/runaway-guard.js), it never compares a sum of RSS.
+ *
+ * 'anon' is a footprint only for a set of ONE process (2026-09-25 r2): RssAnon
+ * counts a copy-on-write page once per process that still shares it (a
+ * zygote's heap in every renderer) and RssShmem counts shared memory once per
+ * mapper, so over several processes Σ(RssAnon+RssShmem) is itself a
+ * per-process sum — measured on this box over 889 chrome pids: 22.87 GB vs
+ * ΣPss 15.15 GB (+51 %). A set with MORE than one member holding an address
+ * space (a zombie holds none) that falls back to it is named 'anon-sum':
+ * recorded, never judged (src/runaway-guard.js JUDGED_METRICS).
+ */
+function setMemory(samples) {
+  const list = (samples || []).filter(Boolean);
+  let rssBytes = 0;
+  for (const s of list) rssBytes += Number(s.rssBytes) || 0;
+  let metric = MEM_METRICS.find((m) => list.every((s) => Number.isFinite(s[MEM_FIELD[m]]))) || 'rss';
+  if (metric === 'anon' && list.filter((s) => (Number(s.rssBytes) || 0) > 0).length > 1) metric = 'anon-sum';
+  let memBytes = 0;
+  for (const s of list) memBytes += Number(s[MEM_FIELD[metric]]) || 0;
+  return { memBytes, memMetric: metric, rssBytes };
+}
+/**
+ * PURE: ONE sample over a set's per-pid samples — `{ cpuTicks, memBytes,
+ * memMetric, rssBytes, pids }` or null when none answered (no evidence).
+ * `reaped` true = cpuTicks counts own + reaped work (a SET: each unit once);
+ * false = own work only (the browser tree walk's rule, unchanged).
+ */
+function setSample(samples, { reaped = true } = {}) {
+  const list = (samples || []).filter(Boolean);
+  if (!list.length) return null;
+  let cpuTicks = 0;
+  for (const s of list) cpuTicks += s.cpuTicks + (reaped ? (s.reapedTicks || 0) : 0);
+  return { cpuTicks, ...setMemory(list), pids: list.length };
 }
 
 /** ── THE PROCESS TREE, READ WITHOUT FORKING (2026-09-09) ──────────────────
@@ -730,7 +822,7 @@ function pidAliveShellFn() {
 }
 
 module.exports = {
-  isCliProcess, cliIdentityShellFns, pidAliveShellFn, procArgv, procExe, readPsIdentity, procCmdline, procUid, procSample,
+  isCliProcess, cliIdentityShellFns, pidAliveShellFn, procArgv, procExe, readPsIdentity, procCmdline, procUid, procSample, procSampleAsync, parseProcSample, setMemory, setSample, MEM_METRICS,
   hasProcfs, readPpid, readChildPids, readSid, sessionIndex, sessionMembers, pidsMatchingCmdline, resetProcTables,
   PS_IDENTITY_TTL_MS, PROC_TABLE_TTL_MS, PROCFS_RECHECK_MS, INTERPRETERS, MAX_INTERP_FLAGS,
 };

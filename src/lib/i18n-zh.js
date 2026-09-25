@@ -3597,6 +3597,7 @@ export default {
   "{n} running": "{n} 个运行中",
   "{used} of {cap} slots in use": "已用 {used}/{cap} 个槽位",
   "A desktop application window with no input for this long is stopped; 0 = never. \"Keep running\" in a window exempts that app.": "一个桌面应用窗口这么久没有输入就会被停止；0 = 永不。窗口里的“保持运行”可让该应用豁免。",
+  "0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; \"Keep running\" in a window exempts that app.": "0（默认）永不因为闲置而停止应用。填分钟数才会在桌面应用窗口无输入达到该时长后停止它；窗口里的“保持运行”可豁免该应用。",
   "Archive finished tasks after (hours)": "已完成任务多少小时后归档",
   "A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.": "一次性任务成功结束这么多小时后离开后台工作列表进入归档（运行记录、投递日志与确认状态都保留；对该 id 的 poll/show 仍然有效）。0 = 永不归档已完成任务。",
   "Archive acknowledged failures after (days)": "已确认的失败多少天后归档",

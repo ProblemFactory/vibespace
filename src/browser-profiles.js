@@ -1119,7 +1119,9 @@ function normalizeRegistry(doc) {
     siteHints: list(d.siteHints, (h) => typeof h.host === 'string'),
     browsers: obj(d.browsers),
     pins: obj(d.pins),
-    runawayParkedUntil: obj(d.runawayParkedUntil),
+    // (no `runawayParkedUntil` since 2026-09-25: a browser is never parked by
+    // a resource guard — an old file's map is dropped on read, and migration
+    // 2026-09-runaway-parks-void removes it from disk)
     // P1 second half (§3.7/§3.8): the CHILD handles a conversation minted for
     // its sub-agents (browserKey → {parent, since, sessionId}) and what each
     // conversation was LAST TOLD about its attachment set (browserKey → the
@@ -1335,37 +1337,11 @@ function ceilingVerdict(running, leases, limits, { others = [], ephemeral = fals
   const names = holders.map((h) => (h.profileId ? `${h.label} (${h.profileId}${h.sessions.length ? ', leased by ' + h.sessions.join(', ') : ', no lease'})` : `${h.label} (${h.kind})`));
   return { code: 'cap', cap, holders, error: `browser ceiling reached (${n}/${cap} running: ${names.join('; ')}) — stop one first (vibespace-browser detach, or Stop in the Browser panel)` };
 }
-/** Per-PROVIDER runaway thresholds (§3.5: chromium's normal floor is higher
- *  than a serve's — measured 6 processes / 420–667 MB PSS per idle browser, so a
- *  serve's 2 GiB would trip on a few heavy tabs). The sample cadence, the
- *  sustain window and the cooldown stay the shared numbers. */
-function providerGuard(provider, limits) {
-  const base = limits || {};
-  if (provider === 'chromium') return { ...base, GUARD_RSS_BYTES: 3 * 1024 * 1024 * 1024, GUARD_CPU_PCT: 250 };
-  return { ...base };
-}
-/** ONE runaway sample — the opencode-serve / desktop-app guard arithmetic,
- *  verbatim, over the provider-scaled limits. `why` non-null ⇒ stop + park. */
-function runawayVerdict(sample, prev, hotSince, now, { clkTck = 100, limits } = {}) {
-  if (!sample) return { cpuPct: null, hotSince: 0, why: null };
-  const L = limits || {};
-  let cpuPct = null;
-  if (prev && now > prev.at) cpuPct = (sample.cpuTicks - prev.cpuTicks) * 100000 / clkTck / (now - prev.at);
-  let why = null;
-  let hot = hotSince || 0;
-  if (sample.rssBytes > L.GUARD_RSS_BYTES) {
-    why = `RSS ${(sample.rssBytes / 2 ** 30).toFixed(1)} GB (limit ${(L.GUARD_RSS_BYTES / 2 ** 30).toFixed(1)} GB)`;
-  } else if (cpuPct !== null && cpuPct > L.GUARD_CPU_PCT) {
-    if (!hot) hot = now;
-    if (now - hot >= L.GUARD_CPU_SUSTAIN_MS) why = `${cpuPct.toFixed(0)}% CPU sustained for ${Math.round((now - hot) / 60000)} min (limit ${L.GUARD_CPU_PCT}%)`;
-  } else hot = 0;
-  return { cpuPct, hotSince: hot, why };
-}
-function runawayParkVerdict(profileId, parkedUntil, now) {
-  const until = profileId && parkedUntil ? Number(parkedUntil[profileId]) : 0;
-  if (!until || until <= now) return null;
-  return { code: 'runaway-parked', until, error: `this profile's browser was stopped as a runaway; not starting it again for ${Math.ceil((until - now) / 60000)} min` };
-}
+// NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): the per-provider
+// thresholds and the verdict live in src/runaway-guard.js, and for a browser a
+// person or an agent is using they only REPORT (the owner's ruling) — this
+// file's copy compared an RSS SUM with a limit measured in PSS, and its park
+// refused a start for an hour after it.
 /**
  * Is the recorded daemon pid STILL the process we mean? `pid` + the recorded
  * starttime against what /proc says now. An identity nobody recorded (no
@@ -1783,7 +1759,7 @@ module.exports = {
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
   SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, ephemeralPairsVerdict, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
-  BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict, providerGuard, runawayVerdict, runawayParkVerdict,
+  BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
   pidVerdict, adoptVerdict, attachedEnvFor,
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan
   CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,

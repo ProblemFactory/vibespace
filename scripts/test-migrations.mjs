@@ -1098,6 +1098,55 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(by.rq_n2 && by.rq_n2.acct === 'sub-b' && by.rq_n2.slotRekeyedBy, '…20 min after the same re-point the slot ledger proves sub-b — re-keyed', by.rq_n2);
     ok(by.rq_s1 && by.rq_s1.acct === 'sub-b' && by.rq_s1.slotRekeyedFrom === 'sub-a', 'a row 3 s after a SPAWN is not in any shadow (a new process has no in-flight request on the pool default `from` names) — re-keyed to the spawn\'s slot', { live: by.rq_s1, arch: archOf('rq_s1')?.reason });
   }
+  // ── 2026-09-runaway-parks-void (2026-09-25, the owner's ruling: a resource guard never stops an app a person uses) ──
+  {
+    console.log('2026-09-runaway-parks-void');
+    const ID = '2026-09-runaway-parks-void';
+    const { OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT } = require('../src/server/migrations.js');
+    const OLD = 'stopped as a runaway: RSS 2.0 GB (limit 2.0 GB)';
+    const CPU = 'stopped as a runaway: 280% CPU sustained for 5 min (limit 150%)';
+    const mkInst = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    // (a) the FILE path (no live keeper — a suite, a boot without the feature)
+    const r1 = mkInst('rpv-file');
+    const daFile = path.join(r1, 'data', 'desktop-apps.json'), bpFile = path.join(r1, 'data', 'browser-profiles.json');
+    fs.writeFileSync(daFile, JSON.stringify({ apps: { 'da-1': { id: 'da-1', label: 'Google Chrome', state: 'failed', stoppedBy: 'runaway', lastError: OLD }, 'da-2': { id: 'da-2', label: 'xterm', state: 'exited', lastError: 'application exited (code 0)' }, 'da-3': { id: 'da-3', label: 'burner', state: 'failed', lastError: CPU } }, runawayParkedUntil: { chromium: Date.now() + 3600e3 } }), { mode: 0o644 });
+    fs.writeFileSync(bpFile, JSON.stringify({ version: 1, profiles: [], leases: [], browsers: { 'bp-00000001': { profileId: 'bp-00000001', state: 'failed', lastError: OLD } }, pins: {}, runawayParkedUntil: { 'bp-00000001': Date.now() + 3600e3 } }), { mode: 0o600 });
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    const da = JSON.parse(fs.readFileSync(daFile, 'utf-8')), bp = JSON.parse(fs.readFileSync(bpFile, 'utf-8'));
+    ok(res1 && res1.status === 'ran' && !('runawayParkedUntil' in da) && !('runawayParkedUntil' in bp), 'both park maps are REMOVED from disk (a park no longer exists)', { res1, da, bp });
+    ok(da.apps['da-1'].lastError === RUNAWAY_VOID_TEXT && bp.browsers['bp-00000001'].lastError === RUNAWAY_VOID_TEXT && RUNAWAY_VOID_TEXT.startsWith('stopped by the old resource guard (a per-process RSS sum'), 'an RSS-sum runaway lastError is rewritten to name the retired guard and its metric', { da: da.apps['da-1'].lastError });
+    ok(da.apps['da-2'].lastError === 'application exited (code 0)' && da.apps['da-3'].lastError === CPU && OLD.startsWith(OLD_RUNAWAY_PREFIX) && !CPU.startsWith(OLD_RUNAWAY_PREFIX), 'every other lastError is untouched (an app exit, the CPU-rule sentence — only the RSS sum was a lie)');
+    ok((fs.statSync(daFile).mode & 0o777) === 0o644 && (fs.statSync(bpFile).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, each file keeps its own mode (browser-profiles.json stays 0600), no temp left');
+    ok(res1.report && res1.report.desktop.parks === 1 && res1.report.desktop.rewritten === 1 && res1.report.browser.parks === 1 && res1.report.browser.rewritten === 1, 'the report counts what it voided', res1.report);
+    ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) missing files are not a failure, and nothing is CREATED
+    const r2 = mkInst('rpv-none');
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'desktop-apps.json')) && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    // (c) THROUGH THE LIVE KEEPER — the real desktop-app keeper loaded its store at construction and its next save
+    //     would overwrite a file edit; the reshape goes through reshapeStore and the keeper's own atomic save
+    const r3 = mkInst('rpv-keeper');
+    const da3 = path.join(r3, 'data', 'desktop-apps.json');
+    fs.writeFileSync(da3, JSON.stringify({ apps: { 'da-9': { id: 'da-9', label: 'Google Chrome', state: 'failed', stoppedBy: 'runaway', lastError: OLD, pids: {}, starts: {} } }, runawayParkedUntil: { chromium: Date.now() + 3600e3 } }));
+    const K = require('../src/server/desktop-app-keeper.js').create({ dataDir: path.join(r3, 'data'), env: () => ({ PATH: process.env.PATH, HOME: scratchHomeDir }), broadcast: () => { }, log: { log() { }, warn() { }, error() { } } });
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, desktopKeeper: K }), r3).find((x) => x.id === ID);
+    const disk3 = JSON.parse(fs.readFileSync(da3, 'utf-8'));
+    ok(res3.status === 'ran' && res3.report.desktop.via === 'keeper' && K.get('da-9').lastError === RUNAWAY_VOID_TEXT, 'with a live keeper the IN-MEMORY record is rewritten (what it saves next)', res3.report);
+    ok(disk3.apps['da-9'].lastError === RUNAWAY_VOID_TEXT && !('runawayParkedUntil' in disk3), '…and the keeper\'s own save put it on disk, park map gone', disk3);
+    K.shutdown();
+    // (d) CONTROL: the file path beside a loaded keeper IS overwritten by the keeper's next save — why (c) exists
+    const r4 = mkInst('rpv-ctl');
+    const da4 = path.join(r4, 'data', 'desktop-apps.json');
+    fs.writeFileSync(da4, JSON.stringify({ apps: { 'da-8': { id: 'da-8', label: 'x', state: 'failed', lastError: OLD, pids: {}, starts: {} } } }));
+    const K4 = require('../src/server/desktop-app-keeper.js').create({ dataDir: path.join(r4, 'data'), env: () => ({ PATH: process.env.PATH, HOME: scratchHomeDir }), broadcast: () => { }, log: { log() { }, warn() { }, error() { } } });
+    runOnly(create({ rootDir: r4, homeDir: scratchHomeDir, serverNotice: () => { } }), r4);
+    K4.reshapeStore(() => 0); // any commit of the loaded keeper
+    ok(JSON.parse(fs.readFileSync(da4, 'utf-8')).apps['da-8'].lastError === OLD, 'CONTROL: a file-only edit beside a loaded keeper is lost at its next save (the store it holds in memory wins)');
+    K4.shutdown();
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

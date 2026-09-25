@@ -4622,6 +4622,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof-state.state-stale { color: var(--yellow, #e5c07b); }
 .bprof-state.state-not-ours { color: var(--text-dim); }
 .bprof-why { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bprof-usage { font-size: 10px; color: var(--text-dim); white-space: nowrap; }
+.bprof-usage-over { color: var(--warn-text); }
 .bprof-rec-live { margin-left: 6px; color: var(--red, #e55); }
 .bprof-rec-refused { margin-left: 6px; color: var(--yellow, #e5c07b); font-size: 10px; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }

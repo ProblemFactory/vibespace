@@ -41,11 +41,13 @@ import path from 'node:path';
 import { spawnSync, spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const F = require('../src/browser-facts.js');
 const K = require('../src/server/browser-keeper.js');
 const LIMITS = require('../src/keeper-limits.js');
+const RG = require('../src/runaway-guard.js');
 const { SPAWN_ORIGINS } = require('../src/resume-continuity.js');
 
 let pass = 0, fail = 0;
@@ -209,13 +211,11 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   // idle / runaway / pid / adoption verdicts
   ok(B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, [], 700, 500).expired && !B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, leases, 700, 500).expired, 'a browser is idle only with NO lease, from its last drop');
   ok(!B.browserIdle({ profileId: 'bp-00000002', startedAt: 0 }, [], 10 ** 9, 0).expired, 'idleMs 0 = never');
-  const guard = B.providerGuard('chromium', LIMITS);
-  ok(guard.GUARD_RSS_BYTES > LIMITS.GUARD_RSS_BYTES && guard.GUARD_CPU_PCT > LIMITS.GUARD_CPU_PCT && guard.GUARD_SAMPLE_MS === LIMITS.GUARD_SAMPLE_MS, 'chromium\'s runaway thresholds are per-PROVIDER (higher floor), the cadence shared');
-  ok(B.runawayVerdict({ cpuTicks: 0, rssBytes: guard.GUARD_RSS_BYTES + 1, pids: [1] }, null, 0, 1000, { limits: guard }).why?.startsWith('RSS'), 'an RSS blowout trips at once');
-  const hot = B.runawayVerdict({ cpuTicks: 100000, rssBytes: 1, pids: [1] }, { at: 0, cpuTicks: 0 }, 0, 1000, { limits: guard });
-  ok(hot.why === null && hot.hotSince === 1000, 'sustained CPU is armed on the first hot sample…');
-  ok(B.runawayVerdict({ cpuTicks: 200000, rssBytes: 1, pids: [1] }, { at: 1000, cpuTicks: 100000 }, 1000, 1000 + guard.GUARD_CPU_SUSTAIN_MS, { limits: guard }).why?.includes('sustained'), '…and trips after GUARD_CPU_SUSTAIN_MS');
-  ok(B.runawayParkVerdict('bp-00000001', { 'bp-00000001': 5000 }, 4000)?.code === 'runaway-parked' && B.runawayParkVerdict('bp-00000001', { 'bp-00000001': 5000 }, 5000) === null, 'a parked profile refuses a start until the cooldown passes');
+  // the per-provider numbers + the resource verdict live in src/runaway-guard.js since 2026-09-25 (test-runaway-guard
+  // owns the verdict); here: chromium's numbers are the browser floor, and browser-profiles carries no park any more
+  const guard = RG.providerGuard('chromium', LIMITS);
+  ok(guard.GUARD_MEM_BYTES > LIMITS.GUARD_MEM_BYTES && guard.GUARD_CPU_PCT > LIMITS.GUARD_CPU_PCT && guard.GUARD_SAMPLE_MS === LIMITS.GUARD_SAMPLE_MS, 'chromium\'s resource numbers are per-PROVIDER (higher floor), the cadence shared');
+  ok(!('runawayVerdict' in B) && !('runawayParkVerdict' in B) && !('providerGuard' in B) && !('runawayParkedUntil' in B.normalizeRegistry({ runawayParkedUntil: { 'bp-00000001': 9e15 } })), 'browser-profiles carries NO verdict and NO park: an old file\'s park map is dropped on read');
   ok(B.pidVerdict({ alive: false }) === 'gone' && B.pidVerdict({ alive: true, sameStart: false }) === 'unproven' && B.pidVerdict({ alive: true, sameStart: true }) === 'ours', 'pid verdicts: gone / unproven / ours');
   ok(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: true }).state === 'ready' && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven', active: true }).state === 'stopped' && /never signalled/.test(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven' }).lastError) && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: false }).state === 'stopped' && B.adoptVerdict({ state: 'stopped' }, { verdict: 'ours', active: true }) === null, 'adoption: ready only for a proven pid whose namespace answers; unproven ⇒ ended and never signalled');
   const env = B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir' });
@@ -232,10 +232,11 @@ const settings = { 'browser.idleTimeoutMs': 60000 };
 const lines = [];
 const log = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push('WARN ' + a.join(' ')), error: (...a) => lines.push('ERROR ' + a.join(' ')) };
 const bcast = [], notices = [], tel = [];
+let noticeReaches = 1; // what server.js's serverNotice answers: the clients it reached (0 = nobody connected)
 const keeperEnv = () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE });
 const mkKeeper = (live, extra = {}) => K.create({
   dataDir: DATA, homeDir: HOME, env: keeperEnv, broadcast: (m) => bcast.push(m),
-  serverSetting: (k) => settings[k], serverNotice: (k, t, o) => notices.push({ k, t, o }),
+  serverSetting: (k) => settings[k], serverNotice: (k, t, o) => { notices.push({ k, t, o }); return noticeReaches; },
   getTelemetry: () => ({ record: (e) => tel.push(e) }), liveKeys: () => live,
   limits: { ...LIMITS, CONCURRENT_CAP: 2 }, log, now, tickMs: 3600e3, install: false, ...extra,
 });
@@ -298,30 +299,88 @@ let kA, workId, teamId, thirdId;
   ok(await until(() => reg(kA).browsers[teamId].state === 'stopped'), 'past browser.idleTimeoutMs with no lease the keeper STOPS the browser');
   ok(await until(() => !alive(teamPid)) && /idle timeout/.test(reg(kA).browsers[teamId].lastError), 'the daemon is gone and the record says idle');
   ok(reg(kA).browsers[workId].state === 'ready' && alive(reg(kA).browsers[workId].pid), 'the still-leased browser is untouched');
-  // runaway
+  // the resource REPORT (2026-09-25, the owner's ruling: a browser a person or an agent is using is never stopped by a
+  // resource guard — it is reported). An over-threshold sample leaves the browser RUNNING, files a notice when a
+  // crossing begins (r2: re-armed only after REPORT_REARM_SAMPLES clear samples, never inside the per-session floor,
+  // re-sent under the same key when nobody received it), parks nothing; a start is never refused by a past sample.
   const origTree = F.treeUsage;
-  F.treeUsage = (pid) => ({ cpuTicks: 0, rssBytes: 4 * 1024 ** 3, pids: [pid] });
+  const overSample = (pid) => ({ cpuTicks: 0, memBytes: 4 * 1024 ** 3, memMetric: 'pss', rssBytes: 9 * 1024 ** 3, pids: [pid] });
+  const normalSample = (pid) => ({ cpuTicks: 0, memBytes: 300 * 1024 ** 2, memMetric: 'pss', rssBytes: 900 * 1024 ** 2, pids: [pid] });
+  const resourceNotices = () => notices.filter((n) => n.k.startsWith('browser-resource:' + workId + ':'));
   const workPid = reg(kA).browsers[workId].pid;
-  skew += LIMITS.GUARD_SAMPLE_MS + 1;
-  await kA.tick();
-  ok(await until(() => reg(kA).browsers[workId].state === 'failed'), 'a 4 GB RSS sample trips the runaway guard: the browser is stopped');
-  F.treeUsage = origTree;
-  ok(await until(() => !alive(workPid)) && /runaway/.test(reg(kA).browsers[workId].lastError), 'its daemon is gone and the record says runaway');
-  ok(tel.some((e) => e.name === 'browser-runaway') && notices.some((n) => n.k === 'browser-runaway:' + workId), 'telemetry + a server notice name the profile');
-  ok(reg(kA).runawayParkedUntil[workId] > now(), 'the profile is PARKED');
-  const e5 = await threw(() => kA.start(workId));
-  ok(e5 && e5.code === 'runaway-parked', 'a start while parked is refused by name');
-  skew += LIMITS.RUNAWAY_COOLDOWN_MS + 1;
-  await kA.tick();
-  ok(!reg(kA).runawayParkedUntil[workId], 'the park expires with the cooldown');
+  const sampleTick = async (fn) => { F.treeUsage = async (pid) => fn(pid); skew += LIMITS.GUARD_SAMPLE_MS + 1; try { await kA.tick(); } finally { F.treeUsage = origTree; } };
+  await sampleTick(overSample);
+  await sleep(300);
+  ok(reg(kA).browsers[workId].state === 'ready' && alive(workPid) && !/runaway/.test(reg(kA).browsers[workId].lastError || ''), 'NO KILL: a 4 GB (PSS) sample over chromium\'s 3 GB number leaves the browser RUNNING, its daemon alive, no runaway on the record');
+  const u = kA.usageOf(workId);
+  ok(u && u.memBytes === 4 * 1024 ** 3 && u.memMetric === 'pss' && /^memory \(PSS\) 4\.0 GB \(limit 3\.0 GB\)$/.test(u.over || '') && u.since > 0 && u.rssBytes === 9 * 1024 ** 3, 'the live row carries memBytes + memMetric, the report sentence (`over`, the metric named) and since when (rssBytes kept, deprecated)', u);
+  ok(resourceNotices().length === 1 && resourceNotices()[0].t === 'The agent browser of profile "Work" is using 4.0 GB (PSS) — Stop it from the Browser panel if that is not what you expect', 'ONE server notice names the profile, the reading with its metric, and the user\'s own lever', resourceNotices());
+  ok(tel.some((e) => e.name === 'browser-resource' && e.value === 4096) && !tel.some((e) => e.name === 'browser-runaway'), 'telemetry browser-resource (value = MB) — the fleet still sees a hot browser');
+  ok(!('runawayParkedUntil' in reg(kA)) && !('runawayParkedUntil' in JSON.parse(fs.readFileSync(kA.storeFile, 'utf8'))), 'nothing is parked: no park map in memory or on disk');
+  await sampleTick(overSample);
+  ok(resourceNotices().length === 1, 'still over on the next sample ⇒ no second notice (a level, not a timer)');
+  const st0 = await kA.start(workId);
+  ok(st0 && st0.state === 'ready', 'a start is never refused by a past sample (there is no park)');
+  await sampleTick(normalSample);
+  ok(kA.usageOf(workId).over === null && kA.usageOf(workId).since === null && resourceNotices().length === 1, 'a normal sample clears the report (over null) and files nothing');
+  await sampleTick(overSample);
+  ok(resourceNotices().length === 1, 'HYSTERESIS: over again after ONE normal sample is the same crossing — no second notice (the oscillation storm, closed)', resourceNotices().map((n) => n.k));
+  for (let i = 0; i < LIMITS.REPORT_REARM_SAMPLES; i++) await sampleTick(normalSample);
+  await sampleTick(overSample);
+  ok(resourceNotices().length === 1, 'FLOOR: re-armed by three clear samples, a crossing inside the hour after the last notice still waits');
+  skew += LIMITS.REPORT_NOTICE_FLOOR_MS;
+  await sampleTick(overSample);
+  ok(resourceNotices().length === 2 && resourceNotices()[1].k === 'browser-resource:' + workId + ':2', '…and past the floor it files a second notice under its own key (the server dedupes keys per boot)', resourceNotices().map((n) => n.k));
+  // DELIVERY: a crossing while nobody is connected (serverNotice → 0) is re-sent, under the SAME key, on the next
+  // sample still over — the server latches a key only on delivery; once somebody got it, nothing more
+  for (let i = 0; i < LIMITS.REPORT_REARM_SAMPLES; i++) await sampleTick(normalSample);
+  skew += LIMITS.REPORT_NOTICE_FLOOR_MS;
+  noticeReaches = 0;
+  const telBefore = tel.filter((e) => e.name === 'browser-resource').length;
+  await sampleTick(overSample); await sampleTick(overSample);
+  noticeReaches = 1;
+  await sampleTick(overSample); await sampleTick(overSample);
+  const k3 = 'browser-resource:' + workId + ':3';
+  ok(JSON.stringify(resourceNotices().slice(2).map((n) => n.k)) === JSON.stringify([k3, k3, k3]), 'DELIVERY: undelivered twice (nobody connected) ⇒ the SAME key re-sent on each over sample, then delivered once, then silence', resourceNotices().map((n) => n.k));
+  ok(tel.filter((e) => e.name === 'browser-resource').length === telBefore + 1, '…and the re-sends are the notice only — one telemetry event per crossing');
+  await sampleTick((pid) => ({ cpuTicks: 0, memBytes: 12 * 1024 ** 3, memMetric: 'rss', rssBytes: 12 * 1024 ** 3, pids: [pid] }));
+  await sampleTick(normalSample);
+  ok(reg(kA).browsers[workId].state === 'ready' && alive(workPid) && lines.filter((l) => /memory is not judged for this session/.test(l)).length === 1, 'a summed-RSS-only sample (12 GB) is not judged on memory — said ONCE in the journal — and the browser runs on');
   const at3 = await kA.attach({ profile: 'Work', browserKey: KEY_A, sessionId: 'sess-2' });
-  ok(!at3.created && at3.browser.state === 'ready' && launches().length === 3, 'the lease survived the stop; re-attaching relaunches the browser');
+  ok(!at3.created && at3.browser.state === 'ready' && at3.browser.pid === workPid && launches().length === 2, 'the lease and the browser survived every report; re-attaching reuses the SAME daemon (no relaunch)');
   await kA.attach({ profile: 'Team', browserKey: KEY_B, sessionId: 'sess-3' });
-  ok(launches().length === 4 && reg(kA).browsers[teamId].state === 'ready', 'Team is back up for KEY_B');
+  ok(launches().length === 3 && reg(kA).browsers[teamId].state === 'ready', 'Team is back up for KEY_B');
   ok(lines.some((l) => /dropped the lease|attached to/.test(l)), 'the keeper journals in words');
 }
 
 // "SIGKILL": keeper A is dropped without shutdown; keeper B boots on the same store
+// NEGATIVE CONTROL (2026-09-25): a copy of the keeper that STOPS the browser on `over` (the pre-ruling policy) must
+// FAIL the no-kill assertion above — else that assertion proves nothing about the report-only branch
+console.log('— ③a control: a keeper copy that stops on `over` fails the NO KILL assertion');
+const MUT = mutantCopies('browser-pin', REPO);
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const needle = '        if (lvl.fire) {';
+  ok(src.split(needle).length === 2, 'CONTROL setup: the report branch is found exactly once in the shipped keeper');
+  const KM = MUT.load('src/server/browser-keeper.js', src.replace(needle, needle + " stop(rec.profileId, { why: 'resource' }).catch(() => { });"), 'stops-on-over');
+  const DATA_C = path.join(ROOT, 'data-ctl'); fs.mkdirSync(DATA_C, { recursive: true });
+  const kc = KM.create({ dataDir: DATA_C, homeDir: HOME, env: keeperEnv, broadcast: () => { }, serverSetting: (k) => settings[k], serverNotice: () => { }, getTelemetry: () => null, liveKeys: () => new Set([KEY_A]), limits: { ...LIMITS, CONCURRENT_CAP: 6 }, log: { log() { }, warn() { }, error() { } }, now, tickMs: 3600e3, install: false });
+  await kc._facts.probeVersion();
+  const pc = kc.createProfile({ label: 'Ctl' }, { owner: { kind: 'session', id: KEY_A } });
+  await kc.attach({ profile: 'Ctl', browserKey: KEY_A, sessionId: 'sess-ctl' });
+  const cpid = kc._reg().browsers[pc.id].pid;
+  const origT = F.treeUsage;
+  F.treeUsage = async (pid) => ({ cpuTicks: 0, memBytes: 4 * 1024 ** 3, memMetric: 'pss', rssBytes: 9 * 1024 ** 3, pids: [pid] });
+  skew += LIMITS.GUARD_SAMPLE_MS + 1;
+  try { await kc.tick(); } finally { F.treeUsage = origT; }
+  await until(() => kc._reg().browsers[pc.id].state !== 'ready', 4000);
+  const noKillHolds = kc._reg().browsers[pc.id].state === 'ready' && alive(cpid);
+  ok(!noKillHolds, 'CONTROL: the stop-on-over copy ends the browser — the NO KILL assertion is RED against it (it judges the branch, not luck)');
+  try { await kc.stop(pc.id); } catch { /* already stopped */ }
+  kc.shutdown();
+  for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '③a ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+}
+
 console.log('— ③b adoption across a keeper death (§3.5 boot order: drop → judge → tick)');
 {
   const before = JSON.parse(fs.readFileSync(path.join(DATA, K.STORE_FILE), 'utf8'));

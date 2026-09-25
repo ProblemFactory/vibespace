@@ -344,7 +344,9 @@ try {
     const cNow = (await j('GET', `/api/desktop/apps/${C.id}`)).body;
     check(`the kept-alive session launched beside it survives the same wait (state ${cNow.state}, idle remaining ${cNow.idle && cNow.idle.remainingMs})`, cNow.state === 'ready' && cNow.idle && cNow.idle.remainingMs === null, cNow.idle);
     const aNow = (await j('GET', `/api/desktop/apps/${A.id}`)).body;
-    check('the first session keeps the timeout it was launched with (stamped at launch, not re-read)', aNow.state === 'ready' && aNow.idleTimeoutMs === A.idleTimeoutMs && aNow.idleTimeoutMs > 3000, { was: A.idleTimeoutMs, now: aNow.idleTimeoutMs });
+    // A was launched under the shipped default — 0 = never since 2.369.171 (owner ruling 2026-09-25) — so a keeper that
+    // RE-READ the setting would now hold 3000 and have stopped it beside B
+    check('the first session keeps the timeout it was launched with (stamped at launch, not re-read: the default 0 = never, not the patched 3 s)', aNow.state === 'ready' && aNow.idleTimeoutMs === A.idleTimeoutMs && A.idleTimeoutMs === 0, { was: A.idleTimeoutMs, now: aNow.idleTimeoutMs });
     await j('PATCH', '/api/settings', { 'desktop.idleTimeoutMin': null });
   }
 

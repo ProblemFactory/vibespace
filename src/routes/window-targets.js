@@ -47,7 +47,7 @@ function refuseHost(req, res) {
 const STATUS = {
   'not-found': 404, not_attached: 404, ref_unknown: 404, app_gone: 404,
   'bad-request': 400, bad_chord: 400, action_unknown: 400, 'unsupported-host': 400, 'exec-not-found': 400, 'cwd-missing': 400, 'needs-wayland': 400,
-  window_leased: 409, window_paused: 409, node_has_no_action: 409, node_not_editable: 409, no_focused_node: 409, ref_stale: 409, no_injection_backend: 409, action_refused: 409, cap: 409, 'runaway-parked': 409, 'no-backend': 409, 'backend-not-wired': 409, 'no-display': 409,
+  window_leased: 409, window_paused: 409, node_has_no_action: 409, node_not_editable: 409, no_focused_node: 409, ref_stale: 409, no_injection_backend: 409, action_refused: 409, cap: 409, 'no-backend': 409, 'backend-not-wired': 409, 'no-display': 409,
   a11y_unavailable: 503, helper_missing: 503, python3_missing: 503, screenshot_unavailable: 503,
   helper_timeout: 504, helper_error: 502, action_failed: 502, ref_unreadable: 502, inject_failed: 502, screenshot_failed: 502,
   // P10 — the desktop class (src/window-desktop.js REFUSALS) + the user's pause/resume verdicts

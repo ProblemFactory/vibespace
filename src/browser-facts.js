@@ -173,34 +173,32 @@ function sameProcess(pid, starttime) {
   const now = procStart(pid);
   return now != null && Number(now) === Number(starttime);
 }
-/** {cpuTicks, rssBytes} for a pid, or null. procfs only, synchronous once a
- *  minute — never a child process (the sessions-discovery lesson). */
-function readProcUsage(pid) {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-    const cpuTicks = Number(f[11]) + Number(f[12]);
-    const rssKb = Number(/VmRSS:\s+(\d+)/.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] || 0);
-    if (!Number.isFinite(cpuTicks)) return null;
-    return { cpuTicks, rssBytes: rssKb * 1024 };
-  } catch { return null; }
-}
 /** The daemon AND what it spawned (chromium is the daemon's child, its
- *  renderers the grandchildren): one sample over the tree, bounded depth. */
-function treeUsage(pid, { depth = 3, readChildren = cliIdentity.readChildPids } = {}) {
+ *  renderers the grandchildren): one sample over the tree, bounded depth —
+ *  `{ cpuTicks, memBytes, memMetric, rssBytes, pids: [every pid walked] }` or
+ *  null. ASYNC (2026-09-25): the tree is walked with cli-identity's /proc
+ *  reads (cheap, sync), then every member is sampled through the ONE /proc
+ *  reader (cli-identity.procSampleAsync — this file's own `readProcUsage`
+ *  copy is gone) and summed by the ONE set rule (cli-identity.setSample):
+ *  memory = ΣPss, never ΣVmRSS — a chromium tree shares its binary, its
+ *  libraries and the zygote's copy-on-write heap across every renderer, so
+ *  its RSS sum counted each shared page once per process (measured: one
+ *  large chrome process Rss 240 MB vs Pss 73 MB). cpuTicks stays OWN work
+ *  only (the rule this walk always had). */
+async function treeUsage(pid, { depth = 3, readChildren = cliIdentity.readChildPids, procRoot } = {}) {
   const seen = new Set();
-  let cpuTicks = 0, rssBytes = 0, n = 0;
   const walk = (p, d) => {
     if (!Number.isInteger(p) || p <= 0 || seen.has(p) || seen.size > 512) return;
     seen.add(p);
-    const u = readProcUsage(p);
-    if (u) { cpuTicks += u.cpuTicks; rssBytes += u.rssBytes; n++; }
     if (d <= 0) return;
     let kids = []; try { kids = readChildren(p) || []; } catch { kids = []; }
     for (const k of kids) walk(Number(k), d - 1);
   };
   walk(pid, depth);
-  return n ? { cpuTicks, rssBytes, pids: [...seen] } : null;
+  const samples = [];
+  for (const p of seen) samples.push(await cliIdentity.procSampleAsync(p, procRoot ? { procRoot } : {}));
+  const s = cliIdentity.setSample(samples, { reaped: false });
+  return s ? { ...s, pids: [...seen] } : null;
 }
 
 /**
@@ -289,4 +287,4 @@ function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, 
   };
 }
 
-module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, readProcUsage, treeUsage };
+module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION_TTL_MS, createBrowserRuntime, pidAlive, procStart, sameProcess, treeUsage };

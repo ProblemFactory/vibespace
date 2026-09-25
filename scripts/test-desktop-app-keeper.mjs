@@ -7,8 +7,9 @@
 // this keeper's display equal before and after, no orphan X) — plus the ONE
 // ws bridge (401 without the cookie, 404 for an unknown id, 501 by name for an
 // xpra target, bytes relayed, input reported), the routes (host refusal),
-// the idle timeout, keep-alive, the cap, and the runaway guard tripped by a
-// CPU burner with the shared limits shrunk. §8 (r2, 2026-09-14) reproduces
+// the idle timeout, keep-alive, the cap, and the resource REPORT (2026-09-25:
+// never a stop — a CPU burner with the shared limits shrunk is REPORTED and
+// keeps running; a stop-on-over keeper copy is the negative control). §8 (r2, 2026-09-14) reproduces
 // the round-1 verifier's findings on the REAL keeper and closes each with a
 // control: a picture server whose binary vanished after the probe (a spawn
 // `error` used to be an UNCAUGHT exception and the X it had started an
@@ -174,6 +175,8 @@ const mk = (name, extra = {}) => {
   k._events = events; keepers.push(k);
   return k;
 };
+/** 2026-09-25: the resource verdict REPORTS — the record's live row names `over`; the state never changes for it. */
+const reportedOver = (k, id, ms = 15000) => until(() => { const r = k.get(id); return r && r.live && r.live.over ? r : null; }, ms);
 /** pids on this box whose cmdline names `needle` (our per-app dirs) — the /proc census. */
 function procCensus(needle) {
   const hits = [];
@@ -523,28 +526,81 @@ console.log('§4 idle timeout, keep-alive, input, the cap');
   k.shutdown(); k5.shutdown();
 }
 
-console.log('§5 the runaway guard (shared limits shrunk) + the registry park');
+console.log('§5 the resource REPORT (shared limits shrunk): an app a person uses is never stopped, parked or refused for a sample');
 {
   const burner = { id: 'burner', label: 'CPU burner', exec: 'sh', args: ['-c', 'while :; do :; done'], category: 'test' };
-  const limits = { ...M.LIMITS, GUARD_CPU_PCT: 50, GUARD_CPU_SUSTAIN_MS: 1500, RUNAWAY_COOLDOWN_MS: 60000 };
-  const telemetry = [];
-  const k = mk('k6', { limits, registryRows: [burner], guardSampleMs: 400, tickMs: 200, getTelemetry: () => ({ record: (e) => telemetry.push(e) }) });
+  const limits = { ...M.LIMITS, GUARD_CPU_PCT: 50, GUARD_CPU_SUSTAIN_MS: 1500 };
+  const telemetry = [], notices = [];
+  const k = mk('k6', { limits, registryRows: [burner], guardSampleMs: 400, tickMs: 200, getTelemetry: () => ({ record: (e) => telemetry.push(e) }), serverNotice: (key, text, o) => notices.push({ key, text, o }) });
   await k.adoptAll(); k.start();
   const r = await k.launch({ appId: 'burner' });
   await until(() => k.get(r.id).state !== 'launching');
   ok(k.get(r.id).state === 'ready' && k.get(r.id).appId === 'burner', 'the burner launched from the registry');
-  const tripped = await until(() => (k.get(r.id).state === 'failed' ? k.get(r.id) : null), 15000);
-  ok(tripped && /stopped as a runaway: \d+% CPU sustained/.test(tripped.lastError) && tripped.stoppedBy === 'runaway', 'sustained CPU over the (shrunk) limit ⇒ stopped as a runaway, state failed, the sentence names the numbers', tripped && tripped.lastError);
-  ok(tripped && !alive(tripped.pids.app) && !alive(tripped.pids.x), 'the burner and its display are gone');
-  ok(telemetry.some((e) => e.name === 'desktop-app-runaway'), 'telemetry desktop-app-runaway emitted');
+  const rep1 = await reportedOver(k, r.id);
+  await sleep(1500); // several more samples while over
+  const now1 = k.get(r.id);
+  ok(rep1 && /^\d+% CPU sustained for \d+ min \(limit 50%\)$/.test(rep1.live.over) && now1.state === 'ready' && alive(now1.pids.app) && alive(now1.pids.x) && !now1.stoppedBy && !now1.lastError, 'NO KILL: sustained CPU over the (shrunk) limit is REPORTED on the live row — the app and its display keep running, nothing on the record', { over: rep1 && rep1.live.over, state: now1.state, lastError: now1.lastError });
+  const mine = notices.filter((n) => n.key.startsWith(`desktop-app-resource:${r.id}:`));
+  ok(mine.length === 1 && /^CPU burner has been using \d+% CPU for \d+ min — Stop it from the Desktop panel if that is not what you expect$/.test(mine[0].text) && mine[0].o && mine[0].o.level === 'warn', 'ONE notice for the crossing (not one per sample), naming the app and the user\'s own lever', mine);
+  ok(telemetry.some((e) => e.name === 'desktop-app-resource') && !telemetry.some((e) => e.name === 'desktop-app-runaway'), 'telemetry desktop-app-resource (the fleet still sees a hot app)');
   const reg = (await k.list()).registry.find((x) => x.id === 'burner');
-  ok(reg && reg.parkedUntil > Date.now() && /not launching it again/.test(reg.reason), 'the registry row is PARKED with the reason and its until');
-  let parked = null;
-  try { await k.launch({ appId: 'burner' }); } catch (e) { parked = e; }
-  ok(parked && parked.code === 'runaway-parked', 'relaunching a parked row is refused by code');
+  ok(reg && reg.available && !reg.reason && !('parkedUntil' in reg), 'the registry row is NOT parked (no reason, no until)', reg);
+  const second = await k.launch({ appId: 'burner' });
+  ok(second && second.id !== r.id && second.state === 'launching', 'a second launch of the same row is served — a past sample never refuses a launch');
   const disk = JSON.parse(fs.readFileSync(k.storeFile, 'utf8'));
-  ok(disk.runawayParkedUntil && disk.runawayParkedUntil.burner > Date.now(), 'the park survives on disk');
+  ok(!('runawayParkedUntil' in disk), 'nothing parked on disk');
+  const st = await k.stop(r.id); await k.stop(second.id);
+  ok(st.state === 'exited' && st.stoppedBy === 'user' && !alive(st.pids.app), 'the user\'s OWN Stop (the lever the notice names) ends it, verified');
   k.shutdown();
+  // the Chrome shape on a REAL session: the sampler hands a 6.2 GB PSS footprint (what a busy Chrome legitimately
+  // reaches) — reported, never stopped; a keeper COPY that stops on `over` (the pre-ruling policy) is the control
+  const bigMem = async (pids) => ({ cpuTicks: 0, memBytes: 6.2 * 2 ** 30, memMetric: 'pss', rssBytes: 40 * 2 ** 30, pids: (pids || []).length });
+  const n2 = [];
+  const k2 = mk('k6-mem', { guardSampleMs: 300, tickMs: 150, display: { ...NO_XVNC, sessionSample: bigMem }, serverNotice: (key, text) => n2.push({ key, text }) });
+  await k2.adoptAll(); k2.start();
+  const m = await k2.launch({ exec: appBin, args: appArgs, label: 'Google Chrome' });
+  await until(() => k2.get(m.id).state !== 'launching');
+  const rep2 = await reportedOver(k2, m.id, 8000);
+  await sleep(1000);
+  const cur2 = k2.get(m.id);
+  const noKill = !!rep2 && cur2.state === 'ready' && alive(cur2.pids.app);
+  ok(noKill && /^memory \(PSS\) 6\.2 GB \(limit 2\.0 GB\)$/.test(rep2.live.over) && cur2.live.memBytes === 6.2 * 2 ** 30 && cur2.live.memMetric === 'pss', 'NO KILL: a 6.2 GB (PSS) footprint is reported (memBytes + memMetric on the view), the app keeps running', cur2.live);
+  ok(n2.filter((x) => x.key.startsWith(`desktop-app-resource:${m.id}:`)).length === 1 && n2[0].text === 'Google Chrome is using 6.2 GB (PSS) — Stop it from the Desktop panel if that is not what you expect', 'the notice: "Google Chrome is using 6.2 GB (PSS) — Stop it from the Desktop panel if that is not what you expect"', n2);
+  await k2.stop(m.id); k2.shutdown();
+  // r2 (the oscillation review, reproduced on this REAL keeper before the fix: a sampler alternating 6.2 GB / 0.9 GB
+  // PSS filed notices :1…:5 in ten samples): the report level's hysteresis + floor hold on the real tick — ONE notice
+  let flip = 0;
+  const osc = async (pids) => ({ cpuTicks: 0, memBytes: (flip++ % 2 ? 0.9 : 6.2) * 2 ** 30, memMetric: 'pss', rssBytes: 1, pids: (pids || []).length });
+  const n3 = [];
+  const k3 = mk('k6-osc', { guardSampleMs: 250, tickMs: 120, display: { ...NO_XVNC, sessionSample: osc }, serverNotice: (key) => n3.push(key) });
+  await k3.adoptAll(); k3.start();
+  const o3 = await k3.launch({ exec: appBin, args: appArgs, label: 'Google Chrome' });
+  await until(() => k3.get(o3.id).state !== 'launching');
+  await until(() => (flip >= 10 ? true : null), 10000);
+  ok(flip >= 10 && k3.get(o3.id).state === 'ready' && JSON.stringify(n3) === JSON.stringify([`desktop-app-resource:${o3.id}:1`]), `OSCILLATION on the real keeper: ${flip} samples alternating over / under ⇒ exactly ONE notice (the pre-r2 level filed one per crossing)`, n3);
+  await k3.stop(o3.id); k3.shutdown();
+  // …and a crossing nobody received (serverNotice → 0: a restart with no browser connected) is re-sent under the SAME
+  // key on the next sample still over, until somebody gets it — then nothing more
+  const n4 = []; let reach = 0;
+  const k4 = mk('k6-deliver', { guardSampleMs: 250, tickMs: 120, display: { ...NO_XVNC, sessionSample: bigMem }, serverNotice: (key) => { n4.push(key); return n4.length >= 3 ? 1 : reach; } });
+  await k4.adoptAll(); k4.start();
+  const o4 = await k4.launch({ exec: appBin, args: appArgs, label: 'Google Chrome' });
+  await until(() => k4.get(o4.id).state !== 'launching');
+  await until(() => (n4.length >= 3 ? true : null), 8000);
+  await sleep(1200); // several more over samples after the delivered one
+  const k4key = `desktop-app-resource:${o4.id}:1`;
+  ok(JSON.stringify(n4) === JSON.stringify([k4key, k4key, k4key]), 'DELIVERY on the real keeper: two undelivered attempts re-sent under the SAME key, the third delivered, then silence', n4);
+  await k4.stop(o4.id); k4.shutdown();
+  const { mod: Kstop } = mutant('stops-on-over', [["        if (lvl.fire) {", "        if (lvl.fire) { stop(rec.id, { why: 'runaway' }).catch(() => { });"]]);
+  const dataDirC = path.join(root, 'k6-ctl'); fs.mkdirSync(dataDirC, { recursive: true });
+  const kc = Kstop.create({ ...PINNED, dataDir: dataDirC, env: baseEnv, broadcast: () => {}, guardSampleMs: 300, tickMs: 150, display: { ...NO_XVNC, sessionSample: bigMem }, log: { log() {}, warn() {}, error() {} } }); keepers.push(kc);
+  await kc.adoptAll(); kc.start();
+  const mc = await kc.launch({ exec: appBin, args: appArgs, label: 'Google Chrome' });
+  await until(() => kc.get(mc.id).state !== 'launching');
+  await until(() => (kc.get(mc.id).state !== 'ready' ? true : null), 8000);
+  const curC = kc.get(mc.id);
+  ok(!(curC.state === 'ready' && alive(curC.pids.app)), 'CONTROL: the stop-on-over copy ENDS the same session — the NO KILL assertion is red against it (it judges the branch, not a quiet sampler)', { state: curC.state });
+  await kc.stop(mc.id).catch(() => { }); kc.shutdown();
 }
 
 console.log('§6 the routes (express) — host refusal, launch, stop, keep-alive, 404');
@@ -759,15 +815,15 @@ console.log('§8 r2 — the round-1 verifier\'s findings, each reproduced on the
   const r = k.get(rec.id);
   ident.resetProcTables();
   const pids = k.sessionPids(r);
-  const a0 = D.procSample(r.pids.app), s0 = D.sessionSample(pids); await sleep(1000);
-  const a1 = D.procSample(r.pids.app), s1 = D.sessionSample(pids);
+  const a0 = D.procSample(r.pids.app), s0 = await D.sessionSample(pids); await sleep(1000);
+  const a1 = D.procSample(r.pids.app), s1 = await D.sessionSample(pids);
   ok(a0 && a1 && s0 && s1 && a1.cpuTicks - a0.cpuTicks < 20 && s1.cpuTicks - s0.cpuTicks >= 50, `CONTROL: over one second the recorded pid burned ${a1 && a0 ? a1.cpuTicks - a0.cpuTicks : '?'} ticks (the round-1 sample — blind) while its session (${pids.length} pids) burned ${s1 && s0 ? s1.cpuTicks - s0.cpuTicks : '?'}`);
-  const liveNow = k.get(rec.id).live;
-  ok(liveNow && liveNow.pids >= 2 && liveNow.cpuPct > 50, `the broadcast live sample counts the session's pids and their CPU (${liveNow && liveNow.pids} pids, ${liveNow && Math.round(liveNow.cpuPct)} %)`, liveNow);
-  const tripped = await until(() => (k.get(rec.id).state === 'failed' ? k.get(rec.id) : null), 15000);
-  ok(tripped && /stopped as a runaway: \d+% CPU sustained/.test(tripped.lastError) && tripped.stoppedBy === 'runaway', 'a burner in a CHILD trips the guard (the whole session is sampled)', tripped && tripped.lastError);
-  await sleep(300); ident.resetProcTables();
-  ok(tripped && k.sessionPids(tripped).length === 0, 'and the stop emptied every session (the `yes` child too)');
+  const liveNow = await until(() => { const l = k.get(rec.id).live; return l && l.cpuPct > 50 ? l : null; }, 5000);
+  ok(liveNow && liveNow.pids >= 2 && liveNow.cpuPct > 50 && liveNow.memMetric === 'pss' && liveNow.memBytes > 0, `the broadcast live sample counts the session's pids, their CPU and their footprint (${liveNow && liveNow.pids} pids, ${liveNow && Math.round(liveNow.cpuPct)} %, ${liveNow && Math.round(liveNow.memBytes / 2 ** 20)} MB PSS)`, liveNow);
+  const tripped = await reportedOver(k, rec.id);
+  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over) && k.get(rec.id).state === 'ready', 'a burner in a CHILD is REPORTED (the whole session is sampled) — and left running', tripped && tripped.live);
+  await k.stop(rec.id); await sleep(300); ident.resetProcTables();
+  ok(k.sessionPids(k.get(rec.id)).length === 0, 'and the user\'s stop empties every session (the `yes` child too)');
   k.shutdown();
 }
 { // (e) the shared desktop is RE-ASKED before a record on it is judged
@@ -944,19 +1000,19 @@ function markerPids(id) {
   const rec = await k.launch({ appId: 'churn' });
   await until(() => k.get(rec.id).state !== 'launching');
   const t0 = Date.now();
-  const tripped = await until(() => (k.get(rec.id).state === 'failed' ? k.get(rec.id) : null), 15000);
-  ok(tripped && /stopped as a runaway: \d+% CPU sustained/.test(tripped.lastError) && tripped.stoppedBy === 'runaway', `a burner whose work runs in short-lived children (yes | head, ~30 MB each) trips the guard in ${Date.now() - t0} ms (the verifier measured 20 s of 'ready' at 0 %)`, tripped && tripped.lastError);
-  await sleep(300); ident.resetProcTables();
-  ok(tripped && k.sessionPids(tripped).length === 0, 'and the stop emptied the session');
+  const tripped = await reportedOver(k, rec.id);
+  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over), `a burner whose work runs in short-lived children (yes | head, ~30 MB each) is REPORTED over in ${Date.now() - t0} ms (the verifier measured 20 s of 'ready' at 0 %)`, tripped && tripped.live);
+  await k.stop(rec.id); await sleep(300); ident.resetProcTables();
+  ok(k.sessionPids(k.get(rec.id)).length === 0, 'and the user\'s stop empties the session');
   k.shutdown();
   // NEGATIVE CONTROL: the round-2 sample (the LIVE pids' own ticks only) on the same shape stays `ready`
   const liveOnly = (pids) => { let cpuTicks = 0, rssBytes = 0, n = 0; for (const pid of pids || []) { const s = D.procSample(pid); if (!s) continue; cpuTicks += s.cpuTicks; rssBytes += s.rssBytes; n++; } return n ? { cpuTicks, rssBytes, pids: n } : null; };
   const k2 = mk('r3d-ctl', { limits, registryRows: [churn], guardSampleMs: 400, tickMs: 200, display: { ...NO_XVNC, sessionSample: liveOnly } }); await k2.adoptAll(); k2.start();
   const rec2 = await k2.launch({ appId: 'churn' });
   await until(() => k2.get(rec2.id).state !== 'launching');
-  const trippedCtl = await until(() => (k2.get(rec2.id).state === 'failed' ? k2.get(rec2.id) : null), 6000);
+  const trippedCtl = await reportedOver(k2, rec2.id, 6000);
   const liveCtl = k2.get(rec2.id).live;
-  ok(!trippedCtl && k2.get(rec2.id).state === 'ready', `CONTROL: sampling live pids only, the same burner is still 'ready' after 6 s (live.cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} %)`);
+  ok(!trippedCtl && k2.get(rec2.id).state === 'ready', `CONTROL: sampling live pids only, the same burner is never reported over in 6 s (live.cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} %)`);
   await k2.stop(rec2.id); k2.shutdown();
   // BOUNDARY, CONSTRUCTED not sampled (2.369.125 r5): the one case no reader over the session's own /proc entries can
   // see is a burner whose parent is DEAD before the burner is reaped — init (the subreaper) reaps it and its ticks land
@@ -1084,10 +1140,10 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   const rec = await k.launch({ appId: 'esc' });
   await until(() => (k.get(rec.id).state !== 'launching' ? true : null), 20000);
   const t0 = Date.now();
-  const tripped = await until(() => (k.get(rec.id).state === 'failed' ? k.get(rec.id) : null), 15000);
-  ok(tripped && /stopped as a runaway: \d+% CPU sustained/.test(tripped.lastError) && tripped.stoppedBy === 'runaway', `a burner in a setsid'd child trips the guard in ${Date.now() - t0} ms (the verifier measured 0 % for 20 s while ready)`, tripped && tripped.lastError);
-  await sleep(500); ident.resetProcTables();
-  ok(tripped && markerPids(rec.id).length === 0, 'and the runaway stop emptied the session, escaped burner included');
+  const tripped = await reportedOver(k, rec.id);
+  ok(tripped && /^\d+% CPU sustained/.test(tripped.live.over) && k.get(rec.id).state === 'ready', `a burner in a setsid'd child is REPORTED over in ${Date.now() - t0} ms (the verifier measured 0 % for 20 s while ready) — and left running`, tripped && tripped.live);
+  await k.stop(rec.id); await sleep(500); ident.resetProcTables();
+  ok(markerPids(rec.id).length === 0, 'and the user\'s stop empties the session, escaped burner included');
   k.shutdown();
   // NEGATIVE CONTROL: the guard over the sid table alone stays `ready` at 0 %
   const { mod: Kg } = mutant('r4c-sid-only', NO_GUARD_UNION);
@@ -1096,9 +1152,9 @@ async function stopBetweenParts(Kmod, dataDir, at, label) {
   await k2.adoptAll(); k2.start();
   const rec2 = await k2.launch({ appId: 'esc' });
   await until(() => (k2.get(rec2.id).state !== 'launching' ? true : null), 20000);
-  const trippedCtl = await until(() => (k2.get(rec2.id).state === 'failed' ? k2.get(rec2.id) : null), 6000);
+  const trippedCtl = await reportedOver(k2, rec2.id, 6000);
   const liveCtl = k2.get(rec2.id).live;
-  ok(!trippedCtl && k2.get(rec2.id).state === 'ready' && liveCtl && liveCtl.cpuPct < 25, `CONTROL: sampling the sid table alone, the same burner is still 'ready' after 6 s at cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} % over ${liveCtl && liveCtl.pids} pids`);
+  ok(!trippedCtl && k2.get(rec2.id).state === 'ready' && liveCtl && liveCtl.cpuPct < 25, `CONTROL: sampling the sid table alone, the same burner is never reported over in 6 s at cpuPct ${liveCtl && Math.round(liveCtl.cpuPct)} % over ${liveCtl && liveCtl.pids} pids`);
   await k2.stop(rec2.id); k2.shutdown();
   await sleep(300);
   ok(markerPids(rec2.id).length === 0, 'CONTROL cleanup: the fixed stop of the mutant keeper (its belt intact) reaped the escaped burner');
@@ -1791,6 +1847,24 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
   const profC = path.join(k.logRoot, c.id, 'profile');
   const endedC = await until(() => { const r = k.get(c.id); return r.state === 'exited' && r.profileRemovedAt ? r : null; }, 15000);
   ok(!!endedC && /application exited/.test(endedC.lastError || '') && !fs.existsSync(profC), 'a browser that EXITS by itself: the session ends (app-exit) and its profile is removed on that path too', k.get(c.id));
+  // (c2) 2026-09-25 (the owner's ruling; F): an IDLE-OUT is the keeper's decision, not a person's — the session stops as
+  // before, but its profile is KEPT and the record says why (a profile goes only by a person's ending)
+  {
+    const dataDirI = path.join(root, 'k18-idle'); fs.mkdirSync(dataDirI, { recursive: true });
+    const settingsI = { ...PIN, 'desktop.idleTimeoutMin': 0.02 };
+    const ki = K.create({ dataDir: dataDirI, env: benv, broadcast: () => {}, serverSetting: (key) => settingsI[key], backends: XVFB_TABLE, registryRows: rows, tickMs: 150, log: { log() {}, warn() {}, error() {} } }); keepers.push(ki);
+    await ki.adoptAll(); ki.start();
+    const d = await ki.launch({ appId: 'vs-browser' });
+    const profD = path.join(ki.logRoot, d.id, 'profile');
+    await until(() => fs.existsSync(path.join(profD, 'Cookies')), 8000);
+    const idled = await until(() => { const r = ki.get(d.id); return r.state === 'exited' ? r : null; }, 10000);
+    ok(!!idled && idled.stoppedBy === 'idle' && fs.existsSync(path.join(profD, 'Cookies')) && !idled.profileRemovedAt && idled.profileKept === true && /by the keeper \(idle\), not by a person/.test(idled.profileKeptWhy || ''), 'an IDLE-OUT stops the session but KEEPS its profile (what the browser wrote is still there) and the record says why', idled && { state: idled.state, kept: idled.profileKept, why: idled.profileKeptWhy });
+    ki.shutdown();
+    const ki2 = K.create({ dataDir: dataDirI, env: benv, broadcast: () => {}, serverSetting: (key) => settingsI[key], backends: XVFB_TABLE, registryRows: rows, log: { log() {}, warn() {}, error() {} } }); keepers.push(ki2);
+    await ki2.adoptAll();
+    ok(fs.existsSync(path.join(profD, 'Cookies')) && !ki2.get(d.id).profileRemovedAt, '…and the next BOOT\'s retirement pass keeps it too (the same person-only verdict decides)');
+    ki2.shutdown();
+  }
   // (d) refusals by name — nothing recorded, nothing created
   const before = Object.keys(k._store().apps).length;
   const refusal = async (body) => { try { await k.launch(body); return null; } catch (e) { return e; } };

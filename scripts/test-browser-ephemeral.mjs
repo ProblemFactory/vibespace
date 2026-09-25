@@ -39,8 +39,10 @@
 //   r4: the keeper's memo names its file only while lstat says it is its own
 //      regular file with its content — a swapped-in symlink / an edit is
 //      re-written (the r3 existsSync check in a patched copy is the control).
-//   ③ RUNAWAY + RESTART: a runaway sample parks it with a notice (the next verb
-//      is refused `runaway-parked`); a new keeper over the same data dir (a
+//   ③ RESOURCE REPORT + RESTART (2026-09-25, the owner's ruling): an
+//      over-threshold sample is REPORTED — ONE notice, the browser keeps
+//      running, its next verb is served, nothing is parked; a new keeper over
+//      the same data dir (a
 //      server restart) ADOPTS a live ephemeral daemon under its recorded pairs
 //      and records a gone one stopped.
 import fs from 'node:fs';
@@ -429,7 +431,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
 }
 
 // ═══ ③ runaway + restart adoption ═════════════════════════════════════════
-console.log('— ③ a runaway parks it; a restart adopts a live one and records a gone one stopped');
+console.log('— ③ an over-threshold sample is reported (never a stop); a restart adopts a live one and records a gone one stopped');
 {
   const D3 = path.join(ROOT, 'data3'); fs.mkdirSync(D3, { recursive: true });
   const live3 = new Set(['bk-000000e1', 'bk-000000e2', 'bk-000000e3']);
@@ -438,13 +440,16 @@ console.log('— ③ a runaway parks it; a restart adopts a live one and records
   const e1 = await k3.ensureEphemeral({ browserKey: 'bk-000000e1', sessionId: 's1', envPairs: pairsFor('bk-000000e1'), sessionName: 'runner' });
   ok(e1.created && e1.browser.state === 'ready', 'an ephemeral browser started through ensureEphemeral');
   const realTree = F.treeUsage;
-  F.treeUsage = (pid) => ({ rssBytes: 8 * 2 ** 30, cpuTicks: 0, pids: [pid] });
+  const pid1 = e1.browser.pid;
+  F.treeUsage = async (pid) => ({ memBytes: 8 * 2 ** 30, memMetric: 'pss', rssBytes: 20 * 2 ** 30, cpuTicks: 0, pids: [pid] });
   try { await k3.tick(); } finally { F.treeUsage = realTree; }
   await new Promise((res) => setTimeout(res, 300));
   const rb = k3.browserOf(e1.profile.id);
-  ok(rb.state === 'failed' && /runaway/.test(rb.lastError || '') && k3._reg().runawayParkedUntil[e1.profile.id] > Date.now() && notices.some((n) => n.key === 'browser-runaway:' + e1.profile.id), 'a RUNAWAY sample stops it, parks it and files the notice — exactly like a named profile', rb);
-  const parked = await threw(() => k3.ensureEphemeral({ browserKey: 'bk-000000e1', sessionId: 's1', envPairs: pairsFor('bk-000000e1') }));
-  ok(parked && parked.code === 'runaway-parked' && /this conversation's browser/.test(parked.message), '…and its next verb is refused runaway-parked, by name', parked && parked.message);
+  const rn = notices.filter((n) => n.key.startsWith('browser-resource:' + e1.profile.id + ':'));
+  ok(rb.state === 'ready' && alive(pid1) && !/runaway/.test(rb.lastError || '') && !('runawayParkedUntil' in k3._reg()), 'NO KILL: an 8 GB (PSS) sample leaves the ephemeral browser RUNNING — nothing parked, nothing on the record', rb);
+  ok(rn.length === 1 && /^The agent browser of "[^"]+" is using 8\.0 GB \(PSS\) — Stop it from the Browser panel if that is not what you expect$/.test(rn[0].text) && k3.usageOf(e1.profile.id)?.memMetric === 'pss' && /memory \(PSS\) 8\.0 GB/.test(k3.usageOf(e1.profile.id)?.over || '') && k3.ephemerals().find((x) => x.profileId === e1.profile.id)?.usage?.over === k3.usageOf(e1.profile.id).over, 'ONE notice names the conversation\'s browser and the reading by its metric; the live row carries `over` — exactly like a named profile', { rn, live: k3.usageOf(e1.profile.id) });
+  const served = await k3.ensureEphemeral({ browserKey: 'bk-000000e1', sessionId: 's1', envPairs: pairsFor('bk-000000e1') });
+  ok(served && served.browser.state === 'ready' && served.browser.pid === pid1, '…and its next verb is SERVED by the same browser (a past sample never refuses a verb)', served && served.browser);
   // restart adoption
   const e2 = await k3.ensureEphemeral({ browserKey: 'bk-000000e2', sessionId: 's2', envPairs: pairsFor('bk-000000e2') });
   const e3 = await k3.ensureEphemeral({ browserKey: 'bk-000000e3', sessionId: 's3', envPairs: pairsFor('bk-000000e3') });

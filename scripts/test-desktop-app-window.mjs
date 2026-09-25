@@ -289,6 +289,10 @@ try {
     if (cwin) {
       const crec = await until(() => p1.evalJs(`fetch('/api/desktop/apps/${cwin.appId}').then((r) => r.json()).then((r) => (r.state === 'ready' ? r : null))`), 25000);
       check(`the card-launched record (${cardApp.exec}) reaches ready`, !!crec && crec.state === 'ready', crec && crec.lastError);
+      // the idle-out defaults to NEVER (owner ruling 2026-09-25, desktop.idleTimeoutMin default 0): a launch under the
+      // shipped default carries idleTimeoutMs 0, and its bar shows neither a countdown nor a Keep running button
+      const idleOff = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === '${cwin.appId}'); const c = w && w.content.querySelector('.desktop-app-chip-idle'); const b = w && w.content.querySelector('.desktop-app-chip-backend'); if (!c || !b || !b.textContent) return null; const keep = [...w.content.querySelectorAll('button')].find((x) => x.textContent === 'Keep running'); return { chip: c.textContent, chipShown: c.style.display !== 'none', keepShown: !!keep && keep.style.display !== 'none' }; })()`), 8000, 200);
+      check('the idle-out is OFF by default: the card-launched record carries idleTimeoutMs 0 (never), no idle countdown chip, no Keep running', !!crec && crec.idleTimeoutMs === 0 && !!idleOff && idleOff.chip === '' && !idleOff.chipShown && !idleOff.keepShown, { idleTimeoutMs: crec && crec.idleTimeoutMs, idleOff });
       // Running shows it, with the slot count, on the next open
       await openDialog(p1);
       const g = await p1.evalJs(GEOM);
@@ -319,6 +323,9 @@ try {
   check('the dialog states the ladder verdict in the chip\'s words', /vnc-display/.test(availText), availText);
   check('the catalog lists xterm as a card (presence-checked; dimmed+disabled with its reason when absent, enabled when present)', await p1.evalJs(`(() => { const b = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-app-id="xterm"]'); if (!b) return false; const absent = ${!XTERM_PRESENT ? 'true' : 'false'}; /* 2.369.131: hostFacts.bins never carries xterm — derive presence from PATH, not from a key that is always undefined (the leg passed only while xterm was absent; xpra's install pulled it in) */ return b.disabled === absent && b.classList.contains('is-unavailable') === absent && (!absent || /not on PATH/.test(b.textContent)); })()`));
   await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); d.querySelector('.desktop-launch-exec').value = ${JSON.stringify(appBin)}; d.querySelector('.desktop-launch-args').value = ${JSON.stringify(appArgs.map((a) => (/\\s/.test(a) ? '"' + a + '"' : a)).join(' '))}; return true; })()`);
+  // the idle-out defaults to never (2026-09-25) — opt in to 30 min, as a user would in Settings, so the countdown
+  // chip below has a record to count down (the timeout is stamped at launch; restored to the default after the chip leg)
+  check('PATCH /api/settings opts in to a 30 min idle-out', (await p1.evalJs(`fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'desktop.idleTimeoutMin': 30 }) }).then((r) => r.status)`)) === 200);
   // a TRUSTED click on Launch (CDP Input): the layout autosave only fires after
   // a real pointerdown/keydown (layout.js's anti-echo guard), exactly as a human's does
   await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-run');
@@ -337,7 +344,8 @@ try {
   check('the status bar names the backend rung: "vnc-display" (pinned first — nothing fell, no reason to print)', chip === 'vnc-display', chip);
   const sample = await until(async () => { const s = await p1.evalJs(CANVAS_SAMPLE); return s.found && s.brightFrac > 0.02 ? s : null; }, 20000, 500);
   check('the noVNC canvas is NOT all black (the app is painted)', !!sample, sample);
-  check('the idle countdown chip is showing (30 min default)', await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`));
+  check('the idle countdown chip is showing (desktop.idleTimeoutMin opted in to 30 min at launch)', !!rec && rec.idleTimeoutMs === 30 * 60000 && await p1.evalJs(`/idle stop in \\d+ min/.test([...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')?.content.querySelector('.desktop-app-chip-idle')?.textContent || '')`), rec && rec.idleTimeoutMs);
+  await p1.evalJs(`fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'desktop.idleTimeoutMin': null }) }).then((r) => r.status)`);
 
   // the autosave (500 ms debounce after a trusted input) must carry the openSpec before a second client can replay it
   const saved = await until(() => p1.evalJs(`fetch('/api/layouts').then((r) => r.json()).then((d) => JSON.stringify(d).includes('openDesktopApp') ? true : null)`), 10000, 300);

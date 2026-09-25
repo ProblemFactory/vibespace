@@ -3596,6 +3596,7 @@ export default {
   "{n} running": "{n} 件実行中",
   "{used} of {cap} slots in use": "{cap} スロット中 {used} 使用中",
   "A desktop application window with no input for this long is stopped; 0 = never. \"Keep running\" in a window exempts that app.": "デスクトップアプリのウィンドウにこの時間入力がなければ停止します。0 = 停止しない。ウィンドウの「実行を続ける」でそのアプリは除外されます。",
+  "0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; \"Keep running\" in a window exempts that app.": "0（既定）では放置中のアプリを停止しません。分数を設定すると、その時間入力のないデスクトップアプリのウィンドウを停止します。ウィンドウの「実行を維持」でそのアプリを除外できます。",
   "Archive finished tasks after (hours)": "完了したタスクをアーカイブするまでの時間（時間）",
   "A one-shot task that finished successfully leaves the Background Work list for the archive this many hours after it ended (its runs, delivery log and acknowledgement are kept; poll/show of the id still answer). 0 = never archive finished tasks.": "正常に完了した単発タスクは、終了からこの時間が経つとバックグラウンド作業の一覧からアーカイブへ移ります（実行履歴・配信ログ・確認状態は保持され、その id への poll/show は引き続き応答します）。0 = 完了タスクをアーカイブしない。",
   "Archive acknowledged failures after (days)": "確認済みの失敗をアーカイブするまでの日数（日）",

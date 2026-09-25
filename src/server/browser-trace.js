@@ -469,6 +469,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       r.recordingBytes = r.recordings.reduce((s, f) => s + f.bytes, 0);
       r.recording = [...recordings.values()].find((x) => x.profileId === r.id) || null;
       r.recordingRefused = recordingRefusals.get(r.id) || null;
+      r.usage = keeper && typeof keeper.usageOf === 'function' ? keeper.usageOf(r.id) : null; // 2026-09-25: the live resource row (report only — memBytes + memMetric, `over`)
     }
     const eph = { scope: T.EPHEMERAL_SCOPE, trace: T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)) };
     const o = await orphans();

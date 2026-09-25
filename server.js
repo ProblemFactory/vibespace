@@ -1774,6 +1774,7 @@ const vnc = new VncManager({ dataDir: path.join(__dirname, 'data') });
 const desktopKeeper = require('./src/server/desktop-app-keeper.js').create({
   dataDir: path.join(__dirname, 'data'), env: () => require('./src/ws-handler').agentEnv(), broadcast: (m) => bcastAll(m),
   serverSetting: (k) => serverSetting(k), getTelemetry: () => { try { return telemetry; } catch { return null; } }, singleton: () => vnc.singletonFacts(),
+  serverNotice: (...a) => serverNotice(...a), // 2026-09-25: the ONE report per resource crossing (the keeper never stops an app for a resource)
 });
 // P9 window targets (design-agent-browser-v2 §4.9 / §6.6): ONE wiring — the RFB bridge's input policy IS the engine's lease verdict, the routes (user + agent) and the shared handback announcer ride the same engine (src/server/window-live-wiring.js)
 const { desktopStream, windowEngine, boot: bootWindowLeases, shutdown: shutdownWindowLeases } = require('./src/server/window-live-wiring.js').install({
@@ -1945,7 +1946,7 @@ server.listen(PORT, HOST, () => {
   // One-shot data migrations (src/server/migrations.js, plan B step 1): the
   // ledger-driven registry runs BEFORE any session restore touches the data
   // it may reshape. Failures notice + retry next boot, never block startup.
-  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
+  try { require('./src/server/migrations.js').create({ rootDir: __dirname, serverNotice, desktopKeeper, browserKeeper: () => browserKeeper /* 2026-09-25: the runaway-parks-void reshape goes THROUGH the live keepers */, channels: channelsWiring.channels /* 2026-09-22: adapters.json's ONE writer stamps the legacy credential keys */, userTodos /* 2.369.152: the LIVE inbox store — the spend-notices migration reshapes through it, never beside it */ }).runLocalMigrations(); usage.reloadRateLimitCache?.(); usageHistory.reloadCursors?.(); usageHistory.reloadEvents?.(); /* a repair may have unlinked data/usage-cache.json AFTER setupUsage loaded it (r6), or REWRITTEN the ledger shards in place (origin backfill) — the event cache reads only appended tails */ }
   catch (e) { console.warn('[migrate] local registry failed to run:', e.message); }
   // B-855a c2: the STANDING identity repair — every boot, AFTER the one-shot registry (it may have reshaped the stores this reads), idempotent; then the panel memory re-reads the repaired disk
   try { repairIdentityAnchors('boot'); usage.reloadRateLimitCache?.(); } catch (e) { console.warn('[usage] boot identity repair failed:', e.message); }

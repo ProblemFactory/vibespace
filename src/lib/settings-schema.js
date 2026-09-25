@@ -126,8 +126,8 @@ const SETTINGS_SCHEMA = {
     category: t('Window'), liveApply: true,
   },
   'desktop.idleTimeoutMin': {
-    type: 'number', default: 30, min: 0, max: 1440, step: 5, label: t('Desktop app idle timeout (minutes)'),
-    description: t('A desktop application window with no input for this long is stopped; 0 = never. "Keep running" in a window exempts that app.'),
+    type: 'number', default: 0, min: 0, max: 1440, step: 5, label: t('Desktop app idle timeout (minutes)'),
+    description: t('0 (the default) never stops an app for sitting still. Set minutes to stop a desktop application window that had no input for that long; "Keep running" in a window exempts that app.'),
     category: t('Window'), liveApply: true,
   },
   'desktop.appScale': {

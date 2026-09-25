@@ -85,7 +85,7 @@ function refuseHost(req, res) {
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' ? 400
-    : code === 'cap' || code === 'runaway-parked' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable' ? 409
+    : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable' ? 409
       : code === 'no-engine' || code === 'xpra-ui-unavailable' ? 503 : 500;
   res.status(status).json({ error: String(e?.message || e), code });
 }

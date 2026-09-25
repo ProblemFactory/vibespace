@@ -17,10 +17,21 @@
  * The discipline is opencode-serve's, inherited rather than re-learned:
  *   · adopt-or-reap at boot by pid+starttime+port (a dead pid ⇒ `exited` with
  *     the lastError KEPT, its leftovers reaped)
- *   · a COUNT CAP + a RUNAWAY GUARD (>150 % CPU for 5 min or RSS > 2 GB ⇒
- *     stop + park the registry row for an hour + telemetry + a broadcast the
- *     window turns into a toast) — the numbers are src/keeper-limits.js, the
- *     ONE home this keeper shares with opencode-serve and the browser keeper
+ *   · a COUNT CAP (a refusal AT LAUNCH naming the holders — never a kill)
+ *   · a RESOURCE REPORT, NEVER A STOP (the owner's 2026-09-25 ruling: "这个
+ *     keeper到底是干啥的，没必要别乱加会影响使用的feature" — a person is using
+ *     this app; Chrome legitimately passes any fixed ceiling). One /proc
+ *     sample per GUARD_SAMPLE_MS over the whole session set; memory = ΣPss
+ *     (never a sum of VmRSS), judged by src/runaway-guard.js against
+ *     src/keeper-limits.js (a browser row by the browser numbers, `guardFor`).
+ *     OVER ⇒ the live row carries it, a server notice when a crossing begins
+ *     (r2: re-armed only by 3 clear samples under 90 % of the line, never
+ *     within an hour of the last one, re-sent under the same key when no
+ *     client received it), telemetry `desktop-app-resource` — and the
+ *     app keeps running: no stop, no park, no profile removed. Until
+ *     2026-09-25 this was a runaway STOP + an hour's PARK + the profile
+ *     deleted; the headless OpenCode serve keeps that policy, nothing a
+ *     person uses does
  *   · per-app IDLE timeout from the last INPUT the bridge reported (DA3:
  *     30 min default, settings `desktop.idleTimeoutMin`, 0 = never; "keep
  *     running" is one explicit action)
@@ -50,7 +61,7 @@
  *      env; stop signals the leader's whole SESSION (group + every member),
  *      verified empty, with the env marker as the identity when the leader is
  *      already gone (a recycled pid must never be signalled).
- *   5. THE RUNAWAY GUARD SAMPLES THE WHOLE SESSION SET (app + X + picture
+ *   5. THE RESOURCE SAMPLE COVERS THE WHOLE SESSION SET (app + X + picture
  *      server + WM, each with its children) — a launcher whose work is in a
  *      child was invisible to a per-pid sample.
  *   6. A CACHED FACT IS RE-ASKED BEFORE A DESTRUCTIVE VERDICT. The singleton
@@ -117,7 +128,7 @@
  *      now ends with that census for this record's id and reaps whatever
  *      still carries the marker (measured: `setsid sleep 3600 &` survived
  *      stop() AND the app-exit path under `exited`, lastError null); the
- *      runaway guard unions the same census (ONE walk per tick, only when a
+ *      resource sample unions the same census (ONE walk per tick, only when a
  *      sample is due) into its sample set (measured: a setsid'd `yes` read
  *      cpuPct 0 / pids 3 for 12 s, trips at 2.6 s once counted). COST,
  *      measured: one /proc environ walk ≈ 50 ms over 3,856 pids, paid per
@@ -164,7 +175,7 @@
  * picture socket), no WM of ours is started (xpra is the WM), the READY probe
  * is the recipe's own kind (`display.waitForListen`), and the app is STILL the
  * keeper's own detached child on that display (handle + starttime + session
- * marker, so app-exit / identity / teardown / the runaway sample are the same
+ * marker, so app-exit / identity / teardown / the resource sample are the same
  * code on every rung). Records carry `probe` so boot adoption asks the same
  * question the bring-up did. DA1: a launch resolves the ladder fresh (xpra
  * first when installed) — an EXISTING record keeps the backend it was born
@@ -175,6 +186,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const M = require('../desktop-apps');
+const RG = require('../runaway-guard'); // the ONE resource verdict + guard pick + report level (2026-09-25: report only, never a stop)
 const LIMITS = require('../keeper-limits');
 const displayFacts = require('../desktop-display');
 const DV = require('../desktop-viewers');
@@ -261,7 +273,9 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *                    desktop-singleton rung; absent ⇒ that rung never resolves.
  *                    `refresh()` (= vnc.js status()) is asked before every verdict.
  *   display        — the desktop-display module (injectable for the suite)
- *   limits         — src/keeper-limits (injectable: the runaway suite shrinks them)
+ *   limits         — src/keeper-limits (injectable: the resource suite shrinks them)
+ *   serverNotice   — optional (key, text, opts) => number — the resource report (server.js's notice; returns the clients
+ *                    it reached — 0 ⇒ the report level re-sends the same key on the next over sample)
  *   registryRows   — the registry (default DEFAULT_REGISTRY; the suite hands a CPU burner)
  *   backends       — the capability table (default M.DISPLAY_BACKENDS; the suite hands a copy
  *                    with a fourth rung to prove this file needs no change for one)
@@ -270,7 +284,7 @@ const namedError = (code, msg) => { const e = new Error(msg); e.code = code; ret
  *   viewerGraceMs  — x5: how long the active pane's seat is held after its socket closed (default VIEWER_GRACE_MS; 0 = re-elect at once)
  *   relaunchSeatMs — A r1: how long a relaunch's carried seat waits for its pane after the answer (default RELAUNCH_SEAT_MS)
  */
-function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, singleton = null,
+function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, serverNotice = null, singleton = null,
   display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, viewerGraceMs = VIEWER_GRACE_MS, relaunchSeatMs = RELAUNCH_SEAT_MS } = {}) {
   if (!dataDir) throw new Error('desktop-app-keeper: dataDir is required');
   if (typeof env !== 'function') throw new Error('desktop-app-keeper: env must be a function returning the sanitised base env');
@@ -280,11 +294,11 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const sampleEvery = guardSampleMs || limits.GUARD_SAMPLE_MS;
 
   // ── state ──
-  let store = { apps: {}, runawayParkedUntil: {} };
+  let store = { apps: {} }; // (no `runawayParkedUntil` since 2026-09-25 — an old file's map is dropped on read; migration 2026-09-runaway-parks-void clears the disk)
   const children = new Map();   // id -> { x, server, wm, app } ChildProcess handles (this process's spawns only)
   const inflight = new Map();   // id -> the bringUp promise while it runs (rule 7: stop() waits for it)
-  const guard = new Map();      // id -> { prev, hotSince, lastSampleAt }
-  const live = new Map();       // id -> { cpuPct, rssBytes, sampledAt }
+  const guard = new Map();      // id -> { prev, hotSince, lastSampleAt, report: { reported, crossings }, memOffSaid }
+  const live = new Map();       // id -> { cpuPct, memBytes, memMetric, rssBytes (deprecated), pids, over, since, sampledAt }
   const fits = new Map();       // id -> { timer, inflight, firstUntil, refusedAt } (P8-2 x4: the app-fit step's state, never persisted)
   const stopping = new Set();
   // P8-2 x5 — THE VIEWERS of each app window (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"): ONE active
@@ -300,7 +314,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function load() {
     try {
       const j = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-      if (j && typeof j === 'object' && j.apps && typeof j.apps === 'object') store = { apps: j.apps, runawayParkedUntil: j.runawayParkedUntil || {} };
+      if (j && typeof j === 'object' && j.apps && typeof j.apps === 'object') store = { apps: j.apps };
     } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[desktop] ${STORE_FILE} unreadable (${e.message}) — starting empty; the old file is left in place`); }
   }
   function save() {
@@ -506,10 +520,9 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     const bins = (hostFacts && hostFacts.bins) || {};
     const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
     return registryRows.map((row) => {
-      const park = M.runawayParkVerdict(row.id, store.runawayParkedUntil, now());
-      if (row.browser) return browserRegistryRow(row, binOf, park);
+      if (row.browser) return browserRegistryRow(row, binOf);
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
-      return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? (park ? park.error : null) : `${row.exec} not on PATH`, parkedUntil: park ? park.until : null };
+      return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
     });
   }
   // ── B-bfe6: a BROWSER as a desktop app — the human's own window, its OWN profile (PURE verdicts in desktop-apps.js) ──
@@ -520,21 +533,23 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** A browser row as the catalog serves it: the family's first binary on PATH (`M.browserRowFor`) and, when that
    *  binary is a snap (desktop-display's fact), whether the snap can reach a profile under this keeper's root — a
    *  row that cannot launch is DIMMED with the verdict's own sentence, never hidden. */
-  function browserRegistryRow(row, binOf, park) {
+  function browserRegistryRow(row, binOf) {
     const probe = {};
     for (const e of (row.execs && row.execs.length ? row.execs : (M.BROWSER_KINDS[row.browser] || { execs: [] }).execs)) probe[e] = binOf(e);
     const b = M.browserRowFor(row, probe);
-    const base = { ...(b.row || row), args: [...(row.args || [])], parkedUntil: park ? park.until : null };
+    const base = { ...(b.row || row), args: [...(row.args || [])] };
     // `reasonCode` = the verdict's CODE beside its sentence: the catalog card says a short, translated reason by
     // code and keeps the sentence for its tooltip (B-bfe6 r1 — a 204-char sentence in a 10 px card was cut to ~27 chars)
     if (!b.ok) return { ...base, available: false, path: null, confinement: null, reason: b.error, reasonCode: b.code };
     const confinement = display.browserConfinement ? display.browserConfinement(b.row.path) : null;
     const pv = M.profileDirVerdict(profileDirOf('da-probe'), { home: homeOf(), ownedRoot: logRoot, confinement, exec: b.row.exec });
-    return { ...base, available: pv.ok, path: b.row.path, confinement, reason: pv.ok ? (park ? park.error : null) : pv.error, reasonCode: pv.ok ? (park ? park.code : null) : pv.code };
+    return { ...base, available: pv.ok, path: b.row.path, confinement, reason: pv.ok ? null : pv.error, reasonCode: pv.ok ? null : pv.code };
   }
   /**
    * Retire a finished browser session's profile: removed (async — a Chrome profile is thousands of files and data/
-   * may sit on NFS: never a sync walk on the event loop) unless the user chose "keep profile"; re-proven OURS by the
+   * may sit on NFS: never a sync walk on the event loop) ONLY when the PURE `M.profileRetireVerdict` says the session
+   * ended by a PERSON (Stop, a relaunch, the app's own exit, or no app ever ran — 2026-09-25: an idle-out or any other
+   * keeper-decided ending KEEPS it, `profileKept` + `profileKeptWhy` on the record); re-proven OURS by the
    * PURE verdict before any recursive delete; left in place — and said so on the record — when a process of the
    * session survived its teardown (it could still be writing). Facts on the record: `profileRemovedAt` /
    * `profileKept` / `profileError`. Called from every terminal path (teardown of a terminal record, stop()'s
@@ -542,7 +557,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
    */
   async function retireProfile(rec, { clean = true, why = 'ended' } = {}) {
     if (!rec || !rec.profileDir || rec.profileRemovedAt || M.isLiveState(rec.state)) return null;
-    if (rec.keepProfile) { if (!rec.profileKept) { rec.profileKept = true; log.log?.(`[desktop] ${rec.id}: kept ${rec.label}'s profile at ${rec.profileDir} (the user chose "keep profile")`); } return 'kept'; }
+    const rv = M.profileRetireVerdict(rec);
+    if (!rv.remove) { if (!rec.profileKept) { rec.profileKept = true; rec.profileKeptWhy = rv.why; log.log?.(`[desktop] ${rec.id}: kept ${rec.label}'s profile at ${rec.profileDir} (${rv.why})`); } return 'kept'; }
     if (!clean) { rec.profileError = `the profile at ${rec.profileDir} was left in place: a process of the session survived its teardown`; log.warn?.(`[desktop] ${rec.id}: ${rec.profileError}`); return 'left'; }
     const pv = M.profileDirVerdict(rec.profileDir, { home: homeOf(), ownedRoot: logRoot });
     if (!pv.ok) { rec.profileError = `not removed: ${pv.error}`; log.warn?.(`[desktop] ${rec.id}: profile ${rec.profileError}`); return 'refused'; }
@@ -606,10 +622,6 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     const row = v.launch.row;
     const cap = M.capVerdict(liveRecords().filter((r) => r.id !== opts.replacing), limits);
     if (cap) throw namedError(cap.code, cap.error);
-    if (v.launch.source === 'registry') {
-      const park = M.runawayParkVerdict(row.id, store.runawayParkedUntil, now());
-      if (park) throw namedError(park.code, park.error);
-    }
     if (row.needsWayland) throw namedError('needs-wayland', `${row.label} needs a Wayland compositor and cannot run on a private X display`);
     if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
     const execPath = resolveExec(row.exec);
@@ -1004,15 +1016,15 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
         await settleBringUp(id, SETTLE_BRINGUP_MS, inflightP);
         if (!(await teardown(rec, handles))) clean = false;
       }
-      const next = M.transition(rec.state, why === 'runaway' ? 'runaway' : 'stop');
+      const next = M.transition(rec.state, 'stop');
       rec.state = next || 'exited';
       rec.endedAt = now();
       rec.stoppedBy = why;
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(rec.idleTimeoutMs / 60000)} min without input (idle timeout)`;
       else if (why === 'relaunch') rec.lastError = `relaunched as ${rec.replacedBy || 'a new session'} at another scale`;
-      else if (why !== 'user' && why !== 'runaway') rec.lastError = why;
+      else if (why !== 'user') rec.lastError = why;
       if (!clean) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}a process survived SIGKILL — check ${LOG_DIR}/${id}/app.log`;
-      if (rec.profileDir) await retireProfile(rec, { clean, why: `stopped (${why})` }); // B-bfe6: every part is verified gone — the profile goes with the session
+      if (rec.profileDir) await retireProfile(rec, { clean, why: `stopped (${why})` }); // B-bfe6: every part is verified gone — the profile goes with the session IF a person ended it (M.profileRetireVerdict: an idle-out keeps it)
       log.log?.(`[desktop] ${id} stopped (${why}): ${rec.label}${clean ? '' : ' — NOT clean'}`);
       commit();
       return view(rec);
@@ -1265,7 +1277,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     }
     await reapTerminalLeftovers();
     // B-bfe6: a browser profile whose removal a SIGKILL of this server interrupted (the verdict was written, the rm was not)
-    for (const rec of Object.values(store.apps)) if (rec.profileDir && !rec.profileRemovedAt && !rec.keepProfile && !M.isLiveState(rec.state)) await retireProfile(rec, { why: 'boot' });
+    for (const rec of Object.values(store.apps)) if (rec.profileDir && !rec.profileRemovedAt && !rec.profileKept && !rec.keepProfile && !M.isLiveState(rec.state)) await retireProfile(rec, { why: 'boot' }); // the same person-only verdict decides
     pruneHistory();
     commit();
   }
@@ -1273,16 +1285,15 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     const t = now();
     const done = Object.values(store.apps).filter((r) => !M.isLiveState(r.state)).sort((a, b) => (b.endedAt || b.startedAt) - (a.endedAt || a.startedAt));
     done.forEach((r, i) => { if (i >= HISTORY_KEEP || t - (r.endedAt || r.startedAt) > HISTORY_MAX_AGE_MS) delete store.apps[r.id]; });
-    for (const [appId, until] of Object.entries(store.runawayParkedUntil)) if (Number(until) <= t) delete store.runawayParkedUntil[appId];
   }
 
-  // ── the tick: liveness (adopted sessions have no child handles), idle, runaway ──
+  // ── the tick: liveness (adopted sessions have no child handles), idle, the resource REPORT ──
   async function tick() {
     const t = now();
     const recs = liveRecords();
     const shared = recs.some((r) => r.backend === 'desktop-singleton') ? await singletonLive() : null;
     // rule 10: ONE marker census per tick, and only on a tick where some
-    // record is due a runaway sample — the guard must see the member that
+    // record is due a resource sample — the sample must see the member that
     // setsid()'d out of every leader's session (measured: a setsid'd `yes`
     // read cpuPct 0 / pids 3 for 12 s through the sid table alone).
     const due = recs.filter((r) => !stopping.has(r.id) && t - ((guard.get(r.id) || {}).lastSampleAt || 0) >= sampleEvery).map((r) => r.id);
@@ -1311,18 +1322,32 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       if (t - g.lastSampleAt >= sampleEvery) {
         // rule 5: the whole session set, never one pid — rule 10: plus what left it
         const pids = sessionPids(rec, escapedOf(rec.id));
-        const s = pids.length ? display.sessionSample(pids) : null;
-        const v = M.runawayVerdict(s, g.prev, g.hotSince, t, { limits });
-        g.prev = s ? { at: t, cpuTicks: s.cpuTicks } : null; g.hotSince = v.hotSince; g.lastSampleAt = t;
+        // 2026-09-25: the sample is AWAITED (smaps_rollup ≈1.1 ms per pid runs on the libuv pool, never the loop). The
+        // slot is claimed BEFORE the await so an overlapping tick never samples the same record twice, and a record a
+        // stop claimed meanwhile is left alone (its live row and its verdict belong to nobody now).
+        g.lastSampleAt = t; guard.set(rec.id, g);
+        const s = pids.length ? await display.sessionSample(pids) : null;
+        if (stopping.has(rec.id) || store.apps[rec.id] !== rec || !M.isLiveState(rec.state)) continue;
+        // ONE verdict module (src/runaway-guard.js) and ONE guard pick per record (guardFor: a browser row by the browser
+        // numbers). REPORT ONLY (the owner's 2026-09-25 ruling): the app a person is using keeps running whatever the
+        // sample says — no stop, no park, no profile touched. OVER ⇒ the live row names it; a notice when a crossing
+        // begins (r2: hysteresis + a per-session floor, and a notice nobody received is re-sent on the next over sample).
+        const lim = RG.guardFor(rec, limits);
+        const v = RG.resourceVerdict(s, g.prev, g.hotSince, t, { limits: lim });
+        g.prev = s ? { at: t, cpuTicks: s.cpuTicks } : null; g.hotSince = v.hotSince;
+        const lvl = RG.reportTransition(g.report, v, { now: t, limits: lim }); g.report = lvl.state;
         guard.set(rec.id, g);
-        if (s) { live.set(rec.id, { cpuPct: v.cpuPct, rssBytes: s.rssBytes, pids: s.pids, sampledAt: t }); dirty = true; }
-        if (v.why) {
-          log.error?.(`[desktop] RUNAWAY — ${rec.id} (${rec.label}, ${pids.length} process(es) in its sessions) stopped: ${v.why}${rec.appId ? `; not launching ${rec.appId} again for ${Math.round(limits.RUNAWAY_COOLDOWN_MS / 60000)} min` : ''}`);
-          if (rec.appId) store.runawayParkedUntil[rec.appId] = t + limits.RUNAWAY_COOLDOWN_MS;
-          rec.lastError = `stopped as a runaway: ${v.why}`;
-          try { getTelemetry()?.record?.({ kind: 'event', name: 'desktop-app-runaway', detail: `${rec.label}: ${v.why}`, value: Math.round((s?.rssBytes || 0) / 1048576) }); } catch { /* telemetry is optional */ }
-          stop(rec.id, { why: 'runaway' }).catch(() => { });
-          continue;
+        if (s) { const was = live.get(rec.id); live.set(rec.id, { cpuPct: v.cpuPct, memBytes: s.memBytes, memMetric: s.memMetric, rssBytes: s.rssBytes /* deprecated: ΣVmRSS, a fact never judged — one release */, pids: s.pids, over: v.over, since: v.over ? ((was && was.over && was.since) || t) : null, sampledAt: t }); dirty = true; }
+        if (v.memGuard === 'unavailable' && !g.memOffSaid) { g.memOffSaid = true; log.warn?.(`[desktop] ${RG.memGuardOffLine(`${rec.id} (${rec.label})`, s)}`); }
+        if (lvl.fire) {
+          log.warn?.(`[desktop] ${rec.id} (${rec.label}, ${pids.length} process(es) in its sessions) is over the reporting threshold: ${v.over} — reported, left running`);
+          try { getTelemetry()?.record?.({ kind: 'event', name: 'desktop-app-resource', detail: `${rec.label}: ${v.over}`, value: Math.round((s?.memBytes || 0) / 1048576) }); } catch { /* telemetry is optional */ }
+        }
+        if (lvl.notify) {
+          const who = rec.appTitle || rec.label || rec.appId || rec.id;
+          let delivered;
+          try { delivered = serverNotice?.(`desktop-app-resource:${rec.id}:${lvl.state.crossings}`, RG.resourceNoticeText({ who, where: 'Desktop panel', verdict: v, sample: s }), { level: 'warn' }); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the resource notice failed: ${e && e.message}`); }
+          g.report = RG.reportDelivery(g.report, delivered);
         }
       }
     }
@@ -1336,8 +1361,12 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   /** Timers only — the apps SURVIVE a VibeSpace exit by design. */
   function shutdown() { if (timer) clearInterval(timer); timer = null; for (const id of [...fits.keys()]) clearFit(id); for (const s of viewerSets.values()) clearGrace(s); if (dirty) save(); }
 
+  /** MIGRATIONS ONLY (src/server/migrations.js, 2026-09-runaway-parks-void): reshape the IN-MEMORY store and commit
+   *  (atomic save + broadcast) — a file edit beside a loaded keeper is overwritten by its next save. */
+  function reshapeStore(fn) { const r = fn(store); commit(); return r; }
+
   load();
-  return { launch, relaunch, stop, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
+  return { launch, relaunch, stop, reshapeStore, keepAlive, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, registry, adoptAll, start, shutdown, tick, sessionPids,
     viewerJoined, viewerLeft, takeoverViewer, activeViewer, viewersView, onViewers, refreshAppTitle, viewerGraceMs, carrySeat, relaunchSeatMs, // P8-2 x5 + A r1
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }

@@ -11,6 +11,10 @@ const os = require('os');
 const path = require('path');
 const { runMigrations } = require('../migration-runner.js');
 
+/** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
+const OLD_RUNAWAY_PREFIX = 'stopped as a runaway: RSS ';
+const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS sum — retired in 2.369.171)';
+
 // `homeDir` is a PARAMETER, not an ambient fact: a migration that reads the
 // transcript tree (the origin backfill) must be drivable against a scratch
 // home, or its suite reads — and its timing depends on — whatever ~/.claude
@@ -26,7 +30,13 @@ const { runMigrations } = require('../migration-runner.js');
 // would be overwritten by its next save. Without one (a suite, a boot with no
 // inbox) the migration builds a PRIVATE manager on the same file — no timer,
 // flushed through the store's own atomic writer before it returns.
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null }) {
+// `desktopKeeper` / `browserKeeper` (2026-09-25) are the LIVE keepers (or
+// getters): each holds its store in memory (the desktop keeper loads at
+// construction and commits after its async boot adoption), so a migration
+// that rewrote data/desktop-apps.json or data/browser-profiles.json beside it
+// would be overwritten by its next save — the reshape goes THROUGH the keeper
+// (`reshapeStore`), the file directly only when there is none (a suite).
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -378,6 +388,19 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-runaway-parks-void',
+      note: "until 2026-09-25 the desktop-app and browser keepers STOPPED a session whose per-process VmRSS SUM crossed a footprint limit, PARKED its registry row / profile for an hour and (desktop apps) removed its browser profile: the owner launched Google Chrome as a desktop app and 3 s after ready it was stopped at 'RSS 2.0 GB (limit 2.0 GB)' over 25 processes that share their binary, libraries and copy-on-write heap (measured on the same box: 891 chrome pids ΣVmRSS 94.67 GB vs ΣPss 15.09 GB). The owner's ruling: a resource guard never stops an app a person or an agent is using — it reports. This voids what the old guard left on disk: every `runawayParkedUntil` map is removed (a park no longer exists), and a record's lastError that says `stopped as a runaway: RSS …` is rewritten to say which guard stopped it and that its metric was an RSS sum. Nothing else is touched; a missing file is not a failure.",
+      run() {
+        const rep = { desktop: voidRunaway(path.join(dataDir, 'desktop-apps.json'), 'apps', desktopKeeper), browser: voidRunaway(path.join(dataDir, 'browser-profiles.json'), 'browsers', browserKeeper) };
+        // Say what happened even when it is nothing — a repair nobody can see
+        // ran is a repair nobody can verify ran.
+        console.log('[migrate] runaway-parks-void:', JSON.stringify(rep));
+        // Deliberately NO serverNotice: the parks were invisible except as a
+        // refused launch, and the rewritten lastError is what the panels show.
+        return rep;
+      },
+    },
+    {
       id: '2026-08-archive-dormant-task-plans',
       note: 'dormant checklist plan arrays (feature removed 2.121.0) → data/archive/',
       run() {
@@ -401,6 +424,41 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     },
   ];
 
+  /** The 2026-09-runaway-parks-void reshape of ONE keeper store: drop the park
+   *  map, rewrite the old guard's RSS-sum lastError on every record under
+   *  `recordsKey`. Through the live keeper when there is one (its in-memory
+   *  store is what it saves next), else the file itself (atomic tmp+rename).
+   *  Returns the counts; a missing / unreadable file = nothing to do. */
+  function voidRunaway(file, recordsKey, keeperOrGetter) {
+    let disk = null;
+    try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { disk = null; }
+    const parksOnDisk = disk && disk.runawayParkedUntil && typeof disk.runawayParkedUntil === 'object' ? Object.keys(disk.runawayParkedUntil).length : 0;
+    const shape = (doc) => {
+      let rewritten = 0;
+      if (!doc || typeof doc !== 'object') return rewritten;
+      if ('runawayParkedUntil' in doc) delete doc.runawayParkedUntil;
+      const recs = doc[recordsKey] && typeof doc[recordsKey] === 'object' ? Object.values(doc[recordsKey]) : [];
+      for (const r of recs) if (r && typeof r.lastError === 'string' && r.lastError.startsWith(OLD_RUNAWAY_PREFIX)) { r.lastError = RUNAWAY_VOID_TEXT; rewritten++; }
+      return rewritten;
+    };
+    if (!disk) return { file: path.basename(file), via: 'none', parks: 0, rewritten: 0 }; // no store (never written / unreadable): nothing to void — and a keeper is never made to CREATE one here
+    const k = typeof keeperOrGetter === 'function' ? keeperOrGetter() : keeperOrGetter;
+    if (k && typeof k.reshapeStore === 'function') {
+      // the keeper's next save would overwrite a file edit: reshape its memory, it commits (atomic) — and the disk
+      // is reshaped too when the keeper never loaded that shape (it drops the park map on read)
+      const rewritten = k.reshapeStore(shape);
+      return { file: path.basename(file), via: 'keeper', parks: parksOnDisk, rewritten: Number(rewritten) || 0 };
+    }
+    const hadMap = 'runawayParkedUntil' in disk;
+    const rewritten = shape(disk);
+    if (!hadMap && !rewritten) return { file: path.basename(file), via: 'file', parks: 0, rewritten: 0 };
+    let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+    const tmp = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
+    fs.renameSync(tmp, file);
+    return { file: path.basename(file), via: 'file', parks: parksOnDisk, rewritten };
+  }
+
   function runLocalMigrations() {
     const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: MIGRATIONS });
     for (const r of results) {
@@ -414,4 +472,4 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS };
 }
 
-module.exports = { create };
+module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT };

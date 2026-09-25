@@ -814,6 +814,18 @@ we should inherit rather than re-earn:
   that burned 209 CPU-minutes: sample `/proc`; on sustained CPU or an RSS blowout, stop it, park
   it with a named reason, emit telemetry, tell the user. Chromium's normal floor is higher than a
   serve's, so the thresholds are **per-provider**, not global.
+  **Owner ruling 2026-09-25 (supersedes "stop it, park it" above):** "不是就算是单一内存2G也不好啊，
+  chrome这么吃内存，完全可能超过这个量吧。这个keeper到底是干啥的，没必要别乱加会影响使用的feature" — a
+  browser a person or an agent is using is NEVER stopped, parked or refused a start by a resource
+  guard: over the threshold (a footprint, ΣPss — never a sum of VmRSS) it is marked on the live
+  record, a notice when a crossing begins (r2 hysteresis: re-armed only by 3 clear samples under 90 % of the line, at most one per session per hour, re-sent under the same key when no client received it) ("… is using 4.0 GB (PSS) — Stop it from the Browser panel if that
+  is not what you expect"), telemetry `browser-resource`. (2026-09-25 r2: a reading hovering across the
+  line had filed a notice every second sample — the report level now has a re-arm band, an hourly floor
+  and delivery-latched keys, src/runaway-guard.js `reportTransition`; memory from RssAnon+RssShmem is
+  judged only for a single process — over several it is a per-process sum again and is recorded only.) Only the headless OpenCode serve the
+  product runs for itself is still stopped; the one verdict is `src/runaway-guard.js`. Cause: a
+  Google Chrome desktop app stopped 3 s after ready at a 25-process VmRSS sum of 2.0 GB, its
+  profile deleted, parked 60 min.
 * **Idle.** Do not delegate to a default: set the timeout explicitly (§3.2.3 — it is disabled on
   the installed build and exempts headed browsers on newer ones). A profile with at least one
   **reconciled** live lease sets `AGENT_BROWSER_IDLE_TIMEOUT_MS=0` and is stopped by the keeper
