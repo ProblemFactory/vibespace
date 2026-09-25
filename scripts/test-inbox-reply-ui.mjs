@@ -422,6 +422,14 @@ try {
     return true;
   };
   const miniIds = `[...document.querySelectorAll('.ut-mini-popover[data-popover] .ut-item')].map((r) => r.dataset.id)`;
+  // ⑩w LAYOUT (owner 2026-09-25 "排版有点问题", a screenshot): an item whose words carry a long
+  // unbroken token (a path, an id) must WRAP inside the popover, never run out of its right
+  // edge — `.ut-text` wraps anywhere and the popover clips horizontally. Filed BEFORE the
+  // popover opens so the append-only-while-open legs below keep their rows.
+  // no hyphens: a hyphen is a line-break opportunity even under overflow-wrap: normal — the owner's path had none for 60+ chars
+  const longPath = '/tmp/fixturehome/workspace/averylongprojectname/docs/designdesktopappsseamlessandthensome/section/five/six/seven/eight.zh.md';
+  const wide = await fileItem(token, { text: 'Decision needed (the design is at ' + longPath + longPath.replace('/tmp', '/again') + ' §5-§6)', urgency: 'normal' });
+  check('⑩w a wide item is filed for the live session', !!(wide && wide.item && wide.item.id), wide);
   check('a real click on the badge', await clickBadge(liveWin));
   check('…opens .ut-mini-popover[data-popover]', await waitFor(`!!document.querySelector('.ut-mini-popover[data-popover]')`, 3000));
   const ids10 = await evalJs(miniIds);
@@ -429,6 +437,17 @@ try {
   check(`…listing EXACTLY this session's open rows (${want10.length}), nothing from another session`, ids10.length === want10.length && want10.every((id) => ids10.includes(id)) && !ids10.includes(HOSTILE_ID), { ids10, want10 });
   check('…headed "Inbox for this session" with the session\'s running dot', await evalJs(`(() => { const p = document.querySelector('.ut-mini-popover'); return !!p && p.querySelector('.ut-mini-title')?.textContent === 'Inbox for this session' && !!p.querySelector('.ut-live-dot[data-key=' + JSON.stringify(${JSON.stringify(`claude:${LIVE_SID}`)}) + ']'); })()`));
   check('…and the badge\'s mousedown did NOT close the For-you panel or drag the window', await evalJs(`!document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  const wideId = wide && wide.item ? wide.item.id : '';
+  check('⑩w the wide item is listed in the popover', await waitFor(`!!document.querySelector(${JSON.stringify('.ut-mini-popover .ut-item[data-id="' + wideId + '"]')})`, 4000), { wideId });
+  const measure = `(() => { const p = document.querySelector('.ut-mini-popover'); const row = p && p.querySelector(${JSON.stringify('.ut-item[data-id="' + wideId + '"]')}); const t = row && row.querySelector('.ut-text'); if (!p || !t) return null; return { popOver: p.scrollWidth - p.clientWidth, textOver: t.scrollWidth - t.clientWidth, lines: Math.round(t.getBoundingClientRect().height / parseFloat(getComputedStyle(t).lineHeight)) }; })()`;
+  const m10 = await evalJs(measure);
+  check('⑩w …its long path WRAPS: the text and the popover have no horizontal overflow, the row spans more than one line', !!m10 && m10.popOver <= 1 && m10.textOver <= 1 && m10.lines >= 2, m10);
+  // the control is LIVE: the old `overflow-wrap: normal` put back on the same row must overflow, else the assertion proves nothing
+  await evalJs(`(() => { const st = document.createElement('style'); st.id = 'x10w-control'; st.textContent = '.ut-mini-popover .ut-text { overflow-wrap: normal !important; }'; document.head.appendChild(st); return true; })()`);
+  const m10c = await evalJs(measure);
+  await evalJs(`document.getElementById('x10w-control')?.remove(); true`);
+  check('⑩w CONTROL: with the old overflow-wrap the same row runs past its text box (the wrap rule is what holds it)', !!m10c && m10c.textOver > 1, m10c);
+  await shot('mini-inbox-wide', '.ut-mini-popover');
 
   console.log('⑪ Escape closes the popover first, then the panel');
   await evalJs(`document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); true`);

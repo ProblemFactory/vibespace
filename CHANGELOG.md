@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.369.174 — the For-you rows wrap a long path instead of running out of the popover (owner 2026-09-25 "排版有点问题")
+
+The owner's screenshot: the session mini inbox showed an item whose words carried an absolute path, and the path ran out of the popover's right edge — `.ut-text` had no `overflow-wrap`, so a token with no spaces (a path, an id) could not break, and the popover clipped only vertically.
+
+- `.ut-text` and `.ut-detail` now wrap anywhere; `.ut-mini-popover` clips horizontally as well. The same rows in the For-you panel inherit the rule.
+- Gate: test-inbox-reply-ui ⑩w files an item with a 100-character hyphen-free path for the live session, opens the mini inbox and measures: no horizontal overflow on the text or the popover, the row spans several lines; the CONTROL is live — a style putting `overflow-wrap: normal` back on the same row makes it overflow (a hyphen is a break opportunity even then, so the fixture path carries none). Screenshot `mini-inbox-wide` under VS_SHOT_DIR.
+
 ## 2.369.173 — two owner-reported bugs: codex sub-agents stay out of the Sessions list (the kind filter is per page, one classifier on every rung, the daemon snapshot child fixed), and a fork lands in its source's Task Groups (with the lock capture rebuilt on a PID witness — six adversarial rounds)
 
 ### Codex sub-agents stay out of the Sessions list: the agent-kind choice is a view of the page, and remote hosts classify sub-agents too

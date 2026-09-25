@@ -1329,8 +1329,8 @@ html, body {
 .ut-dot[data-urgency="urgent"] { background: var(--red, #e55); animation: ut-pulse 1.4s ease infinite; }
 @keyframes ut-pulse { 50% { opacity: 0.35; } }
 .ut-body { flex: 1; min-width: 0; }
-.ut-text { font-size: 11px; color: var(--text); line-height: 1.4; }
-.ut-detail { font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; margin-top: 2px; line-height: 1.4; max-height: 120px; overflow-y: auto; }
+.ut-text { font-size: 11px; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; } /* a path / an id has no spaces — it wraps, never runs out of the popover (owner 2026-09-25 排版) */
+.ut-detail { font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; line-height: 1.4; max-height: 120px; overflow-y: auto; }
 .ut-tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .ut-tab {
   border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary);
@@ -4688,7 +4688,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .tab-item .win-inbox-badge { margin-left: 3px; }
 .ut-mini-popover {
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 8px 10px; width: 340px; max-width: calc(100vw - 16px); max-height: 420px; overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 8px 10px; width: 340px; max-width: calc(100vw - 16px); max-height: 420px; overflow-y: auto; overflow-x: hidden;
 }
 .ut-mini-head { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: var(--text); padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .ut-mini-name { font-weight: 400; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
