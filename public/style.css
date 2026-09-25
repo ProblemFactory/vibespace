@@ -1349,7 +1349,7 @@ html, body {
 .ut-detail-exp[open] > summary::before { content: '▾ '; content: '▾ ' / ""; }
 .ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
-.ut-actions { display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; }
+.ut-actions { float: right; margin: 0 0 2px 8px; display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; } /* floated inside .ut-body: the words wrap beside the buttons, then use the full width (2.369.175) */
 .ut-item:hover .ut-actions { opacity: 1; }
 .ut-act {
   background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);

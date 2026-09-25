@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.369.175 — the For-you row's buttons float at its top-right; the words use the full row width (owner 2026-09-25 "大段文字右侧就被几个按钮占据产生大量空白")
+
+A row was a flex pair — the words on the left, a column of four buttons on the right — so a tall item wasted the right third of the row under its buttons. The buttons now live inside the body as a floated block: the first lines wrap beside them, the rest use the full width. Same markup order for the reply box (never detached), the `:scope > .ut-body > .ut-actions` selector is the one live-state hook.
+
+- Gate: test-inbox-reply-ui ⑩w measures the wide row — the text block spans ≥ 95 % of the body, the buttons sit at the top-right, the text runs on below them; the pre-2.369.175 layout fails the share by construction (≈ 0.65). test-mobile-gaps' 36 px targets hold on the phone sheet.
+
 ## 2.369.174 — the For-you rows wrap a long path instead of running out of the popover (owner 2026-09-25 "排版有点问题")
 
 The owner's screenshot: the session mini inbox showed an item whose words carried an absolute path, and the path ran out of the popover's right edge — `.ut-text` had no `overflow-wrap`, so a token with no spaces (a path, an id) could not break, and the popover clipped only vertically.

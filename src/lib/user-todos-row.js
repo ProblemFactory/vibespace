@@ -142,7 +142,7 @@ export function applyLive(el, item, ctx) {
   const { t } = ctx;
   const rs = ctx.replyState ? ctx.replyState(item) : { show: false, enabled: false, why: '' };
   const why = rs.enabled ? '' : t(rs.why || '');
-  const btn = el.querySelector(':scope > .ut-actions > .ut-reply-btn');
+  const btn = el.querySelector(':scope > .ut-body > .ut-actions > .ut-reply-btn');
   if (btn) {
     btn.disabled = !rs.enabled;
     btn.title = rs.enabled ? t('Reply') : why;
@@ -170,7 +170,10 @@ export function renderRow(entry, ctx) {
   el.dataset.id = entry.item.id;
   const p = partsOf(entry, ctx);
   el.className = p.cls;
-  el.innerHTML = p.dot + `<div class="ut-body">${p.body}</div>` + p.actions;
+  // the actions FLOAT at the body's top-right (first child, CSS float) so the words
+  // wrap beside them and then use the full width below — a sibling column reserved
+  // the right third of every tall row for four buttons (owner 2026-09-25 screenshot)
+  el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
   el.dataset.sig = p.sig;
   applyLive(el, entry.item, ctx);
   return el;
@@ -191,17 +194,16 @@ export function patchRow(el, entry, ctx) {
     const keep = box && (!entry.resolved || boxInUse(box)) ? box : null;
     el.className = p.cls;
     if (!keep) {
-      el.innerHTML = p.dot + `<div class="ut-body">${p.body}</div>` + p.actions;
+      el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
       body = el.querySelector(':scope > .ut-body');
     } else {
       for (const c of [...el.children]) if (c !== body) c.remove();
       for (const c of [...body.children]) if (c !== keep) c.remove();
       const tmp = document.createElement('div');
-      tmp.innerHTML = p.dot + `<div class="ut-body">${p.body}</div>` + p.actions;
-      const [dotEl, freshBody, actionsEl] = [...tmp.children];
+      tmp.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
+      const [dotEl, freshBody] = [...tmp.children];
       el.insertBefore(dotEl, body);
       keep.before(...freshBody.childNodes);
-      el.append(actionsEl);
     }
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
     el.dataset.sig = p.sig;
