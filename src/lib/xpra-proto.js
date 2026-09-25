@@ -435,6 +435,21 @@ export function parseClipboardToken(p) {
   if (!(dtype.includes('text') || dtype.includes('string'))) return { selection, text: null };
   return { selection, text: bytesToString(p[7]) };
 }
+/** The server asks the CLIENT to move / resize a window (round 3 lane B, docs/design-desktop-apps-seamless §3.3): a
+ *  client-side-decorated app (GTK's header bar) sent _NET_WM_MOVERESIZE and xpra — the window manager of its display —
+ *  hands the gesture to the client (xpra x11/server/seamless.py `_initiate_moveresize` → server/source/window.py:
+ *  `[type, wid, x_root, y_root, direction, button, source_indication]`; the type is `initiate-moveresize` under
+ *  BACKWARDS_COMPATIBLE — what 6.5.3 sends, MEASURED §2.3 M3b — else `window-initiate-moveresize`). `direction` is
+ *  X's MoveResize: 0–7 the eight edges (SIZE_TOPLEFT … SIZE_LEFT), 8 MOVE, 9 SIZE_KEYBOARD, 10 MOVE_KEYBOARD,
+ *  11 CANCEL. Returns null for a packet that is not one. */
+export const MOVERESIZE_PACKETS = Object.freeze(['initiate-moveresize', 'window-initiate-moveresize']);
+export function parseMoveResize(p) {
+  if (!Array.isArray(p) || p.length < 5 || !MOVERESIZE_PACKETS.includes(bytesToString(p[0]))) return null;
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+  const direction = Number(p[4]);
+  if (!Number.isInteger(direction)) return null;
+  return { wid: p[1], xRoot: num(p[2]), yRoot: num(p[3]), direction, button: num(p[5]), source: num(p[6]) };
+}
 /** A `cursor` packet → { url data, w, h, xhot, yhot } or null (reset). */
 export function parseCursor(p) {
   if (!p || p.length < 10 || bytesToString(p[1]) !== 'png') return null;

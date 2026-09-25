@@ -51,6 +51,13 @@
 // clamp) the ACTIVE picture is scaled to fit — never cropped — with the badge
 // "Scaled to fit — the app needs at least {w}×{h}"; `onMinSize({w,h}|null)`
 // hands the smallest pane (CSS px) to the window, which clamps its own size.
+// SEAMLESS (round 3 lane B, docs/design-desktop-apps-seamless §3.3): the app's own header bar dragging its window
+// arrives as the client's `moveresize`; the view hands it to the window (`onMoveResize`) with the gesture's press
+// point in VIEWPORT px (`rootToClient` — the X root is the pane's stage, device px) and turns the pane's pointer
+// OFF for the rest of that press: capture released (the window manager's drag owns the pointer now), no motion
+// forwarded, and the button release still reaches X once — from wherever the pointer is let go (a document-level
+// pointerup, per-press AbortController) — so the app never sees a button stuck down. `onMain(meta|null)` and
+// `onState(changed)` name the main window's metadata (its `decorations`) and the app's own maximize / minimize.
 import { t } from './i18n.js';
 import { showToast } from './utils.js';
 import { createPictureShell, streamUrl, copyViaSelection } from './picture-shell.js';
@@ -93,12 +100,14 @@ const pointerMods = (e) => ({ shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!
  *   onTitle(text) / onIcon(dataUrl|null) — the app window's own title and icon
  *   onMinSize({w,h}|null) — the smallest pane (CSS px) the app fits in unscaled (its minimum ÷ the ratio)
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
+ *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
+ *   onMoveResize(ev) — the app's header bar moves/resizes its window: {direction, button, main, press:{clientX,clientY}|null}
  *   pixelRatio    — () => devicePixelRatio (injectable); CSS px × this = the device px the session speaks
  *   Worker / decode / now / secure / clipboardApi — injectable for the node suite
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -309,6 +318,16 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     return [x * drawRatio, y * drawRatio];
   };
   let moveRaf = 0, lastMove = null;
+  // the press in flight (for a window-manager gesture the app starts in the middle of it) and, once one started, the
+  // window manager's hold on the pointer: { pointerId, button, xy (the last pane point), ctl (its document listener) }
+  let press = null, wmHold = null;
+  const releaseWmHold = (e) => {
+    const h = wmHold; wmHold = null;
+    if (!h) return;
+    try { h.ctl.abort(); } catch {}
+    // the button is still down in X (the app handed the gesture over mid-press): release it once, where it was let go
+    if (client) { const xy = e && pane.isConnected ? paneXY(e) : h.xy; client.pointerButton(xy[0], xy[1], h.button, false, e ? pointerMods(e) : {}); }
+  };
   pane.addEventListener('pointerenter', () => { if (client) fitStage(); }); // the window may have moved: back onto the device grid
   pane.addEventListener('pointerdown', (e) => {
     ime.focus({ preventScroll: true });
@@ -316,22 +335,45 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!client) return;
     try { pane.setPointerCapture(e.pointerId); } catch {}
     const [x, y] = paneXY(e);
+    press = { pointerId: e.pointerId, button: e.button, xy: [x, y] };
     client.pointerButton(x, y, e.button, true, pointerMods(e));
   });
   pane.addEventListener('pointerup', (e) => {
     if (!client) return;
+    if (wmHold) return; // the window manager's gesture owns this press — its document listener releases the button in X
+    press = null;
     const [x, y] = paneXY(e);
     client.pointerButton(x, y, e.button, false, pointerMods(e));
     try { pane.releasePointerCapture(e.pointerId); } catch {}
   });
   pane.addEventListener('pointermove', (e) => {
-    if (!client) return;
+    if (!client || wmHold) return;
     lastMove = e;
     if (moveRaf) return;
     moveRaf = requestAnimationFrame(() => { moveRaf = 0; const ev = lastMove; lastMove = null; if (!ev || !client) return; const [x, y] = paneXY(ev); client.pointerMove(x, y, pointerMods(ev)); });
   });
   pane.addEventListener('wheel', (e) => { e.preventDefault(); if (!client) return; const [x, y] = paneXY(e); client.wheel(x, y, e.deltaX, e.deltaY, e.deltaMode, pointerMods(e)); }, { passive: false });
   pane.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // ── seamless: the app's header bar hands its move / resize to OUR window ──
+  /** The X root point (device px; the root is the pane's stage) → viewport px. */
+  const rootToClient = (xr, yr) => {
+    const r = pane.getBoundingClientRect();
+    return { clientX: r.left + stageOffset.x + (xr / drawRatio) * stageScale, clientY: r.top + stageOffset.y + (yr / drawRatio) * stageScale };
+  };
+  const onClientMoveResize = (ev) => {
+    const cancel = ev.direction === 11;
+    if (!cancel && press && !wmHold) {
+      // the window manager owns the pointer from here: no capture, no motion to X, the release sent once
+      const ctl = new AbortController();
+      wmHold = { pointerId: press.pointerId, button: press.button, xy: press.xy, ctl };
+      try { pane.releasePointerCapture(press.pointerId); } catch {}
+      document.addEventListener('pointerup', (e) => { if (e.pointerId === wmHold?.pointerId) { press = null; releaseWmHold(e); } }, { signal: ctl.signal });
+      document.addEventListener('pointercancel', (e) => { if (e.pointerId === wmHold?.pointerId) { press = null; releaseWmHold(e); } }, { signal: ctl.signal });
+    }
+    const hasRoot = Number.isFinite(ev.xRoot) && Number.isFinite(ev.yRoot) && (ev.xRoot !== 0 || ev.yRoot !== 0);
+    try { onMoveResize?.({ direction: ev.direction, button: ev.button, main: ev.main, wid: ev.wid, press: hasRoot ? rootToClient(ev.xRoot, ev.yRoot) : null, held: !!wmHold }); } catch (e) { log?.warn?.(`[xpra] onMoveResize threw: ${e && e.message}`); }
+  };
 
   // ── the pane follows the window: debounce, then the session re-fits ──────
   let resizeTimer = null;
@@ -402,6 +444,9 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
           }
         },
         window: onWindow, paint: onPaint, title: (text) => { try { onTitle?.(text); } catch {} },
+        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} },
+        state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } },
+        moveresize: onClientMoveResize,
         icon: ({ data }) => { const u = pngDataUrl(data); if (u) { try { onIcon?.(u); } catch {} } },
         clipboard: onClipboard,
         constraints: applyConstraints,
@@ -421,7 +466,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   };
   reBtn.onclick = () => { shell.resetLadder(); connect(); };
 
-  const disconnect = () => { shell.unwant(); try { client?.close(); } catch {} client = null; clearWindows(); };
+  const disconnect = () => { shell.unwant(); releaseWmHold(null); press = null; try { client?.close(); } catch {} client = null; clearWindows(); try { onMain?.(null); } catch {} };
   const dispose = () => { shell.close(); disconnect(); ro?.disconnect(); clearTimeout(resizeTimer); if (moveRaf) cancelAnimationFrame(moveRaf); try { dprMq?.removeEventListener?.('change', onRatio); } catch {} };
   const focus = () => { try { ime.focus({ preventScroll: true }); } catch {} };
   const setViewOnly = (v) => { viewOnly = !!v; if (client) client.viewOnly = viewOnly || mode !== 'active'; pane.classList.toggle('xpra-view-only', viewOnly || mode !== 'active'); };
@@ -442,5 +487,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const resnap = () => { if (client) fitStage(); };
   /** round 3 A2: the outer ✕ — ask the app to close its main window (xpra-client closeMain); false = nothing to ask. */
   const closeApp = () => (client ? client.closeMain() : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
+  const setAppState = (st) => (client ? client.setMainState(st) : false);
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

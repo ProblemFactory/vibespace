@@ -2377,6 +2377,33 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-app-is-blocked > :not(.desktop-app-blocked) { visibility: hidden; }
 .desktop-copied-chip { color: var(--accent); border-color: var(--accent); }
 .window-app-icon { width: 1em; height: 1em; vertical-align: -0.1em; object-fit: contain; }
+/* round 3 lane B — SEAMLESS desktop-app windows (docs/design-desktop-apps-seamless §3.3; desktop-app-window.js decides,
+   PURE src/lib/desktop-seamless.js): an app that draws its own title bar gets NO VibeSpace chrome over it. The title bar
+   and the status strip fold to 0 height (a class — never display:none: the bars stay in the DOM, the menus and the
+   suites still reach them) and OVERLAY the picture when revealed (a hover of the top edge, Alt), so a reveal never
+   resizes the pane (the app is never re-fitted by a hover). The 1 px frame (.window-active's border) and the eight
+   resize handles stay. Inside the picture shell (counter-zoomed to net zoom 1) the strip sits under the title bar at
+   its VIEWPORT height: --title-height × the UI scale. The revealed bars stay BELOW the resize handles (z-index 9 / 8 <
+   the handles' 10; fix r1): the top edge's 3 px handle band is a RESIZE while the bars show, exactly as on a normal
+   window — at z 25 a press on the edge after the 250 ms reveal became a title-bar drag. */
+.window.seamless > .window-titlebar { position: absolute; left: 0; right: 0; top: 0; z-index: 9; height: 0; min-height: 0; overflow: hidden; border-bottom-width: 0; transition: height 0.15s ease; }
+.window.seamless.seamless-revealed > .window-titlebar { height: var(--title-height); border-bottom-width: 1px; }
+.window.seamless .picture-shell { position: relative; }
+.window.seamless .picture-shell > .desktop-bar { position: absolute; left: 0; right: 0; top: 0; z-index: 8; height: 0; padding-top: 0; padding-bottom: 0; border-bottom-width: 0; overflow: visible; background: transparent; }
+.window.seamless .picture-shell > .desktop-bar > * { visibility: hidden; }
+.window.seamless.seamless-revealed .picture-shell > .desktop-bar { top: calc(var(--title-height) * var(--ui-scale, 1)); height: auto; padding-top: 4px; padding-bottom: 4px; border-bottom-width: 1px; background: var(--bg-panel, var(--bg-titlebar)); overflow: hidden; }
+.window.seamless.seamless-revealed .picture-shell > .desktop-bar > * { visibility: visible; }
+/* the honest list: a copy the page cannot write without a click FLOATS at the pane's BOTTOM-right while the strip is
+   folded (picture-shell.js setFloatingChip — it hides itself after 10 s); the one-time HTTPS hint floats above it.
+   Never the top-right (fix r1): that is where a CSD header bar draws its own ─ □ ✕ (measured on GNOME Calculator —
+   the chip sat exactly over them for 10 s). The folded bar stays 0 high and moves to the pane's BOTTOM edge, so the chip
+   anchors there; the bar takes no pointer (its folded children are hidden), only the chip and the hint do. */
+.window.seamless:not(.seamless-revealed) .picture-shell-floating-chip > .desktop-bar { top: auto; bottom: 0; pointer-events: none; }
+.window.seamless:not(.seamless-revealed) .picture-shell-floating-chip > .desktop-bar > .desktop-copied-chip,
+.window.seamless:not(.seamless-revealed) .picture-shell-floating-chip > .desktop-bar > .desktop-copy-hint {
+  visibility: visible; position: absolute; right: 8px; background: var(--bg-window); box-shadow: var(--shadow-window); border-radius: var(--radius-sm); pointer-events: auto; }
+.window.seamless:not(.seamless-revealed) .picture-shell-floating-chip > .desktop-bar > .desktop-copied-chip { bottom: 8px; height: 22px; border: 1px solid var(--accent); }
+.window.seamless:not(.seamless-revealed) .picture-shell-floating-chip > .desktop-bar > .desktop-copy-hint { bottom: 36px; padding-top: 2px; padding-bottom: 2px; }
 /* Width belongs on the DIALOG, never on the body (the third instance of the
    anti-pattern this file documents twice, .ucl-* and .guided-cli-dialog):
    .dialog is a fixed 440px box with overflow:hidden, so a body min-width of

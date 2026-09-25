@@ -140,6 +140,14 @@ const SETTINGS_SCHEMA = {
     description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×: widgets 2×, text 2.5×). 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). The scale is fixed when the app starts; a window\'s ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.'),
     category: t('Window'), liveApply: true,
   },
+  'desktop.seamless': {
+    type: 'enum', default: 'auto', options: [
+      { value: 'auto', label: t('Auto (apps that draw their own title bar)') },
+      { value: 'off', label: t('Off (always show the window frame)') },
+    ], label: t('Seamless desktop app windows'),
+    description: t('An app that draws its own title bar (GTK header bars, e.g. GNOME Calculator) is shown with NO VibeSpace title bar or status strip: drag its own header bar to move the window. Hover the top edge (or hold Alt) to bring the bars back; the taskbar menu of the window has every control. Paused while an agent drives the app, in a tab group and on a phone. A window\'s ⋯ → Show window frame overrides this per app.'),
+    category: t('Window'), liveApply: true,
+  },
   'desktop.backendPrefs': {
     type: 'string', default: '',
     label: t('Desktop app display backend order'),

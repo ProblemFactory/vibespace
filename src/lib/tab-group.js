@@ -546,9 +546,17 @@ const tabGroupMethods = {
     return el;
   },
 
+  /** A window entered / left a chain (or its chain was re-rendered): `winInfo.onChainChanged` lets it re-decide what
+   *  it shows — a seamless desktop-app window PAUSES in a chain (the tab bar lives in the title bar it would fold;
+   *  docs/design-desktop-apps-seamless §3.3). Deferred a microtask so the chain's own bookkeeping has settled. */
+  _notifyChainChange(ids) {
+    queueMicrotask(() => { for (const id of ids) { const w = this.windows.get(id); if (w && typeof w.onChainChanged === 'function') { try { w.onChainChanged(); } catch (e) { console.warn('[tab-group] onChainChanged threw:', e); } } } });
+  },
+
   _renderTabBar(chain) {
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
+    this._notifyChainChange([...chain.tabs]);
     // Rebuilding the tab DOM destroys per-tab auth badges — re-apply them
     // after this render instead of waiting for the next identity broadcast.
     queueMicrotask(() => {
@@ -953,6 +961,7 @@ const tabGroupMethods = {
 
     win.content.classList.remove('tab-hidden');
     win._tabChain = null;
+    this._notifyChainChange([win.id]);
     if (hostWin && win.id !== hostWin.id) {
       win.element.style.left = hostWin.element.style.left;
       win.element.style.top = hostWin.element.style.top;
@@ -1025,6 +1034,7 @@ const tabGroupMethods = {
     const lastWin = this.windows.get(chain.tabs[0]);
     if (!lastWin) return;
     lastWin._tabChain = null;
+    this._notifyChainChange([lastWin.id]);
     this._clearSplitDom(lastWin);
     lastWin.content.classList.remove('tab-hidden');
     const standaloneIcon = lastWin.titleBar.querySelector(':scope > .window-icon-stack');

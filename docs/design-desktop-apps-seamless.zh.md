@@ -117,6 +117,17 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 
 **Gate**：fast test-desktop-seamless（判定表全矩阵 + 暂停条件 + 用户开关优先级）；test-xpra-client §2 加 `initiate-moveresize` ⇒ `on.moveresize` 事件（假 worker）；heavy test-desktop-xpra-window 加两腿：计算器 ⇒ `.window.seamless`、标题栏 `offsetHeight 0`、拖 header bar 120×64 ⇒ 窗口 `left/top` 各 +120/+64（±2）、X 主窗口仍 (0,0)；xterm ⇒ 不 seamless、标题栏可见；控制组 = M3b 今天的行为（什么都不动）。
 
+**已交付（lane B，2026-09-25，2.369.177）**——按上文实现；与计划不同之处与实测：
+- **判定逐字是 §3.3 的公式**（`src/lib/desktop-seamless.js`）；`why` 先答"想不想"（user / setting-off / ssd / csd），再答暂停，于是菜单能说"agent 操作期间显示边框"而不是"没有标题栏"。被 block 的第二个客户端没有画面、无从得知应用的边框，所以它答 `ssd`（bar 显示在 "Resume here" 覆盖层之上）而不是 `disconnected`——结果相同。
+- **开关的两套词。** 菜单说的是 FRAME（"显示窗口边框 ▸ 自动/开/关"，user state `desktopAppFrame[<应用 id 或 exec:basename>]` 存的是边框词）；判定里的 `userToggle` 说的是 SEAMLESS——边框"开" ⇒ userToggle off。一个 PURE 函数负责互译。
+- **展开的时间：** 窗顶 6 px（几何判断，resize 手柄仍拥有边缘）悬停 250 ms，或在活动窗口上按住 Alt；两条 bar **叠在**应用之上（悬停绝不改变 pane 尺寸——应用不会因此重新 fit）；指针回到应用内或松开 Alt 后停留 1.5 s（"滑出 1.5 s"按停留理解），指针离开窗口立即收起。
+- **拖动进入同一套机制：** `WindowManager.beginDragFromPointer` 从手势的按下点（由 xpra 的 x_root/y_root 换算）开始标题栏自己的拖动，由逐次拖动的 AbortController 上的 POINTER 事件驱动——pane 取消了自己的 pointerdown，浏览器不会再发兼容的鼠标事件。视图把指针交出去：释放 capture、不再向 X 转发移动、在 document 的 pointerup 上只向 X 发一次按键释放。**实测**：拖 header bar 120×64 ⇒ 窗口移动 120/64；X 与客户端都保持主窗口在 0,0；M3b 的"2 条报文"是 `[8 MOVE, button 1]`，以及松开时的 `[11 CANCEL, 0, 0, button 0]`——GTK4 在松开时发 CANCEL，晚于我们的 drop（无操作）。
+- **菜单只有一层子菜单**（showContextMenu）："Desktop app ▸ Keep running / Stop / Scale ▸"变成窗口/任务栏菜单里的四个顶层行——显示窗口边框 ▸、缩放 ▸、保持运行、停止应用——展开后的 ⋯ 里是同样的行。
+- **诚实清单，实际落地：** blocked 覆盖层与 fit 角标不变（在 pane 里）；状态条折起时复制 chip 浮在 pane **右下角**、10 s 后自隐（r1：原计划的右上角正好盖住 CSD header bar 自己的 ─ □ ✕——在 GNOME 计算器上实测）；idle 停止前最后一分钟是 toast；未连接 = 暂停（状态条与 Reconnect 显示），而不是另做一个覆盖层；agent 租约与标签组暂停；焦点 = 1 px `--border-active` 边框。
+- **顺手发现：** 在应用画面里点击从不会激活它的 VibeSpace 窗口（被取消的 pointerdown 压掉了窗口焦点监听所等的 mousedown）——用窗口上的 capture 阶段 pointerdown 修复。
+- Gate：test-desktop-seamless（fast）、test-xpra-client §2d/§2e、test-desktop-xpra-window §12（heavy，控制组 = 判定强制为 false 的副本）。
+- **验证者 r1（2026-09-25），与首版的三处不同，每条都先在真实链路上复现为红：** (a) 从**最大化**的 seamless 窗口拖出来（应用的 header bar 或我们的标题栏）会让 X 保持 `maximized: true`——应用一直显示还原图标，第一次点击是死的；window.js 拖动取消最大化时现在像其他所有取消最大化一样调用 `onResize`（取消拖动而重新最大化时也调用），由它发出 `setAppState({maximized:false})`；(b) 浮动复制 chip 挪到 pane **右下角**（右上角在它的 10 s 里盖住应用的 ─ □ ✕）；(c) 展开后的标题栏与状态条原来是 z-index 25 / 24，压在 resize 手柄（10）之上，于是 250 ms 展开之后按在顶边 3 px 手柄带上变成了标题栏**拖动**——现在是 9 / 8，展开时顶边仍然是 resize（§12 (4) 命中测试，把 25 放回去的现场控制组）。热区仍是几何判断。
+
 ### 3.4 DPI：从 VibeSpace 自己的缩放推导，每窗可改
 
 - **推导（PURE，`appScaleFor(setting, dpr, uiScale)`）**：`eff = clamp(dpr × uiScale, 1, 3)`；`gdk = eff < √2 ? 1 : eff < 2√2 ? 2 : 3`（r2 的比例就近规则推广到 3）；`dpi = max(96, round(96 × eff / gdk))`（余数只向上进 dpi，永不把文字缩到 96 以下）。`scaleKnobs(eff)` 接受任意有效值，返回 `{scale: eff, gdkScale, dpi, env, xresources}`（GDK_SCALE、QT_SCALE_FACTOR=gdk、XTerm faceSize = 8 × gdk × (dpi/96)）。表：
@@ -204,9 +215,9 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 
 1. Firefox / Safari 的手势窗：Firefox 同为 5 s 瞬时激活（规范），Safari 可能要求同步——都未实测；退路是 chip，不会更糟。
 2. Chrome 的 `unsafely-treat-insecure-origin-as-secure` flag 让 `navigator.clipboard` 出现——按文档行为，未实测。
-3. GTK4 在 xpra 下是否画 最小化/最大化 按钮；`window-metadata {maximized|iconic}` 是否如预期到达——未实测（§6-5）。
-4. CSD 边角 resize 的 `initiate-moveresize` direction 0–7——只量了 MOVE（8）。
+3. ~~GTK4 在 xpra 下是否画 最小化/最大化 按钮~~——**2026-09-25 已实测（lane B）**：GTK 4.22 / GNOME 计算器 50 在 xpra 6.5.3 下画出 最小化、最大化 和 关闭；点击它们分别发 `window-metadata {maximized:true|false}` / `{iconic:true}`，映射为我们窗口的 最大化 / 还原 / 最小化（set 语义），我们的还原会回发 `{iconified:false}`（xpra 回 `{iconic:false}`，应用重新绘制）。钉在 test-desktop-xpra-window §12 (3)。
+4. CSD 边角 resize 的 `initiate-moveresize` direction 0–7——**2026-09-25 已实测**：GNOME 计算器在 xpra 下（无合成器 ⇒ 无阴影 ⇒ 无 CSD resize 边框）从边和角都**不发**任何 direction；缩放仍靠我们的 8 个手柄（seamless 下保留）。0–7 / 9 / 10 仍接到手柄自己的 resize 路径，并在假 worker 上钉住（test-xpra-client §2d）。
 5. Qt 的 `QT_SCALE_FACTOR` 小数、Electron 的 `--force-device-scale-factor`——未实测（D9）。
 6. 机队镜像 xpra 3.1.3 的协议——仍 OPEN（D7 建议绕过）。
 7. 远程链路上的实际延迟与 x5 座位切换——未实测（没有配对设备可用）；§7.1 的 netem 数字是同一条 ws 上的上界估计。
-8. 一个把 `decorations` 设 0 但没有自己关闭按钮的应用（kiosk/splash 型）会自动 seamless——逃生口永远在（热区、任务栏菜单、Alt），但第一次可能让人愣一下；全局 `desktop.seamless=off` 是一键回退。
+8. 一个把 `decorations` 设 0 但没有自己关闭按钮的应用（kiosk/splash 型）会自动 seamless——逃生口永远在（热区、任务栏菜单、Alt），但第一次可能让人愣一下；全局 `desktop.seamless=off` 是一键回退。 **已交付，每个逃生口都有 gate（lane B）**：热区与 Alt（test-desktop-xpra-window §12 (4)/(5)）、任务栏菜单（§12 (8)）、设置 → 无缝桌面应用窗口 = 关（§12 (8)）；kiosk 应用自己的窗口关闭时我们的窗口照样关闭（§3.2）。

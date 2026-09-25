@@ -389,6 +389,105 @@ console.log('§2c round 3 A2 (docs/design-desktop-apps-seamless §3.2): the oute
   c.close();
 }
 
+console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): initiate-moveresize ⇒ on.moveresize (8 move, 0–7 resize, 9/10 keyboard, 11 cancel); on.main names the decorations; on.state the app\'s own maximize/minimize; setMainState tells the display');
+{
+  const S = await import('../src/lib/desktop-seamless.js');
+  // the PURE word
+  ok(same(P.parseMoveResize(['initiate-moveresize', 4, 120, 22, 8, 1, 1]), { wid: 4, xRoot: 120, yRoot: 22, direction: 8, button: 1, source: 1 }) && same(P.parseMoveResize(['window-initiate-moveresize', 4, 0, 0, 11, 0, 1]), { wid: 4, xRoot: 0, yRoot: 0, direction: 11, button: 0, source: 1 }), 'parseMoveResize reads both names (6.5.3 sends the BACKWARDS_COMPATIBLE `initiate-moveresize`, MEASURED) — [wid, x_root, y_root, direction, button, source]');
+  ok(P.parseMoveResize(['draw', 1]) === null && P.parseMoveResize(['initiate-moveresize', 4, 0, 0, 'x']) === null && P.parseMoveResize(null) === null, 'parseMoveResize: anything else is null (never guessed)');
+  const run = async (mod, { watch = false, viewOnly = false, dormant = false } = {}) => {
+    FakeWorker.instances.length = 0;
+    const ev = { mr: [], main: [], state: [] };
+    const c = mod.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 900, height: 600 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null,
+      on: { moveresize: (e) => ev.mr.push(e), main: (w) => ev.main.push(w ? { wid: w.wid, decorations: w.meta.decorations, maximized: w.meta.maximized } : null), state: (w, ch) => ev.state.push([w.wid, ch]) } });
+    c.connect();
+    const w = await until(() => FakeWorker.instances[0]);
+    await until(() => w.sent('hello').length);
+    w.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    w.feed(['new-window', 4, 0, 0, 360, 616, { title: 'Calculator', 'window-type': ['NORMAL'], decorations: 0, 'size-constraints': { 'minimum-size': [360, 616] } }]);
+    w.feed(['new-window', 5, 40, 40, 200, 100, { title: 'About', 'transient-for': 4, 'window-type': ['DIALOG'], decorations: 0 }]);
+    c.watch = watch; c.viewOnly = viewOnly; c.dormant = dormant;
+    const cfg0 = w.sent('configure-window').length;
+    for (const d of [8, 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]) w.feed(['initiate-moveresize', 4, 120 + d, 22, d, d === 11 ? 0 : 1, 1]);
+    w.feed(['window-initiate-moveresize', 5, 10, 10, 8, 1, 1]);
+    w.feed(['initiate-moveresize', 99, 10, 10, 8, 1, 1]);
+    await sleep(10);
+    return { c, w, ev, cfgAfter: w.sent('configure-window').length - cfg0 };
+  };
+  const A = await run(C);
+  ok(A.ev.mr.length === 13 && same(A.ev.mr.map((e) => e.direction).slice(0, 12), [8, 0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11]) && same(A.ev.mr[0], { wid: 4, xRoot: 128, yRoot: 22, direction: 8, button: 1, source: 1, main: true }), 'every initiate-moveresize of a known window reaches on.moveresize with its direction, press point and button, `main` naming the main window', A.ev.mr.slice(0, 2));
+  ok(A.ev.mr[12].wid === 5 && A.ev.mr[12].main === false, 'a DIALOG\'s own drag is surfaced as not-main (the window leaves it to the app — only the main moves the VibeSpace window)');
+  const ops = A.ev.mr.slice(0, 12).map((e) => S.moveResizeAction(e.direction));
+  ok(same(ops, [{ op: 'move' }, { op: 'resize', dir: 'nw' }, { op: 'resize', dir: 'n' }, { op: 'resize', dir: 'ne' }, { op: 'resize', dir: 'e' }, { op: 'resize', dir: 'se' }, { op: 'resize', dir: 's' }, { op: 'resize', dir: 'sw' }, { op: 'resize', dir: 'w' }, { op: 'resize', dir: 'se' }, { op: 'move' }, { op: 'cancel' }]), 'the mapping (PURE moveResizeAction): 8 MOVE ⇒ move; 0–7 ⇒ the eight edges nw n ne e se s sw w; 9 SIZE_KEYBOARD ⇒ resize from se, 10 MOVE_KEYBOARD ⇒ move (the mouse takes over); 11 CANCEL ⇒ cancel', ops);
+  ok(A.cfgAfter === 0 && A.c.windows.get(4).x === 0 && A.c.windows.get(4).y === 0, `the client applies NOTHING itself: no configure-window for any of the 13 gestures (${A.cfgAfter}) — the X main window stays at 0,0 (the belt does not move); the VibeSpace window moves`);
+  ok(A.ev.main.length >= 1 && A.ev.main[0].wid === 4 && A.ev.main[0].decorations === 0 && S.isCsd(A.c.windows.get(4).meta), 'on.main names the main window with its metadata the moment it maps — `decorations: 0` = the app draws its own title bar (isCsd)', A.ev.main);
+  A.w.feed(['window-metadata', 4, { maximized: true }]);
+  A.w.feed(['window-metadata', 4, { iconic: true }]);
+  A.w.feed(['window-metadata', 4, { title: 'Calc 2' }]);
+  A.w.feed(['window-metadata', 5, { maximized: true }]);
+  ok(same(A.ev.state, [[4, { maximized: true }], [4, { iconic: true }], [5, { maximized: true }]]), 'on.state carries window-metadata {maximized} / {iconic} as sent (a title change is not a state); the view filters to the main window', A.ev.state);
+  ok(A.ev.main.slice(-1)[0] && A.ev.main.slice(-1)[0].maximized === true && A.ev.main.length >= 4, 'on.main re-fires for every metadata change of the main window (the verdict re-reads its decorations)');
+  const n0 = A.w.sent('configure-window').length;
+  ok(A.c.setMainState({ maximized: false }) === true && same(A.w.sent('configure-window').slice(n0)[0], ['configure-window', 4, 0, 0, A.c.windows.get(4).w, A.c.windows.get(4).h, {}, 0, { maximized: false }, false]), 'setMainState({maximized:false}) ⇒ configure-window of the MAIN at its own geometry with the state dict (the ui driver\'s; xpra seamless.py _set_window_state)');
+  ok(A.c.setMainState({ iconified: false }) === true && same(A.w.sent('configure-window').slice(-1)[0][8], { iconified: false }) && A.c.setMainState({ bogus: 1 }) === false, 'setMainState({iconified:false}) likewise; an empty/unknown state sends nothing');
+  A.c.close();
+  for (const [name, o] of [['Watch', { watch: true }], ['view-only', { viewOnly: true }], ['blocked (dormant)', { dormant: true }]]) {
+    const B = await run(C, o);
+    ok(B.ev.mr.length === 0 && B.c.setMainState({ maximized: true }) === false, `${name}: no on.moveresize and no setMainState — only the DRIVING pane moves the window the app asked to move`);
+    B.c.close();
+  }
+  // NEGATIVE CONTROL: the pre-lane client (initiate-moveresize in the ignore list — M3b, "today the drag does nothing")
+  const src = read('src/lib/xpra-client.js');
+  const line = "      case 'initiate-moveresize': case 'window-initiate-moveresize': moveResizeAsked(p); return;\n";
+  ok(src.split(line).length === 2, 'the moveresize dispatch is spelled once (the control removes exactly it)');
+  const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', src.replace(line, ''), 'moveresize')).href);
+  const M = await run(Cpre);
+  ok(M.ev.mr.length === 0, `CONTROL: the pre-lane client surfaces NO move (${M.ev.mr.length} events for 14 packets) — the header-bar drag did nothing (M3b)`);
+  M.c.close();
+}
+
+console.log('§2e lane B — the VIEW hands the header-bar gesture over: the press point in viewport px, capture released, no motion to X, ONE button release from wherever it is let go');
+{
+  const docL = [];
+  const prevAdd = doc.addEventListener;
+  doc.addEventListener = (k, fn, o) => docL.push({ k, fn, o });
+  const fireDoc = (k, ev) => { for (const l of docL.filter((x) => x.k === k && !(x.o && x.o.signal && x.o.signal.aborted))) l.fn({ preventDefault() {}, ...ev }); };
+  try {
+    const host = new El('div');
+    const got = [], mains = [], states = [];
+    const view = V.createXpraView(host, { url: 'ws://x/stream', workerUrl: '/w.js', Worker: FakeWorker, decode: async () => ({ close() {} }), pixelRatio: () => 2, onMoveResize: (e) => got.push(e), onMain: (m) => mains.push(m), onState: (c) => states.push(c) });
+    const pane = view.pane;
+    pane.clientWidth = 400; pane.clientHeight = 300; pane.rect = { left: 50, top: 80 };
+    FakeWorker.instances.length = 0;
+    await view.connect();
+    const wk = await until(() => FakeWorker.instances[0]);
+    await until(() => wk.sent('hello').length);
+    wk.feed(['hello', { 'packet-types': ['keyboard-config', 'display-configure'] }]);
+    wk.feed(['new-window', 7, 0, 0, 800, 600, { title: 'Calculator', 'window-type': ['NORMAL'], decorations: 0 }]);
+    ok(mains.length >= 1 && mains.slice(-1)[0].decorations === 0, 'onMain hands the window the main metadata (decorations 0)');
+    pane.fire('pointerdown', { clientX: 110, clientY: 91, button: 0, pointerId: 3 });
+    ok(pane.captured === true, 'the press is captured by the pane as always');
+    wk.feed(['initiate-moveresize', 7, 120, 22, 8, 1, 1]);
+    ok(got.length === 1 && got[0].direction === 8 && got[0].main === true && same(got[0].press, { clientX: 110, clientY: 91 }) && got[0].held === true, 'onMoveResize: direction 8, the press point in VIEWPORT px (X root 120,22 device px at ratio 2 + the pane at 50,80 ⇒ 110,91)', got[0]);
+    ok(pane.captured === false && view.wmHeld === true, 'the pane RELEASES its pointer capture — the window manager\'s drag owns the pointer now');
+    wk.posted.length = 0;
+    pane.fire('pointermove', { clientX: 200, clientY: 150, pointerId: 3 });
+    await sleep(10);
+    pane.fire('pointerup', { clientX: 230, clientY: 155, button: 0, pointerId: 3 });
+    ok(wk.all.length === 0, 'while held: no motion and no release through the pane (it would say where the pointer is on a window that moves under it)', wk.all);
+    fireDoc('pointerup', { clientX: 230, clientY: 155, button: 0, pointerId: 3 });
+    const rel = wk.all.filter((p) => p[0] === 'button-action');
+    ok(rel.length === 1 && rel[0][3] === false && rel[0][2] === 1 && view.wmHeld === false, 'the document pointerup releases the button in X exactly ONCE (the app is never left with a button stuck down)', rel);
+    fireDoc('pointerup', { clientX: 230, clientY: 155, button: 0, pointerId: 3 });
+    ok(wk.all.filter((p) => p[0] === 'button-action').length === 1, '…and the hold is gone with it (its listeners were per-press — a second pointerup sends nothing)');
+    wk.feed(['initiate-moveresize', 7, 0, 0, 11, 0, 1]);
+    ok(got.length === 2 && got[1].direction === 11 && got[1].press === null && got[1].held === false, 'the CANCEL GTK sends on the button release arrives after it (x_root 0,0 ⇒ no press point) — nothing held');
+    wk.feed(['window-metadata', 7, { maximized: true }]);
+    ok(same(states, [{ maximized: true }]), 'onState: the main window\'s maximize reaches the window');
+    view.dispose();
+  } finally { doc.addEventListener = prevAdd; }
+}
+
 console.log('§3 the view under the fake DOM (xpra-view.js): both clipboard branches, the keyboard, the pointer, the ladder');
 {
   const mk = (opts) => {

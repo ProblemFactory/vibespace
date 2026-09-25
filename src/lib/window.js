@@ -277,14 +277,19 @@ class WindowManager {
       }
     };
 
+    // ONE start for every drag of this window: the title bar's mousedown, and (seamless, round 3 lane B) a pointer
+    // the app's own header bar handed over (beginDragFromPointer) — the same move and drop handlers from here on
+    const beginAt = (x, y) => {
+      mouseDown = true; dragging = false; tabMergeTarget = null;
+      startX = x; startY = y;
+      initL = element.offsetLeft; initT = element.offsetTop;
+      shiftDragStart = -1;
+      resetShake({ clientX: x, clientY: y });
+    };
     titleBar.addEventListener('mousedown', (e) => {
       // the split button is a button, never a drag handle (split UX R1)
       if (e.target.closest('.window-controls') || e.target.closest('.tab-item') || e.target.closest('.window-icon-stack') || e.target.closest('.tab-split-btn') || e.button !== 0) return;
-      mouseDown = true; dragging = false; tabMergeTarget = null;
-      startX = e.clientX; startY = e.clientY;
-      initL = element.offsetLeft; initT = element.offsetTop;
-      shiftDragStart = -1;
-      resetShake(e);
+      beginAt(e.clientX, e.clientY);
       e.preventDefault();
     });
 
@@ -313,6 +318,10 @@ class WindowManager {
     element.style.left = ((e.clientX - wsr.left) / uiScale() - prevW * ((e.clientX - wsr.left) / (this.workspace.offsetWidth * uiScale()))) + 'px'; element.style.top = '0px';
           initL = element.offsetLeft; initT = element.offsetTop;
           startX = e.clientX; startY = e.clientY;
+          // the drag UN-MAXIMIZED the window — say so like every other un-maximize (restore / toggleMaximize): a seamless
+          // desktop app's own header bar keeps its maximize / restore state from this (lane B fix r1 — without it the app
+          // kept its restore glyph and its next click was dead)
+          if (win.onResize) { try { win.onResize(); } catch {} }
         }
         // Restore pre-snap size when dragging out of a snap
         if (win._isSnapped && win._preSnapBounds) {
@@ -499,18 +508,29 @@ class WindowManager {
       });
     };
 
-    const onUp = (e) => {
-      // Cancel any queued frame so processMove can't run after the drop
-      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
-      if (!mouseDown) return;
-      mouseDown = false;
-      if (!dragging) return;
-      dragging = false; element.classList.remove('dragging');
+    /** The drag's transient chrome, gone (the drop and the cancel share it). */
+    const clearDragVisuals = () => {
+      element.classList.remove('dragging');
       clearShakeBadge(); // remove the "snap off" indicator (all drop paths below may early-return)
       this.snapIndicator.style.display = 'none';
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
       document.querySelectorAll('.desktop-preview').forEach(p => p.classList.remove('desktop-preview-drop'));
+    };
+    // SEAMLESS (round 3 lane B): a drag started from a pointer the app's header bar handed over is fed by POINTER
+    // events (the pane cancelled its pointerdown, so the browser sends no compatibility mouse events for that press);
+    // they drive the SAME onMove / onUp and are removed with the drag (a per-drag controller, never a per-render one)
+    let pointerFeed = null, cancelBounds = null;
+    const onUp = (e) => {
+      // Cancel any queued frame so processMove can't run after the drop
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
+      if (pointerFeed) { pointerFeed.abort(); pointerFeed = null; }
+      cancelBounds = null;
+      if (!mouseDown) return;
+      mouseDown = false;
+      if (!dragging) return;
+      dragging = false;
+      clearDragVisuals();
 
       // Desktop preview drop: if we have a mini window inside a preview, commit the move
       if (deskPreviewTarget && deskMiniWin) {
@@ -628,6 +648,46 @@ class WindowManager {
     };
     const signal = win._listenerCtl?.signal;
     document.addEventListener('mousemove', onMove, { signal }); document.addEventListener('mouseup', onUp, { signal });
+    /** seamless: enter THIS drag from a pointer already down elsewhere (the app's header bar) — `press` = where the
+     *  gesture began (the window follows the pointer from there), `at` = where the pointer is now (applied at once). */
+    win._beginDragFromPointer = ({ press = null, at = null } = {}) => {
+      if (mouseDown) return false;
+      const p0 = press || at;
+      if (!p0 || !Number.isFinite(p0.clientX) || !Number.isFinite(p0.clientY)) return false;
+      cancelBounds = { left: element.style.left, top: element.style.top, width: element.style.width, height: element.style.height, isMaximized: win.isMaximized, prevBounds: win.prevBounds, isSnapped: win._isSnapped };
+      beginAt(p0.clientX, p0.clientY);
+      pointerFeed = new AbortController();
+      const fs = { signal: pointerFeed.signal };
+      document.addEventListener('pointermove', onMove, fs);
+      document.addEventListener('pointerup', onUp, fs);
+      document.addEventListener('pointercancel', () => win._cancelPointerDrag?.(), fs);
+      if (at && (at.clientX !== p0.clientX || at.clientY !== p0.clientY)) onMove({ clientX: at.clientX, clientY: at.clientY, altKey: !!at.altKey, shiftKey: !!at.shiftKey, timeStamp: performance.now() });
+      return true;
+    };
+    /** seamless (X's MOVERESIZE_CANCEL): end the drag with NO drop — the window goes back where it was. */
+    win._cancelPointerDrag = () => {
+      if (!mouseDown) return false;
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingMoveEv = null; }
+      if (pointerFeed) { pointerFeed.abort(); pointerFeed = null; }
+      mouseDown = false;
+      if (dragging) {
+        dragging = false;
+        clearDragVisuals();
+        if (deskMiniWin) { deskMiniWin.remove(); deskMiniWin = null; }
+        const srcRect = document.querySelector(`.desktop-preview.active .desktop-preview-win[data-win-id="${win.id}"]`);
+        if (srcRect) srcRect.style.visibility = '';
+        this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
+      }
+      element.style.display = ''; element.style.visibility = ''; element.style.pointerEvents = '';
+      const b = cancelBounds; cancelBounds = null;
+      if (b) {
+        const wasMax = win.isMaximized;
+        element.style.left = b.left; element.style.top = b.top; element.style.width = b.width; element.style.height = b.height; win.isMaximized = b.isMaximized; win.prevBounds = b.prevBounds; win._isSnapped = b.isSnapped;
+        if (wasMax !== win.isMaximized && win.onResize) { try { win.onResize(); } catch {} } // a cancel that RE-maximizes says so too
+      }
+      tabMergeTarget = null; savedBounds = null; deskPreviewTarget = null; deskSavedBounds = null; shiftDragStart = -1;
+      return true;
+    };
   }
 
   _snapVal(val, gridLines, threshold) {
@@ -651,11 +711,12 @@ class WindowManager {
   }
 
   _setupResize(win) {
-    win.element.querySelectorAll('.resize-handle').forEach(handle => {
-      handle.addEventListener('mousedown', (e) => {
-        e.stopPropagation(); e.preventDefault();
-        const dir = handle.dataset.dir, sX = e.clientX, sY = e.clientY;
+    // ONE resize for every start: a handle's mousedown, and (seamless, round 3 lane B) a pointer the app's own window
+    // edge handed over (beginResizeFromPointer — fed by pointer events, the pane cancelled its pointerdown)
+    const startResize = (dir, sX, sY, { pointer = false, at = null } = {}) => {
+        if (win._resizeOp) return false;
         const sW = win.element.offsetWidth, sH = win.element.offsetHeight, sL = win.element.offsetLeft, sT = win.element.offsetTop;
+        const sBounds = { left: win.element.style.left, top: win.element.style.top, width: win.element.style.width, height: win.element.style.height };
         const SNAP_T = 15;
 
         const processMove = (e) => {
@@ -692,10 +753,16 @@ class WindowManager {
           if (raf) return;
           raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev) processMove(ev); });
         };
-        const onUp = () => {
+        const feed = pointer ? new AbortController() : null;
+        const detach = () => {
+          win._resizeOp = null;
           if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
           document.removeEventListener('mousemove', onMove);
           document.removeEventListener('mouseup', onUp);
+          feed?.abort();
+        };
+        const onUp = () => {
+          detach();
           // Update gridBounds after resize (if window was grid-tracked, keep tracking with new proportions)
           if (win.gridBounds) this._captureGridBounds(win);
           if (win._tabChain) this._syncChainBounds(win._tabChain);
@@ -708,8 +775,57 @@ class WindowManager {
           this._notify();
         };
         document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp);
+        if (feed) {
+          document.addEventListener('pointermove', onMove, { signal: feed.signal });
+          document.addEventListener('pointerup', onUp, { signal: feed.signal });
+          document.addEventListener('pointercancel', () => win._resizeOp?.cancel(), { signal: feed.signal });
+        }
+        // X's MOVERESIZE_CANCEL: stop with the window back at its size before the gesture
+        win._resizeOp = { cancel: () => { detach(); Object.assign(win.element.style, sBounds); if (win.onResize) win.onResize(); return true; } };
+        if (at && (at.clientX !== sX || at.clientY !== sY)) processMove({ clientX: at.clientX, clientY: at.clientY, altKey: !!at.altKey });
+        return true;
+    };
+    win._beginResizeFromPointer = (dir, { press = null, at = null } = {}) => {
+      const p0 = press || at;
+      if (!/^(n|s|e|w|ne|nw|se|sw)$/.test(String(dir)) || !p0 || !Number.isFinite(p0.clientX) || !Number.isFinite(p0.clientY)) return false;
+      return startResize(dir, p0.clientX, p0.clientY, { pointer: true, at });
+    };
+    win.element.querySelectorAll('.resize-handle').forEach(handle => {
+      handle.addEventListener('mousedown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        startResize(handle.dataset.dir, e.clientX, e.clientY);
       });
     });
+  }
+
+  /** SEAMLESS (round 3 lane B, docs/design-desktop-apps-seamless §3.3): the app's own header bar asked its window
+   *  manager to MOVE the window (xpra `initiate-moveresize` direction 8) — enter this window's EXISTING title-bar drag
+   *  from the pointer that is already down (grid snap, shake bypass, the tab-merge hit test, the desktop-preview drop:
+   *  all as a title-bar drag). `press` / `at` are viewport points ({clientX, clientY}). A tab guest drags its chain's
+   *  host (the title bar that carries the chain). Returns whether a drag started. */
+  beginDragFromPointer(id, { press = null, at = null } = {}) {
+    let win = this.windows.get(id); if (!win) return false;
+    if (win._tabChain && win._tabChain.tabs[0] !== win.id) win = this.windows.get(win._tabChain.tabs[0]);
+    if (!win || win.isMinimized || typeof win._beginDragFromPointer !== 'function') return false;
+    this.focusWindow(win.id);
+    return win._beginDragFromPointer({ press, at });
+  }
+  /** SEAMLESS: …to RESIZE it from an edge (directions 0–7 ⇒ 'nw' 'n' 'ne' 'e' 'se' 's' 'sw' 'w') — the resize handle's
+   *  own path (the window's minimum, the grid-line snap, the chain bounds on release). */
+  beginResizeFromPointer(id, dir, { press = null, at = null } = {}) {
+    let win = this.windows.get(id); if (!win) return false;
+    if (win._tabChain && win._tabChain.tabs[0] !== win.id) win = this.windows.get(win._tabChain.tabs[0]);
+    if (!win || win.isMinimized || win.isMaximized || typeof win._beginResizeFromPointer !== 'function') return false;
+    return win._beginResizeFromPointer(dir, { press, at });
+  }
+  /** SEAMLESS (MOVERESIZE_CANCEL): end a pointer-started move or resize of this window and put it back. */
+  cancelPointerOp(id) {
+    let win = this.windows.get(id); if (!win) return false;
+    if (win._tabChain && win._tabChain.tabs[0] !== win.id) win = this.windows.get(win._tabChain.tabs[0]);
+    if (!win) return false;
+    const a = win._cancelPointerDrag ? win._cancelPointerDrag() : false;
+    const b = win._resizeOp ? win._resizeOp.cancel() : false;
+    return a || b;
   }
 
   /**

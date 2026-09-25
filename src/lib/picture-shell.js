@@ -27,9 +27,18 @@
 // (the retired desktop-window.js is its control) across vnc-view.js AND this
 // file; scripts/test-xpra-client.mjs censuses that `.desktop-bar` is built
 // here and nowhere else.
+// SEAMLESS (round 3 lane B, docs/design-desktop-apps-seamless §3.3): the
+// container carries `.picture-shell` so a seamless window's CSS can fold the
+// bar into its 0-height hot zone; `setFloatingChip(true)` makes the copy chip
+// (and the one-time hint) a FLOATING chip at the pane's top-right while the
+// bar is folded — it hides itself after FLOATING_CHIP_MS (the design's honest
+// list: "pane 右上角浮 chip，10 s 自隐"), the click still copies.
 import { t } from './i18n.js';
 import { COUNTER_ZOOM, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
+
+/** A floating copy chip (a seamless window's folded bar) hides itself after this long. */
+export const FLOATING_CHIP_MS = 10000;
 
 /** The bounded auto-reconnect ladder (ms) a caller may opt into. */
 export const RECONNECT_LADDER = [1000, 2000, 4000, 8000, 15000];
@@ -109,6 +118,7 @@ export function streamUrl(pathname) {
 export function createPictureShell(host, { labels = {}, autoReconnect = false, onStatus = null, background = '#000', focus = null } = {}) {
   const L = { starting: t('Starting desktop…'), unavailable: t('Desktop unavailable on this server'), ...labels };
   const container = document.createElement('div');
+  container.className = 'picture-shell';
   // the retired window's literal, verbatim (test-vnc-view §2 pins it); a view may recolour it
   const containerCss = 'display:flex;flex-direction:column;height:100%;background:#000';
   container.style.cssText = background === '#000' ? containerCss : containerCss.replace('#000', background);
@@ -239,11 +249,16 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
 
   // ── app → browser: the API on a secure context, else the COPY CHIP ──
   let copiedText = null;
-  const hideCopied = () => { copiedText = null; copyChip.style.display = 'none'; };
+  let floating = false, floatTimer = null;
+  const hideCopied = () => { copiedText = null; copyChip.style.display = 'none'; clearTimeout(floatTimer); floatTimer = null; };
+  /** seamless: the chip floats over the pane (the bar is folded) and goes away by itself after FLOATING_CHIP_MS. */
+  const armFloat = () => { clearTimeout(floatTimer); floatTimer = null; if (floating && copiedText != null) floatTimer = setTimeout(() => { floatTimer = null; if (floating) { hideCopied(); copyHint.style.display = 'none'; } }, FLOATING_CHIP_MS); };
+  const setFloatingChip = (on) => { floating = !!on; container.classList.toggle('picture-shell-floating-chip', floating); armFloat(); };
   const hintStorage = () => { try { return typeof localStorage !== 'undefined' ? localStorage : null; } catch { return null; } };
   /** `insecure` = the chip is shown because the PAGE is plain http (not an API refusal) — the one case the hint names. */
   const showCopied = (text, { insecure = false } = {}) => {
     copiedText = String(text); copyChip.style.display = '';
+    armFloat();
     const st = hintStorage();
     if (insecure && copyHintDue({ secure: false, storage: st })) {
       copyHint.style.display = '';
@@ -273,7 +288,7 @@ export function createPictureShell(host, { labels = {}, autoReconnect = false, o
     return 'api';
   };
 
-  const close = () => { closed = true; unwant(); closePasteBox({ refocus: false }); };
+  const close = () => { closed = true; unwant(); closePasteBox({ refocus: false }); clearTimeout(floatTimer); };
 
-  return { container, bar, mount, status, pasteBtn, reBtn, copyChip, copyHint, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; }, get hintShown() { return copyHint.style.display !== 'none'; } };
+  return { container, bar, mount, status, pasteBtn, reBtn, copyChip, copyHint, labels: L, setStatus, addControl, emit, scheduleRetry, resetLadder, want, unwant, close, pasteFromClipboard, openPasteBox, closePasteBox, deliverCopy, showCopied, hideCopied, setFloatingChip, get floatingChip() { return floating; }, get state() { return state; }, get wanted() { return wanted; }, get closed() { return closed; }, get pasteOpen() { return !!pasteBox; }, get copiedText() { return copiedText; }, get hintShown() { return copyHint.style.display !== 'none'; } };
 }

@@ -93,6 +93,24 @@
 // `replacedBy` — and THIS window (on every client, each from the broadcast; the asking one from the answer at once)
 // RETARGETS to the successor: same window, same place, the picture reconnects. A layout replay of a replaced id
 // follows the chain the same way.
+//
+// SEAMLESS (round 3 lane B, docs/design-desktop-apps-seamless §3.3 — the owner: "如果内部窗口具有完整的窗口控制能力
+// （关闭按钮啥的），外部窗口就不应该显示任何东西"): an app that draws its OWN title bar (xpra's main-window metadata
+// `decorations: 0` — GTK's header bar) gets `.window.seamless`: the VibeSpace title bar and the status strip fold into
+// a 0-height hot zone (the 1 px active border and the resize handles stay), and come back — both, together — on a
+// 250 ms hover of the window's top edge or while Alt is held (PURE revealStep: they linger 1.5 s after the pointer
+// goes back into the app or Alt is released; leaving the window folds them). The ONE verdict is PURE seamlessVerdict
+// (src/lib/desktop-seamless.js) over: the app's CSD, the global `desktop.seamless` (auto | off), the per-APP "Show
+// window frame ▸ Auto / On / Off" (user state `desktopAppFrame`, synced), and the PAUSES — an agent lease (the user
+// must see an agent is driving), a tab chain (its tab bar lives in the title bar), a phone (the title bar is its way
+// back), a picture that is not connected (the status + Reconnect must show). The app's own header bar MOVES this
+// window: xpra's `initiate-moveresize` (the view's onMoveResize) enters WindowManager.beginDragFromPointer /
+// beginResizeFromPointer — the title bar's own drag / the handles' own resize (snap, shake, tab merge, desktop drop,
+// the minimum) — while the X main window stays at 0,0; its maximize / minimize buttons (`window-metadata`) map to ours
+// (PURE windowStateAction, SET semantics) and ours are told back to the display (setAppState). What must stay
+// reachable with the bars folded (the design's honest list): the blocked overlay and the fit badge live in the pane;
+// the plain-http copy chip FLOATS at the pane's top-right and hides itself after 10 s; Show window frame ▸, Scale ▸,
+// Keep running and Stop app ride the taskbar / window menu as well as the ⋯; the idle stop < 1 min is a toast.
 import { t } from './i18n.js';
 import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { windowMinForPane } from './window-min-size.js';
@@ -106,6 +124,7 @@ import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
+import { seamlessVerdict, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
 
 const WATCH_HINT_EVERY_MS = 8000;
 
@@ -175,11 +194,16 @@ export function liveChipText(rec) {
   const cpu = Number.isFinite(l.cpuPct) ? `CPU ${Math.max(0, Math.round(l.cpuPct))}% · ` : '';
   return `${cpu}${memoryText(l.memBytes, l.memMetric)}`;
 }
+/** ms until the idle stop (null when the app never times out / is not running). */
+export function idleRemainingMs(rec, now = Date.now()) {
+  if (!rec || !(rec.idleTimeoutMs > 0) || rec.state !== 'ready') return null;
+  return Math.max(0, (Number(rec.lastInputAt) || Number(rec.startedAt) || now) + rec.idleTimeoutMs - now);
+}
 /** Idle countdown text from the record's own clock, computed locally each
  *  second between broadcasts; '' when the app never times out. */
 export function idleChipText(rec, now = Date.now()) {
-  if (!rec || !(rec.idleTimeoutMs > 0) || rec.state !== 'ready') return '';
-  const remaining = Math.max(0, (Number(rec.lastInputAt) || Number(rec.startedAt) || now) + rec.idleTimeoutMs - now);
+  const remaining = idleRemainingMs(rec, now);
+  if (remaining == null) return '';
   const min = Math.ceil(remaining / 60000);
   return min > 1 ? t('idle stop in {n} min', { n: min }) : t('idle stop in under a minute');
 }
@@ -202,6 +226,51 @@ export function exitToastText(rec, name) {
   if (rec.stoppedBy === 'user') return t('{app} stopped', { app });
   if (rec.stoppedBy === 'idle') return t('{app} stopped after {n} min without input', { app, n: Math.max(1, Math.round((Number(rec.idleTimeoutMs) || 0) / 60000)) });
   return rec.lastError ? t('{app} stopped: {why}', { app, why: rec.lastError }) : t('{app} stopped', { app });
+}
+
+// ── SEAMLESS: the per-app "Show window frame" choice (user state `desktopAppFrame`, PATCH merge-only, the
+// jobsPanelFolds pattern) — loaded ONCE per page, kept in step with other clients by the user-state-updated broadcast,
+// written locally FIRST (never waiting for the echo) ──
+let FRAMES = null;
+let framesWired = false;
+const frameSubs = new Set();
+const frameNotify = () => { for (const f of frameSubs) { try { f(); } catch {} } };
+function wireFrames(app) {
+  if (framesWired) return;
+  framesWired = true;
+  app.ws.onGlobal((m) => {
+    if (m.type !== 'user-state-updated' || !m.state || typeof m.state !== 'object' || !('desktopAppFrame' in m.state)) return;
+    FRAMES = m.state.desktopAppFrame && typeof m.state.desktopAppFrame === 'object' ? { ...m.state.desktopAppFrame } : {};
+    frameNotify();
+  });
+  fetchJson('/api/user-state').then((st) => {
+    if (FRAMES !== null) return;
+    FRAMES = st && st.desktopAppFrame && typeof st.desktopAppFrame === 'object' ? { ...st.desktopAppFrame } : {};
+    frameNotify();
+  });
+}
+async function saveFrameChoice(key, choice) {
+  if (!key) return;
+  FRAMES = setFrameChoice(FRAMES, key, choice);
+  frameNotify();
+  const r = await fetchJson('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktopAppFrame: FRAMES }) });
+  if (!r || r.error) showToast(t('Could not save the window frame choice') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
+}
+/** The first, disabled line of Show window frame ▸: what the verdict is and why (the reason words). */
+export function frameStatusText(v) {
+  if (!v) return '';
+  if (v.seamless) return v.why === 'user' ? t('Frame hidden (your choice for this app)') : t('Frame hidden — the app draws its own title bar');
+  if (v.why === 'lease') return t('Frame shown while an agent drives this app');
+  if (v.why === 'chain') return t('Frame shown in a tab group');
+  if (v.why === 'phone') return t('Frame shown on a small screen');
+  if (v.why === 'disconnected') return t('Frame shown until the picture is connected');
+  if (v.why === 'setting-off') return t('Frame shown (Settings → Seamless desktop app windows is off)');
+  if (v.why === 'user') return t('Frame shown (your choice for this app)');
+  return t('Frame shown — the app has no title bar of its own');
+}
+export function frameRowLabel(row) {
+  const mark = row.current ? '✓ ' : '\u2003';
+  return mark + (row.choice === 'on' ? t('On') : row.choice === 'off' ? t('Off') : t('Auto'));
 }
 
 export function openDesktopApp(app, id, { syncId } = {}) {
@@ -249,6 +318,18 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   let closeAskedAt = 0;     // the outer ✕ asked the app (close-window) at — a second ✕ within OUTER_CLOSE_AGAIN_MS stops it
   let lease = null;        // P9b: the agent lease on this app (null = the user's own app, nothing gated)
   let lastHintAt = 0;
+  // seamless (round 3 lane B) — declared before the view exists (its callbacks read them)
+  const lsig = winInfo._listenerCtl?.signal;
+  let mainMeta = null;          // the app's main X window metadata (decorations 0 = it draws its own title bar)
+  let viewConnected = false;    // the picture is up (the verdict pauses while it is not)
+  let appIconified = false;     // the app minimized itself through its own button (restoring ours tells the display)
+  let seamless = { seamless: false, why: 'ssd' };
+  let revealState = revealInitial(), revealTimer = null;
+  let lastPointer = null;       // the last pointer point over this window (a header-bar drag continues from it)
+  let idleWarned = false;
+  const phoneMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 768px)') : null;
+  const frameKey = () => frameKeyOf(rec);
+  const frameChoice = () => frameChoiceOf(FRAMES, frameKey());
   const readyGate = async () => {
     if (!rec) { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error) rec = r; }
     if (!rec) return { ok: false, error: t('This desktop app no longer exists') };
@@ -268,7 +349,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     url: () => { viewerId = newViewerId(); winInfo._windowViewerId = viewerId; return streamUrl(`/api/desktop/${encodeURIComponent(id)}/stream`) + `?viewer=${encodeURIComponent(viewerId)}&pane=${encodeURIComponent(paneKey)}` + (prevPane ? `&prev=${encodeURIComponent(prevPane)}` : ''); }, // the ONE bridge path (test-vnc-view's census) + a fresh per-socket viewer id + the stable pane key (x5) + its predecessor (the grace)
     labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable') },
     before: readyGate, autoReconnect: true,
-    onStatus: (s) => { if (s === 'connected') applyViewOnly(); },
+    onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') applyViewOnly(); applySeamless(); },
   });
   const setAppIcon = (dataUrl) => {
     if (!dataUrl || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return;
@@ -283,7 +364,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const ensureView = (kind) => {
     if (view) return view;
     view = kind === 'xpra'
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96) })
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96) })
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
@@ -299,6 +380,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     }, { capture: true, signal: winInfo._listenerCtl?.signal });
     lastSeat = null;
     applyViewOnly();
+    view.setFloatingChip?.(seamless.seamless);
     return view;
   };
 
@@ -339,6 +421,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   /** Applies this pane's state to the view: the overlay, the mode (input / geometry / fit), the reconnect of a cut pane. */
   function renderSeat() {
     if (!view) return;
+    applySeamless(); // the lease / the seat are verdict inputs
     const st = seatState();
     if (rec) render(); else blockedTitle.textContent = titleText(); // the title bar + the overlay follow the seat (the name's source depends on it) — peer-controlled text, never markup
     if (st === lastSeat) return;
@@ -531,7 +614,10 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     const r = moreBtn.getBoundingClientRect();
-    showContextMenu(r.left, r.bottom + 2, [{ label: t('Scale'), children: scaleItems() }]);
+    const items = [{ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() }];
+    if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
+    if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
+    showContextMenu(r.left, r.bottom + 2, items);
   };
   let relaunching = false;
   async function relaunchAt(choice, scale) {
@@ -558,6 +644,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     for (const [, w] of app.wm.windows) if (w !== winInfo && w._desktopAppId === nextId) { closed = true; app.wm.closeWindow(winInfo.id); return; }
     if (view) { try { view.dispose(); } catch {} try { view.container.remove(); } catch {} }
     view = null; rec = null; gone = false; exitDecided = false; closeAskedAt = 0; lastSeat = null;
+    mainMeta = null; viewConnected = false; appIconified = false; applySeamless();
     seats = { known: false, active: null, viewers: [] }; optimistic = null; lease = null; myTag = null;
     applyMinSize(null);
     id = nextId;
@@ -588,10 +675,109 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // adoption broadcast reaches nobody — re-read the record on every reconnect
   const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); } };
   app.ws.onStateChange(onWs);
-  const tick = setInterval(() => { if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; } }, 1000);
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); });
+  const tick = setInterval(() => {
+    if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; }
+    // seamless: the idle chip is folded away — the last minute before an idle stop is said as a toast, once per approach
+    const left = idleRemainingMs(rec);
+    if (left != null && left < 60000 && seamless.seamless) {
+      if (!idleWarned) { idleWarned = true; winInfo._desktopIdleWarned = Date.now(); showToast(t('{app} stops in under a minute without input — Keep running is in the window menu', { app: titleText() }), { duration: 8000 }); }
+    } else if (left == null || left >= 60000) idleWarned = false;
+  }, 1000);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); clearTimeout(revealTimer); frameSubs.delete(applySeamless); });
   winInfo.onMoved = () => view?.resnap?.(); // a moved window puts the picture back on the device-pixel grid (r2)
   winInfo.onClose = () => { minRo?.disconnect(); if (minRaf) cancelAnimationFrame(minRaf); view?.dispose(); };
+
+  // ── SEAMLESS: the verdict, the hot zone, the header bar driving this window, the app's own maximize / minimize ──
+  function applySeamless() {
+    const v = seamlessVerdict({
+      // the per-app frame choice is about xpra windows (the only ones with a header bar to drag): a whole-display rung is 'auto' + no CSD
+      csd: isCsd(mainMeta), setting: app.settings.get('desktop.seamless'), userToggle: rec && rec.stream === 'xpra' ? userToggleOfFrame(frameChoice()) : 'auto',
+      lease: !!lease, chain: !!winInfo._tabChain, phone: !!phoneMq?.matches, connected: viewConnected,
+    });
+    const was = seamless.seamless;
+    seamless = v;
+    winInfo._desktopSeamless = { ...v, paused: isPaused(v), csd: isCsd(mainMeta), frame: frameChoice(), key: frameKey() }; // the raw handle the suites read
+    winInfo.element.classList.toggle('seamless', v.seamless);
+    view?.setFloatingChip?.(v.seamless);
+    if (was && !v.seamless) stepReveal({ type: 'reset' });
+  }
+  function stepReveal(ev) {
+    const r = revealStep(revealState, ev, performance.now());
+    revealState = r.state;
+    winInfo.element.classList.toggle('seamless-revealed', r.revealed && seamless.seamless);
+    winInfo._desktopReveal = { ...revealState };
+    clearTimeout(revealTimer); revealTimer = null;
+    if (r.wakeAt != null) revealTimer = setTimeout(() => { revealTimer = null; stepReveal({ type: 'tick' }); }, Math.max(0, r.wakeAt - performance.now()) + 1);
+  }
+  const frameItems = () => {
+    const m = frameMenuModel(frameChoice());
+    const head = frameStatusText(seamless);
+    const rows = m.map((r) => ({ label: frameRowLabel(r), disabled: r.disabled, action: () => { saveFrameChoice(frameKey(), r.choice); } }));
+    return head ? [{ label: head, disabled: true }, ...rows] : rows;
+  };
+  const canKeep = () => !!rec && rec.state === 'ready' && rec.idleTimeoutMs > 0;
+  const canStop = () => !!rec && (rec.state === 'ready' || rec.state === 'launching');
+  winInfo._desktopAppFrameItems = frameItems;
+  winInfo._desktopAppCanKeep = canKeep;
+  winInfo._desktopAppCanStop = canStop;
+  winInfo._desktopAppKeep = () => keepBtn.onclick();
+  winInfo._desktopAppStop = () => stopApp();
+  winInfo.onChainChanged = applySeamless;
+  frameSubs.add(applySeamless);
+  wireFrames(app);
+  app.settings.on('desktop.seamless', applySeamless);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { app.settings.off('desktop.seamless', applySeamless); });
+  phoneMq?.addEventListener?.('change', applySeamless, { signal: lsig });
+  // the hot zone: the top HOT_ZONE_PX of the window (a geometry test, so the resize handles keep the edge) — and, once
+  // revealed, the bars themselves
+  winInfo.element.addEventListener('pointermove', (e) => {
+    lastPointer = { clientX: e.clientX, clientY: e.clientY };
+    if (!seamless.seamless) return;
+    const r = winInfo.element.getBoundingClientRect();
+    const inside = e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top - 2 && e.clientY <= r.bottom;
+    const onBar = revealState.revealed && !!(e.target && e.target.closest && e.target.closest('.window-titlebar, .desktop-bar'));
+    const inZone = inside && (e.clientY - r.top <= HOT_ZONE_PX * uiScale() || onBar);
+    if (inZone !== revealState.inZone) stepReveal({ type: inZone ? 'zone-enter' : 'zone-leave' });
+  }, { signal: lsig });
+  winInfo.element.addEventListener('pointerleave', () => { if (seamless.seamless || revealState.revealed) stepReveal({ type: 'window-leave' }); }, { signal: lsig });
+  // Alt held reveals the bars of the ACTIVE seamless window (the key still reaches the app — nothing is swallowed)
+  document.addEventListener('keydown', (e) => { if (e.key === 'Alt' && !e.repeat && seamless.seamless && app.wm.activeWindowId === winInfo.id) stepReveal({ type: 'alt', down: true }); }, { capture: true, signal: lsig });
+  document.addEventListener('keyup', (e) => { if (e.key === 'Alt' && revealState.alt) stepReveal({ type: 'alt', down: false }); }, { capture: true, signal: lsig });
+  window.addEventListener('blur', () => { if (revealState.alt) stepReveal({ type: 'alt', down: false }); }, { signal: lsig });
+  // a press inside the picture makes this THE active window (the pane cancels its pointerdown, so the window's own
+  // mousedown focus never fires for a click on the app — measured on the real rung, round 3 lane B)
+  winInfo.element.addEventListener('pointerdown', () => { if (app.wm.activeWindowId !== winInfo.id) app.wm.focusWindow(winInfo.id); }, { capture: true, signal: lsig });
+
+  function onAppMain(meta) { mainMeta = meta || null; applySeamless(); }
+  /** The app's own header-bar gesture → THIS window (only the driving pane; a dialog's own drag stays the app's). */
+  function onAppMoveResize(ev) {
+    const a = moveResizeAction(ev && ev.direction);
+    const log = (winInfo._desktopMoveResizeLog ||= []);
+    const entry = { direction: ev && ev.direction, op: a ? a.op : null, dir: a && a.dir, main: !!(ev && ev.main), at: Date.now(), started: false };
+    log.push(entry); if (log.length > 20) log.shift();
+    if (!a || !ev.main || seatState() !== 'active') return;
+    if (a.op === 'cancel') { entry.started = app.wm.cancelPointerOp(winInfo.id); return; }
+    const opts = { press: ev.press || null, at: lastPointer };
+    entry.started = a.op === 'move' ? app.wm.beginDragFromPointer(winInfo.id, opts) : app.wm.beginResizeFromPointer(winInfo.id, a.dir, opts);
+  }
+  /** The app's own maximize / minimize buttons → this window (SET semantics; the driving pane only). */
+  function onAppState(changed) {
+    if (seatState() !== 'active') return;
+    const act = windowStateAction(changed, { maximized: !!winInfo.isMaximized, minimized: !!winInfo.isMinimized });
+    (winInfo._desktopStateLog ||= []).push({ changed: { ...changed }, act, at: Date.now() });
+    if (mainMeta) Object.assign(mainMeta, 'maximized' in changed ? { maximized: changed.maximized } : {}, 'iconic' in changed ? { iconic: changed.iconic } : {});
+    if (act === 'maximize' || act === 'restore') app.wm.toggleMaximize(winInfo.id);
+    else if (act === 'minimize') { appIconified = true; app.wm.minimize(winInfo.id); }
+  }
+  // …and back: what the user did to THIS window reaches the app's header bar (restore after its own minimize draws
+  // it again; our maximize flips its maximize / restore button) — csd apps only, the driving pane only
+  winInfo.onResize = () => {
+    if (!view || typeof view.setAppState !== 'function' || !isCsd(mainMeta) || seatState() !== 'active') return;
+    if (appIconified && !winInfo.isMinimized) { appIconified = false; view.setAppState({ iconified: false }); }
+    const xMax = !!(mainMeta && mainMeta.maximized);
+    if (xMax !== !!winInfo.isMaximized && !winInfo.isMinimized) { mainMeta.maximized = !!winInfo.isMaximized; view.setAppState({ maximized: !!winInfo.isMaximized }); }
+  };
+  applySeamless();
 
   renderLease();
   refetchLease();
@@ -621,6 +807,24 @@ registerMenuItem({
   menu: 'window', group: '1_window', order: 35, id: 'window/desktop-app-scale', kind: 'scale',
   when: (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppScaleItems === 'function' && c.win._desktopAppStream === 'xpra',
   label: () => t('Scale'), children: (c) => c.win._desktopAppScaleItems(),
+});
+// round 3 lane B (seamless §3.3): with the bars folded the window menu is the way to every control of the window —
+// Show window frame ▸ (per app), Keep running, Stop app — the same rows the ⋯ carries
+const isXpraApp = (c) => !!c.win && c.win.type === 'desktop-app' && c.win._desktopAppStream === 'xpra';
+registerMenuItem({
+  menu: 'window', group: '1_window', order: 34, id: 'window/desktop-app-frame', kind: 'frame',
+  when: (c) => isXpraApp(c) && typeof c.win._desktopAppFrameItems === 'function',
+  label: () => t('Show window frame'), children: (c) => c.win._desktopAppFrameItems(),
+});
+registerMenuItem({
+  menu: 'window', group: '1_window', order: 36, id: 'window/desktop-app-keep', kind: 'keep',
+  when: (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppCanKeep === 'function' && c.win._desktopAppCanKeep(),
+  label: () => t('Keep running'), run: (c) => { c.win._desktopAppKeep(); },
+});
+registerMenuItem({
+  menu: 'window', group: '1_window', order: 37, id: 'window/desktop-app-stop', kind: 'stop',
+  when: (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppCanStop === 'function' && c.win._desktopAppCanStop(),
+  label: () => t('Stop app'), run: (c) => { c.win._desktopAppStop(); },
 });
 
 /** A one-line HTML label for lists (escaped — labels come from the user's own

@@ -71,6 +71,19 @@
 //   fit). `dormant` (another client is active: the bridge holds this
 //   socket's hello and relays nothing) suspends the hello timeout — the
 //   server's hello arrives the moment this pane becomes active.
+// • SEAMLESS (round 3 lane B, docs/design-desktop-apps-seamless §3.3): the
+//   app's OWN header bar moving / resizing its window reaches us as xpra's
+//   `initiate-moveresize` (the server is the display's window manager and
+//   hands the gesture to the client); it is surfaced as `on.moveresize(ev)`
+//   — never acted on here: the X main window stays at 0,0 under the belt, the
+//   VIBESPACE window moves (desktop-app-window.js → WindowManager). Only the
+//   DRIVING pane hears it (not in Watch / view-only / blocked). `on.main(win)`
+//   names the main window and its metadata whenever either changes (the
+//   `decorations: 0` of a client-side-decorated app is what makes a window
+//   seamless), and `on.state(win, changed)` carries the app's own maximize /
+//   minimize (`window-metadata {maximized|iconic}`); `setMainState({maximized|
+//   iconified})` tells the display what OUR window did (configure-window's
+//   state dict — the ui driver's, measured in xpra 6.5.3 seamless.py).
 import * as P from './xpra-proto.js';
 
 const HELLO_TIMEOUT_MS = 15000;
@@ -92,6 +105,9 @@ export function defaultDecode(bytes, mime) {
  *   on.window(kind, win)       'new' | 'geometry' | 'raise' | 'meta' | 'lost'
  *   on.paint(win, op)          {type:'image', img, x, y, w, h} | {type:'scroll', moves}
  *   on.title(text) / on.icon({w,h,data}) / on.clipboard(text) / on.cursor(cur|null) / on.ready()
+ *   on.main(win|null)          the MAIN window (its `meta` included) — when the main changes or its metadata does
+ *   on.state(win, changed)     `window-metadata` carrying `maximized` / `iconic` (the keys that changed, as sent)
+ *   on.moveresize(ev)          {wid, xRoot, yRoot, direction, button, source, main} — the app asked its window manager to move/resize it
  * Returns the session handle (see the tail).
  */
 export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
@@ -155,6 +171,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (next) { emit('title', next.title); refit(next); }
     else { emit('title', ''); syncDisplay(); } // no main: the display is the pane again
     announceConstraints();
+    emit('main', next);
   };
   /** The main window follows the pane: a new fit ⇒ configure-window (the server confirms with window-move-resize / window-resized). */
   const refit = (win) => {
@@ -212,7 +229,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     windows.set(wid, win);
     if (isMain) { mainWid = wid; emit('title', win.title); syncDisplay(); } // the display contains the fit before the map
     emit('window', 'new', win);
-    if (isMain) announceConstraints();
+    if (isMain) { announceConstraints(); emit('main', win); }
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
   const lostWindow = (wid) => {
@@ -269,6 +286,16 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     });
   };
 
+  // ── the app's own header bar moves / resizes ITS window: surfaced, never applied here ──
+  const moveResizeAsked = (p) => {
+    const m = P.parseMoveResize(p);
+    if (!m) return;
+    const win = windows.get(m.wid);
+    // only the DRIVING pane: a watching / view-only / blocked pane never moves the window of the viewer that is driving
+    if (!win || viewOnly || watch || dormant || state !== 'connected') { log?.log?.(`[xpra] initiate-moveresize for window ${m.wid} ignored (${!win ? 'unknown window' : 'not the driving pane'})`); return; }
+    emit('moveresize', { ...m, main: m.wid === mainWid });
+  };
+
   // ── packets from the server ──────────────────────────────────────────────
   const onPacket = (p) => {
     if (!Array.isArray(p) || !p.length) return;
@@ -313,6 +340,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
         if ('title' in meta) { win.title = winTitle(meta); if (win.wid === mainWid) emit('title', win.title); }
         if ('size-constraints' in meta || 'size-hints' in meta) { resetBelt(win); refit(win); if (win.wid === mainWid) announceConstraints(); }
         emit('window', 'meta', win);
+        if (win.wid === mainWid) emit('main', win);
+        if ('maximized' in meta || 'iconic' in meta) { const changed = {}; if ('maximized' in meta) changed.maximized = !!meta.maximized; if ('iconic' in meta) changed.iconic = !!meta.iconic; emit('state', win, changed); }
         return;
       }
       case 'window-icon': { if (p[1] === mainWid && P.bytesToString(p[4]) === 'png' && p[5]) emit('icon', { w: p[2], h: p[3], data: p[5] }); return; }
@@ -328,7 +357,8 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       }
       case 'clipboard-request': { const reqId = p[1], selection = P.bytesToString(p[2]); send(lastPaste != null ? P.clipboardContents(reqId, selection, lastPaste) : P.clipboardNone(reqId, selection)); return; }
       case 'ping_echo': case 'setting-change': case 'encodings': case 'bell': case 'notify_show': case 'notify_close': case 'info-response':
-      case 'new-tray': case 'send-file': case 'open-url': case 'pointer-position': case 'initiate-moveresize': case 'set-clipboard-enabled':
+      case 'initiate-moveresize': case 'window-initiate-moveresize': moveResizeAsked(p); return;
+      case 'new-tray': case 'send-file': case 'open-url': case 'pointer-position': case 'set-clipboard-enabled':
       case 'clipboard-enable-selections': case 'clipboard-pending-requests': case 'desktop_size': case 'control': case 'sound-data':
         return;
       default:
@@ -462,8 +492,23 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     return send(P.closeWindow(mainWid));
   };
 
+  /** Tell the display what OUR window did to the app's main window (`{maximized}` / `{iconified}` — the state dict of
+   *  configure-window, applied for the ui driver): the app's own header bar then shows the right button (restore vs
+   *  maximize) and an app minimized by its own button draws again once our window is back. Never from Watch / view-only. */
+  const setMainState = (st) => {
+    const main = mainWid ? windows.get(mainWid) : null;
+    if (!main || state !== 'connected' || viewOnly || watch || dormant || !st || typeof st !== 'object') return false;
+    const clean = {};
+    if ('maximized' in st) clean.maximized = !!st.maximized;
+    if ('iconified' in st) clean.iconified = !!st.iconified;
+    if (!Object.keys(clean).length) return false;
+    if ('maximized' in clean) main.meta.maximized = clean.maximized;
+    if ('iconified' in clean) main.meta.iconic = clean.iconified;
+    return send(P.configureWindow(main.wid, { x: main.x, y: main.y, w: main.w, h: main.h }, clean));
+  };
+
   return {
-    connect, close: () => finish('closed by the window'), send, resize, closeMain, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
+    connect, close: () => finish('closed by the window'), send, resize, closeMain, setMainState, keyDown, keyUp, typeText, pointerMove, pointerButton, wheel: wheelAt, pasteText, focusWindow, windowAt,
     get state() { return state; }, get closedReason() { return closedReason; }, get windows() { return windows; }, get mainWid() { return mainWid; }, get focusedWid() { return focusedWid; },
     beltState: (wid) => { const w = windows.get(wid); return w && w.belt ? { at: w.belt.at, fights: w.belt.fights, gaveUp: w.belt.gaveUp, pending: !!w.belt.timer } : null; },
     get pane() { return pane; }, get display() { return sentDisplay ? { ...sentDisplay } : null; }, get cssPane() { return cssPane; }, get ratio() { return ratioNow(); }, get dpi() { return dpi; },

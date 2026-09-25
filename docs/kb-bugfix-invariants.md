@@ -2,6 +2,22 @@
 
 Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 
+## A CLICK INTO A DESKTOP APP NEVER ACTIVATED ITS WINDOW (2.369.177, found by round 3 lane B while wiring the seamless Alt reveal)
+
+- **What happened.** Every VibeSpace window becomes the active one through its element's `mousedown` listener (window.js `createWindow`). The xpra picture pane calls `preventDefault()` on its `pointerdown` (it must — the press is the app's), and a cancelled pointerdown makes the browser send NO compatibility mouse events for that press (Pointer Events: mousedown / mousemove / mouseup are suppressed until pointerup). So a click into an app's picture never focused its window: another window stayed `.window-active`, keyboard shortcuts and the window-scoped Alt reveal went to the wrong window. MEASURED on the real rung before the fix (a probe window focused, a trusted click into the calculator's picture: `activeWindowId` unchanged — "NOT ACTIVATED"); after it: "ACTIVATED".
+- **FIX.** desktop-app-window.js adds a capture-phase `pointerdown` on the window element (bound to `winInfo._listenerCtl.signal`) that focuses the window when it is not already active — it sees the press before the pane cancels it, and it covers both picture views (xpra and RFB).
+- **The same cancelled pointerdown is why the seamless drag is POINTER-fed.** WindowManager.beginDragFromPointer / beginResizeFromPointer listen to `pointermove` / `pointerup` on a per-drag AbortController — the `mousemove` / `mouseup` the title-bar drag relies on never arrive for a press that started in the pane.
+- **不变量 / invariants.** (1) A surface that cancels `pointerdown` owns the consequences: every mouse-event listener above it (focus, drag, hover-intent) is blind for that press — give them a pointer-event path or a capture-phase hook. (2) A window activates on ANY press inside it, never only on presses its chrome sees.
+- Gate: test-desktop-xpra-window §12 (6) (a probe window focused, a trusted click into the calculator's picture ⇒ the calculator's window is active); the drag feed: test-desktop-seamless §4.
+- 不变量=a cancelled pointerdown silences every mouse listener above it; a window activates on any press inside it.
+
+## A DRAG OFF A MAXIMIZED WINDOW UN-MAXIMIZED IT SILENTLY (2.369.177, lane B verifier r1 — latent in window.js, visible once a seamless app's header bar mirrors the state)
+
+- **What happened.** `_setupDrag`'s `processMove` un-maximizes a maximized window at the drag threshold (`win.isMaximized = false`, the prevBounds size applied) and nothing else — while every other un-maximize (restore, toggleMaximize, the snap paths) calls `win.onResize`. For most windows a ResizeObserver hid it; a seamless desktop app learns its maximize state ONLY through `winInfo.onResize` (→ `setAppState({maximized})`), so after a drag off a maximized calculator — from its own header bar or from our title bar — X kept `maximized: true`: the app's button kept its restore glyph and its first click was dead (reproduced on the real rung, xpra 6.5.3 + GNOME Calculator).
+- **FIX.** The drag's un-maximize branch calls `win.onResize` (once, at the moment the size changes), and `_cancelPointerDrag` calls it again when its restore re-maximizes the window.
+- **不变量 / invariants.** A state change is said through the SAME hook on every path that makes it — a new path that flips `isMaximized` (or any size) and skips the hook is a silent fork for every consumer that mirrors the state elsewhere.
+- Gate: test-desktop-seamless §4 (e) (the real WindowManager over a fake DOM + a mutant-copy CONTROL of window.js without the two calls) + test-desktop-xpra-window §12 (3b) (real rung, a live muted-onResize control).
+
 ## A FORK LANDED IN NO TASK GROUP (2.369.173, owner 2026-09-25: "fork的会话不会自动分配到和fork之前的会话相同的group里")
 
 - **What happened.** `_doForkSession` (src/lib/session-lifecycle.js) built its `createSession({…, fork: true})` with no `taskId`. Every other group-aware spawn carries one — the New Session dialog's group, and `resumeSession`'s `contextTask` (the first explicit group rides every resume) — so a fork of a conversation that sat in a Task Group was spawned into none: no server-side `_initialGroupId` (so `groupsForSession` — the task context the agent reads over its session token — named no group until a bind landed) and no explicit tag once its id appeared. Only a membership that came from an auto-include FOLDER carried over (same cwd); every explicit tag was lost and the owner re-bound forks by hand.
