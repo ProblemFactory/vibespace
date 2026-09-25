@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -253,7 +254,8 @@ console.log('— ③b the NEXT turn really runs at the new effort, and says so')
   const last = live2.messages.filter((m) => m.role === 'assistant').pop();
   ok(last?.meta?.effort === 'high', 'the new turn\'s messages are stamped high', JSON.stringify(last?.meta?.effort));
 }
-try { w.stdin.end(); w.kill(); } catch { }
+try { w.stdin.end(); } catch { }
+await stopWrapper(w);
 
 console.log('— ③c a REFUSED thread/settings/update records nothing about the thread (r2 review)');
 {
@@ -297,8 +299,8 @@ console.log('— ③c a REFUSED thread/settings/update records nothing about the
   ok(st3?.params?.effort === 'max', 'the per-turn param still carries the pick (the fallback a refusal leaves in place)', JSON.stringify(st3?.params?.effort));
   const tc3 = ev3().filter((r) => r.type === 'turn_context').pop();
   ok(tc3?.payload?.effort === 'max', '…and the new turn_context states the effort that turn was STARTED with', JSON.stringify(tc3?.payload?.effort));
-  try { w3.stdin.end(); w3.kill(); } catch { }
-  try { fs.rmSync(d3, { recursive: true, force: true }); } catch { }
+  try { w3.stdin.end(); } catch { }
+  await stopWrapper(w3, { dir: d3 });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1023,7 +1025,8 @@ const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
     ok(mm.status().effort === 'ultra' && mm.messages.find((m) => m.role === 'assistant')?.meta?.effort === 'ultra',
       'a buffer with ONE turn_context (the owner\'s shape) now stamps every message ultra', JSON.stringify([mm.status().effort, mm.messages.find((m) => m.role === 'assistant')?.meta?.effort]));
   }
-  try { w11.stdin.end(); w11.kill(); } catch { }
+  try { w11.stdin.end(); } catch { }
+  await stopWrapper(w11, { dir: d11 });
 
   // ── THE CLAUDE TWIN, ROUND 2: NEITHER KNOB HAS A COMMANDABLE SOURCE ──────
   // Round 1 read the transcript's last MAIN-THREAD assistant `message.model`

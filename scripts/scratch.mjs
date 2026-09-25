@@ -18,6 +18,7 @@
 // checks the real ~/.claude/projects for exactly what this function mints — so
 // a suite that renames its scratch dir cannot walk out from under the guard.
 import net from 'node:net';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -92,4 +93,26 @@ export function withoutVendorKeys(env = process.env) {
   const out = { ...env };
   for (const k of VENDOR_KEY_ENV) delete out[k];
   return out;
+}
+
+/** STOP A WRAPPER, THEN REMOVE ITS SCRATCH DIR — in that order (2.369.172 r1,
+ *  the Actions mirror's red on test-codex-p2-client: `ENOTEMPTY: directory not
+ *  empty, rmdir /tmp/vs-cxfork-…`). Since 2.369.172 every wrapper answers
+ *  SIGTERM/SIGHUP/SIGINT with a synchronous record — the meta first, then the
+ *  buffer, then a log line (`appendFileSync` CREATES chat-wrapper.log /
+ *  codex-chat-wrapper.log when it is absent) — so a suite that kills the wrapper
+ *  and calls `rmSync(dir)` in the same tick races that append: on the 2-vCPU
+ *  runner the log file landed between rmSync's listing and its rmdir. Four fast
+ *  suites had exactly that shape (no exit wait at all); this is the ONE idiom.
+ *  Waits for the child's exit (SIGKILL after `graceMs`), then removes the dir
+ *  with retries. Safe on a child that already exited. */
+export async function stopWrapper(child, { dir = null, graceMs = 3000 } = {}) {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    try { child.kill('SIGTERM'); } catch { }
+    const t = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, graceMs);
+    await exited;
+    clearTimeout(t);
+  }
+  if (dir) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 }

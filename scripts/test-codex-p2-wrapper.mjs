@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -557,7 +558,7 @@ const spawnStub = (tag, stubBody) => {
     send: (x) => proc.stdin.write(JSON.stringify(x) + '\n'),
     dir: d,
     journal: () => { try { return fs.readFileSync(path.join(d, 'codex-chat-wrapper.log'), 'utf8'); } catch { return ''; } },
-    stop: () => { try { proc.kill('SIGTERM'); } catch {} try { fs.rmSync(d, { recursive: true, force: true }); } catch {} },
+    stop: () => stopWrapper(proc, { dir: d }),
   };
 };
 
@@ -648,7 +649,7 @@ process.stdin.on('data', (d) => {
   ok(userA('really stopped')?.queueState === 'removed', `…while the one Stop really dropped does (${userA('really stopped')?.queueState})`);
   const sysA = mmA.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
   ok(sysA.some((t) => /no longer queued — it already ran/.test(t)), 'and the user is TOLD that one already ran (nothing silent)', sysA.join(' | '));
-  A.stop();
+  await A.stop();
 }
 
 // (3) — an app-server that stops answering. Stop is a SAFETY CONTROL: it must
@@ -693,7 +694,7 @@ process.stdin.on('data', (d) => {
   ok(gotB && elapsedB < 10000, `Stop reaches turn/interrupt on the sweep's budget even when thread/queue/list never answers (${elapsedB}ms; the 15s-per-RPC cut took 15s+ before sending it)`);
   ok(B.ops().some((r) => r.op === 'remove' && r.ok === false), `…and it SPEAKS: the queue was NOT cleared (${JSON.stringify(B.ops())})`);
   ok(!B.ops().some((r) => r.ok === true), 'nothing is reported removed when nothing could be read', JSON.stringify(B.ops()));
-  B.stop();
+  await B.stop();
 }
 {
   // (3b) the DELETEs never answer: the cap must expire mid-sweep, the items it
@@ -715,7 +716,7 @@ process.stdin.on('data', (d) => {
   ok(rms.length === 4 && rms.every((r) => r.ok === false) && queuedIds.every((id) => rms.some((r) => r.id === id)), `every item Stop could NOT clear is reported ok:false, by id (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
   ok(rms.some((r) => r.reason === 'timeout' && /did not answer/.test(r.detail || '')), 'the items the expired cap never even reached are reported as timeouts — reporting what was NOT cleared is the point', JSON.stringify(rms.map((r) => r.reason)));
   ok(C.lastQueue().length === 4, `…and the strip still lists them: they are still queued and will run (${C.lastQueue().length})`);
-  C.stop();
+  await C.stop();
 }
 
 // ── ②e STOP, ROUND 3: the SECOND Stop frame (double-click, or a second
@@ -813,7 +814,7 @@ process.stdin.on('data', (d) => {
   // the peer entry Stop dropped goes back to the delivery ladder EXACTLY once
   const back = D.msgs().filter((p) => p.type === 'peer_message_result' && p.ok === false);
   ok(back.length === 1 && /ping from E/.test(back[0].text || ''), `the dropped peer message is handed back to the ladder once, not twice (${JSON.stringify(back.map((b) => b.reason))})`);
-  D.stop();
+  await D.stop();
 }
 
 // ── ②f a STEER whose delete is REFUSED: `{deleted:false}` after a landed steer
@@ -847,7 +848,7 @@ console.log('— ②f the steer whose queued copy could not be removed');
     ok(bubble?.queueState === 'steered', `the bubble reads 'steered' — it was (${bubble?.queueState})`);
     ok(notice.some((t) => /may run a second time/.test(t)), 'and the possible double run is SAID', notice.join(' | '));
   }
-  E.stop();
+  await E.stop();
 }
 
 
@@ -1032,7 +1033,7 @@ setInterval(() => {
   ok(await waitFor(() => !!I.meta()?.unhandledItems?.holoDeck), `an item/completed kind nothing routes is COUNTED in the sidecar (${JSON.stringify(I.meta()?.unhandledItems)})`);
   ok(/unhandled item kind "holoDeck"/.test(I.journal()), 'and logged once, verbatim, in the wrapper journal');
   ok(!I.meta()?.unhandledItems?.hookPrompt && !I.meta()?.unhandledItems?.userMessage, 'a NAMED no-op (hookPrompt) and the now-routed userMessage are not "unhandled"', JSON.stringify(I.meta()?.unhandledItems));
-  I.stop();
+  await I.stop();
 
   // THE NEGATIVE CONTROL, against the SHIPPED code: the same stub, the same
   // steer-all, driven by the wrapper as it was before this fix. It is a
@@ -1072,8 +1073,7 @@ setInterval(() => {
       ok(users2().length === 1, `PRE-FIX CONTROL: …and renders ONE bubble, the message typed here — exactly the owner's report ("我只能看到我最后插入的一条消息") (${users2().length})`, JSON.stringify(users2().map((r) => r.payload.content?.[0]?.text)));
       ok(!/unhandled item kind/.test((() => { try { return fs.readFileSync(path.join(cd, 'codex-chat-wrapper.log'), 'utf8'); } catch { return ''; } })()),
         '…and said nothing about the twelve item kinds it dropped — the silence this fix also closes');
-      try { p2.kill('SIGTERM'); } catch {}
-      try { fs.rmSync(cd, { recursive: true, force: true }); } catch {}
+      await stopWrapper(p2, { dir: cd });
     }
   }
 }
@@ -1362,7 +1362,7 @@ process.stdin.on('data', (d) => {
   // remote wrapper's sidecar is on the other machine).
   ok(JSON.stringify(V.meta()?.caps?.queueVerbs) === JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all']), 'the sidecar adverts the verb list this build serves', JSON.stringify(V.meta()?.caps));
   ok(V.queues().every((q) => Array.isArray(q.verbs) && q.verbs.includes('reorder')), 'EVERY queue_changed carries the same list in-band (the only advert a remote session ever sees)', JSON.stringify(V.queues().slice(-1)[0]?.verbs));
-  V.stop();
+  await V.stop();
   try { fs.unlinkSync(injectFile); } catch { }
   try { fs.unlinkSync(endFile); } catch { }
 }
@@ -1540,7 +1540,7 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     ok(/const nameHtml = msg\.peerFrom[\s\S]{0,200}escHtml\(msg\.peerFrom\)/.test(cr), 'renderer pin: the peer/notification LABEL goes through escHtml before it enters innerHTML');
     ok(/<div class="chat-text">\$\{this\.renderMarkdown\(core\.trim\(\)\)\}<\/div>/.test(cr) && /renderMarkdown\(text\) \{[\s\S]{0,400}DOMPurify\.sanitize\(marked\.parse/.test(cr), 'renderer pin: the BODY goes through renderMarkdown, i.e. DOMPurify (the XSS law)');
   }
-  N.stop();
+  await N.stop();
 }
 {
   // (6) A REFUSED STEER FALLS BACK — and says so. Two shapes:
@@ -1558,7 +1558,7 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     `…the turn ended mid-flight ⇒ it runs as its OWN turn and the result NAMES the refused steer (${JSON.stringify(eRes()[0])})`);
   ok(E.rpc().filter((m) => m.method === 'turn/start').length === startsBeforeE + 1, 'exactly one turn/start for the fallen-back notification');
   ok(E.events().some((e) => e.type === 'response_item' && JSON.stringify(e.payload?.webui_peer || {}).includes('nightly')), 'the message is recorded on the fallback path too (the card still renders)');
-  E.stop();
+  await E.stop();
 }
 {
   //   (b) a turn that CANNOT be steered (review/compact) ⇒ it queues, and the
@@ -1575,7 +1575,7 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     `an unsteerable turn ⇒ QUEUED, with the refusal named and the server's own words kept (${JSON.stringify(rRes()[0])})`);
   ok(await waitFor(() => R.lastQueue().some((i) => i.kind === 'peer')), 'and the message really is in the queue (nothing was lost)', JSON.stringify(R.lastQueue()));
   ok(R.rpc().filter((m) => m.method === 'turn/steer').length === 1, 'the refused steer is tried ONCE, never retried in a loop');
-  R.stop();
+  await R.stop();
 }
 // wrapper pins for the rule (the 2.355.0 unstaged-wiring lesson: a behaviour
 // with no call-site pin can be reverted by an extraction and stay green)
@@ -1826,7 +1826,7 @@ process.stdin.on('data', (d) => {
     ok(ctlSlash.filter((t) => t === '/compact').length === 1 && ctlSlash.length === 11,
       `NEGATIVE CONTROL (the finding): drop ONLY the slash command's retraction and the unrelated turn-9 '/compact' is deleted (${ctlSlash.length} of 12)`, JSON.stringify(ctlSlash));
   }
-  R.stop();
+  await R.stop();
 }
 
 // ── ⑧ THE READ-ONLY PERMISSION-RULE VERB (owner ruling 10) ─────────────────
@@ -1936,7 +1936,7 @@ process.stdin.on('data', (d) => {
   ok(wrapperKeys.length > 0 && wrapperKeys.join(',') === [...pureKeys].join(','),
     'PARITY: the shipped wrapper\'s permission-key list is byte-for-byte the PURE module\'s (the usage scanner drifted twice by exactly this route)',
     `wrapper=[${wrapperKeys}] pure=[${[...pureKeys]}]`);
-  C.stop();
+  await C.stop();
 }
 
 // ── ⑧b THE BYTE CAP: a degrade path may not assert what it just threw away ──
@@ -2009,7 +2009,7 @@ process.stdin.on('data', (d) => {
     ok(pre.layers.flatMap((l) => l.rules).every((r) => r.note === PRmod.CODEX_DEFAULT_NOTE),
       'NEGATIVE CONTROL: the pre-fix payload (same bytes, no `originsDropped`) still yields the false "packaged default" attribution — so the flag is what fixed it');
   }
-  B.stop();
+  await B.stop();
 
   // RUNG 3 — the drop is NOT enough: refuse, with the byte count. A cap is a cap.
   const G = spawnStub('cfghuge', STUB_BIG.replace(/__NROOTS__/g, '700'));
@@ -2025,7 +2025,7 @@ process.stdin.on('data', (d) => {
   ok(G.events().every((e) => Buffer.byteLength(JSON.stringify(e), 'utf8') <= CAP),
     'MEASURED: no line the wrapper emitted for this read is over the cap (the old ladder emitted the oversized payload anyway)',
     String(Math.max(...G.events().map((e) => Buffer.byteLength(JSON.stringify(e), 'utf8')))));
-  G.stop();
+  await G.stop();
 }
 
 // ── ⑨ A TURN THE APP-SERVER ENDS ON A USAGE LIMIT (2026-09-08) ─────────────
@@ -2177,7 +2177,7 @@ process.stdin.on('data', (d) => {
     ok(await waitFor(() => R.queues().length > n), 'a resync over a NON-empty queue publishes as well');
     ok((R.queues().slice(-1)[0].items || []).length === 1, '…and it carries the pending item, so the strip comes back', JSON.stringify(R.queues().slice(-1)[0].items));
   }
-  R.stop();
+  await R.stop();
 
   // NEGATIVE CONTROL: the PRE-FIX wrapper — the product source with only the
   // `queue-resync` branch removed — drops the frame SILENTLY and publishes
@@ -2204,14 +2204,10 @@ process.stdin.on('data', (d) => {
     await sleep(800);
     ok(pq().length === n0, `PRE-FIX: the same frame publishes NOTHING (${pq().length} vs ${n0}) — the verb, not the plumbing, is what re-states the queue`);
     ok(pmeta()?.threadId === 'th-resync', '…and the unknown verb is dropped SILENTLY (the wrapper is still alive) — which is why the server asks only a wrapper that adverts it');
-    try { pp.kill('SIGTERM'); } catch { }
-    await sleep(200);
-    try { fs.rmSync(pd, { recursive: true, force: true }); } catch { }
+    await stopWrapper(pp, { dir: pd });
   }
 }
 
-try { w.kill('SIGTERM'); } catch {}
-await sleep(300);
-try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+await stopWrapper(w, { dir });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

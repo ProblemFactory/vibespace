@@ -1898,5 +1898,48 @@ console.log('§54 one resource verdict; only the headless serve stops for a reso
   ok(Object.keys(offenders(plantStop)).includes('src/server/desktop-app-keeper.js') && !PARK.test(code['src/server/browser-keeper.js']) && !PARK.test(code['src/server/desktop-app-keeper.js']), '§54b NEGATIVE CONTROL: the pre-fix spelling (why: \'runaway\') is caught, and the old park names are spoken by neither report-only keeper');
 }
 
+// §55 A SUITE THAT KILLS A WRAPPER WAITS FOR ITS EXIT BEFORE REMOVING ITS DIR
+// (2.369.172 r1 — the Actions mirror's red on test-codex-p2-client: `ENOTEMPTY:
+// directory not empty, rmdir /tmp/vs-cxfork-…`). Since 2.369.172 every wrapper
+// answers SIGTERM with a synchronous record whose last act is a log APPEND that
+// creates the log file when absent; a suite that `kill('SIGTERM')`s the wrapper
+// and `rmSync(dir)`s in the same tick races that append — green on a fast box,
+// red on the 2-vCPU runner. The ONE idiom is scripts/scratch.mjs `stopWrapper`
+// (kill → await exit, SIGKILL after a grace → rmSync with retries). DERIVED:
+// every scripts/test-*.mjs that spawns a data/bin/*wrapper*.js AND removes a
+// directory imports stopWrapper, or at least waits on an 'exit' event.
+console.log('§55 a suite that kills a wrapper waits for its exit before removing its dir');
+{
+  const judge = (src) => {
+    const spawnsWrapper = /data\/bin\/(?:chat|pty|codex-chat)-wrapper\.js/.test(src);
+    const removes = /\brmSync\s*\(/.test(src);
+    // only a CATCHABLE signal runs the wrapper's record (SIGKILL writes nothing — kill-then-rm is safe there)
+    const catchableKill = /\.kill\(\s*(?:['"]SIG(?:TERM|HUP|INT)['"]\s*)?\)/.test(src);
+    if (!spawnsWrapper || !removes || !catchableKill) return null;
+    const idiom = /import\s*\{[^}]*\bstopWrapper\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(src);
+    const waits = /\b(?:once|on)\s*\(\s*['"]exit['"]/.test(src);
+    return idiom || waits ? null : 'spawns a wrapper and removes a dir with no stopWrapper import and no exit wait';
+  };
+  const suites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
+  const bad = [];
+  let scope = 0;
+  for (const f of suites) {
+    const src = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8');
+    // in scope: spawns a wrapper, removes a dir, and ends the wrapper (a catchable kill, or the idiom that hides one)
+    if (/data\/bin\/(?:chat|pty|codex-chat)-wrapper\.js/.test(src) && /\brmSync\s*\(/.test(src) && (/\.kill\(\s*(?:['"]SIG(?:TERM|HUP|INT)['"]\s*)?\)/.test(src) || /\bstopWrapper\b/.test(src))) scope++;
+    const why = judge(src); if (why) bad.push(f + ': ' + why);
+  }
+  ok(scope >= 4, `§55 census scope is non-vacuous (${scope} suites spawn a wrapper and remove a dir)`);
+  ok(bad.length === 0, `§55 every such suite stops the wrapper through stopWrapper (or waits for its exit) before removing its dir${bad.length ? ' — ' + bad.join(' | ') : ''}`);
+  const blind = "spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, meta]);\ntry { w.kill('SIGTERM'); } catch {}\nfs.rmSync(dir, { recursive: true, force: true });";
+  const idiom = "import { stopWrapper } from './scratch.mjs';\n" + blind;
+  const waiter = "spawn(process.execPath, [path.join(REPO, 'data/bin/pty-wrapper.js'), buf, meta]);\nawait new Promise((r) => w.once('exit', r));\nfs.rmSync(dir, { recursive: true, force: true });";
+  const noWrapper = "spawn('node', ['server.js']);\ntry { w.kill('SIGTERM'); } catch {}\nfs.rmSync(dir, { recursive: true, force: true });";
+  const sigkill = "spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta]);\nw.kill('SIGKILL');\nfs.rmSync(dir, { recursive: true, force: true });";
+  const bareKill = "spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta]);\ntry { w.stdin.end(); w.kill(); } catch {}\nfs.rmSync(dir, { recursive: true, force: true });";
+  ok(judge(blind) !== null && judge(bareKill) !== null && judge(idiom) === null && judge(waiter) === null && judge(noWrapper) === null && judge(sigkill) === null,
+    '§55 NEGATIVE CONTROL: the kill-then-rm shape is caught (SIGTERM and the bare kill()); the stopWrapper import passes; an explicit exit wait passes; a suite that spawns no wrapper is out of scope; a SIGKILL (the record never runs) is out of scope');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

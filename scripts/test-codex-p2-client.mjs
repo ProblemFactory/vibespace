@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -36,8 +37,7 @@ const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   ok(!rpcAbs().some((m) => m.method === 'thread/resume' || m.method === 'thread/start'), 'no resume/start alongside the fork (one writer, a NEW thread id comes back)');
   t0 = Date.now(); while (Date.now() - t0 < 5000 && (() => { try { return JSON.parse(readAbs(meta)).threadId !== 'th-forked'; } catch { return true; } })()) await sleep(100);
   ok((() => { try { return JSON.parse(readAbs(meta)).threadId === 'th-forked'; } catch { return false; } })(), 'the forked thread id is adopted into the sidecar (discovery/forkedFrom chain sees the child)');
-  try { w.kill('SIGTERM'); } catch {}
-  fs.rmSync(dir, { recursive: true, force: true });
+  await stopWrapper(w, { dir });
 }
 
 // ── wiring pins ──

@@ -16,6 +16,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -123,8 +124,7 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   const sm = recs().find((r) => r.type === 'session_meta');
   ok(sm && sm.payload.id === 'th-forked' && sm.payload.forked_from_id === 'th-old', 'wrapper session_meta echoes codex\'s forked_from_id from the thread/fork response', sm?.payload);
   ok(sm && JSON.stringify(sm.payload.forked_from) === JSON.stringify(['th-older', 'th-old']), 'CODEX_WEBUI_FORKED_FROM is deduped (each superseded id once, own id dropped)', sm?.payload?.forked_from);
-  try { w.kill('SIGTERM'); } catch {}
-  fs.rmSync(dir, { recursive: true, force: true });
+  await stopWrapper(w, { dir });
 }
 
 console.log('— ② 0.153 record tolerance: known skips, agent chatter, sub-agent cards, unknowns → telemetry once');
@@ -246,8 +246,7 @@ console.log('— ④ explicit model + effort on EVERY turn/start (resume continu
     send({ type: 'chat-input', text: 'second', msgId: 'm2' });
     t0 = Date.now(); while (Date.now() - t0 < 8000 && rpc().filter((m) => m.method === 'turn/start').length < 2) await sleep(100);
     const t2 = rpc().filter((m) => m.method === 'turn/start')[1];
-    try { w.kill('SIGTERM'); } catch {}
-    fs.rmSync(dir, { recursive: true, force: true });
+    await stopWrapper(w, { dir });
     return { t1: t1?.params, t2: t2?.params, meta: readMeta() };
   };
   const a = await run({}, 'no commanded effort');
