@@ -22,6 +22,7 @@ export default {
   "Scale": "缩放",
   "Relaunch {app} at {scale}×?": "以 {scale}× 重启 {app}？",
   "The app restarts at the new scale; unsaved work in it is lost.": "应用会以新的缩放重启；其中未保存的内容会丢失。",
+  "The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.": "浏览器会以新的缩放重启，配置文件不变（登录状态与标签页保留）；页面里未保存的状态会丢失。",
   "Relaunch": "重启",
   "Could not relaunch the app": "无法重启应用",
   "{app} relaunched at {scale}×": "{app} 已以 {scale}× 重启",

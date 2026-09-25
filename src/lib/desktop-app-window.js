@@ -146,7 +146,6 @@ export function scaleWhyText(code) {
   if (code === 'lease') return t('An agent holds this app — relaunching it would end the agent\'s lease');
   if (code === 'seat') return t('Active on another client — Resume here first');
   if (code === 'not-xpra') return t('Only an xpra app has a scale — this display is drawn at the browser\'s pixels');
-  if (code === 'relaunch-browser') return t('A browser app keeps its profile only for its own session — stop it and launch it again to change its scale');
   if (code === 'not-ready' || code === 'not-found') return t('Only a running app can be relaunched at another scale');
   return '';
 }
@@ -538,7 +537,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   async function relaunchAt(choice, scale) {
     if (relaunching || !rec) return;
     const name = titleText();
-    const okd = await showConfirmDialog({ title: t('Relaunch {app} at {scale}×?', { app: name, scale }), message: t('The app restarts at the new scale; unsaved work in it is lost.'), confirmText: t('Relaunch'), danger: true });
+    const okd = await showConfirmDialog({ title: t('Relaunch {app} at {scale}×?', { app: name, scale }), message: rec && rec.browser ? t('The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.') : t('The app restarts at the new scale; unsaved work in it is lost.'), confirmText: t('Relaunch'), danger: true });
     if (!okd || closed) return;
     relaunching = true;
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale() }) });

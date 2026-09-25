@@ -22,6 +22,7 @@ export default {
   "Scale": "スケール",
   "Relaunch {app} at {scale}×?": "{app} を {scale}× で再起動しますか？",
   "The app restarts at the new scale; unsaved work in it is lost.": "アプリは新しいスケールで再起動します。保存していない内容は失われます。",
+  "The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.": "ブラウザは同じプロファイルのまま新しいスケールで再起動します（ログインとタブは保持）。ページ内の未保存の状態は失われます。",
   "Relaunch": "再起動",
   "Could not relaunch the app": "アプリを再起動できませんでした",
   "{app} relaunched at {scale}×": "{app} を {scale}× で再起動しました",

@@ -1916,6 +1916,46 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
     ok(sx.state === 'exited' && fs.existsSync(profX), 'CONTROL: without the retire at stop, the stopped session\'s profile is LEFT on disk — the leg above proves the removal, not a coincidence');
     kc.shutdown();
   }
+  // (c3) 2.369.176 (the owner: "你不让我在这里调我怎么调？") — a Scale ▸ relaunch of a BROWSER keeps its profile:
+  // the successor is recorded first (named by the old record before its stop broadcasts), the old browser is stopped
+  // and its profile dir MOVED onto the successor's path once every part is gone, then the successor starts on it.
+  if (!XPRA_BIN || !D.binOnPath('xauth', { env: process.env })) skip('§18 (c3): xpra / xauth not on PATH — a browser relaunch needs the xpra rung');
+  else {
+    const runCarry = async (mod, tag) => {
+      const dataDirX = path.join(root, `k18-${tag}`); fs.mkdirSync(dataDirX, { recursive: true });
+      const evs = [];
+      const kx = mod.create({ dataDir: dataDirX, env: benv, broadcast: (m) => evs.push(JSON.stringify(m)), serverSetting: (key) => ({ ...PIN, 'desktop.backendPrefs': '' })[key], registryRows: rows, log: { log() {}, warn() {}, error() {} } });
+      keepers.push(kx);
+      await kx.adoptAll(); kx.start();
+      const d0 = await kx.launch({ appId: 'vs-browser', url: 'https://example.com/vs-carry', dpr: 1 });
+      const p0 = path.join(kx.logRoot, d0.id, 'profile');
+      const r0 = await until(() => { const r = kx.get(d0.id); return r.state === 'ready' || r.state === 'failed' ? r : null; }, 40000);
+      if (!r0 || r0.state !== 'ready') { kx.shutdown(); return { tag, failed: r0 ? r0.lastError : 'never ready' }; }
+      await until(() => fs.existsSync(path.join(p0, 'Cookies')), 8000);
+      fs.writeFileSync(path.join(p0, 'vs-carry.txt'), 'carried');
+      const rl = await kx.relaunch(d0.id, { scale: 2, dpr: 1 }).then((r) => r, (e) => ({ error: e.code || e.message }));
+      if (rl.error) { kx.shutdown(); return { tag, error: rl.error }; }
+      const p1 = path.join(kx.logRoot, rl.app.id, 'profile');
+      const r1 = await until(() => { const r = kx.get(rl.app.id); return r.state === 'ready' || r.state === 'failed' ? r : null; }, 40000);
+      const argv1 = await until(() => { try { return fs.readFileSync(path.join(p1, 'argv.txt'), 'utf8'); } catch { return null; } }, 8000);
+      // the ORDER: the first broadcast that shows the old record exited already carries the successor (named + recorded)
+      const firstExited = evs.findIndex((s) => s.includes(`"id":"${d0.id}"`) && s.includes('"state":"exited"'));
+      const successorThen = firstExited >= 0 && evs[firstExited].includes(`"id":"${rl.app.id}"`) && evs[firstExited].includes(`"replacedBy":"${rl.app.id}"`);
+      const out = { tag, next: rl.app.id, scale: rl.app.scale, origin: rl.app.scaleOrigin, profileDir: rl.app.profileDir === p1, carried: fs.existsSync(path.join(p1, 'vs-carry.txt')), cookies: fs.existsSync(path.join(p1, 'Cookies')), oldGone: !fs.existsSync(p0), carriedTo: rl.replaced.profileCarriedTo, oldRemovedAt: rl.replaced.profileRemovedAt || null, ready: r1 && r1.state, argvNamesNew: !!argv1 && argv1.includes(`--user-data-dir=${p1}`), successorThen, firstExited };
+      kx.shutdown();
+      return out;
+    };
+    const c3 = await runCarry(K, 'carry');
+    ok(!c3.failed && !c3.error && c3.scale === 2 && c3.origin === 'chosen' && c3.profileDir && c3.ready === 'ready', `§18 (c3): a browser relaunches at 2× (chosen) through the xpra rung and reaches ready — ${c3.error || c3.failed || c3.next}`, c3);
+    ok(c3.carried && c3.cookies && c3.oldGone && c3.carriedTo === c3.next && !c3.oldRemovedAt, '§18 (c3): the profile is CARRIED — the file the old browser wrote is in the successor\'s profile dir, the old dir is gone (moved, not removed: no profileRemovedAt, profileCarriedTo names the successor)', c3);
+    ok(c3.argvNamesNew, '§18 (c3): the successor browser PROCESS was started on the carried profile (its argv names the new path)', c3);
+    ok(c3.successorThen, '§18 (c3): the old record names its successor before its stop broadcasts, and the successor is already recorded in that same broadcast (a client following it never meets not-found)', { firstExited: c3.firstExited, successorThen: c3.successorThen });
+    // CONTROL: a keeper that forgets to carry (the pre-2.369.176 stop) removes the old profile — the successor starts empty
+    const { mod: Kno } = mutant('no-carry', [["      rec.profileCarryTo = nextId;", "      // (pre-2.369.176: nothing carried)"]]);
+    const c3c = await runCarry(Kno, 'nocarry');
+    ok(!c3c.error && !c3c.failed && !c3c.carried && !c3c.carriedTo, '§18 (c3) CONTROL: without the carry the successor starts from an EMPTY profile (the file is not there) — the carry is what keeps it', c3c);
+  }
+
 }
 
 console.log('§19 round 3 A2 (docs/design-desktop-apps-seamless §3.2) — an app EXIT: the record + the broadcast carry the windows LEFT on the display (the census before the teardown)');

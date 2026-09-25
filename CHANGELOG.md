@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.369.176 — a browser desktop app changes its scale from the ⋯ menu like any other app, keeping its profile (owner 2026-09-25 "你不让我在这里调我怎么调？")
+
+The Scale ▸ rows of a browser app (Chrome as a desktop app) were greyed out with "stop it and launch it again": a relaunch mints a new session with a new profile dir, and a browser started on an empty profile loses its logins and tabs. Now the keeper relaunches a browser in a different ORDER: the successor is recorded first (every refusal — the cap, a vanished binary — happens before anything stops), the old record names it, the old browser is stopped and, once every part is verified gone (a browser locks its profile dir), its profile dir is MOVED onto the successor's path, then the successor starts on it at the chosen scale. The picture reconnects in the same window; logins and tabs come back with the profile.
+
+- What a "live" scale change would need does not exist on X11: GDK_SCALE / Xft.dpi are read once at the app's start, so a true scale change is always a restart. The confirm dialog for a browser says the profile is kept.
+- Gates: test-desktop-apps (the PURE verdict no longer refuses a browser row); test-desktop-app-keeper §18 (c3) on the real xpra rung with the fake browser — the file the old browser wrote is in the successor's profile, the old dir is gone by a move (never `profileRemovedAt`), the successor process was started on the carried path, the old record names its successor in the same broadcast that shows it exited; CONTROL: a keeper without the carry starts the successor empty.
+
 ## 2.369.175 — the For-you row's buttons float at its top-right; the words use the full row width (owner 2026-09-25 "大段文字右侧就被几个按钮占据产生大量空白")
 
 A row was a flex pair — the words on the left, a column of four buttons on the right — so a tall item wasted the right third of the row under its buttons. The buttons now live inside the body as a floated block: the first lines wrap beside them, the rest use the full width. Same markup order for the reply box (never detached), the `:scope > .ut-body > .ut-actions` selector is the one live-state hook.

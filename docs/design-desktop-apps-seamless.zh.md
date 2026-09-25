@@ -176,7 +176,7 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 | D1 | 明文 http 上用手势窗写剪贴板（用户自己那次 Ctrl+C/点击之后 5 s 内），窗外仍 chip；一次性 HTTPS 提示要不要、指向哪条路 | **是**；提示一次/设备、可关；文档三条路（Chrome flag / Tailscale serve / Caddy），不在产品里做 TLS |
 | D2 | (a) 应用退出 ⇒ 窗口自动关 + toast；(b) 外层 ✕ ⇒ 先给应用 `close-window`，5 s 内再按 = Stop；(c) `failed` 留窗；(d) 点 Stop 也关窗 | 全部**是** |
 | D3 | seamless 默认：检测 CSD 自动开；暂停条件 = agent 租约 / 标签组 / 手机；展开手势 = 顶边悬停 250 ms 或 Alt；每窗开关按应用 id 记；全局 `desktop.seamless` auto/off | 全部按建议 |
-| D4 | 推导 = `DPR × uiScale`，整数按比例就近，余数只向上进 dpi；1.5× 保留为显式；每窗 Scale ▸ relaunch 带确认 | 按建议 |
+| D4 | 推导 = `DPR × uiScale`，整数按比例就近，余数只向上进 dpi；1.5× 保留为显式；每窗 Scale ▸ relaunch 带确认 | 按建议 | **2.369.176 补:** 浏览器应用的 Scale ▸ 也可用 — keeper 先停旧的、把 profile 目录搬到后继者名下、再以新缩放启动 (登录/标签页保留); X11 下 GDK_SCALE/Xft.dpi 启动时只读一次, 真·实时改缩放不存在.
 | D5 | 远程范围：只做有 daemon 的配对设备；无 daemon 的 ssh 主机按名拒绝（不做单文件 rung） | **是** |
 | D6 | 安装 rung：配对 Linux 盒子上 owner 点击、先看计划、需 passwordless sudo（apt ≥ 5 否则 xpra.org 仓库，钉 6.x）；机队只走镜像 | **是** |
 | D7 | 机队镜像的 xpra：3.1.3（bookworm）协议未量，要么在 bookworm 容器里量 3.1，要么镜像改装 xpra.org 的 6.x bookworm 包，全机队一个协议版本 | **改镜像到 6.x**（省掉一次没人想做的测量；§9-1/§9-4 随之关闭） |

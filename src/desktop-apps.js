@@ -457,13 +457,14 @@ function validateRelaunchRequest(body) {
 }
 /** May this record be relaunched at another scale? null = yes, else { code, error } by name. The scale is fixed at
  *  launch (GDK_SCALE is read once), so the relaunch is a NEW app session: only a running xpra app, never a browser
- *  (its profile belongs to the session it was made for — a relaunch would start from an empty one). */
+ *  (a browser's profile is CARRIED to the successor by the keeper's stop-first relaunch — 2.369.176). */
 function relaunchVerdict(rec, backends = DISPLAY_BACKENDS) {
   if (!rec) return { code: 'not-found', error: 'no such desktop app' };
   if (rec.state !== 'ready') return { code: 'not-ready', error: `${rec.label || rec.id} is ${rec.state} — only a running app can be relaunched at another scale` };
   const b = rec.backend ? backendById(rec.backend, backends) : null;
   if (!b || b.stream !== 'xpra') return { code: 'not-xpra', error: `${rec.label || rec.id} runs on ${rec.backend || 'no'} rung — only an xpra app has a scale (a whole display is drawn at the browser's pixels)` };
-  if (rec.browser) return { code: 'relaunch-browser', error: `${rec.label || rec.id} is a browser with a profile of its own session — stop it and launch it again to change its scale` };
+  // a browser row relaunches too (2.369.176, the owner: "你不让我在这里调我怎么调") — the keeper stops it FIRST and moves its
+  // profile onto the successor (a browser locks its profile dir, so the successor cannot start beside it), then starts it
   return null;
 }
 /** The launch body that starts the same app again: a catalog row by its id, a typed command as typed. */

@@ -18,7 +18,7 @@
  *                                     same app started again at that scale (auto = derived from
  *                                     THIS client's dpr × uiScale), the old session stopped with
  *                                     `replacedBy` naming the new one → `{ app, replaced }`;
- *                                     not-ready / not-xpra / relaunch-browser 409, bad-request 400
+ *                                     not-ready / not-xpra 409 (relaunch-browser retired 2.369.176: a browser relaunches with its profile carried), bad-request 400
  *   GET  /api/vnc/status · POST /api/vnc/start   the singleton desktop's two
  *                                     routes (moved from server.js — same
  *                                     answers, one home for desktop routes)

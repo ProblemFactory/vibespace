@@ -301,6 +301,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const live = new Map();       // id -> { cpuPct, memBytes, memMetric, rssBytes (deprecated), pids, over, since, sampledAt }
   const fits = new Map();       // id -> { timer, inflight, firstUntil, refusedAt } (P8-2 x4: the app-fit step's state, never persisted)
   const stopping = new Set();
+  const deferred = new Map();   // id -> () => bringUp — a launch whose start waits for the record it replaces to stop (a browser relaunch, 2.369.176)
   // P8-2 x5 — THE VIEWERS of each app window (docs/design-desktop-apps §7 P8-2 "x5 多客户端 = 单活跃 viewer"): ONE active
   // human viewer per window, the rule PURE in src/desktop-viewers.js. Viewer ids only — the sockets are the bridge's (this
   // file touches no WebSocket); never persisted: a restart re-elects from the sockets that come back.
@@ -557,6 +558,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
    */
   async function retireProfile(rec, { clean = true, why = 'ended' } = {}) {
     if (!rec || !rec.profileDir || rec.profileRemovedAt || M.isLiveState(rec.state)) return null;
+    if (rec.profileCarriedTo) return null; // 2.369.176: the profile went WITH the relaunch's successor — nothing here to retire
     const rv = M.profileRetireVerdict(rec);
     if (!rv.remove) { if (!rec.profileKept) { rec.profileKept = true; rec.profileKeptWhy = rv.why; log.log?.(`[desktop] ${rec.id}: kept ${rec.label}'s profile at ${rec.profileDir} (${rv.why})`); } return 'kept'; }
     if (!clean) { rec.profileError = `the profile at ${rec.profileDir} was left in place: a process of the session survived its teardown`; log.warn?.(`[desktop] ${rec.id}: ${rec.profileError}`); return 'left'; }
@@ -626,7 +628,7 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
     const execPath = resolveExec(row.exec);
     const cwd = resolveCwd(row.cwd);
-    const id = newId();
+    const id = opts.id || newId(); // a relaunch mints the successor's id first (the old record names it before it stops)
     // B-bfe6: a browser row gets its OWN profile dir (the app session's), its argv from the PURE model (profile flags,
     // then the optional URL) — every refusal by name BEFORE anything is recorded or started
     let browser = null;
@@ -667,11 +669,17 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     store.apps[id] = rec;
     pruneHistory();
     commit();
-    const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
-    inflight.set(id, p);
-    p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
+    const start = () => {
+      const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
+      inflight.set(id, p);
+      p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
+    };
+    // 2.369.176: a browser relaunch records the successor NOW (every refusal already happened above, the record is
+    // committed and named) but brings it up only after the record it replaces has stopped and handed over its profile
+    if (opts.deferBringUp) deferred.set(id, start); else start();
     return view(rec);
   }
+  function startDeferred(id) { const start = deferred.get(id); deferred.delete(id); if (start) start(); return !!start; }
 
   /** Round 3 A3 (docs/design-desktop-apps-seamless §3.4): the per-window Scale ▸ — the SAME app (catalog row or typed
    *  command) launched again at the chosen scale (GDK_SCALE is read once, at the app's start: a relaunch is the only
@@ -686,6 +694,23 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     if (!rv.ok) throw namedError(rv.code, rv.error);
     const why = M.relaunchVerdict(rec, backends) || (stopping.has(id) || rec.replacedBy ? { code: 'not-ready', error: `${rec.label || id} is already stopping` } : null);
     if (why) throw namedError(why.code, why.error);
+    if (rec.browser) {
+      // 2.369.176 — a BROWSER relaunch keeps its profile (logins, tabs): a browser locks its profile dir, so the
+      // successor cannot start beside the running one. Order: mint the successor's id and RECORD it (every refusal —
+      // the cap, a vanished binary — happens here, the running browser untouched), the old record names it, stop the
+      // old one with `carryProfileTo` (its profile dir is MOVED onto the successor's path once every part is gone),
+      // then bring the successor up on that profile. The seat carries exactly as for any other app.
+      const nextId = newId();
+      const next = await launch({ ...M.relaunchBodyOf(rec), url: rec.url || undefined, keepProfile: rec.keepProfile === true, dpr: rv.dpr, uiScale: rv.uiScale }, { scaleChoice: rv.choice, replacing: id, id: nextId, deferBringUp: true });
+      const armSeat = carrySeat(id, nextId);
+      rec.replacedBy = nextId;
+      commit();
+      let old;
+      rec.profileCarryTo = nextId; // stop() moves the profile onto this successor once every part is gone (the record carries the order; stop's reasons stay the closed list §54b pins)
+      try { old = await stop(id, { why: 'relaunch' }); } finally { startDeferred(nextId); armSeat(); }
+      log.log?.(`[desktop] ${id} relaunched as ${nextId} at ${next.scale}× (${next.scaleOrigin}) with its profile carried: ${rec.label}`);
+      return { app: get(nextId) || next, replaced: old };
+    }
     const next = await launch({ ...M.relaunchBodyOf(rec), dpr: rv.dpr, uiScale: rv.uiScale }, { scaleChoice: rv.choice, replacing: id });
     const armSeat = carrySeat(id, next.id);
     rec.replacedBy = next.id;
@@ -1024,6 +1049,26 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
       else if (why === 'relaunch') rec.lastError = `relaunched as ${rec.replacedBy || 'a new session'} at another scale`;
       else if (why !== 'user') rec.lastError = why;
       if (!clean) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}a process survived SIGKILL — check ${LOG_DIR}/${id}/app.log`;
+      // 2.369.176: a browser relaunch CARRIES the profile — every part is verified gone (the browser's lock is released),
+      // so the dir is moved onto the successor's own path (its empty scaffold removed first); a failed move is said by
+      // name on both records and the successor starts from an empty profile rather than never
+      const carryProfileTo = why === 'relaunch' && typeof rec.profileCarryTo === 'string' ? rec.profileCarryTo : null;
+      if (carryProfileTo && rec.profileDir && clean) {
+        const target = profileDirOf(carryProfileTo);
+        try {
+          try { await fs.promises.rmdir(target); } catch { /* absent or not empty — the rename below decides */ }
+          await fs.promises.rename(rec.profileDir, target);
+          rec.profileCarriedTo = carryProfileTo; delete rec.profileCarryTo;
+          log.log?.(`[desktop] ${id}: its profile moved to ${target} for the relaunch ${carryProfileTo}`);
+        } catch (e) {
+          rec.profileError = `the profile at ${rec.profileDir} could not be moved to the relaunch (${e.message}) — it starts from an empty one`;
+          const succ = store.apps[carryProfileTo]; if (succ) succ.lastError = `started from an empty profile: ${e.message}`;
+          log.warn?.(`[desktop] ${id}: ${rec.profileError}`);
+        }
+      } else if (carryProfileTo && rec.profileDir) {
+        rec.profileError = `the profile at ${rec.profileDir} was not moved to the relaunch: a process of the session survived its teardown`;
+        log.warn?.(`[desktop] ${id}: ${rec.profileError}`);
+      }
       if (rec.profileDir) await retireProfile(rec, { clean, why: `stopped (${why})` }); // B-bfe6: every part is verified gone — the profile goes with the session IF a person ended it (M.profileRetireVerdict: an idle-out keeps it)
       log.log?.(`[desktop] ${id} stopped (${why}): ${rec.label}${clean ? '' : ' — NOT clean'}`);
       commit();
