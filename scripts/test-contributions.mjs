@@ -833,6 +833,51 @@ console.log('contributions — C. ws-handler unknown-type default');
 }
 function captureWarnsAsync() { const out = []; const o = console.warn; console.warn = (...a) => out.push(a.map(String).join(' ')); return { stop: () => { console.warn = o; return out; } }; }
 
+// ── E. MULTIVIEW (docs/design-browser-multiview.zh.md D3): the Agent browser window's menu rows — fold back, pop out ──
+console.log('contributions — E. MULTIVIEW: the Agent browser window\'s fold-back row + the strip\'s pop-out');
+{
+  const lw = read('src/lib/browser-live-window.js');
+  const fnSrc = (name) => { let i = lw.indexOf(`export function ${name}(`); if (i < 0) i = lw.indexOf(`export async function ${name}(`); const j = lw.indexOf('\n}\n', i); if (i < 0 || j < 0) throw new Error('cannot extract ' + name); return lw.slice(i, j + 2).replace(/^export (async )?function/, (m, a) => (a ? 'async function' : 'function')); };
+  const toasts = [];
+  const LW = new Function('t', 'showToast', `${fnSrc('otherLiveWindow')}\n${fnSrc('passControlTo')}\n${fnSrc('foldBackLive')}\nreturn { otherLiveWindow, passControlTo, foldBackLive };`)(id, (m) => toasts.push(m));
+  const folds = [];
+  new Function('registerMenuItem', 't', 'otherLiveWindow', 'foldBackLive', extract('src/lib/browser-live-window.js', 'registerLiveViewMenus'))(registerMenuItem, id, LW.otherLiveWindow, (app, win) => { folds.push(win.id); return LW.foldBackLive(app, win); });
+  // a fake live view: `st` is ITS state (a pass it receives flips mine; a switch sets the ref and a new viewer id, as a hello would)
+  const liveWin = (wid, sessionId, st = {}) => { const s0 = { sessionId, currentRef: st.ref || null, mode: st.mode || 'watch', mine: !!st.mine, you: st.you || 1, target: { ref: st.ref || null } }; const w = { id: wid, type: 'browser-live', switched: null, sent: [], s: s0, _browserLive: { state: () => ({ ...w.s }), switchTo: (r) => { w.switched = r; w.s = { ...w.s, currentRef: r, target: { ref: r }, you: (w.s.you || 1) + 100 }; }, send: (m) => { w.sent.push(m); if (m.type === 'pass' && w.passTo) { w.s = { ...w.s, mine: false }; w.passTo.s = { ...w.passTo.s, mode: 'takeover', mine: true }; } }, bindLabel: () => 'Snap beside it', isBound: () => false, toggleBind: () => { } } }; return w; }; // isBound: lane I's rule — the bind row only while UNBOUND (2.369.183)
+  const mkApp = (wins) => { const closed = [], focused = []; return { closed, focused, wm: { windows: new Map(wins.map((w) => [w.id, w])), closeWindow: (x) => closed.push(x), focusWindow: (x) => focused.push(x) } }; };
+  const main = liveWin('win-blive-s1', 's1', { ref: 'bp-00000001' }), pop = liveWin('win-pop1', 's1', { ref: 'bk-0000000a.1' }), lone = liveWin('win-s2', 's2', { ref: 'bp-00000002' });
+  const app = mkApp([pop, main, lone]);
+  const rows = (win) => menuItems('window', { app, id: win.id, win }).map((i) => i.label);
+  ok(rows(pop).includes('Fold back into the Agent browser window') && rows(pop).includes('Snap beside it'), 'a POPPED-OUT window\'s own menu offers "Fold back into the Agent browser window" (beside bind)', J(rows(pop)));
+  ok(!rows(lone).includes('Fold back into the Agent browser window') && rows(lone).includes('Snap beside it'), 'a session with ONE live window has no fold-back row');
+  ok(LW.otherLiveWindow(app, 's1', 'win-pop1') === main && LW.otherLiveWindow(app, 's1', 'win-blive-s1') === pop && LW.otherLiveWindow(app, 's2', 'win-s2') === null, 'the MAIN window is the deterministic win-blive-<session> when open, else the oldest other — the last one standing is the main one');
+  await menuItems('window', { app, id: pop.id, win: pop }).find((i) => i.label === 'Fold back into the Agent browser window').action();
+  ok(J(folds) === J(['win-pop1']) && main.switched === 'bk-0000000a.1' && J(app.closed) === J(['win-pop1']) && J(app.focused) === J(['win-blive-s1']) && pop.sent.length === 0, 'running it: the main window SELECTS the folded tab (helper 1\'s browser), the popped-out window closes, the main one is focused (nothing driven ⇒ nothing passed)');
+  const drivingMain = liveWin('win-blive-s3', 's3', { ref: 'bp-00000003', mode: 'takeover', mine: true }), pop3 = liveWin('win-pop3', 's3', { ref: '~ephemeral' });
+  const app3 = mkApp([drivingMain, pop3]);
+  ok((await LW.foldBackLive(app3, pop3)) === true && drivingMain.switched === null && J(app3.closed) === J(['win-pop3']) && /keeps the browser you are driving/.test(toasts[toasts.length - 1] || ''), 'folding into a window where YOU DRIVE never switches it away (a takeover is never taken away) — said in plain words; the folded one stays in its strip');
+  ok((await LW.foldBackLive(mkApp([lone]), lone)) === false && /no other Agent browser window/.test(toasts[toasts.length - 1] || ''), 'nothing to fold into ⇒ said, never a silent no-op');
+  // lane P verify (finding 3): a popped-out window the user DRIVES carries its control — `pass` to the main window's
+  // viewer on that browser (its NEW viewer id, after the switch's hello), and only then does it close
+  const main4 = liveWin('win-blive-s4', 's4', { ref: 'bp-00000004', you: 7 }), pop4 = liveWin('win-pop4', 's4', { ref: 'bk-0000000d.1', mode: 'takeover', mine: true, you: 9 });
+  pop4.passTo = main4;
+  const app4 = mkApp([main4, pop4]);
+  const f4 = await LW.foldBackLive(app4, pop4);
+  ok(f4 === true && main4.switched === 'bk-0000000d.1' && J(pop4.sent) === J([{ type: 'pass', to: 107 }]) && main4.s.mine && main4.s.mode === 'takeover' && J(app4.closed) === J(['win-pop4']) && /still driving/.test(toasts[toasts.length - 1] || ''), 'folding back the window you DRIVE: the main one switches, the pop-out PASSES its control to the main one\'s new view, THEN closes — you are still driving', J({ sent: pop4.sent, main: main4.s, closed: app4.closed }));
+  const main5 = liveWin('win-blive-s5', 's5', { ref: 'bp-00000005', mode: 'takeover', mine: true }), pop5 = liveWin('win-pop5', 's5', { ref: 'bp-00000006', mode: 'takeover', mine: true });
+  const app5 = mkApp([main5, pop5]);
+  ok((await LW.foldBackLive(app5, pop5)) === false && app5.closed.length === 0 && main5.switched === null && pop5.sent.length === 0 && /driving in both windows/.test(toasts[toasts.length - 1] || ''), 'driving in BOTH windows: refused in words — nothing switches, nothing closes (one takeover would be lost)');
+  // the strip tab's own context menu: "Open in new window" = openBrowserLive with THAT tab's ref (a normal window, its own selection)
+  // 2.369.183: `popOut: true` — since lane H (naive study 2 finding 2) a plain openBrowserLive FOCUSES the session's view; the pop-out is the one deliberate second window
+  ok(/\{ label: t\('Open in new window'\), action: \(\) => app\.openBrowserLive\(\{ sessionId, profileId: r\.ref, popOut: true \}\) \}/.test(lw) && /b\.oncontextmenu = \(e\) => \{ e\.preventDefault\(\); e\.stopPropagation\(\); stripMenu\(r, e\.clientX, e\.clientY\); \};/.test(lw), 'WIRING PIN: a strip tab\'s right-click offers "Open in new window" = app.openBrowserLive({ sessionId, profileId: <that tab\'s ref>, popOut: true })');
+  ok(/if \(r\.ref === curRef\(\) && otherLiveWindow\(app, sessionId, winInfo\.id\)\) items\.push\(\{ label: t\('Fold back into the Agent browser window'\), action: \(\) => foldBackLive\(app, winInfo\) \}\)/.test(lw), 'WIRING PIN: …and on the tab a popped-out window is showing, the same fold-back');
+  // the ONE drag exception folds back (tab-group.js _mergeDrop asks the PURE rule first)
+  const tg = read('src/lib/tab-group.js');
+  const md = tg.slice(tg.indexOf('  _mergeDrop(targetWin, win, {'), tg.indexOf('  _mergeDrop(targetWin, win, {') + 900);
+  ok(/const fold = this\._liveFoldTarget\(targetWin, win\);\s*\n\s*if \(fold && this\._app\?\.foldBackLive\) \{ this\._app\.foldBackLive\(win, fold\); return; \}/.test(md) && md.indexOf('_liveFoldTarget') < md.indexOf('addToTabChain'), 'WIRING PIN: the merge drop asks the PURE fold-back rule BEFORE it chains (two live views of one session fold back, never a chain of them)');
+  ok(/foldBackTarget\(facts\(win\), members\.map\(facts\)\)/.test(tg) && /App\.prototype\.foldBackLive = function \(win, into\) \{ return foldBackLive\(this, win, into\); \};/.test(lw), 'WIRING PIN: _liveFoldTarget = chain-layout.foldBackTarget over the target (and its group), App.foldBackLive = the menu row\'s act');
+}
+
 // ── D. wiring pins ──
 console.log('contributions — D. wiring pins');
 {

@@ -110,11 +110,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (keeper) { try { set = keeper.setFor(f.browserKey); profiles = keeper.list().profiles; } catch (e) { log.warn?.(`[browser-live] keeper unreadable: ${e && e.message}`); } }
     const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef, envPairs: f.envPairs, profiles });
     if (!target.ok) return refuse(ws, target.code, target.error, { handles: target.handles || [] });
-    const key = relayKeyOf(sessionId, target);
+    const key = relayKeyFor(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
     const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now() };
     relay.viewers.set(viewer.id, viewer);
+    noteViewers(relay);
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
     if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; }
@@ -133,14 +134,23 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     await relay.ensureUpstream();
   }
 
-  /** One relay per (session, target): an attachment by its profile, the session's own ephemeral, or (naive study 2,
-   *  finding 4) a SUB-AGENT's ephemeral by its child key — a tap only, never a viewer's. */
-  const relayKeyOf = (sessionId, target) => `${sessionId}|${target.kind === 'attachment' ? target.profileId : (target.child ? 'child:' + target.browserKey : 'ephemeral')}`;
+  /** ONE upstream per (session, target): an attachment by its profile, a HELPER by its child key — the live view's
+   *  `child` target (lane P, by handle) and the recorder's `~child:` tap (lane H naive study 2 finding 4, `child: true` +
+   *  its browserKey) name the SAME browser and share ONE relay — the session's own browser otherwise. */
+  function relayKeyFor(sessionId, target) { return `${sessionId}|${target.kind === 'attachment' ? target.profileId : target.kind === 'child' ? 'child:' + target.handle : target.child ? 'child:' + target.browserKey : 'ephemeral'}`; }
+  /** MULTIVIEW B-325a: the keeper releases no browser somebody is watching — tell it how many watch this pair. */
+  function noteViewers(relay) { try { keeper?.noteViewers?.(relay.browserKey, relay.target.profileId || null, relay.viewers.size); } catch { /* optional */ } }
   function createRelay(key, sessionId, target) {
     const f = sessionFacts(sessionId) || {};
+    // MULTIVIEW §4: a HELPER's relay is keyed on ITS handle (its takeover pauses
+    // the helper, never the parent) and answers under ITS OWN pairs
+    const child = target.kind === 'child';
+    let childPairs = null;
+    if (child && keeper && typeof keeper.pairsForKey === 'function') { try { childPairs = keeper.pairsForKey(target.handle); } catch { childPairs = null; } }
     const relay = {
-      // a sub-agent's relay is keyed and answered under ITS key and pairs (the session's are its parent's)
-      key, sessionId, target, browserKey: target.browserKey || f.browserKey || null, envPairs: target.envPairs || f.envPairs || null, viewers: new Map(), upstream: null, connecting: null, last: {}, lastFrame: null,
+      // a HELPER's relay is keyed and answered under ITS key and pairs (the session's are its parent's): lane P's view
+      // target by handle (pairs from the keeper), lane H's tap target (its own browserKey + pairs on the target)
+      key, sessionId, target, browserKey: child ? target.handle : (target.browserKey || f.browserKey || null), envPairs: child ? childPairs : (target.envPairs || f.envPairs || null), viewers: new Map(), upstream: null, connecting: null, last: {}, lastFrame: null,
       // P5 (§4.5): server-side TAPS — the action-trace recorder listens to the
       // same upstream (every record, frames included) and keeps the relay
       // alive with no viewer at a low fps; a tap never drives, never counts
@@ -168,7 +178,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!keeper) { broadcast(relay, { type: 'status', state: 'error', code: 'unavailable', error: 'browser profiles are not available on this server' }); return endRelay(relay, 1011); }
     const r = await keeper.streamPortFor(relay.target);
     if (!relay.viewers.size && !relay.taps.size) return endRelay(relay);           // everyone left while the port was asked for
-    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error, ...(r.unstable ? { unstable: r.unstable } : {}) }); return endRelay(relay, 1011); } // lane H verify r6: an unstable verdict's kind rides (the view's words)
+    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error, ...(r.unstable ? { unstable: r.unstable } : {}), ...(r.state ? { browserState: String(r.state) } : {}) }); return endRelay(relay, 1011); } // lane H verify r6: an unstable verdict's kind rides (the view's words); lane P verify: `browserState` = the keeper's record state (not-started / stopped) — the view draws it hollow
     relay.port = r.port;
     const up = new WebSocketImpl(`ws://127.0.0.1:${r.port}`, { headers: { Origin: S.originHeaderFor(r.port) }, maxPayload: MAX_PAYLOAD, handshakeTimeout: connectTimeoutMs });
     relay.upstream = up;
@@ -361,6 +371,18 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       else send(viewer.ws, { type: 'mode-ack', ok: true, mode: relay.mode, mine: false, heldMs: r.heldMs || 0 });
       return;
     }
+    // lane P verify (finding 3): a FOLD-BACK of the window the user drives — the holder hands its controls to
+    // another view of THIS relay (same session, same browser); the closing view then hands nothing back
+    if (v.kind === 'pass') {
+      if (relay.holder !== viewer.id) { send(viewer.ws, { type: 'refused', code: 'not_holder', error: 'only the view that is driving can pass the controls on', mode: relay.mode }); return; }
+      if (v.to === null || v.to === viewer.id || !relay.viewers.has(v.to)) { send(viewer.ws, { type: 'refused', code: 'no_such_viewer', error: 'the controls pass only to another view of this same browser', mode: relay.mode }); return; }
+      let r = null;
+      if (keeper && typeof keeper.passControl === 'function') { r = keeper.passControl({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, from: viewer.id, to: v.to, sessionId: relay.sessionId }); if (r.ok && !unsubInput) applyInputState(relay, r.state, 'pass'); }
+      else { r = T.decidePass({ state: relay.mode === 'takeover' ? { input: 'user', takenAt: relay.modeSince, takenBy: { viewerId: relay.holder, at: relay.modeSince } } : null, from: viewer.id, to: v.to, now: now() }); if (r.ok) applyInputState(relay, r.state, 'pass'); }
+      if (!r.ok) send(viewer.ws, { type: 'refused', code: r.code || 'refused', error: r.error || 'refused', mode: relay.mode });
+      else send(viewer.ws, { type: 'mode-ack', ok: true, mode: relay.mode, mine: false, passedTo: v.to });
+      return;
+    }
     if (v.kind === 'confirm') {
       if (!keeper || typeof keeper.answerConfirmation !== 'function') { send(viewer.ws, { type: 'confirmation-ack', ok: false, id: v.id, decision: v.decision, code: 'unavailable', error: 'confirmations are not available on this server' }); return; }
       keeper.answerConfirmation({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, id: v.id, decision: v.decision, envPairs: relay.envPairs })
@@ -380,6 +402,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function broadcastViewers(relay) { broadcast(relay, { type: 'viewers', n: relay.viewers.size }); }
   function dropViewer(relay, viewer) {
     if (!relay.viewers.delete(viewer.id)) return;
+    noteViewers(relay);
     // P3: the holder's window closed ⇒ the controls go back to the agent
     // (`viewer-left`: zero-spend unless browser.announceIdleHandback says so).
     if (relay.holder === viewer.id) { try { handbackFor(relay, viewer.id, 'viewer-left'); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: handback on viewer-left failed — ${e && e.message}`); } }
@@ -406,7 +429,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const childPairs = ck && keeper && typeof keeper.ephemeralPairsFor === 'function' ? keeper.ephemeralPairsFor(ck) : null;
     const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef: profileRef || '', envPairs: f.envPairs, profiles, childPairs });
     if (!target.ok) return { ok: false, code: target.code, error: target.error };
-    const key = relayKeyOf(sessionId, target);
+    const key = relayKeyFor(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
     relay.taps.add(fn);
@@ -424,7 +447,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   /** Send one JSON record to every viewer of the relays on (session, profileId|null). */
   function broadcastTo(sessionId, profileId, obj) {
     let n = 0;
-    for (const r of relays.values()) { if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null) || r.target.child) continue; broadcast(r, obj); n += r.viewers.size; }
+    for (const r of relays.values()) { if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null) || r.target.child || r.target.kind === 'child') continue; broadcast(r, obj); n += r.viewers.size; } // a helper's relay (either shape) is never the session's own
     return n;
   }
   /** Close every viewer (typed status first, when a reason is given) and the
@@ -437,6 +460,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (why) broadcast(relay, { type: 'status', state: 'ended', error: why });
     for (const v of [...relay.viewers.values()]) { try { v.ws.close(code); } catch { /* closing */ } }
     relay.viewers.clear();
+    noteViewers(relay);
     // P5: the taps are told, then forgotten (a tap re-arms itself on the keeper's next lease event)
     for (const fn of [...relay.taps]) { try { fn({ type: 'tap-end', code, why }, null, relay); } catch { /* optional */ } }
     relay.taps.clear();
@@ -449,7 +473,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function viewerCount(sessionId) { let n = 0; for (const r of relays.values()) if (r.sessionId === sessionId) n += r.viewers.size; return n; }
   function stats() {
     return [...relays.values()].map((r) => ({
-      key: r.key, sessionId: r.sessionId, target: { kind: r.target.kind, profileId: r.target.profileId || null, alias: r.target.alias || null }, port: r.port,
+      key: r.key, sessionId: r.sessionId, target: { kind: r.target.kind, profileId: r.target.profileId || null, alias: r.target.alias || null, handle: r.target.handle || null }, port: r.port, browserKey: r.browserKey,
       upstream: r.upstream ? r.upstream.readyState : null, paused: r.paused, upstreamMaxFps: r.upstreamMaxFps, mode: r.mode, holder: r.holder,
       picture: r.picture, viewport: r.viewport ? { clientWidth: r.viewport.clientWidth, clientHeight: r.viewport.clientHeight, why: r.viewport.why } : null, // lane J
       viewers: [...r.viewers.values()].map((v) => ({ id: v.id, maxFps: v.maxFps, sent: v.sent, dropped: v.dropped, bufferedAmount: v.ws.bufferedAmount })),

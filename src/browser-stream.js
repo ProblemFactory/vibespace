@@ -79,7 +79,7 @@ const MODES = Object.freeze(['watch', 'takeover', 'handback']);
 const VIEWER_INPUT_TYPES = Object.freeze(['input_mouse', 'input_keyboard', 'input_touch']);
 /** P3 (§4.3): the viewer verbs that change WHO drives, and the answer to a
  *  pending `--confirm-actions` card. None is forwarded upstream as-is. */
-const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm']);
+const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', 'pass']); // + lane P verify: `pass` {to} = the holder hands its controls to another view of the same browser (a fold-back)
 /** CDP's modifier bitmask, the one the stream server expects (measured off
  *  the dashboard's own bundle: alt 1, ctrl 2, meta 4, shift 8). */
 const KEY_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
@@ -166,7 +166,11 @@ function originHeaderFor(port) { return `http://127.0.0.1:${Number(port) || 0}`;
  * Answers a typed target or a typed refusal — never throws.
  *   { ok:true, kind:'attachment', profileId, alias, label, isDefault, chosen:'named'|'default'|'only'|'first', ns, sessionName, dir }
  *   { ok:true, kind:'ephemeral', ns, sessionName, envPairs }
+ *   { ok:true, kind:'child', handle, ns:'vs-<handle>', sessionName }   MULTIVIEW §4: a helper's browser (no pairs — the keeper's record has them)
  *   { ok:false, code:'not_attached'|'no-browser'|'no-key', error, handles }
+ * `profileRef` may also be EPHEMERAL_REF (the session's own browser, asked for
+ * by name beside its attachments) or a child handle the set lists. Every ok
+ * target carries `ref` = what a strip tab names it by.
  */
 function streamTargetFor({ browserKey, set = null, profileRef = '', envPairs = null, profiles = [], childPairs = null } = {}) {
   const bk = String(browserKey || '');
@@ -184,14 +188,23 @@ function streamTargetFor({ browserKey, set = null, profileRef = '', envPairs = n
   const byId = (id) => (profiles || []).find((p) => p && p.id === id) || null;
   const mk = (a, chosen) => {
     const p = byId(a.profileId);
-    return { ok: true, kind: 'attachment', profileId: a.profileId, alias: a.alias, label: a.label || (p ? p.label : a.profileId), isDefault: !!a.isDefault, chosen, ns: sessionNameFor(a.profileId), sessionName: sessionNameFor(bk), dir: p ? p.dir : (a.dir || null) };
+    return { ok: true, kind: 'attachment', ref: a.profileId, profileId: a.profileId, alias: a.alias, label: a.label || (p ? p.label : a.profileId), isDefault: !!a.isDefault, chosen, ns: sessionNameFor(a.profileId), sessionName: sessionNameFor(bk), dir: p ? p.dir : (a.dir || null) };
   };
   const ref = String(profileRef || '').trim();
   const pairs = Array.isArray(envPairs) ? envPairs.filter((s) => typeof s === 'string' && /^AGENT_BROWSER_[A-Z_]+=/.test(s)) : [];
-  const ephemeral = () => (pairs.length
-    ? { ok: true, kind: 'ephemeral', profileId: null, alias: null, label: null, isDefault: false, chosen: 'ephemeral', ns: sessionNameFor(bk), sessionName: sessionNameFor(bk), envPairs: pairs }
+  const ephemeral = (chosen) => (pairs.length
+    ? { ok: true, kind: 'ephemeral', ref: EPHEMERAL_REF, profileId: null, alias: null, label: null, isDefault: false, chosen, ns: sessionNameFor(bk), sessionName: sessionNameFor(bk), envPairs: pairs }
     : { ok: false, code: 'no-browser', error: 'this session has no browser of its own (browser isolation is off for it, or it runs on another machine) — nothing to view', handles });
-  if (ref === EPHEMERAL_REF) return ephemeral();
+  // MULTIVIEW (design-browser-multiview §2): the session's OWN browser by name
+  // (a strip tab / a pop-out asks for it beside its attachments)
+  if (ref === EPHEMERAL_REF) return ephemeral('named');
+  // MULTIVIEW §4 (B-89d0): a HELPER's browser — a child handle this set lists.
+  // The target carries NO pairs: the bridge asks the keeper for THAT child's
+  // own recorded pairs, never the parent's (which name the parent's browser).
+  if (ref && CHILD_HANDLE_RE.test(ref)) {
+    const kids = (set && Array.isArray(set.children)) ? set.children : [];
+    if (kids.some((c) => c && c.handle === ref)) return { ok: true, kind: 'child', ref, handle: ref, profileId: null, alias: null, label: null, isDefault: false, chosen: 'named', ns: sessionNameFor(ref), sessionName: sessionNameFor(ref) };
+  }
   if (ref) {
     const a = atts.find((x) => x.alias === ref) || atts.find((x) => x.profileId === ref);
     if (!a) return { ok: false, code: 'not_attached', error: `this session is not attached to ${JSON.stringify(ref)}${handles.length ? ' — its attachments: ' + handles.join(', ') : ''}`, handles };
@@ -201,7 +214,7 @@ function streamTargetFor({ browserKey, set = null, profileRef = '', envPairs = n
   if (def) return mk(def, 'default');
   if (atts.length === 1) return mk(atts[0], 'only');
   if (atts.length > 1) return mk(atts[0], 'first');
-  return ephemeral();
+  return ephemeral('ephemeral');
 }
 
 /** `['K=V', …]` → `{K: V}` (the P0 spawn pairs, for one CLI call). */
@@ -250,6 +263,7 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   if (t === 'takeover') return { kind: 'takeover', forward: false };
   if (t === 'handback') return { kind: 'handback', forward: false };
   if (t === 'confirm') return { kind: 'confirm', forward: false, id: typeof msg.id === 'string' ? msg.id.slice(0, 80) : '', decision: msg.decision === 'deny' ? 'deny' : 'confirm' };
+  if (t === 'pass') return { kind: 'pass', forward: false, to: Number.isInteger(msg.to) ? msg.to : (typeof msg.to === 'string' && msg.to ? msg.to.slice(0, 40) : null) };
   return { kind: 'unknown', forward: false, refusal: { type: 'refused', code: 'unknown-type', error: `unknown message type ${JSON.stringify(t).slice(0, 40)}` } };
 }
 
@@ -344,7 +358,7 @@ function backpressureVerdict(bufferedAmounts, paused, limits = BACKPRESSURE) {
 function hello({ viewers = 1, target = null, mode = 'watch', holder = null, upstreamVersion = null } = {}) {
   return {
     type: 'hello', viewers: Number(viewers) || 1, mode: MODES.includes(mode) ? mode : 'watch', holder: holder || null,
-    target: target && target.ok ? { kind: target.kind, profileId: target.profileId || null, alias: target.alias || null, label: target.label || null, isDefault: !!target.isDefault, chosen: target.chosen, ns: target.ns || null } : null, // ns: a stopped view knows which ephemeral it waits for (naive study 2)
+    target: target && target.ok ? { kind: target.kind, ref: target.ref || null, handle: target.handle || null, profileId: target.profileId || null, alias: target.alias || null, label: target.label || null, isDefault: !!target.isDefault, chosen: target.chosen, ns: target.ns || null } : null, // ns: a stopped view knows which ephemeral it waits for (naive study 2)
     protocol: { frames: 'latest-wins', ordered: UPSTREAM_TYPES.filter((t) => t !== 'frame'), input: 'holder-only', control: VIEWER_CONTROL_TYPES.slice(), upstreamVersion: upstreamVersion || null },
   };
 }
@@ -552,6 +566,212 @@ function liveTitle({ label = null, alias = null, sessionName = '', ephemeralWord
   return sessionName ? `${who} · ${sessionName}` : String(who);
 }
 
+// ── MULTIVIEW (docs/design-browser-multiview.zh.md §2 A1 / §4 B-89d0 / D3 / D4) ──
+// ONE session, N browsers, ONE strip. The list below is what the strip shows
+// and what the `own/cap` chip counts; it is DERIVED from the keeper's own
+// status answer (GET /api/browser/session/:id — `attachments`, `ephemeral`,
+// `children`, `inputs`, `leases`), never from a second store. Only these
+// three kinds exist in v1 (the fourth, an agent-opened desktop Chrome, waits
+// for E2 — §5 item 6); anything else in the answer never becomes a row.
+// EPHEMERAL_REF (lane H, above — '~ephemeral') is the ref a strip tab / a pop-out openSpec names the session's
+// OWN ephemeral browser by: never a valid alias (aliases start with [a-z0-9]) nor an id. ONE spelling (the
+// integration of 2.369.183 — lane P had minted '~ephemeral' beside it; '~ephemeral' is persisted in 2.369.180 layouts).
+const LIST_KINDS = Object.freeze(['attachment', 'ephemeral', 'child']);
+/** running = a command in flight (only the relay knows — the client passes it
+ *  as `activity`); idle = the browser process is live; released = not live
+ *  (released after the turn, idled out, stopped by the user, never started —
+ *  the NEXT COMMAND starts it again, a view never does); ended = failed. */
+const ROW_STATES = Object.freeze(['running', 'idle', 'released', 'ended']);
+/** The same spelling as browser-profiles.CHILD_KEY_RE (this module imports
+ *  nothing; test-browser-handles pins the two sources equal). */
+const CHILD_HANDLE_RE = /^bk-[0-9a-f]{8}\.\d{1,4}$/;
+function rowStateOf(b) {
+  if (!b || typeof b !== 'object') return 'released';
+  const st = String(b.state || '');
+  if (st === 'starting' || st === 'ready') return 'idle';
+  if (st === 'failed') return 'ended';
+  return 'released';
+}
+/**
+ * THE STRIP'S LIST — PURE over the status answer. Every row:
+ *   { ref, kind, label, state, driver, isDefault, owners, profileId, helper }
+ *   ref     what the view asks the bridge for (`profile=`): a profile id, EPHEMERAL_REF, a child handle
+ *   driver  'agent' | 'helper' | 'you' — 'you' while the USER holds the input side (keeper `inputs`)
+ *   owners  how many OTHER conversations hold a lease on the same profile (a count, never a name)
+ *   helper  { name, n } for a child row — `name` only when a WITNESS paired it (see bindHelpers)
+ * `activity` (ref → true) upgrades a live row to 'running'; `helpers` is the
+ * session's witness state (bindHelpers) — absent ⇒ every helper is "Helper N".
+ * Order: attachments (the keeper's lease order), the ephemeral browser, the
+ * children by their number. The client keeps a window's first-seen order on
+ * top of this (stripOrder) so a new row lands at the TAIL.
+ */
+function browserListFor(status, { activity = null, helpers = null } = {}) {
+  if (!isObj(status)) return [];
+  const bk = String(status.browserKey || '');
+  const inputs = Array.isArray(status.inputs) ? status.inputs.filter(isObj) : [];
+  const leases = Array.isArray(status.leases) ? status.leases.filter(isObj) : [];
+  const busy = (ref) => !!(activity && (activity instanceof Map ? activity.get(ref) : activity[ref]));
+  const drivenByUser = (key, profileId) => inputs.some((s) => s.input === 'user' && String(s.browserKey || '') === key && (s.profileId || null) === (profileId || null));
+  const stateFor = (ref, b) => { const s = rowStateOf(b); return s === 'idle' && busy(ref) ? 'running' : s; };
+  const rows = [];
+  const seen = new Set();
+  const push = (r) => { if (!r.ref || seen.has(r.ref) || !LIST_KINDS.includes(r.kind)) return; seen.add(r.ref); rows.push(r); };
+  for (const a of Array.isArray(status.attachments) ? status.attachments : []) {
+    if (!isObj(a) || typeof a.profileId !== 'string' || !a.profileId) continue;
+    const l = leases.find((x) => x.profileId === a.profileId && String(x.browserKey || '') === bk) || null;
+    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: drivenByUser(bk, a.profileId) ? 'you' : 'agent', isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
+  }
+  const e = isObj(status.ephemeral) ? status.ephemeral : null;
+  if (e && !e.child && String(e.browserKey || '') === bk && typeof e.profileId === 'string') {
+    push({ ref: EPHEMERAL_REF, kind: 'ephemeral', profileId: e.profileId, alias: null, label: null, state: stateFor(EPHEMERAL_REF, e), driver: drivenByUser(bk, null) ? 'you' : 'agent', isDefault: !rows.length, owners: 0, helper: null });
+  }
+  const kids = (Array.isArray(status.children) ? status.children : []).filter((c) => isObj(c) && CHILD_HANDLE_RE.test(String(c.handle || '')) && String(c.handle).slice(0, String(c.handle).indexOf('.')) === bk);
+  kids.sort((x, y) => childN(x.handle) - childN(y.handle));
+  // the route answers `helperNames` (handle → name) beside the status; a caller holding the raw witness state passes `helpers`
+  const names = isObj(status.helperNames) ? status.helperNames : helperNames(helpers);
+  for (const c of kids) {
+    const h = String(c.handle);
+    const b = isObj(c.browser) ? c.browser : null;
+    push({ ref: h, kind: 'child', profileId: b && typeof b.profileId === 'string' ? b.profileId : null, alias: null, label: null, state: stateFor(h, b), driver: drivenByUser(h, null) ? 'you' : 'helper', isDefault: false, owners: 0, helper: { name: names[h] || null, n: childN(h) } });
+  }
+  return rows;
+}
+function childN(handle) { const s = String(handle || ''); const i = s.indexOf('.'); return i < 0 ? 0 : Number(s.slice(i + 1)) || 0; }
+/** How many of a list's rows hold a LIVE browser (the chip's numerator). */
+function ownLiveCount(rows) { return (rows || []).filter((r) => r && (r.state === 'running' || r.state === 'idle')).length; }
+
+// ── helper naming by WITNESS, never by time or order (§4 B-89d0) ──
+// `new-child` is called by a sub-agent with its parent's token, so the server
+// cannot tell WHICH helper asked. What it can see: the claude stdout carries
+// the sub-agent's Bash tool_use naming `vibespace-browser new-child` under
+// `parent_tool_use_id` = the Task tool_use whose input names the helper
+// (`description`), and later that Bash call's tool_result (the CLI's own
+// words, which print the handle it minted).
+// lane P verify (finding 4, 2026-09-26): the pairing is decided at the
+// witness's CLOSE, over its WINDOW (tool_use … tool_result). A child is named
+// only when EXACTLY ONE mint arrived inside that window, NO other witness was
+// open at any moment of it, and the result's text names that very handle (a
+// whole token). A mint that arrives while no witness is open (a helper whose
+// `new-child` ran inside a script, a witness the JSONL watcher delivers late,
+// a background Bash) is "Helper N" for good — never claimed by a later
+// witness. The old rule paired the open halves by ORDER, so a script's mint
+// inside another helper's window took that helper's Task description. A codex
+// helper (no such signal on its stdout) is never witnessed ⇒ always "Helper N".
+const NEW_CHILD_RE = /(^|[\s;&|(`'"])vibespace-browser\s+(?:--\S+\s+)*new-child\b/;
+/** The Task tool_uses a parent-line assistant record opens: [{id, description, agentType}]. */
+function taskOpeningsOf(msg) {
+  if (!isObj(msg) || msg.type !== 'assistant' || msg.parent_tool_use_id || msg.isSidechain) return [];
+  const content = isObj(msg.message) && Array.isArray(msg.message.content) ? msg.message.content : [];
+  const out = [];
+  for (const b of content) {
+    if (!isObj(b) || b.type !== 'tool_use' || (b.name !== 'Task' && b.name !== 'Agent') || typeof b.id !== 'string') continue;
+    const inp = isObj(b.input) ? b.input : {};
+    out.push({ id: b.id, description: typeof inp.description === 'string' ? inp.description.slice(0, 120) : '', agentType: typeof inp.subagent_type === 'string' ? inp.subagent_type.slice(0, 60) : '' });
+  }
+  return out;
+}
+/** A sidechain assistant record's `vibespace-browser new-child` witnesses: [{id, parent}]. */
+function newChildWitnessesOf(msg, parentToolUseId = null) {
+  if (!isObj(msg) || msg.type !== 'assistant') return [];
+  const parent = String(parentToolUseId || msg.parent_tool_use_id || '');
+  if (!parent) return [];
+  const content = isObj(msg.message) && Array.isArray(msg.message.content) ? msg.message.content : [];
+  const out = [];
+  for (const b of content) {
+    if (!isObj(b) || b.type !== 'tool_use' || b.name !== 'Bash' || typeof b.id !== 'string') continue;
+    const cmd = isObj(b.input) && typeof b.input.command === 'string' ? b.input.command : '';
+    if (NEW_CHILD_RE.test(cmd)) out.push({ id: b.id, parent });
+  }
+  return out;
+}
+const RESULT_TEXT_MAX = 4096;
+/** A sidechain user record's tool_results: [{id, text}] (the text a string or the text blocks, capped). The caller keeps only ids that are open witnesses. */
+function witnessClosesOf(msg, parentToolUseId = null) {
+  if (!isObj(msg) || msg.type !== 'user') return [];
+  if (!String(parentToolUseId || msg.parent_tool_use_id || '')) return [];
+  const content = isObj(msg.message) && Array.isArray(msg.message.content) ? msg.message.content : [];
+  const out = [];
+  for (const b of content) {
+    if (!isObj(b) || b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue;
+    const c = b.content;
+    const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (isObj(x) && typeof x.text === 'string' ? x.text : '')).join('\n') : '';
+    out.push({ id: b.tool_use_id, text: text.slice(0, RESULT_TEXT_MAX) });
+  }
+  return out;
+}
+/** Does `text` name `handle` as a whole token (`bk-….1` is not named by `bk-….10`)? */
+function namesHandle(text, handle) {
+  const h = String(handle || ''); if (!h) return false;
+  const t = String(text || '');
+  let i = t.indexOf(h);
+  while (i >= 0) {
+    const before = i === 0 ? '' : t[i - 1], after = t[i + h.length] || '';
+    if (!/[\w.-]/.test(before) && !/[\w.]/.test(after)) return true;
+    i = t.indexOf(h, i + 1);
+  }
+  return false;
+}
+/** A fresh witness state: tasks (Task id → {description, agentType}), witnesses, children. */
+function newHelperState() { return { tasks: {}, witnesses: [], children: [] }; }
+/**
+ * ONE event into the witness state (PURE — returns a NEW state):
+ *   { kind:'task', id, description, agentType }   a Task tool_use opened on the parent line
+ *   { kind:'witness', id, parent }                 a sidechain Bash tool_use naming `new-child` — its window OPENS
+ *   { kind:'child', handle }                       the keeper minted a child handle for this conversation
+ *   { kind:'witness-close', id, text }             that Bash call's tool_result — its window CLOSES and is judged
+ * A witness = { id, parent, open, mints (≤ 2 kept: two already means "not one"), overlapped, handle };
+ * a child = { handle, witness, orphan } (orphan = minted while no witness was open ⇒ numbered for good).
+ */
+function bindHelpers(state, ev) {
+  const st = isObj(state) ? state : newHelperState();
+  const next = {
+    tasks: { ...(isObj(st.tasks) ? st.tasks : {}) },
+    witnesses: (Array.isArray(st.witnesses) ? st.witnesses : []).filter(isObj).map((w) => ({ ...w, mints: Array.isArray(w.mints) ? w.mints.slice(0, 2) : [] })),
+    children: (Array.isArray(st.children) ? st.children : []).filter(isObj).map((c) => ({ ...c })),
+  };
+  if (!isObj(ev)) return next;
+  const open = () => next.witnesses.filter((w) => w.open);
+  if (ev.kind === 'task' && typeof ev.id === 'string') next.tasks[ev.id] = { description: String(ev.description || '').slice(0, 120), agentType: String(ev.agentType || '').slice(0, 60) };
+  else if (ev.kind === 'witness' && typeof ev.id === 'string' && !next.witnesses.some((w) => w.id === ev.id)) {
+    const o = open();
+    for (const w of o) w.overlapped = true;           // two windows open at once ⇒ neither can be judged
+    next.witnesses.push({ id: ev.id, parent: String(ev.parent || ''), open: true, mints: [], overlapped: o.length > 0, handle: null });
+  } else if (ev.kind === 'child' && CHILD_HANDLE_RE.test(String(ev.handle || '')) && !next.children.some((c) => c.handle === ev.handle)) {
+    const o = open();
+    next.children.push({ handle: String(ev.handle), witness: null, orphan: o.length === 0 });
+    for (const w of o) if (w.mints.length < 2) w.mints.push(String(ev.handle));
+  } else if (ev.kind === 'witness-close' && typeof ev.id === 'string') {
+    const w = next.witnesses.find((x) => x.id === ev.id && x.open);
+    if (!w) return next;
+    w.open = false;
+    if (!w.overlapped && w.mints.length === 1) {
+      const c = next.children.find((x) => x.handle === w.mints[0]);
+      if (c && !c.witness && !c.orphan && namesHandle(ev.text, c.handle)) { c.witness = w.id; w.handle = c.handle; }
+    }
+  } else return next;
+  // keep the state bounded (a long conversation mints many helpers): the last 64 of each
+  if (next.witnesses.length > 64) next.witnesses = next.witnesses.slice(-64);
+  if (next.children.length > 64) next.children = next.children.slice(-64);
+  const keepTasks = new Set(next.witnesses.map((w) => w.parent));
+  const ids = Object.keys(next.tasks);
+  if (ids.length > 128) for (const id of ids.slice(0, ids.length - 128)) if (!keepTasks.has(id)) delete next.tasks[id];
+  return next;
+}
+/** handle → the helper's name (its Task description, else its agent type) — only for a WITNESSED child. */
+function helperNames(state) {
+  const out = {};
+  if (!isObj(state)) return out;
+  const tasks = isObj(state.tasks) ? state.tasks : {};
+  for (const c of Array.isArray(state.children) ? state.children : []) {
+    if (!c || !c.witness) continue;
+    const w = (state.witnesses || []).find((x) => x && x.id === c.witness);
+    const t = w && tasks[w.parent];
+    const name = t ? (t.description || t.agentType || '') : '';
+    if (name) out[c.handle] = name;
+  }
+  return out;
+}
+
 module.exports = {
   STREAM_PATH, BACKPRESSURE, MAX_FPS_DEFAULT, MAX_FPS_CAP, UPSTREAM_TYPES, REPLAYED_TYPES, MODES, VIEWER_INPUT_TYPES, VIEWER_CONTROL_TYPES, KEY_MODIFIERS,
   EPHEMERAL_REF, sessionNameFor, classifyUpstream, parseStreamStatus, streamPlan, originHeaderFor, streamTargetFor, pairsToEnv,
@@ -564,4 +784,7 @@ module.exports = {
   modifiersOf, mouseRecord, wheelRecord, keyRecord, touchRecord,
   // lane J r2: the picture's placement (top-aligned) and text a viewer hands the page (a paste, an IME composition)
   LIVE_ALIGN, ALIGNS, textRecords, TEXT_CHUNK, TEXT_MAX,
+  // MULTIVIEW (design-browser-multiview §2 / §4 / D3): the strip's list, the helper witness
+  LIST_KINDS, ROW_STATES, CHILD_HANDLE_RE, rowStateOf, browserListFor, ownLiveCount, childN,
+  NEW_CHILD_RE, taskOpeningsOf, newChildWitnessesOf, witnessClosesOf, namesHandle, newHelperState, bindHelpers, helperNames,
 };

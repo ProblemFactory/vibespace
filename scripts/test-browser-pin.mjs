@@ -212,7 +212,12 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   // the ceiling
   const running = [{ profileId: 'bp-00000001', label: 'Work', state: 'ready' }, { profileId: 'bp-00000002', label: 'Team', state: 'ready' }, { profileId: 'bp-00000009', state: 'stopped' }];
   const cap = B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 2 });
-  ok(cap && cap.code === 'cap' && cap.holders.length === 2 && /Work \(bp-00000001/.test(cap.error) && /Team \(bp-00000002, leased by/.test(cap.error), 'at the ceiling the refusal NAMES the holders and who leases them');
+  // MULTIVIEW D4 / B-325a (docs/design-browser-multiview.zh.md): the machine ceiling names ONLY the asking
+  // conversation's own holders — every other one is a COUNT (another session's name / lease id never reaches it)
+  ok(cap && cap.code === 'cap' && cap.scope === 'machine' && cap.holders.length === 0 && cap.others === 2 && /browser ceiling reached \(2\/2 running on this machine/.test(cap.error) && !/bp-0000000|Work|Team|bk-/.test(cap.error), 'at the ceiling (nobody asking) the refusal names NO holder — "2 are in other conversations or desktop apps"', cap && cap.error);
+  const owner = leases.find((l) => l.profileId === 'bp-00000002');
+  const capMine = B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 2 }, { browserKey: owner.browserKey });
+  ok(capMine && capMine.holders.length === 1 && capMine.holders[0].label === 'Team' && capMine.others === 1 && /yours: Team; 1 is in other conversations/.test(capMine.error) && !/Work|bp-00000001/.test(capMine.error) && !capMine.holders.some((h) => h.sessions.length), 'asked BY a holder: only ITS holder is named (label only, no lease ids), the rest a count', capMine && capMine.error);
   ok(B.ceilingVerdict(running, leases, { CONCURRENT_CAP: 3 }) === null, 'below the ceiling nothing is refused (stopped records do not count)');
   // idle / runaway / pid / adoption verdicts
   ok(B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, [], 700, 500).expired && !B.browserIdle({ profileId: 'bp-00000002', startedAt: 0, lastLeaseDroppedAt: 100 }, leases, 700, 500).expired, 'a browser is idle only with NO lease, from its last drop');
@@ -292,7 +297,8 @@ let kA, workId, teamId, thirdId;
   ok(st.leases.length === 2 && st.leases.find((l) => l.profileId === teamId).others === 1 && st.leases.find((l) => l.profileId === workId).others === 0, 'statusFor names each lease with how many OTHER sessions share it');
   // the ceiling (cap 2)
   const e3 = await threw(() => kA.attach({ profile: 'Third', browserKey: KEY_B, sessionId: 'sess-3' }));
-  ok(e3 && e3.code === 'cap' && e3.holders.length === 2 && /Work \(/.test(e3.message) && /Team \(/.test(e3.message) && new RegExp(KEY_B).test(e3.message), 'at the ceiling the third browser is refused, naming the holders and their sessions');
+  // MULTIVIEW D4 / B-325a: KEY_B holds Team (shared) — it hears "yours: Team" and a COUNT for Work (KEY_A's), never KEY_A
+  ok(e3 && e3.code === 'cap' && e3.holders.length === 1 && e3.holders[0].label === 'Team' && /yours: Team; 1 is in other conversations/.test(e3.message) && !/Work/.test(e3.message) && !new RegExp(KEY_A).test(e3.message), 'at the ceiling the third browser is refused, naming only the asker\'s own holder (another conversation\'s browser is a count)', e3 && e3.message);
   ok(!reg(kA).leases.some((l) => l.profileId === thirdId) && launches().length === 2, '…and no lease, no launch');
   ok(kA.list().cap.used === 2 && kA.list().cap.cap === 2, 'the digest reports used/cap');
   // detach

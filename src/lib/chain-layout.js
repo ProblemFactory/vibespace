@@ -475,6 +475,100 @@ function swapSides(chain) {
   return normalizeChain(chain);
 }
 
+// ── MULTIVIEW (docs/design-browser-multiview.zh.md §3 (b) + D5) ──
+// Two chats grouped in one window, each with its own live view: the strip is
+// lane F's two halves (left = the chats, right = the browsers). ONE rule —
+// no new window type, no new openSpec, no persisted field: a tab's PARTNER is
+// the tab on the OTHER side whose session is the same (a chat ↔ its live
+// view), derived from `factsOf(id) → { sessionId, kind: 'chat'|'live'|other, ended }`
+// (the window facts tab-group.js reads — never stored in the chain).
+// D5: still only two panes, never a third; the follow happens ONLY when the
+// other side currently shows a PARTNERED tab of the same kind as the partner
+// (a live view of a session that has its chat here, or a chat whose live view
+// is here) — the other side showing a chat the user placed there by itself
+// (two chats side by side) never moves.
+const PANE_KINDS = Object.freeze(['chat', 'live']);
+const factOf = (factsOf, id) => { try { const f = typeof factsOf === 'function' ? factsOf(String(id)) : null; return f && typeof f === 'object' ? f : {}; } catch { return {}; } };
+/** The tab on the OTHER side of a split whose session matches `tabId`'s and
+ *  whose kind is the other one (chat ↔ live), else null. An ENDED session has
+ *  no partner (nothing is followed onto a dead pane). */
+function partnerFor(chain, tabId, factsOf) {
+  const sides = sidesOf(chain);
+  if (!sides) return null;
+  const id = String(tabId);
+  const me = factOf(factsOf, id);
+  if (!me.sessionId || !PANE_KINDS.includes(me.kind) || me.ended) return null;
+  const mine = sides.left.includes(id) ? 'left' : sides.right.includes(id) ? 'right' : null;
+  if (!mine) return null;
+  const want = me.kind === 'chat' ? 'live' : 'chat';
+  for (const x of sides[mine === 'left' ? 'right' : 'left']) {
+    const f = factOf(factsOf, x);
+    if (f.sessionId === me.sessionId && f.kind === want && !f.ended) return x;
+  }
+  return null;
+}
+/** Does this tab's session have BOTH a chat and a live view in the chain? */
+function isPartnered(chain, id, factsOf) {
+  const f = factOf(factsOf, id);
+  if (!f.sessionId || !PANE_KINDS.includes(f.kind) || f.ended) return false;
+  const want = f.kind === 'chat' ? 'live' : 'chat';
+  return (chain && Array.isArray(chain.tabs) ? chain.tabs : []).some((x) => { if (String(x) === String(id)) return false; const g = factOf(factsOf, x); return g.sessionId === f.sessionId && g.kind === want && !g.ended; });
+}
+/**
+ * After the user SHOWED `tabId` (a click, the keyboard), which tab should the
+ * OTHER side show now? → the partner's id, or null (nothing moves):
+ *   · not a split / no partner / the partner on the SAME side   ⇒ null
+ *   · the other side already shows the partner                  ⇒ null
+ *   · the other side shows a tab of the partner's kind that is itself
+ *     partnered (a chain of chat/browser pairs)                   ⇒ the partner
+ *   · the other side shows anything else (a chat the user placed, a file) ⇒ null
+ */
+function followFor(chain, tabId, factsOf) {
+  const partner = partnerFor(chain, tabId, factsOf);
+  if (!partner) return null;
+  const c = normalizeChain(cloneChain(chain));
+  if (c.layout !== 'split') return null;
+  const otherIdx = c.split.left.includes(partner) ? 0 : 1;
+  const shown = String(c.split.pair[otherIdx]);
+  if (shown === partner) return null;
+  const pf = factOf(factsOf, partner), sf = factOf(factsOf, shown);
+  if (sf.kind !== pf.kind || !isPartnered(c, shown, factsOf)) return null;
+  return partner;
+}
+/**
+ * WHERE a session's NEW live view goes when its chat window is `chatId`
+ * (D5 (a)/(b)): a chat not yet in a split ⇒ `{mode:'split'}` (the one pane
+ * becomes chat | browser — the existing auto-bind); a chat already in a split
+ * ⇒ `{mode:'tab', side}`: a TAB that changes nothing on screen (it pulses),
+ * on the BROWSER side (a side holding a live view, away from the chat) when
+ * there is one, else on the chat's own side. Never a third pane.
+ */
+function livePlacement(chain, chatId, factsOf) {
+  const sides = sidesOf(chain);
+  if (!sides) return { mode: 'split', side: 'right' };
+  const id = String(chatId);
+  const chatSide = sides.left.includes(id) ? 'left' : sides.right.includes(id) ? 'right' : null;
+  const hasLive = (list) => list.some((x) => factOf(factsOf, x).kind === 'live');
+  const other = chatSide === 'left' ? 'right' : 'left';
+  if (chatSide && hasLive(sides[other])) return { mode: 'tab', side: other };
+  if (!chatSide) return { mode: 'tab', side: hasLive(sides.right) ? 'right' : hasLive(sides.left) ? 'left' : 'right' };
+  return { mode: 'tab', side: chatSide };
+}
+/**
+ * D3's fold-back: the ONE drag exception (the icon-merge drop) between two
+ * LIVE VIEWS OF THE SAME SESSION folds the dragged window back into the other
+ * instead of chaining them. `dragged` / each candidate = `{ id, type,
+ * sessionId }` (the drop target and, when it heads a tab group, its members).
+ * → the id of the live view to fold into, or null (an ordinary merge).
+ */
+function foldBackTarget(dragged, candidates) {
+  if (!dragged || dragged.type !== 'browser-live' || !dragged.sessionId) return null;
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    if (c && c.type === 'browser-live' && c.sessionId === dragged.sessionId && String(c.id) !== String(dragged.id)) return String(c.id);
+  }
+  return null;
+}
+
 // ── the ownership badge (§4.6) ──
 // The colour is derived PER SESSION and deliberately NOT the task-group colour
 // (a session in no group has none to draw; two sessions in one group share
@@ -523,5 +617,7 @@ module.exports = {
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
+  // MULTIVIEW (design-browser-multiview §3 (b) / D3 / D5): the partner rule, the follow verdict, the new live view's place, the fold-back
+  PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

@@ -117,10 +117,20 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   ceiling, restarts it on your next command after an idle stop, and removes it
   when the conversation ends. `vibespace-browser status` shows it:
   `ephemeral: <state>, started <ago>`.
-* **It can be refused at the ceiling.** When the instance already runs as many
-  browsers and desktop apps as it allows, your FIRST command answers
-  `browser_cap`, naming every holder: nothing of yours is queued — wait for one
-  to idle out, or ask the user to stop one, then run the same command again.
+* **It is let go a few minutes after your turn ends** (3 minutes by default,
+  the user's setting; in a CHAT session — a terminal session's browser stays
+  until its own idle timeout) — unless the user is driving it or watching it. Its tab
+  stays in the user's Agent browser window, hollow; your next command starts it
+  again (a page you were on is gone — open it again).
+* **It can be refused at a limit.** Your conversation has its OWN limit on
+  browsers running at once (3 by default; your helpers' browsers count toward
+  it): past it your command answers `browser_cap` saying it is THIS
+  conversation's limit — close one you no longer need, or ask the user to raise
+  it (the count in their Agent browser window, or Session Properties). The
+  machine also has a ceiling, shared with other conversations and desktop apps:
+  there `browser_cap` says "machine ceiling reached", names only YOUR browsers
+  and counts the rest — nothing of yours is queued; wait for one to idle out, or
+  ask the user to stop one, then run the same command again.
 * **It is EPHEMERAL.** A login you perform in it is gone once it idles out. For
   a login that survives, use a named profile (section 3).
 * **The user can watch it and take over.** They open **Agent browser** from
@@ -279,7 +289,14 @@ default with `*`.
   line in the sub-agent's prompt (it runs it in its own tool call, or passes
   `--profile bk-….<n>` on every command). That child browser is reaped with
   your conversation. Without it, a sub-agent's commands land on YOUR default —
-  the larger grant when that is a logged-in profile.
+  the larger grant when that is a logged-in profile. The user can WATCH each
+  helper's browser: it is a tab of its own in your Agent browser window, named
+  after the helper's task when VibeSpace can tell which helper asked — the
+  helper ran `vibespace-browser new-child` as its OWN command (not inside a
+  script) and no other helper was doing the same at that moment (else
+  "Helper 1", "Helper 2"), and they can take it over — then THAT helper's
+  commands are refused `browser_paused`, yours are not. A helper's browser
+  counts toward your conversation's limit.
 * **Cross-profile work is two commands:** `vibespace-browser --profile work
   snapshot`, then `vibespace-browser --profile personal snapshot`. Two browsers
   are two identities; there is no cross-profile transaction.
@@ -315,10 +332,14 @@ default with `*`.
   and your verbs drive the machine's one browser: `close --all` is refused
   `shared_browser` because it would close every agent's browser, and another
   agent may be in the tab you see.
-* **There is a ceiling** on browsers running at once on this instance (shared
-  with desktop apps, your own ephemeral browser included). At it, `use` answers
-  `cap` and your first page verb answers `browser_cap`, both naming who holds
-  the slots — detach yours, wait for an idle-out, or ask the user to stop one.
+* **There are two limits.** Your conversation's own (3 by default, your
+  helpers included; the user changes it from the count in the Agent browser
+  window or in Session Properties): past it `use` and your first page verb
+  answer `browser_cap` saying it is this conversation's limit. And the
+  machine's ceiling (shared with other conversations and desktop apps, your own
+  ephemeral browser included): `use` answers `cap`, your first page verb
+  `browser_cap`, both naming only YOUR browsers and counting the rest —
+  detach one of yours, wait for an idle-out, or ask the user to stop one.
 * **Your own ephemeral browser is not CDP-mediated** — it has one conversation.
   While the user drives it, your verbs are refused at the server
   (`browser_paused`) before they run; there is no second fence inside it.

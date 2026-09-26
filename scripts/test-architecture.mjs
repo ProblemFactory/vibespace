@@ -1831,7 +1831,9 @@ console.log('§54 one resource verdict; only the headless serve stops for a reso
   //  (2) EVERY stop( call in the file names a `why` from a CLOSED allow-list (the shorthand `{ why }` only where the
   //      function's callers are themselves allow-listed: retireEphemeral);
   //  (3) outside the sampled block the file never reads the verdict's facts (`.over`, `.overKind`, `.report`).
-  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped'];
+  // + 'turn-idle' (MULTIVIEW B-325a, docs/design-browser-multiview.zh.md §4): the release of a conversation's ephemeral
+  //   browser a few minutes after its TURN ended — a lifecycle why, never a resource one (the verdict is not read there)
+  const STOP_WHYS = ['user', 'idle', 'relaunch', 'switch', 'conversation gone', 'child handle dropped', 'turn-idle'];
   const argsAt = (t, i) => { let d = 0, j = i; for (; j < t.length; j++) { const c = t[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } return t.slice(i + 1, j); };
   const sampledBlock = (t) => {
     const m = /const (\w+) = RG\.resourceVerdict\(/.exec(t); if (!m) return null;
@@ -2257,6 +2259,43 @@ console.log('§60 the browser tool writes in the session\'s frame; no browser da
   const refusedCheckout = F.runDir(() => ({ ok: true, dir: REPO }));
   const chosen = F.runDir();
   ok(refusedCheckout.ok === false && refusedCheckout.code === 'daemon_cwd_refused' && chosen.ok && chosen.dir !== REPO && !chosen.dir.startsWith(REPO + '/') && !REPO.startsWith(chosen.dir + '/'), `§60c runDir refuses the checkout even when injected, and chooses ${chosen.dir} (outside it)`);
+}
+
+// §61 A RELEASE VERDICT NEEDS A KNOWN TURN (lane P verify r2 F1, 2026-09-26). The
+// keeper releases a conversation's ephemeral browser a few minutes after its
+// TURN ended, asking the wiring's `conversationFacts`. `turnOf` reads
+// `_isStreaming`, which only CHAT consumers write — a TERMINAL-mode session
+// (plain claude/codex in a PTY) read 'idle' forever and its browser (and its
+// helpers') was released 3 min after the last verb, MID-WORK. The turn is
+// answered only where the session's mode PUBLISHES turn facts (`turnKnown`);
+// anywhere else it is null = unknown = never released. Pinned on the wiring
+// (the one place the keeper's facts are composed) and on the PURE predicate.
+console.log('§61 the release verdict reads a turn only where the mode publishes one (turnKnown)');
+{
+  const W = read('src/server/mounts-plugins-wiring.js');
+  const lift = (src) => { const m = /\n( +)conversationFacts: (\(bk\) => \{[\s\S]*?\n\1\}),\n/.exec(src); return m ? m[2] : null; };
+  // every `turnOf(` in the block is the consequent of a `turnKnown(s) ?` whose alternative is null
+  const judge = (blk) => {
+    if (!blk) return 'no conversationFacts block';
+    const calls = [...blk.matchAll(/turnOf\(/g)].length;
+    const gated = [...blk.matchAll(/\bturnKnown\(s\)\s*\?\s*[\w.]*turnOf\(s\)\s*:\s*null\b/g)].length;
+    if (!calls) return 'the block answers no turn at all';
+    return calls === gated ? null : `${calls - gated} turnOf( read(s) not gated by turnKnown(s) ? … : null`;
+  };
+  const blk = lift(W);
+  const why = judge(blk);
+  ok(!!blk && why === null, `§61 the wiring's conversationFacts answers { turn } only through turnKnown(s) ? turnOf(s) : null${why ? ' — ' + why : ''}`);
+  let TF = null; try { TF = (await import('node:module')).createRequire(import.meta.url)('../src/server/turn-facts.js'); } catch { TF = null; }
+  ok(!!TF && typeof TF.turnKnown === 'function' && TF.turnKnown({ mode: 'chat' }) === true && TF.turnKnown({ mode: 'terminal', _isStreaming: false }) === false && TF.turnKnown({ mode: 'terminal', _isStreaming: true }) === false && TF.turnKnown(null) === false && TF.turnKnown({}) === false,
+    '§61 PURE turnKnown: a chat session publishes turn facts; a terminal one (whatever its fields say), a mode-less record and nothing do not');
+  ok(!!TF && TF.turnOf({ mode: 'terminal' }) === 'idle' && TF.turnDigest(new Map([['a', { mode: 'terminal' }]])) === '', '§61 …turnOf / turnDigest are unchanged (the For-you running dot may read a terminal session idle — it releases nothing)');
+  // NEGATIVE CONTROL: the pre-fix block (the verifier's shape) and a partially gated one are caught
+  const preFix = "(bk) => {\n        let s = null;\n        for (const x of activeSessions.values()) if (x && x._browserKey === bk) { s = x; break; }\n        if (!s) return { turn: null };\n        return { turn: require('./turn-facts.js').turnOf(s) };\n      }";
+  const half = "(bk) => {\n        const TF = require('./turn-facts.js');\n        if (s.mode === 'chat') return { turn: TF.turnOf(s) };\n        return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null };\n      }";
+  const alwaysIdle = "(bk) => {\n        return { turn: 'idle' };\n      }";
+  const reverted = lift(W.replace(/TF\.turnKnown\(s\) \? TF\.turnOf\(s\) : null/, 'TF.turnOf(s)'));
+  ok(judge(preFix) !== null && judge(half) !== null && judge(alwaysIdle) !== null && !!reverted && reverted !== blk && judge(reverted) !== null,
+    '§61 NEGATIVE CONTROL: the pre-fix answer `{ turn: turnOf(s) }`, a second ungated read beside a gated one, a block that answers no turn, and the wiring with its gate reverted (lifted the same way) are all caught');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

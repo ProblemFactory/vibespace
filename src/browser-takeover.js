@@ -153,6 +153,20 @@ function decideHandback({ state = null, viewerId = null, cause = 'explicit', now
   };
 }
 
+/**
+ * lane P verify (docs/design-browser-multiview.md D3, finding 3): the viewer DRIVING hands its control to ANOTHER
+ * view of the same browser (a fold-back of the window you drive) — the takeover goes on (takenAt, the idle clock
+ * and the url kept), only its holder changes; nothing is handed back to the agent. The bridge checks that `to` is a
+ * view of the very same relay; this verdict checks who may pass.
+ */
+function decidePass({ state = null, from = null, to = null, now = 0 } = {}) {
+  const s = state && typeof state === 'object' ? state : newInputState();
+  if (to === null || to === undefined || to === '' || to === from) return { ok: false, code: 'bad-request', error: 'a pass names ANOTHER view to hand the controls to' };
+  if (s.input !== 'user' || !s.takenBy) return { ok: false, code: 'not_taken', error: 'nobody has taken over this browser — nothing to pass' };
+  if (s.takenBy.viewerId !== from) return { ok: false, code: 'not_holder', error: 'only the view that is driving can pass the controls on' };
+  return { ok: true, state: { ...s, takenBy: { viewerId: to, at: num(now) } } };
+}
+
 /** Has a takeover lapsed? `idleMs` 0 = never. */
 function idleHandbackVerdict({ state = null, now = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS } = {}) {
   const s = state && typeof state === 'object' ? state : null;
@@ -483,7 +497,7 @@ function inputSummary(states, hasBrowser) {
 
 module.exports = {
   INPUT_SIDES, HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
-  inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, idleHandbackVerdict, announceVerdict,
+  inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
   browserPausedRefusal, handbackText, handbackNotice, renderHandbackNotice, idleInboxItem,
   confirmationFromUpstream, confirmationResolvedFromUpstream, confirmationView, decisionArgv, decisionVerdict,
   agentCursorFromCommand, modeBadge, inputSummary,

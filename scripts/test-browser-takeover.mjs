@@ -129,6 +129,10 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   ok(hb.ok && hb.state.input === 'agent' && hb.state.url === 'https://x.test/login' && hb.heldMs === 5000 && hb.byHolder === false && hb.cause === 'explicit', 'any viewer may hand back; the URL and the held span ride the state');
   ok(T.decideHandback({ state: hb.state, cause: 'explicit' }).code === 'not_taken', 'a handback with nobody driving is `not_taken`');
   ok(T.decideHandback({ state: t0.state, cause: 'bogus' }).cause === 'explicit', 'an unknown cause is spelled explicit (never a fourth word)');
+  // lane P verify (finding 3): the PASS verdict — the holder hands its controls to another view; the takeover goes on
+  const ps = T.decidePass({ state: { ...t0.state, lastUserInputAt: 150, url: 'https://x.test/a' }, from: 7, to: 11, now: 300 });
+  ok(ps.ok && ps.state.input === 'user' && ps.state.takenBy.viewerId === 11 && ps.state.takenAt === 100 && ps.state.lastUserInputAt === 150 && ps.state.url === 'https://x.test/a', 'pass: the holder hands the controls on — still user, the new holder named, takenAt / the idle clock / the url kept');
+  ok(T.decidePass({ state: t0.state, from: 8, to: 11 }).code === 'not_holder' && T.decidePass({ state: hb.state, from: 7, to: 11 }).code === 'not_taken' && T.decidePass({ state: t0.state, from: 7, to: 7 }).code === 'bad-request' && T.decidePass({ state: t0.state, from: 7, to: null }).code === 'bad-request', 'pass: only the holder, only while taken over, only to ANOTHER view');
   const idle = T.idleHandbackVerdict({ state: { ...t0.state, lastUserInputAt: 1000 }, now: 1000 + 60000, idleMs: 60000 });
   ok(idle.lapsed && /no input for/.test(idle.why), 'the idle verdict lapses at the window');
   ok(!T.idleHandbackVerdict({ state: { ...t0.state, lastUserInputAt: 1000 }, now: 1000 + 59999, idleMs: 60000 }).lapsed, '…not one ms before');
@@ -259,7 +263,7 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   const v = S.viewerMessageVerdict({ type: 'takeover' });
   ok(v.kind === 'takeover' && !v.forward && S.viewerMessageVerdict({ type: 'handback' }).kind === 'handback' && S.viewerMessageVerdict({ type: 'confirm', id: 'c_1', decision: 'deny' }).decision === 'deny' && S.viewerMessageVerdict({ type: 'confirm', id: 'c_1', decision: 'x' }).decision === 'confirm', 'the three control verbs are decided, never forwarded');
   ok(S.viewerMessageVerdict({ type: 'input_mouse' }, { mode: 'takeover', holder: 3, viewerId: 3 }).forward === true && S.viewerMessageVerdict({ type: 'input_mouse' }, { mode: 'takeover', holder: 3, viewerId: 4 }).refusal.code === 'watch-mode' && !/P3/.test(S.viewerMessageVerdict({ type: 'input_mouse' }, {}).refusal.error), 'input is forwarded only from the holder; the watch-mode refusal no longer says P3');
-  ok(S.hello({}).protocol.input === 'holder-only' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm', 'the hello names the input rule and the control verbs');
+  ok(S.hello({}).protocol.input === 'holder-only' && S.hello({}).protocol.control.join(',') === 'takeover,handback,confirm,pass', 'the hello names the input rule and the control verbs');
 }
 
 // ═══ ② THE REAL KEEPER ════════════════════════════════════════════════════
@@ -528,6 +532,37 @@ function viewer(port, q) {
   a.ws.close();
   await b.until((v) => v.by('mode').length >= 4 && v.last('mode').mode === 'watch');
   ok(b.last('mode').cause === 'viewer-left' && keeper.inputStateFor(KEY_A, p.id).input === 'agent', 'the holder\'s window closing hands back with cause viewer-left');
+  // lane P verify (finding 3, 2026-09-26): a FOLD-BACK of the window the user drives — the holder PASSES its control to
+  // another view of the SAME browser before its window closes: the keeper stays 'user', the other view drives, and the
+  // closing view hands NOTHING back (no viewer-left handback, no announcement, no inbox item)
+  {
+    const evs = []; const unIn = keeper.onInput((e) => evs.push(e));
+    const e = viewer(PORT, `session=sess-1&profile=${p.id}`), f = viewer(PORT, `session=sess-1&profile=${p.id}`);
+    await e.until((v) => !!v.last('hello')); await f.until((v) => !!v.last('hello'));
+    const eId = e.last('hello').you, fId = f.last('hello').you;
+    e.send({ type: 'takeover' });
+    await f.until((v) => !!v.last('mode') && v.last('mode').mode === 'takeover');
+    f.send({ type: 'pass', to: eId });
+    await f.until((v) => v.by('refused').some((m) => m.code === 'not_holder'));
+    ok(f.by('refused').some((m) => m.code === 'not_holder') && (keeper.inputStateFor(KEY_A, p.id).takenBy || {}).viewerId === eId, 'pass: only the view DRIVING may hand its control on (not_holder)', f.by('refused'));
+    e.send({ type: 'pass', to: 987654 });
+    await e.until((v) => v.by('refused').some((m) => m.code === 'no_such_viewer'));
+    ok(e.by('refused').some((m) => m.code === 'no_such_viewer') && (keeper.inputStateFor(KEY_A, p.id).takenBy || {}).viewerId === eId, 'pass: only to a view of the SAME browser (no_such_viewer)', e.by('refused'));
+    e.send({ type: 'pass', to: fId });
+    await f.until((v) => !!v.last('mode') && v.last('mode').mine === true);
+    const st1 = keeper.inputStateFor(KEY_A, p.id);
+    ok(f.last('mode') && f.last('mode').mode === 'takeover' && f.last('mode').cause === 'pass' && st1.input === 'user' && (st1.takenBy || {}).viewerId === fId, 'pass: the other view now DRIVES (mode takeover, mine, cause pass) — the keeper still says user', { mode: f.last('mode'), st1 });
+    e.ws.close();
+    await sleep(200);
+    ok(keeper.inputStateFor(KEY_A, p.id).input === 'user' && !evs.some((x) => x.kind === 'handback'), 'the view that passed its control closes: NOTHING is handed back to the agent (no viewer-left handback)', evs.map((x) => `${x.kind}:${x.cause}`));
+    f.send({ type: 'input_mouse', eventType: 'mouseMoved', x: 3, y: 4 });
+    await until(() => up.got.some((m) => m.x === 3 && m.y === 4));
+    ok(up.got.some((m) => m.x === 3 && m.y === 4), 'the new holder\'s input is forwarded upstream');
+    f.send({ type: 'handback' });
+    await f.until((v) => v.last('mode') && v.last('mode').mode === 'watch');
+    ok(keeper.inputStateFor(KEY_A, p.id).input === 'agent', '…and it hands back like any holder');
+    unIn(); f.ws.close(); await sleep(50);
+  }
   // confirmation: the upstream's result mirror ⇒ typed records, replayed to a late viewer, answered through the keeper
   up.send({ type: 'result', action: 'eval', id: 'r9', success: false, confirmation_required: true, confirmation_id: 'c_ok', timestamp: clock });
   await b.until((v) => !!v.last('confirmation'));

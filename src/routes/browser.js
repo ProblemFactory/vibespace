@@ -17,7 +17,12 @@
  *   POST   /api/browser/profiles/:id/stop     stop its browser (leases stay; it restarts on the next attach)
  *   POST   /api/browser/attach                { sessionId, profile }   a live session's conversation → profile
  *   POST   /api/browser/detach                { sessionId, profile? }
- *   GET    /api/browser/session/:sessionId    that session's leases / pin / origin / attachment set (§3.7)
+ *   GET    /api/browser/session/:sessionId    that session's leases / pin / origin / attachment set (§3.7) + MULTIVIEW: its
+ *                                             helpers' browsers (`children[].browser`), their inputs, `cap` {own, cap, origin,
+ *                                             explicit, machine:{used, cap}} and the helpers' witnessed `helperNames`
+ *   POST   /api/browser/cap                   { sessionId, cap: 1..6 | null }   MULTIVIEW D4: the conversation's own browser cap
+ *   POST   /api/browser/session/:sessionId/stop   { ref }   MULTIVIEW: stop ONE of this session's own browsers (a shared
+ *                                             profile is refused `shared`); the ref is resolved inside the session's list
  *   POST   /api/browser/pin                   { sessionId, profile|null }   the conversation's pin (§3.2.5) — a USER act:
  *                                             queues the zero-billed `browser-pin` notice (§3.8 layer ②), persists to session meta
  *   POST   /api/browser/adopt                 { sessionId, label }  "new persistent profile from this session's browser":
@@ -116,11 +121,15 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503,
   // lane H verify r2 M1: a profile directory another browser holds (a lock the keeper cannot prove its own orphan's)
   // r4/r5: a profile's browser closed and not started again (a failed / unidentified relaunch), or its heal budget spent
-  profile_locked: 409, browser_closed: 409, browser_unstable: 409 };
+  profile_locked: 409, browser_closed: 409, browser_unstable: 409,
+  // MULTIVIEW (design-browser-multiview §2 / D4): a Stop of a browser that has not started (a view's refusal is lane H's browser_stopped); a shared profile is not one of yours to stop
+  browser_released: 409, shared: 409 };
 function fail(res, e) {
   const code = e?.code || null;
   res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
+    // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
+    ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
     ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}),
     // lane H verify r2: a thrown `browser_paused` (an agent's detach while the user drives) carries when, like a resolve's; `profile_locked` names the holder pid
     ...(Number.isInteger(e?.takenAt) && e.takenAt > 0 ? { takenAt: e.takenAt, lastUserInputAt: e.lastUserInputAt || 0 } : {}), ...(Number.isInteger(e?.holderPid) ? { holderPid: e.holderPid } : {}) });
@@ -331,7 +340,43 @@ router.get('/api/browser/session/:sessionId', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
-  try { res.json(k.statusFor(f.browserKey)); } catch (e) { fail(res, e); }
+  // MULTIVIEW §4: + the helpers' WITNESSED names (handle → its Task's description) — the strip's list is browser-stream.browserListFor over this one answer
+  try { res.json({ ...k.statusFor(f.browserKey), helperNames: require('../server/browser-helpers.js').namesOf(f.session), backend: f.session.backend || null }); } catch (e) { fail(res, e); }
+});
+/** MULTIVIEW D4: THIS conversation's per-conversation browser cap — a USER act
+ *  (the strip's `own/cap` chip, Session Properties). `cap` 1..6, or null = back
+ *  to the default (Task Group > instance setting > 3). Kept per conversation
+ *  (a resume keeps it), copied to the session meta, re-published live. */
+router.post('/api/browser/cap', (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
+  try {
+    const r = k.setCap(f.browserKey, req.body?.cap === undefined ? null : req.body.cap);
+    f.session._browserCap = r.explicit;
+    try { ctx.persistCap?.(f.session, r.explicit); } catch (e) { console.warn('[browser] cap not persisted — ' + (e && e.message)); }
+    try { ctx.onLiveFactsChanged?.(f.sessionId, f.session); } catch { /* optional */ }
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
+/** MULTIVIEW D4 / B-325a: stop ONE of this session's own browsers from the chip's
+ *  list — its ephemeral browser, a helper's, or an attachment NO other
+ *  conversation holds (a shared profile is refused `shared`: detach instead).
+ *  The ref is resolved inside THIS session's list, never a bare profile id. */
+router.post('/api/browser/session/:sessionId/stop', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const f = needKey(res, sessionFacts(String(req.params.sessionId || ''))); if (!f) return;
+  const S = require('../browser-stream.js');
+  const ref = String(req.body?.ref || '').trim();
+  try {
+    const rows = S.browserListFor({ ...k.statusFor(f.browserKey), helperNames: {} });
+    const row = rows.find((r) => r.ref === ref);
+    if (!row) return res.status(404).json({ error: 'that browser is not one of this session\'s', code: 'not-found' });
+    if (!row.profileId) return res.status(409).json({ error: 'that browser has not started', code: 'browser_released' });
+    if (row.kind === 'attachment' && row.owners > 0) return res.status(409).json({ error: `this profile's browser is shared with ${row.owners} other conversation${row.owners === 1 ? '' : 's'} — detach it instead`, code: 'shared' });
+    res.json({ ref, browser: await k.stop(row.profileId, { why: 'user' }) });
+  } catch (e) { fail(res, e); }
 });
 /** P3 (§4.3): hand a taken-over browser back from OUTSIDE the live view — the
  *  card's "Hand back" / Session Properties. An EXPLICIT handback: the keeper
@@ -629,6 +674,7 @@ router.post('/api/agent/browser/new-child', (req, res) => {
   const B = require('../browser-profiles.js');
   try {
     const c = k.newChild({ browserKey: f.browserKey, sessionId: f.sessionId });
+    require('../server/browser-helpers.js').noteChild(f.session, c.handle); // MULTIVIEW §4: the mint half of the witness pairing
     const env = childEnvOf(f, c.handle);
     k.tell(f.browserKey);
     res.json({ ...c, env: env.pairs, unset: env.unset, handles: k.setFor(f.browserKey).handles });

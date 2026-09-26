@@ -4,7 +4,7 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
-import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -223,7 +223,7 @@ const tabGroupMethods = {
    *  split), `{ side, index }` (a slot of a half / the strip, the merge drop's
    *  `_dropSlot`), or a legacy CHAIN index n (= after tabs[n]). A split with no
    *  placement puts it at the end of the RIGHT side (PURE insertTab). */
-  addToTabChain(chain, guestWin, placement) {
+  addToTabChain(chain, guestWin, placement, { show = true } = {}) {
     const hostWin = this.windows.get(chain.tabs[0]);
     guestWin._tabChain = chain;
     // Enforce same desktop
@@ -236,6 +236,15 @@ const tabGroupMethods = {
     guestWin.element.style.display = 'none';
     guestWin.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
     this._normalizeChain(chain);
+    if (!show) {
+      // MULTIVIEW D5 (a): a QUIET arrival — the new tab changes nothing on screen
+      // (the two shown panes stay, `active` stays); it pulses once so it is seen
+      chain._pulseTab = { id: guestWin.id, until: Date.now() + 2400 };
+      this._applyChainLayout(chain);
+      this._renderTabBar(chain);
+      this._notify();
+      return;
+    }
     this._renderTabBar(chain);
     // Activate the tab that was just dropped — not the last one (dropping
     // between tabs used to light up an unrelated trailing tab)
@@ -624,11 +633,25 @@ const tabGroupMethods = {
    *  (_afterUserMerge) runs ONCE with the target chain's layout from BEFORE the drop (the undo of a drop onto a
    *  chain that was already split puts that layout back — v2 verify r1 ④). */
   _mergeDrop(targetWin, win, { x, y, from = null } = {}) {
+    // MULTIVIEW D3: the drop between two LIVE VIEWS OF THE SAME SESSION folds the
+    // dragged one back into the other (PURE foldBackTarget over the target and,
+    // when it heads a group, its members) — never a chain of two views of one session
+    const fold = this._liveFoldTarget(targetWin, win);
+    if (fold && this._app?.foldBackLive) { this._app.foldBackLive(win, fold); return; }
     const tc = targetWin._tabChain;
     const before = tc ? this._chainLayoutSnap(tc) : null;
     if (tc) this.addToTabChain(tc, win, this._dropSlot(targetWin, x, y)); // the strip slot under the pointer (in a split: its half)
     else this.createTabChain(targetWin, win);
     this._afterUserMerge(win._tabChain, { dragged: win, from, before }); // never from restore / sync; F3 may land it side by side
+  },
+
+  /** MULTIVIEW D3: the live view `win` folds back into, when the drop target (or
+   *  a member of the group it heads) is another live view of the same session. */
+  _liveFoldTarget(targetWin, win) {
+    const facts = (w) => { let sid = null; try { sid = w?._browserLive?.state?.().sessionId || w?._openSpec?.sessionId || null; } catch { sid = w?._openSpec?.sessionId || null; } return { id: w?.id, type: w?.type, sessionId: sid }; };
+    const members = targetWin?._tabChain ? targetWin._tabChain.tabs.map((id) => this.windows.get(id)).filter(Boolean) : [targetWin];
+    const id = foldBackTarget(facts(win), members.map(facts));
+    return id ? this.windows.get(id) || null : null;
   },
 
   /** A USER merge onto a chain that was ALREADY split (v2 verify r1 ④ — as shipped it was silent, under either
@@ -785,6 +808,7 @@ const tabGroupMethods = {
       // A grouped guest's own titlebar is hidden — the tab carries its
       // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).
       if (tabWin.element.classList.contains('window-waiting')) tab.classList.add('waiting');
+      if (chain._pulseTab && chain._pulseTab.id === tabWinId && Date.now() < chain._pulseTab.until) tab.classList.add('tab-arrived'); // MULTIVIEW D5 (a): a quiet arrival pulses
       tab.append(iconWrap, label);
       // §4.6: the OWNERSHIP badge (the session's own colour + name) rides the tab because the guest's title bar is hidden
       if (tabWin._ownerBadge && tabWin._ownerBadge.dots && tabWin._ownerBadge.dots.length) tab.appendChild(this._ownerBadgeEl(tabWin._ownerBadge));
@@ -936,7 +960,7 @@ const tabGroupMethods = {
     }
   },
 
-  switchTab(chain, index) {
+  switchTab(chain, index, { follow = true } = {}) {
     if (index < 0 || index >= chain.tabs.length) return;
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
@@ -949,6 +973,13 @@ const tabGroupMethods = {
     // previous pane stays in its list. (The retired D19 (a) replaced only the
     // non-anchor pane: the owner "can only change the right side".)
     showTab(chain, targetId);
+    // MULTIVIEW D5 (c) (design-browser-multiview §3 (b)): the OTHER side follows to
+    // this tab's partner (a chat ↔ its live view) — only when it shows a partnered
+    // tab of that kind now (PURE followFor); a chat the user placed there never
+    // moves, and the phone (one pane) never follows. Already-connected views:
+    // nothing reconnects, a pane only changes which content is displayed.
+    const followId = follow ? this._followPartner(chain, targetId) : null;
+    if (followId) { showTab(chain, followId); chain.active = index; }
     const prevWin = this.windows.get(prevId);
     if (prevWin && prevId !== targetId && !displayedPanes(chain).includes(prevId)) prevWin.content.classList.add('tab-hidden'); // a pane that stays shown never flaps hidden (its view would suspend)
     // the recent tabs (most recent first) = the default side-by-side partner (local, never persisted)
@@ -972,6 +1003,25 @@ const tabGroupMethods = {
     this._labelSplitBtn(chain, hostWin.titleBar.querySelector(':scope > .tab-split-btn')); // `recent` moved ⇒ so did the default partner
     if (displayedPanes(chain).join('|') !== shownBefore) requestAnimationFrame(() => this._resizePanes(chain));
     this._notify();
+  },
+
+  /** MULTIVIEW D5 (c): the facts the PURE partner rule reads about ONE pane —
+   *  its session and whether it is a chat (chat / terminal window) or a live
+   *  view of an agent's browser. Derived from the windows, never stored. */
+  _paneFacts(id) {
+    const w = this.windows.get(id);
+    if (!w) return {};
+    if (w.type === 'browser-live') {
+      let st = null; try { st = w._browserLive?.state?.() || null; } catch { st = null; }
+      return { sessionId: (st && st.sessionId) || w._openSpec?.sessionId || null, kind: 'live', ended: !!(st && st.sessionEnded) };
+    }
+    if (w.type === 'chat' || w.type === 'terminal') return { sessionId: this._app?.sessions?.get?.(id)?.sessionId || null, kind: 'chat', ended: !!w.exited };
+    return { sessionId: null, kind: w.type || null };
+  },
+  /** The partner the OTHER side should show after `id` was shown, or null (never on a narrow layout). */
+  _followPartner(chain, id) {
+    if (typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches) return null;
+    try { return followFor(chain, id, (x) => this._paneFacts(x)); } catch { return null; }
   },
 
   /** The strip SLOT under a pointer — `{ side, index, tabs, container }`: in a

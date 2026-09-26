@@ -4585,11 +4585,32 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .context-menu-item .chan-menu-check svg { width: 1em; height: 1em; }
 /* ── Agent browser P2: the live view window (src/lib/browser-live-window.js, design §4.4 / §3.7) ── */
 .browser-live { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
-.browser-live-strip { display: flex; gap: 2px; padding: 3px 6px 0; flex-shrink: 0; overflow-x: auto; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
-.browser-live-strip-tab { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; white-space: nowrap; }
+.browser-live-strip { display: flex; align-items: flex-end; gap: 4px; padding: 3px 6px 0; flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
+/* MULTIVIEW (design-browser-multiview §2 A1): the tabs fold by priority into ▾+N (src/lib/live-strip-layout.js); the tab you look at never folds */
+.browser-live-strip-tabs { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.browser-live-strip-tab { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11px; color: var(--text-secondary); background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; white-space: nowrap; flex: none; }
 .browser-live-strip-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); }
-.browser-live-strip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
-.browser-live-strip-tab.running .browser-live-strip-dot { background: var(--green, #7fc47f); animation: chat-remote-pulse 1.2s ease-in-out infinite; }
+.browser-live-strip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; box-sizing: border-box; }
+.browser-live-strip-tab.running .browser-live-strip-dot, .browser-live-strip-tab.state-running .browser-live-strip-dot { background: var(--green, #7fc47f); animation: chat-remote-pulse 1.2s ease-in-out infinite; }
+.browser-live-strip-tab.state-released .browser-live-strip-dot, .browser-live-strip-tab.state-ended .browser-live-strip-dot { background: transparent; border: 1px solid var(--text-dim); }
+.browser-live-strip-tab.state-released .browser-live-strip-label, .browser-live-strip-tab.state-ended .browser-live-strip-label { color: var(--text-dim); }
+.browser-live-strip-driver { font-size: 10px; color: var(--text-dim); padding: 0 4px; border-radius: var(--radius-sm); background: var(--hover-overlay); }
+.browser-live-strip-tab.driven .browser-live-strip-driver { color: var(--accent); }
+.browser-live-strip-more, .browser-live-strip-cap { flex: none; align-self: center; margin-bottom: 2px; padding: 1px 7px; font-size: 11px; line-height: 16px; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.browser-live-strip-more:hover, .browser-live-strip-cap:hover { background: var(--hover-overlay); color: var(--text); }
+.browser-live-strip-cap.full { color: var(--red); border-color: color-mix(in srgb, var(--red) 60%, transparent); }
+.browser-live-strip-cap.machine-full { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--yellow) 70%, transparent); }
+.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); font-size: 12px; color: var(--text); display: flex; flex-direction: column; gap: 6px; }
+.browser-live-cap-head { font-weight: 600; }
+.browser-live-cap-machine { color: var(--yellow); font-size: 11px; }
+.browser-live-cap-empty, .browser-live-cap-shared { color: var(--text-dim); font-size: 11px; }
+.browser-live-cap-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.browser-live-cap-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-live-cap-limit { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.browser-live-cap-value { min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; }
+/* MULTIVIEW D5 (a): a live view that arrived as a quiet TAB (nothing on screen moved) pulses once */
+.tab-item.tab-arrived { animation: tab-split-pulse 1.2s ease-out 2; }
+@media (prefers-reduced-motion: reduce) { .tab-item.tab-arrived { animation: none; outline: 1px solid var(--accent); } }
 .browser-live-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 11px; min-width: 0; overflow: hidden; }
 /* lane I (2026-09-25, the owner's zh screenshots): A CHROME BAR NEVER WRAPS — every child keeps its words on ONE line at
    its own width (flex: 0 0 auto + nowrap), the URL alone flexes (down to 120 px = URL_MIN_PX in browser-live-window.js),

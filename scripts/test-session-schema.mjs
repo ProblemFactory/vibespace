@@ -89,5 +89,17 @@ for (const [k, v] of Object.entries(SESSION_FIELDS)) {
 }
 ok(true, 'every schema row carries owner + persisted');
 
+// MULTIVIEW (docs/design-browser-multiview.zh.md D4 / §4): the two new fields, each with its home. `_browserCap` is
+// the conversation's explicit browser cap — persisted in the session meta (written at spawn + restored at boot); the
+// keeper's per-conversation `caps` is what a resume reads. `_browserHelpers` (the helper-naming witness) is in memory.
+const bc = SESSION_FIELDS._browserCap, bh = SESSION_FIELDS._browserHelpers;
+const src = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf-8'); } catch { return ''; } };
+ok(bc && bc.persisted === 'meta' && bc.owner === 'ws' && writes.has('_browserCap')
+  && /browserCap: Number\.isInteger\(session\._browserCap\)/.test(src('src/ws-create.js'))
+  && (src('src/server/boot-restore.js').match(/_browserCap: Number\.isInteger\(meta\.browserCap\)/g) || []).length === 3,
+  '_browserCap: registered (owner ws, persisted meta), written to the session meta at spawn and restored by all three boot-restore paths');
+ok(bh && bh.persisted === null && bh.owner === 'stdout' && writes.has('_browserHelpers') && [...writes.get('_browserHelpers')].includes('src/server/browser-helpers.js'),
+  '_browserHelpers: registered (in memory), written only by src/server/browser-helpers.js (the stdout witness + the new-child mint)');
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -1112,6 +1112,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin }); } catch { }
               }
               if (pin.profileId) console.log(`[browser] ${id}: pinned to profile ${pin.profileId} "${pin.label}" (${pin.origin})${be.pinRefused ? ' — REFUSED at the browser layer: ' + be.pinRefused.why : ''}`);
+              // MULTIVIEW D4 (design-browser-multiview): the conversation's OWN browser cap — kept per conversation by the
+              // keeper like the pin (a resume carries the same key ⇒ the same cap); this is the session's copy for the meta
+              // lane P verify (finding 5): the Task Group's default cap is STAMPED here, when the conversation starts
+              // (once — a conversation that has its stamp keeps it), never read live off the group afterwards
+              try {
+                const kc = require('./server/browser-keeper.js').keeper();
+                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null });
+                session._browserCap = kc && typeof kc.capOf === 'function' ? kc.capOf(bk.key) : null;
+              } catch { session._browserCap = null; }
               spawnBrowserPre = be.remotePrelude || '';
               // `resume-unknown` is the leak this ladder exists to prevent, so
               // it is SAID rather than inferred later from orphaned dirs.
@@ -2205,6 +2214,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             browserProfileId: session._browserProfileId || undefined, // P1 §3.2.5: the pin + its origin survive a restart
             browserPinOrigin: session._browserPinOrigin || undefined,
             browserEnv: session._browserEnv || undefined,        // P2: the ephemeral live view's stream is asked under these after a restart
+            browserCap: Number.isInteger(session._browserCap) ? session._browserCap : undefined, // MULTIVIEW D4: the conversation's explicit browser cap (null = the default)
             browserProfileActive: session._browserProfileActive === undefined ? undefined : (session._browserProfileActive === null ? undefined : session._browserProfileActive), // P2 §3.8 ③: the profile the agent LAST USED ('' = the ephemeral one)
             worktree: session._worktree || undefined,       // owner ruling 9: the badge + properties row survive a server restart
             worktreePath: session._worktreePath || undefined, // filled by the init frame (the CLI's own announced cwd)

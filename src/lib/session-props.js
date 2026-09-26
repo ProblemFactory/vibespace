@@ -1,5 +1,5 @@
 import { UI_ICONS } from './icons.js';
-import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor } from './utils.js';
+import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast } from './utils.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps } from './agent-meta.js';
 import { loadInto, renderInto } from './permission-rules-view.js';
@@ -273,6 +273,23 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       lvBtn.onclick = () => app.openBrowserLive({ sessionId: s.webuiId });
       brRow.appendChild(lvBtn);
       brSec.appendChild(brRow);
+      // MULTIVIEW D4 (design-browser-multiview): THIS conversation's browser limit — the same value the Agent browser
+      // window's own/cap chip steps (1..6); Default = its Task Group's default, else the instance setting (3)
+      const capRow = document.createElement('div');
+      capRow.className = 'session-detail-row';
+      capRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Browsers at once'))}</span>`;
+      const capSel = document.createElement('select');
+      capSel.className = 'toolbar-select session-props-browser-cap';
+      { const o = document.createElement('option'); o.value = ''; o.textContent = t('Default'); capSel.appendChild(o); }
+      for (let n = 1; n <= 6; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = String(n); capSel.appendChild(o); }
+      capSel.value = Number.isInteger(s.browserCap) ? String(s.browserCap) : '';
+      capSel.title = t('How many browsers this conversation (with its helpers) may run at once; the machine keeps its own ceiling');
+      capSel.onchange = async () => {
+        const r = await fetchJson('/api/browser/cap', { method: 'POST', body: JSON.stringify({ sessionId: s.webuiId, cap: capSel.value ? Number(capSel.value) : null }), headers: { 'Content-Type': 'application/json' } });
+        if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error' }); capSel.value = Number.isInteger(s.browserCap) ? String(s.browserCap) : ''; }
+      };
+      capRow.appendChild(capSel);
+      brSec.appendChild(capRow);
     }
 
     // ── Config overrides (summary; edit via the card ⚙) ──

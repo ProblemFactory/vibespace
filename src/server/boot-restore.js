@@ -384,7 +384,7 @@ function restoreSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, // + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       agentToken: meta.agentToken || null, // vibespace-status auth survives restarts
@@ -574,7 +574,7 @@ function restoreAgentdPipeSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, // + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _spawnModel: meta.spawnModel || null, _pickedModel: meta.pickedModel || null, _pickedModelAt: meta.pickedModelAt || 0,
       _servedViaFallback: restoredFallback(meta), // the classifier reroute survives a restart (r3 §7)
       _msgReachability: meta.msgReachability || null,
@@ -686,7 +686,7 @@ async function readoptOrphanKeeperSessions() {
       // user-data-dir rung it spawned on. Restored so a later resume of this
       // conversation finds its key and the orphan sweep sees this session as
       // live in memory as well as on disk.
-      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
+      _browserKey: meta.browserKey || null, _browserVariant: meta.browserVariant || null, _browserProfileId: meta.browserProfileId || null, _browserPinOrigin: meta.browserPinOrigin || null, _browserEnv: Array.isArray(meta.browserEnv) ? meta.browserEnv : null, _browserProfileActive: typeof meta.browserProfileActive === 'string' ? meta.browserProfileActive : null, _browserCap: Number.isInteger(meta.browserCap) ? meta.browserCap : null, // + MULTIVIEW D4: the conversation's explicit browser cap // + P2: the ephemeral live view's pairs + the last-used profile (§3.8 ③)
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,

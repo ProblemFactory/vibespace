@@ -127,7 +127,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // takeover C3 (D2): the COUNT SEAM — the holders another keeper reports
   // against the shared CONCURRENT_CAP (the desktop-app keeper's live apps,
   // `[{label, kind}]`); wired late by server.js through `setOtherHolders`
-  otherHolders = null } = {}) {
+  otherHolders = null,
+  // MULTIVIEW D4 / B-325a (docs/design-browser-multiview.zh.md): what the
+  // keeper may ask about a CONVERSATION (its parent browser key) — `{turn}`:
+  // the turn of the session carrying it ('idle'|'running'|'waiting', null =
+  // unknown ⇒ nothing is released). Absent ⇒ no release.
+  conversationFacts = null,
+  // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default
+  // per-conversation cap FOR A CREATE (`{cwd, initialGroupId, sessionKey}` →
+  // 1..6 | null), asked once when a conversation STARTS (`stampGroupCap`) —
+  // the browserProfileId precedent: a default is where a session starts,
+  // never a retroactive edit of a running one. Absent ⇒ no group rung.
+  taskGroupCap = null } = {}) {
   if (!dataDir) throw new Error('browser-keeper: dataDir is required');
   const storeFile = path.join(dataDir, STORE_FILE);
   // ONE base environment for the probe, the runtime and the socket-root answer
@@ -205,6 +216,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const switching = new Set();  // P4 (§7.4): profiles mid-switch — attach/resolve answer `browser_restarting`, never a timeout
   const ephPairs = new Map();   // takeover C3: ephemeral profileId → the session's spawn pairs it runs under
   const retiring = new Map();   // takeover C3: ephemeral profileId → the in-flight stop + removal
+  // MULTIVIEW B-325a: when THIS keeper first saw an ephemeral browser's
+  // conversation idle (profileId → ms) and how many live-view viewers watch
+  // each (conversation, browser) pair right now (inputKey → n, the bridge says)
+  const turnIdleSince = new Map();
+  const watchers = new Map();
   let othersFn = typeof otherHolders === 'function' ? otherHolders : null;
   const othersNow = () => { if (!othersFn) return []; try { const v = othersFn(); return Array.isArray(v) ? v : []; } catch (e) { log.warn?.(`[browser] the ceiling's count seam failed — ${e && e.message}`); return []; } };
   // P3 (§4.3): WHO DRIVES each (conversation, browser) pair — IN MEMORY ONLY.
@@ -651,19 +667,85 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }
   /** r4 LOW 5: the idle timeout an ephemeral's spawn pairs carry (frozen at spawn), else the setting. */
   function pairsIdleMs(pairs) {
-    const v = pairsEnv(pairs || []).AGENT_BROWSER_IDLE_TIMEOUT_MS;
-    return typeof v === 'string' && /^\d+$/.test(v.trim()) ? B.idleTimeoutMs(Number(v)) : idleMs();
+    // ONE reading of the pairs' idle (2.369.183: lane P's PURE B.pairsIdleMs — the same fact its launch passes)
+    const v = B.pairsIdleMs(pairs);
+    return v === null ? idleMs() : B.idleTimeoutMs(v);
   }
   /** The ceiling over EVERY live browser record (named + managed ephemeral)
    *  plus the holders the count seam reports (desktop apps, D2). */
-  function ceilingNow({ ephemeral = false } = {}) {
-    return B.ceilingVerdict(Object.values(reg.browsers).map((r) => { const q = profile(r.profileId); return { ...r, label: q?.label, ephemeral: isEph(q) }; }), reg.leases, limits, { others: othersNow(), ephemeral, idleMs: idleMs() });
+  function ceilingNow({ ephemeral = false, browserKey = null } = {}) {
+    return B.ceilingVerdict(Object.values(reg.browsers).map((r) => { const q = profile(r.profileId); return { ...r, label: q?.label, ephemeral: isEph(q), owner: isEph(q) ? q.owner.id : null }; }), reg.leases, limits, { others: othersNow(), ephemeral, idleMs: idleMs(), browserKey });
+  }
+  // ── MULTIVIEW D4: the PER-CONVERSATION cap (below the machine ceiling) ──
+  const convFacts = (bk) => { if (typeof conversationFacts !== 'function') return {}; try { return conversationFacts(B.parentKeyOf(bk)) || {}; } catch (e) { log.warn?.(`[browser] conversation facts unreadable — ${e && e.message}`); return {}; } };
+  // reg.caps[<conversation key>] = { cap: explicit 1..6 | null, group: the Task Group default STAMPED when the
+  // conversation started | null, at } — both kept per conversation (a resume carries the same key ⇒ the same facts)
+  /** The conversation's EXPLICIT cap (the chip / Session Properties), or null. */
+  function capOf(browserKey) { ensureLoaded(); const v = reg.caps[B.parentKeyOf(browserKey)]; return v && Number.isInteger(v.cap) ? v.cap : null; }
+  /** The Task Group default this conversation STARTED with (stamped at create / resume), or null. */
+  function groupCapOf(browserKey) { ensureLoaded(); const v = reg.caps[B.parentKeyOf(browserKey)]; return v && Number.isInteger(v.group) ? v.group : null; }
+  /** The effective cap + its origin (explicit > the stamped Task Group default > instance setting > 3). Nothing is read live off a group. */
+  function capFor(browserKey) {
+    ensureLoaded();
+    const bk = B.parentKeyOf(browserKey);
+    return B.conversationCapFor({ explicit: capOf(bk), taskGroup: groupCapOf(bk), setting: setting('browser.defaultPerConversationCap', null) });
+  }
+  /**
+   * lane P verify (finding 5): a conversation STARTS (ws-create: a create, a resume, a fork's new key) ⇒ its
+   * Task Group's default cap is stamped ONCE — a conversation that already has its stamp keeps it (a later edit
+   * of the group never reaches a running conversation, nor its resume). No group default ⇒ nothing stamped.
+   */
+  function stampGroupCap(browserKey, facts = {}) {
+    ensureLoaded();
+    const bk = B.parentKeyOf(browserKey);
+    if (!B.isBrowserKey(bk)) return capFor(bk);
+    const v = reg.caps[bk] || null;
+    if (v && Number.isInteger(v.group)) return capFor(bk);
+    let g = null;
+    if (typeof taskGroupCap === 'function') { try { g = B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); g = null; } }
+    if (g === null) return capFor(bk);
+    reg.caps[bk] = { cap: v && Number.isInteger(v.cap) ? v.cap : null, group: g, at: now() };
+    commit();
+    log.log?.(`[browser] ${bk}: the Task Group's default browser cap ${g} stamped at start`);
+    return capFor(bk);
+  }
+  /** Set (1..6) or clear (null) a conversation's explicit cap — a USER act; the digest broadcast carries it to every window. Clearing goes back to the default it STARTED with. */
+  function setCap(browserKey, cap) {
+    ensureLoaded();
+    const bk = B.parentKeyOf(browserKey);
+    if (!B.isBrowserKey(bk)) throw namedError('bad-request', 'a cap needs a conversation\'s browser key');
+    const c = cap === null || cap === undefined || cap === '' ? null : B.clampConversationCap(cap);
+    if (cap !== null && cap !== undefined && cap !== '' && c === null) throw namedError('bad-request', `a per-conversation cap is ${B.CONVERSATION_CAP_MIN}..${B.CONVERSATION_CAP_MAX}`);
+    const group = groupCapOf(bk);
+    if (c === null && group === null) delete reg.caps[bk]; else reg.caps[bk] = { cap: c, group, at: now() };
+    commit();
+    return { ...capFor(bk), own: ownLive(bk), explicit: c };
+  }
+  /** Is this live browser record THIS conversation's (its ephemeral, a helper's, or a profile it or a helper leases)? */
+  function ownsLive(bk, profileId) {
+    const p = profile(profileId);
+    if (!p) return false;
+    if (isEph(p)) return B.parentKeyOf(p.owner.id) === bk;
+    return reg.leases.some((l) => l.profileId === profileId && B.parentKeyOf(l.browserKey) === bk);
+  }
+  /** How many LIVE browsers this conversation holds now (the chip's numerator; helpers count). */
+  function ownLive(browserKey) {
+    const bk = B.parentKeyOf(browserKey);
+    return Object.values(reg.browsers).filter((r) => B.isLiveBrowser(r) && ownsLive(bk, r.profileId)).length;
+  }
+  /** The conversation cap's refusal for ONE more browser of `browserKey`, or null. */
+  function conversationCapNow(browserKey) {
+    const bk = B.parentKeyOf(browserKey);
+    if (!B.isBrowserKey(bk)) return null;
+    const v = B.conversationCapVerdict({ own: ownLive(bk), cap: capFor(bk).cap });
+    if (v) log.log?.(`[browser] ${bk}: refused browser_cap (this conversation's cap ${v.cap}, ${v.own} running)`);
+    return v;
   }
   /** An ephemeral daemon whose pid is gone idled out (the CLI's own timeout):
    *  recorded `stopped` — not an error; the next verb starts it again. */
   function markEphemeralGone(rec, seenBy = 'the tick') {
     rec.state = 'stopped'; rec.endedAt = now(); rec.stoppedBy = 'idle'; rec.lastError = null;
-    rec.note = `the browser idled out (${Math.round(pairsIdleMs(pairsOf(rec.profileId)) / 60000)} min without a command) — the next command starts it again`;
+    rec.note = `the browser idled out (${Math.round((Number.isInteger(rec.idleMs) ? rec.idleMs : pairsIdleMs(pairsOf(rec.profileId))) / 60000)} min without a command) — the next command starts it again`;
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
     log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (idle), the next verb restarts it`);
@@ -1087,8 +1169,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const profileId = p.id;
     const pairs = pairsOf(profileId);
     if (!pairs || !pairs.length) throw namedError('not_managed', `"${p.label}" has no spawn pairs recorded — run the command again from its session`);
-    const cap = ceilingNow({ ephemeral: true });
-    if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders, remedy: cap.remedy });
+    // MULTIVIEW D4: THIS conversation's own cap first (its helpers count), then the machine's ceiling —
+    // whose refusal names only this conversation's holders (B-325a: another session's name never reaches an agent)
+    const own = conversationCapNow(p.owner.id);
+    if (own) throw namedError(own.code, own.error, { holders: own.holders, remedy: own.remedy, scope: own.scope, capOwn: own.own, capOf: own.cap });
+    const cap = ceilingNow({ ephemeral: true, browserKey: p.owner.id });
+    if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders, remedy: cap.remedy, scope: cap.scope, others: cap.others });
     const p0 = (async () => {
       const ns = nsOf(profileId);
       const env0 = pairsEnv(pairs);
@@ -1109,9 +1195,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // r4 (MAJOR 2 / LOW 3): the launch carries this conversation's MARK (the keeper's file for it, unless its pairs name
         // their own config — rung D's, marked by browser-env); every later call of this record uses the same file
         rec.mark = p.owner.id;
-        // r4 LOW 5: the idle the session's spawn pairs froze (what every command of it carries) — never the setting NOW: a
-        // different value makes the binary restart the daemon and its Chrome on the agent's next verb (measured)
-        const r = await rt.launch(null, { idleMs: pairsIdleMs(pairs), headed: null, extraEnv: env0 });
+        // r4 LOW 5 (lane H) = lane P verify r2 F2 (the same measured finding, reached by both lanes; measured on
+        // 0.38.1): the launch passes the idle the PAIRS name — every other client of this daemon (the agent's verbs, a
+        // live view's `stream status`) runs under them, and a client whose idle differs from the daemon's RESTARTS it
+        // (`restartedBackground`, a new pid the record never names); the setting only when the pairs name none (a
+        // setting changed since the spawn reaches the conversation at its next spawn — a resume — like every other pair)
+        const launchIdle = B.pairsIdleMs(pairs) ?? idleMs();
+        rec.idleMs = launchIdle;
+        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
           rec.state = 'failed'; rec.endedAt = now(); rec.lastError = `the browser did not start: ${text}`;
@@ -1171,6 +1262,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     else { if (sessionId && l.sessionId !== sessionId) l.sessionId = sessionId; l.carrierLostAt = null; }
     if (l.sessionId) ephSessions.set(p.id, l.sessionId); // VERIFY r1 L2
     ephPairs.set(p.id, v.pairs);
+    turnIdleSince.delete(p.id); // MULTIVIEW B-325a: a verb is activity — the release clock starts again at the next idle turn
     commit();
     if (created) log.log?.(`[browser] ${bk}${sessionId ? ' (' + sessionId + ')' : ''}: managed ephemeral browser ${p.id} "${p.label}" recorded (rung ${variant || '?'}, ns ${B.sessionNameFor(bk)})`);
     const rec0 = reg.browsers[p.id] || null;
@@ -1202,7 +1294,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return pr.finally(() => { if (retiring.get(profileId) === pr) retiring.delete(profileId); });
   }
   function headedSetting() { const v = setting('browser.headed', ''); return v === true || v === 'yes' ? true : (v === false || v === 'no' ? false : null); }
-  async function start(profileId, { why = 'attach' } = {}) {
+  async function start(profileId, { why = 'attach', browserKey = null } = {}) {
     ensureLoaded();
     const p = profile(profileId);
     if (!p) throw namedError('not-found', `no profile ${profileId}`);
@@ -1222,8 +1314,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     if (starting.has(profileId)) return starting.get(profileId);
     if (isEph(p)) return startEphemeral(p, { why });
-    const cap = ceilingNow({ ephemeral: false });
-    if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders });
+    const cap = ceilingNow({ ephemeral: false, browserKey });
+    if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders, scope: cap.scope, others: cap.others });
     const fence = B.configFence(userConfig());
     if (fence) throw namedError('fence_refused', `this machine's ~/.agent-browser/config.json restricts browsing to ${fence.join(', ')}, and the CLI refuses a domain fence beside a profile — a persistent profile cannot start under it (§6.3)`);
     // P4 second half (§7.4 / §7.5 / D33 / D34): the capability control for
@@ -1502,6 +1594,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.endedAt = now(); rec.stoppedBy = why;
       if (why === 'idle') rec.lastError = `stopped after ${Math.round(idleMs() / 60000)} min with no lease (idle timeout)`;
       else if (why === 'switch') rec.lastError = 'stopped to switch backend (§7.4) — restarted on the new one';
+      else if (why === 'turn-idle') { rec.lastError = null; rec.note = 'released after the turn ended — the next command starts it again'; }
       else if (why !== 'user') rec.lastError = why;
       if (left) rec.lastError = `${rec.lastError ? rec.lastError + '; ' : ''}${left}`;
       guard.delete(profileId); live.delete(profileId);
@@ -1550,7 +1643,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // including the negative answer); a probe that cannot run leaves the
     // answer 'unknown' and pinTab false, never a throw out of an attach.
     if (bf.lastVersion() === undefined) { try { await bf.probeVersion(); } catch { /* floorVerdict spells it */ } }
-    const browser = await start(p.id, { why: `attach ${browserKey}` });
+    // MULTIVIEW D4: attaching a browser this conversation does not already count
+    // (not live, or live only for others) adds one to ITS cap
+    if (!(B.isLiveBrowser(reg.browsers[p.id]) && ownsLive(B.parentKeyOf(browserKey), p.id))) {
+      const own = conversationCapNow(browserKey);
+      if (own) throw namedError(own.code, own.error, { holders: own.holders, remedy: own.remedy, scope: own.scope, capOwn: own.own, capOf: own.cap });
+    }
+    const browser = await start(p.id, { why: `attach ${browserKey}`, browserKey });
     // r4 MAJOR 1: a browser that was closed and could not be started again is refused BY NAME (the user's own browser
     // holds the directory: profile_locked naming its pid; else browser_closed) — never a dead port handed to the agent
     { const cr = closedRefusalOf(p.id); if (cr) throw namedError(cr.code, cr.error, cr.holderPid ? { holderPid: cr.holderPid } : {}); }
@@ -1627,6 +1726,31 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     return { lease: leaseView(d.lease), others: d.others };
   }
+  // ── MULTIVIEW B-325a: release an ephemeral browser a few minutes after its turn ended ──
+  /** The live-view bridge says how many viewers watch a (conversation, browser) pair right now. */
+  function noteViewers(browserKey, profileId = null, n = 0) {
+    const k = inputKey(browserKey, profileId);
+    const v = Math.max(0, Number(n) || 0);
+    if (v) watchers.set(k, v); else watchers.delete(k);
+  }
+  function idleReleaseAfterMs() { return B.idleReleaseMs(setting('browser.idleReleaseAfterTurnMs', B.DEFAULT_IDLE_RELEASE_MS)); }
+  /** The tick's release arm: every LIVE managed ephemeral / helper browser whose conversation's turn has been idle ≥ the setting. */
+  function sweepIdleReleases(t) {
+    const releaseMs = idleReleaseAfterMs();
+    for (const p of reg.profiles.filter(isEph)) {
+      const rec = reg.browsers[p.id];
+      const live0 = B.isLiveBrowser(rec) && !stopping.has(p.id) && !starting.has(p.id) && !retiring.has(p.id);
+      if (!live0) { turnIdleSince.delete(p.id); continue; }
+      const f = convFacts(p.owner.id);
+      const v = B.idleReleaseVerdict({ live: true, turn: f.turn === undefined ? null : f.turn, idleSince: turnIdleSince.has(p.id) ? turnIdleSince.get(p.id) : null, now: t, releaseMs,
+        takenOver: inputStateFor(p.owner.id, null).input === 'user', watched: (watchers.get(inputKey(p.owner.id, null)) || 0) > 0 });
+      if (v.idleSince === null) turnIdleSince.delete(p.id); else turnIdleSince.set(p.id, v.idleSince);
+      if (!v.release) continue;
+      turnIdleSince.delete(p.id);
+      log.log?.(`[browser] ephemeral ${p.id} "${p.label}" released (${v.why}) — the tab stays; the next command starts it again`);
+      stop(p.id, { why: 'turn-idle' }).catch((e) => log.warn?.(`[browser] ephemeral ${p.id}: release failed — ${e && e.message}`));
+    }
+  }
   // ── P3 (§4.3 / §4.3.1): the INPUT SIDE of a lease — takeover, handback, idle ──
   const inputKey = (browserKey, profileId) => T.inputKeyFor(browserKey, profileId || null);
   function takeoverIdleMs() { return T.takeoverIdleMs(setting('browser.takeoverIdleMs', T.DEFAULT_TAKEOVER_IDLE_MS)); }
@@ -1680,6 +1804,21 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + d.state.url : ''}`);
     emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder });
     return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, state: inputStateFor(browserKey, profileId) };
+  }
+  /**
+   * lane P verify (finding 3): the viewer driving PASSES the controls to another view of the same browser (a
+   * fold-back of the window it drives). The takeover goes on — the lease stays 'user', nothing is handed back,
+   * nothing is announced; the event says `takeover` with cause `pass` so every relay re-draws its holder.
+   */
+  function passControl({ browserKey, profileId = null, from, to, sessionId = null } = {}) {
+    ensureLoaded();
+    const k = inputKey(browserKey, profileId);
+    const d = T.decidePass({ state: inputs.get(k) || null, from, to, now: now() });
+    if (!d.ok) return d;
+    inputs.set(k, d.state);
+    log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user's control passed from view ${from} to view ${to} (a fold-back — nothing handed back)`);
+    emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: 'pass', url: d.state.url || '' });
+    return { ok: true, state: inputStateFor(browserKey, profileId) };
   }
   /** The bridge forwarded an input from the holder — the idle clock restarts. Cheap, in memory. */
   function noteUserInput(browserKey, profileId = null, at = null) {
@@ -1879,11 +2018,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return { ...l, label: l.label || (p ? p.label : l.profileId), browser: browserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length };
     });
     const set = setFor(browserKey);
-    return { browserKey, leases, pin: pinFor(browserKey), defaultProfile: set.defaultId, attachments: set.attachments, handles: set.handles, children: set.children, fingerprint: set.fingerprint, told: reg.told[String(browserKey || '')]?.fingerprint || null,
-      // P3 (§4.3): who drives each of this conversation's browsers, and what is waiting on a confirmation
-      inputs: inputsFor(browserKey), input: inputSummaryFor(browserKey), pending: pendingAllFor(browserKey),
+    // MULTIVIEW §4 (B-89d0): each helper's handle carries ITS OWN browser's state
+    // (its managed ephemeral record — null until its first page verb) — the strip lists it
+    const children = set.children.map((c) => { const e = ephemeralFor(c.handle); return { ...c, browser: e ? { profileId: e.profileId, state: e.state, live: e.live, stoppedBy: e.stoppedBy, endedAt: e.endedAt, startedAt: e.startedAt } : null }; });
+    const cap = capFor(browserKey);
+    return { browserKey, leases, pin: pinFor(browserKey), defaultProfile: set.defaultId, attachments: set.attachments, handles: set.handles, children, fingerprint: set.fingerprint, told: reg.told[String(browserKey || '')]?.fingerprint || null,
+      // P3 (§4.3): who drives each of this conversation's browsers (its helpers' too — MULTIVIEW), and what is waiting on a confirmation
+      inputs: [...inputsFor(browserKey), ...set.children.flatMap((c) => inputsFor(c.handle))], input: inputSummaryFor(browserKey), pending: pendingAllFor(browserKey),
       // takeover C3: this conversation's managed ephemeral browser (null until its first page verb)
-      ephemeral: ephemeralFor(browserKey) };
+      ephemeral: ephemeralFor(browserKey),
+      // MULTIVIEW D4: the strip's `own/cap` chip — this conversation's live browsers against ITS cap; the machine's ceiling beside it (a count, never names)
+      cap: { own: ownLive(browserKey), cap: cap.cap, origin: cap.origin, explicit: capOf(browserKey), machine: { used: Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length, cap: Number(limits.CONCURRENT_CAP) || LIMITS.CONCURRENT_CAP } } };
   }
 
   /** Lane H: the browser this conversation's agent holds LIVE right now, as
@@ -1952,6 +2097,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (v.kind === 'attachment' && switching.has(v.attachment.profileId)) { const rr = SW.restartingRefusal(profile(v.attachment.profileId)); return { ...rr, handles: v.handles || [] }; }
       const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [] });
       if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return paused; }
+    }
+    // MULTIVIEW §4: a helper's browser is watchable and can be taken over in the
+    // live view — then IT is paused (keyed by the child handle), never by its parent's takeover
+    if (v.ok && v.kind === 'child') {
+      const paused = pausedVerdictFor(v.handle, null, { handles: v.handles || [] });
+      if (paused) { log.log?.(`[browser] ${v.handle}: refused with browser_paused (the user drives this helper's browser)`); return paused; }
     }
     return v;
   }
@@ -2373,6 +2524,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // pending confirmation the daemon has already auto-denied is forgotten.
     sweepIdleTakeovers(t);
     sweepPending();
+    sweepIdleReleases(t); // MULTIVIEW B-325a
     if (!Object.values(reg.browsers).some(B.isLiveBrowser) && !reg.leases.length && !inputs.size && !pending.size) stopTimer();
   }
   function startTimer() {
@@ -2388,10 +2540,28 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   // ── P2 (§4.2): the stream port of ONE live-view target ──────────────────
   /**
+   * lane P verify r2 (F2, 2026-09-26): a view that arrives WHILE a launch runs
+   * waits for it. The record reads `starting` (live) from the commit before
+   * `rt.launch`, the strip draws it idle and a hollow view reconnects at once;
+   * without this wait the view's `stream status` ran under the same pairs while
+   * `open` was still launching. The real 0.38.1 serializes it behind `open`
+   * (measured — the daemon RESTART the verifier saw came from a client whose
+   * idle differed from the launch's, fixed in `startEphemeral`), but a view
+   * must never answer from a half-launched record, and a launch that FAILS must
+   * be its answer — a `stream status` under the pairs of a browser that never
+   * came up spawns a daemon (r1 finding 2): a view starting a browser.
+   * `null` = nothing in flight or it settled; else the typed refusal.
+   */
+  async function launchSettled(profileId) {
+    const inFlightLaunch = starting.get(profileId);
+    if (!inFlightLaunch) return null;
+    try { await inFlightLaunch; return null; } catch (e) { return { ok: false, port: null, code: (e && e.code) || 'launch_failed', error: String((e && e.message) || e) }; }
+  }
+  /**
    * The port the live view bridges to, for a target `browser-stream.streamTargetFor`
-   * decided: an ATTACHMENT (the profile's daemon, started if it is not live —
-   * a view of a stopped browser is a start, like an attach — asked under the
-   * lease's own session name `vs-<browserKey>`) or the session's EPHEMERAL
+   * decided: an ATTACHMENT (the profile's daemon — never started by a view:
+   * a stopped one is refused `browser_stopped` — asked under the
+   * lease's own session name `vs-<browserKey>`), a HELPER's (MULTIVIEW), or the session's EPHEMERAL
    * browser (asked with the very pairs it was spawned with; no namespace of
    * ours, nothing started by us). Never throws: `{ok, port, error, code}`.
    */
@@ -2399,16 +2569,50 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     ensureLoaded();
     if (!target || !target.ok) return { ok: false, port: null, code: (target && target.code) || 'bad-request', error: (target && target.error) || 'no target' };
     const S = require('../browser-stream.js');
+    // MULTIVIEW (design-browser-multiview §2 A1): a VIEW NEVER STARTS a
+    // browser — the conversation's own, a helper's, or an attachment's (lane P
+    // verify: P2's "viewing a held lease starts it" is gone) — a released /
+    // stopped / never-started one is said, and the next COMMAND starts it.
+    // lane P verify (2026-09-26, finding 1): the rule holds for an ATTACHMENT too — P2's "viewing a held
+    // lease starts it" launched a Chromium the user never asked for from a click on a hollow tab
+    // 2.369.183 (lanes H + P on one tree): ONE code for "a managed browser that is not running, and a view never starts
+    // it" — lane H's shipped `browser_stopped` (lane P had minted `browser_released` for the same verdict); `state` rides
+    // so the view tells a browser it WAS showing (greyed, lane H) from a hollow tab it was just switched to (lane P)
+    const stoppedRefusal = (e, who) => ({ ok: false, port: null, code: 'browser_stopped', error: `${who} is not running — the agent's next browser command starts it again, and this view reconnects then`, state: e ? e.state : 'not-started' });
+    if (target.kind === 'child') {
+      // r2 F2: a launch in flight is awaited FIRST — every verdict below reads the settled record
+      { const e0 = ephemeralFor(target.handle); if (e0) { const w = await launchSettled(e0.profileId); if (w) return w; } }
+      const e = ephemeralFor(target.handle);
+      if (!e) return { ok: false, port: null, code: 'no-browser', state: 'not-started', error: 'this helper has not opened its browser yet' }; // lane P verify: not-started ⇒ the view draws it hollow and picks it up by itself
+      if (!e.live) return stoppedRefusal(e, 'this helper\'s browser');
+      // THAT child's own recorded pairs — never the parent's (they name the parent's browser)
+      const pairs = pairsOf(e.profileId);
+      if (!pairs || !pairs.length) return { ok: false, port: null, code: 'not_managed', error: 'this helper\'s browser has no recorded pairs on this server — it cannot be viewed' };
+      const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(pairs) });
+      return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+    }
     if (target.kind === 'ephemeral') {
       // lane H (measured on 0.32.0: `stream status` with no daemon STARTS one under the pairs): a conversation's
       // MANAGED ephemeral browser that is not running is refused BY NAME — a view of it (the auto-opened one
       // reconnecting after an idle-out, the recorder's tap) must never launch a daemon the keeper does not hold;
       // its next verb starts it, its holder row returns and the view reconnects
-      const bk = String(target.ns || '').replace(/^vs-/, '');
+      const bk = String(target.ns || target.sessionName || '').replace(/^vs-/, '');
+      // lane P verify r2 (F2): a launch in flight is awaited FIRST — every verdict below reads the settled record
+      { const e0 = bk ? ephemeralFor(bk) : null; if (e0) { const w = await launchSettled(e0.profileId); if (w) return w; } }
       if (bk) judgeEphemeral(bk, 'a view asked for its port'); // VERIFY r1 H2: the PROCESS, not the record (a ready record lies until the tick)
       const e = bk ? ephemeralFor(bk) : null;
       { const eRec = e && e.state === 'ready' ? reg.browsers[e.profileId] : null; if (eRec && isLocalRec(eRec) && !starting.has(e.profileId) && !stopping.has(e.profileId)) recaptureBrowser(eRec, 'a view asked for its port'); } // verify r3 M1 (a)
-      if (e && e.state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', error: e.state === 'starting' ? 'this conversation\'s browser is starting — the view connects when it is ready' : 'this conversation\'s browser is not running (it idled out or was stopped) — the agent\'s next browser command starts it again, and this view reconnects then' };
+      if (e && e.state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', state: e.state, error: e.state === 'starting' ? 'this conversation\'s browser is starting — the view connects when it is ready' : 'this conversation\'s browser is not running (it idled out or was stopped) — the agent\'s next browser command starts it again, and this view reconnects then' };
+      // lane P verify (2026-09-26, finding 2): NO record = the conversation has not opened its browser yet
+      // (the default target of a live view opened before its first command). `stream status` under its
+      // pairs would SPAWN a background daemon on the real 0.38.1 (measured) that nobody records — so only
+      // the launch-free `session info` is asked: a daemon an escaped command (or a pre-C3 session) already
+      // runs under those very pairs is SHOWN, none ⇒ `no-browser` (not-started), and the view waits.
+      if (!e) {
+        let info = null;
+        try { info = typeof rt.info === 'function' ? await rt.info(null, { extraEnv: S.pairsToEnv(target.envPairs) }) : null; } catch { info = null; }
+        if (!info || !info.active) return { ok: false, port: null, code: 'no-browser', state: 'not-started', error: 'this conversation has not opened its browser yet — its next command starts it' };
+      }
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(target.envPairs) });
       return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
     }
@@ -2417,6 +2621,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4: the stream server is the LOCAL daemon's; a browser reached over CDP
     // or running on a paired machine has none the hub can bridge yet
     if (p.host || !(B.providerRow(p.provider) || {}).starts) return { ok: false, port: null, code: 'stream_unavailable', error: `"${p.label}" is ${p.host ? 'on ' + p.host : 'an external browser over CDP'} — its live view is not bridged in this release` };
+    // lane P verify r2 (F2): a launch in flight is awaited FIRST (`start()` answers a `starting` record at once — its live
+    // shortcut precedes its single flight — so the wait cannot be left to it); a failed launch is the answer
+    { const w = await launchSettled(p.id); if (w) return w; }
     // NAIVE STUDY 2 (finding 3): A VIEW NEVER STARTS A BROWSER — not an ephemeral one (lane H), not a profile's
     // (P2's "a view of a stopped browser is a start" made a reconnect after the user's Stop relaunch it, the view
     // showing about:blank "Agent is driving" as if a new browser had started). The PROCESS is judged first (the
@@ -2424,7 +2631,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // and the view resumes when the digest says it runs again.
     { const rec0 = reg.browsers[p.id]; if (rec0 && rec0.state === 'ready' && isLocalRec(rec0) && !starting.has(p.id) && !stopping.has(p.id) && daemonGone(rec0)) { markDaemonGone(rec0, 'a view asking for its port'); commit(); } } // r2: dead OR recycled; its browser ended (M1)
     if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }
-    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', error: `"${p.label}"'s browser is not running — the agent's next browser command starts it again, and this view reconnects then` };
+    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', state: reg.browsers[p.id] ? reg.browsers[p.id].state : 'not-started', error: `"${p.label}"'s browser is not running — the agent's next browser command starts it again, and this view reconnects then` };
     { const recV = reg.browsers[p.id]; if (recV && recV.state === 'ready' && isLocalRec(recV) && !stopping.has(p.id)) await followRelaunch(recV, 'a view asking for its port', { heal: leasedNow(p.id), force: true }); } // verify r3 M1 (a): the cdp url follows too; r4 MAJOR 1: a closed browser is healed — r5 MINOR 2: only while a lease holds it (a view never starts a browser nobody uses: `browser_closed` below, the next command starts it)
     { const cr = closedRefusalOf(p.id); if (cr) return { ok: false, port: null, code: cr.code, error: cr.error, ...(cr.unstable ? { unstable: cr.unstable } : {}) }; } // r4: never a dead port; r6: the unstable kind (the view's words)
     // P6: a mediated lease's stream server is ITS OWN daemon's (the session's
@@ -2492,15 +2699,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
-    streamPortFor, // P2: the live view's port (attachment or ephemeral)
+    streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
     ephemeralPairsFor: (browserKey) => { ensureLoaded(); const p = reg.profiles.find((x) => isEph(x) && x.owner.id === String(browserKey || '')); return p ? (pairsOf(p.id) || null) : null; }, // naive study 2 (finding 4): a sub-agent browser's OWN pairs — the recorder's tap on it
     viewportFor, // lane J: the page's own viewport (the live view's input space)
+    // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports
+    capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
+    pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
     start, stop, attach: attachTimed, detach, statusFor,
     // P3 (§4.3 / §4.3.1): the input side — takeover/handback/idle, the typed paused refusal, the confirmation registry
-    takeoverIdleMs, inputStateFor, inputsFor, inputSummaryFor, takeover, handback, noteUserInput, noteUserUrl, pausedVerdictFor, onInput,
+    takeoverIdleMs, inputStateFor, inputsFor, inputSummaryFor, takeover, handback, passControl, noteUserInput, noteUserUrl, pausedVerdictFor, onInput,
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,
     // P1 second half (§3.7/§3.8): the set, handles, the one-time refusal, children, the audit, adopt
     setFor, tell, resolveFor, newChild, dropChild, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),

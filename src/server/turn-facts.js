@@ -24,6 +24,20 @@ function turnOf(s) {
   return s._isStreaming ? 'running' : 'idle';
 }
 
+/**
+ * Does this session PUBLISH turn facts at all? (lane P verify r2, F1,
+ * 2026-09-26.) Every `_isStreaming` / `_turnState` writer is a CHAT consumer
+ * (the stream-json / codex / ACP stdout consumers, chat-input, the sidecar
+ * reconciliation, the exit path) — a TERMINAL-mode session (plain claude /
+ * codex in a PTY) never sets them, so `turnOf` reads it 'idle' BY
+ * CONSTRUCTION. That is harmless for the running dot and wrong for any
+ * decision that ACTS on "the turn ended": such a reader asks `turnKnown` first
+ * and treats false as UNKNOWN (null), never as idle.
+ */
+function turnKnown(s) {
+  return !!s && s.mode === 'chat';
+}
+
 /** The sorted `${id}:${turn}` join over every NON-idle session of a
  *  Map(id → session) (or any iterable of [id, session] pairs). */
 function turnDigest(map) {
@@ -36,4 +50,4 @@ function turnDigest(map) {
   return out.sort().join(',');
 }
 
-module.exports = { turnOf, turnDigest };
+module.exports = { turnOf, turnKnown, turnDigest };

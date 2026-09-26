@@ -1131,6 +1131,12 @@ function normalizeRegistry(doc) {
     // toldView) — the memory layer ①'s one-time refusal fires on.
     children: obj(d.children),
     told: obj(d.told),
+    // MULTIVIEW D4: each conversation's EXPLICIT per-conversation browser cap
+    // (browserKey → {cap, at}) — conversation-level like `pins`, so a resume
+    // keeps it; the session meta carries a copy (`browserCap`)
+    // MULTIVIEW D4: per conversation — `cap` = its explicit value, `group` = the Task Group default stamped when it
+    // STARTED (lane P verify, finding 5); an entry holding neither is dropped
+    caps: Object.fromEntries(Object.entries(obj(d.caps)).filter(([k, v]) => isBrowserKey(k) && v && typeof v === 'object' && (clampConversationCap(v.cap) !== null || clampConversationCap(v.group) !== null)).map(([k, v]) => [k, { cap: clampConversationCap(v.cap), group: clampConversationCap(v.group), at: Number(v.at) || 0 }])),
     // P4 second half (§7.4): the SEAT reading per key row (integrationId →
     // {tier, total, at, source}) read back from the FIRST REAL LAUNCH, the
     // Chromium major each backend was last seen writing (provider →
@@ -1235,6 +1241,24 @@ function ephemeralPairsVerdict(pairs, browserKey) {
   const has = (k) => list.includes(`${k}=${want}`);
   if (!has('AGENT_BROWSER_SESSION') || !has('AGENT_BROWSER_NAMESPACE')) return { ok: false, why: `the spawn pairs do not name this conversation's browser (${want})` };
   return { ok: true, pairs: list };
+}
+/**
+ * The idle timeout a session's spawn pairs NAME (`AGENT_BROWSER_IDLE_TIMEOUT_MS`),
+ * or null when they name none / a junk value. lane P verify r2 (F2, measured on
+ * 0.38.1): the daemon's launch options are part of its identity — a client whose
+ * idle differs from the one the daemon was launched with RESTARTS it
+ * (`restartedBackground:true`, a new pid carrying the client's value). Every
+ * client of a managed ephemeral browser (the agent's verbs, a live view's
+ * `stream status`) runs under the PAIRS, so the keeper's launch passes this.
+ */
+function pairsIdleMs(pairs) {
+  for (const s of Array.isArray(pairs) ? pairs : []) {
+    if (typeof s !== 'string' || !s.startsWith('AGENT_BROWSER_IDLE_TIMEOUT_MS=')) continue;
+    const v = s.slice('AGENT_BROWSER_IDLE_TIMEOUT_MS='.length);
+    if (!/^\d+$/.test(v)) return null;
+    return Number(v);
+  }
+  return null;
 }
 /** The directory a managed ephemeral browser writes, when the rung names one
  *  (rung C's per-session scratch dir) — null on D/N (the CLI's own temp dir).
@@ -1349,23 +1373,90 @@ function browserIdle(rec, leases, now, idleMs) {
  *  `ephemeral:true` answers the typed `browser_cap` a conversation's FIRST
  *  page verb gets — naming every holder and the two ways out (an idle-out, or
  *  the user stopping one); a named profile's start keeps its `cap` sentence. */
-function ceilingVerdict(running, leases, limits, { others = [], ephemeral = false, idleMs = DEFAULT_IDLE_TIMEOUT_MS } = {}) {
+function ceilingVerdict(running, leases, limits, { others = [], ephemeral = false, idleMs = DEFAULT_IDLE_TIMEOUT_MS, browserKey = null } = {}) {
   const cap = Number(limits && limits.CONCURRENT_CAP) || 6;
   const live = (running || []).filter(isLiveBrowser);
   const extra = (Array.isArray(others) ? others : []).filter((o) => o && typeof o === 'object');
   if (live.length + extra.length < cap) return null;
-  const holders = [
-    ...live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey), kind: r.ephemeral ? 'ephemeral' : 'profile' })),
-    ...extra.map((o) => ({ profileId: null, label: String(o.label || o.id || 'desktop app'), ephemeral: false, sessions: [], kind: String(o.kind || 'desktop-app') })),
-  ];
+  // MULTIVIEW D4 / B-325a: the refusal names ONLY the asking conversation's
+  // own holders (its attachments, its ephemeral browser, its helpers'); every
+  // other holder — another conversation's browser, a desktop app — is a COUNT.
+  // Another session's name or lease id never reaches an agent through here.
+  const bk = browserKey ? parentKeyOf(browserKey) : '';
+  const mineOf = (r) => !!bk && (((leases || []).some((l) => l.profileId === r.profileId && parentKeyOf(l.browserKey) === bk)) || (!!r.owner && parentKeyOf(r.owner) === bk));
+  const holders = live.filter(mineOf).map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: [], kind: r.ephemeral ? 'ephemeral' : 'profile' }));
   const n = live.length + extra.length;
+  const othersN = n - holders.length;
+  const names = holders.map((h) => h.label);
+  const elsewhere = othersN ? `${othersN} ${othersN === 1 ? 'is' : 'are'} in other conversations or desktop apps` : '';
   if (ephemeral) {
-    const names = holders.map((h) => (h.kind === 'profile' ? `${h.label}${h.sessions.length ? ' (' + h.sessions.join(', ') + ')' : ''}` : h.kind === 'ephemeral' ? h.label : `${h.label} (${h.kind})`));
     const min = Math.max(1, Math.round((Number(idleMs) > 0 ? Number(idleMs) : DEFAULT_IDLE_TIMEOUT_MS) / 60000));
-    return { code: 'browser_cap', cap, holders, error: `${n} browsers are running on this instance (the ceiling of ${cap} is shared with desktop apps): ${names.join(', ')}; yours starts when one idles out (${min} min without a command) or is stopped by the user (Agent browser panel). \`vibespace-browser status\` shows the holders; nothing of yours is queued`, remedy: `wait for an idle-out (${min} min) or ask the user to stop one of the holders — then run the same command again` };
+    const who = names.length ? `yours: ${names.join(', ')}${elsewhere ? '; ' + elsewhere : ''}` : (elsewhere ? `none of them is yours — ${elsewhere}` : 'none of them is yours');
+    return { code: 'browser_cap', scope: 'machine', cap, holders, others: othersN, error: `machine ceiling reached — ${n} browsers are running on this machine (the ceiling of ${cap} is shared with desktop apps; ${who}); yours starts when one idles out (${min} min without a command) or is stopped by the user (Agent browser window). \`vibespace-browser status\` shows your own; nothing of yours is queued`, remedy: `wait for an idle-out (${min} min) or ask the user to stop one — then run the same command again` };
   }
-  const names = holders.map((h) => (h.profileId ? `${h.label} (${h.profileId}${h.sessions.length ? ', leased by ' + h.sessions.join(', ') : ', no lease'})` : `${h.label} (${h.kind})`));
-  return { code: 'cap', cap, holders, error: `browser ceiling reached (${n}/${cap} running: ${names.join('; ')}) — stop one first (vibespace-browser detach, or Stop in the Browser panel)` };
+  const who = names.length ? `yours: ${names.join(', ')}${elsewhere ? '; ' + elsewhere : ''}` : (elsewhere || 'none of them is yours');
+  return { code: 'cap', scope: 'machine', cap, holders, others: othersN, error: `browser ceiling reached (${n}/${cap} running on this machine — ${who}) — stop one first (vibespace-browser detach, or Stop in the Agent browser window)` };
+}
+// ── MULTIVIEW D4: the PER-CONVERSATION cap (a conversation's own property) ──
+// The machine ceiling (CONCURRENT_CAP) stays the hard top; below it every
+// conversation has its own cap — its explicit value (the strip's chip, Session
+// Properties; kept per conversation like the pin, so a resume keeps it) > its
+// Task Group's default > the instance setting `browser.defaultPerConversationCap`
+// > 3. A conversation's helpers' browsers count toward it.
+const CONVERSATION_CAP_DEFAULT = 3;
+const CONVERSATION_CAP_MIN = 1;
+const CONVERSATION_CAP_MAX = 6;
+/** An integer 1..6, or null (not a cap). */
+function clampConversationCap(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(CONVERSATION_CAP_MIN, Math.min(CONVERSATION_CAP_MAX, Math.round(n)));
+}
+/** The effective cap and WHICH fact chose it (the B-6b6d rule: stated, never inferred). */
+function conversationCapFor({ explicit = null, taskGroup = null, setting = null } = {}) {
+  const e = clampConversationCap(explicit); if (e !== null) return { cap: e, origin: 'conversation' };
+  const g = clampConversationCap(taskGroup); if (g !== null) return { cap: g, origin: 'task-group' };
+  const s = clampConversationCap(setting); if (s !== null) return { cap: s, origin: 'instance' };
+  return { cap: CONVERSATION_CAP_DEFAULT, origin: 'default' };
+}
+/** Would starting ONE more browser for this conversation exceed ITS cap? */
+function conversationCapVerdict({ own = 0, cap = CONVERSATION_CAP_DEFAULT, adding = 1 } = {}) {
+  const c = clampConversationCap(cap) ?? CONVERSATION_CAP_DEFAULT;
+  const o = Math.max(0, Number(own) || 0);
+  if (o + (Number(adding) || 0) <= c) return null;
+  return { code: 'browser_cap', scope: 'conversation', cap: c, own: o, holders: [], others: 0,
+    error: `this conversation already runs ${o} of its ${c} browser${c === 1 ? '' : 's'} (the cap is this conversation's own; the machine's ceiling is separate)`,
+    remedy: `stop one of this conversation's browsers (\`vibespace-browser close\` on one you no longer need), or ask the user to raise this conversation's cap — the ${o}/${c} chip in the Agent browser window, or Session Properties → Browser` };
+}
+// ── MULTIVIEW B-325a: an ephemeral browser is RELEASED a few minutes after the turn ends ──
+const DEFAULT_IDLE_RELEASE_MS = 3 * 60 * 1000;
+/** `browser.idleReleaseAfterTurnMs` → a usable number: 0 = never; junk ⇒ the default; a floor of 30 s. */
+function idleReleaseMs(setting) {
+  if (setting === 0 || setting === '0') return 0;
+  const n = Number(setting);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_IDLE_RELEASE_MS;
+  return n === 0 ? 0 : Math.max(30000, Math.round(n));
+}
+/**
+ * Release this conversation's LIVE ephemeral (or helper) browser now?
+ * `turn` = the owning conversation's turn ('idle'|'running'|'waiting'|null =
+ * unknown); `idleSince` = when THIS keeper first saw it idle (null = not yet).
+ * Never while a turn runs or waits on the user, never while the USER drives
+ * it (takeover), never while somebody WATCHES it (a live view is open — the
+ * owner's law: never take away the browser the user is looking at), never
+ * with an unknown turn. Returns { release, idleSince, why }.
+ */
+function idleReleaseVerdict({ live = false, turn = null, idleSince = null, now = 0, releaseMs = DEFAULT_IDLE_RELEASE_MS, takenOver = false, watched = false } = {}) {
+  const t = Number(now) || 0;
+  if (!live) return { release: false, idleSince: null, why: 'not running' };
+  if (turn !== 'idle') return { release: false, idleSince: null, why: turn === null || turn === undefined ? 'turn unknown' : `turn ${turn}` };
+  const since = Number.isFinite(Number(idleSince)) && idleSince !== null ? Number(idleSince) : t;
+  if (!(Number(releaseMs) > 0)) return { release: false, idleSince: since, why: 'release after the turn is off' };
+  if (takenOver) return { release: false, idleSince: since, why: 'the user drives it' };
+  if (watched) return { release: false, idleSince: since, why: 'a live view is watching it' };
+  if (t - since < Number(releaseMs)) return { release: false, idleSince: since, why: 'turn ended ' + Math.round((t - since) / 1000) + ' s ago' };
+  return { release: true, idleSince: since, why: `the turn ended ${Math.round((t - since) / 60000)} min ago` };
 }
 // NO RESOURCE VERDICT AND NO PARK HERE (2026-09-25): the per-provider
 // thresholds and the verdict live in src/runaway-guard.js, and for a browser a
@@ -2023,9 +2114,11 @@ module.exports = {
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
-  SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
+  SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, pairsIdleMs, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
+  // MULTIVIEW D4 / B-325a: the per-conversation cap + the release after the turn
+  CONVERSATION_CAP_DEFAULT, CONVERSATION_CAP_MIN, CONVERSATION_CAP_MAX, clampConversationCap, conversationCapFor, conversationCapVerdict, DEFAULT_IDLE_RELEASE_MS, idleReleaseMs, idleReleaseVerdict,
   pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,
   pidLiveness, userDataDirsOf, sameDir, profileLockVerdict, profileLockedRefusal, // lane H verify r2: liveness vs signalling, the orphaned-browser lock
   keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)

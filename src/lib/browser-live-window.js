@@ -89,12 +89,13 @@
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
 import { t } from './i18n.js';
-import { escHtml, fetchJson, showToast, showContextMenu, COUNTER_ZOOM } from './utils.js';
+import { escHtml, fetchJson, showToast, showContextMenu, createPopover, COUNTER_ZOOM } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
-import { ownerDots } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's
+import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
+import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE)
 import { UI_ICONS } from './icons.js';
-import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning } from '../browser-stream.js';
+import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor } from '../browser-stream.js';
 import { frameGeometry, toLocal } from '../browser-stream.js'; // lane J: the picture vs the page — two sizes, one rect basis
 import { LIVE_ALIGN, textRecords } from '../browser-stream.js'; // lane J r2: the picture's placement (top) + text a viewer hands the page
 import { agentCursorFromCommand, modeBadge as modeBadgeText } from '../browser-takeover.js';
@@ -161,13 +162,17 @@ function isSplitPane(winInfo) {
 }
 const BIND_SVG = svgIcon16('<rect x="1.5" y="3" width="5.5" height="10" rx="1"/><rect x="9" y="3" width="5.5" height="10" rx="1"/><path d="M7 8h2"/>');
 
-export function openBrowserLive(app, { sessionId, profileId = null, syncId, intoChain = null } = {}) {
+export function openBrowserLive(app, { sessionId, profileId = null, syncId, intoChain = null, popOut = false } = {}) {
   if (!sessionId) { showToast(t('No session to view'), { type: 'error' }); return null; }
   // naive study 2 (finding 2): ONE live view per session — a MANUAL open (the status-bar chip's "Open live view", the
   // card, the phone's switcher, Session Properties) goes to the session's existing view instead of opening another
   // (every click opened a new window); a new one takes the auto-bind's id `win-blive-<session>` (PURE liveViewPlan)
+  // …EXCEPT the one deliberate second window (MULTIVIEW D3, 2.369.183): a strip tab's "Open in new window" is a POP-OUT —
+  // another window of the same session (its own selection, the same strip), a free window with its own id, never the main
+  // one's `win-blive-<session>` (a layout replay passes its saved syncId, which creates as before)
   const views = [...app.wm.windows.values()].filter((w) => w.type === 'browser-live' && w._browserLive).map((w) => { const s = w._browserLive.state(); return { id: w.id, sessionId: s.sessionId, profileRef: s.profileRef, connected: s.connected }; });
   const plan = liveViewPlan({ views, sessionId, profileId, syncId: syncId || null });
+  if (popOut && !syncId) { plan.act = 'create'; plan.syncId = null; } // the pop-out: a fresh free window (never the focus of the session's view)
   if (plan.act === 'focus') {
     const w = app.wm.windows.get(plan.id);
     try { if (plan.switchTo) w._browserLive.switchTo(plan.switchTo); else if (plan.reconnect) w._browserLive.reconnect(); } catch { /* window going */ }
@@ -215,6 +220,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     sessionId, profileRef: profileId || '', ws: null, closed: false, connected: false,
     frames: 0, meta: null, page: null, viewers: 0, mode: 'watch', holder: null, target: null,
     url: '', tabs: [], console: [], lastStatus: null, error: null, attachments: [], defaultId: null,
+    // MULTIVIEW (design-browser-multiview §2 / D3 / D4): the session's status answer, the strip's rows in THIS
+    // window's first-seen order, which tabs are folded, and whether the session itself ended
+    status: null, rows: [], order: [], folded: [], sessionEnded: false,
     running: false, lastCommand: null, reconnects: 0, reconnectTimer: null, lastHintAt: 0, sidePane: null, stopped: false,
     // P3 (§4.3): the input side — our viewer id, whether WE hold it, the agent cursor, the pending confirmations
     you: null, mine: false, modeSince: 0, modeCause: null, cursor: null, confirmations: new Map(), confirmTimer: null, lastMoveAt: 0, buttonsDown: 0,
@@ -226,6 +234,11 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   // ── DOM ──
   const root = document.createElement('div'); root.className = 'browser-live';
   const strip = document.createElement('div'); strip.className = 'browser-live-strip'; strip.style.display = 'none';
+  // MULTIVIEW §2 A1: the tabs (one per browser of this session), the ▾+N fold, the own/cap chip (D4)
+  const stripTabs = document.createElement('div'); stripTabs.className = 'browser-live-strip-tabs';
+  const stripMoreBtn = document.createElement('button'); stripMoreBtn.className = 'browser-live-strip-more'; stripMoreBtn.style.display = 'none';
+  const capBtn = document.createElement('button'); capBtn.className = 'browser-live-strip-cap';
+  strip.append(stripTabs, stripMoreBtn, capBtn);
   const bar = document.createElement('div'); bar.className = 'browser-live-bar';
   const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
   // lane I: ONE mode toggle — Take over while the agent drives, Hand back while a human does (the retired Watch button
@@ -460,7 +473,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const renderTitle = () => {
     const name = sessionName();
     const tg = st.target;
-    const title = liveTitle({ label: tg ? tg.label : null, alias: tg ? tg.alias : null, sessionName: name, ephemeralWord: t('ephemeral (no profile)') });
+    const row = (st.rows || []).find((x) => x.ref === curRef());
+    const title = liveTitle({ label: tg && tg.kind === 'child' && row ? rowName(row) : (tg ? tg.label : null), alias: tg ? tg.alias : null, sessionName: name, ephemeralWord: t('ephemeral (no profile)') });
     try { app.wm.setTitle(winInfo.id, title); } catch { /* window gone */ }
   };
   // ── P7 (§4.6 / §3.7): the OWNERSHIP badge + the strip's per-pane owner dots, from the digest's leases ──
@@ -495,25 +509,159 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   titleBind.onclick = (e) => { e.stopPropagation(); toggleBind(); };
   // every chain transition (bind / unbind / detach / a tab switch) ends in onResize of the displayed panes — re-read the state there
   winInfo.onResize = () => renderBind();
-  const renderStrip = () => {
-    const atts = st.attachments || [];
-    const show = atts.length >= 2;
-    strip.style.display = show ? '' : 'none';
-    strip.innerHTML = '';
-    if (!show) return;
-    for (const a of atts) {
-      const b = document.createElement('button');
-      const current = st.target && st.target.profileId === a.profileId;
-      b.className = 'browser-live-strip-tab' + (current ? ' active' : '') + (current && st.running ? ' running' : '');
-      b.dataset.profileId = a.profileId;
-      const dot = document.createElement('span'); dot.className = 'browser-live-strip-dot';
-      const label = document.createElement('span'); label.textContent = String(a.label || a.alias || a.profileId) + (a.isDefault ? ' ' + t('(default)') : '');
-      b.append(dot, label, ownersEl(dotsFor(a.profileId))); // §3.7: the per-pane owner badge
-      b.title = current ? t('You are looking at this pane') : t('Switch this window to {name}', { name: String(a.label || a.alias || a.profileId) });
-      b.onclick = () => { if (!current) switchTo(a.profileId); };
-      strip.appendChild(b);
-    }
+  // ── MULTIVIEW (design-browser-multiview §2 A1 / D3 / D4): ONE strip lists EVERY browser of this session ──
+  /** The ref of the pane this window shows (a profile id, EPHEMERAL_REF, a helper's handle). */
+  const curRef = () => {
+    const tg = st.target;
+    if (tg) return tg.ref || (tg.kind === 'attachment' ? tg.profileId : tg.kind === 'child' ? tg.handle : EPHEMERAL_REF);
+    return st.profileRef || null;
   };
+  /** A row's words: a profile's label (+ default), the session's own browser, a helper by its witnessed name or number. */
+  const rowLabel = (r) => {
+    if (!r) return '';
+    if (r.kind === 'ephemeral') return t('This session'); // short on the tab (≤16 chars); the title says it whole
+    if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
+    return String(r.label || r.alias || r.ref) + (r.isDefault ? ' ' + t('(default)') : '');
+  };
+  /** A row's full name, for a title / a menu / the window title. */
+  const rowName = (r) => {
+    if (!r) return '';
+    if (r.kind === 'ephemeral') return t('This conversation’s browser');
+    if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
+    return String(r.label || r.alias || r.ref) + (r.isDefault ? ' ' + t('(default)') : '');
+  };
+  const driverText = (r) => (r.driver === 'you' ? t('you') : r.kind === 'child' ? '' : t('agent'));
+  // lane P verify (finding 6): the words come from the PURE rowStateWords — a released own browser beside an attachment is
+  // never promised "the next command" (a bare command lands on the attachment); one sentence per code
+  const STATE_WORDS = {
+    running: () => t('Running a command'), idle: () => t('Running'), ended: () => t('Ended'),
+    released: () => t('Released — the next command starts it again'),
+    'released-attached': () => t('Released — used again only when no profile is attached'),
+  };
+  const stateTitle = (r) => (STATE_WORDS[rowStateWords(r, st.rows)] || STATE_WORDS.released)();
+  /** 2.369.183: a browser this view has no frame of is not running (a strip switch, a pop-out) — HOLLOW, the tab's own words. */
+  const hollowFor = (m) => { st.error = m; st.hollow = true; const r = st.rows.find((x) => x.ref === curRef()); setStatus(stateTitle(r || { kind: st.target && st.target.kind, state: 'released' }), { reconnect: false }); };
+  /** The rows in THIS window's first-seen order (a new browser lands at the tail — nothing shown moves). */
+  const computeRows = () => {
+    const cur = curRef();
+    const activity = cur ? { [cur]: !!st.running } : null;
+    const r = stripOrder(st.order, browserListFor(st.status, { activity }));
+    st.order = r.order;
+    return r.rows;
+  };
+  const chipNow = () => capChip({ rows: st.rows, cap: st.status && st.status.cap ? st.status.cap.cap : 3, machine: st.status && st.status.cap ? st.status.cap.machine : null });
+  let foldRaf = 0;
+  const refold = () => {
+    if (foldRaf) return;
+    foldRaf = requestAnimationFrame(() => {
+      foldRaf = 0;
+      if (st.closed || strip.style.display === 'none') return;
+      const tabs = [...stripTabs.querySelectorAll('.browser-live-strip-tab')];
+      for (const b of tabs) b.style.display = '';
+      const widths = {};
+      for (const b of tabs) widths[b.dataset.ref] = b.offsetWidth + 2;
+      const avail = strip.clientWidth - 12;
+      const f = stripFold({ rows: st.rows, widths, avail, shownRef: curRef(), chipPx: capBtn.offsetWidth + 6, morePx: 44 });
+      st.folded = f.folded;
+      for (const b of tabs) b.style.display = f.folded.includes(b.dataset.ref) ? 'none' : '';
+      stripMoreBtn.style.display = f.folded.length ? '' : 'none';
+      stripMoreBtn.textContent = '▾+' + f.folded.length;
+      stripMoreBtn.title = t('{n} more browser(s) of this conversation', { n: f.folded.length });
+    });
+  };
+  const stripMenu = (r, x, y) => {
+    const items = [{ label: t('Open in new window'), action: () => app.openBrowserLive({ sessionId, profileId: r.ref, popOut: true }) }];
+    if (r.ref === curRef() && otherLiveWindow(app, sessionId, winInfo.id)) items.push({ label: t('Fold back into the Agent browser window'), action: () => foldBackLive(app, winInfo) });
+    showContextMenu(x, y, items);
+  };
+  const renderStrip = () => {
+    st.rows = computeRows();
+    const chip = chipNow();
+    // ≥2 browsers ⇒ the strip (one browser keeps the single-browser look) — and a conversation AT its cap
+    // shows the strip too, so the red own/cap chip the agent's refusal points at is there to click
+    const show = st.rows.length >= 2 || (st.rows.length >= 1 && chip.full);
+    strip.style.display = show ? '' : 'none';
+    stripTabs.replaceChildren();
+    if (!show) { stripMoreBtn.style.display = 'none'; return; }
+    const cur = curRef();
+    for (const r of st.rows) {
+      const b = document.createElement('button');
+      const current = r.ref === cur;
+      b.className = 'browser-live-strip-tab' + (current ? ' active' : '') + ' state-' + r.state + (r.driver === 'you' ? ' driven' : '');
+      b.dataset.ref = r.ref; b.dataset.kind = r.kind;
+      if (r.profileId) b.dataset.profileId = r.profileId;
+      const dot = document.createElement('span'); dot.className = 'browser-live-strip-dot'; dot.title = stateTitle(r);
+      const full = rowName(r);
+      const label = document.createElement('span'); label.className = 'browser-live-strip-label'; label.textContent = shortLabel(rowLabel(r));
+      b.append(dot, label);
+      const dt = driverText(r);
+      if (dt) { const d = document.createElement('span'); d.className = 'browser-live-strip-driver'; d.textContent = dt; b.appendChild(d); }
+      if (r.kind === 'attachment') b.appendChild(ownersEl(dotsFor(r.profileId))); // §3.7: who else this profile's browser belongs to
+      b.title = (current ? t('You are looking at this browser') : t('Switch this window to {name}', { name: full })) + '\n' + stateTitle(r);
+      b.onclick = () => { if (r.ref !== curRef()) switchTo(r.ref); };
+      b.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); stripMenu(r, e.clientX, e.clientY); };
+      stripTabs.appendChild(b);
+    }
+    capBtn.textContent = chip.text;
+    capBtn.classList.toggle('full', chip.full);
+    capBtn.classList.toggle('machine-full', chip.machineFull);
+    capBtn.title = t('{own} of this conversation’s {cap} browsers are running — click to see them or change the limit', { own: chip.own, cap: chip.cap }) + (chip.machineFull ? '\n' + t('Machine ceiling reached') : '');
+    refold();
+  };
+  stripMoreBtn.onclick = (e) => {
+    e.stopPropagation();
+    const r = stripMoreBtn.getBoundingClientRect();
+    const items = st.rows.filter((x) => st.folded.includes(x.ref)).map((x) => ({ label: rowName(x), action: () => switchTo(x.ref) }));
+    showContextMenu(r.left, r.bottom + 2, items);
+  };
+  /** D4: the chip's popover — THIS conversation's running browsers (helpers' too) with a Stop each, and its limit (1..6). */
+  const openCapPopover = () => {
+    const pop = createPopover(capBtn, 'browser-live-cap-pop');
+    const chip = chipNow();
+    const head = document.createElement('div'); head.className = 'browser-live-cap-head'; head.textContent = t('This conversation’s browsers: {own} of {cap} running', { own: chip.own, cap: chip.cap });
+    pop.appendChild(head);
+    if (chip.machineFull) { const m = document.createElement('div'); m.className = 'browser-live-cap-machine'; m.textContent = t('Machine ceiling reached — no browser can start until one stops, anywhere on this machine'); pop.appendChild(m); }
+    const list = stoppableRows(st.rows);
+    if (!list.length) { const n = document.createElement('div'); n.className = 'browser-live-cap-empty'; n.textContent = t('None of them is running right now'); pop.appendChild(n); }
+    for (const x of list) {
+      const row = document.createElement('div'); row.className = 'browser-live-cap-row';
+      const name = document.createElement('span'); name.className = 'browser-live-cap-name'; name.textContent = rowName(st.rows.find((y) => y.ref === x.ref) || x);
+      row.appendChild(name);
+      if (x.shared) { const sh = document.createElement('span'); sh.className = 'browser-live-cap-shared'; sh.textContent = t('also used by {n} other conversation(s) — detach it instead', { n: x.owners }); row.appendChild(sh); }
+      else {
+        const stop = document.createElement('button'); stop.className = 'file-tool-btn browser-live-cap-stop'; stop.textContent = t('Stop');
+        stop.onclick = async () => {
+          stop.disabled = true;
+          const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}/stop`, { method: 'POST', body: JSON.stringify({ ref: x.ref }), headers: { 'Content-Type': 'application/json' } });
+          if (!r || r.error) { stop.disabled = false; showToast((r && r.error) || t('server unreachable'), { type: 'error' }); return; }
+          showToast(t('Stopped — the next command starts it again'), { duration: 3000 });
+          pop.remove(); refreshSet();
+        };
+        row.appendChild(stop);
+      }
+      pop.appendChild(row);
+    }
+    // the limit: a stepper 1..6 (+ back to the default)
+    const capRow = document.createElement('div'); capRow.className = 'browser-live-cap-limit';
+    const lbl = document.createElement('span'); lbl.textContent = t('Limit for this conversation') + ': ';
+    const minus = document.createElement('button'); minus.className = 'file-tool-btn browser-live-cap-minus'; minus.textContent = '−'; minus.title = t('Fewer');
+    const val = document.createElement('span'); val.className = 'browser-live-cap-value'; val.textContent = String(chip.cap);
+    const plus = document.createElement('button'); plus.className = 'file-tool-btn browser-live-cap-plus'; plus.textContent = '+'; plus.title = t('More');
+    capRow.append(lbl, minus, val, plus);
+    const explicit = st.status && st.status.cap ? st.status.cap.explicit : null;
+    if (Number.isInteger(explicit)) { const d = document.createElement('button'); d.className = 'file-tool-btn browser-live-cap-default'; d.textContent = t('Use the default'); d.onclick = () => setCap(null); capRow.appendChild(d); }
+    pop.appendChild(capRow);
+    const setCap = async (v) => {
+      const r = await setBrowserCap(sessionId, v);
+      if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error' }); return; }
+      pop.remove(); refreshSet();
+    };
+    minus.disabled = chip.cap <= 1; plus.disabled = chip.cap >= 6;
+    minus.onclick = () => setCap(chip.cap - 1);
+    plus.onclick = () => setCap(chip.cap + 1);
+  };
+  capBtn.onclick = (e) => { e.stopPropagation(); openCapPopover(); };
+  if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => refold()); ro.observe(strip); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => ro.disconnect()); }
   const renderSide = () => {
     side.style.display = st.sidePane ? '' : 'none';
     tabsPane.style.display = st.sidePane === 'tabs' ? '' : 'none';
@@ -625,10 +773,21 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   async function refreshSet() {
     if (st.closed) return;
     const r = await fetchJson(`/api/browser/session/${encodeURIComponent(sessionId)}`);
-    if (!r || r.error) { st.attachments = []; renderStrip(); return; }
+    if (st.closed) return;
+    if (!r || r.error) { st.attachments = []; st.status = null; renderStrip(); return; }
     st.attachments = Array.isArray(r.attachments) ? r.attachments : [];
     st.defaultId = r.defaultProfile || null;
+    st.status = r;
     renderStrip();
+    renderTitle();
+    // MULTIVIEW §2: a pane that was RELEASED is never started by this view — but when the next
+    // command started it again, the view picks it up by itself (the same pane, never another)
+    // (2.369.183: the hollow `browser_stopped` of lane H's code, and a greyed helper's view — lane H's digest resume
+    // reads only an attachment's / the session's own browser — resume here too; a closed / unstable one never does)
+    if (st.error && !st.connected && (st.hollow || st.error.browserState === 'not-started' || (st.stopped === true && st.error.code === 'browser_stopped'))) {
+      const row = st.rows.find((x) => x.ref === curRef());
+      if (row && (row.state === 'idle' || row.state === 'running')) { st.error = null; st.reconnects = 0; connect(); }
+    }
   }
   const onGlobal = (msg) => {
     if (st.closed || !msg) return;
@@ -646,7 +805,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (st.closed) return;
     if (st.reconnectTimer) { clearTimeout(st.reconnectTimer); st.reconnectTimer = null; }
     try { st.ws?.close(); } catch { /* */ }
-    st.connected = false; st.error = null;
+    st.connected = false; st.error = null; st.hollow = false;
     setStatus(t('Connecting…'));
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const q = new URLSearchParams({ session: sessionId });
@@ -685,7 +844,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         if (was === 'takeover' && st.mode === 'watch' && wasMine) {
           if (m.cause === 'idle') showToast(t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
           else if (m.cause !== 'explicit') showToast(t('Control returned to the agent'), { duration: 3500 });
-        } else if (st.mode === 'takeover' && st.mine && !wasMine) showToast(t('You took over — the agent is paused until you hand back'), { duration: 4000 });
+        } else if (st.mode === 'takeover' && st.mine && !wasMine && m.cause !== 'pass') showToast(t('You took over — the agent is paused until you hand back'), { duration: 4000 }); // a PASS (fold-back) says its own words
         break;
       }
       case 'mode-ack': if (m.ok && m.mode === 'watch') showToast(t('Control handed back to the agent'), { duration: 3500 }); break;
@@ -695,22 +854,33 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       case 'viewers': st.viewers = Number(m.n) || 1; renderViewers(); break;
       case 'status':
         st.lastStatus = m;
+        // 2.369.183 (lanes H + P on one tree): ONE code for "not running, and a view never starts it" — `browser_stopped`
+        // (lane P's `browser_released` is read the same). A view that WAS showing this browser (frames) greys by name and
+        // keeps its last frame (lane H, naive study 2 finding 3); a view just switched to it — a strip tab, a pop-out — has
+        // no frame to keep and says the tab's own state words, HOLLOW (lane P). Either way it picks the browser up by itself.
         if (m.state === 'error' && m.code === 'browser_stopped') {
-          // naive study 2 (finding 3): the browser is not running and a view never starts one — say so plainly, keep the
-          // LAST frame (greyed), the badge says "Browser stopped"; the view resumes by itself when the browser runs again
-          st.error = m; st.stopped = true; st.stoppedHow = null; renderMode();
-          setStatus(t('Stopped — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true });
+          if (st.frames > 0) {
+            // naive study 2 (finding 3): the browser is not running and a view never starts one — say so plainly, keep the
+            // LAST frame (greyed), the badge says "Browser stopped"; the view resumes by itself when the browser runs again
+            st.error = m; st.stopped = true; st.stoppedHow = null; st.hollow = false; renderMode();
+            setStatus(t('Stopped — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true });
+          } else hollowFor(m); // MULTIVIEW: a released / stopped browser (lane P verify: an attachment too) is HOLLOW — the tab's own words
+        } else if (m.state === 'error' && m.code === 'browser_released') {
+          hollowFor(m);
+        } else if (m.state === 'error' && m.code === 'no-browser' && m.browserState === 'not-started') {
+          // …or not started yet (the conversation has not opened it) — hollow too, and the view picks it up by itself
+          st.error = m; setStatus(t('Not started yet — the next command starts it'), { reconnect: false });
         } else if (m.state === 'error' && (m.code === 'browser_closed' || m.code === 'browser_unstable')) {
           // lane H verify r5 (MINOR 2): its browser was CLOSED (the daemon lives) — a view never starts it: the last frame
           // stays greyed, the badge names why; `browser_unstable` = it kept closing and VibeSpace stopped restarting it
           // lane H verify r6 MINOR 1: `unstable: 'failing'` = every ask to start it again failed — it never came back to close
           st.error = m; st.stopped = m.code; st.stoppedHow = m.unstable || null; renderMode();
           setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
-        } else if (m.state === 'error') { st.error = m; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); }
+        } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
         else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); }
         else if (m.state === 'upstream-closed') { st.connected = false; setStatus(t('Stream ended'), { error: true, reconnect: true }); }
-        else if (m.state === 'ended') { st.error = m; setStatus(String(m.error || t('Stream ended')), { error: true, reconnect: true }); }
+        else if (m.state === 'ended') { st.error = m; if (/session ended/.test(String(m.error || ''))) st.sessionEnded = true; setStatus(String(m.error || t('Stream ended')), { error: true, reconnect: true }); }
         else if (m.connected !== undefined) { // the upstream's own status record
           if (m.viewportWidth && m.viewportHeight && !st.meta) st.meta = { width: Number(m.viewportWidth), height: Number(m.viewportHeight) }; // lane J: a CLAIM, used only where it fits the picture
         }
@@ -719,6 +889,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         const data = typeof m.data === 'string' ? m.data : '';
         if (!data) break;
         st.frames++;
+        if (!st.connected) { st.connected = true; st.reconnects = 0; } // a LATE viewer of a relay already open (a tap kept it) hears no upstream-open — its first frame is the proof
         const md = m.metadata || {};
         if (Number(md.deviceWidth) > 0 && Number(md.deviceHeight) > 0) st.meta = { width: Number(md.deviceWidth), height: Number(md.deviceHeight) }; // lane J: every frame's claim, both sides
         img.src = 'data:image/jpeg;base64,' + data; // .src, never markup (the image-overlay law)
@@ -756,11 +927,14 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   }
   function switchTo(profileRef) {
     st.profileRef = profileRef || '';
+    st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
+    if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
     st.frames = 0; st.url = ''; st.tabs = []; st.console = []; st.running = false; st.reconnects = 0;
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds
     renderUrl(); renderTabs(); renderConsole();
     try { winInfo._openSpec = { action: 'openBrowserLive', sessionId, profileId: st.profileRef || null }; app.wm._notify?.(); } catch { /* optional */ }
+    renderStrip();
     connect();
   }
 
@@ -902,6 +1076,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     st.closed = true;
     releaseKeyboard(winInfo.id); st.claimed = false; // lane J r2: a closed view never owns the keyboard (its listeners die with the window's AbortController)
     if (st.echoTimer) { clearTimeout(st.echoTimer); st.echoTimer = null; }
+    if (foldRaf) { cancelAnimationFrame(foldRaf); foldRaf = 0; }
     try { app.wm.setOwnerBadge?.(winInfo.id, null); } catch { /* window gone */ }
     if (st.confirmTimer) { clearInterval(st.confirmTimer); st.confirmTimer = null; }
     if (st.reconnectTimer) clearTimeout(st.reconnectTimer);
@@ -914,7 +1089,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     connect, dispose, switchTo, pointerAt,
     reconnect: () => { if (st.closed) return; st.reconnects = 0; connect(); }, // lane H: the auto-bind's "its browser holds again" (and the bar's Reconnect button's twin)
     toggleBind, bindLabel, isBound, // P7 (§4.6): the one act behind the bar button, the title-bar button and the window menu row
+    refreshSet, openCapPopover, // MULTIVIEW: the suite re-reads the list / opens the chip
     el: () => root, img: () => img,
+    ws: () => st.ws, // MULTIVIEW: a suite proves a switch of the OTHER pane / a new browser never rebuilt this socket
     drawn: () => { const g = geometry(); return drawnRect(rectOf(img), g ? g.picW : 0, g ? g.picH : 0, LIVE_ALIGN); },
     kbd: () => kbd, ownsKeyboard: () => !!(st.claimed && iOwn()), // lane J r2: the sink + the ownership fact (the suite types against both)
     geometry, frameClaim: () => (st.meta ? { ...st.meta } : null), pageReading: () => (st.page ? { ...st.page } : null), // lane J: {picW, picH, cssW, cssH, source}; the metadata's CLAIM and the page's own reading (the suite's control replays both)
@@ -926,14 +1103,91 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       you: st.you, mine: st.mine, holder: st.holder, modeSince: st.modeSince, modeCause: st.modeCause, cursor: st.cursor ? { ...st.cursor } : null, cursorShown: cursorEl.style.display !== 'none', confirmations: [...st.confirmations.values()].map((c) => ({ ...c })), badge: modeBadge.textContent, badgeFull: modeBadge.title,
       // lane J r2
       ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent, echo: echoEl.style.display === 'none' ? null : echoEl.textContent, ripples: st.ripples.map((r) => ({ ...r })), youPt: st.youPt ? { ...st.youPt } : null, youShown: youEl.style.display !== 'none', reclaims: st.reclaims, align: LIVE_ALIGN,
+      // MULTIVIEW (design-browser-multiview §2 / D3 / D4) — the STRIP's folds are `stripFolded` (`folded` is lane I's bar)
+      currentRef: curRef(), rows: st.rows.map((r) => ({ ...r, text: rowLabel(r), name: rowName(r) })), order: st.order.slice(), stripFolded: st.folded.slice(), stripShown: strip.style.display !== 'none', capText: capBtn.textContent, capFull: capBtn.classList.contains('full'), machineFull: capBtn.classList.contains('machine-full'), sessionEnded: st.sessionEnded, released: !!(st.error && st.hollow), notStarted: !!(st.error && st.error.browserState === 'not-started'), statusText: statusEl ? statusEl.textContent : null,
       bar: fold.last(), folded: fold.folded(), foldedRows: foldedRows().map((r) => ({ label: r.label, disabled: !!r.disabled })) }), // lane I: the census re-runs barLayout on `bar`
     layoutBar: () => fold.layoutNow(), // lane I: the census asks for the verdict NOW (never waiting a frame)
   };
 }
 
-// ── P7 (§4.6): the title bar's own menu carries the bind act (reachable from the tab and the phone's long-press) ──
-// lane I: offered only while UNBOUND — a bound pane's menu already carries the chain's own "Unsplit" (the same unbindSplit), and two words for one act was the audit's D7
-registerMenuItem({ menu: 'window', group: '1_window', order: 35, id: 'window/browser-bind', kind: 'bind', when: (c) => !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && !c.win._browserLive.isBound()), label: (c) => c.win._browserLive.bindLabel(), run: (c) => { c.win._browserLive.toggleBind(); } });
+
+// ── MULTIVIEW D3 (docs/design-browser-multiview.zh.md §0.1): N Agent browser windows per session, ONE strip ──
+// A popped-out window is NOT a new window type: it is another `browser-live`
+// window of the same session (its own selection, the same strip). The MAIN one
+// is the deterministic `win-blive-<session>` when it is open, else the oldest
+// still open — so closing the main one leaves the next one as the main one,
+// never an orphan state.
+/** The other live window of `sessionId` a fold-back lands in (the main one), else null. */
+export function otherLiveWindow(app, sessionId, excludeId = null) {
+  const wins = [...(app?.wm?.windows?.values?.() || [])].filter((w) => w && w.type === 'browser-live' && w._browserLive && w.id !== excludeId && (() => { try { return w._browserLive.state().sessionId === sessionId; } catch { return false; } })());
+  return wins.find((w) => w.id === 'win-blive-' + sessionId) || wins[0] || null;
+}
+/**
+ * lane P verify (finding 3): hand THIS view's controls to `toL`'s view of the same browser before the window
+ * closes — wait for `toL`'s hello on `ref` (its viewer id), send `pass`, wait until it drives. Never throws;
+ * false on a timeout (the caller keeps the window open: closing it would hand the browser back to the agent).
+ */
+export async function passControlTo(fromL, toL, ref, { timeoutMs = 8000 } = {}) {
+  const t0 = Date.now();
+  const nap = () => new Promise((r) => setTimeout(r, 50));
+  const onRef = () => { const s = toL.state(); return !!(s.target && s.you !== null && s.you !== undefined && (!ref || s.currentRef === ref)); };
+  while (!onRef() && Date.now() - t0 < timeoutMs) await nap();
+  if (!onRef()) return false;
+  fromL.send({ type: 'pass', to: toL.state().you });
+  while (!(toL.state().mine && toL.state().mode === 'takeover') && Date.now() - t0 < timeoutMs) await nap();
+  return !!(toL.state().mine && toL.state().mode === 'takeover');
+}
+/**
+ * FOLD BACK: close `win` and let the other window (`into`, else the main one)
+ * show what `win` showed. The other window keeps the browser the user is
+ * DRIVING there (a takeover is never taken away) — the folded one stays one
+ * click away in its strip. lane P verify (finding 3): when the user DRIVES the
+ * folded window, its control moves WITH it (a `pass` to the other window's
+ * view) before it closes — a fold-back never hands the browser back to the
+ * agent, files nothing, announces nothing; driving in BOTH windows is said and
+ * refused (one of the two takeovers would be lost). Resolves whether it folded.
+ */
+export async function foldBackLive(app, win, into = null) {
+  const L = win && win._browserLive;
+  if (!L) return false;
+  const st = L.state();
+  const target = into && into._browserLive ? into : otherLiveWindow(app, st.sessionId, win.id);
+  if (!target || !target._browserLive) { showToast(t('There is no other Agent browser window of this session to fold into'), { type: 'warn' }); return false; }
+  const TL = target._browserLive;
+  const ts = TL.state();
+  const ref = st.currentRef || null;
+  const carry = st.mode === 'takeover' && st.mine;
+  const targetDrives = ts.mode === 'takeover' && ts.mine;
+  if (ref && ts.currentRef !== ref) {
+    if (targetDrives && carry) { showToast(t('You are driving in both windows — hand one back before folding them together'), { type: 'warn', duration: 5000 }); return false; }
+    if (targetDrives) showToast(t('Folded back — the other window keeps the browser you are driving; this one is in its strip'), { duration: 4500 });
+    else TL.switchTo(ref);
+  }
+  if (carry) {
+    const passed = await passControlTo(L, TL, ref);
+    if (!passed) { showToast(t('Could not hand your control to the other window — this window stays open'), { type: 'warn', duration: 5000 }); return false; }
+  }
+  try { app.wm.closeWindow(win.id); } catch { /* gone */ }
+  try { app.wm.focusWindow(target.id); } catch { /* gone */ }
+  if (carry) showToast(t('Folded back — you are still driving this browser'), { duration: 3000 });
+  return true;
+}
+/** D4: set (1..6) or clear (null) THIS conversation's browser limit — the chip's stepper and Session Properties share it. */
+export function setBrowserCap(sessionId, cap) {
+  return fetchJson('/api/browser/cap', { method: 'POST', body: JSON.stringify({ sessionId, cap: cap === null || cap === undefined ? null : Number(cap) }), headers: { 'Content-Type': 'application/json' } });
+}
+// ── the title bar's own menu (reachable from the tab and the phone's long-press) carries the window's two acts:
+//    P7 (§4.6) bind / unbind, and MULTIVIEW D3 "Fold back into the Agent browser window" — only while another live
+//    window of the same session is open. Self-contained so test-contributions replays it (closed over:
+//    registerMenuItem, t, otherLiveWindow, foldBackLive).
+export function registerLiveViewMenus() {
+  // lane I: bind offered only while UNBOUND — a bound pane's menu already carries the chain's own "Unsplit" (the same unbindSplit), and two words for one act was the audit's D7
+  registerMenuItem({ menu: 'window', group: '1_window', order: 35, id: 'window/browser-bind', kind: 'bind', when: (c) => !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && !c.win._browserLive.isBound()), label: (c) => c.win._browserLive.bindLabel(), run: (c) => { c.win._browserLive.toggleBind(); } });
+  registerMenuItem({ menu: 'window', group: '1_window', order: 36, id: 'window/browser-foldback', kind: 'foldback',
+    when: (c) => { try { return !!(c.win && c.win.type === 'browser-live' && c.win._browserLive && otherLiveWindow(c.app, c.win._browserLive.state().sessionId, c.win.id)); } catch { return false; } },
+    label: () => t('Fold back into the Agent browser window'), run: (c) => { foldBackLive(c.app, c.win); } });
+}
+registerLiveViewMenus(); // end registerLiveViewMenus
 
 // ── P7 (§4.6): AUTO-BIND — a session's browser started (a NEW lease in the digest) and its window is open here ⇒ the live view is BORN inside that chain ──
 // Lane H (2026-09-25): the digest's `leases` are the HOLDER rows (browser-profiles.holderRows) — a conversation's managed
@@ -956,7 +1210,11 @@ export function autoBindLiveViews(app, prev, digest) {
     if (existing) { try { if (!existing._browserLive.state().connected) existing._browserLive.reconnect(); } catch { /* window going */ } continue; }
     const syncId = 'win-blive-' + l.sessionId;                                   // deterministic: two clients open ONE window, layout-sync sees the same id
     if (app.wm.windows.has(syncId)) continue;
-    const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain: { hostId: host.id, split: true, side: 'right' } });
+    // MULTIVIEW D5 (a)/(b): beside the chat only while the chat is NOT yet in a split (one pane ⇒ chat | browser);
+    // a chat already split gets the browser as a quiet TAB (browser side, else its own) — nothing on screen moves
+    const place = livePlacement(host._tabChain, host.id, (x) => app.wm._paneFacts?.(x) || {});
+    const intoChain = place.mode === 'split' ? { hostId: host.id, split: true, side: 'right' } : { hostId: host.id, quiet: true, side: place.side };
+    const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain });
     if (w) opened.push(w.id);
   }
   return opened;
@@ -966,6 +1224,8 @@ export function installBrowserLive(App) {
   /** lane J r2: THE mediator question every focus-into-a-text-box path asks — true while a live view on this
    *  client drives the agent's browser (src/lib/keyboard-owner.js is the one registry). */
   App.prototype.takeoverOwnsKeyboard = function () { return keyboardOwned(); };
+  // MULTIVIEW D3: the icon-merge drop between two live views of one session folds back (tab-group.js _mergeDrop asks here)
+  App.prototype.foldBackLive = function (win, into) { return foldBackLive(this, win, into); };
 }
 
 // ── WINDOW-TYPE REGISTRATION (Plugin Ph1) ── one window per (session, pane); N windows = N viewers on ONE upstream

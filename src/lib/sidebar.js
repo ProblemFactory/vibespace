@@ -100,6 +100,9 @@ const LIVE_SESSION_FACTS = Object.freeze({
   browserProfileId: { digest: (v) => v || '' },                       // the PINNED half
   browserProfileActive: { digest: (v) => (v == null ? '' : (v || '~ephemeral')) }, // the LAST-USED half
   browserPinOrigin: { digest: null },
+  // MULTIVIEW D4 (design-browser-multiview): the conversation's EXPLICIT browser limit (null = the default) —
+  // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
+  browserCap: { digest: null },
   // agent browser P3 (§4.3): 'user' while somebody drives one of this
   // conversation's browsers, 'agent' when it has one, null when none — the
   // card's "Hand back" row and the status-bar chip's driving state gate on it

@@ -28,6 +28,11 @@
 //      with the pair∈side check removed, with the "a displayed tab carries its
 //      display" line removed, with removeTab reverted to a bare splice, and with
 //      the order dropped from the sync key; each copy must turn its own leg red;
+//   ⑫ MULTIVIEW (docs/design-browser-multiview.zh.md §3 (b) + D3/D5): `partnerFor` (the other
+//      side's tab of the same session, chat ↔ live view), `followFor` (other side / same side /
+//      no partner / session ended / a user-placed chat ⇒ no follow), `livePlacement` (split only
+//      while the chat is not yet split, else a quiet tab — never a third pane), `foldBackTarget`;
+//      two more patched-copy controls (the follow blind to the other side, the partner on either side).
 //   ⑪ (v2 verify r1, finding ①) THE HELD RATIO: a user's divider act holds its
 //      ratio (holdRatio) until a save carries it (releaseRatio); heldRatio
 //      answers only while the chain still shows that value and for at most
@@ -260,6 +265,40 @@ function legs(C, { quiet = false } = {}) {
     const k = mk(0.15), k2 = mk(0.15); F('holdRatio')(k, T0);
     leg(C.chainSyncKey(k) === C.chainSyncKey(k2) && !('_ratioHeld' in C.cloneChain(k)), '⑪ the stamp is LOCAL: never in the sync key, never in a clone (so never persisted or sent)');
   }
+  // ⑫ MULTIVIEW (docs/design-browser-multiview.zh.md §3 (b) + D5): the partner rule, the follow verdict, the new
+  //    live view's place, the fold-back — over window FACTS (chat A/B, live views LA/LB of sessions sA/sB)
+  {
+    const facts = { A: { sessionId: 'sA', kind: 'chat' }, B: { sessionId: 'sB', kind: 'chat' }, LA: { sessionId: 'sA', kind: 'live' }, LB: { sessionId: 'sB', kind: 'live' }, X: { sessionId: 'sX', kind: 'chat' }, E: { sessionId: 'sE', kind: 'chat', ended: true }, LE: { sessionId: 'sE', kind: 'live', ended: true }, F: { sessionId: null, kind: 'file' } };
+    const fo = (id) => facts[id] || {};
+    const split = (left, right, pair) => F('normalizeChain')({ tabs: [...left, ...right], active: 0, layout: 'split', split: { pair, ratio: 0.5, left, right } });
+    const pf = F('partnerFor'), ff = F('followFor');
+    const c1 = split(['A', 'B'], ['LA', 'LB'], ['A', 'LA']);
+    leg(pf(c1, 'B', fo) === 'LB' && pf(c1, 'LA', fo) === 'A', '⑫ partnerFor: the tab on the OTHER side with the same session (chat ↔ its live view)');
+    leg(run(() => ff(c1, 'B', fo)) === 'LB', '⑫ OTHER SIDE: the left switched to chat B while the right shows a partnered live view ⇒ the right follows to B\'s browser');
+    leg(run(() => ff(split(['A', 'B'], ['LA', 'LB'], ['A', 'LA']), 'LB', fo)) === 'B', '⑫ …and the reverse: the right switched to B\'s browser while the left shows a partnered chat ⇒ the left follows to chat B');
+    leg(run(() => ff(c1, 'A', fo)) === null, '⑫ the other side already shows the partner ⇒ nothing moves');
+    const same = split(['A', 'LA', 'LB'], ['B'], ['A', 'B']);
+    leg(pf(same, 'A', fo) === null && run(() => ff(same, 'LA', fo)) === null, '⑫ SAME SIDE: the partner sits on the same side (mergeDropLayout=split put the chats apart) ⇒ no partner, nothing follows — you see what you click');
+    const lone = split(['A', 'B'], ['LA'], ['B', 'LA']);
+    leg(pf(lone, 'B', fo) === null && run(() => ff(lone, 'B', fo)) === null, '⑫ NO PARTNER: chat B has no live view in the chain ⇒ nothing follows');
+    const ended = split(['A', 'E'], ['LA', 'LE'], ['A', 'LA']);
+    leg(pf(ended, 'E', fo) === null && run(() => ff(ended, 'E', fo)) === null, '⑫ SESSION ENDED: an ended session has no partner ⇒ nothing follows onto a dead pane');
+    const placed = split(['A', 'B'], ['X', 'LA', 'LB'], ['B', 'X']);
+    leg(pf(placed, 'B', fo) === 'LB' && run(() => ff(placed, 'B', fo)) === null, '⑫ USER-PLACED CHAT: the other side shows a chat the user put there (two chats side by side) ⇒ it NEVER moves, though B has a partner there');
+    const placedLive = split(['A', 'B', 'F'], ['LA', 'LB'], ['F', 'LA']);
+    leg(run(() => ff(placedLive, 'LB', fo)) === null, '⑫ …and the reverse: the other side shows something that is not a partnered chat (a file) ⇒ nothing moves');
+    leg(pf(F('normalizeChain')({ tabs: ['A', 'LA'], active: 0 }), 'A', fo) === null && run(() => ff(F('normalizeChain')({ tabs: ['A', 'LA'], active: 0 }), 'A', fo)) === null, '⑫ a TABS chain (no sides) has no partner');
+    // livePlacement (D5 (a)/(b)): never a third pane
+    const lp = F('livePlacement');
+    leg(J(lp(null, 'A', fo)) === J({ mode: 'split', side: 'right' }) && J(lp(F('normalizeChain')({ tabs: ['A', 'X'], active: 0 }), 'A', fo)) === J({ mode: 'split', side: 'right' }), '⑫ livePlacement: a chat NOT yet in a split (alone, or a tabs group) ⇒ the auto-bind makes chat | browser');
+    leg(J(lp(split(['A', 'B'], ['LA'], ['A', 'LA']), 'B', fo)) === J({ mode: 'tab', side: 'right' }), '⑫ …a chat already in a split with a BROWSER SIDE ⇒ a quiet tab on the browser side');
+    leg(J(lp(split(['A'], ['B'], ['A', 'B']), 'B', fo)) === J({ mode: 'tab', side: 'right' }) && J(lp(split(['A'], ['B'], ['A', 'B']), 'A', fo)) === J({ mode: 'tab', side: 'left' }), '⑫ …two chats side by side (no browser side) ⇒ a quiet tab on the chat\'s OWN side — nothing on screen moves');
+    // foldBackTarget (D3)
+    const fb = F('foldBackTarget');
+    leg(fb({ id: 'w2', type: 'browser-live', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === 'w1', '⑫ foldBackTarget: a drop between two live views of the SAME session folds back');
+    leg(fb({ id: 'w2', type: 'browser-live', sessionId: 'sA' }, [{ id: 'c', type: 'chat', sessionId: 'sA' }, { id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === 'w1', '⑫ …also onto a group holding that session\'s live view');
+    leg(fb({ id: 'w2', type: 'browser-live', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sB' }]) === null && fb({ id: 'c', type: 'chat', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === null && fb({ id: 'w1', type: 'browser-live', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === null, '⑫ …never between two sessions\' views, never for a chat, never onto itself (an ordinary merge)');
+  }
   return failed;
 }
 
@@ -278,6 +317,10 @@ const MUTANTS = [
   // ratio moved since would re-send a value somebody else already replaced
   { tag: 'hold-never-expires', find: '  if (!(age >= 0 && age <= RATIO_HOLD_MS)) return null;\n', repl: '\n', expect: /RATIO_HOLD_MS \(= §6b/ },
   { tag: 'hold-ignores-moved-ratio', find: '  return Math.abs(clampRatio(chain.split.ratio) - r) <= 0.005 ? r : null;', repl: '  return r;', expect: /moved away from/ },
+  // MULTIVIEW D5 (c): a follow that ignores WHAT the other side shows would move a chat the user placed there; a partner
+  // looked for on BOTH sides would follow onto the same side (a "follow" that is really a switch of the clicked side)
+  { tag: 'follow-ignores-the-other-side', find: '  if (sf.kind !== pf.kind || !isPartnered(c, shown, factsOf)) return null;\n', repl: '\n', expect: /USER-PLACED CHAT/ },
+  { tag: 'partner-on-either-side', find: "  for (const x of sides[mine === 'left' ? 'right' : 'left']) {", repl: '  for (const x of [...sides.left, ...sides.right].filter((y) => y !== id)) {', expect: /SAME SIDE/ },
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);

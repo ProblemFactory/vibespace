@@ -384,6 +384,19 @@ export function openTaskDetail(app, taskId, { syncId } = {}) {
       bpSel.onchange = () => patch({ browserProfileId: bpSel.value || null });
       bpWrap.append(bpLbl, bpSel);
       ctxSec.appendChild(bpWrap);
+      // MULTIVIEW D4 (design-browser-multiview): the group's default PER-CONVERSATION browser cap
+      // (a conversation's own value — the Agent browser window's chip / Session Properties — wins)
+      const capWrap = document.createElement('label');
+      capWrap.className = 'task-detail-folder-rec task-detail-inject';
+      capWrap.title = t('How many browsers a new conversation of this group may run at once (each conversation can change its own; one already running keeps the limit it started with)');
+      const capLbl = document.createElement('span'); capLbl.textContent = t('Browsers per conversation') + ': ';
+      const capSel = document.createElement('select'); capSel.className = 'toolbar-select';
+      { const o = document.createElement('option'); o.value = ''; o.textContent = t('Instance default'); capSel.appendChild(o); }
+      for (let n = 1; n <= 6; n++) { const o = document.createElement('option'); o.value = String(n); o.textContent = String(n); capSel.appendChild(o); }
+      capSel.value = Number.isInteger(task.browserCap) ? String(task.browserCap) : '';
+      capSel.onchange = () => patch({ browserCap: capSel.value ? Number(capSel.value) : null });
+      capWrap.append(capLbl, capSel);
+      ctxSec.appendChild(capWrap);
     }
 
     // ── Color ──

@@ -230,7 +230,7 @@ console.log('§4 wiring pins');
   ok(/win\.title = t; win\.titleSpan\.textContent = t;[\s\S]{0,420}this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitle(id, t) {')), 'setTitle re-decides (a new title may need the chip\'s room or give it back)');
   ok(/else this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setTitleMeta(id, meta = {}) {')), 'setTitleMeta re-decides a standalone bar (a chain re-renders, which re-applies the chips)');
   ok(/else if \(win\._ownerBadgeKey !== key\) this\._fitChipsSoon\(win\);/.test(fnBody(wj, '  setOwnerBadge(id, badge) {')) && (fnBody(wj, '  _placeInboxBadge(win) {').match(/this\._fitChipsSoon\(win\)/g) || []).length === 2, 'the sibling badges re-decide when they appear, change or go (owner dots, the mini inbox)');
-  ok(/this\._fitChipsSoon\?\.\(hostWin\);/.test(fnBody(tg, '  switchTab(chain, index) {')), 'a tab switch re-decides the strip (the active label is drawn bolder)');
+  ok(/this\._fitChipsSoon\?\.\(hostWin\);/.test(fnBody(tg, '  switchTab(chain, index, { follow = true } = {}) {')), 'a tab switch re-decides the strip (the active label is drawn bolder)');
   const soon = fnBody(wj, '  _fitChipsSoon(win) {');
   ok(/if \(!host \|\| !host\.titleBar\?\.querySelector\('\.win-auth-badge'\)\) return;/.test(soon), 'a bar with no billing chip is never observed nor measured (file explorers, editors…)');
   ok(/if \(this\._chipFitRaf\) return;/.test(soon) && /this\._chipFitRaf = requestAnimationFrame\(/.test(soon) && /\(this\._chipFitIds \|\|= new Set\(\)\)\.add\(host\.id\);/.test(soon), 'ONE requestAnimationFrame per burst, keyed by the host bar (rAF-coalesced)');

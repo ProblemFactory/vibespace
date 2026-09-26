@@ -47,7 +47,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   ok(/const brSec = section\(t\('Agent browser'\)\);/.test(sp) && /brBtn\.textContent = t\('Agent browser profile…'\);/.test(sp), "Session Properties: the section is 'Agent browser'");
   const ss = read('src/lib/settings-schema.js');
   const cats = [...ss.matchAll(/category: t\('([^']+)'\), liveApply: true/g)].map((m) => m[1]);
-  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 12, `Settings: the 12 agent-browser rows sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted)`);
+  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 14, `Settings: the 14 agent-browser rows sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs)`);
   ok(/^  t\('Agent browser'\),$/m.test(ss) && !/^  t\('Browser'\),$/m.test(ss) && /categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\)\]/.test(ss), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
   ok(/'toolbar\.showBrowserButton': \{\s*type: 'boolean', default: true, label: t\('Show Web view button'\)/.test(ss) && /'browser\.isolateSessions'/.test(ss), "Settings: the toolbar row reads 'Show Web view button' (keys toolbar.showBrowserButton / browser.* unchanged)");
   ok(/\{ id: 'btn-browser',\s+label: 'Web view button',\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js')), "customize mode names the element 'Web view button'");

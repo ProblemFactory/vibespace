@@ -657,6 +657,31 @@ function createSessionMessages(session, sessionId) {
         const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && g.browserProfileId)) || groups.find((g) => g.browserProfileId);
         return first ? first.browserProfileId : '';
       },
+      // MULTIVIEW B-325a (design-browser-multiview): what the keeper may ask
+      // about a CONVERSATION — the turn of the live session carrying its key (the
+      // release clock). (The Task Group's cap is NOT read here — lane P verify
+      // finding 5: it is stamped when the conversation starts, below.)
+      // lane P verify r2 (F1): a turn is answered only where the session's mode
+      // PUBLISHES one (chat) — a terminal-mode session's `turnOf` is 'idle' by
+      // construction, which released its browser (and its helpers') 3 min after
+      // the last verb MID-WORK; null = unknown = never released (the CLI's own
+      // idle timeout still ends a browser nobody uses). Pinned: test-architecture §57.
+      conversationFacts: (bk) => {
+        let s = null;
+        for (const x of activeSessions.values()) if (x && x._browserKey === bk) { s = x; break; }
+        if (!s) return { turn: null };
+        const TF = require('./turn-facts.js');
+        return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null };
+      },
+      // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
+      // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
+      taskGroupCap: ({ cwd = null, initialGroupId = null, sessionKey = null } = {}) => {
+        const tasks = getTasks ? getTasks() : null;
+        if (!tasks) return null;
+        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId }) || [];
+        const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && Number.isInteger(g.browserCap))) || groups.find((g) => Number.isInteger(g.browserCap));
+        return first ? first.browserCap : null;
+      },
     });
     const taskIdsFor = (s, id) => {
       const tasks = getTasks ? getTasks() : null;
@@ -693,6 +718,8 @@ function createSessionMessages(session, sessionId) {
       persistActive: (session, v) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserProfileActive: v === null || v === undefined ? undefined : String(v) }); },
       // lane H: re-run the ONE meta choke point (its binding hook + belts) when an ephemeral browser starts — a missing conversation → key binding is written by the same rule, never a second one
       ensureBinding: (session) => { if (rebindSessionMeta && session) rebindSessionMeta(session); },
+      // MULTIVIEW D4: the conversation's explicit browser cap rides the meta (the properties row + a restart); the keeper keeps the conversation-level fact
+      persistCap: (session, v) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserCap: Number.isInteger(v) ? v : undefined }); },
       onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
       // the pin route re-points a RUNNING session's indirection through the
       // same module ws-create resolves it with (file-based, so a second

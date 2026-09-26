@@ -159,6 +159,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   function sweepStale(ev, moment) {
     const out = { moment, sessionId: null, stale: [], kept: 0, why: null };
     if (!ev || isWindow(ev)) { out.why = 'a window target has no browser approvals'; return out; }
+    // 2.369.183: a lane P `pass` (a fold-back moving the SAME takeover to another view) arrives as kind 'takeover' with
+    // cause 'pass' — no takeover began, so it is not a stale-approval moment
+    if (ev.cause === 'pass') { out.why = 'a pass moves the same takeover to another view — no new moment'; return out; }
     if (!approvals || typeof approvals.pending !== 'function' || typeof approvals.answer !== 'function') { out.why = 'the approvals seam is not wired'; return out; }
     const sess = sessionFor(ev.sessionId, ev.browserKey);
     if (!sess) { out.why = 'no live session carries this browser key'; return out; }

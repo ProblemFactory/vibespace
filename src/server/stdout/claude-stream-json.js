@@ -35,6 +35,7 @@ const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
 const { parseSetModelEcho } = require('../../model-echo.js'); // the ONE /model echo parser (shared with the status bar + card label)
+const browserHelpers = require('../../server/browser-helpers.js'); // (spelled from src/ like every require here — suites rebase '../../') MULTIVIEW §4 (B-89d0): a helper's browser is named by WITNESS — the Task that opened it + its `vibespace-browser new-child`
 
 // SendUserFile → the published-pages channel (owner ruling 8(c),
 // design-harness-features §2.12). The CLI's tool names LOCAL files; we turn
@@ -309,6 +310,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               if (msg.uuid && emitted.has(msg.uuid)) continue; // already sent via stream-json
               if (msg.uuid) emitted.add(msg.uuid);
               if (msg.type !== 'user' && msg.type !== 'assistant' && msg.type !== 'result') continue;
+              browserHelpers.observe(session, msg, toolUseId); // MULTIVIEW §4: the sub-agent's own JSONL carries its `new-child` call too
               // Buffer + broadcast
               if (!session.subagentBuffers.has(toolUseId)) session.subagentBuffers.set(toolUseId, []);
               session.subagentBuffers.get(toolUseId).push(msg);
@@ -1343,6 +1345,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // agent-style "N messages · View Log" line on a Bash card. Route
           // them to their own channel (the elapsed seconds are genuinely
           // useful on a pending card) and never into the subagent path.
+          browserHelpers.observe(session, msg); // MULTIVIEW §4: a Task opening (parent line) / a helper's `new-child` Bash call (sidechain) — never throws
           if (msg.type === 'tool_progress') {
             broadcastToSession(session, id, {
               type: 'tool-progress', sessionId: id,

@@ -527,6 +527,27 @@ const SETTINGS_SCHEMA = {
     description: t('ON (default): when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window, so the browser never loses its owner. OFF: open it yourself (session menu → Agent browser — live view) and bind it with "Snap beside" (or group it with the session\'s window as tabs, then choose "Show side by side"). An ephemeral browser (no profile) is never auto-opened.'),
     category: t('Agent browser'), liveApply: true,
   },
+  // ── MULTIVIEW (docs/design-browser-multiview.zh.md D4 / B-325a) ──────────
+  // D4: the cap is a CONVERSATION's property — this is only its default (a
+  // Task Group's default beats it; the conversation's own value, set from the
+  // Agent browser window's chip or Session Properties, beats both). The
+  // machine's ceiling (six, shared with desktop apps) stays the hard top.
+  'browser.defaultPerConversationCap': {
+    type: 'number', default: 3, min: 1, max: 6,
+    label: t('Browsers one conversation may run at once'),
+    description: t('The default number of browsers one conversation (with its helpers) may have running at the same time. Each conversation can change its own from the count in its Agent browser window or in Session Properties, and a Task Group can give its new conversations a different default (a conversation keeps the group default it started with). The machine keeps its own ceiling of six, shared with desktop apps.'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  // B-325a: a conversation's own browser (and its helpers') is let go a few
+  // minutes after its turn ends — the tab stays in the window, hollow, and the
+  // next command starts it again. Never while you drive it or watch it. Chat
+  // sessions only (lane P verify r2): a terminal session publishes no turn.
+  'browser.idleReleaseAfterTurnMs': {
+    type: 'number', default: 180000, min: 0, max: 86400000,
+    label: t('Release a conversation\'s browser after its turn ends (ms)'),
+    description: t('How long after a turn ends the conversation\'s own browser (and its helpers\' browsers) keep running before they are released. The tab stays in the Agent browser window and the next command starts the browser again. Never while you are driving it or watching it in a live view. Chat sessions only: a terminal session\'s browser keeps running until its idle timeout. 0 = never release; anything under 30 s is raised to 30 s.'),
+    category: t('Agent browser'), liveApply: true,
+  },
   // ── AGENT BROWSER P10 (design-agent-browser-v2 §7.6 tier 3 / §6.6, D27 (b)) ──
   // THE SWITCH with its own consent: windows on the user's REAL desktop become
   // window targets. OFF by default; confirmOn = the confirmation dialog IS the

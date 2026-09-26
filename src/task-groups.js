@@ -94,6 +94,8 @@ function slugify(title) {
 // (bp-<8 hex>) or null — a label would drift with a rename, so the picker
 // sends the id; anything else is null (never a throw out of a patch).
 function sanitizeBrowserProfileId(v) { const s = typeof v === 'string' ? v.trim() : ''; return /^bp-[0-9a-f]{8}$/.test(s) ? s : null; }
+/** MULTIVIEW D4 (docs/design-browser-multiview.zh.md): the group's default PER-CONVERSATION browser cap, 1..6, or null (follow the instance setting). */
+function sanitizeBrowserCap(v) { if (v === null || v === undefined || v === '') return null; const n = Number(v); return Number.isFinite(n) ? Math.max(1, Math.min(6, Math.round(n))) : null; }
 function sanitizeStrArray(arr, cap = 200) {
   if (!Array.isArray(arr)) return [];
   const seen = new Set();
@@ -1007,7 +1009,7 @@ class TaskGroupManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext, browserProfileId } = {}) {
+  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap } = {}) {
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -1035,6 +1037,7 @@ class TaskGroupManager {
       // agent browser P1 (§3.2.5 row 3): the DEFAULT browser profile of this
       // group's NEW sessions — never a retroactive edit of running ones
       browserProfileId: sanitizeBrowserProfileId(browserProfileId),
+      browserCap: sanitizeBrowserCap(browserCap), // MULTIVIEW D4: the group's default per-conversation browser cap (null = the instance setting)
       createdAt: now,
       updatedAt: now,
       contentUpdatedAt: now,
@@ -1132,6 +1135,8 @@ class TaskGroupManager {
     // (a `bp-<8 hex>` id or null); binding/unbinding never rewrites a running
     // session's pin — a default is where a session STARTS
     if (patch.browserProfileId !== undefined) t.browserProfileId = sanitizeBrowserProfileId(patch.browserProfileId);
+    // MULTIVIEW D4: the group's default per-conversation browser cap — a conversation's own value (chip / Session Properties) wins
+    if (patch.browserCap !== undefined) t.browserCap = sanitizeBrowserCap(patch.browserCap);
     // patch.plan is deliberately IGNORED (checklist removed 2.121.0) — an old
     // client bundle may still send it; a stored dormant t.plan stays untouched.
     if (patch.backlog !== undefined) {

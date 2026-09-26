@@ -35,7 +35,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
-import { mutantCopies } from './mutant-copy.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const F = require('../src/browser-facts.js');
@@ -43,6 +43,8 @@ const K = require('../src/server/browser-keeper.js');
 const BE = require('../src/server/browser-env.js');
 const LIMITS = require('../src/keeper-limits.js');
 const { SessionStatusManager } = require('../src/session-status.js');
+const S = require('../src/browser-stream.js');          // MULTIVIEW: the strip's list, the child rung, the witness naming
+const BH = require('../src/server/browser-helpers.js'); // MULTIVIEW §4: the witness feed (stdout + the new-child route)
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
@@ -352,7 +354,13 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   // children
   // the parent is PINNED (Personal) at this point: its generated config names pers.dir
   ok(JSON.parse(fs.readFileSync(cfgPath, 'utf8')).profile === pers.dir, 'precondition: the parent\'s config names the pinned directory');
+  // MULTIVIEW §4 (B-89d0): the claude stdout carries the WITNESS — a Task opening on the parent line and, under it, the
+  // helper's own Bash call running `vibespace-browser new-child` (fed through the same module the stdout consumer uses)
+  BH.observe(sessA, { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_T1', name: 'Task', input: { description: 'Check the prices', subagent_type: 'general-purpose', prompt: '…' } }] } });
+  BH.observe(sessA, { type: 'assistant', parent_tool_use_id: 'toolu_T1', message: { content: [{ type: 'tool_use', id: 'toolu_B1', name: 'Bash', input: { command: 'eval "$(vibespace-browser new-child)"' } }] } });
   c = await cli(['new-child']);
+  // lane P verify (finding 4): the witness is paired at its CLOSE — the helper's Bash tool_result (the CLI's own words, naming the handle it printed)
+  BH.observe(sessA, { type: 'user', parent_tool_use_id: 'toolu_T1', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_B1', content: c.stderr + c.stdout }] } });
   const childCfg = path.join(DATA, 'browser-env', KEY_A + '.1.json');
   ok(c.status === 0 && /child handle bk-0000000a\.1 minted/.test(c.stderr) && c.stdout.trim() === 'export VIBESPACE_BROWSER=bk-0000000a.1', '`new-child` prints ONLY the child\'s handle on stdout (takeover C2 §3.4: the browser identity behind it is the server\'s business)', JSON.stringify(c.stdout));
   ok(fs.existsSync(childCfg), '…and on rung D the server still generated a config of the child\'s OWN, beside the parent\'s (<key>.<n>.json) — the child\'s commands get it through /resolve');
@@ -400,9 +408,134 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   // GET /session carries the set
   r = await j('GET', '/api/browser/session/sess-1');
   ok(r.status === 200 && Array.isArray(r.json.attachments) && Array.isArray(r.json.handles) && 'defaultProfile' in r.json, 'GET /api/browser/session/:id answers the attachment set');
+  // MULTIVIEW §4: the route pairs the ONE witness with the ONE handle it minted — the helper's browser is named by its Task
+  ok(r.json.helperNames && r.json.helperNames[KEY_A + '.1'] === 'Check the prices', 'the new-child route + the stdout witness name the helper: helperNames[<handle>] = its Task\'s description', r.json.helperNames);
+  const rowsR = S.browserListFor(r.json);
+  const kidRow = rowsR.find((x) => x.ref === KEY_A + '.1');
+  ok(kidRow && kidRow.kind === 'child' && kidRow.helper.name === 'Check the prices' && kidRow.helper.n === 1 && kidRow.driver === 'helper' && 'browser' in r.json.children.find((x) => x.handle === KEY_A + '.1'), 'the strip\'s list carries the helper row, named, and the status answer carries ITS browser slot', kidRow);
+  ok(r.json.cap && Number.isInteger(r.json.cap.own) && r.json.cap.cap >= 1 && r.json.cap.machine, 'the answer carries the own/cap chip (D4)');
   await k.stop(work.id).catch(() => { }); await k.stop(pers.id).catch(() => { });
   k.shutdown();
   srv.close(); srv = null;
+}
+
+// ═══ ④ MULTIVIEW (docs/design-browser-multiview.zh.md §2 A1 / §4 B-89d0), PURE + the real bridge ═══
+console.log('— ④ MULTIVIEW: the strip\'s list (truth table + negative control), the child rung, the helper naming by witness, the bridge\'s child relay');
+{
+  const bk = KEY_A;
+  ok(String(S.CHILD_HANDLE_RE) === String(B.CHILD_KEY_RE), 'the stream module\'s child-handle spelling IS browser-profiles\' (this module imports nothing — the two sources are pinned equal)');
+  // the truth table: attachments ∪ ephemeral ∪ children, nothing else
+  const status = {
+    browserKey: bk,
+    attachments: [{ profileId: 'bp-00000001', alias: 'work', label: 'Work', isDefault: true }, { profileId: 'bp-00000002', alias: 'personal', label: 'Personal', isDefault: false }],
+    leases: [
+      { profileId: 'bp-00000001', browserKey: bk, others: 2, browser: { state: 'ready' } },
+      { profileId: 'bp-00000002', browserKey: bk, others: 0, browser: { state: 'stopped' } },
+      { profileId: 'bp-00000003', browserKey: bk + '.1', others: 0, browser: { state: 'ready' } }, // a helper's named lease: not an attachment of the parent
+    ],
+    ephemeral: { profileId: 'bp-000000e1', browserKey: bk, child: false, state: 'ready', live: true },
+    children: [{ handle: bk + '.2', browser: null }, { handle: bk + '.1', browser: { profileId: 'bp-000000c1', state: 'ready' } }, { handle: KEY_B + '.1', browser: { state: 'ready' } }],
+    inputs: [{ input: 'user', browserKey: bk, profileId: 'bp-00000002' }, { input: 'user', browserKey: bk + '.1', profileId: null }],
+    // things that are NOT one of this session's browsers — none may ever become a row:
+    desktopApps: [{ id: 'da-1', label: 'GIMP' }], profiles: [{ id: 'bp-00000009', label: 'Unleased' }], ephemerals: [{ profileId: 'bp-000000e9', browserKey: KEY_B }],
+    pin: { profileId: 'bp-00000009' }, handles: [{ handle: 'ghost', kind: 'attachment' }],
+  };
+  const rows = S.browserListFor(status, { activity: { 'bp-00000001': true }, helpers: S.bindHelpers(S.bindHelpers(S.bindHelpers(S.bindHelpers(null, { kind: 'task', id: 't1', description: 'Scrape the menu' }), { kind: 'witness', id: 'w1', parent: 't1' }), { kind: 'child', handle: bk + '.1' }), { kind: 'witness-close', id: 'w1', text: `export VIBESPACE_BROWSER='${bk}.1'` }) });
+  const want = [
+    ['bp-00000001', 'attachment', 'running', 'agent', true, 2],
+    ['bp-00000002', 'attachment', 'released', 'you', false, 0],
+    [S.EPHEMERAL_REF, 'ephemeral', 'idle', 'agent', false, 0],
+    [bk + '.1', 'child', 'idle', 'you', false, 0],
+    [bk + '.2', 'child', 'released', 'helper', false, 0],
+  ];
+  ok(rows.length === want.length, `the list has exactly ${want.length} rows (2 attachments, the own browser, 2 helpers)`, rows.map((r) => r.ref));
+  for (const [ref, kind, state, driver, isDef, owners] of want) {
+    const r = rows.find((x) => x.ref === ref);
+    ok(r && r.kind === kind && r.state === state && r.driver === driver && r.isDefault === isDef && r.owners === owners, `row ${ref}: ${kind} · ${state} · driver ${driver} · default ${isDef} · owners ${owners}`, r);
+  }
+  ok(rows.map((r) => r.ref).join() === ['bp-00000001', 'bp-00000002', S.EPHEMERAL_REF, bk + '.1', bk + '.2'].join(), 'order: attachments (lease order), the own browser, helpers by number');
+  ok(rows.find((x) => x.ref === bk + '.1').helper.name === 'Scrape the menu' && rows.find((x) => x.ref === bk + '.2').helper.name === null && rows.find((x) => x.ref === bk + '.2').helper.n === 2, 'a WITNESSED helper is named by its Task; an unwitnessed one is numbered');
+  // NEGATIVE CONTROL: every foreign record stays out — and a list that let one in would be caught by this very check
+  const FOREIGN = ['bp-00000003', 'bp-00000009', 'bp-000000e9', KEY_B + '.1', 'da-1', 'ghost'];
+  const leaked = (list) => list.filter((r) => FOREIGN.includes(r.ref) || FOREIGN.includes(r.profileId));
+  ok(leaked(rows).length === 0, 'nothing outside the three kinds appears: a helper\'s named lease, an unleased profile, another session\'s ephemeral / helper, a desktop app, a stray handle, the pin', leaked(rows));
+  const poisoned = S.browserListFor({ ...status, attachments: [...status.attachments, { profileId: 'bp-00000009', label: 'Unleased' }] });
+  ok(leaked(poisoned).length === 1, 'NEGATIVE CONTROL: the same check catches a record that DOES get in (a planted attachment) — the check can fail');
+  ok(S.browserListFor({ ...status, ephemeral: { ...status.ephemeral, child: true } }).every((r) => r.kind !== 'ephemeral') && S.browserListFor({ ...status, ephemeral: { ...status.ephemeral, browserKey: KEY_B } }).every((r) => r.kind !== 'ephemeral'), 'an ephemeral record that is a child\'s, or another key\'s, is never the session\'s own row');
+  ok(S.browserListFor(null).length === 0 && S.browserListFor({}).length === 0 && S.browserListFor({ browserKey: bk, attachments: [{ profileId: 'bp-00000001', label: 'Work' }] }).length === 1, 'no status ⇒ no rows; one attachment ⇒ one row (the strip stays hidden below two)');
+  ok(S.ownLiveCount(rows) === 3, 'the chip\'s numerator counts live rows only (running + idle)');
+  // the child rung
+  const set = { attachments: status.attachments.map((a) => ({ ...a })), children: [{ handle: bk + '.1' }] };
+  const tc = S.streamTargetFor({ browserKey: bk, set, profileRef: bk + '.1', envPairs: ['AGENT_BROWSER_SESSION=vs-' + bk, 'AGENT_BROWSER_NAMESPACE=vs-' + bk] });
+  ok(tc.ok && tc.kind === 'child' && tc.handle === bk + '.1' && tc.ns === 'vs-' + bk + '.1' && tc.sessionName === 'vs-' + bk + '.1' && !('envPairs' in tc) && tc.ref === bk + '.1', 'streamTargetFor: a child handle the set lists ⇒ {kind:"child", ns:"vs-<handle>"} — carrying NO pairs (never the parent\'s)', tc);
+  const tn = S.streamTargetFor({ browserKey: bk, set, profileRef: bk + '.7' });
+  ok(!tn.ok && tn.code === 'not_attached', 'a child handle the set does NOT list is not_attached');
+  const te = S.streamTargetFor({ browserKey: bk, set, profileRef: S.EPHEMERAL_REF, envPairs: ['AGENT_BROWSER_SESSION=vs-' + bk] });
+  ok(te.ok && te.kind === 'ephemeral' && te.ref === S.EPHEMERAL_REF && te.chosen === 'named', 'EPHEMERAL_REF names the session\'s own browser beside its attachments');
+  ok(!S.streamTargetFor({ browserKey: bk, set, profileRef: S.EPHEMERAL_REF }).ok, '…and refuses no-browser without the session\'s pairs');
+  ok(S.streamTargetFor({ browserKey: bk, set, profileRef: 'work' }).ref === 'bp-00000001' && S.hello({ target: tc }).target.handle === bk + '.1' && S.hello({ target: tc }).target.ref === bk + '.1', 'every target carries `ref`; hello names the helper\'s handle');
+  // helper naming — THE OUTCOMES TABLE (never by time, never by order). lane P verify (finding 4, 2026-09-26): a
+  // witness is paired at its CLOSE (the Bash tool_result): a helper is named only when EXACTLY ONE mint arrived
+  // inside that witness's window (tool_use … tool_result), no other witness was open in it, and the result's own
+  // words name that handle (the CLI prints it). A mint arriving with no open witness is "Helper N" for good.
+  const task = (id, d) => ({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name: 'Task', input: { description: d, subagent_type: 'x' } }] } });
+  const bash = (id, parent, cmd = 'vibespace-browser new-child') => ({ type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'tool_use', id, name: 'Bash', input: { command: cmd } }] } });
+  const minted = (h) => `child handle ${h} minted — its own ephemeral browser, reaped with this conversation.\nexport VIBESPACE_BROWSER='${h}'`;
+  const close = (id, parent, text) => ({ type: 'user', parent_tool_use_id: parent, message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }] } });
+  const one = {}; BH.observe(one, task('T1', 'Compare flights')); BH.observe(one, bash('B1', 'T1')); BH.noteChild(one, bk + '.1');
+  ok(!BH.namesOf(one)[bk + '.1'], 'a witness still OPEN names nothing yet (the pairing is decided at its close)');
+  BH.observe(one, close('B1', 'T1', minted(bk + '.1')));
+  ok(BH.namesOf(one)[bk + '.1'] === 'Compare flights', 'ONE witness, ONE mint inside its window, its result names the handle ⇒ "Helper: Compare flights"');
+  // the verifier's sequence: a helper whose new-child ran inside a SCRIPT (no Bash witness) mints .1 while B1 is open, then B1's own mint .2
+  const script = {}; BH.observe(script, task('T1', 'Check the prices')); BH.observe(script, bash('B1', 'T1')); BH.noteChild(script, bk + '.1'); BH.noteChild(script, bk + '.2'); BH.observe(script, close('B1', 'T1', minted(bk + '.2')));
+  ok(Object.keys(BH.namesOf(script)).length === 0, 'TWO mints inside one witness\'s window (one from a script, no witness of its own) ⇒ neither is named — never paired by order', script._browserHelpers);
+  const late = {}; BH.observe(late, task('T1', 'Late witness')); BH.noteChild(late, bk + '.1'); BH.observe(late, bash('B1', 'T1')); BH.observe(late, close('B1', 'T1', minted(bk + '.1')));
+  ok(Object.keys(BH.namesOf(late)).length === 0, 'a mint with NO open witness is "Helper N" for good — a witness opening after it never claims it');
+  const failed = {}; BH.observe(failed, task('T1', 'Failed call')); BH.observe(failed, bash('B1', 'T1')); BH.noteChild(failed, bk + '.1'); BH.observe(failed, close('B1', 'T1', '[bad-request] the server refused'));
+  ok(Object.keys(BH.namesOf(failed)).length === 0, 'the witness\'s own result must NAME the handle: a failed new-child beside somebody else\'s mint names nobody');
+  const two = {}; BH.observe(two, task('T1', 'A')); BH.observe(two, task('T2', 'B')); BH.observe(two, bash('B1', 'T1')); BH.observe(two, bash('B2', 'T2')); BH.noteChild(two, bk + '.1'); BH.noteChild(two, bk + '.2'); BH.observe(two, close('B1', 'T1', minted(bk + '.1'))); BH.observe(two, close('B2', 'T2', minted(bk + '.2')));
+  ok(Object.keys(BH.namesOf(two)).length === 0, 'TWO witnesses open at once ⇒ both numbered ("Helper 1", "Helper 2") — never guessed, even when each result names its own handle');
+  const nested = {}; BH.observe(nested, task('T1', 'A')); BH.observe(nested, task('T2', 'B')); BH.observe(nested, bash('B1', 'T1')); BH.observe(nested, bash('B2', 'T2')); BH.noteChild(nested, bk + '.1'); BH.observe(nested, close('B2', 'T2', minted(bk + '.1'))); BH.observe(nested, close('B1', 'T1', 'no output'));
+  ok(Object.keys(BH.namesOf(nested)).length === 0, '…another witness open inside the window makes it ambiguous (the sole mint is not given to the one that closed first)');
+  const clean = {}; BH.observe(clean, task('T1', 'First')); BH.observe(clean, bash('B1', 'T1')); BH.noteChild(clean, bk + '.1'); BH.observe(clean, close('B1', 'T1', minted(bk + '.1'))); BH.observe(clean, task('T2', 'Second')); BH.observe(clean, bash('B2', 'T2')); BH.noteChild(clean, bk + '.2'); BH.observe(clean, close('B2', 'T2', minted(bk + '.2')));
+  ok(BH.namesOf(clean)[bk + '.1'] === 'First' && BH.namesOf(clean)[bk + '.2'] === 'Second', 'two helpers ONE AFTER THE OTHER are each named (the ambiguity is about overlapping windows)');
+  ok(S.helperNames(S.bindHelpers(S.bindHelpers(S.bindHelpers(S.bindHelpers(null, { kind: 'task', id: 't', description: 'D' }), { kind: 'witness', id: 'w', parent: 't' }), { kind: 'child', handle: bk + '.1' }), { kind: 'witness-close', id: 'w', text: `export VIBESPACE_BROWSER='${bk}.10'` }))[bk + '.1'] === undefined, 'the handle is matched as a WHOLE token (…\\.1 is not named by a result printing …\\.10)');
+  // NEGATIVE CONTROL (patched copy of src/browser-stream.js — the pre-fix pairing: the witness takes the FIRST mint it
+  // saw, whatever else arrived, whatever its result says): the verifier's script sequence goes red on it
+  {
+    const MS = mutantCopies('browser-handles-naming', REPO);
+    const ssrc = fs.readFileSync(path.join(REPO, 'src/browser-stream.js'), 'utf8');
+    const A1 = 'if (!w.overlapped && w.mints.length === 1) {';
+    const A2 = 'if (c && !c.witness && !c.orphan && namesHandle(ev.text, c.handle)) {';
+    ok(ssrc.includes(A1) && ssrc.includes(A2), 'NEGATIVE CONTROL setup: the close-time judgement is found in src/browser-stream.js');
+    if (ssrc.includes(A1) && ssrc.includes(A2)) {
+      const PS = MS.load('src/browser-stream.js', ssrc.replace(A1, 'if (w.mints.length >= 1) {').replace(A2, 'if (c && !c.witness) {'), 'pair-by-order');
+      const run = (evs) => PS.helperNames(evs.reduce((st, ev) => PS.bindHelpers(st, ev), null));
+      const got = run([{ kind: 'task', id: 'T1', description: 'Check the prices' }, { kind: 'witness', id: 'B1', parent: 'T1' }, { kind: 'child', handle: bk + '.1' }, { kind: 'child', handle: bk + '.2' }, { kind: 'witness-close', id: 'B1', text: minted(bk + '.2') }]);
+      ok(got[bk + '.1'] === 'Check the prices', 'NEGATIVE CONTROL: pairing by order names the SCRIPT\'s helper (.1) with the other helper\'s Task — the outcomes table is red on it', got);
+      for (const r of copiesCensus(MS.files, MS.dir, REPO, { label: 'naming control: ' })) ok(r.pass, r.name, r.detail);
+    }
+  }
+  const codex = {}; BH.noteChild(codex, bk + '.1');
+  ok(Object.keys(BH.namesOf(codex)).length === 0 && S.browserListFor({ browserKey: bk, children: [{ handle: bk + '.1', browser: null }] }, { helpers: codex._browserHelpers }).find((r) => r.kind === 'child').helper.n === 1, 'a CODEX helper (no witness on its stdout) ⇒ "Helper 1"');
+  ok(S.newChildWitnessesOf(bash('B9', 'T9', 'vibespace-browser snapshot')).length === 0 && S.newChildWitnessesOf(bash('B9', null)).length === 0 && S.newChildWitnessesOf(bash('B9', 'T9', 'cd x && vibespace-browser --json new-child')).length === 1 && S.taskOpeningsOf(bash('B9', 'T9')).length === 0, 'the witness is exactly a sidechain Bash running `vibespace-browser … new-child` (not another verb, not the parent line)');
+  // the REAL bridge: a helper's relay is keyed on ITS handle and uses ITS pairs (a tap needs no socket)
+  const BS = require('../src/server/browser-stream.js');
+  const asked = [];
+  const stubKeeper = {
+    setFor: () => ({ attachments: [], children: [{ handle: bk + '.1' }], handles: [] }), list: () => ({ profiles: [] }),
+    pairsForKey: (h) => (h === bk + '.1' ? ['AGENT_BROWSER_SESSION=vs-' + h, 'AGENT_BROWSER_NAMESPACE=vs-' + h] : null),
+    streamPortFor: async (t) => { asked.push(t); return { ok: false, code: 'stream_unavailable', error: 'stub' }; }, noteViewers: () => { },
+  };
+  const sess = new Map([['sess-9', { _browserKey: bk, _browserEnv: ['AGENT_BROWSER_SESSION=vs-' + bk, 'AGENT_BROWSER_NAMESPACE=vs-' + bk] }]]);
+  const bridge = BS.create({ keeper: stubKeeper, activeSessions: sess, requestAuthed: () => true, log: { warn() { }, log() { } } });
+  let relaySeen = null;
+  const origCreate = bridge._relays.set.bind(bridge._relays);
+  bridge._relays.set = (key, r) => { relaySeen = r; return origCreate(key, r); };
+  await bridge.tap('sess-9', bk + '.1', () => { });
+  ok(relaySeen && relaySeen.key === 'sess-9|child:' + bk + '.1' && relaySeen.browserKey === bk + '.1' && JSON.stringify(relaySeen.envPairs) === JSON.stringify(stubKeeper.pairsForKey(bk + '.1')), 'the bridge\'s helper relay: keyed on the handle, its takeover key IS the handle, its pairs are the HELPER\'s (never the parent\'s)', relaySeen && { key: relaySeen.key, bk: relaySeen.browserKey, pairs: relaySeen.envPairs });
+  ok(asked.length === 1 && asked[0].kind === 'child' && asked[0].handle === bk + '.1', '…and the keeper is asked for the CHILD target\'s port');
+  bridge.shutdown();
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

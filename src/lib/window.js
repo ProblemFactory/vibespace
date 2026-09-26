@@ -80,7 +80,7 @@ class WindowManager {
     this.windowCounter++;
     width = width || 700; height = height || 500;
     if (x === undefined) ({ left: x, top: y, width, height } = this._defaultPlacement(width, height));
-    // BORN IN A CHAIN (agent browser P7, §4.6): `intoChain: { hostId, split, side }`
+    // BORN IN A CHAIN (agent browser P7, §4.6): `intoChain: { hostId, split, side, quiet }`
     // — the window is never painted standalone (no visible jump, no
     // created-then-merged autosave churn); it joins the host's chain below.
     const born = intoChain && intoChain.hostId && intoChain.hostId !== id ? (this.windows.get(intoChain.hostId) || null) : null;
@@ -141,12 +141,17 @@ class WindowManager {
     if (openSpec) winInfo._openSpec = openSpec;
     track('event', 'window-open:' + type);
     this._app?.stage?.onWindowCreated(winInfo); // stage aux binding / transient tag
+    // MULTIVIEW D5 (a)/(b): `quiet` = a TAB that changes nothing on screen (the two shown panes stay; it pulses) —
+    // a live view born beside a chat that is ALREADY in a split lands on its `side` and is never focused
+    const quiet = !!(born && intoChain.quiet && born._tabChain && born._tabChain.layout === 'split');
     if (born) {
-      if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right' });
+      if (quiet) this.addToTabChain(born._tabChain, winInfo, { side: intoChain.side === 'left' ? 'left' : 'right' }, { show: false });
+      else if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right' });
       else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo, { afterId: born.id }); // a TAB born right after its source (on the source's side in a split)
       else this.createTabChain(born, winInfo);
     }
-    this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
+    if (!quiet) this.focusWindow(id);
+    this._notify(); this._scheduleOverlapUpdate(); return winInfo;
   }
 
   // ── Grid Bounds Tracking ──

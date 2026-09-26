@@ -146,8 +146,31 @@ console.log('— ① the ephemeral record, the set, the ceiling (PURE)');
   const five = [live('bp-00000001', 'Shopping'), live('bp-00000002', 'Work'), live('bp-000000e1', '(ephemeral) session B', true), live('bp-000000e5', '(ephemeral) session C', true), live('bp-000000e6', '(ephemeral) session D', true)];
   ok(B.ceilingVerdict(five, [], L6, { ephemeral: true }) === null, 'five live browsers of six: no refusal');
   const v = B.ceilingVerdict(five, [{ profileId: 'bp-00000001', browserKey: KEY_P }], L6, { ephemeral: true, others: [{ label: 'GIMP', kind: 'desktop-app' }], idleMs: 900000 });
-  ok(v && v.code === 'browser_cap' && v.holders.length === 6 && v.holders.some((h) => h.kind === 'desktop-app' && h.label === 'GIMP') && v.holders.filter((h) => h.ephemeral).length === 3, 'five browsers + one desktop app through the seam ⇒ browser_cap with SIX holders (ephemerals counted, the desktop app named by kind)', v);
-  ok(/6 browsers are running/.test(v.error) && /shared with desktop apps/.test(v.error) && /Shopping \(bk-00000011\)/.test(v.error) && /\(ephemeral\) session B/.test(v.error) && /GIMP \(desktop-app\)/.test(v.error) && /idles out \(15 min without a command\)/.test(v.error) && /stopped by the user/.test(v.error) && /nothing of yours is queued/.test(v.error) && v.remedy, 'the sentence names every holder and the two ways out (§5.3), with a remedy');
+  // MULTIVIEW D4 / B-325a (docs/design-browser-multiview.zh.md §4): the ceiling still COUNTS every holder (ephemerals,
+  // the desktop app through the seam) but NAMES only the asking conversation's own — here nobody asks ⇒ nobody is named
+  ok(v && v.code === 'browser_cap' && v.scope === 'machine' && v.holders.length === 0 && v.others === 6, 'five browsers + one desktop app through the seam ⇒ browser_cap at SIX (ephemerals and the desktop app counted) — no holder named for a caller that holds none', v);
+  ok(/machine ceiling reached/.test(v.error) && /6 browsers are running/.test(v.error) && /shared with desktop apps/.test(v.error) && /none of them is yours — 6 are in other conversations or desktop apps/.test(v.error) && /idles out \(15 min without a command\)/.test(v.error) && /stopped by the user/.test(v.error) && /nothing of yours is queued/.test(v.error) && v.remedy, 'the sentence says machine ceiling, COUNTS the others and keeps the two ways out (§5.3), with a remedy', v.error);
+  // THE LEAK CHECK every refusal below runs: no other conversation's name, label or browser key, no desktop app's name
+  const FOREIGN = /Shopping|session B|session C|session D|GIMP|Work|bk-00000011|bp-0000000[12]|bp-000000e[156]/;
+  const leaks = (x, allow = null) => { const txt = JSON.stringify(x); return allow ? FOREIGN.test(txt.replace(allow, '')) : FOREIGN.test(txt); };
+  ok(!leaks(v), 'the refusal (sentence + payload) carries NO other conversation\'s name, label or key, and no desktop app\'s name', JSON.stringify(v));
+  const vMine = B.ceilingVerdict(five, [{ profileId: 'bp-00000001', browserKey: KEY_P }], L6, { ephemeral: true, others: [{ label: 'GIMP', kind: 'desktop-app' }], idleMs: 900000, browserKey: KEY_P + '.2' });
+  ok(vMine && vMine.holders.length === 1 && vMine.holders[0].label === 'Shopping' && vMine.others === 5 && /yours: Shopping; 5 are in other conversations or desktop apps/.test(vMine.error) && !leaks(vMine, /Shopping|bp-00000001/g) && !vMine.holders.some((h) => h.sessions.length), 'asked by a HELPER of the conversation holding Shopping: only Shopping is named (its label, no lease ids), five are a count', vMine.error);
+  // NEGATIVE CONTROL (patched copy): the pre-fix ceiling — every holder named with who leases it — trips the same leak check
+  {
+    const MB = mutantCopies('browser-ephemeral-leak', REPO);
+    const src = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const anchor = "const mineOf = (r) => !!bk && (((leases || []).some((l) => l.profileId === r.profileId && parentKeyOf(l.browserKey) === bk)) || (!!r.owner && parentKeyOf(r.owner) === bk));";
+    const namesAll = "  const holders = live.filter(mineOf).map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: [], kind: r.ephemeral ? 'ephemeral' : 'profile' }));";
+    const pre = src.includes(anchor) && src.includes(namesAll) ? src.replace(anchor, 'const mineOf = () => true;').replace(namesAll, "  const holders = [...live.map((r) => ({ profileId: r.profileId, label: r.label || r.profileId, ephemeral: !!r.ephemeral, sessions: (leases || []).filter((l) => l.profileId === r.profileId).map((l) => l.browserKey), kind: r.ephemeral ? 'ephemeral' : 'profile' })), ...extra.map((o) => ({ profileId: null, label: String(o.label), ephemeral: false, sessions: [], kind: 'desktop-app' }))];") : null;
+    ok(!!pre, 'NEGATIVE CONTROL setup: the narrowed ceiling\'s two lines are found in src/browser-profiles.js');
+    if (pre) {
+      const PB = MB.load('src/browser-profiles.js', pre, 'names-every-holder');
+      const vPre = PB.ceilingVerdict(five, [{ profileId: 'bp-00000001', browserKey: KEY_P }], L6, { ephemeral: true, others: [{ label: 'GIMP', kind: 'desktop-app' }], idleMs: 900000 });
+      ok(vPre && vPre.code === 'browser_cap' && leaks(vPre), 'NEGATIVE CONTROL: the pre-fix naming (every holder, with who leases it) is caught by the leak check', JSON.stringify(vPre).slice(0, 300));
+      for (const r of copiesCensus(MB.files, MB.dir, REPO, { label: 'leak control: ' })) ok(r.pass, r.name, r.detail);
+    }
+  }
   const named = B.ceilingVerdict(five, [], L6, { others: [{ label: 'GIMP', kind: 'desktop-app' }] });
   ok(named && named.code === 'cap' && /^browser ceiling reached \(6\/6 running/.test(named.error), 'CONTROL: a named profile\'s start keeps its `cap` code and sentence');
   ok(B.ceilingVerdict(five.slice(0, 5), [], L6) === null && B.ceilingVerdict([...five, live('bp-00000009', 'X')], [], L6).code === 'cap', 'CONTROL: no seam, six named/ephemeral live ⇒ `cap` as before');
@@ -201,7 +224,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
   ok(leases.length === 1 && leases[0].alias === 'ephemeral' && leases[0].browserKey === KEY_A && leases[0].sessionId === 'sess-a', 'ONE lease aliased `ephemeral`');
   ok(k.setFor(KEY_A).attachments.length === 0, '…and it is not an attachment (no handle)');
   const L = launches();
-  ok(L.length === 1 && L[0].by === 'open' && L[0].ns === 'vs-' + KEY_A && L[0].session === 'vs-' + KEY_A && L[0].socketDir === SOCK && L[0].idle === '600000', 'the KEEPER launched it (open about:blank) under the session\'s EXACT pairs — its socket dir included — with the idle setting', L);
+  ok(L.length === 1 && L[0].by === 'open' && L[0].ns === 'vs-' + KEY_A && L[0].session === 'vs-' + KEY_A && L[0].socketDir === SOCK && L[0].idle === '600000', 'the KEEPER launched it (open about:blank) under the session\'s EXACT pairs — its socket dir included — with the idle those pairs name (= the setting here; lane P verify r2 F2)', L);
   ok(beCalls === 0, 'the browser-env resolver was never asked (no re-run of the ladder)', beCalls);
   const cm = cmds();
   ok(cm.length === 1 && cm[0].verb === 'snapshot' && cm[0].ns === 'vs-' + KEY_A && cm[0].socketDir === SOCK, 'the command itself ran on that browser');
@@ -409,9 +432,12 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
   const s7 = mkSession('sess-7', 'bk-000000c7', '7');
   const before = launches().length;
   const r7 = await post('/api/agent/browser/resolve', { argv: ['snapshot'] }, s7.agentToken);
-  ok(r7.status === 409 && r7.json.code === 'browser_cap' && r7.json.holders.length === 6 && r7.json.holders.some((h) => h.kind === 'desktop-app') && /nothing of yours is queued/.test(r7.json.error) && r7.json.remedy && launches().length === before, 'the SEVENTH conversation\'s first verb ⇒ 409 browser_cap naming all six holders and the way out — nothing launched', r7.json);
+  // MULTIVIEW D4 / B-325a: the machine ceiling SAYS so, counts the six, names none of them (none is this conversation's)
+  const OTHERS7 = /Shopping|GIMP|session sess-c|sess-p|bk-000000c[12]|bk-00000011|bk-0000000a/;
+  ok(r7.status === 409 && r7.json.code === 'browser_cap' && r7.json.scope === 'machine' && r7.json.holders.length === 0 && r7.json.others === 6 && /machine ceiling reached/.test(r7.json.error) && /nothing of yours is queued/.test(r7.json.error) && r7.json.remedy && launches().length === before, 'the SEVENTH conversation\'s first verb ⇒ 409 browser_cap "machine ceiling reached", the six COUNTED and the way out — nothing launched', r7.json);
+  ok(!OTHERS7.test(JSON.stringify(r7.json)), '…and the refusal carries NO other session\'s name, label or lease key (nor the desktop app\'s name)', JSON.stringify(r7.json));
   c = await cli(['snapshot'], cliEnvFor(s7));
-  ok(c.status === 1 && /\[browser_cap\]/.test(c.stderr) && /holder: GIMP \[desktop-app\]/.test(c.stderr) && /holder: \(ephemeral\) session sess-c0/.test(c.stderr) && /remedy: /.test(c.stderr), 'the CLI prints the code, every holder and the remedy', c.stderr);
+  ok(c.status === 1 && /\[browser_cap\]/.test(c.stderr) && !/holder: /.test(c.stderr) && /6 are in other conversations or desktop apps/.test(c.stderr) && /remedy: /.test(c.stderr) && !OTHERS7.test(c.stderr), 'the CLI prints the code, the count and the remedy — and no other conversation\'s holder', c.stderr);
   const n3 = k.createProfile({ label: 'Third' }, { owner: { kind: 'instance', id: null } });
   const capNamed = await threw(() => k.attach({ profileId: n3.id, browserKey: KEY_P, sessionId: 'sess-p' }));
   ok(capNamed && capNamed.code === 'cap' && /browser ceiling reached \(6\/6 running/.test(capNamed.message), 'CONTROL: a named profile\'s attach at the ceiling keeps its `cap` code and sentence', capNamed && capNamed.message);
@@ -2007,7 +2033,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       killAll6();
     } else ok(false, '⑥ r4 LOW 4 CONTROL: the lockHeldUnder anchor was not found in src/server/browser-keeper.js');
     // (8) r4 LOW 5: the launch back on the setting NOW — the ephemeral launches with 300000 while its pairs say 600000
-    const IL = '        const r = await rt.launch(null, { idleMs: pairsIdleMs(pairs), headed: null, extraEnv: env0 });';
+    const IL = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: env0 });'; // 2.369.183: lane P's launchIdle (the same pairs' idle) — the one launch line
     if (k6src.includes(IL)) {
       const ci = await idleLeg(M6.load('src/server/browser-keeper.js', k6src.replace(IL, '        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: env0 });'), 'idle-now'), 'ctl-idle');
       ok(!ci.threw && ci.launchIdle === '300000', `⑥ r4 LOW 5 CONTROL: a keeper copy launching with the setting NOW launches with ${ci.launchIdle} — the LOW 5 leg can go red`, ci);
@@ -2097,6 +2123,412 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     killAll6();
   }
   killAll6();
+}
+
+// ═══ ⑦ MULTIVIEW PURE: the per-conversation cap + the release after the turn ═══
+console.log('— ⑦ MULTIVIEW (design-browser-multiview D4 / B-325a): the per-conversation cap ladder + verdict, the idle-release timing table (PURE)');
+{
+  const cf = B.conversationCapFor;
+  ok(cf({}).cap === 3 && cf({}).origin === 'default', 'no fact ⇒ 3 (default)');
+  ok(cf({ setting: 4 }).cap === 4 && cf({ setting: 4 }).origin === 'instance', 'the instance setting');
+  ok(cf({ setting: 4, taskGroup: 2 }).cap === 2 && cf({ setting: 4, taskGroup: 2 }).origin === 'task-group', 'a Task Group default beats the setting');
+  ok(cf({ setting: 4, taskGroup: 2, explicit: 5 }).cap === 5 && cf({ setting: 4, taskGroup: 2, explicit: 5 }).origin === 'conversation', 'the conversation\'s own value beats both');
+  ok(cf({ explicit: 9 }).cap === 6 && cf({ explicit: 0 }).cap === 1 && cf({ explicit: 'x', setting: 'y' }).origin === 'default', 'clamped to 1..6; junk is not a cap');
+  const cv = B.conversationCapVerdict;
+  ok(cv({ own: 2, cap: 3 }) === null && cv({ own: 0, cap: 1 }) === null, 'below the cap: nothing refused');
+  const r3 = cv({ own: 3, cap: 3 });
+  ok(r3 && r3.code === 'browser_cap' && r3.scope === 'conversation' && r3.own === 3 && r3.cap === 3 && /already runs 3 of its 3 browsers/.test(r3.error) && /this conversation's own/.test(r3.error) && /3\/3 chip in the Agent browser window, or Session Properties/.test(r3.remedy) && r3.holders.length === 0, 'AT the cap: browser_cap, scope conversation, says it is THIS conversation\'s cap and where to raise it — names nobody', r3);
+  ok(!/vibespace-browser status|another|session /.test(r3.error), '…the sentence is about this conversation only');
+  // the release after the turn — the timing table (releaseMs 3 min)
+  const R = (o) => B.idleReleaseVerdict({ releaseMs: 180000, now: 1000000, live: true, ...o });
+  const table = [
+    [{ live: false, turn: 'idle', idleSince: 0 }, false, null, 'not running'],
+    [{ turn: 'running', idleSince: 500000 }, false, null, 'a running turn clears the clock'],
+    [{ turn: 'waiting' }, false, null, 'a turn waiting on the user is not over'],
+    [{ turn: null }, false, null, 'an unknown turn never releases'],
+    [{ turn: 'idle', idleSince: null }, false, 1000000, 'first idle sighting stamps the clock'],
+    [{ turn: 'idle', idleSince: 1000000 - 179999 }, false, 1000000 - 179999, '2 min 59.999 s after: kept'],
+    [{ turn: 'idle', idleSince: 1000000 - 180000 }, true, 1000000 - 180000, 'exactly 3 min after: released'],
+    [{ turn: 'idle', idleSince: 0, takenOver: true }, false, 0, 'the user drives it: never'],
+    [{ turn: 'idle', idleSince: 0, watched: true }, false, 0, 'a live view watches it: never'],
+    [{ turn: 'idle', idleSince: 0, releaseMs: 0 }, false, 0, 'release off (0): never'],
+  ];
+  for (const [inp, want, since, name] of table) { const v = R(inp); ok(v.release === want && v.idleSince === since, `idle release: ${name} (${v.why})`, v); }
+  ok(B.idleReleaseMs(undefined) === 180000 && B.idleReleaseMs(0) === 0 && B.idleReleaseMs('0') === 0 && B.idleReleaseMs(1000) === 30000 && B.idleReleaseMs(600000) === 600000 && B.idleReleaseMs('junk') === 180000, 'the setting: default 3 min, 0 = never, a 30 s floor, junk ⇒ default');
+  ok(B.normalizeRegistry({ caps: { 'bk-0000000a': { cap: 4, at: 1 }, 'nope': { cap: 2 }, 'bk-0000000b': { cap: 'x' } } }).caps['bk-0000000a'].cap === 4 && Object.keys(B.normalizeRegistry({ caps: { 'nope': { cap: 2 }, 'bk-0000000b': { cap: 'x' } } }).caps).length === 0, 'the registry keeps well-formed per-conversation caps only');
+  const rg = B.normalizeRegistry({ caps: { 'bk-0000000c': { group: 2, at: 1 }, 'bk-0000000d': { cap: 5, group: 'x' } } }).caps;
+  ok(rg['bk-0000000c'].group === 2 && rg['bk-0000000c'].cap === null && rg['bk-0000000d'].cap === 5 && rg['bk-0000000d'].group === null, 'lane P verify (finding 5): an entry may hold only the Task Group default the conversation STARTED with (`group`), beside or without its explicit cap', rg);
+}
+
+// ═══ ⑧ MULTIVIEW, the REAL keeper: the cap counts helpers, the release after the turn, a view never starts it ═══
+console.log('— ⑧ MULTIVIEW: the real keeper — the per-conversation cap (helpers count, a raised cap admits; a Task Group default stamped at start, never read live), the release after the turn (kept while driven / watched), a view never starts a browser (released ephemeral, stopped attachment, a conversation with no browser yet — only `session info` asked), the next verb restarts it; three patched-copy controls (lane P verify)');
+{
+  const KEY_R = 'bk-000000a1';
+  live.add(KEY_R);
+  let OFF = 0;
+  const facts = { [KEY_R]: { turn: 'running', taskGroupCap: null } };
+  const set5 = { 'browser.idleTimeoutMs': 600000, 'browser.idleReleaseAfterTurnMs': 180000 };
+  let groupCapNow = null; // lane P verify (finding 5): the Task Group's default as the CREATE asks it (the keeper's taskGroupCap fact)
+  const k5 = mkKeeper({ serverSetting: (x) => set5[x], now: () => Date.now() + OFF, tickMs: 3600e3, conversationFacts: (bk) => facts[bk] || { turn: null, taskGroupCap: null }, taskGroupCap: () => groupCapNow });
+  const pR = pairsFor(KEY_R);
+  const e0 = await k5.ensureEphemeral({ browserKey: KEY_R, sessionId: 'sess-r', envPairs: pR, sessionName: 'r' });
+  ok(e0.browser.state === 'ready', 'the conversation\'s own browser starts');
+  const kidPairs = (h) => B.childPairsOver(pR, B.childEnvFor({ childKey: h, parentVariant: 'N' }));
+  const h1 = k5.newChild({ browserKey: KEY_R }).handle, h2 = k5.newChild({ browserKey: KEY_R }).handle, h3 = k5.newChild({ browserKey: KEY_R }).handle;
+  await k5.ensureEphemeral({ browserKey: h1, sessionId: 'sess-r', envPairs: kidPairs(h1), sessionName: 'r · child 1' });
+  await k5.ensureEphemeral({ browserKey: h2, sessionId: 'sess-r', envPairs: kidPairs(h2), sessionName: 'r · child 2' });
+  ok(k5.ownLive(KEY_R) === 3 && k5.capFor(KEY_R).cap === 3 && k5.capFor(KEY_R).origin === 'default', 'own + two helpers = 3 of the default 3 (helpers count toward their conversation)');
+  const before5 = launches().length;
+  const eCap = await threw(() => k5.ensureEphemeral({ browserKey: h3, sessionId: 'sess-r', envPairs: kidPairs(h3), sessionName: 'r · child 3' }));
+  ok(eCap && eCap.code === 'browser_cap' && eCap.scope === 'conversation' && eCap.capOwn === 3 && eCap.capOf === 3 && /this conversation's own/.test(eCap.message) && launches().length === before5, 'a THIRD helper\'s browser is refused with THIS conversation\'s cap (scope conversation) — nothing launched', eCap && eCap.message);
+  const st5 = k5.statusFor(KEY_R);
+  ok(st5.cap && st5.cap.own === 3 && st5.cap.cap === 3 && st5.cap.origin === 'default' && st5.cap.explicit === null && st5.cap.machine && Number.isInteger(st5.cap.machine.used) && st5.cap.machine.cap === 6, 'statusFor carries the chip: own/cap + origin + the machine\'s count (a separate fact)', st5.cap);
+  ok(st5.children.length === 3 && st5.children.filter((c) => c.browser && c.browser.state === 'ready').length === 2 && st5.children.find((c) => c.handle === h3).browser.state === 'not-started', 'each helper handle carries ITS browser\'s state (the refused third: recorded, never started)', st5.children);
+  const rows5 = S.browserListFor(st5);
+  ok(rows5.map((r) => r.kind).join() === 'ephemeral,child,child,child' && rows5.filter((r) => r.state === 'idle').length === 3 && rows5.find((r) => r.ref === h3).state === 'released', 'the strip\'s list: the own browser + three helper rows (two live, one never started = hollow)', rows5);
+  // lane P verify (finding 5, 2026-09-26): a Task Group's default is where a conversation STARTS (the browserProfileId
+  // precedent) — one that appears while the conversation RUNS never changes it (a live read refused a running agent's
+  // next browser mid-turn the moment its group was bound or edited)
+  facts[KEY_R].taskGroupCap = 2; groupCapNow = 2;
+  ok(k5.capFor(KEY_R).cap === 3 && k5.capFor(KEY_R).origin === 'default', 'a Task Group default set AFTER the conversation started does not change its cap (nothing is read live off the group)', k5.capFor(KEY_R));
+  const stamp1 = typeof k5.stampGroupCap === 'function' ? k5.stampGroupCap(KEY_R, { cwd: '/w' }) : null;
+  ok(stamp1 && stamp1.cap === 2 && stamp1.origin === 'task-group' && k5.capFor(KEY_R).cap === 2 && k5.capFor(KEY_R).origin === 'task-group' && k5.capOf(KEY_R) === null, 'the conversation\'s next START (a create / a resume — the same key) stamps the group\'s default once: origin task-group, never an explicit value', stamp1);
+  groupCapNow = 5; if (typeof k5.stampGroupCap === 'function') k5.stampGroupCap(KEY_R, { cwd: '/w' });
+  ok(k5.capFor(KEY_R).cap === 2 && k5.capFor(KEY_R).origin === 'task-group', '…and a later edit of the group never re-stamps a conversation that has its default (a resume keeps what it started with)', k5.capFor(KEY_R));
+  groupCapNow = null;
+  const sc = k5.setCap(KEY_R, 4);
+  ok(sc.cap === 4 && sc.origin === 'conversation' && sc.explicit === 4 && k5.capOf(KEY_R) === 4 && k5.capOf(h1) === 4, 'setCap: the conversation\'s own value (its helpers read the parent\'s)');
+  const e4 = await k5.ensureEphemeral({ browserKey: h3, sessionId: 'sess-r', envPairs: kidPairs(h3), sessionName: 'r · child 3' });
+  ok(e4.browser.state === 'ready' && k5.ownLive(KEY_R) === 4, '…and the raised cap admits the fourth');
+  ok((await threw(() => k5.setCap(KEY_R, 'lots'))).code === 'bad-request' && k5.setCap(KEY_R, null).origin === 'task-group', 'a junk cap is refused; null goes back to the default (here the group\'s)');
+  const k5b = mkKeeper({ serverSetting: (x) => set5[x], tickMs: 3600e3, conversationFacts: () => ({}) });
+  ok(k5b.capOf(KEY_R) === null, 'a cleared cap is gone from the store');
+  k5.setCap(KEY_R, 5); const k5c = mkKeeper({ serverSetting: (x) => set5[x], tickMs: 3600e3 });
+  ok(k5c.capOf(KEY_R) === 5, 'an explicit cap is kept per CONVERSATION in the registry (a resume carries the same key ⇒ the same cap)');
+  // ─ the release after the turn
+  const idOf = (key) => k5.ephemeralFor(key).profileId;
+  const own = idOf(KEY_R);
+  k5.sweepIdleReleases(Date.now() + OFF);
+  ok(k5.browserOf(own).state === 'ready', 'a RUNNING turn: nothing released');
+  facts[KEY_R].turn = 'idle';
+  k5.sweepIdleReleases(Date.now() + OFF);
+  OFF += 170000; k5.sweepIdleReleases(Date.now() + OFF);
+  ok(k5.browserOf(own).state === 'ready', '2 min 50 s after the turn ended: kept');
+  k5.noteViewers(KEY_R, null, 1); k5.noteViewers(h2, null, 1);
+  const tk = k5.takeover({ browserKey: h1, profileId: null, viewerId: 7, sessionId: 'sess-r' });
+  ok(tk.ok, 'the user takes over helper 1\'s browser; live views watch the own browser and helper 2\'s');
+  OFF += 20000; k5.sweepIdleReleases(Date.now() + OFF);
+  for (let i = 0; i < 60 && k5.browserOf(idOf(h3)).state !== 'stopped'; i++) await new Promise((r) => setTimeout(r, 50));
+  ok(k5.browserOf(idOf(h3)).state === 'stopped' && k5.browserOf(idOf(h3)).stoppedBy === 'turn-idle', 'past 3 min: helper 3\'s browser (nobody on it) is RELEASED', k5.browserOf(idOf(h3)));
+  ok(k5.browserOf(own).state === 'ready' && k5.browserOf(idOf(h2)).state === 'ready', '…the WATCHED ones are kept (the browser the user looks at is never taken away)');
+  ok(k5.browserOf(idOf(h1)).state === 'ready', '…and the one the user DRIVES is kept');
+  k5.noteViewers(KEY_R, null, 0);
+  k5.sweepIdleReleases(Date.now() + OFF);
+  for (let i = 0; i < 60 && k5.browserOf(own).state !== 'stopped'; i++) await new Promise((r) => setTimeout(r, 50));
+  const recOwn = k5.browserOf(own);
+  ok(recOwn.state === 'stopped' && recOwn.stoppedBy === 'turn-idle' && /released after the turn ended/.test(recOwn.note || '') && !recOwn.lastError, 'the view closed: the own browser is RELEASED at the next sweep (stopped by turn-idle, no error)', recOwn);
+  ok(k5._reg().profiles.some((x) => x.id === own) && k5._reg().leases.some((l) => l.profileId === own), '…the record and its lease stay (the tab stays, hollow)');
+  const row = S.browserListFor(k5.statusFor(KEY_R)).find((r) => r.ref === S.EPHEMERAL_REF);
+  ok(row && row.state === 'released', 'the strip row reads RELEASED (hollow — "the next command starts it again")', row);
+  const launchesBefore = launches().length;
+  const vp = await k5.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-' + KEY_R, envPairs: pR });
+  ok(!vp.ok && vp.code === 'browser_stopped' && launches().length === launchesBefore, 'a LIVE VIEW of the released browser is refused browser_stopped (2.369.183: lane H\'s one code for a browser a view will not start) — the view never starts it', vp);
+  const hNew = k5.newChild({ browserKey: KEY_R }).handle;
+  const vNew = await k5.streamPortFor({ ok: true, kind: 'child', handle: hNew });
+  ok(!vNew.ok && vNew.code === 'no-browser' && vNew.state === 'not-started', 'lane P verify: a helper that has not opened its browser yet is no-browser / not-started (the view draws it hollow and waits)', vNew);
+  const vc = await k5.streamPortFor({ ok: true, kind: 'child', handle: h2 });
+  ok(vc.ok && Number.isInteger(vc.port), 'a live helper\'s browser has a port (under ITS OWN recorded pairs)', vc);
+  const again = await k5.ensureEphemeral({ browserKey: KEY_R, sessionId: 'sess-r', envPairs: pR, sessionName: 'r' });
+  ok(again.browser.state === 'ready' && launches().length === launchesBefore + 1 && again.profile.id === own, 'the NEXT VERB starts it again — the same record');
+  // ─ lane P verify (finding 1, 2026-09-26): a view never STARTS a stopped ATTACHMENT's browser either — P2's
+  //   "viewing a held lease starts it" contradicted the owner's law and the hollow dot's own words
+  const nR = k5.createProfile({ label: 'Second profile R' }, { owner: { kind: 'instance', id: null } });
+  await k5.attach({ profileId: nR.id, browserKey: KEY_R, sessionId: 'sess-r' });
+  await k5.stop(nR.id);
+  const lbA = launches().length;
+  const tA = S.streamTargetFor({ browserKey: KEY_R, set: k5.setFor(KEY_R), profileRef: nR.id, envPairs: pR, profiles: k5.list().profiles });
+  const vA = await k5.streamPortFor(tA);
+  ok(tA.ok && tA.kind === 'attachment' && !vA.ok && vA.code === 'browser_stopped' && launches().length === lbA && !B.isLiveBrowser(k5.browserOf(nR.id)), 'a LIVE VIEW of a STOPPED attachment is refused browser_stopped — the view never starts it (no launch)', { vA, launched: launches().length - lbA });
+  ok(k5._reg().leases.some((l) => l.profileId === nR.id && l.browserKey === KEY_R) && /Second profile R/.test(String(vA.error)) && !/sess-|bk-/.test(String(vA.error)), '…the lease stays, and the sentence names this profile only (no key, no session)', vA.error);
+  await k5.attach({ profileId: nR.id, browserKey: KEY_R, sessionId: 'sess-r' });
+  ok(B.isLiveBrowser(k5.browserOf(nR.id)) && launches().length === lbA + 1, 'the next COMMAND on it (an attach) starts it — one launch');
+  const vA2 = await k5.streamPortFor(tA);
+  ok(vA2.ok && Number.isInteger(vA2.port) && launches().length === lbA + 1, '…and the view then has its port with no further launch', vA2);
+  await k5.stop(nR.id).catch(() => { });
+  // ─ lane P verify (finding 2, 2026-09-26): the DEFAULT target of a conversation that has not opened its browser yet
+  //   (no record) never runs `stream status` under its pairs — the real 0.38.1 SPAWNS a background daemon for it
+  //   (measured: `stream status --json` in an empty socket dir ⇒ port + `session info` active:true, a live
+  //   agent-browser process nobody recorded). Only the launch-free `session info` is asked.
+  {
+    const calls2 = []; let daemonUp = false;
+    const stubRt = new Proxy({}, { get: (_t, name) => (name === 'then' ? undefined : async () => { calls2.push(String(name)); if (name === 'info') return { ok: true, active: daemonUp, pid: daemonUp ? 4242 : null, socketDir: null }; if (name === 'streamPort') return { ok: true, port: 24242, error: null }; return { ok: false }; }) });
+    const DATA2 = path.join(ROOT, 'data-noview'); fs.mkdirSync(DATA2, { recursive: true });
+    const k6 = K.create({ dataDir: DATA2, homeDir: fakeHome, env: () => rtEnv, runtime: stubRt, facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { } }, install: false, tickMs: 3600e3 });
+    const KEY_N = 'bk-000000a4', pN = pairsFor(KEY_N);
+    const streamCalls = () => calls2.filter((c) => /^stream/.test(c)).length;
+    const vn = await k6.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-' + KEY_N, envPairs: pN });
+    ok(!vn.ok && vn.code === 'no-browser' && vn.state === 'not-started' && streamCalls() === 0, 'a live view of a conversation with NO browser yet: no-browser (not-started) — `stream status` never ran', { vn, calls2 });
+    ok(calls2.every((c) => c === 'info'), '…the only question asked is the launch-free `session info`', calls2);
+    daemonUp = true;
+    const vd = await k6.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-' + KEY_N, envPairs: pN });
+    ok(vd.ok && vd.port === 24242 && !calls2.includes('launch'), 'a daemon ALREADY running under those pairs (an escaped command, a pre-C3 session) is shown — never started by the view', { vd, calls2 });
+    k6.shutdown();
+  }
+  // NEGATIVE CONTROLS (lane P verify, patched copies of the keeper — ONE guard reverted each, the tree never written):
+  // every leg above goes red on its own when its guard is gone
+  {
+    const MK = mutantCopies('browser-ephemeral-multiview', REPO);
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    // 2.369.183: the attachment guard is lane H's (naive study 2 finding 3) — P's own copy of it merged into it
+    const G1 = "    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', state: reg.browsers[p.id] ? reg.browsers[p.id].state : 'not-started', error: `\"${p.label}\"'s browser is not running — the agent's next browser command starts it again, and this view reconnects then` };\n";
+    const G2 = "        if (!info || !info.active) return { ok: false, port: null, code: 'no-browser', state: 'not-started', error: 'this conversation has not opened its browser yet — its next command starts it' };\n";
+    const G3 = 'taskGroup: groupCapOf(bk), setting:';
+    ok(ksrc.includes(G1) && ksrc.includes(G2) && ksrc.includes(G3), 'NEGATIVE CONTROL setup: the three guards are found in src/server/browser-keeper.js');
+    const mk = (src, tag, extra) => MK.load('src/server/browser-keeper.js', src, tag).create({ homeDir: fakeHome, env: () => rtEnv, broadcast: null, serverSetting: (x) => settings[x], getTelemetry: () => null, liveKeys: () => live, facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3, ...extra });
+    if (ksrc.includes(G1)) {
+      const D1 = path.join(ROOT, 'data-ctl-1'); fs.mkdirSync(D1, { recursive: true });
+      const kc1 = mk(ksrc.replace(G1, ''), 'view-starts-attachment', { dataDir: D1, runtime: F.createBrowserRuntime({ env: rtEnv }) });
+      const pc = kc1.createProfile({ label: 'Control profile' }, { owner: { kind: 'instance', id: null } });
+      await kc1.attach({ profileId: pc.id, browserKey: KEY_R, sessionId: 'sess-r' }); await kc1.stop(pc.id);
+      const lb = launches().length;
+      const v = await kc1.streamPortFor(S.streamTargetFor({ browserKey: KEY_R, set: kc1.setFor(KEY_R), profileRef: pc.id, envPairs: pR, profiles: kc1.list().profiles }));
+      // (no start() is left in streamPortFor since lane H — without the guard the view is not refused BY NAME: the leg's predicate is red on it)
+      ok(!(!v.ok && v.code === 'browser_stopped' && launches().length === lb), 'NEGATIVE CONTROL (finding 1): without the guard a view of the stopped attachment is not refused browser_stopped by name — the leg\'s predicate is red on it', { v, launched: launches().length - lb });
+      await kc1.stop(pc.id).catch(() => { }); kc1.shutdown();
+    }
+    if (ksrc.includes(G2)) {
+      const calls3 = [];
+      const stub3 = new Proxy({}, { get: (_t, name) => (name === 'then' ? undefined : async () => { calls3.push(String(name)); if (name === 'info') return { ok: true, active: false, pid: null }; if (name === 'streamPort') return { ok: true, port: 24243, error: null }; return { ok: false }; }) });
+      const D2 = path.join(ROOT, 'data-ctl-2'); fs.mkdirSync(D2, { recursive: true });
+      const kc2 = mk(ksrc.replace(G2, ''), 'view-asks-stream-status', { dataDir: D2, runtime: stub3 });
+      const v = await kc2.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-bk-000000a4', envPairs: pairsFor('bk-000000a4') });
+      ok(v.ok && calls3.includes('streamPort'), 'NEGATIVE CONTROL (finding 2): without the guard the view asks `stream status` for a conversation with no browser — the leg\'s predicate is red on it', calls3);
+      kc2.shutdown();
+    }
+    if (ksrc.includes(G3)) {
+      const D3 = path.join(ROOT, 'data-ctl-3'); fs.mkdirSync(D3, { recursive: true });
+      const kc3 = mk(ksrc.replace(G3, 'taskGroup: groupCapOf(bk) ?? (convFacts(bk).taskGroupCap ?? null), setting:'), 'group-cap-live', { dataDir: D3, runtime: F.createBrowserRuntime({ env: rtEnv }), conversationFacts: () => ({ turn: 'running', taskGroupCap: 2 }) });
+      ok(kc3.capFor(KEY_R).cap === 2 && kc3.capFor(KEY_R).origin === 'task-group', 'NEGATIVE CONTROL (finding 5): a keeper that reads the group LIVE changes a running conversation\'s cap — the leg\'s predicate is red on it', kc3.capFor(KEY_R));
+      kc3.shutdown();
+    }
+    for (const r of copiesCensus(MK.files, MK.dir, REPO, { label: 'multiview controls: ' })) ok(r.pass, r.name, r.detail);
+  }
+  k5.handback({ browserKey: h1, profileId: null, viewerId: 7, cause: 'explicit' });
+  for (const e of k5.ephemerals()) await k5.stop(e.profileId).catch(() => { });
+  k5.shutdown(); k5b.shutdown(); k5c.shutdown();
+  live.delete(KEY_R);
+}
+
+// ═══ ⑧ r2 (lane P verify r2, 2026-09-26): a TERMINAL session's browser is never released on a turn it cannot read (F1);
+//     a view waits for the launch it arrived during (F2) ═══
+console.log('— ⑧ r2: the release needs a KNOWN turn (the wiring\'s own facts: a terminal session publishes none ⇒ kept; a chat session\'s ended turn ⇒ released), and a live view picked up mid-launch asks `stream status` only after `open` ended (own / helper / attachment); a patched-copy control each');
+{
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+  const waitFor = async (pred, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleepMs(25); } return pred(); };
+  const kidPairsOf = (parentPairs, h) => B.childPairsOver(parentPairs, B.childEnvFor({ childKey: h, parentVariant: 'N' }));
+  const setR2 = { 'browser.idleTimeoutMs': 600000, 'browser.idleReleaseAfterTurnMs': 180000 };
+  // ─ F1: the keeper is driven with the WIRING'S OWN `conversationFacts` (src/server/mounts-plugins-wiring.js, lifted
+  //   verbatim and evaluated over a Map of sessions with the wiring's own `require`) — never a restatement of it
+  const WIRING = path.join(REPO, 'src/server/mounts-plugins-wiring.js');
+  const WSRC = fs.readFileSync(WIRING, 'utf8');
+  const liftFacts = (src) => { const m = /\n( +)conversationFacts: (\(bk\) => \{[\s\S]*?\n\1\}),\n/.exec(src); return m ? m[2] : null; };
+  const factsOf = (text, sessions) => new Function('activeSessions', 'require', `return (${text});`)(sessions, createRequire(WIRING));
+  const GATE = 'TF.turnKnown(s) ? TF.turnOf(s) : null';
+  const lifted = liftFacts(WSRC);
+  ok(!!lifted && lifted.includes(GATE), 'F1 setup: the wiring\'s conversationFacts is found and answers through turnKnown', lifted);
+  const runF1 = async (factsText, tag) => {
+    const KEY_T = 'bk-000000b1', KEY_C = 'bk-000000b2';
+    for (const x of [KEY_T, KEY_C]) live.add(x);
+    const DD = path.join(ROOT, 'data-r2-' + tag); fs.mkdirSync(DD, { recursive: true });
+    const sessions = new Map([
+      ['sess-t', { mode: 'terminal', _browserKey: KEY_T, name: 'terminal agent' }],
+      ['sess-c', { mode: 'chat', _browserKey: KEY_C, _isStreaming: true, name: 'chat agent' }],
+    ]);
+    let OFF = 0;
+    const kk = mkKeeper({ dataDir: DD, serverSetting: (x) => setR2[x], now: () => Date.now() + OFF, tickMs: 3600e3, conversationFacts: factsOf(factsText, sessions) });
+    const pT = pairsFor(KEY_T), pC = pairsFor(KEY_C);
+    await kk.ensureEphemeral({ browserKey: KEY_T, sessionId: 'sess-t', envPairs: pT, sessionName: 't' });
+    const hT = kk.newChild({ browserKey: KEY_T }).handle;
+    await kk.ensureEphemeral({ browserKey: hT, sessionId: 'sess-t', envPairs: kidPairsOf(pT, hT), sessionName: 't · child 1' });
+    await kk.ensureEphemeral({ browserKey: KEY_C, sessionId: 'sess-c', envPairs: pC, sessionName: 'c' });
+    const id = (k0) => kk.ephemeralFor(k0).profileId;
+    const st = (k0) => { const b = kk.browserOf(id(k0)); return { state: b.state, stoppedBy: b.stoppedBy || null }; }; // a SNAPSHOT (browserOf is the live record)
+    const sweep = () => kk.sweepIdleReleases(Date.now() + OFF);
+    sweep(); OFF += 170000; sweep(); OFF += 11000; sweep(); // t, t+170 s, t+181 s — the verifier's timeline
+    await waitFor(() => [KEY_T, hT, KEY_C].some((k0) => st(k0).state === 'stopped'), 1500);
+    const at181 = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C) };
+    // the POSITIVE control: the chat session's turn ENDS ⇒ released 3 min later (its turn is a fact the wiring can read)
+    sessions.get('sess-c')._isStreaming = false;
+    sweep(); OFF += 181000; sweep();
+    await waitFor(() => st(KEY_C).state === 'stopped', 3000);
+    await waitFor(() => st(KEY_T).state === 'stopped' || st(hT).state === 'stopped', 600);
+    const after = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C) };
+    for (const e of kk.ephemerals()) await kk.stop(e.profileId).catch(() => { });
+    kk.shutdown();
+    for (const x of [KEY_T, KEY_C]) live.delete(x);
+    return { at181, after };
+  };
+  if (lifted) {
+    const r = await runF1(lifted, 'f1');
+    ok(r.at181.own.state === 'ready' && r.at181.helper.state === 'ready', 'F1: a TERMINAL session (its mode publishes no turn facts) — its browser AND its helper\'s are KEPT 3 min 1 s after the last verb (the turn is unknown, never idle)', r.at181);
+    ok(r.at181.chat.state === 'ready', 'F1: a CHAT session mid-turn (_isStreaming) is kept', r.at181.chat);
+    ok(r.after.chat.state === 'stopped' && r.after.chat.stoppedBy === 'turn-idle', 'F1 POSITIVE CONTROL: the chat session\'s turn ENDS ⇒ its browser is released 3 min later (stopped by turn-idle) — the same facts, the same sweep', r.after.chat);
+    ok(r.after.own.state === 'ready' && r.after.helper.state === 'ready', 'F1: …and the terminal session\'s browsers are still kept (never released on a turn the keeper cannot read)', r.after);
+    // NEGATIVE CONTROL (the wiring text in memory, the gate reverted — the pre-fix answer `{ turn: turnOf(s) }`):
+    const pre = lifted.replace(GATE, 'TF.turnOf(s)');
+    const rc = await runF1(pre, 'f1-ctl');
+    ok(pre !== lifted && rc.at181.own.state === 'stopped' && rc.at181.own.stoppedBy === 'turn-idle' && rc.at181.helper.state === 'stopped' && rc.at181.helper.stoppedBy === 'turn-idle' && rc.at181.chat.state === 'ready', 'F1 NEGATIVE CONTROL: conversationFacts answering turnOf unconditionally releases the terminal session\'s own browser and its helper\'s at t+181 s MID-WORK (the chat one mid-turn kept) — the legs above are red on it', rc.at181);
+  }
+
+  // ─ F2: THE SLOW-LAUNCH FAKE — a shim in front of the fake whose `open` takes 600 ms and which logs every call in
+  //   order (`open:begin` / `open:end`; every other call with whether the daemon is up when it lands)
+  const SLOW = path.join(ROOT, 'bin-slow'); fs.mkdirSync(SLOW, { recursive: true });
+  fs.writeFileSync(path.join(SLOW, 'agent-browser'), `#!${process.execPath}
+const fs = require('fs'), path = require('path'), { execFileSync } = require('child_process');
+const st = process.env.FAKE_AB_STATE, ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
+const log = (x) => fs.appendFileSync(path.join(st, 'slow-calls.log'), JSON.stringify({ t: Date.now(), ns, ...x }) + '\\n');
+const up = () => { try { process.kill(JSON.parse(fs.readFileSync(path.join(st, ns + '.json'), 'utf8')).pid, 0); return true; } catch { return false; } };
+const args = process.argv.slice(2).filter((x) => x !== '--json');
+if (args[0] === 'open') { log({ call: 'open:begin' }); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 600); if (process.env.FAKE_SLOW_FAIL) { log({ call: 'open:end', failed: true }); process.stderr.write('fake: Chrome exited early (exit code: 21)'); process.exit(1); } }
+else log({ call: args.slice(0, 2).join(' '), daemon: up() });
+let code = 0;
+try { process.stdout.write(execFileSync(${JSON.stringify(path.join(BIN, 'agent-browser'))}, process.argv.slice(2), { env: process.env, encoding: 'utf8' })); } catch (e) { code = e.status || 1; process.stdout.write(String(e.stdout || '')); }
+if (args[0] === 'open') log({ call: 'open:end', daemon: up() });
+process.exit(code);
+`, { mode: 0o755 });
+  const slowEnv = { PATH: `${SLOW}:${PATH_ENV}`, HOME: fakeHome, FAKE_AB_STATE: AB_STATE };
+  const slowCalls = (ns, since = 0) => logOf('slow-calls.log').filter((c) => c.ns === ns && c.t >= since).map((c) => c.call + (c.call === 'stream status' ? (c.daemon ? '' : ' (NO daemon)') : ''));
+  const nsOfPairs = (pairs) => S.pairsToEnv(pairs).AGENT_BROWSER_NAMESPACE;
+  const orderOk = (seq) => { const b = seq.indexOf('open:begin'), e = seq.indexOf('open:end'), s = seq.findIndex((c) => c.startsWith('stream status')); return b >= 0 && e > b && s > e && seq.every((c) => c !== 'stream status (NO daemon)') && seq.slice(0, b).every((c) => c === 'session info'); };
+  const midLaunch = async (kk, ns, begin, view) => {
+    const t0 = Date.now();
+    const pend = begin();
+    const began = await waitFor(() => slowCalls(ns, t0).includes('open:begin'), 5000);
+    const midState = view.state();
+    const midRow = view.row ? view.row() : null;
+    const v = await view.port();
+    const atAnswer = view.state();
+    let settled = null; try { settled = await pend; } catch (e) { settled = { error: e && e.message }; }
+    return { began, midState, midRow, v, atAnswer, seq: slowCalls(ns, t0), settled: !!settled };
+  };
+  const runF2 = async (loadKeeper, tag) => {
+    const KEY_S = tag === 'fix' ? 'bk-000000b3' : 'bk-000000b4';
+    live.add(KEY_S);
+    const DD = path.join(ROOT, 'data-r2-slow-' + tag); fs.mkdirSync(DD, { recursive: true });
+    const kk = loadKeeper({ dataDir: DD, homeDir: fakeHome, env: () => slowEnv, broadcast: null, serverSetting: (x) => setR2[x], getTelemetry: () => null, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: slowEnv }), facts: F.createBrowserFacts({ env: slowEnv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3 });
+    const pS = pairsFor(KEY_S);
+    const out = {};
+    // the conversation's OWN browser: the hollow view reconnects the moment the record reads `starting`
+    out.own = await midLaunch(kk, nsOfPairs(pS), () => kk.ensureEphemeral({ browserKey: KEY_S, sessionId: 'sess-s', envPairs: pS, sessionName: 's' }), {
+      state: () => kk.ephemeralFor(KEY_S).state,
+      row: () => (S.browserListFor(kk.statusFor(KEY_S)).find((r) => r.ref === S.EPHEMERAL_REF) || {}).state,
+      port: () => kk.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-' + KEY_S, envPairs: pS }),
+    });
+    // a HELPER's browser (its own recorded pairs)
+    const h = kk.newChild({ browserKey: KEY_S }).handle, hp = kidPairsOf(pS, h);
+    out.helper = await midLaunch(kk, nsOfPairs(hp), () => kk.ensureEphemeral({ browserKey: h, sessionId: 'sess-s', envPairs: hp, sessionName: 's · child 1' }), {
+      state: () => kk.ephemeralFor(h).state,
+      port: () => kk.streamPortFor({ ok: true, kind: 'child', handle: h }),
+    });
+    // an ATTACHMENT: its lease is held, its browser stopped (hollow), and the agent's next command on it starts it again
+    const np = kk.createProfile({ label: 'Slow profile ' + tag }, { owner: { kind: 'instance', id: null } });
+    await kk.attach({ profileId: np.id, browserKey: KEY_S, sessionId: 'sess-s' }); await kk.stop(np.id);
+    let tA = null;
+    out.attachment = await midLaunch(kk, kk.nsOf(np.id), () => kk.attach({ profileId: np.id, browserKey: KEY_S, sessionId: 'sess-s' }), {
+      state: () => (kk.browserOf(np.id) || {}).state,
+      port: () => { tA = S.streamTargetFor({ browserKey: KEY_S, set: kk.setFor(KEY_S), profileRef: np.id, envPairs: pS, profiles: kk.list().profiles }); return kk.streamPortFor(tA); },
+    });
+    out.attachment.target = tA && tA.kind;
+    for (const e of kk.ephemerals()) await kk.stop(e.profileId).catch(() => { });
+    await kk.stop(np.id).catch(() => { });
+    kk.shutdown();
+    live.delete(KEY_S);
+    return out;
+  };
+  const r2 = await runF2((o) => K.create(o), 'fix');
+  for (const [what, r] of Object.entries(r2)) {
+    ok(r.began && r.midState === 'starting', `F2 (${what}): the view arrives while \`open\` is launching (the record reads starting)`, r);
+    ok(r.v.ok && Number.isInteger(r.v.port) && r.atAnswer === 'ready', `F2 (${what}): streamPortFor answers only once the launch SETTLED (ready at the answer) — never under a half-launched daemon`, { v: r.v, atAnswer: r.atAnswer });
+    ok(orderOk(r.seq), `F2 (${what}): the call log reads session info → open:begin → open:end → … → stream status (never \`stream status\` before \`open:end\`) — ${r.seq.join(' → ')}`, r.seq);
+  }
+  ok(r2.own.seq[0] === 'session info' && r2.own.seq[1] === 'open:begin' && r2.own.seq[2] === 'open:end', 'F2 (own): the launch itself is unchanged — the launch-free `session info`, then `open` (no daemon to adopt)', r2.own.seq);
+  ok(r2.own.midRow === 'idle', 'F2: the strip may still draw the starting browser idle (the row state is unchanged — only the view waits)', r2.own.midRow);
+  ok(r2.attachment.target === 'attachment', 'F2: the attachment leg\'s target is the attachment', r2.attachment.target);
+  // ─ F2, a launch that FAILS while the view waits: the view's answer is the launch's own refusal — its
+  //   `stream status` never runs (on the real 0.38.1 one under the pairs of a browser that never came up SPAWNS
+  //   a daemon nobody records — measured in r1 finding 2: a view would have started a browser)
+  const failEnv = { ...slowEnv, FAKE_SLOW_FAIL: '1' };
+  const runFail = async (loadKeeper, tag) => {
+    const KEY_X = tag === 'fix' ? 'bk-000000b5' : 'bk-000000b6';
+    live.add(KEY_X);
+    const DD = path.join(ROOT, 'data-r2-fail-' + tag); fs.mkdirSync(DD, { recursive: true });
+    const kk = loadKeeper({ dataDir: DD, homeDir: fakeHome, env: () => failEnv, broadcast: null, serverSetting: (x) => setR2[x], getTelemetry: () => null, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: failEnv }), facts: F.createBrowserFacts({ env: failEnv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3 });
+    const pX = pairsFor(KEY_X);
+    const r = await midLaunch(kk, nsOfPairs(pX), () => kk.ensureEphemeral({ browserKey: KEY_X, sessionId: 'sess-x', envPairs: pX, sessionName: 'x' }), {
+      state: () => kk.ephemeralFor(KEY_X).state,
+      port: () => kk.streamPortFor({ ok: true, kind: 'ephemeral', sessionName: 'vs-' + KEY_X, envPairs: pX }),
+    });
+    r.after = kk.ephemeralFor(KEY_X).state;
+    kk.shutdown(); live.delete(KEY_X);
+    return r;
+  };
+  const rf = await runFail((o) => K.create(o), 'fix');
+  ok(rf.midState === 'starting' && !rf.v.ok && rf.v.code === 'launch_failed' && /did not start/.test(String(rf.v.error)) && rf.after === 'failed', 'F2: a launch that FAILS while the view waits — the view answers the launch\'s own refusal (launch_failed, the CLI\'s words)', { v: rf.v, after: rf.after });
+  ok(!rf.seq.some((c) => c.startsWith('stream status')), `F2: …and its \`stream status\` never ran (a view never starts a browser — under the pairs of one that never came up it would) — ${rf.seq.join(' → ')}`, rf.seq);
+  // ─ F2, the LAUNCH'S OWN ENV: the keeper launches with the idle the PAIRS name (measured on 0.38.1: a client
+  //   whose idle differs from the daemon's restarts it — the agent's first verb, or the view's `stream status`,
+  //   under the spawn pairs replaced the daemon the keeper had just launched and recorded); a setting changed
+  //   since the spawn therefore reaches the conversation at its next spawn, like every other pair
+  const runIdle = async (loadKeeper, tag) => {
+    const out = {};
+    const DD = path.join(ROOT, 'data-r2-idle-' + tag); fs.mkdirSync(DD, { recursive: true });
+    const kk = loadKeeper({ dataDir: DD, homeDir: fakeHome, env: () => rtEnv, broadcast: null, serverSetting: (x) => ({ 'browser.idleTimeoutMs': 600000 })[x], getTelemetry: () => null, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, install: false, tickMs: 3600e3 });
+    for (const [what, key, pairs] of [
+      ['pairs name 900000', tag === 'fix' ? 'bk-000000b7' : 'bk-000000b9', null],
+      ['pairs name none', tag === 'fix' ? 'bk-000000b8' : 'bk-000000ba', 'strip'],
+    ]) {
+      live.add(key);
+      const pr = pairs === 'strip' ? pairsFor(key).filter((x) => !x.startsWith('AGENT_BROWSER_IDLE_TIMEOUT_MS=')) : [...B.browserEnvFor({ browserKey: key, variant: B.VARIANTS.N, idleMs: 900000 }), `AGENT_BROWSER_SOCKET_DIR=${SOCK}`];
+      const n0 = launches().length;
+      await kk.ensureEphemeral({ browserKey: key, sessionId: 'sess-' + key, envPairs: pr, sessionName: key });
+      out[what] = { launch: launches().slice(n0).map((l) => l.idle), rec: kk.browserOf(kk.ephemeralFor(key).profileId).idleMs };
+      live.delete(key);
+    }
+    for (const e of kk.ephemerals()) await kk.stop(e.profileId).catch(() => { });
+    kk.shutdown();
+    return out;
+  };
+  ok(B.pairsIdleMs(['AGENT_BROWSER_IDLE_TIMEOUT_MS=900000']) === 900000 && B.pairsIdleMs(['AGENT_BROWSER_IDLE_TIMEOUT_MS=0']) === 0 && B.pairsIdleMs(['AGENT_BROWSER_SESSION=vs-x']) === null && B.pairsIdleMs(['AGENT_BROWSER_IDLE_TIMEOUT_MS=soon']) === null && B.pairsIdleMs(null) === null, 'F2 PURE pairsIdleMs: the idle the pairs name (0 = never is a value), none / junk ⇒ null');
+  const ri = await runIdle((o) => K.create(o), 'fix');
+  ok(ri['pairs name 900000'].launch.join() === '900000' && ri['pairs name 900000'].rec === 900000, 'F2: the setting (600000) changed since the spawn (the pairs name 900000) — the keeper launches with the PAIRS\' idle, the one every client of the daemon sends (no restart on the agent\'s first verb)', ri);
+  ok(ri['pairs name none'].launch.join() === '600000' && ri['pairs name none'].rec === 600000, 'F2: pairs that name no idle ⇒ the setting', ri['pairs name none']);
+  // NEGATIVE CONTROL (a patched keeper copy, ONE guard reverted — the in-flight launch is never awaited):
+  {
+    const MK2 = mutantCopies('browser-ephemeral-multiview-r2', REPO);
+    const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+    const W1 = '    const inFlightLaunch = starting.get(profileId);\n';
+    ok(ksrc.includes(W1), 'F2 NEGATIVE CONTROL setup: the launch wait is found in src/server/browser-keeper.js');
+    if (ksrc.includes(W1)) {
+      // 2.369.183 (layered guards): lane H's attachment branch waits on `starting` too — the control strips BOTH wait layers,
+      // and judges the fix legs' OWN predicates (lane H's `starting` refusal on the conversation's browser is not a pass either)
+      const HW = "    if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }\n";
+      ok(ksrc.includes(HW), 'F2 NEGATIVE CONTROL setup: lane H\'s attachment wait is found in src/server/browser-keeper.js');
+      const mut = MK2.load('src/server/browser-keeper.js', ksrc.replace(W1, '    const inFlightLaunch = null;\n').replace(HW, ''), 'view-during-launch');
+      const rc = await runF2((o) => mut.create(o), 'ctl');
+      const legOk = (r) => r.v.ok && Number.isInteger(r.v.port) && r.atAnswer === 'ready' && orderOk(r.seq);
+      for (const [what, r] of Object.entries(rc)) ok(!legOk(r), `F2 NEGATIVE CONTROL (${what}): without the wait the view answers before \`open\` settled (a half-launched record: ${r.v.ok ? 'served' : r.v.code}) — the F2 legs are red on it: ${r.seq.join(' → ')}`, { v: r.v, seq: r.seq });
+      const rfc = await runFail((o) => mut.create(o), 'ctl');
+      ok(!(!rfc.v.ok && rfc.v.code === 'launch_failed' && !rfc.seq.some((c) => c.startsWith('stream status'))), `F2 NEGATIVE CONTROL (failed launch): without the wait the view never answers the launch's own refusal (${rfc.v.code}) — the failed-launch legs are red on it: ${rfc.seq.join(' → ')}`, { v: rfc.v, seq: rfc.seq });
+    }
+    const W2 = '        const launchIdle = B.pairsIdleMs(pairs) ?? idleMs();\n';
+    ok(ksrc.includes(W2), 'F2 NEGATIVE CONTROL setup: the launch\'s pairs idle is found in src/server/browser-keeper.js');
+    if (ksrc.includes(W2)) {
+      const mut2 = MK2.load('src/server/browser-keeper.js', ksrc.replace(W2, '        const launchIdle = idleMs();\n'), 'launch-idle-setting');
+      const ric = await runIdle((o) => mut2.create(o), 'ctl');
+      ok(ric['pairs name 900000'].launch.join() === '600000', 'F2 NEGATIVE CONTROL (launch idle): the pre-fix launch passes the SETTING (600000) over pairs naming 900000 — the daemon the agent\'s first verb would restart; the launch-idle leg is red on it', ric);
+    }
+    for (const r of copiesCensus(MK2.files, MK2.dir, REPO, { label: 'multiview r2 controls: ' })) ok(r.pass, r.name, r.detail);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
