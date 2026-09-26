@@ -64,7 +64,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
   const { claudeSessionId = '', cwd = '', name = '', host = '', syncId } = opts;
 
   const existing = [...app.wm.windows.values()].find(w => w._workflowRunId === runId);
-  if (existing) { app.wm.focusWindow(existing.id); return existing; }
+  if (existing) { app.wm.revealWindow(existing.id, { replay: !!syncId }); return existing; }
 
   // host = the machine holding the run's artifacts (remote session, 2.191.0)
   const openSpec = { action: 'openWorkflowDetail', runId, claudeSessionId, cwd, name, ...(host ? { host } : {}) };
@@ -85,7 +85,7 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     if (!agentId) { showToast(t('This agent has no transcript on disk'), { type: 'error' }); return; }
     const virtualId = `sub-agent-${agentId}`;
     const openWinId = agentViewers.get(virtualId);
-    if (openWinId && app.wm.windows.has(openWinId)) { app.wm.focusWindow(openWinId); return; }
+    if (openWinId && app.wm.windows.has(openWinId)) { app.wm.revealWindow(openWinId); return; }
     // Reuse the standard read-only subagent viewer. Server resolves the
     // workflow-nested transcript by agentId (candidate list includes
     // subagents/workflows/wf_*/). No live parent — reads from disk.

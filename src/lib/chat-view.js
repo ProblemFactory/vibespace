@@ -5124,7 +5124,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       if (!this._subagentViewers) this._subagentViewers = new Map();
       const existingWinId = this._subagentViewers.get(viewId);
       if (existingWinId && this.app.wm.windows.has(existingWinId)) {
-        this.app.wm.focusWindow(existingWinId);
+        this.app.wm.revealWindow(existingWinId);
         return;
       }
       const winInfo = this.app.viewSession(threadId, cwd, description || agentNickname || agentRole || 'Agent', {
@@ -5154,7 +5154,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     if (!this._subagentViewers) this._subagentViewers = new Map();
     const existingWinId = this._subagentViewers.get(virtualId);
     if (existingWinId && this.app.wm.windows.has(existingWinId)) {
-      this.app.wm.focusWindow(existingWinId);
+      this.app.wm.revealWindow(existingWinId);
       return;
     }
 

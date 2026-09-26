@@ -57,7 +57,7 @@ const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
 export function openUsageWindow(app, opts = {}) {
   const existing = [...app.wm.windows.values()].find(w => w.type === 'usage');
-  if (existing) { if (existing.isMinimized) app.wm.restore?.(existing.id); app.wm.focusWindow(existing.id); return existing; }
+  if (existing) { app.wm.revealWindow(existing.id, { replay: !!opts.syncId }); return existing; }
   const winInfo = app.wm.createWindow({
     title: t('Usage'), type: 'usage', width: 860, height: 640,
     // Always set openSpec — even when replayed with a syncId. Dropping it on

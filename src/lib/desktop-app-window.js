@@ -313,7 +313,7 @@ export function frameRowLabel(row) {
 export function openDesktopApp(app, id, { syncId } = {}) {
   if (typeof id !== 'string' || !id) return null;
   for (const [wid, win] of app.wm.windows) {
-    if (win._desktopAppId === id) { app.wm.focusWindow(wid); return win; }
+    if (win._desktopAppId === id) { app.wm.revealWindow(wid, { replay: !!syncId }); return win; }
   }
   app._hideWelcome();
   const winInfo = app.wm.createWindow({

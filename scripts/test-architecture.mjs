@@ -2306,5 +2306,89 @@ console.log('§61 the release verdict reads a turn only where the mode publishes
     '§61 NEGATIVE CONTROL: the pre-fix answer `{ turn: turnOf(s) }`, a second ungated read beside a gated one, a block that answers no turn, and the wiring with its gate reverted (lifted the same way) are all caught');
 }
 
+// §62 A WINDOW THE USER NAMES IS REVEALED AS ITSELF (inc-muiq348r-jwb5, 2026-09-26).
+// The owner on a phone: "我在手机上怎么切换不到 vibespace 大开发这个 session？" — the
+// window was the HOST of a tab group showing its GUEST, and wm.focusWindow raises
+// a FRAME: it switched the group's tab for a guest only. Every door that NAMES a
+// window (the phone switcher's row, a sidebar card, the palette, the window list,
+// go-to, find, an open-link dedupe, a singleton re-open) ended there, so naming
+// the host changed nothing on screen while the title and the highlight said it
+// did. The fix is ONE door, wm.revealWindow (PURE revealTab: the host is a tab
+// like any other), and this census holds the whole client to it: every
+// `.focusWindow(` / `wm.restore(` call in src/lib is a RAISE-ONLY site listed with
+// its reason (a pointer press — pressTab keeps the tab on show; a machine path —
+// the record decides; the door's own internals), and every door is counted, so a
+// new path that names a window with a bare focusWindow is RED here until it is
+// routed through revealWindow (or argued into the raise-only list).
+console.log('§62 every path where the user names a window goes through wm.revealWindow');
+{
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/[^\n]*/g, '$1');
+  const cnt = (src, re) => (strip(src).match(re) || []).length;
+  const FOCUS = /\.focusWindow\(/g, RESTORE = /(?:\bwm|this)\.restore\??\.?\(/g, DOOR = /\.revealWindow\(/g;
+  // RAISE-ONLY sites: [focusWindow calls, restore calls, why]
+  const RAISE_ONLY = {
+    'src/lib/window.js': [9, 2, 'the door\'s own raise (revealWindow: its replay branch + the raise), restore\'s raise, createWindow\'s focus of a NEW window, the POINTER (_focusFromPointer ×2, beginDragFromPointer), startMoveMode, _focusMostRecent (the close / minimize handoff)'],
+    'src/lib/tab-group.js': [3, 0, 'a detach and the two close handoffs — machine'],
+    'src/lib/layout.js': [4, 2, 'boot restore / remote apply / preset re-apply — the RECORD decides the tab (§6b)'],
+    'src/lib/stage-manager.js': [2, 0, 'the stage raising its own hero (_stageBypass)'],
+    'src/lib/command-mode.js': [1, 1, 'the Tab cycle steps FRAMES (each group on the tab it shows) — it names no tab'],
+    'src/lib/desktop-app-window.js': [1, 0, 'the capture pointerdown — a PRESS keeps the tab'],
+    'src/lib/browser-live-window.js': [1, 0, 'the fallback for an app without goToWinId (a stub app in a suite) — goToWinId IS the door'],
+    'src/lib/taskbar.js': [0, 1, 'the window menu\'s Restore — a frame\'s own menu restores the frame'],
+    'src/lib/session-lifecycle.js': [0, 1, '_focusExistingSession\'s REPLAY branch (a layout replay found the window already open)'],
+  };
+  // THE DOORS: [revealWindow calls, where]
+  const DOORS = {
+    'src/lib/mobile-nav.js': [2, 'the phone switcher\'s window row + its Minimized row (the incident)'],
+    'src/lib/taskbar.js': [3, 'activateWindow (every taskbar button), the grouped chooser\'s row, the window list\'s row'],
+    'src/lib/window.js': [1, 'the overlap switcher\'s row'],
+    'src/lib/app.js': [5, 'goToWinId (go-to / Switch window / inbox / live view), flashWindow here + on another desktop, moveSessionWindow, _focusOpenInChain'],
+    'src/lib/session-lifecycle.js': [2, '_focusExistingSession (sidebar card, palette, For-you / explorer / chat links, resume-already-open) + the tmux view'],
+    'src/lib/chat-view.js': [2, 'the two sub-agent viewer dedupes'],
+    'src/lib/workflow-detail.js': [2, 'the workflow window + its agent-log dedupe'],
+    ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'desktop-app-window', 'browser-live-window']
+      .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
+  };
+  const judge = (srcs) => {
+    const bad = [];
+    for (const [f, src] of Object.entries(srcs)) {
+      const [fa, ra, why] = RAISE_ONLY[f] || [0, 0, null];
+      const fc = cnt(src, FOCUS), rc = cnt(src, RESTORE), dc = cnt(src, DOOR), dw = (DOORS[f] || [0])[0];
+      if (fc !== fa || rc !== ra) bad.push(`${f}: ${fc} .focusWindow( / ${rc} wm.restore( where the raise-only list says ${fa} / ${ra}${why ? ' (' + why + ')' : ''} — a path where the USER names a window goes through wm.revealWindow`);
+      if (dc !== dw) bad.push(`${f}: ${dc} .revealWindow( door(s) where the census counts ${dw}${DOORS[f] ? ' (' + DOORS[f][1] + ')' : ''}`);
+    }
+    return bad;
+  };
+  const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n);
+  const srcs = Object.fromEntries(libFiles.map((f) => [f, read(f)]));
+  const listed = [...new Set([...Object.keys(RAISE_ONLY), ...Object.keys(DOORS)])];
+  ok(libFiles.length >= 100 && listed.every((f) => srcs[f]), `§62 census scope: every src/lib/*.js (${libFiles.length} files); every listed file exists`);
+  const bad = judge(srcs);
+  ok(bad.length === 0, `§62 every .focusWindow( / wm.restore( in src/lib is a listed RAISE-ONLY site and every door is counted (${Object.values(DOORS).reduce((a, [n]) => a + n, 0)} doors in ${Object.keys(DOORS).length} files)${bad.length ? ' — ' + bad.join('; ') : ''}`);
+  // the door's own shape: the PURE verdict, the ONE persisted tab path; the pointer keeps the tab
+  const wj = read('src/lib/window.js');
+  const body = (src, name) => { const i = src.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = src.indexOf('\n  }\n', i); return src.slice(i, j); };
+  const rw = body(wj, 'revealWindow'), fp = body(wj, '_focusFromPointer');
+  ok(/const i = revealTab\(ch, id\);/.test(rw) && /if \(i >= 0\) this\.switchTab\(ch, i\);/.test(rw) && !/\.active\s*=/.test(rw) && /if \(replay\) \{ this\.focusWindow\(id\); return true; \}/.test(rw),
+    '§62 revealWindow = PURE revealTab → switchTab (the tab click\'s own persisted, synced path — never a hand-written `active`); a replay only raises');
+  const pointerPin = (b) => b.length > 40 && /pressTab\(ch, /.test(b) && !/revealWindow|revealTab/.test(b);
+  ok(pointerPin(fp), '§62 _focusFromPointer (a PRESS) asks PURE pressTab and never the door — a press keeps the tab on show');
+  const pin = (f, name, re) => { const b = body(read(f), name); return b.length > 40 && re.test(b) && !/\.focusWindow\(/.test(strip(b)); };
+  ok(pin('src/lib/mobile-nav.js', '_buildWindowItem', /wm\.revealWindow\(win\.id\)/) && pin('src/lib/session-lifecycle.js', '_focusExistingSession', /this\.wm\.revealWindow\(winId, \{ replay \}\)/) && pin('src/lib/app.js', 'goToWinId', /this\.wm\.revealWindow\(winId\)/),
+    '§62 the incident\'s doors spell it: the phone switcher row, _focusExistingSession (sidebar card / palette), goToWinId — no bare focusWindow in their bodies');
+  ok(/export function activateWindow\(app, id\) \{[^}]*app\.wm\.revealWindow\(id\);/.test(read('src/lib/taskbar.js')), '§62 activateWindow (every taskbar button) is the door');
+  // NEGATIVE CONTROLS (string copies, nothing written): the pre-fix switcher row, a new bare focus in an unlisted file,
+  // a door silently turned back into a raise, a pointer path that switches tabs
+  const mn = srcs['src/lib/mobile-nav.js'];
+  const preFix = { ...srcs, 'src/lib/mobile-nav.js': mn.replace('item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };', 'item.onclick = () => { pop.remove(); wm.focusWindow(win.id); };') };
+  const planted = { ...srcs, 'src/lib/zz-new-panel.js': 'export function openZz(app) { for (const [, w] of app.wm.windows) if (w.type === "zz") { app.wm.focusWindow(w.id); return w; } }\n' };
+  const raised = { ...srcs, 'src/lib/settings-ui.js': srcs['src/lib/settings-ui.js'].replace('this.app.wm.revealWindow(existing.id, { replay: !!syncId });', 'this.app.wm.focusWindow(existing.id);') };
+  const commented = { ...srcs, 'src/lib/zz-new-panel.js': '// app.wm.focusWindow(w.id) is how this used to read\n/* wm.restore(x) */\n' };
+  ok(preFix['src/lib/mobile-nav.js'] !== mn && judge(preFix).length === 1 + 1 && judge(planted).length === 1 && judge(raised).length === 2 && judge(commented).length === 0,
+    `§62 NEGATIVE CONTROL: the pre-fix switcher row (${judge(preFix).length} findings), a bare focus planted in an unlisted file (${judge(planted).length}), a singleton door turned back into a raise (${judge(raised).length}) are caught; a commented-out call is not counted (${judge(commented).length})`);
+  const fpBad = body(wj.replace('const target = pressTab(ch, paneWin ? paneWin.id : null);', 'const target = pressTab(ch, paneWin ? paneWin.id : null); this.revealWindow(win.id);'), '_focusFromPointer');
+  ok(fpBad !== fp && !pointerPin(fpBad), '§62 NEGATIVE CONTROL: the pointer path patched to reveal (a press that would switch tabs) fails the pointer pin');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

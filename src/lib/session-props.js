@@ -27,7 +27,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   if (!s0) return null;
 
   const existing = [...app.wm.windows.values()].find(w => w._sessionPropsKey === refKey);
-  if (existing) { app.wm.focusWindow(existing.id); return existing; }
+  if (existing) { app.wm.revealWindow(existing.id, { replay: !!syncId }); return existing; }
 
   const openSpec = { action: 'openSessionProps', sessionKey: refKey, cwd: s0.cwd || '', name: s0.name || '' };
   const winInfo = app.wm.createWindow({

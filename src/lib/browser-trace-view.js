@@ -424,7 +424,7 @@ async function act(url, init, what) {
 const jsonInit = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 
 export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
-  for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.focusWindow(w.id); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus); return w; }
+  for (const [, w] of app.wm.windows) if (w.type === PANEL_TYPE) { app.wm.revealWindow(w.id, { replay: !!syncId }); if (focus && w._browserProfiles) w._browserProfiles.focusRow(focus); return w; }
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({ title: t('Agent browser'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
   const st = { view: null, error: null, busy: false, closed: false, timer: null, focus };

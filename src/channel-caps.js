@@ -626,13 +626,19 @@ function freshnessText(claim, { t = defaultT, short = false } = {}) {
     // disabled) are the same claim — no evidence is being gathered — so the
     // kind picks the verb and the state picks the sentence.
     case 'off': return f.kind === 'scanned' ? t('not scanning') : t('not polling');
-    case 'never': return t('not scanned yet');
-    // `short`: the row PILL (at most ~82 px in a 188 px panel) says "19s ago";
-    // the sentence stays whole in the pill's tooltip and everywhere else
+    // `short`: the row PILL's words. The pill is drawn WHOLE (it never shrinks
+    // or ellipsizes — the title yields), so its width budget lives HERE: every
+    // pill word ≤ 82 px at 9/600 in the runner's face (DejaVu Sans), which
+    // leaves the title design §4's 60 px in the 188 px panel's 148 px line.
+    // "refresh paused" is 89 px in DejaVu Sans (79 in this box's Noto Sans):
+    // the .185 mirror drew "refresh pau…" (2.369.186). Measured per face ×
+    // language by test-channels-e2e ⑯; the sentence stays whole in the pill's
+    // tooltip and everywhere else.
+    case 'never': return short ? t('no scan yet') : t('not scanned yet');
     case 'aged': return short ? t('{age} ago', { age: age() }) : t('scanned {age} ago', { age: age() });
     case 'live': return t('live');
     case 'reconciling': return t('reconciling');
-    case 'paused': return t('refresh paused');
+    case 'paused': return short ? t('paused') : t('refresh paused');
     case 'unknown': return t('polling');
     case 'bound': return t('within {age}', { age: age() });
     default: return t('unknown');

@@ -8,7 +8,7 @@ import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 import { HIDE_REASONS, hiddenReasons } from './view-visibility.js';
 import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
-import { displayedPanes } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
+import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
 
 /** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
 function setChipMode(chip, mode) {
@@ -1119,14 +1119,54 @@ class WindowManager {
    *  the window menu acted on the wrong tab (inc-muhfb5al-jzk6 reader, M7). */
   _focusFromPointer(win, e) {
     const ch = win._tabChain;
-    if (ch && ch.layout === 'split' && ch.split && ch.tabs[0] === win.id) {
-      const pane = e && e.target && e.target.closest ? e.target.closest('.window-content.tab-split-pane') : null;
+    if (ch && ch.tabs[0] === win.id) {
+      const pane = ch.layout === 'split' && ch.split && e && e.target && e.target.closest ? e.target.closest('.window-content.tab-split-pane') : null;
       const paneWin = pane ? ch.tabs.map((id) => this.windows.get(id)).find((w) => w && w.content === pane) : null;
-      const target = paneWin ? paneWin.id : ch.tabs[ch.active]; // the title bar's own area keeps the focused pane
-      if (target !== win.id && this.windows.has(target)) return this.focusWindow(target); // a guest pane: focusWindow switches to its tab and raises the host
-      if (ch.tabs[ch.active] !== win.id) this.switchTab(ch, 0); // the host's own pane
+      // PURE pressTab: the displayed pane under the pointer, else the tab ON SHOW — the title bar's own area keeps it,
+      // and in a TABS group a press into the shown guest (its content lives in this element) names THAT guest, never
+      // the hidden host (inc-muiq348r-jwb5: the phone's title, highlight and close button then acted on the host)
+      const target = pressTab(ch, paneWin ? paneWin.id : null);
+      if (target && target !== win.id && this.windows.has(target)) return this.focusWindow(target); // a guest: focusWindow raises the host on that tab
+      if (ch.tabs[ch.active] !== win.id) this.switchTab(ch, 0); // the host's own pane of a split
     }
     this.focusWindow(win.id);
+  }
+
+  /** THE USER NAMED THIS WINDOW — show it AS ITSELF (inc-muiq348r-jwb5, the owner on a phone:
+   *  "我在手机上怎么切换不到 vibespace 大开发这个 session？"). focusWindow raises a FRAME: for a tab
+   *  group's HOST it never switched the group's tab (only a guest's focus did), so every door that
+   *  named a host whose group showed a guest — the phone switcher's row, a sidebar card, the palette,
+   *  the window list, go-to — changed nothing on screen while the title and the highlight said it did.
+   *  This is the ONE door for "the user named a window": the member's own tab is shown (PURE
+   *  revealTab — the host is a tab like any other; switchTab persists + broadcasts it exactly as a
+   *  tab click, and never drags a partner pane on the phone), a minimized group is restored, the
+   *  frame is raised. NOT for a press on the frame (`_focusFromPointer` keeps the tab on show) and
+   *  NOT for a machine path: `replay` (a layout replay / remote apply — the record's `active`
+   *  decides) only raises, as before. The desktop switch stays with the caller (goToWinId; a
+   *  'focus' card click never switched desktops); `raise: false` = choose its tab only (a window
+   *  found on ANOTHER desktop: its group shows it when the user goes there). The census in
+   *  test-architecture §62 holds every user-named call site to this door. */
+  revealWindow(id, { replay = false, raise = true } = {}) {
+    const win = this.windows.get(id); if (!win) return false;
+    if (replay) { this.focusWindow(id); return true; }
+    const ch = win._tabChain;
+    const i = revealTab(ch, id);
+    if (!raise) {
+      // choose its tab only (Locate of a window on ANOTHER desktop): the ACTIVE window stays what it was — switchTab
+      // names the tab it shows as the active window, and that window is not on this screen (verify r1: Ctrl+\ x would
+      // have closed a window on another desktop, the taskbar and the phone title named one nobody could see)
+      const prev = this.activeWindowId;
+      if (i >= 0) this.switchTab(ch, i);
+      if (this.activeWindowId !== prev) { this.activeWindowId = prev; this.syncHiddenViews(); this._notify(); }
+      return true;
+    }
+    if (i >= 0) this.switchTab(ch, i);
+    const host = (ch && this.windows.get(ch.tabs[0])) || win;
+    // the stage materializes FRAMES: a group member goes on stage as its host (a member's own element is never displayed)
+    const focusId = ch && host.id !== id && this._app?.stage?.shouldIntercept?.(win) ? host.id : id;
+    if (host.isMinimized) this.restore(focusId);
+    else this.focusWindow(focusId);
+    return true;
   }
 
   // ── Layout Presets ──
@@ -1833,7 +1873,7 @@ class WindowManager {
       const label = document.createElement('span');
       label.textContent = w.title;
       item.append(icon, label);
-      item.onclick = () => { this.focusWindow(w.id); pop.remove(); };
+      item.onclick = () => { this.revealWindow(w.id); pop.remove(); }; // the row names the host (its title) — show THAT tab
       pop.appendChild(item);
     }
 

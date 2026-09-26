@@ -350,7 +350,7 @@ export function openIntegrationsWindow(app, opts = {}) {
   const focus = opts.focus || null;
   for (const [, w] of app.wm.windows) {
     if (w.type === 'integrations') {
-      app.wm.focusWindow(w.id);
+      app.wm.revealWindow(w.id, { replay: !!opts.syncId });
       if (focus && w._integFocus) w._integFocus(focus);
       return w;
     }

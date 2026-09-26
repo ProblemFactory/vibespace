@@ -16,7 +16,7 @@
 //
 // ON EVERY ROW A FRESHNESS CHIP. That chip is not decoration — it is this
 // feature's honesty contract. A row says how often its evidence is gathered
-// ("live" / "within 30s" / "scanned 4m ago" / "refresh paused"), because
+// ("live" / "within 30s" / "4m ago" / "paused"), because
 // that is the one number a user needs before handing something to a lane.
 // Since 2026-09-26 a linked account is an AGGREGATED IM: there is no track
 // step, every conversation is fetched on its own cadence (hot / warm / cold
@@ -1326,7 +1326,7 @@ export function focusChannelsPanel(app, opts = {}) {
  *  renderChannelsPanel (its broadcast unsubscribe is tied to the window's
  *  listener controller, so a closed window stops repainting). */
 export function openChannelsWindow(app, { syncId } = {}) {
-  for (const [, w] of app.wm.windows) if (w.type === 'channels') { app.wm.focusWindow(w.id); return w; }
+  for (const [, w] of app.wm.windows) if (w.type === 'channels') { app.wm.revealWindow(w.id, { replay: !!syncId }); return w; }
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({ title: t('Channels'), type: 'channels', syncId, openSpec: { action: 'openChannels' }, width: 520, height: 600 });
   const c = document.createElement('div');

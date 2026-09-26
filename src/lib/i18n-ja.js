@@ -3603,6 +3603,7 @@ export default {
   "not scanning": "スキャンなし",
   "not polling": "ポーリングなし",
   "not scanned yet": "まだスキャンしていません",
+  "no scan yet": "未スキャン",
   "scanned {age} ago": "{age}前にスキャン",
   "live": "ライブ",
   "reconciling": "照合中",

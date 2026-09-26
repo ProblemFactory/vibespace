@@ -33,6 +33,11 @@
 //      no partner / session ended / a user-placed chat ⇒ no follow), `livePlacement` (split only
 //      while the chat is not yet split, else a quiet tab — never a third pane), `foldBackTarget`;
 //      two more patched-copy controls (the follow blind to the other side, the partner on either side).
+//   ⑬ NAMING vs PRESSING (inc-muiq348r-jwb5, the owner on a phone: "我在手机上怎么切换不到 vibespace
+//      大开发这个 session？"): `revealTab` — the user NAMED a window ⇒ its own tab, the HOST included
+//      (the pre-fix door switched a GUEST only); `pressTab` — a press on the frame ⇒ the tab ON SHOW,
+//      never a hidden one (the pre-fix press named the hidden host). Two patched-copy controls: the
+//      reveal that skips the host, the press that names the host.
 //   ⑪ (v2 verify r1, finding ①) THE HELD RATIO: a user's divider act holds its
 //      ratio (holdRatio) until a save carries it (releaseRatio); heldRatio
 //      answers only while the chain still shows that value and for at most
@@ -299,6 +304,24 @@ function legs(C, { quiet = false } = {}) {
     leg(fb({ id: 'w2', type: 'browser-live', sessionId: 'sA' }, [{ id: 'c', type: 'chat', sessionId: 'sA' }, { id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === 'w1', '⑫ …also onto a group holding that session\'s live view');
     leg(fb({ id: 'w2', type: 'browser-live', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sB' }]) === null && fb({ id: 'c', type: 'chat', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === null && fb({ id: 'w1', type: 'browser-live', sessionId: 'sA' }, [{ id: 'w1', type: 'browser-live', sessionId: 'sA' }]) === null, '⑫ …never between two sessions\' views, never for a chat, never onto itself (an ordinary merge)');
   }
+  // ⑬ NAMING vs PRESSING (inc-muiq348r-jwb5): the incident's group = [主开发 (host), Project B (guest)], Project B on show
+  {
+    const rv = F('revealTab'), pr = F('pressTab');
+    const inc = F('normalizeChain')({ tabs: ['HOST', 'GUEST'], active: 1, layout: 'tabs', order: ['GUEST', 'HOST'] });
+    leg(run(() => rv(inc, 'HOST')) === 0, '⑬ revealTab: the user NAMES the HOST of a tabs group that shows a guest ⇒ index 0 (the host is a tab like any other — the incident)', J(inc));
+    leg(run(() => rv(inc, 'GUEST')) === -1 && run(() => rv(F('normalizeChain')({ tabs: ['HOST', 'GUEST'], active: 0 }), 'HOST')) === -1, '⑬ …the tab already on show ⇒ -1 (nothing to switch; the frame is only raised)');
+    leg(run(() => rv(F('normalizeChain')({ tabs: ['HOST', 'GUEST', 'G2'], active: 0 }), 'G2')) === 2, '⑬ …a guest named while the host is on show ⇒ its own index (the guest door, unchanged)');
+    leg(run(() => rv(inc, 'STRANGER')) === -1 && run(() => rv(null, 'HOST')) === -1 && run(() => rv({ tabs: [] }, 'HOST')) === -1, '⑬ …a window not in the chain, no chain, an empty chain ⇒ -1');
+    leg(run(() => rv({ tabs: ['HOST', 'GUEST'], active: 7 }, 'HOST')) === 0 && run(() => rv({ tabs: ['HOST', 'GUEST'], active: 7 }, 'GUEST')) === -1 && run(() => rv({ tabs: ['HOST', 'GUEST'], active: -2 }, 'GUEST')) === 1, '⑬ …an out-of-range `active` reads as normalizeChain settles it (7 ⇒ the last tab, -2 ⇒ the host) — the index switchTab itself would show, never a stale one');
+    leg(run(() => pr({ tabs: ['HOST', 'GUEST'], active: 7 })) === 'GUEST', '⑬ …pressTab reads the same settled `active`');
+    const sp = F('normalizeChain')({ tabs: ['A', 'B', 'C'], active: 2, layout: 'split', split: { pair: ['A', 'C'], ratio: 0.5, left: ['A', 'B'], right: ['C'] } });
+    leg(run(() => rv(sp, 'A')) === 0 && run(() => rv(sp, 'B')) === 1 && run(() => rv(sp, 'C')) === -1, '⑬ …in a SPLIT: the other displayed pane (the host A) and a waiting tab (B) are switched to; the focused pane is not', J(sp));
+    leg(run(() => pr(inc)) === 'GUEST' && run(() => pr(inc, 'HOST')) === 'GUEST', '⑬ pressTab: a press on a TABS group\'s frame focuses the tab ON SHOW (the guest) — never the hidden host, even when the host\'s id is offered as the "pane" (the pre-fix press named the host)');
+    leg(run(() => pr(F('normalizeChain')({ tabs: ['HOST', 'GUEST'], active: 0 }))) === 'HOST', '⑬ …the host on show ⇒ the host');
+    leg(run(() => pr(sp, 'A')) === 'A' && run(() => pr(sp, 'C')) === 'C' && run(() => pr(sp)) === 'C' && run(() => pr(sp, 'B')) === 'C', '⑬ …a SPLIT: the displayed pane under the pointer (A or C) becomes the focus; the title bar\'s own area (no pane) keeps the focused pane; a waiting tab (B) is never focused by a press');
+    leg(run(() => pr(null)) === null && run(() => pr({ tabs: [] })) === null, '⑬ …no chain ⇒ null');
+    leg(J(inc) === J(F('normalizeChain')({ tabs: ['HOST', 'GUEST'], active: 1, layout: 'tabs', order: ['GUEST', 'HOST'] })), '⑬ the two verdicts never mutate the chain (the switch is switchTab\'s — persisted and synced as a tab click)');
+  }
   return failed;
 }
 
@@ -321,6 +344,10 @@ const MUTANTS = [
   // looked for on BOTH sides would follow onto the same side (a "follow" that is really a switch of the clicked side)
   { tag: 'follow-ignores-the-other-side', find: '  if (sf.kind !== pf.kind || !isPartnered(c, shown, factsOf)) return null;\n', repl: '\n', expect: /USER-PLACED CHAT/ },
   { tag: 'partner-on-either-side', find: "  for (const x of sides[mine === 'left' ? 'right' : 'left']) {", repl: '  for (const x of [...sides.left, ...sides.right].filter((y) => y !== id)) {', expect: /SAME SIDE/ },
+  // inc-muiq348r-jwb5: the pre-fix door (focusWindow switched a GUEST's tab only — the host's own id never switched the
+  // group) and the pre-fix press (a press on a tabs group's frame named the host element's own window)
+  { tag: 'reveal-skips-the-host', find: '  return i === c.active ? -1 : i;\n}', repl: '  return i === c.active || i === 0 ? -1 : i;\n}', expect: /NAMES the HOST of a tabs group/ },
+  { tag: 'press-names-the-host', find: '  return String(c.tabs[c.active]);\n}', repl: '  return String(c.tabs[0]);\n}', expect: /focuses the tab ON SHOW/ },
 ];
 for (const m of MUTANTS) {
   const found = SRC.includes(m.find);

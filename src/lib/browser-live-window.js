@@ -1168,7 +1168,7 @@ export async function foldBackLive(app, win, into = null) {
     if (!passed) { showToast(t('Could not hand your control to the other window — this window stays open'), { type: 'warn', duration: 5000 }); return false; }
   }
   try { app.wm.closeWindow(win.id); } catch { /* gone */ }
-  try { app.wm.focusWindow(target.id); } catch { /* gone */ }
+  try { app.wm.revealWindow(target.id); } catch { /* gone */ } // the window the fold named — its own tab, even when it hosts a group
   if (carry) showToast(t('Folded back — you are still driving this browser'), { duration: 3000 });
   return true;
 }

@@ -47,6 +47,13 @@
 //      tab / window per setting, a reload restores the born windows, client 2 gets the async viewer IN the chain
 //      (control: the pre-fix reconcile ⇒ free); L9 a pre-v2 record restores as a valid split; L7 mergeDropLayout =
 //      split lands the merge side by side with Undo (back where it stood) / Unsplit (control: tabs)
+//  13  inc-muiq348r-jwb5 (the owner on an Android phone: "我在手机上怎么切换不到 vibespace 大开发这个 session？"): a
+//      window the user NAMES is revealed AS ITSELF — a real merge makes Alpha the HOST with Bravo on show; the HOST's
+//      sidebar card (D1, + a control with the door neutered), the window list row (D2), the palette (D3) and go-to (D4)
+//      SHOW Alpha; a press on the title bar / into the shown guest keeps Bravo and names it (D5); a 448×850 DPR 3
+//      Android phone booted on the record: the switcher's HOST row shows Alpha (P1 — the incident), the guest row
+//      Bravo (P2), a tap into the content keeps the tab (P3), the host row with another window on screen (P2b), the
+//      reveal saved like a tab click while the desktop keeps its own tab (P4), and the door neutered ⇒ the incident (P5)
 // RED on 2.369.160 (the title-bar half zone): 1 / 1a / 2 split, 4 has no button / toast.
 // SKIPs with evidence without chrome / dtach. Free ports, scratch dirs only.
 import fs from 'node:fs';
@@ -975,6 +982,169 @@ else await (async () => {
     const c7d2 = await l7d(true);
     ok(S(c7d2.u.pair) === S(['editor:notes.md', sidB]), 'L7d CONTROL: with the restore of the before-layout neutered the same Undo leaves D shown (pair [D, B]) — the detach alone does not undo the drop', S(c7d2.u));
     await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'editor') wm.closeWindow(w.id); app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
+    // ── 13 · inc-muiq348r-jwb5 (2026-09-26, the owner on an Android phone: "我在手机上怎么切换不到 vibespace 大开发
+    //    这个 session？"): a window the user NAMES is revealed AS ITSELF — a tab group's HOST is switched to (its row in
+    //    the phone switcher, its sidebar card, the palette, the window list, go-to); a press on the frame keeps the tab
+    //    on show. The incident's shape: A (Alpha) the HOST, B (Bravo) the guest ON SHOW, made by a real merge.
+    console.log('— 13 · inc-muiq348r-jwb5: naming a group\'s HOST shows the host; a press on the frame keeps the tab');
+    const R13 = (X) => X.ev(`const A = bySid(${S(sidA)}); const ch = A && A._tabChain; if (!ch) return { chain: false }; const host = wm.windows.get(ch.tabs[0]); const shown = ch.tabs.filter((id) => { const w = wm.windows.get(id); return w && disp(w.content) !== 'none' && w.content.getBoundingClientRect().width > 0; }).map(sidOf); const r = host.element.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height * 0.6); const hw = ch.tabs.map((id) => wm.windows.get(id)).find((w) => w && hit && w.content.contains(hit)); const nav = document.getElementById('mobile-nav-title'); return { chain: true, layout: ch.layout, host: sidOf(ch.tabs[0]), active: sidOf(ch.tabs[ch.active]), shown, hit: hw ? sidOf(hw.id) : null, activeWin: sidOf(wm.activeWindowId), titles: Object.fromEntries(ch.tabs.map((id) => [sidOf(id), wm.windows.get(id).title])), nav: nav ? nav.textContent : null };`);
+    const showB = async (X, how) => { const st = await R13(X); if (st.active === sidB) return st; if (how === 'click') { const tb = await X.ev(`const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}); const host = wm.windows.get(A._tabChain.tabs[0]); const t = host.titleBar.querySelector('.tab-item[data-win-id="' + B.id + '"]'); return t ? rect(t) : null;`); if (tb) await click(centre(tb)); } else await X.ev(`const B = bySid(${S(sidB)}); wm.revealWindow(B.id); return true;`); await sleep(200); return R13(X); };
+    {
+      await P1.send('Page.bringToFront');
+      await clearToasts();
+      const g13 = await mergeScene();
+      await mergeDrag(g13);
+      await clearToasts();
+      const s0 = await showB(P1, 'click');
+      ok(s0.chain && s0.layout === 'tabs' && s0.host === sidA && s0.active === sidB && S(s0.shown) === S([sidB]) && s0.hit === sidB, '13 scene (the incident): a real merge made ONE tabs group — Alpha the HOST, Bravo the guest ON SHOW', S(s0));
+      const T = s0.titles || {};
+      // D1 · the sidebar card (default click = focus) of the HOST
+      const nameA = String(T[sidA] || '').split(' — ')[0];
+      await ev(`if (!app.sidebar.isOpen) app.sidebar.toggle(true); if (app.sidebar._activeTab !== 'folders' && app.sidebar._railGo) app.sidebar._railGo('folders'); return true;`); await sleep(500);
+      const card = await ev(`const names = [...document.querySelectorAll('.session-item-card .session-card-name')].filter((n) => n.getBoundingClientRect().width > 0 && n.textContent.trim() === ${S(nameA)}); const n = names[0]; if (!n) return { x: null, names: [...document.querySelectorAll('.session-item-card .session-card-name')].map((x) => x.textContent.trim()).slice(0, 12), open: app.sidebar.isOpen, tab: app.sidebar._activeTab }; n.scrollIntoView({ block: 'center' }); const r = n.getBoundingClientRect(); return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2, clickBehavior: app.settings.get('sessionCard.clickBehavior') };`);
+      if (ok(card && card.x !== null, `13 D1 the HOST's sidebar card is on screen ("${nameA}")`, S(card))) {
+        await click(card);
+        await sleep(300);
+        const d1 = await R13(P1);
+        ok(d1.active === sidA && S(d1.shown) === S([sidA]) && d1.hit === sidA && d1.activeWin === sidA, `13 D1 a click on the HOST's sidebar card (clickBehavior ${card.clickBehavior}) SHOWS the host — the group switched to its tab, the pane under the frame is Alpha (as shipped: Bravo stayed, the card said Alpha)`, S(d1));
+        // CONTROL: the door neutered to the pre-fix raise ⇒ the same card click leaves Bravo on screen
+        await showB(P1, 'click');
+        await ev(`if (!app.sidebar.isOpen) app.sidebar.toggle(true); wm.__rv13 = wm.revealWindow; wm.revealWindow = function (id) { this.focusWindow(id); return true; }; return true;`); await sleep(400);
+        const card2 = await ev(`const n = [...document.querySelectorAll('.session-item-card .session-card-name')].find((x) => x.getBoundingClientRect().width > 0 && x.textContent.trim() === ${S(nameA)}); if (!n) return null; const r = n.getBoundingClientRect(); return { x: r.left + Math.min(20, r.width / 2), y: r.top + r.height / 2 };`);
+        if (card2) await click(card2);
+        await sleep(300);
+        const d1c = await R13(P1);
+        await ev(`wm.revealWindow = wm.__rv13; delete wm.__rv13; return true;`);
+        ok(!!card2 && d1c.active === sidB && S(d1c.shown) === S([sidB]) && d1c.activeWin === sidA, '13 D1 CONTROL: with revealWindow neutered to the pre-fix raise the same card click leaves Bravo on screen under the active window Alpha (the leg sees the bug)', S(d1c));
+      }
+      await ev(`if (app.sidebar.isOpen) app.sidebar.toggle(false); return true;`); await sleep(300);
+      // D2 · the taskbar window list (the group's row is labelled with the HOST's title)
+      await showB(P1, 'click');
+      const chip = await ev(`const c = document.getElementById('taskbar-status'); return c && c.getBoundingClientRect().width > 0 ? rect(c) : null;`);
+      if (ok(!!chip, '13 D2 the taskbar window-list chip is on screen')) {
+        await click(centre(chip));
+        await sleep(250);
+        const row = await ev(`const rows = [...document.querySelectorAll('.overlap-switcher-item')].filter((r) => r.getBoundingClientRect().width > 0); const r = rows.find((x) => x.textContent.includes(${S(T[sidA] || 'Alpha')})); return r ? { r: rect(r), labels: rows.map((x) => x.textContent.trim().slice(0, 40)) } : { r: null, labels: rows.map((x) => x.textContent.trim().slice(0, 40)) };`);
+        if (ok(!!row.r, '13 D2 the window list shows the group as ONE row under the host\'s title', S(row.labels))) {
+          await click(centre(row.r));
+          await sleep(300);
+          const d2 = await R13(P1);
+          ok(d2.active === sidA && S(d2.shown) === S([sidA]) && d2.hit === sidA, '13 D2 the window list\'s row (labelled Alpha) SHOWS Alpha (as shipped: Bravo under Alpha\'s name)', S(d2));
+        }
+      }
+      // D3 · the Ctrl+K palette
+      await showB(P1, 'click');
+      await ev(`document.activeElement && document.activeElement.blur && document.activeElement.blur(); return true;`);
+      await P1.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', modifiers: 2, key: 'k', code: 'KeyK', windowsVirtualKeyCode: 75, nativeVirtualKeyCode: 75 });
+      await P1.send('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 2, key: 'k', code: 'KeyK', windowsVirtualKeyCode: 75, nativeVirtualKeyCode: 75 });
+      const pal = await until(() => ev(`return !!document.querySelector('.palette-overlay .palette-input');`), 3000);
+      if (ok(pal, '13 D3 Ctrl+K opens the session palette')) {
+        await ev(`document.querySelector('.palette-overlay .palette-input').focus(); return true;`);
+        await P1.send('Input.insertText', { text: nameA });
+        await sleep(300);
+        const typed = await ev(`return document.querySelector('.palette-overlay .palette-input').value;`);
+        const top = await ev(`const it = document.querySelector('.palette-list .palette-item.active'); return it ? it.querySelector('.palette-name').textContent.trim() : null;`);
+        await P1.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+        await P1.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+        await sleep(400);
+        const d3 = await R13(P1);
+        ok(typed === nameA && top === nameA && d3.active === sidA && S(d3.shown) === S([sidA]) && d3.hit === sidA, `13 D3 the palette: "${typed}" typed, the selected item "${top}", Enter SHOWS Alpha`, S(d3));
+      }
+      // D4 · go-to (the card's GoTo button / the For-you link / clickBehavior goto) — app.goToWindow is that door
+      await showB(P1, 'click');
+      await ev(`app.goToWindow(${S(sidA)}); return true;`); await sleep(300);
+      const d4 = await R13(P1);
+      ok(d4.active === sidA && S(d4.shown) === S([sidA]) && d4.activeWin === sidA, '13 D4 go-to the HOST shows the host (goToWinId used to resolve only a guest)', S(d4));
+      // D5 · the POINTER contract: a press on the frame keeps the tab on show — and names IT, never the hidden host
+      const s5 = await showB(P1, 'click');
+      const bar = await ev(`const A = bySid(${S(sidA)}); const host = wm.windows.get(A._tabChain.tabs[0]); const tb = host.titleBar.getBoundingClientRect(); const ctl = host.titleBar.querySelector('.window-controls').getBoundingClientRect(); const y = tb.top + tb.height / 2; for (let x = ctl.left - 3; x > tb.left + 4; x -= 6) { const el = document.elementFromPoint(x, y); if (el && el.closest('.window-titlebar') === host.titleBar && !el.closest('.tab-item, .window-controls, .window-icon-stack, .tab-split-btn, button, input')) return { x, y }; } return null;`);
+      if (ok(!!bar && s5.active === sidB, '13 D5 a bare spot on the group\'s title bar exists (the strip, the icons and the controls excluded) while Bravo is on show', S({ bar, s5 }))) {
+        await click(bar);
+        const d5 = await R13(P1);
+        ok(d5.active === sidB && S(d5.shown) === S([sidB]) && d5.activeWin === sidB, '13 D5 a press on the group\'s TITLE BAR keeps the tab on show (Bravo) and names it as the active window (as shipped: the hidden host)', S(d5));
+      }
+      const body5 = await ev(`const B = bySid(${S(sidB)}); const r = B.content.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.35 };`);
+      await click(body5);
+      const d5b = await R13(P1);
+      ok(d5b.active === sidB && S(d5b.shown) === S([sidB]) && d5b.activeWin === sidB, '13 D5 a press INTO the shown guest\'s content keeps the tab and names Bravo (its content lives in the host element — the press used to name the hidden host)', S(d5b));
+
+      // ── the PHONE (the incident's device: 448×850, DPR 3, touch, an Android UA) boots onto this record ──
+      await P1.send('Page.bringToFront');
+      await showB(P1, 'click');
+      ok(await saveNow(), '13 the group (Bravo on show) is on disk before the phone boots');
+      const diskB = chainFromDisk();
+      const pp = await newPage();
+      if (ok(!!pp, '13 a phone page target (448×850)')) {
+        const P = pp.X;
+        await P.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
+        await P.send('Emulation.setDeviceMetricsOverride', { width: 448, height: 850, deviceScaleFactor: 3, mobile: true });
+        await P.send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
+        await P.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+        await P.send('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
+        await P.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+        if (ok(await bootOk(P), '13 the app booted on the phone (448×850, DPR 3, Android UA)')) {
+          if (deskId) await P.ev(`const dm = app.desktopManager; if (dm && dm.activeDesktopId !== ${S(deskId)}) await dm.switchTo(${S(deskId)}); return true;`);
+          await until(() => P.ev(`const A = bySid(${S(sidA)}); return !!(A && A._tabChain && !app.layoutManager._restoring);`), 20000, 250);
+          await sleep(600);
+          const env = await P.ev(`return { mobile: app.isMobile, touch: app.isTouch, iw: innerWidth, dpr: devicePixelRatio, nav: !!app._mobileNav };`);
+          const p0 = await R13(P);
+          ok(env.mobile && env.touch && env.nav && env.iw === 448 && env.dpr === 3 && p0.chain && p0.layout === 'tabs' && p0.host === sidA && p0.active === sidB, '13 P0 the phone restored the incident\'s record: one tabs group, Alpha the host, Bravo its active tab (isMobile, isTouch, 448 px, DPR 3)', S({ env, p0, diskB }));
+          const tap = async (pt) => { await P.send('Page.bringToFront'); await P.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pt.x, y: pt.y }] }); await sleep(60); await P.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(350); };
+          const navPt = async () => P.ev(`const n = document.getElementById('mobile-nav-title'); const r = n.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+          const rowPt = (title) => P.ev(`const rows = [...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')]; const r = rows.find((x) => x.textContent.includes(${S(title)})); if (!r) return { pt: null, rows: rows.map((x) => x.textContent.trim().slice(0, 40)) }; r.scrollIntoView({ block: 'nearest' }); const b = r.getBoundingClientRect(); return { pt: { x: b.left + 60, y: b.top + b.height / 2 }, rows: rows.map((x) => x.textContent.trim().slice(0, 40)) };`);
+          const pickRow = async (title) => { await tap(await navPt()); const r = await rowPt(title); if (r.pt) await tap(r.pt); else await P.ev(`document.querySelector('.mobile-win-switcher')?.remove(); return true;`); await sleep(250); return r; };
+          // the incident's screen: the group on show with its GUEST (the owner was reading Project B) — reached by its row
+          await pickRow(T[sidB]);
+          const p0b = await R13(P);
+          ok(p0b.active === sidB && S(p0b.shown) === S([sidB]) && p0b.hit === sidB && (p0b.nav || '').startsWith(T[sidB]), '13 P0 the GUEST\'s row puts the group on screen showing Bravo (the incident\'s starting screen)', S(p0b));
+          // P1 · THE INCIDENT: the title → the HOST's row
+          const r1 = await pickRow(T[sidA]);
+          const p1 = await R13(P);
+          ok(!!r1.pt && p1.active === sidA && S(p1.shown) === S([sidA]) && p1.hit === sidA && p1.activeWin === sidA && (p1.nav || '').startsWith(T[sidA]), `13 P1 THE INCIDENT: the phone switcher's HOST row shows the host — the group's active tab is Alpha, the pane on screen is Alpha, the nav title says Alpha (as shipped: Bravo stayed under the title "Alpha")`, S({ rows: r1.rows, p1 }));
+          // P2 · the guest's row still works (the door that always worked)
+          await pickRow(T[sidB]);
+          const p2 = await R13(P);
+          ok(p2.active === sidB && S(p2.shown) === S([sidB]) && p2.hit === sidB && (p2.nav || '').startsWith(T[sidB]), '13 P2 the GUEST\'s row shows Bravo (unchanged)', S(p2));
+          // P3 · a tap INTO the shown guest's content keeps the tab and the title names Bravo (never the hidden host)
+          const mid = await P.ev(`const B = bySid(${S(sidB)}); const r = B.content.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height * 0.3 };`);
+          await tap(mid);
+          const p3 = await R13(P);
+          ok(p3.active === sidB && S(p3.shown) === S([sidB]) && p3.activeWin === sidB && (p3.nav || '').startsWith(T[sidB]), '13 P3 a tap into the shown content keeps the tab (the pointer contract) and the nav title / active window stay Bravo (as shipped: the tap named the hidden host — its title, its highlight, its ✕)', S(p3));
+          // P2b · the HOST's row while ANOTHER window is on screen (Charlie): the group comes back on the host, not on its guest
+          await pickRow(T[sidB]);
+          const cTitle = await P.ev(`const C = bySid(${S(sidC)}); if (C && C.isMinimized) wm.restore(C.id); return C ? C.title : null;`);
+          await pickRow(cTitle);
+          const p2c = await R13(P);
+          await pickRow(T[sidA]);
+          const p2b = await R13(P);
+          ok(!!cTitle && p2c.activeWin === sidC && S(p2c.shown) === S([]) && p2b.active === sidA && S(p2b.shown) === S([sidA]) && p2b.hit === sidA, '13 P2b with another window on screen (Charlie; the group behind it on Bravo) the HOST\'s row brings the group back ON THE HOST', S({ p2c, p2b }));
+          // P4 · multi-client: the phone's reveal travels as a TAB CLICK does — the record's `active` names the host
+          // after the phone's own save; the desktop keeps ITS tab (`active` is never in the structural key, §6b)
+          await pickRow(T[sidA]);
+          const saved = await until(() => { const c = chainFromDisk(); return !!(c && c.tabs && c.tabs[c.active] && c.tabs.length === 2 && c.active === 0); }, 12000, 250);
+          const deskAfter = await R13(P1);
+          ok(saved && deskAfter.active === sidB, '13 P4 the phone\'s reveal of the host is saved like a tab click (data/layouts.json active = 0, the host) and the desktop client keeps its own tab (Bravo) — no new sync path', S({ disk: chainFromDisk(), deskAfter }));
+          // P5 · CONTROL: the door neutered to the pre-fix raise (focusWindow) ⇒ the host row leaves Bravo on screen
+          await pickRow(T[sidB]);
+          await P.ev(`wm.__rv13 = wm.revealWindow; wm.revealWindow = function (id) { this.focusWindow(id); return true; }; return true;`);
+          await pickRow(T[sidA]);
+          const p5 = await R13(P);
+          await P.ev(`wm.revealWindow = wm.__rv13; delete wm.__rv13; return true;`);
+          ok(p5.active === sidB && S(p5.shown) === S([sidB]) && p5.activeWin === sidA, '13 P5 CONTROL: with revealWindow neutered to the pre-fix raise, the same HOST row leaves Bravo on screen under the active window Alpha — the incident, reproduced by this leg', S(p5));
+        }
+        P.close(); await P1.send('Target.closeTarget', { targetId: pp.targetId });
+      }
+      // D6 (verify r1, 2026-09-26; LAST in this section — it makes and deletes a second desktop, which the phone legs
+      //    above must not inherit) · Locate of a group member on ANOTHER desktop: its group is set to show it THERE
+      // (raise: false) and the ACTIVE window here stays what it was — switchTab names the tab it shows as the active
+      // window, and a window on another desktop must never be it (Ctrl+\ x would have closed it, the taskbar highlight
+      // and the phone title named a window nobody could see). As shipped in r0 the desktop-hidden host became active.
+      const d6run = (neuter) => ev(`const dm = app.desktopManager; if (!dm) return null; const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}), Cw = bySid(${S(sidC)}); const ch = A._tabChain; if (Cw.isMinimized) wm.restore(Cw.id); wm.switchTab(ch, ch.tabs.indexOf(B.id)); const two = dm.createDesktop('Two'); dm.moveWindowToDesktop(A.id, two); wm.focusWindow(Cw.id); const before = sidOf(wm.activeWindowId); const real = wm.revealWindow; if (${neuter ? 'true' : 'false'}) wm.revealWindow = function (id, { raise = true } = {}) { const w = this.windows.get(id); const c = w._tabChain; const idx = c ? c.tabs.indexOf(id) : -1; if (c && idx >= 0 && c.active !== idx) this.switchTab(c, idx); if (!raise) return true; this.focusWindow(id); return true; }; try { app.flashWindow(${S(sidA)}); await new Promise((r) => setTimeout(r, 300)); } finally { wm.revealWindow = real; } const host = wm.windows.get(ch.tabs[0]); const out = { before, after: sidOf(wm.activeWindowId), active: sidOf(ch.tabs[ch.active]), hidden: !!host._hiddenByDesktop, sameDesk: dm.activeDesktopId === ${S(deskId)} }; dm.moveWindowToDesktop(A.id, ${S(deskId)}); await dm.deleteDesktop(two); wm.focusWindow(Cw.id); return out;`);
+      const d6 = await d6run(false);
+      ok(d6 && d6.before === sidC && d6.after === sidC && d6.active === sidA && d6.hidden && d6.sameDesk, '13 D6 Locate (flashWindow) of the HOST on another desktop: its group is set to show Alpha there, the desktop is not switched, and the ACTIVE window stays Charlie (as shipped in r0: the desktop-hidden Alpha became the active window)', S(d6));
+      const d6c = await d6run(true);
+      ok(d6c && d6c.before === sidC && d6c.after === sidA && d6c.active === sidA && d6c.hidden, '13 D6 CONTROL: the r0 door (a tab choice that does not keep the active window) makes the desktop-hidden host the active window — the leg sees it', S(d6c));
+    }
   }
 
   } finally {

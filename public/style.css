@@ -4294,16 +4294,20 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-row { padding: 5px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; transition: all var(--transition); position: relative; overflow: hidden; }
 .chan-row:hover { background: var(--bg-hover); border-color: var(--border-active); }
 .chan-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.chan-row-title { flex: 1 1 auto; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
+.chan-row-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
 .chan-row.chan-row-unread .chan-row-title { font-weight: 600; }
 .chan-row-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 1px; font-size: 10px; color: var(--text-dim); }
 .chan-row-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-chip { flex-shrink: 0; font-size: 9px; font-weight: 600; letter-spacing: 0; padding: 1px 6px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; }
-/* on a row the pill (the honesty contract) does NOT shrink: the title yields first, down to its
-   60px floor, and only a pill wider than the space left (line − floor − gap) ellipsizes rather
-   than clipping — a shrink weight, however small, let the ellipsis eat the pill's negation
-   ("not scanni…") beside a truncated title (verifier, a4 r4) */
-.chan-row-line .chan-chip { flex: 0 0 auto; max-width: calc(100% - 66px); overflow: hidden; text-overflow: ellipsis; }
+/* on a row the pill (the honesty contract) is drawn WHOLE, always: it never shrinks, never
+   ellipsizes, and the TITLE yields (min-width 0, its own ellipsis, the full title in its tooltip).
+   A shrink weight let the ellipsis eat the pill's negation ("not scanni…", verifier a4 r4); the
+   r4 cap (max-width: line − a 60px title floor) ellipsized any pill wider than 82px at the 188px
+   panel, and the Actions runner's face (DejaVu Sans, ~10 % wider than this box's Noto Sans) drew
+   "refresh paused" at 89px ⇒ "refresh pau…" — a mirror-only red (2.369.186). The width budget
+   lives in the WORDS now (`freshnessText`'s short forms), measured under both faces by
+   test-channels-e2e ⑯. */
+.chan-row-line .chan-chip { flex: 0 0 auto; }
 .chan-chip-live { color: var(--ok-text); background: color-mix(in srgb, var(--green, #3fb950) 13%, transparent); }
 .chan-chip-off { color: var(--text-dim); background: color-mix(in srgb, var(--text-dim) 10%, transparent); }
 .chan-unread { flex-shrink: 0; font-size: 10px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); font-variant-numeric: tabular-nums; }

@@ -95,7 +95,7 @@ export function openRailPanel(app, tab, { syncId, forceWindow = false } = {}) {
     }
     return true;
   }
-  for (const [, w] of app.wm.windows) if (w.type === tab) { app.wm.focusWindow(w.id); return w; }
+  for (const [, w] of app.wm.windows) if (w.type === tab) { app.wm.revealWindow(w.id, { replay: !!syncId }); return w; }
   app._hideWelcome?.();
   const action = tab === 'system' ? 'openSystem' : 'openPorts';
   const winInfo = app.wm.createWindow({ title: tr(RAIL_TITLES[tab]), type: tab, syncId, openSpec: { action }, width: 560, height: 620 });

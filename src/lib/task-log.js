@@ -22,7 +22,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   const sidebar = app.sidebar;
   const existing = [...app.wm.windows.values()].find(w => w._taskLogId === taskId);
   if (existing) {
-    app.wm.focusWindow(existing.id);
+    app.wm.revealWindow(existing.id, { replay: !!syncId });
     if (tab && existing._taskLogSetTab) existing._taskLogSetTab(tab);
     return existing;
   }

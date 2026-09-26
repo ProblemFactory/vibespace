@@ -26,7 +26,7 @@ import { createVncView, streamUrl } from './vnc-view.js';
  */
 export function openDesktop(app, { syncId } = {}) {
   for (const [id, win] of app.wm.windows) {
-    if (win._isDesktop) { app.wm.focusWindow(id); return win; }
+    if (win._isDesktop) { app.wm.revealWindow(id, { replay: !!syncId }); return win; }
   }
   app._hideWelcome();
   const winInfo = app.wm.createWindow({

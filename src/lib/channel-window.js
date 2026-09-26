@@ -195,7 +195,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   for (const [id, w] of app.wm.windows || []) {
     const spec = w && w._openSpec;
     if (spec && spec.action === 'openChannel' && `${spec.adapterId}/${spec.convId}` === key) {
-      app.wm.focusWindow(id);
+      app.wm.revealWindow(id, { replay: !!opts.syncId });
       return w;
     }
   }

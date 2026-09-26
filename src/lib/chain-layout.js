@@ -569,6 +569,38 @@ function foldBackTarget(dragged, candidates) {
   return null;
 }
 
+// ── NAMING vs PRESSING (inc-muiq348r-jwb5, 2026-09-26) ──
+// The owner on a phone: "我在手机上怎么切换不到 vibespace 大开发这个 session？" — the
+// window was the HOST of a tab group whose GUEST was on show, and every door
+// that NAMES a window (the phone switcher's row, a sidebar card, the palette,
+// the window list, go-to) ended in focusWindow(host), which raises the frame
+// but switched the tab only for a GUEST. The host is a tab like any other.
+// Two acts, two rules, both here so neither is re-derived at a call site:
+//   · the user NAMES a window  ⇒ its own tab is shown (revealTab), host included;
+//   · the user PRESSES the frame ⇒ nothing switches: the focus names the tab ON
+//     SHOW (pressTab) — in a tabs group the shown guest's content lives inside
+//     the host element, so the press used to name the hidden host (the phone's
+//     title, highlight and ✕ then acted on a window nobody could see).
+/** The user NAMED `id`: the index switchTab must show for it to be on screen,
+ *  or -1 (not a member, or already the focused tab). Read over a normalized
+ *  CLONE — the same `active` switchTab's own normalizeChain settles on. */
+function revealTab(chain, id) {
+  if (!chain || !Array.isArray(chain.tabs) || !chain.tabs.length) return -1;
+  const c = normalizeChain(cloneChain(chain));
+  const i = c.tabs.indexOf(String(id));
+  if (i < 0) return -1;
+  return i === c.active ? -1 : i;
+}
+/** A press on the chain's frame: the tab it focuses — the DISPLAYED pane under
+ *  the pointer (`paneId`, a split on a wide layout), else the tab on show.
+ *  Never a tab that is not displayed (a press never switches tabs). */
+function pressTab(chain, paneId = null) {
+  if (!chain || !Array.isArray(chain.tabs) || !chain.tabs.length) return null;
+  const c = normalizeChain(cloneChain(chain));
+  if (paneId !== null && paneId !== undefined && displayedPanes(c).includes(String(paneId))) return String(paneId);
+  return String(c.tabs[c.active]);
+}
+
 // ── the ownership badge (§4.6) ──
 // The colour is derived PER SESSION and deliberately NOT the task-group colour
 // (a session in no group has none to draw; two sessions in one group share
@@ -619,5 +651,7 @@ module.exports = {
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
   // MULTIVIEW (design-browser-multiview §3 (b) / D3 / D5): the partner rule, the follow verdict, the new live view's place, the fold-back
   PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,
+  // inc-muiq348r-jwb5: a NAMED window shows its own tab (the host included); a PRESS keeps the tab on show
+  revealTab, pressTab,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

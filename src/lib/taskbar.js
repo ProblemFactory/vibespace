@@ -355,9 +355,7 @@ function _buildStackIcon(app, group) {
 export function activateWindow(app, id) {
   const win = app.wm.windows.get(id);
   if (!win) return;
-  const hostId = win._tabChain ? win._tabChain.tabs[0] : id;
-  if (app.wm.windows.get(hostId)?.isMinimized) app.wm.restore(id);
-  else app.wm.focusWindow(id);
+  app.wm.revealWindow(id); // THE door for a named window (inc-muiq348r-jwb5): its own tab, the group restored, raised
   const session = app.sessions.get(id); if (session) session.focus();
 }
 
@@ -594,10 +592,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     label.textContent = win.title;
     item.append(icon, label);
     item.onclick = () => {
-      if (app.wm.windows.get(chain.tabs[0])?.isMinimized) app.wm.restore(chain.tabs[0]);
-      app.wm.focusWindow(chain.tabs[0]);
-      const idx = chain.tabs.indexOf(tid);
-      if (idx >= 0) app.wm.switchTab(chain, idx);
+      app.wm.revealWindow(tid); // the row names THIS tab — the host's own row included (the door that used to be spelled here by hand)
       const session = app.sessions.get(tid);
       if (session) session.focus();
       pop.remove();
@@ -704,8 +699,7 @@ export function showWindowList(app, anchor) {
       label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
       item.append(icon, label);
       item.onclick = () => {
-        if (win.isMinimized) app.wm.restore(id);
-        else app.wm.focusWindow(id);
+        app.wm.revealWindow(id); // the row is labelled with the HOST's title — show the host's tab, never the guest under its name
         const session = app.sessions.get(id);
         if (session) session.focus();
         pop.remove();

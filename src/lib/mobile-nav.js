@@ -14,6 +14,9 @@ import { getCommand, runCommand } from './contributions.js';
  * for sidebar/window/session access.
  */
 
+/** Is `w` minimized? A tab group is minimized as ONE frame — the HOST carries the flag, its guests are hidden with it. */
+const minimizedOf = (wm, w) => !!((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w).isMinimized;
+
 export class MobileNav {
   constructor(app) {
     this.app = app;
@@ -99,8 +102,9 @@ export class MobileNav {
 
   updateTitle() {
     if (!this._titleEl) return;
-    const win = this.app.wm.windows.get(this.app.wm.activeWindowId);
-    const count = [...this.app.wm.windows.values()].filter(w => !w._hiddenByDesktop && !w.isMinimized).length;
+    const wm = this.app.wm;
+    const win = wm.windows.get(wm.activeWindowId);
+    const count = [...wm.windows.values()].filter(w => !w._hiddenByDesktop && !minimizedOf(wm, w)).length;
     this._titleEl.textContent = (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
   }
 
@@ -127,7 +131,7 @@ export class MobileNav {
       // FRESH each render (inc-mtfici94: a stale open-time snapshot showed
       // nothing after a switch materialized the lazy-replayed windows — the
       // popup had to be reopened to see them)
-      const allWindows = [...wm.windows.values()].filter(w => !w.isMinimized);
+      const allWindows = [...wm.windows.values()].filter(w => !minimizedOf(wm, w));
       // not-yet-materialized windows live only in the desktop's saved state
       // until its first switchTo — count them or fresh-load desktops read 0
       const savedCount = (deskId) => ((dm._savedStates?.get(deskId)?.windows) || [])
@@ -176,7 +180,7 @@ export class MobileNav {
       }
       // Window list for current desktop
       winList.innerHTML = '';
-      const windows = allWindows.filter(w => !w._hiddenByDesktop && !w.isMinimized);
+      const windows = allWindows.filter(w => !w._hiddenByDesktop);
       if (!windows.length) {
         winList.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">${escHtml(t('No windows on this desktop'))}</div>`;
       } else {
@@ -188,7 +192,8 @@ export class MobileNav {
       // no-op ≤768px now, but a window minimized on a desktop client before
       // this phone joined would otherwise vanish from every list — a tap
       // restores it.
-      const minimized = [...wm.windows.values()].filter(w => w.isMinimized && !w._hiddenByDesktop);
+      // a tab group is minimized as ONE frame (the host carries the flag) — its guests are listed here too
+      const minimized = [...wm.windows.values()].filter(w => minimizedOf(wm, w) && !w._hiddenByDesktop);
       if (minimized.length) {
         const head = document.createElement('div');
         head.className = 'mobile-win-minimized-head';
@@ -198,7 +203,7 @@ export class MobileNav {
         for (const win of minimized) {
           const item = this._buildWindowItem(win, wm, pop, rerender);
           item.classList.add('mobile-win-minimized');
-          item.onclick = () => { pop.remove(); wm.restore(win.id); };
+          item.onclick = () => { pop.remove(); wm.revealWindow(win.id); }; // restores the group AND shows this tab (a host too)
           winList.appendChild(item);
         }
       }
@@ -269,7 +274,9 @@ export class MobileNav {
     if (billChip) item.append(icon, label, billChip, closeBtn);
     else item.append(icon, label, closeBtn);
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
-    item.onclick = () => { pop.remove(); wm.focusWindow(win.id); };
+    // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group
+    // showed a guest, only raised the frame — the guest stayed on screen under the host's title and highlight)
+    item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };
     return item;
   }
 

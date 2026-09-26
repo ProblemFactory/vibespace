@@ -613,7 +613,7 @@ class LayoutManager {
         }
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
-          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { backend: alive.backend || backend, mode: alive.mode || 'terminal' });
+          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { backend: alive.backend || backend, mode: alive.mode || 'terminal', machine: true });
           applyPosition(winInfo, ws);
           // Restore split-pane editor if it was active (Ctrl+G)
           if (ws.editorState && winInfo) {
@@ -659,7 +659,7 @@ class LayoutManager {
         }
         if (alive) {
           const customName = this.app.sidebar?.getCustomName(backendSessionId || alive.backendSessionId || alive.claudeSessionId);
-          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { mode: 'chat', backend: alive.backend || backend });
+          const winInfo = this.app.attachSession(alive.id, customName || alive.name, alive.cwd, { mode: 'chat', backend: alive.backend || backend, machine: true });
           applyPosition(winInfo, ws);
         } else if (backendSessionId) {
           // Session not alive (server/machine restarted) — open as view-only
@@ -1058,7 +1058,7 @@ class LayoutManager {
           if (activeMatch) {
             // Active but no window — attach (use custom name if available)
             const customName = this.app.sidebar?.getCustomName(backendSessionId);
-            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { backend: activeMatch.backend || backend, mode: activeMatch.mode || ws.type });
+            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { backend: activeMatch.backend || backend, mode: activeMatch.mode || ws.type, machine: true });
             if (winInfo) {
               matchedWinIds.add(winInfo.id);
               applyPosition(winInfo, ws);
@@ -1119,7 +1119,7 @@ class LayoutManager {
           if (!activeMatch && ws.serverSessionId) activeMatch = activeSessions.find(s => s.id === ws.serverSessionId);
           if (activeMatch) {
             const customName = this.app.sidebar?.getCustomName(backendSessionId);
-            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { mode: 'chat', backend: activeMatch.backend || backend });
+            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { mode: 'chat', backend: activeMatch.backend || backend, machine: true });
             if (winInfo) { matchedWinIds.add(winInfo.id); applyPosition(winInfo, ws); }
           }
         }

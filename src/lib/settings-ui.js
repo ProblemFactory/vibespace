@@ -23,8 +23,7 @@ class SettingsUI {
     // Singleton — focus an already-open settings window instead of stacking.
     const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
     if (existing) {
-      if (existing.isMinimized) this.app.wm.restore?.(existing.id);
-      this.app.wm.focusWindow(existing.id);
+      this.app.wm.revealWindow(existing.id, { replay: !!syncId }); // its own tab, restored, raised (a replay only raises)
       const inp = existing.content.querySelector('.settings-search');
       inp?.focus();
       return;

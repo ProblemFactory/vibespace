@@ -598,12 +598,15 @@ export function installSessionLifecycle(App, ctx = {}) {
     } catch { showToast(t('Terminate failed'), { type: 'error' }); }
   },
 
-  // Find existing window for a server session ID and focus it
-  _focusExistingSession(serverId) {
+  // Find existing window for a server session ID and show it. The USER named it (a card, the palette, an inbox
+  // link…) ⇒ wm.revealWindow — its own tab even when it hosts a group that shows another (inc-muiq348r-jwb5);
+  // a MACHINE path (`replay`: a layout replay / boot restore / remote apply that found the window already open)
+  // only raises it, as before — the record's `active` decides the tab.
+  _focusExistingSession(serverId, { replay = false } = {}) {
     for (const [winId, term] of this.sessions) {
       if (term.sessionId === serverId) {
-        this.wm.focusWindow(winId);
-        if (this.wm.windows.get(winId)?.isMinimized) this.wm.restore(winId);
+        this.wm.revealWindow(winId, { replay });
+        if (replay && this.wm.windows.get(winId)?.isMinimized) this.wm.restore(winId);
         term.focus();
         return true;
       }
@@ -629,11 +632,11 @@ export function installSessionLifecycle(App, ctx = {}) {
     return { set: (s) => { el.textContent = s; }, remove: () => el.remove() };
   },
 
-  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId } = {}) {
+  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false } = {}) {
     cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
     this._closeSidebarOnMobile();
-    // If we already have a window for this session, just focus it
-    if (this._focusExistingSession(serverId)) return null;
+    // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
+    if (this._focusExistingSession(serverId, { replay: !!(syncId || machine) })) return null;
 
     this._hideWelcome();
     const isChat = mode === 'chat';
@@ -773,13 +776,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     return winInfo;
   },
 
-  attachTmuxSession(tmuxTarget, name, cwd) {
+  attachTmuxSession(tmuxTarget, name, cwd, { replay = false } = {}) {
     this._closeSidebarOnMobile();
     // Check if already viewing this tmux target
     for (const [winId, term] of this.sessions) {
       if (term._tmuxTarget === tmuxTarget) {
-        this.wm.focusWindow(winId);
-        if (this.wm.windows.get(winId)?.isMinimized) this.wm.restore(winId);
+        this.wm.revealWindow(winId, { replay }); // the user named it: its own tab, the group restored, raised (a replay only raises)
         term.focus(); return;
       }
     }
@@ -831,7 +833,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         const sidebar = this.sidebar;
         const match = (sidebar._allSessions || []).find(s => (s.backendSessionId || s.sessionId) === targetBackendId && (s.backend || 'claude') === backend && s.webuiId);
         if (match && term.sessionId === match.webuiId && match.webuiId !== excludeWebuiId) {
-          this._focusExistingSession(match.webuiId);
+          this._focusExistingSession(match.webuiId, { replay: !!syncId });
           return;
         }
       }
@@ -1697,7 +1699,7 @@ function replayViewSubagent(app, spec, { syncId } = {}) {
 registerWindowType({
   type: 'terminal', label: 'Terminal', persist: false,
   icon: svgIcon16('<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4.5 7l2 2-2 2M8.5 11h3"/>'),
-  action: 'attachTmuxSession', replay: (app, spec) => app.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd),
+  action: 'attachTmuxSession', replay: (app, spec) => app.attachTmuxSession(spec.tmuxTarget, spec.name, spec.cwd, { replay: true }),
 });
 registerWindowType({
   type: 'chat', label: 'Chat', persist: false,

@@ -3604,6 +3604,7 @@ export default {
   "not scanning": "未在扫描",
   "not polling": "未在轮询",
   "not scanned yet": "还没有扫描过",
+  "no scan yet": "尚未扫描",
   "scanned {age} ago": "{age}前扫描",
   "live": "实时",
   "reconciling": "对账中",

@@ -392,7 +392,7 @@ export function openJobsWindow(app, opts = {}) {
   // rail panel) — every entry point lands on the rail panel when it exists;
   // the window remains only for mobile / activityRail-off
   if (!opts.forceWindow && focusJobsPanel(app, opts.focusJobId)) return null;
-  for (const [, w] of app.wm.windows) if (w.type === 'jobs') { app.wm.focusWindow(w.id); return w; }
+  for (const [, w] of app.wm.windows) if (w.type === 'jobs') { app.wm.revealWindow(w.id, { replay: !!opts.syncId }); return w; }
   const winInfo = app.wm.createWindow({ title: t('Background Work'), type: 'jobs', syncId: opts.syncId, openSpec: { action: 'openJobs' }, width: 760, height: 540 });
   const shell = document.createElement('div'); shell.className = 'jobs-win';
   const bar = document.createElement('div'); bar.className = 'jobs-toolbar';

@@ -25,7 +25,7 @@ const SWATCHES = [
 export function openTaskDetail(app, taskId, { syncId } = {}) {
   const sidebar = app.sidebar;
   const existing = [...app.wm.windows.values()].find(w => w._taskDetailId === taskId);
-  if (existing) { app.wm.focusWindow(existing.id); return existing; }
+  if (existing) { app.wm.revealWindow(existing.id, { replay: !!syncId }); return existing; }
 
   let task = sidebar._taskById(taskId);
   if (!task && sidebar._tasksLoaded) { showToast(t('Task Group not found'), { type: 'error' }); return null; }

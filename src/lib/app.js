@@ -2028,8 +2028,7 @@ class App {
       if ((wHost || '') !== (host || '')) continue;
       const same = dir ? (w.type === 'files' && w._explorerPath === p) : ((w.type === 'viewer' || w.type === 'editor' || w.type === 'hex-viewer') && w._filePath === p);
       if (!same) continue;
-      if (ch.tabs[0] === id) this.wm.switchTab(ch, 0); // the host's own tab (focusWindow switches only a guest's)
-      this.wm.focusWindow(id);
+      this.wm.revealWindow(id); // its own tab (the host's too — inc-muiq348r-jwb5's one door), raised
       if (line && typeof w._gotoLine === 'function') { try { w._gotoLine(line); } catch { } }
       return true;
     }
@@ -2240,18 +2239,11 @@ class App {
       if (term.sessionId !== serverSessionId) continue;
       const win = this.wm.windows.get(winId);
       if (!win) break;
-      let targetId = winId, targetWin = win;
-      if (win._tabChain && win._tabChain.tabs[0] !== winId) {
-        const hostId = win._tabChain.tabs[0];
-        const host = this.wm.windows.get(hostId);
-        if (host) {
-          targetId = hostId; targetWin = host;
-          const tabIdx = win._tabChain.tabs.indexOf(winId);
-          if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
-        }
-      }
+      // the group moves as ONE frame (its host) and shows THIS session's tab — a host's own tab included
+      const host = win._tabChain ? this.wm.windows.get(win._tabChain.tabs[0]) : null;
+      const targetId = host ? host.id : winId, targetWin = host || win;
       const dm = this.desktopManager;
-      const start = () => this.wm.startMoveMode(targetId);
+      const start = () => { this.wm.revealWindow(winId); this.wm.startMoveMode(targetId); };
       if (dm && targetWin._desktopId && targetWin._desktopId !== dm.activeDesktopId) {
         dm.switchTo(targetWin._desktopId).then(start);
       } else {
@@ -2273,26 +2265,17 @@ class App {
   // Window-id based go-to (2.212.0): the title-bar/taskbar "Switch window"
   // submenu targets ANY window type, not just sessions. Same semantics as
   // goToWindow: tab-chain resolve, stage-aware, cross-desktop switch, flash.
+  // The window itself is shown through wm.revealWindow (inc-muiq348r-jwb5: a
+  // group's HOST is switched to as well — this used to resolve only a guest).
   goToWinId(winId) {
     const win = this.wm.windows.get(winId);
     if (!win) return;
-
-    // Resolve tab group: find host and switch to target tab
-    let targetWin = win, targetId = winId;
-    if (win._tabChain && win._tabChain.tabs[0] !== winId) {
-      const hostId = win._tabChain.tabs[0];
-      const host = this.wm.windows.get(hostId);
-      if (host) {
-        targetWin = host; targetId = hostId;
-        const tabIdx = win._tabChain.tabs.indexOf(winId);
-        if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
-      }
-    }
+    // the FRAME that carries it (a tab group's host) — the desktop, the flash
+    const targetWin = (win._tabChain && this.wm.windows.get(win._tabChain.tabs[0])) || win;
 
     const dm = this.desktopManager;
     const doFlash = () => {
-      if (targetWin.isMinimized) this.wm.restore(targetId);
-      this.wm.focusWindow(targetId);
+      this.wm.revealWindow(winId);
       targetWin.element.classList.add('window-find-flash');
       setTimeout(() => targetWin.element.classList.remove('window-find-flash'), 3000);
     };
@@ -2320,23 +2303,15 @@ class App {
 
         const dm = this.desktopManager;
 
-        // Resolve the visible window: if in a tab group, find the host and switch to this tab
-        let flashWin = win;
-        let flashWinId = winId;
-        if (win._tabChain && win._tabChain.tabs[0] !== winId) {
-          const hostId = win._tabChain.tabs[0];
-          const host = this.wm.windows.get(hostId);
-          if (host) {
-            flashWin = host;
-            flashWinId = hostId;
-            // Switch to the target tab
-            const tabIdx = win._tabChain.tabs.indexOf(winId);
-            if (tabIdx >= 0) this.wm.switchTab(win._tabChain, tabIdx);
-          }
-        }
+        // Resolve the visible window: a tab group flashes as its HOST frame, showing THIS tab
+        const host = win._tabChain ? this.wm.windows.get(win._tabChain.tabs[0]) : null;
+        const flashWin = host || win;
+        const flashWinId = flashWin.id;
 
-        // If window is on another desktop, flash its rect in the desktop preview
+        // If window is on another desktop, flash its rect in the desktop preview ('find' never switches a
+        // desktop) — its group is set to show THIS tab there, raised nowhere
         if (dm && flashWin._desktopId && flashWin._desktopId !== dm.activeDesktopId) {
+          this.wm.revealWindow(winId, { raise: false });
           dm._flashingWinId = flashWinId;
           dm._renderSwitcher();
           setTimeout(() => { dm._flashingWinId = null; dm._renderSwitcher(); }, 3000);
@@ -2353,8 +2328,7 @@ class App {
           dm._flashingWinId = flashWinId;
           dm._renderSwitcher();
         }
-        if (flashWin.isMinimized) this.wm.restore(flashWinId);
-        this.wm.focusWindow(flashWinId);
+        this.wm.revealWindow(winId); // THIS session's own tab (a host too — inc-muiq348r-jwb5), the group restored, raised
         setTimeout(() => {
           flashWin.element.classList.remove('window-find-flash');
           if (taskbarItem) taskbarItem.classList.remove('find-flash');

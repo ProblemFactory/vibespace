@@ -285,7 +285,7 @@ export function renderInlineProposals(app, proposals) {
 
 /** Open (or focus) THE Outbox window — a singleton kind. */
 export function openChannelOutbox(app, opts = {}) {
-  for (const [id, w] of app.wm.windows || []) if (w && w.type === 'channel-outbox') { app.wm.focusWindow(id); return w; }
+  for (const [id, w] of app.wm.windows || []) if (w && w.type === 'channel-outbox') { app.wm.revealWindow(id, { replay: !!opts.syncId }); return w; }
   const winInfo = app.wm.createWindow({ title: t('Outbox'), type: 'channel-outbox', syncId: opts.syncId, openSpec: { action: 'openChannelOutbox' }, width: 560, height: 600 });
   const root = el('div', 'chanwin chan-outbox');
   winInfo.content.appendChild(root);

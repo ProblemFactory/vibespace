@@ -35,7 +35,7 @@ Status key: **A** available · **P** partial · **M** missing · **N** not appli
 | 22 | Move window to desktop | window menu, Ctrl+\ ] | M | taskbar.js:233 | switcher-row long-press → 'window' menu | S |
 | 23 | Minimize/restore | titlebar, taskbar | M, and a minimized window disappears from the switcher with no restore path | mobile-nav.js:65,97; window.js:999 | never minimize ≤768 (or list minimized rows) | S |
 | 24 | Close window | titlebar ✕ | A | mobile-nav.js:26 | — | – |
-| 25 | Tab groups (merge/split/tab bar) | icon drag, tab bar | N (titlebar hidden, mouse-only drag) | tab-group.js:217; style.css:1898 | — | – |
+| 25 | Tab groups (merge/split/tab bar) | icon drag, tab bar | N (titlebar hidden, mouse-only drag) — but a group made on a desktop still EXISTS on the phone: its members are reached through the switcher, whose rows reveal their own tab (host included) since inc-muiq348r-jwb5 (2026-09-26) | tab-group.js:217; style.css:1898 | switcher rows → `wm.revealWindow` | done |
 | 26 | Window context menu (rename/restart/terminate/locate/props/close) | titlebar/taskbar right-click | P — same actions via session-card long-press menu; missing: Move to Desktop | window.js:120; session-card.js:114-154 | title long-press → `menuItems('window')` | S |
 | 27 | Move mode | window menu, card | N (pointer only) | session-card.js:702 | — | – |
 | 28 | Ctrl+K palette | keyboard | N (not installed; sidebar search) | app.js:324 | — | – |

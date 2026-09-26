@@ -44,6 +44,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -927,23 +928,165 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); return 1; })()`);
 }
 
-// ── ⑯ THE FRESHNESS PILL FITS (verifier r4): at the 260px default rail, in
-//    en, zh AND ja, no pill is truncated (the ellipsis once ate ja's negation —
-//    ポーリングしていま… read as "polling" when the truth was "not polling");
-//    2026-09-26: every row is fetched, so every row carries one ──
+// ── ⑯ THE FRESHNESS PILL IS DRAWN WHOLE (verifier r4; 2.369.186): at the
+//    default rail's panel, in en, zh AND ja, no pill is truncated (the ellipsis
+//    once ate ja's negation — ポーリングしていま… read as "polling" when the
+//    truth was "not polling"); 2026-09-26: every row is fetched, so every row
+//    carries one.
+//    THE RUNNER'S FACE (the .185 mirror red): every census here runs TWICE —
+//    under this box's own `system-ui` (Noto Sans here) and under 'DejaVu Sans'
+//    forced on `html, body`, which is what the product's stack resolves to on
+//    the Actions runner (~10 % wider). The .185 mirror drew "refresh paused" as
+//    "refresh pau…" (82 of 89 px) while this box drew it whole (79 px); the
+//    second pass is the LOCAL control for that machine-dependent geometry (the
+//    roster / title-chip precedent) and SKIPs with a reason without the face.
+//    Three censuses per face × language:
+//      a · the fixture's own rows — every pill whole, never clipped by the row;
+//      b · THE WORDS: every word `freshnessText` can put in a pill (the switch's
+//          own `case` labels, census-derived) is ≤ PILL_BUDGET (82 px — what
+//          leaves design §4's 60 px title in the 188 px panel's 148 px line) in
+//          THIS face, and is whole and inside its row in a plain row AND an
+//          account's ↳ child row (the Lark / Gmail rows: 17 px narrower);
+//      c · THE STRUCTURE: a pill carrying the language's longest SENTENCE (wider
+//          than the budget) is still whole — the title yields (the r4 cap
+//          ellipsized every pill over 82 px).
+//    CONTROL (en, both faces): the PRE-FIX product — style.css with the r4 cap
+//    (a patched copy in this run's scratch dir, swapped into the page) and the
+//    r3 words (channel-caps.js with the short forms removed, a mutant-copy
+//    module) — is CUT under DejaVu Sans with the mirror's own numbers (82 of
+//    89 px) while this box's Noto Sans draws it whole (79 px, printed as a note —
+//    on the runner the default face IS DejaVu): the mirror-only red, reproduced
+//    here. ──
 {
-  const PILLS = `(async () => {
+  const PILL_BUDGET = 82, PILL_TITLE_MIN = 60;
+  const capsSrc = fs.readFileSync(path.join(wt, 'src/channel-caps.js'), 'utf8');
+  const capsNow = require(path.join(wt, 'src/channel-caps.js'));
+  const dicts = { en: {} };
+  for (const l of ['zh', 'ja']) dicts[l] = (await import(new URL(`file://${path.join(wt, `src/lib/i18n-${l}.js`)}`).href)).default;
+  // src/lib/i18n.js `t` verbatim (dictionary, else the English key; {param} substitution)
+  const tFor = (lang) => (str, params) => { let x = (dicts[lang] && dicts[lang][str]) || str; if (params) x = x.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m)); return x; };
+  const CLAIMS = [
+    { kind: 'scanned', state: 'off' }, { kind: 'within', state: 'off' }, { kind: 'scanned', state: 'never' },
+    ...[59, 3540, 82800, 400 * 86400].map((seconds) => ({ kind: 'scanned', state: 'aged', seconds })),
+    { kind: 'live', state: 'live' }, { kind: 'within', state: 'reconciling' }, { kind: 'within', state: 'paused' },
+    { kind: 'within', state: 'unknown' }, ...[5, 45, 300, 900].map((seconds) => ({ kind: 'within', state: 'bound', seconds })),
+    { kind: 'within', state: 'no-such-state' },
+  ];
+  const fnAt = capsSrc.indexOf('function freshnessText(');
+  const cases = [...capsSrc.slice(fnAt, capsSrc.indexOf('\n}\n', fnAt)).matchAll(/case '([\w-]+)':/g)].map((m) => m[1]);
+  ok(cases.length >= 8 && cases.every((c) => CLAIMS.some((x) => x.state === c)), `CENSUS: every state \`freshnessText\` words (${cases.join(', ')}) is in the pill census's claims table — a new state cannot dodge the width census`, JSON.stringify(cases));
+  // the pill's words exactly as chip() composes them (channels-panel.js)
+  const pillWords = (mod, lang) => [...new Set(CLAIMS.map((c) => mod.freshnessText(c, { t: tFor(lang), short: true }) || tFor(lang)('unknown')))];
+  const longest = (mod, lang) => CLAIMS.map((c) => mod.freshnessText(c, { t: tFor(lang) }) || '').sort((x, y) => y.length - x.length)[0];
+
+  // THE CONTROL'S PRE-FIX PRODUCT, written only into this run's scratch dir (never the checkout):
+  // ① channel-caps.js with every `short` pill form removed (r3's words), ② style.css with the r4 cap back
+  const MUT = mutantCopies('chan-e2e-pill', repo);
+  const SHORT_RE = /return short \? (t\([^;]*?\)) : (t\([^;]*?\));/g;
+  const shortForms = [...capsSrc.matchAll(SHORT_RE)];
+  ok(shortForms.length >= 2, `the pill's short forms are spelled \`return short ? t(…) : t(…);\` (${shortForms.length}) — the control's edit reverts each to its sentence`, String(shortForms.length));
+  const capsPre = MUT.load('src/channel-caps.js', capsSrc.replace(SHORT_RE, (m, a, b) => (/'\{age\} ago'/.test(a) ? m : `return ${b};`)), 'r3-words');
+  const cssNow = fs.readFileSync(path.join(wt, 'public/style.css'), 'utf8');
+  const CSS_EDITS = [
+    ['.chan-row-title { flex: 1 1 auto; min-width: 0;', '.chan-row-title { flex: 1 1 auto; min-width: 60px;'],
+    ['.chan-row-line .chan-chip { flex: 0 0 auto; }', '.chan-row-line .chan-chip { flex: 0 0 auto; max-width: calc(100% - 66px); overflow: hidden; text-overflow: ellipsis; }'],
+  ];
+  ok(CSS_EDITS.every(([a]) => cssNow.split(a).length === 2), 'the two rules the control reverts are spelled once in style.css', JSON.stringify(CSS_EDITS.map(([a]) => cssNow.split(a).length - 1)));
+  const cssPreFile = path.join(MUT.dir, 'style-r4-cap.css');
+  fs.writeFileSync(cssPreFile, CSS_EDITS.reduce((x, [a, b]) => x.replace(a, b), cssNow));
+  MUT.files.push(cssPreFile);
+  const cssPre = fs.readFileSync(cssPreFile, 'utf8');
+
+  const OPEN = `(async () => {
     const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
     for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
-    const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
-    return { width: document.querySelector('.rail-panel-channels').getBoundingClientRect().width, rows: rows.map((r) => { const c = r.querySelector('.chan-row-line .chan-chip'); return { chip: c ? c.textContent : null, fits: c ? c.scrollWidth <= c.clientWidth : null, w: c ? c.getBoundingClientRect().width : 0 }; }) };
+    return document.querySelectorAll('.rail-panel-channels .chan-row').length;
   })()`;
-  for (const lang of ['zh', 'ja', 'en']) {
-    await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
-    ok(await p1.load(), `page 1 reloaded in ${lang}`);
-    const r = await p1.evaljs(PILLS);
-    ok(r.rows.length >= 4 && r.rows.every((x) => x.chip && x.fits === true), `${lang}: at the ${Math.round(r.width)}px panel every row's pill is drawn whole (no ellipsis)`, JSON.stringify(r.rows));
+  const r1 = (x) => Math.round(x * 10) / 10;
+  const MEASURE = `const r1 = ${r1.toString()};
+    const m = (row) => { const c = row.querySelector('.chan-row-line .chan-chip'), ln = row.querySelector('.chan-row-line'), ti = row.querySelector('.chan-row-title');
+      if (!c) return { chip: null };
+      const cr = c.getBoundingClientRect(), lr = ln.getBoundingClientRect();
+      return { chip: c.textContent, whole: c.scrollWidth <= c.clientWidth, inside: cr.right <= lr.right + 0.5, w: r1(cr.width), natural: c.scrollWidth, line: r1(lr.width), title: r1(ti.getBoundingClientRect().width), child: row.classList.contains('chan-row-child') }; };`;
+  // a · the fixture's own rows
+  const ROWS = `(() => { ${MEASURE}
+    const panel = document.querySelector('.rail-panel-channels');
+    return { width: panel.getBoundingClientRect().width, font: getComputedStyle(document.body).fontFamily, rows: [...document.querySelectorAll('.rail-panel-channels .chan-row')].map(m) };
+  })()`;
+  // b/c · a clone of a real row (plain, then as an account's ↳ child) carrying each word in turn — one
+  //       synchronous pass, so no repaint of the panel can land between the write and the read
+  const PROBE = (words, kinds = [false, true]) => `(() => { ${MEASURE}
+    const base = document.querySelector('.rail-panel-channels .chan-row:not(.chan-row-child)');
+    if (!base) return { fail: 'no plain row to clone' };
+    const out = [];
+    for (const child of ${JSON.stringify(kinds)}) {
+      const r = base.cloneNode(true); r.dataset.conv = 'vs-pill-probe'; r.classList.toggle('chan-row-child', child);
+      const line = r.querySelector('.chan-row-line'), title = r.querySelector('.chan-row-title'), chip = r.querySelector('.chan-row-line .chan-chip');
+      if (child && !line.querySelector('.mounts-child-arrow')) { const ar = document.createElement('span'); ar.className = 'mounts-child-arrow'; ar.textContent = '↳'; line.insertBefore(ar, title); }
+      title.textContent = 'A conversation title long enough to be cut at every width';
+      base.parentNode.appendChild(r);
+      for (const w of ${JSON.stringify(words)}) { chip.textContent = w; out.push(m(r)); }
+      r.remove();
+    }
+    return { rows: out };
+  })()`;
+  const brief = (rows) => rows.map((x) => `"${x.chip}" ${x.w}/${x.natural}px${x.whole ? '' : ' CUT'} title ${x.title}${x.child ? ' ↳' : ''}`).join(' | ');
+  const setCss = async (pre) => p1.evaljs(`(() => {
+    const link = [...document.querySelectorAll('link[rel="stylesheet"]')].find((l) => /^\\/?style\\.css/.test(l.getAttribute('href') || ''));
+    if (!link) return 'no style.css link';
+    const old = document.getElementById('vs-pill-control-css'); if (old) old.remove();
+    if (!${pre ? 'true' : 'false'}) { link.disabled = false; return 'product'; }
+    const st = document.createElement('style'); st.id = 'vs-pill-control-css'; st.textContent = ${pre ? JSON.stringify(cssPre) : "''"}; link.after(st); link.disabled = true;
+    return 'r4-cap';
+  })()`);
+
+  const hasDejaVu = (() => { try { return /DejaVu Sans/.test(execSync('fc-list : family', { encoding: 'utf8' })); } catch { return false; } })();
+  if (!hasDejaVu) console.log("  SKIP: the runner-face pass (every pill census under 'DejaVu Sans') needs DejaVu Sans on this machine (fc-list : family)");
+  const control = {}, structural = {};
+  for (const FACE of hasDejaVu ? [null, 'DejaVu Sans'] : [null]) {
+    const tag = FACE ? `[${FACE}] ` : '';
+    const reg = FACE ? await p1.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body { font-family: '${FACE}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
+    for (const lang of ['zh', 'ja', 'en']) {
+      await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
+      ok(await p1.load(), `${tag}page 1 reloaded in ${lang}`);
+      ok((await p1.evaljs(OPEN)) >= 4, `${tag}${lang}: the channels panel lists the fixture's rows`);
+      const r = await p1.evaljs(ROWS);
+      if (FACE) ok(new RegExp(FACE).test(r.font), `${tag}${lang}: the forced face is in force (body font-family: ${r.font})`);
+      console.log(`    ${tag}${lang} rows @${Math.round(r.width)}px: ` + brief(r.rows));
+      ok(r.rows.length >= 4 && r.rows.every((x) => x.chip && x.whole && x.inside), `${tag}${lang}: a · at the ${Math.round(r.width)}px panel every row's pill is drawn whole (no ellipsis, never clipped by the row)`, JSON.stringify(r.rows));
+      const words = pillWords(capsNow, lang);
+      const pb = await p1.evaljs(PROBE(words));
+      console.log(`    ${tag}${lang} words: ` + brief(pb.rows || []));
+      const bad = (pb.rows || []).filter((x) => !x.whole || !x.inside || x.natural > PILL_BUDGET || (!x.child && x.title < PILL_TITLE_MIN));
+      const widest = (pb.rows || []).reduce((a, x) => (x.natural > (a ? a.natural : -1) ? x : a), null);
+      ok(!pb.fail && pb.rows.length === words.length * 2 && !bad.length, `${tag}${lang}: b · every pill word (${words.length}: ${words.join(' · ')}) is ≤ ${PILL_BUDGET} px (widest "${widest && widest.chip}" ${widest && widest.natural} px) — whole and inside a plain row (title ≥ ${PILL_TITLE_MIN} px) and a ↳ child row`, JSON.stringify(pb.fail || bad));
+      const long = longest(capsNow, lang);
+      const lp = await p1.evaljs(PROBE([long], [false]));
+      const lr = (lp.rows || [])[0];
+      if (lr && lr.natural <= PILL_BUDGET) console.log(`    ${tag}${lang}: c · no ${lang} sentence outgrows the budget ("${long}" ${lr.natural} px) — the structure is proven in the other languages`);
+      else { structural[FACE || 'default'] = (structural[FACE || 'default'] || 0) + 1; ok(!lp.fail && !!lr && lr.whole && lr.inside && Math.abs(lr.title + lr.w + 6 - lr.line) <= 1, `${tag}${lang}: c · a pill carrying the longest sentence ("${long}", ${lr && lr.natural} px > the budget) is still drawn whole — the title yields (${brief(lp.rows || [])})`, JSON.stringify(lp)); }
+      if (lang === 'en') {
+        // THE CONTROL: the pre-fix product through the SAME probes
+        ok((await setCss(true)) === 'r4-cap', `${tag}CONTROL: the page now runs the pre-fix style.css (the scratch copy with the r4 cap)`);
+        const pre = await p1.evaljs(PROBE(pillWords(capsPre, lang)));
+        const preLong = await p1.evaljs(PROBE([long], [false]));
+        ok((await setCss(false)) === 'product', `${tag}CONTROL: the product style.css is back`);
+        const prePaused = (pre.rows || []).find((x) => !x.child && /refresh paused/.test(x.chip));
+        console.log(`    ${tag}CONTROL pre-fix words: ` + brief(pre.rows || []));
+        control[FACE || 'default'] = { plainPaused: prePaused, cutWords: (pre.rows || []).filter((x) => !x.whole).length, longCut: (preLong.rows || []).some((x) => !x.whole) };
+        ok(!!prePaused, `${tag}CONTROL: the pre-fix words carry the mirror's pill "refresh paused"`, JSON.stringify(pre.rows));
+        ok((preLong.rows || []).some((x) => !x.whole), `${tag}CONTROL: under the r4 cap the longest sentence IS cut — c has teeth on any face`, JSON.stringify(preLong));
+      }
+    }
+    if (reg && reg.result) await p1.cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: reg.result.identifier });
+    ok((structural[FACE || 'default'] || 0) >= 1, `${tag}c ran with teeth in at least one language (${structural[FACE || 'default'] || 0})`);
   }
+  // the mirror-only signature: green on this box's face, red on the runner's, with the mirror's own numbers
+  const cd = control.default && control.default.plainPaused, cv = control['DejaVu Sans'] && control['DejaVu Sans'].plainPaused;
+  // (a NOTE, not an assert: on the runner this box's face IS DejaVu Sans, so the default pass cuts it too)
+  console.log(`    CONTROL, this box's own face: the pre-fix product draws "refresh paused" ${cd && cd.whole ? 'WHOLE' : 'CUT'} in a plain row (${cd && cd.w}/${cd && cd.natural} px)${cd && cd.whole ? ' — why the local gate stayed green on .185' : ''}`);
+  if (hasDejaVu) ok(!!cv && cv.whole === false && cv.natural > cv.w, `CONTROL: under DejaVu Sans the pre-fix product cuts it (${cv && cv.w} of ${cv && cv.natural} px — the .185 mirror measured 82 px, fits:false) — the leg above reddens on the pre-fix product HERE`, JSON.stringify(cv));
+  for (const x of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 // ── the routes' host parameter is a PARAMETER with a named refusal ──
