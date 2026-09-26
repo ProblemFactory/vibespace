@@ -6,6 +6,7 @@
 const { MessageManager } = require('./message-manager');
 const { createMessageManager, feedLive, feedPeerCard, rebuildHistory } = require('./normalizers');
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
+const { answerPermission } = require('./server/permission-answer'); // lane J r2: THE one permission answer (the ws case + the browser takeover's stale sweep)
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
@@ -673,17 +674,10 @@ function registerWsHandler(wss, ctx) {
             });
             break;
           }
-          const session = activeSessions.get(data.sessionId);
-          if (session?.pty && session.mode === 'chat') {
-            const adapter = adapterRegistry.get(session.backend);
-            if (adapter) {
-              const payload = adapter.formatPermissionResponse(data);
-              session.pty.write(payload + '\n');
-              // Record in buffer so permission state survives refresh/restart
-              session.buffer = (session.buffer + payload + '\n').slice(-500000);
-              feedLive(session, JSON.parse(payload));
-            }
-          }
+          // THE one answer path (src/server/permission-answer.js) — the browser takeover's stale sweep answers through it too.
+          // A client's own Deny keeps the CLI's sentence: `denyMessage` is the server's alone (a stale answer names
+          // browser_paused, and a client must not be able to paint a card "stale" by sending one)
+          answerPermission(activeSessions.get(data.sessionId), { ...data, denyMessage: undefined }, { adapterRegistry, feedLive });
           break;
         }
 

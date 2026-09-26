@@ -26,9 +26,47 @@
 //      session with TWO attachments (switching reconnects to the other
 //      profile's port), the viewer count, the DPI pointer helper at 375×667
 //      and under a non-1 `--ui-scale`;
+//   ③b LANE H (2026-09-25 — the owner watched an agent's ephemeral browser
+//      start and saw nothing): a chat session with NO attachment, its chat
+//      window open; the session's first `vibespace-browser open <url>` (the
+//      SHIPPED CLI, as the agent) ⇒ within 5 s a `browser-live` window is BORN
+//      beside the chat in ONE split chain (silently), streaming THAT browser
+//      (EPHEMERAL_REF); the recorder's viewer-less tap files the navigation
+//      under data/browser-trace/ephemeral and the tool card's Browser actions
+//      row shows its thumbnail; the status chip and the session card say
+//      "Agent browser · (ephemeral) <session>"; the browser stopping greys the
+//      view (`browser_stopped`, never a relaunch by the view) and its next
+//      verb reconnects it. CONTROL: the same server with a keeper copy whose
+//      holder rows drop the ephemeral ⇒ no window, no trace, no card chip.
 //   ④ the REAL binary (agent-browser ≥ 0.32 + a chrome): one headless
 //      chromium on a scratch profile, the real `stream status --json`, the
-//      real bridge, one real JPEG frame at a viewer — SKIPs with evidence.
+//      real bridge, one real JPEG frame at a viewer — SKIPs with evidence;
+//   ⑤ lane J (inc-muhgv0fb-9i4u "接管浏览器的时候鼠标操作位置不对"): the REAL
+//      rung end to end — a session's own ephemeral browser (headless, and
+//      HEADED on its own 2560×1440 Xvfb: the owner's shape) opened by the real
+//      `vibespace-browser open`, the live view in chrome as the owner's client
+//      (1920×963, DPR 2/1, UI scale 100/125 %, the window 1400×800 and 700×900),
+//      Take over, a real click where grid cell (10,5) is DRAWN lands on page
+//      (525,275) within 2 px (the page reports it); the CONTROL is the pre-fix
+//      belief ("the metadata IS the frame") in a patched copy, through the same
+//      socket — 71 px headless, 132 px or dropped headed; then a new tab and a
+//      `set viewport` re-read; the leg reaps the daemons it started.
+//   ⑥ lane J r2 (the 2026-09-25 naive-user study, three operators: typed text
+//      vanished or landed in the CHAT COMPOSER — "tomsmithtomsmith…", a password
+//      one Enter from sent — an approval queued before a takeover ran a stale
+//      step, a click that reached nothing looked like a frozen picture, the
+//      picture sat between dark bands): on the same real rung — the fake claude
+//      queues a browser `click` approval at spawn, the FIRST takeover answers it
+//      stale (the CLI's stdin receives a deny naming browser_paused) and the
+//      chat card says why; the picture's band above measured in PIXELS (0 px;
+//      the pre-fix centred CSS as the control: > 100 px); a click on a form
+//      input ripples at the page point it reached and the bar echoes it; the
+//      chat window is ATTACHED (session-lifecycle's chatView.focus) and its
+//      composer focused by hand, then "tomsmith", an IME commit and a paste are
+//      typed into the client ⇒ the PAGE's input holds all of it and the
+//      composer is empty; the CONTROL is the same client rebuilt with the
+//      keyboard owner neutered (one edit, esbuild in the leg's worktree) ⇒ the
+//      composer gets "tomsmith" and the page gets nothing.
 // Heavy: chrome + a worktree server + (optionally) a real chromium; free ports,
 // per-pid scratch paths only.
 import fs from 'node:fs';
@@ -38,7 +76,10 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
+import { gitEnvFrom } from './git-env.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const S = require('../src/browser-stream.js');
 const BS = require('../src/server/browser-stream.js');
@@ -52,7 +93,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 25) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (pred()) return true; await sleep(every); } return pred(); };
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const FIX = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/browser-stream/session-0.32.0.json'), 'utf8'));
-const FRAME = FIX.server_to_client.frame;           // a REAL 1280×720 JPEG frame
+const FRAME = FIX.server_to_client.frame;           // a REAL 0.32.0 frame: a 1280×577 JPEG under a 1280×720 metadata claim (lane J)
 const JPEG = FRAME.data;
 const ROOT = scratch('browser-live');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
@@ -60,13 +101,37 @@ const procs = new Set();
 const worktrees = new Set();
 function cleanup() {
   for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
+  // ③'s session outlives the SIGKILLed server by design (dtach master + wrapper + the fake claude's `sleep`): end every
+  // process whose environment or cwd names this suite's root — the scratch reaper found them after every run (lane H verify r1)
+  for (const d of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { if (Number(d) === process.pid) continue; try { const cwd = fs.readlinkSync(`/proc/${d}/cwd`); if (cwd.startsWith(ROOT + '/') || fs.readFileSync(`/proc/${d}/environ`, 'utf8').includes(ROOT + '/')) process.kill(Number(d), 'SIGKILL'); } catch { /* not ours / gone */ } }
   for (const wt of worktrees) { try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { } }
   fs.rmSync(ROOT, { recursive: true, force: true });
   try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch { }
+  for (const h of extraHomes) { try { fs.rmSync(h, { recursive: true, force: true }); } catch { } }
 }
 let fakeHome = null;
+const extraHomes = [];
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(130); });
+/** The REAL agent-browser daemons a leg started outlive `close --all` (children gone, the daemon stays — 90 of them were
+ *  found alive from earlier runs): killed by their OWN environment's session name — evidence, never a process name. */
+function reapDaemons(sessionNames, { cwdUnder = null } = {}) {
+  const killed = [];
+  let pids = []; try { pids = fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)); } catch { return killed; }
+  for (const pid of pids) {
+    if (Number(pid) === process.pid) continue;
+    let envs = ''; try { envs = fs.readFileSync(`/proc/${pid}/environ`, 'utf8'); } catch { continue; }
+    const m = /(?:^|\0)AGENT_BROWSER_SESSION=([^\0]*)/.exec(envs);
+    // a browser the daemon started carries none of its env — it carries the cwd of whoever launched the daemon: the suite's
+    // OWN worktree server (`cwdUnder`), so that is the second piece of evidence
+    let cwd = ''; if (cwdUnder) { try { cwd = fs.readlinkSync(`/proc/${pid}/cwd`).replace(/ \(deleted\)$/, ''); } catch { } }
+    if ((m && sessionNames.has(m[1])) || (cwdUnder && (cwd === cwdUnder || cwd.startsWith(cwdUnder + '/')))) { try { process.kill(Number(pid), 'SIGKILL'); killed.push(Number(pid)); } catch { } }
+  }
+  // a SIGKILL is asynchronous: wait (bounded) until they are gone, so a dying GPU process writes nothing into a dir we remove next
+  const t0 = Date.now();
+  while (killed.some((p) => fs.existsSync(`/proc/${p}`)) && Date.now() - t0 < 3000) { const x = Date.now(); while (Date.now() - x < 25) { /* spin */ } }
+  return killed;
+}
 const done = () => { console.log(fail ? `\n${fail} FAILED (${pass} passed${skipped ? ', ' + skipped + ' skipped' : ''})` : `\nALL PASS (${pass}${skipped ? ', ' + skipped + ' skipped' : ''})`); process.exit(fail ? 1 : 0); };
 
 // ═══ ① PURE ═══════════════════════════════════════════════════════════════
@@ -83,6 +148,7 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
   for (const t of ['status', 'tabs', 'frame', 'command', 'result']) ok(S.classifyUpstream(FIX.server_to_client[t]) === (t === 'frame' ? 'frame' : 'ordered'), `fixture ${t} classified ${t === 'frame' ? 'frame (latest-wins)' : 'ordered'}`);
   ok(S.classifyUpstream({ type: 'something-new' }) === 'ordered' && S.classifyUpstream('x') === 'invalid' && S.classifyUpstream({}) === 'invalid', 'an unknown type is relayed ordered (a newer upstream is not silenced); a non-record is invalid');
   ok(FRAME.metadata.deviceWidth === 1280 && FRAME.metadata.deviceHeight === 720 && Buffer.from(JPEG, 'base64').slice(0, 3).toString('hex') === 'ffd8ff' && FRAME.seq === undefined, 'the captured frame is a real JPEG with device dimensions in `metadata` and NO seq (0.32.0)');
+  { const js = S.jpegSize(JPEG); ok(js && js.width === 1280 && js.height === 577 && FRAME.metadata.timestamp === 0, `lane J: the captured JPEG itself is ${js && js.width}×${js && js.height} while its metadata claims 1280×720 (timestamp 0 — synthesized by the stream server): the metadata is not the picture`); }
   ok(FIX.origin['http://example.com'].startsWith('403') && FIX.origin.absent === 'accepted' && S.originHeaderFor(39927) === 'http://127.0.0.1:39927', 'origin rule pinned: foreign 403, loopback/absent accepted; the bridge presents a loopback Origin');
 
   // the target ladder
@@ -146,6 +212,30 @@ console.log('— ① the PURE rules over the captured 0.32.0 shapes');
   ok(S.liveTitle({ label: 'Work', sessionName: 'refactor' }) === 'Work · refactor' && S.liveTitle({ sessionName: 'x', ephemeralWord: 'eph' }) === 'eph · x', 'the title names the pane\'s profile, then the session');
   const h = S.hello({ viewers: 2, target: t, mode: 'watch' });
   ok(h.type === 'hello' && h.viewers === 2 && h.mode === 'watch' && h.target === null && h.protocol.frames === 'latest-wins', 'hello carries viewers / mode / the target (null for a refused one) / the protocol');
+  // NAIVE STUDY 2 (2026-09-25) — the pure halves of findings 2, 3 and 4, each with a mutant-copy control below
+  {
+    const V = [{ id: 'win-blive-s1', sessionId: 's1', profileRef: S.EPHEMERAL_REF, connected: true }, { id: 'w-x', sessionId: 's2', profileRef: 'work', connected: false }];
+    const p1 = S.liveViewPlan({ views: V, sessionId: 's1' }), p2 = S.liveViewPlan({ views: V, sessionId: 's2' }), p3 = S.liveViewPlan({ views: V, sessionId: 's2', profileId: 'personal' }), p4 = S.liveViewPlan({ views: V, sessionId: 's3' }), p5 = S.liveViewPlan({ views: V, sessionId: 's1', syncId: 'restored-7' });
+    ok(p1.act === 'focus' && p1.id === 'win-blive-s1' && !p1.switchTo && !p1.reconnect && p2.act === 'focus' && p2.reconnect === true && p3.act === 'focus' && p3.switchTo === 'personal' && !p3.reconnect && p4.act === 'create' && p4.syncId === 'win-blive-s3' && p5.act === 'create' && p5.syncId === 'restored-7', 'finding 2: a MANUAL open FOCUSES the session\'s existing view (switching its pane when another is asked, reconnecting it when down); none ⇒ ONE new window under the auto-bind\'s id win-blive-<session>; a replay\'s own syncId is left alone', JSON.stringify({ p1, p2, p3, p4, p5 }));
+    const dig = { browsers: { 'bp-00000001': { state: 'ready' }, 'bp-00000002': { state: 'stopped' } }, ephemerals: [{ browserKey: 'bk-0000000a', state: 'ready' }, { browserKey: 'bk-0000000b', state: 'stopped' }] };
+    ok(S.viewTargetRunning({ target: { kind: 'attachment', profileId: 'bp-00000001' }, digest: dig }) === true && S.viewTargetRunning({ target: { kind: 'attachment', profileId: 'bp-00000002' }, digest: dig }) === false && S.viewTargetRunning({ target: { kind: 'ephemeral', ns: 'vs-bk-0000000a' }, digest: dig }) === true && S.viewTargetRunning({ target: { kind: 'ephemeral', ns: 'vs-bk-0000000b' }, digest: dig }) === false && S.viewTargetRunning({ target: null, digest: dig }) === null, 'finding 3: a STOPPED view resumes only when the digest says ITS browser runs again (a view never starts one)');
+    const ht = S.hello({ target: S.streamTargetFor({ browserKey: 'bk-0000000a', envPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a'], profileRef: S.EPHEMERAL_REF }) });
+    ok(ht.target && ht.target.ns === 'vs-bk-0000000a', 'the hello names the target\'s namespace (what a stopped ephemeral view waits for)');
+    const ck = S.childRefFor('bk-0000000a.2');
+    const tc = S.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a.2'] });
+    ok(tc.ok && tc.kind === 'ephemeral' && tc.child === true && tc.browserKey === 'bk-0000000a.2' && tc.ns === 'vs-bk-0000000a.2' && tc.envPairs.length === 2 && S.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck }).code === 'no-browser' && S.streamTargetFor({ browserKey: 'bk-0000000b', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=x'] }).code === 'not_attached' && S.childKeyOfRef('~child:bk-0000000a.x') === null, 'finding 4: `~child:<key>` names a SUB-AGENT\'s browser only with its own pairs (the recorder\'s tap); no pairs (a viewer) ⇒ no-browser; another conversation\'s child ⇒ not_attached');
+    // controls: the pre-fix rules in patched copies of the PURE module
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const MS = mutantCopies('browser-live-pure', repo);
+    const ssrc = fs.readFileSync(path.join(repo, 'src/browser-stream.js'), 'utf8');
+    const m1 = ssrc.replace("  if (syncId) return { act: 'create', syncId };", "  return { act: 'create', syncId: syncId || null };");
+    const m2 = ssrc.replace("  if (String(profileRef || '').startsWith(CHILD_REF_PREFIX)) {", "  if (false) {");
+    const S1 = m1 !== ssrc ? MS.load('src/browser-stream.js', m1, 'open-new') : null, S2 = m2 !== ssrc ? MS.load('src/browser-stream.js', m2, 'no-child') : null;
+    ok(S1 && S1.liveViewPlan({ views: V, sessionId: 's1' }).act === 'create', 'CONTROL: the pre-fix open (every click creates a window) in a patched copy ⇒ the focus leg goes red');
+    ok(S2 && S2.streamTargetFor({ browserKey: 'bk-0000000a', profileRef: ck, childPairs: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.2'] }).child !== true, 'CONTROL: a copy without the child ref resolves `~child:` to something else (not the helper\'s browser) ⇒ the finding-4 leg goes red');
+    const { copiesCensus } = await import('./mutant-copy.mjs');
+    for (const r of copiesCensus(MS.files, MS.dir, repo, { minCopies: 2, label: '① naive study 2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  }
 }
 
 // ═══ ② the REAL bridge over a FAKE upstream ══════════════════════════════
@@ -229,6 +319,7 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   await b.until((v) => v.frames >= 1 && v.byType('tabs').length, 3000);
   ok(up.clients.size === 1 && asked.length === 1, 'the second viewer shares the ONE upstream connection (no second port ask, no second upstream client)');
   ok(b.frames === 1 && b.byType('tabs').length === 1 && b.byType('url').length === 1 && b.byType('hello')[0].viewers === 2, 'the late viewer is replayed the last status/tabs/url AND the last frame at once; its hello counts 2');
+  ok(b.byType('status').some((m) => m.state === 'upstream-open'), 'the late viewer is told the upstream is ALREADY open (2.369.180: lane H\'s recorder taps a relay before any view joins; lane J\'s keyboard ownership reads `connected` off this record)');
   await a.until((v) => v.byType('viewers').some((m) => m.n === 2), 2000);
   ok(a.byType('viewers').some((m) => m.n === 2), 'the first viewer hears the viewer count rise to 2');
   await sleep(120);                                            // past both viewers' fps gate (default 15 ⇒ 67 ms)
@@ -324,24 +415,9 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   srv.close();
 }
 
-// ═══ ③ headless chrome: the WINDOW on a worktree server ═══════════════════
-console.log('— ③ the browser-live window in headless chrome (worktree server, fake claude + fake agent-browser)');
-const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
-let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
-if (!CHROME) skip('no chrome/chromium on this box — the window leg needs one');
-else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
-else await (async () => {
-  const upA = await fakeUpstream({ fps: 4 }), upB = await fakeUpstream({ fps: 4 });
-  fakeHome = scratchHome('browser-live-home', fs);
-  const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
-  const AB_STATE = path.join(ROOT, 'ab-state'); fs.mkdirSync(AB_STATE, { recursive: true });
-  // the fake claude: prints the real CLI's first two lines (a hook line + the init frame) then sleeps
-  const SID = crypto.randomUUID();
-  const hookLine = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
-  const initLine = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: ROOT, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
-  fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n%s\\n' '${hookLine}' '${initLine}';; esac\nexec sleep 600\n`, { mode: 0o755 });
-  // the fake agent-browser: the P1 suites' shape + `stream status --json` naming the fake upstream of THIS namespace
-  fs.writeFileSync(path.join(BIN, 'agent-browser'), `#!${process.execPath}
+/** The fake agent-browser the chrome legs share (③ and ③b): the P1 suites' shape, `stream status --json` naming
+ *  the fake upstream of THIS namespace (ports.json), `open` of any url (logged to opens.log — lane H reads it). */
+const FAKE_AB_SOURCE = () => `#!${process.execPath}
 const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
 const st = process.env.FAKE_AB_STATE; const ns = process.env.AGENT_BROWSER_NAMESPACE || 'default';
 const f = path.join(st, ns + '.json');
@@ -359,7 +435,26 @@ if (a === 'stream' && b === 'status') { fs.appendFileSync(path.join(st, 'stream.
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed: 1, failed: [], sessions: [] } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
-`, { mode: 0o755 });
+`;
+
+// ═══ ③ headless chrome: the WINDOW on a worktree server ═══════════════════
+console.log('— ③ the browser-live window in headless chrome (worktree server, fake claude + fake agent-browser)');
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
+if (!CHROME) skip('no chrome/chromium on this box — the window leg needs one');
+else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
+else await (async () => {
+  const upA = await fakeUpstream({ fps: 4 }), upB = await fakeUpstream({ fps: 4 });
+  fakeHome = scratchHome('browser-live-home', fs);
+  const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
+  const AB_STATE = path.join(ROOT, 'ab-state'); fs.mkdirSync(AB_STATE, { recursive: true });
+  // the fake claude: prints the real CLI's first two lines (a hook line + the init frame) then sleeps
+  const SID = crypto.randomUUID();
+  const hookLine = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID, hook_name: 'SessionStart' });
+  const initLine = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, cwd: ROOT, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
+  fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n%s\\n' '${hookLine}' '${initLine}';; esac\nexec sleep 600\n`, { mode: 0o755 });
+  // the fake agent-browser: the P1 suites' shape + `stream status --json` naming the fake upstream of THIS namespace
+  fs.writeFileSync(path.join(BIN, 'agent-browser'), FAKE_AB_SOURCE(), { mode: 0o755 });
   const PORT = await freePort(), CDP = await freePort();
   execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' }); worktrees.add(wt);
   for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]); }
@@ -367,7 +462,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const baseEnv = { ...process.env, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), FAKE_AB_STATE: AB_STATE };
   for (const k of Object.keys(baseEnv)) if (k.startsWith('AGENT_BROWSER_')) delete baseEnv[k];
   let journal = '';
-  const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
   const booted = await until(() => journal.includes('Ready.'), 40000, 100);
@@ -430,13 +525,16 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const title = await q('return w.element.querySelector(".window-title")?.textContent || w.title || ""');
   ok(/Work/.test(title), `the title names the profile of the pane you are looking at (${JSON.stringify(title).slice(0, 60)})`);
   ok(await q("return getComputedStyle(L.el().querySelector('.browser-live-canvas')).zoom !== undefined"), 'the picture container carries the counter-zoom rule (zoom is a live CSS property)');
-  // DPI pointer helper: at ui-scale 1 and 0.8, the image centre maps to (640,360)
+  // DPI pointer helper: at ui-scale 1 and 0.8, the image centre maps to the PAGE's centre. The fixture's frame is the
+  // real 0.32.0 capture — a 1280×577 JPEG under a 1280×720 metadata claim (lane J: the page is 1280×577; the fake
+  // upstream has no CDP to read, so the view maps by the picture 1:1) ⇒ (640, 289), never the claim's (640, 360)
   for (const scale of [1, 0.8]) {
-    const r = await q(`document.documentElement.style.setProperty('--ui-scale', '${scale}'); document.body.style.zoom = '${scale}'; const img = L.img(); const rect = img.getBoundingClientRect(); const p = L.pointerAt({ clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }); document.body.style.zoom = ''; document.documentElement.style.removeProperty('--ui-scale'); return { p, w: rect.width };`);
-    ok(r.p && r.p.x === 640 && r.p.y === 360, `ui-scale ${scale}: the picture's centre maps to device (640,360) (rect width ${Math.round(r.w)})`);
+    const r = await q(`document.documentElement.style.setProperty('--ui-scale', '${scale}'); document.body.style.zoom = '${scale}'; const img = L.img(); const rect = img.getBoundingClientRect(); const d = L.drawn(); const p = L.pointerAt({ clientX: d.left + d.width / 2, clientY: d.top + d.height / 2 }); document.body.style.zoom = ''; document.documentElement.style.removeProperty('--ui-scale'); return { p, w: rect.width, g: L.geometry() };`); // lane J r2: the DRAWN picture's centre (top-aligned — no longer the element's centre)
+    ok(r.p && r.p.x === 640 && r.p.y === 289 && r.g.source === 'picture', `ui-scale ${scale}: the picture's centre maps to the page's centre (640,289) — the picture's 1280×577, not the metadata's 1280×720 (rect width ${Math.round(r.w)}, geometry ${r.g && r.g.source})`, JSON.stringify(r));
   }
-  // a second viewer (a second window in the same page) ⇒ viewer count 2
-  await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(sessionId)}, profileId: ${JSON.stringify(work.id)} })`);
+  // a second viewer (a second window in the same page) ⇒ viewer count 2 — opened the way a layout REPLAY / another client's
+  // window is (an explicit syncId): a MANUAL open now goes to the session's existing view (naive study 2, finding 2)
+  await evaluate(`window.app.openBrowserLive({ sessionId: ${JSON.stringify(sessionId)}, profileId: ${JSON.stringify(work.id)}, syncId: 'win-blive-second-viewer' })`);
   const two = await (async () => { for (let i = 0; i < 40; i++) { if (await q('return L.state().viewers === 2')) return true; await sleep(200); } return false; })();
   ok(two && upA.clients.size === 1, 'a second window on the same target is a second VIEWER on the ONE upstream connection (viewers = 2)');
   // switch the strip to Personal ⇒ reconnects to the other profile's port
@@ -471,10 +569,253 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   srv.kill('SIGKILL');
 })().catch((e) => ok(false, 'the window leg threw', e && (e.stack || e.message)));
 
+// ═══ ③b LANE H: the ephemeral browser shows itself ════════════════════════
+/**
+ * ONE worktree server + ONE headless chrome page, a chat session with no attachment, the agent's first
+ * `vibespace-browser open` — and what the page shows within 5 s. `mutate` patches the WORKTREE's keeper
+ * copy (a scratch checkout, never this one) so its holder rows drop the ephemeral: the negative control.
+ * Returns the observations; asserts nothing itself (the caller judges both runs).
+ */
+async function ephemeralLeg({ tag, mutate = false, clientPrefix = false }) {
+  // an ASYNC predicate (a CDP evaluate) — `until` would take the pending promise itself for a yes
+  const untilA = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
+  const obs = { tag };
+  const R2 = path.join(ROOT, 'eph-' + tag); fs.mkdirSync(R2, { recursive: true });
+  const home = scratchHome('browser-live-eph-' + tag + '-home', fs); extraHomes.push(home);
+  const wt2 = path.join(R2, 'wt'), BIN2 = path.join(R2, 'bin'), AB2 = path.join(R2, 'ab-state');
+  fs.mkdirSync(BIN2, { recursive: true }); fs.mkdirSync(AB2, { recursive: true });
+  const up = await fakeUpstream({ fps: 4 });
+  // a random id like the suite's other legs (③ / ④): this server runs under its own scratch HOME and nothing here writes
+  // a transcript, so it is not a fixture CARRIER (test-fixture-isolation (c): a suite that mints the fixture family must be a transcript
+  // writer with its own ~/.claude census — lane H's first cut minted one here and that census went red, 2.369.180)
+  const SID2 = crypto.randomUUID();
+  const hook2 = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID2, hook_name: 'SessionStart' });
+  const init2 = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID2, cwd: R2, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
+  // the fake claude: the real CLI's first two lines, its ENV to a file (the suite runs the agent's CLI with it),
+  // then every emit-<pid>-* file the suite writes is printed as the CLI's own stdout (a tool card, its result)
+  // (a probe — `--version` — answers and exits; a session lives at most 600 s like ③'s `exec sleep 600`: never a loop that outlives the suite)
+  fs.writeFileSync(path.join(BIN2, 'claude'), `#!/bin/sh\ncase " $* " in *" --version "*) echo '2.1.281 (Claude Code)'; exit 0;; esac\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n%s\\n' '${hook2}' '${init2}';; esac\nenv > "$FAKE_AB_STATE/claude-env-$$"\ni=0; while [ $i -lt 3000 ]; do for f in "$FAKE_AB_STATE"/emit-$$-*; do [ -f "$f" ] || continue; cat "$f"; rm -f "$f"; done; sleep 0.2; i=$((i+1)); done\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(BIN2, 'agent-browser'), FAKE_AB_SOURCE(), { mode: 0o755 });
+  fs.writeFileSync(path.join(AB2, 'ports.json'), '{}');
+  const PORT2 = await freePort(), CDP2 = await freePort();
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt2, 'HEAD'], { stdio: 'ignore' }); worktrees.add(wt2);
+  for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt2, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt2, f)]); }
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt2, 'node_modules'));
+  if (mutate) {
+    const kf = path.join(wt2, 'src/server/browser-keeper.js');
+    const src = fs.readFileSync(kf, 'utf8');
+    const mut = src.replace('const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView });', 'const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView }).filter((r) => !r.ephemeral);');
+    obs.mutated = mut !== src;
+    fs.writeFileSync(kf, mut);
+  }
+  if (clientPrefix) {
+    // naive study 2 CONTROL: the PRE-FIX client in this leg's OWN scratch worktree (never the checkout, §51) — a manual open
+    // creates a window every time (finding 2) and a stopped browser's view keeps the driving badge (finding 3); bundle rebuilt here
+    const cf = path.join(wt2, 'src/lib/browser-live-window.js');
+    const csrc = fs.readFileSync(cf, 'utf8');
+    const cmut = csrc.replace('  const plan = liveViewPlan({ views, sessionId, profileId, syncId: syncId || null });', "  const plan = { act: 'create', syncId: syncId || null };").replace("        if (m.state === 'error' && m.code === 'browser_stopped') {", '        if (false) {');
+    obs.clientMutated = cmut !== csrc && (cmut.match(/if \(false\) \{/g) || []).length >= 1 && cmut.includes("const plan = { act: 'create'");
+    fs.writeFileSync(cf, cmut);
+    try { execFileSync(path.join(wt2, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt2, stdio: 'ignore', timeout: 120000 }); obs.rebuilt = true; } catch (e) { obs.rebuilt = false; obs.rebuildErr = String(e && e.message).slice(0, 300); }
+  }
+  const env2 = { ...process.env, PATH: BIN2 + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN2, 'claude'), FAKE_AB_STATE: AB2 };
+  for (const k of Object.keys(env2)) if (k.startsWith('AGENT_BROWSER_')) delete env2[k];
+  let journal2 = '';
+  const srv2 = spawn('node', ['server.js'], { cwd: wt2, env: { ...env2, ...VNC_ENV, PORT: String(PORT2), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  procs.add(srv2);
+  srv2.stdout.on('data', (d) => { journal2 += d; }); srv2.stderr.on('data', (d) => { journal2 += d; });
+  const chromeLog2 = [];
+  let chrome2 = null, cdp2 = null, wsMain2 = null;
+  try {
+    obs.booted = await until(() => journal2.includes('Ready.'), 40000, 100);
+    if (!obs.booted) { obs.journal = journal2.slice(-800); return obs; }
+    wsMain2 = new WebSocket(`ws://127.0.0.1:${PORT2}/ws`);
+    const msgs2 = []; wsMain2.on('message', (d) => { try { msgs2.push(JSON.parse(d)); } catch { } });
+    await new Promise((r, e) => { wsMain2.on('open', r); wsMain2.on('error', e); });
+    wsMain2.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: R2, cols: 80, rows: 24, reqId: 'e1', name: 'eph-one' }));
+    await until(() => msgs2.some((m) => m.type === 'created'), 15000);
+    const created2 = msgs2.find((m) => m.type === 'created');
+    obs.created = !!(created2 && created2.sessionId);
+    if (!obs.created) { obs.journal = journal2.slice(-800); return obs; }
+    const sid = created2.sessionId;
+    obs.sessionId = sid;
+    // the agent's environment, off the fake claude (its AGENT_BROWSER_SESSION names this conversation's browser key)
+    let agentEnv = null, claudePid = null;
+    await until(() => {
+      for (const n of fs.readdirSync(AB2).filter((x) => x.startsWith('claude-env-'))) {
+        const t = fs.readFileSync(path.join(AB2, n), 'utf8');
+        if (/^AGENT_BROWSER_SESSION=vs-bk-/m.test(t) && t.includes('VIBESPACE_SESSION_TOKEN=')) { agentEnv = {}; for (const line of t.split('\n')) { const i = line.indexOf('='); if (i > 0) agentEnv[line.slice(0, i)] = line.slice(i + 1); } claudePid = n.slice('claude-env-'.length); return true; }
+      }
+      return false;
+    }, 15000, 100);
+    obs.agentEnv = !!agentEnv;
+    if (!agentEnv) { obs.journal = journal2.slice(-800); return obs; }
+    const bk = agentEnv.AGENT_BROWSER_SESSION.slice(3);
+    obs.browserKey = bk;
+    fs.writeFileSync(path.join(AB2, 'ports.json'), JSON.stringify({ ['vs-' + bk]: up.port }));
+    // headless chrome on the app, the chat window open on the desktop you are looking at
+    chrome2 = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP2}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(R2, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
+    procs.add(chrome2);
+    chrome2.stderr.on('data', (d) => { if (chromeLog2.length < 40) chromeLog2.push(d.toString()); });
+    let target = null;
+    for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP2}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
+    if (!target) { obs.chrome = chromeLog2.join('').slice(0, 400); return obs; }
+    cdp2 = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+    await new Promise((r) => cdp2.on('open', r));
+    let seq2 = 0; const pend2 = new Map();
+    cdp2.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend2.has(m.id)) { pend2.get(m.id)(m); pend2.delete(m.id); } });
+    const send2 = (method, params = {}) => new Promise((r) => { const id = ++seq2; pend2.set(id, r); cdp2.send(JSON.stringify({ id, method, params })); });
+    const ev2 = async (expr) => { const r = await send2('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval threw'); return r.result?.result?.value; };
+    await send2('Page.enable'); await send2('Runtime.enable');
+    await send2('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await send2('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await send2('Page.navigate', { url: `http://127.0.0.1:${PORT2}/` });
+    obs.appBooted = await (async () => { for (let i = 0; i < 120; i++) { try { if (await ev2('(async () => { if (!window.app || !window.app.ready) return false; return await Promise.race([window.app.ready.then(() => true), new Promise((r) => setTimeout(() => r(false), 100))]); })()')) return true; } catch { } await sleep(250); } return false; })();
+    if (!obs.appBooted) return obs;
+    await ev2('window.app.refreshBrowserProfiles()');
+    // the page records every toast it shows (the auto-bind is SILENT: no Undo toast)
+    await ev2(`(() => { window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && /toast/.test(n.className || '')) window.__toasts.push(n.textContent || ''); }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
+    await ev2(`window.app.attachSession(${JSON.stringify(sid)}, 'eph-one', ${JSON.stringify(R2)}, { mode: 'chat', backend: 'claude' })`);
+    const W = (js) => ev2(`(() => { const app = window.app, wm = app.wm; const byType = (t) => [...wm.windows.values()].filter((w) => w.type === t); const chat = () => byType('chat')[0] || null; const live = () => byType('browser-live')[0] || null; ${js} })()`);
+    obs.chatUp = await untilA(() => W(`const c = chat(); return !!(c && app.sessions.get(c.id) && app.sessions.get(c.id).sessionId === ${JSON.stringify(sid)});`), 15000, 150);
+    if (!obs.chatUp) return obs;
+    obs.chatId = await W('return chat().id;');
+    obs.liveBefore = await W('return byType("browser-live").length;');
+    // the agent's tool call starts (the card the Browser actions row rides), then the agent runs the SHIPPED CLI
+    const emit = (lines) => { const f = path.join(AB2, `emit-${claudePid}-${Date.now()}-${Math.random().toString(16).slice(2)}`); fs.writeFileSync(f + '.part', lines.map((l) => JSON.stringify(l)).join('\n') + '\n'); fs.renameSync(f + '.part', f); };
+    const URL1 = 'https://example.com/lane-h-' + tag;
+    emit([{ type: 'assistant', message: { id: 'msg_laneh_' + tag, type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_laneh_' + tag, name: 'Bash', input: { command: 'vibespace-browser open ' + URL1, description: 'Open the page' } }], stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, session_id: SID2, uuid: crypto.randomUUID() }]);
+    await sleep(700);
+    const t0 = Date.now();
+    const cliRun = await new Promise((resolve) => { const { execFile } = require('child_process'); execFile(process.execPath, [path.join(wt2, 'data/bin/vibespace-browser'), 'open', URL1], { env: agentEnv, cwd: R2, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })); });
+    obs.cli = { status: cliRun.status, stderr: cliRun.stderr.slice(0, 600) };
+    // the stream server mirrors the command the daemon ran (the captured shapes), frames keep flowing (fps 4)
+    const cmdId = 'r' + Date.now();
+    up.send({ type: 'command', id: cmdId, action: 'navigate', params: { action: 'navigate', url: URL1 }, timestamp: Date.now() });
+    await sleep(80);
+    up.send({ type: 'result', id: cmdId, action: 'navigate', success: false, data: { url: URL1 }, duration_ms: 40, timestamp: Date.now() });
+    up.send({ type: 'url', url: URL1, timestamp: Date.now() });
+    // within 5 s of the CLI starting: the live view, born in the chat's chain
+    obs.bound = await untilA(() => W(`const l = live(); return !!(l && l._tabChain && l._tabChain.layout === 'split');`), Math.max(500, 5000 - (Date.now() - t0)), 100);
+    obs.boundMs = Date.now() - t0;
+    if (obs.bound) {
+      obs.chain = await W(`const l = live(), c = chat(); const ch = c._tabChain; return { same: l._tabChain === ch, host: ch.tabs[0], pair: ch.split && ch.split.pair, liveId: l.id, syncId: l.id, target: l._browserLive.state().target, spec: l._openSpec || null };`);
+      obs.frames = await untilA(() => W('const l = live(); return !!(l && l._browserLive.state().frames >= 1 && l._browserLive.img().naturalWidth === 1280);'), 10000, 150);
+    }
+    // naive study 2 (finding 2): the user opens the live view BY HAND — the status-bar chip's "Open live view", twice
+    if (!mutate) {
+      // the focus starts somewhere ELSE (a probe window outside the chat's chain) — "Open live view" must bring the ONE view forward
+      await W("const pw = app.wm.createWindow({ title: 'probe', type: 'probe' }); window.__probeWin = pw.id; return true;");
+      const openByHand = async () => {
+        await W('app.wm.focusWindow(window.__probeWin); return true;');
+        await W("document.querySelector('.chat-status-browser') && document.querySelector('.chat-status-browser').click(); return true;");
+        const got = await untilA(() => W("return !!document.querySelector('.chat-status-browser-live');"), 4000, 100);
+        if (got) await W("document.querySelector('.chat-status-browser-live').click(); return true;");
+        await sleep(400);
+        return got;
+      };
+      obs.menuFound = await openByHand();
+      obs.menuFound2 = await openByHand();
+      obs.liveAfterOpens = await W('return byType("browser-live").length;');
+      // in a split chain the chain's host takes the focus (both panes show): the active window is IN the live view's chain, never the probe
+      obs.activeIsLive = await W('const a = app.wm.activeWindowId; return a !== window.__probeWin && byType("browser-live").some((w) => w.id === a || (w._tabChain && w._tabChain.tabs.includes(a)));');
+      await W('try { app.wm.closeWindow(window.__probeWin); } catch { } return true;');
+    }
+    emit([{ type: 'user', message: { role: 'user', content: [{ tool_use_id: 'toolu_laneh_' + tag, type: 'tool_result', content: '{"success":true}', is_error: false }] }, parent_tool_use_id: null, session_id: SID2, uuid: crypto.randomUUID() }]);
+    // the recorder's entry on disk (no viewer was needed — it was armed at the start)
+    const idx = path.join(wt2, 'data', 'browser-trace', 'ephemeral', 'index.ndjson');
+    const readIdx = () => { try { return fs.readFileSync(idx, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    await until(() => readIdx().length > 0, mutate ? 4000 : 10000, 150);
+    obs.entries = readIdx();
+    // the tool card's Browser actions row: a thumbnail drawn from the entry's frame
+    // the row's thumbnail names the ENTRY's frame (thumbs are loading=lazy — a content-visibility card may not have
+    // fetched it yet — so the frame is fetched here from the page, with the page's own cookie, and judged as a JPEG)
+    obs.thumb = await untilA(() => W(`const el = document.querySelector('.chat-browser-trace'); return !!(el && [...el.querySelectorAll('img.browser-trace-thumb-img')].some((i) => /\\/api\\/browser\\/actions\\/tr-[0-9a-f]+\\/frame\\/(after|before)$/.test(i.getAttribute('src') || '')));`), mutate ? 4000 : 12000, 250);
+    if (obs.thumb) obs.thumbFrame = await ev2(`(async () => { const i = [...document.querySelectorAll('.chat-browser-trace img.browser-trace-thumb-img')][0]; const r = await fetch(i.getAttribute('src')); const b = new Uint8Array(await r.arrayBuffer()); return { src: i.getAttribute('src'), status: r.status, type: r.headers.get('content-type'), magic: b.length > 2 ? b[0].toString(16) + b[1].toString(16) : '', bytes: b.length }; })()`);
+    obs.traceRow = await W(`const el = document.querySelector('.chat-browser-trace'); return el ? { text: el.textContent.replace(/\\s+/g, ' ').trim().slice(0, 200), ts: el.dataset.traceTs || null, imgs: [...el.querySelectorAll('img')].map((i) => i.src.replace(location.origin, '')).slice(0, 4) } : null;`);
+    obs.rowName = await W(`const r = (app.sidebar._allSessions || []).find((x) => x.webuiId === ${JSON.stringify(sid)}); return r ? (r.webuiName || r.name || '') : null;`);
+    // the chips
+    await untilA(() => W(`return !!document.querySelector('.chat-status-browser');`), 6000, 200);
+    obs.statusChip = await W(`const c = document.querySelector('.chat-status-browser'); return c ? c.textContent.replace(/\\s+/g, ' ').trim() : null;`);
+    await untilA(() => W(`return !!document.querySelector('.sess-browser-chip');`), mutate ? 3000 : 12000, 250);
+    obs.cardChip = await W(`const c = document.querySelector('.sess-browser-chip'); return c ? c.textContent.replace(/\\s+/g, ' ').trim() : null;`);
+    obs.toasts = await ev2('window.__toasts.slice()');
+    obs.liveWindows = await W('return byType("browser-live").length;');
+    if (!mutate && obs.bound) {
+      // the browser STOPS (its daemon and its stream server with it): the view greys by name, and the view never relaunches it
+      const eph = (await (await fetch(`http://127.0.0.1:${PORT2}/api/browser/profiles`)).json()).ephemerals.find((e) => e.browserKey === bk);
+      await fetch(`http://127.0.0.1:${PORT2}/api/browser/profiles/${eph.profileId}/stop`, { method: 'POST' });
+      for (const cl of up.clients) cl.terminate();
+      const streamAsks = () => { try { return fs.readFileSync(path.join(AB2, 'stream.log'), 'utf8').trim().split('\n').filter(Boolean).length; } catch { return 0; } };
+      obs.greyed = await untilA(() => W(`const s = live()._browserLive.state(); return !s.connected && !!s.error && s.error.code === 'browser_stopped';`), 20000, 250);
+      obs.greyedText = await W(`const e = live()._browserLive.el().querySelector('.browser-live-status'); return e ? e.textContent : null;`);
+      // naive study 2 (finding 3): the stopped view keeps its LAST frame (greyed) and never says anybody drives
+      obs.stoppedView = await W(`const L = live()._browserLive, s = L.state(), img = L.img(); return { stopped: s.stopped, badge: s.badge, frameKept: !!img.getAttribute('src') && img.naturalWidth === 1280, rootStopped: L.el().classList.contains('stopped') };`);
+      const asksAtGrey = streamAsks();
+      obs.daemons = (() => { try { return fs.readFileSync(path.join(AB2, 'vs-' + bk + '.json'), 'utf8'); } catch { return null; } })();
+      // its next verb: the holder row returns ⇒ the SAME view reconnects (no second window)
+      const again = await new Promise((resolve) => { const { execFile } = require('child_process'); execFile(process.execPath, [path.join(wt2, 'data/bin/vibespace-browser'), 'open', URL1 + '/again'], { env: agentEnv, cwd: R2, encoding: 'utf8', timeout: 30000 }, (err) => resolve(err ? err.code : 0)); });
+      obs.again = again;
+      obs.reconnected = await untilA(() => W(`const s = live()._browserLive.state(); return s.connected && byType('browser-live').length === 1;`), 10000, 200);
+      obs.resumed = await W(`const s = live()._browserLive.state(); return { stopped: s.stopped, badge: s.badge };`);
+      obs.streamAsksGreyToAgain = streamAsks() - asksAtGrey;
+    }
+    return obs;
+  } finally {
+    // the fake browser daemons (a `sleep` each, spawned detached by the fake `open`) — every one this leg started
+    try { for (const l of fs.readFileSync(path.join(AB2, 'pids'), 'utf8').trim().split('\n')) { const pid = Number(l); if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { } } } } catch { }
+    try { cdp2?.close(); } catch { }
+    try { chrome2?.kill('SIGKILL'); } catch { }
+    try { wsMain2?.close(); } catch { }
+    try { srv2.kill('SIGKILL'); } catch { }
+    // the leg's sessions outlive a SIGKILLed server by design (dtach) — end every process under this leg's scratch root
+    // (dtach masters, the wrapper, the fake claude, the fake browser daemons): a suite ends what it starts
+    try { execFileSync('pkill', ['-KILL', '-f', R2 + '/'], { stdio: 'ignore' }); } catch { /* none left */ }
+    // …and every process whose ENVIRONMENT names this leg's root: a fake daemon's cmdline is a bare `sleep 600`, which the
+    // pattern above never matched (the control leg leaked one per run — found by the scratch reaper's dry run, lane H verify r1)
+    for (const d of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { if (Number(d) === process.pid) continue; try { if (fs.readFileSync(`/proc/${d}/environ`, 'utf8').includes(R2 + '/')) process.kill(Number(d), 'SIGKILL'); } catch { /* not ours / gone */ } }
+    await up.close();
+    obs.journalTail = journal2.split('\n').filter((l) => /\[browser|\[browser-trace\]|browser-live/.test(l)).slice(-12).join('\n');
+  }
+}
+console.log('— ③b lane H: the agent\'s ephemeral browser shows itself (live view beside the chat, the action trace, the chips) — and the control');
+if (!CHROME) skip('no chrome/chromium on this box — the lane H leg needs one');
+else if (!dtachOk) skip('dtach is not installed — a local session cannot be created here');
+else await (async () => {
+  const o = await ephemeralLeg({ tag: 'real' });
+  if (!ok(o.booted && o.created && o.agentEnv && o.appBooted && o.chatUp, 'lane H: a worktree server, a chat session with NO attachment, its chat window open in headless chrome, the agent\'s env read', JSON.stringify(o).slice(0, 900))) return;
+  ok(o.liveBefore === 0 && o.cli.status === 0, 'the agent ran the SHIPPED `vibespace-browser open <url>` — its first browser command (no live view existed before it)', JSON.stringify(o.cli));
+  ok(o.bound && o.boundMs <= 5000, `within 5 s a browser-live window appeared, BORN in the chat window's chain as a split (${o.boundMs} ms)`, o.journalTail);
+  ok(o.chain && o.chain.same && o.chain.host === o.chatId && o.chain.pair && o.chain.pair[0] === o.chatId && o.chain.pair[1] === o.chain.liveId && o.chain.liveId === 'win-blive-' + o.sessionId, 'ONE chain: [chat, live], the chat the host, the deterministic syncId win-blive-<session>', JSON.stringify(o.chain));
+  ok(o.chain && o.chain.target && o.chain.target.kind === 'ephemeral' && o.chain.spec && o.chain.spec.profileId === S.EPHEMERAL_REF, 'the view streams THAT browser: target kind ephemeral, its openSpec names EPHEMERAL_REF (a replay reopens the same pane)', JSON.stringify(o.chain));
+  ok(o.frames, 'frames are DRAWN in the bound pane (the fake stream server through the bridge)');
+  ok(!(o.toasts || []).some((t) => /Undo|side by side/i.test(t)), 'the auto-bind is SILENT — no Undo / side-by-side toast (split UX: only a user\'s own bind announces)', JSON.stringify(o.toasts));
+  const e0 = (o.entries || [])[0];
+  ok(o.entries && o.entries.length >= 1 && e0.action === 'navigate' && e0.sessionId === o.sessionId && /lane-h-real/.test(JSON.stringify(e0)) && e0.profileId === null, `data/browser-trace/ephemeral holds the navigation (${(o.entries || []).length} entr${(o.entries || []).length === 1 ? 'y' : 'ies'}) — recorded by the viewer-less tap armed at the browser's start`, JSON.stringify(e0).slice(0, 400));
+  ok(o.thumb && o.thumbFrame && o.thumbFrame.status === 200 && /image\/jpeg/.test(o.thumbFrame.type || '') && o.thumbFrame.magic === 'ffd8' && (o.entries || []).some((e) => o.thumbFrame.src.includes('/' + e.id + '/')) && /1 action/.test((o.traceRow && o.traceRow.text) || ''), `the tool card's Browser actions row shows the entry's thumbnail — "${o.traceRow && o.traceRow.text}", ${o.thumbFrame && o.thumbFrame.src} = ${o.thumbFrame && o.thumbFrame.bytes} bytes of JPEG`, JSON.stringify({ row: o.traceRow, frame: o.thumbFrame }));
+  ok(!!o.rowName && o.statusChip === 'Agent browser · (ephemeral) ' + o.rowName, `the status-bar chip: "${o.statusChip}" (the session is "${o.rowName}")`);
+  ok(!!o.rowName && o.cardChip === 'Agent browser · (ephemeral) ' + o.rowName, `the session card's chip: "${o.cardChip}"`);
+  ok(o.greyed && /^Stopped — the agent's next browser command starts it again/.test(o.greyedText || ''), `the browser stopped ⇒ the view GREYS by name (browser_stopped: "${String(o.greyedText || '').slice(0, 120)}")`);
+  ok(o.stoppedView && o.stoppedView.stopped === true && o.stoppedView.badge === 'Browser stopped' && o.stoppedView.frameKept && o.stoppedView.rootStopped, 'naive study 2 (finding 3): the stopped view keeps its LAST frame (greyed) and the badge says "Browser stopped" — never "Agent is driving" over a blank page as if a new browser had started', JSON.stringify(o.stoppedView));
+  ok(o.menuFound && o.menuFound2 && o.liveAfterOpens === 1 && o.activeIsLive, `naive study 2 (finding 2): "Open live view" from the status-bar chip, clicked twice, FOCUSES the one live view — ${o.liveAfterOpens} window(s) (every click opened a new one)`, JSON.stringify({ menu: [o.menuFound, o.menuFound2], windows: o.liveAfterOpens, active: o.activeIsLive }));
+  ok(o.again === 0 && o.reconnected && o.resumed && o.resumed.stopped === false && o.resumed.badge === 'Agent is driving', 'its next verb restarts it ⇒ the SAME view reconnects (the holder row returned; still one window) and the stopped state clears', JSON.stringify(o.resumed));
+  const c = await ephemeralLeg({ tag: 'mut', mutate: true });
+  ok(c.mutated && c.booted && c.created && c.chatUp && c.cli && c.cli.status === 0, 'CONTROL: the same world on a server whose keeper copy drops the ephemeral from its holder rows (the pre-lane digest); the agent\'s command still runs', JSON.stringify(c).slice(0, 600));
+  ok(!c.bound && c.liveWindows === 0, 'CONTROL: …no live view appears (the auto-bind had no row to open on) — the leg above can go red', JSON.stringify({ bound: c.bound, windows: c.liveWindows }));
+  ok((c.entries || []).length === 0 && !c.thumb, 'CONTROL: …and NOTHING is recorded (the recorder arms only on a holder row) — the trace leg can go red', JSON.stringify(c.entries).slice(0, 200));
+  ok(!c.cardChip, 'CONTROL: …and the card has no Agent browser chip (browserLive comes from the same rows)', String(c.cardChip));
+  const u = await ephemeralLeg({ tag: 'ui', clientPrefix: true });
+  ok(u.clientMutated && u.rebuilt && u.booted && u.chatUp && u.bound, 'CONTROL (naive study 2): the same world with the PRE-FIX live-view client (a manual open always creates; no stopped state), its bundle rebuilt in the leg\'s own worktree', JSON.stringify(u).slice(0, 600));
+  ok(u.menuFound && u.liveAfterOpens >= 3, `CONTROL: …"Open live view" twice opens ${u.liveAfterOpens} windows (the auto-bound one + one per click) — the finding-2 leg can go red`);
+  ok(u.stoppedView && u.stoppedView.badge === 'Agent is driving' && !u.stoppedView.stopped, `CONTROL: …and the stopped browser's view says "${u.stoppedView && u.stoppedView.badge}" — the finding-3 leg can go red`, JSON.stringify(u.stoppedView));
+})().catch((e) => ok(false, 'the lane H leg threw', e && (e.stack || e.message)));
+
 // ═══ ④ the REAL binary ═══════════════════════════════════════════════════
 console.log('— ④ the real agent-browser: one headless chromium, the real stream server, the real bridge');
 {
-  let ver = null; try { ver = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 10000 }).trim(); } catch { }
+  // the REAL binary, resolved the way the server resolves it (the VibeSpace shim is first on every session's PATH and
+  // exits 2 — a bare `agent-browser --version` made this leg SKIP whenever the suite ran inside a VibeSpace session)
+  let ver = null; try { const rb = F.binaryResolver('agent-browser', process.env)(); ver = rb ? execFileSync(rb, ['--version'], { encoding: 'utf8', timeout: 10000 }).trim() : null; } catch { }
   const CHROME_ANY = CHROME || ['/usr/bin/google-chrome', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
   if (!ver) skip('agent-browser is not on PATH');
   else if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(ver)) skip(`agent-browser ${ver} is below 0.32 — no stream server`);
@@ -486,10 +827,10 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) env[k] = v;
     const extraEnv = { AGENT_BROWSER_CONFIG: path.join(D, 'cfg.json'), AGENT_BROWSER_HEADED: '0', AGENT_BROWSER_SOCKET_DIR: path.join(D, 'sock') };
     const rt = F.createBrowserRuntime({ env, log: null });
-    const launched = await rt.launch(ns, { dir: path.join(D, 'prof'), idleMs: 120000, headed: false, url: 'data:text/html,<title>live</title><h1>live</h1>', timeout: 90000 });
+    const launched = await rt.launch(ns, { dir: path.join(D, 'prof'), idleMs: 120000, headed: false, url: 'data:text/html,<title>live</title><h1>live</h1>', timeout: 90000, extraEnv });
     // the runtime's launch merges its own pairs; the config must ride too
     const lr = launched.ok ? launched : await new Promise((r) => { const { execFile } = require('child_process'); execFile('agent-browser', ['open', 'data:text/html,<title>live</title><h1>live</h1>'], { env: { ...env, AGENT_BROWSER_SESSION: ns, AGENT_BROWSER_NAMESPACE: ns, AGENT_BROWSER_PROFILE: path.join(D, 'prof'), AGENT_BROWSER_IDLE_TIMEOUT_MS: '120000', AGENT_BROWSER_JSON: '1', ...extraEnv }, timeout: 90000, encoding: 'utf8' }, (err, stdout, stderr) => r({ ok: !err, stdout, stderr })); });
-    if (!lr.ok) { skip(`the real chromium did not launch here: ${String(lr.stderr || lr.stdout || lr.error || '').slice(0, 200)}`); return; }
+    if (!lr.ok) { skip(`the real chromium did not launch here: ${String(lr.stderr || lr.stdout || lr.error || '').slice(0, 200)}`); reapDaemons(new Set([ns])); return; }
     try {
       const port = await rt.streamPort(ns, { dir: path.join(D, 'prof'), session: ns, extraEnv });
       // THE LAUNCH SHAPE IS EVIDENCE (2026-09-21): on a box whose chromium exits before
@@ -510,9 +851,402 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       await v.until((x) => x.frames >= 1, 15000);
       ok(v.frames >= 1 && v.byType('status').some((m) => m.viewportWidth > 0) && v.byType('tabs').length >= 1, `a REAL frame, status and tabs reached the viewer through the real bridge (${v.frames} frame(s))`);
       ok(v.byType('hello')[0]?.target?.kind === 'ephemeral', 'the target was the session\'s own (ephemeral) browser');
+      // lane H: THE RECORDER over the REAL stream server — a viewer-less-style tap on the session's own ephemeral
+      // browser (EPHEMERAL_REF), then a REAL command the daemon runs: its own `command` / `result` mirrors are the
+      // trace entry (the owner's first `open` was never recorded)
+      {
+        const TRC = require('../src/server/browser-trace.js');
+        const tdir = path.join(D, 'trace-data'); fs.mkdirSync(tdir, { recursive: true });
+        const bk = ns.slice(3);
+        const tk = { ...keeper, holdersFor: () => [{ ephemeral: true, child: false, browserKey: bk, sessionId: 'sess-real' }], browserOf: () => null, leasesOn: () => [] };
+        const trc = TRC.create({ dataDir: tdir, keeper: tk, bridge, serverSetting: () => undefined, runtime: rt, log: { log() { }, warn() { } }, sweepEveryMs: 0 });
+        const armed = await trc.watch({ sessionId: 'sess-real', profileId: null, browserKey: bk });
+        ok(armed.ok, 'lane H (real binary): the recorder armed a tap on the session\'s own ephemeral browser (EPHEMERAL_REF)', JSON.stringify(armed));
+        const OPEN = 'data:text/html,<title>traced-real</title><h1>traced</h1>';
+        const ran = await rt.exec(ns, ['open', OPEN], { dir: path.join(D, 'prof'), session: ns, extraEnv, timeout: 30000 });
+        let es = [];
+        for (let i = 0; i < 80 && !es.length; i++) { await sleep(100); es = trc.list({ sessionId: 'sess-real', profileId: null }); }
+        const e0 = es[0];
+        ok(ran.ok && e0 && ['open', 'navigate'].includes(e0.action) && /traced-real/.test(JSON.stringify(e0)) && e0.after && fs.existsSync(path.join(tdir, 'browser-trace', 'ephemeral', e0.after.file)), `lane H (real binary ${String(ver || '').trim()}): the daemon's own mirror of a REAL \`open\` is RECORDED under browser-trace/ephemeral (action ${e0 && e0.action}, an after-frame on disk)`, JSON.stringify({ ran: ran.ok, stderr: String(ran.stderr || '').slice(0, 200), e0 }).slice(0, 600));
+        trc.shutdown();
+      }
       bridge.shutdown(); srv.close();
-    } finally { await rt.closeAll(ns, { dir: path.join(D, 'prof') }).catch(() => { }); }
+    } finally {
+      // lane H: close under the SAME socket root + config the browser was launched with — without `extraEnv` the close
+      // asked another root's daemon and every run leaked this one (and, once the launch worked, its Chrome)
+      // lane J: then reap the namespace's daemons, twice: `close --all` may itself start a daemon that registers a beat later
+      await rt.closeAll(ns, { dir: path.join(D, 'prof'), extraEnv }).catch(() => { });
+      reapDaemons(new Set([ns])); await sleep(600); reapDaemons(new Set([ns]));
+    }
   })().catch((e) => ok(false, 'the real-binary leg threw', e && (e.stack || e.message)));
 }
+
+// ═══ ⑤ lane J: TAKEOVER CLICKS LAND WHERE YOU CLICK — the real rung ═══════
+// inc-muhgv0fb-9i4u (2026-09-25, owner: "接管浏览器的时候鼠标操作位置不对"): the
+// owner took over the agent's ephemeral (rung D, HEADED) browser from a Mac at
+// DPR 2 and clicks landed off. Measured cause: 0.32.0's frame metadata and
+// status say the CONFIGURED 1280×720; the page is 1280×577 headless and, headed
+// on a 2560×1440 screen with no window size, 1265×1277 downscaled into a 713×720
+// JPEG — the view letterboxed and scaled by the claim. This leg is the owner's
+// path end to end: a worktree server, a session whose spawn pairs name its own
+// browser, `vibespace-browser open` (ensureEphemeral → the REAL agent-browser),
+// the live view in headless chrome emulated as the owner's client (1920×963,
+// DPR 2 and 1, UI scale 100 % and 125 %, the window 1400×800 and 700×900 so the
+// picture letterboxes both ways), Take over, a REAL click where grid cell
+// (10,5) is DRAWN (the judge's own object-fit arithmetic over the page's own
+// innerWidth/innerHeight) — and the page reports where it landed. The CONTROL
+// is the pre-fix mapping in a patched copy of src/browser-stream.js fed the
+// same inputs the pre-fix window had (the metadata's claim), sent through the
+// same socket: the owner's offset, measured. Then a new tab and a resized
+// viewport. SKIPs with evidence without chrome / dtach / the real binary / Xvfb.
+console.log('— ⑤ lane J: the real rung — a real agent browser (headless and headed), the live view as the owner\'s client, a click on grid cell (10,5)');
+await (async () => {
+  const REAL_AB = (() => { try { const r = F.binaryResolver('agent-browser', process.env); return r ? r() : null; } catch { return null; } })();
+  let abVer = null; if (REAL_AB) { try { abVer = execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 10000 }).trim(); } catch { } }
+  const XVFB = ['/usr/bin/Xvfb', '/usr/local/bin/Xvfb'].find((p) => fs.existsSync(p)) || null;
+  const realBrowsers = path.join(os.homedir(), '.agent-browser', 'browsers');
+  if (!CHROME) return skip('⑤ no chrome/chromium for the client');
+  if (!dtachOk) return skip('⑤ dtach is not installed — a local session cannot be created here');
+  if (!REAL_AB || !abVer) return skip(`⑤ the real agent-browser is not resolvable here (${REAL_AB || 'only the VibeSpace shim / nothing on PATH'})`);
+  if (!/\b0\.(3[2-9]|[4-9]\d)\.|\b[1-9]\d*\./.test(abVer)) return skip(`⑤ agent-browser ${abVer} is below 0.32 — no stream server`);
+  if (!fs.existsSync(realBrowsers)) return skip(`⑤ the real agent-browser has no installed browser under ${realBrowsers} (the leg never downloads one)`);
+  const M = mutantCopies('browser-live', repo);
+  // THE CONTROL: the pre-fix belief — "the frame's metadata IS the frame" — as ONE edit to frameGeometry in a patched
+  // copy of src/browser-stream.js: the claim becomes both the picture (the letterbox) and the page (the scale). The
+  // control runs the fixed client's own two calls (frameGeometry → pointerToDevice) through the patched module.
+  const SRC = fs.readFileSync(path.join(repo, 'src/browser-stream.js'), 'utf8');
+  const S0 = M.load('src/browser-stream.js', SRC.replace('  const pw = posNum(picW), ph = posNum(picH);\n', '  if (meta && meta.width && meta.height) return { picW: meta.width, picH: meta.height, cssW: meta.width, cssH: meta.height, source: \'metadata\' };\n  const pw = posNum(picW), ph = posNum(picH);\n'));
+  { const arg = { picW: 713, picH: 720, page: { clientWidth: 1265, clientHeight: 1277 }, meta: { width: 1280, height: 720 } };
+    ok(S0.frameGeometry(arg).cssW === 1280 && S0.frameGeometry(arg).picW === 1280 && S.frameGeometry(arg).cssW === 1265 && S.frameGeometry(arg).picW === 713, 'control: the patched copy really believes the metadata (census of the patch: 1280×720 for the picture AND the page)', JSON.stringify([S0.frameGeometry(arg), S.frameGeometry(arg)])); }
+  const HOME5 = scratchHome('browser-live-real', fs);
+  const cleanupHome5 = () => { try { fs.rmSync(HOME5, { recursive: true, force: true }); } catch { } };
+  process.on('exit', cleanupHome5);
+  fs.mkdirSync(path.join(HOME5, '.agent-browser'), { recursive: true });
+  fs.symlinkSync(realBrowsers, path.join(HOME5, '.agent-browser', 'browsers')); // the INSTALLED browser, read-only use; never a download, never the owner's profiles
+  const D5 = path.join(ROOT, 'real5'); const BIN5 = path.join(D5, 'bin'); const ENVS = path.join(D5, 'envs'); fs.mkdirSync(BIN5, { recursive: true }); fs.mkdirSync(ENVS, { recursive: true });
+  const SID5 = crypto.randomUUID();
+  const hook5 = JSON.stringify({ type: 'system', subtype: 'hook_started', session_id: SID5, hook_name: 'SessionStart' });
+  const init5 = JSON.stringify({ type: 'system', subtype: 'init', session_id: SID5, cwd: D5, model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [] });
+  // the fake claude writes its whole environment (the spawn pairs + the session token) where the suite can read it
+  // (a SESSION only: the server's own probes of the CLI get a version line and an exit — a probe that sleeps outlives the suite)
+  // lane J r2 (⑥): the agent QUEUES an approval for a browser page command at spawn (a tool_use + the CLI's
+  // can_use_tool control_request — the claude stream-json shapes), and everything the server writes to its stdin
+  // (the stale deny) is kept as evidence in <pid>.stdin
+  const toolUse5 = JSON.stringify({ type: 'assistant', message: { id: 'msg_lj2_click', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_lj2_click', name: 'Bash', input: { command: 'vibespace-browser click @e3', description: 'Press the button' } }], stop_reason: null, usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, session_id: SID5 });
+  const ctlReq5 = JSON.stringify({ type: 'control_request', request_id: 'req_lj2_click', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'vibespace-browser click @e3', description: 'Press the button' }, permission_suggestions: [], tool_use_id: 'toolu_lj2_click' } });
+  fs.writeFileSync(path.join(BIN5, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) env > "${ENVS}/$$.env"; sleep 1; printf '%s\\n%s\\n%s\\n%s\\n' '${hook5}' '${init5}' '${toolUse5}' '${ctlReq5}'; exec cat > "${ENVS}/$$.stdin";; esac\necho '2.1.281 (Claude Code)'\n`, { mode: 0o755 });
+  // the grid page + the collector: the page reports its own viewport and every mousedown, same-origin (loopback)
+  const vps = new Map(), clicks = [], kbds = new Map();
+  // lane J r2 (⑥): a form page — an input at page (20,20) 300×40 reporting every value it holds, and every mousedown
+  const form = (n) => `<!doctype html><title>form ${n}</title><style>html,body{margin:0;background:#fff}</style><input id=u autocomplete=off style="position:absolute;left:20px;top:20px;width:300px;height:40px;font-size:18px;box-sizing:border-box"><script>const N=${JSON.stringify(n)};const rep=(p)=>fetch(p,{cache:'no-store'}).catch(()=>{});const u=document.getElementById('u');u.addEventListener('input',()=>rep('/kbd?n='+N+'&v='+encodeURIComponent(u.value)));addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);</script>`;
+  const grid = (n) => `<!doctype html><title>grid ${n}</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}body{background-image:linear-gradient(#999 1px,transparent 1px),linear-gradient(90deg,#999 1px,transparent 1px);background-size:50px 50px}</style><script>const N=${JSON.stringify(n)};const rep=(p)=>fetch(p,{cache:'no-store'}).catch(()=>{});const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));</script>`;
+  const col = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://x');
+    if (u.pathname === '/grid') { res.setHeader('Content-Type', 'text/html'); res.end(grid(u.searchParams.get('n') || '')); return; }
+    if (u.pathname === '/form') { res.setHeader('Content-Type', 'text/html'); res.end(form(u.searchParams.get('n') || '')); return; }
+    if (u.pathname === '/kbd') kbds.set(u.searchParams.get('n'), u.searchParams.get('v'));
+    if (u.pathname === '/vp') vps.set(u.searchParams.get('n'), { w: Number(u.searchParams.get('w')), h: Number(u.searchParams.get('h')), dpr: Number(u.searchParams.get('dpr')), at: Date.now() });
+    if (u.pathname === '/click') clicks.push({ n: u.searchParams.get('n'), x: Number(u.searchParams.get('x')), y: Number(u.searchParams.get('y')), at: Date.now() });
+    res.statusCode = 204; res.end();
+  });
+  const CP = await freePort(); await new Promise((r) => col.listen(CP, '127.0.0.1', r));
+  const procs5 = [];
+  const sessionNames = new Set(), createdIds = [];
+  let wsKill = null; // the leg's own ws: its sessions are KILLED through the server before it goes (a dtach session outlives a SIGKILLed server by design)
+  let xvfb = null, DISPLAY_N = null;
+  const results = [];
+  try {
+    const wt = path.join(ROOT, 'wt5');
+    execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore', env: gitEnvFrom(process.env) }); worktrees.add(wt);
+    for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]); }
+    fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
+    if (XVFB) {
+      // our own X server, 2560×1440 like the owner's screen; Xvfb picks a free display itself (-displayfd) and is ended
+      // with SIGTERM so it removes its own lock (a SIGKILL strands /tmp/.X<n>-lock for every later run)
+      xvfb = spawn(XVFB, ['-displayfd', '3', '-screen', '0', '2560x1440x24', '-nolisten', 'tcp'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
+      procs.add({ kill: () => { try { xvfb.kill('SIGTERM'); } catch { } } });
+      const d = await new Promise((res) => { let b = ''; xvfb.stdio[3].on('data', (x) => { b += x; if (/\n/.test(b)) res(b.trim()); }); xvfb.on('exit', () => res(null)); setTimeout(() => res(null), 10000); });
+      DISPLAY_N = d && /^\d+$/.test(d) ? Number(d) : null;
+    }
+    const PATH5 = `${BIN5}:${path.dirname(REAL_AB)}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
+    const baseEnv = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && k !== 'WAYLAND_DISPLAY') baseEnv[k] = v;
+    Object.assign(baseEnv, { PATH: PATH5, CLAUDE_CMD: path.join(BIN5, 'claude'), HOME: HOME5, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' });
+    if (DISPLAY_N !== null) baseEnv.DISPLAY = `:${DISPLAY_N}`; else delete baseEnv.DISPLAY;
+    const PORT5 = await freePort(), CDP5 = await freePort();
+    let journal = '';
+    const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT5) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    procs.add(srv); procs5.push(srv);
+    srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
+    if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), '⑤ the worktree server booted (real agent-browser on its PATH)', journal.slice(-600))) return;
+    const wsMain = new WebSocket(`ws://127.0.0.1:${PORT5}/ws`);
+    const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
+    await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
+    wsKill = wsMain;
+    // the client: headless chrome as the owner's Mac (1920×963, DPR 2)
+    const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP5}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(D5, 'client')}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore' });
+    procs.add(chrome); procs5.push(chrome);
+    let target = null;
+    for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP5}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
+    if (!ok(!!target, '⑤ the client chrome exposed a page target')) return;
+    const cdp = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+    await new Promise((r) => cdp.on('open', r));
+    let seq = 0; const pend = new Map();
+    cdp.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+    const send = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params })); });
+    const evaluate = async (expr) => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval threw'); return r.result?.result?.value; };
+    const metrics = (dsf) => send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 963, deviceScaleFactor: dsf, mobile: false });
+    await send('Page.enable'); await send('Runtime.enable');
+    await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await metrics(2);
+    await send('Page.navigate', { url: `http://127.0.0.1:${PORT5}/` });
+    const ready = await (async () => { for (let i = 0; i < 160; i++) { try { if (await evaluate('!!(window.app && window.app.wm && window.app.sidebar)')) return true; } catch { } await sleep(250); } return false; })();
+    if (!ok(ready, '⑤ the app booted in the client chrome (1920×963, DPR 2)')) return;
+    await evaluate('window.app.ready');
+    /** ⑥ lane J r2 on the real rung (headless shape): letterbox pixels, input feedback, THE KEYBOARD, the stale card, and the control. */
+    const laneJ2 = async ({ q, clickOnce, created, vb }) => {
+      const sid = created.sessionId;
+      // ── the letterbox, in PIXELS: the band above the picture (the pane at 700×900, DPR 1, UI 100 %) ──
+      const band = async () => {
+        await metrics(1);
+        await evaluate(`(() => { document.body.style.zoom = ''; document.documentElement.style.removeProperty('--ui-scale'); return true; })()`);
+        await q(`const el = w.element; w.gridBounds = null; window.app.wm.focusWindow?.(w.id); el.style.left = '24px'; el.style.top = '12px'; el.style.width = '700px'; el.style.height = '900px'; w.onResize && w.onResize(); return true;`);
+        await sleep(400);
+        const r = await q(`const c = L.el().querySelector('.browser-live-canvas').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width, h: c.height };`);
+        const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.x, y: r.y, width: r.w, height: r.h, scale: 1 } });
+        return evaluate(`(async () => { const img = new Image(); img.src = 'data:image/png;base64,' + ${JSON.stringify(shot.result && shot.result.data || '')}; await img.decode(); const c = document.createElement('canvas'); c.width = img.naturalWidth; c.height = img.naturalHeight; const x = c.getContext('2d'); x.drawImage(img, 0, 0); const W = c.width, H = c.height; const d = x.getImageData(0, 0, W, H).data; const px = (xx, yy) => { const i = (yy * W + xx) * 4; return [d[i], d[i + 1], d[i + 2]]; }; const cx = Math.floor(W * 0.37); const white = (p) => p[0] > 235 && p[1] > 235 && p[2] > 235; let top = -1, bottom = -1; for (let yy = 0; yy < H; yy++) if (white(px(cx, yy))) { if (top < 0) top = yy; bottom = yy; } return { W, H, top, bottom, above: top, below: bottom < 0 ? H : H - 1 - bottom }; })()`);
+        // the page is a white grid (#999 lines every 50 page px); the pane's own background, the focus ring and the
+        // bar are not white — so the first and last WHITE rows of one column are the drawn picture's top and bottom
+      };
+      const b1 = await band();
+      ok(b1 && b1.top >= 0 && b1.above <= 3 && b1.below > 100, `⑥ the letterbox measured in pixels: the picture starts ${b1 && b1.above} px from the pane's top (a ${b1 && b1.W}×${b1 && b1.H} pane; ${b1 && b1.below} px of spare room all BELOW it, none above)`, JSON.stringify(b1));
+      await q(`L.img().style.objectPosition = '50% 50%'; return true;`); // CONTROL: the pre-fix CSS (object-fit's centred default)
+      const b0 = await band();
+      await q(`L.img().style.objectPosition = ''; return true;`);
+      ok(b0 && b0.above > 100 && Math.abs(b0.above - b0.below) <= 6, `⑥ control: the pre-fix centred picture measures ${b0 && b0.above} px of band ABOVE and ${b0 && b0.below} below with the same measure (the study's "a third of the pane")`, JSON.stringify(b0));
+      // ── a form page; the user takes over and clicks its input ──
+      await q('L.send({ type: "handback" }); return true;');
+      await sleep(300);
+      const fo = await vb(['open', `http://127.0.0.1:${CP}/form?n=kb1`]);
+      await until(() => vps.has('kb1'), 20000, 100);
+      ok(fo.ok && vps.has('kb1'), `⑥ the agent opened a form page (${vps.get('kb1') ? vps.get('kb1').w + '×' + vps.get('kb1').h : 'no report'})`, (fo.stderr || fo.stdout).slice(0, 300));
+      await (async () => { for (let i = 0; i < 60; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH }'); const v = vps.get('kb1'); if (g && v && Math.abs(g.w - v.w) <= 1 && Math.abs(g.h - v.h) <= 1) return; await sleep(150); } })();
+      await sleep(600); // a frame of the form page
+      await q('L.send({ type: "takeover" }); return true;');
+      const mineAgain = await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard()')) return true; await sleep(100); } return false; })();
+      ok(mineAgain, '⑥ Take over ⇒ this view OWNS the keyboard (the claim, the ring, "Typing goes to the browser")');
+      const own0 = await q(`const s = L.state(); return { chip: s.kbdChip, ring: L.el().classList.contains('kbd-owned'), sink: document.activeElement === L.kbd(), text: L.el().querySelector('.browser-live-kbd-chip').textContent };`);
+      ok(own0.chip && own0.ring && own0.sink && /Typing goes to the browser/.test(own0.text), `⑥ …the bar says "${own0.text}", the picture wears the ring, and focus sits in the view's own sink`, JSON.stringify(own0));
+      const sent0 = await q('return L.state().sent');
+      const hit = await clickOnce({ dsf: 1, scale: 1, win: [1000, 800], px: 170, py: 40, n: 'kb1' });
+      ok(!hit.lost && hit.off <= 2, `⑥ a click on the form's input lands on it (${hit.lost ? 'LOST' : `(${hit.x},${hit.y}), off ${hit.off.toFixed(1)} px`})`);
+      const fb = await q(`const s = L.state(); const rp = s.ripples[s.ripples.length - 1] || null; const canvas = L.el().querySelector('.browser-live-canvas'); const cr = canvas.getBoundingClientRect(); const d = L.drawn(); const g = L.geometry(); const exp = { left: (d.left + 170 * d.width / g.cssW - cr.left) * canvas.clientWidth / cr.width, top: (d.top + 40 * d.height / g.cssH - cr.top) * canvas.clientHeight / cr.height }; return { rp, exp, echo: s.echo, sent: s.sent, you: s.youShown, youPt: s.youPt };`);
+      ok(fb.rp && Math.abs(fb.rp.x - 170) <= 2 && Math.abs(fb.rp.y - 40) <= 2 && Math.abs(fb.rp.left - fb.exp.left) <= 2 && Math.abs(fb.rp.top - fb.exp.top) <= 2,
+        `⑥ the click RIPPLES at the page point it was sent to — (${fb.rp && fb.rp.x},${fb.rp && fb.rp.y}) drawn at (${fb.rp && Math.round(fb.rp.left)},${fb.rp && Math.round(fb.rp.top)}) in the picture, where the page got it`, JSON.stringify(fb));
+      ok(fb.sent === sent0 + 1 && /^input sent · \d+$/.test(fb.echo || '') && fb.you && fb.youPt && Math.abs(fb.youPt.x - 170) <= 2, `⑥ …the bar echoes "${fb.echo}" and the "you" marker shows where the page has your pointer`, JSON.stringify(fb));
+      // ── the steal: the session's chat window is ATTACHED (session-lifecycle: chatView.focus()), then its composer focused by hand ──
+      const composerQ = `const cw = [...window.app.wm.windows.values()].find((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(sid)}); const cv = cw && window.app.sessions.get(cw.id); const ta = cv && cv._chatInput && cv._chatInput._textarea;`;
+      const steal = async () => {
+        await evaluate(`(() => { const has = [...window.app.wm.windows.values()].some((x) => x.type === 'chat' && window.app.sessions.get(x.id) && window.app.sessions.get(x.id).sessionId === ${JSON.stringify(sid)}); if (!has) window.app.attachSession(${JSON.stringify(sid)}, 'live-hl', ${JSON.stringify(D5)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+        const hasComposer = await (async () => { for (let i = 0; i < 100; i++) { if (await evaluate(`(() => { ${composerQ} return !!ta; })()`)) return true; await sleep(150); } return false; })();
+        await sleep(500);
+        // the attach path's own call (session-lifecycle.js), then a raw focus on the composer (the ~70 other .focus() sites)
+        const after1 = await evaluate(`(() => { ${composerQ} cv.focus(); return { onComposer: document.activeElement === ta, cls: document.activeElement && document.activeElement.className }; })()`);
+        const after2 = await evaluate(`(async () => { ${composerQ} ta.focus(); await new Promise((r) => setTimeout(r, 50)); return { onComposer: document.activeElement === ta, cls: document.activeElement && document.activeElement.className }; })()`);
+        return { hasComposer, after1, after2 };
+      };
+      const st1 = await steal();
+      ok(st1.hasComposer, '⑥ the session\'s chat window is attached — a live composer exists on the page');
+      ok(!st1.after1.onComposer && !st1.after2.onComposer && /browser-live-kbd/.test(st1.after2.cls || ''), `⑥ neither the attach's chatView.focus() nor a raw composer.focus() takes the keyboard while you drive (focus is back in "${st1.after2.cls}")`, JSON.stringify(st1));
+      const rc = await q('return L.state().reclaims');
+      ok(rc >= 1, `⑥ …the raw focus was RECLAIMED (${rc} reclaim(s)) — the backstop for every focus site the guard does not sit on`);
+      // ── type into the CLIENT: real key events, an IME commit, a paste ──
+      const typeKeys = async (text) => { for (const ch of text) { const up = ch.toUpperCase(); await send('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, code: 'Key' + up, text: ch, unmodifiedText: ch, windowsVirtualKeyCode: up.charCodeAt(0) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: ch, code: 'Key' + up, windowsVirtualKeyCode: up.charCodeAt(0) }); } };
+      await typeKeys('tomsmith');
+      await until(() => kbds.get('kb1') === 'tomsmith', 8000, 50);
+      const comp1 = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
+      ok(kbds.get('kb1') === 'tomsmith' && comp1 === '', `⑥ "tomsmith" typed with the composer attached and focused by hand: the PAGE's input holds "${kbds.get('kb1')}", the chat composer holds ${JSON.stringify(comp1)} — nothing typed while you drive reaches a chat box`);
+      await send('Input.imeSetComposition', { text: 'にほん', selectionStart: 3, selectionEnd: 3 }).catch(() => null);
+      await send('Input.insertText', { text: '日本' });
+      await until(() => /日本$/.test(kbds.get('kb1') || ''), 6000, 50);
+      await evaluate(`(() => { const dt = new DataTransfer(); dt.setData('text/plain', '!Pw'); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
+      await until(() => /!Pw$/.test(kbds.get('kb1') || ''), 6000, 50);
+      const comp2 = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
+      ok(kbds.get('kb1') === 'tomsmith日本!Pw' && comp2 === '', `⑥ an IME commit ("日本") and a paste ("!Pw") reach the page as TEXT (${JSON.stringify(kbds.get('kb1'))}); the composer is still ${JSON.stringify(comp2)}`);
+      const fin = await q('const s = L.state(); return { sent: s.sent, echo: s.echo }');
+      ok(fin.sent >= sent0 + 11, `⑥ every act was echoed: ${fin.sent - sent0} input(s) sent since the takeover ("${fin.echo}")`);
+      // ── the stale card, where the user looks ──
+      const card = await (async () => { for (let i = 0; i < 40; i++) { const c = await evaluate(`(() => { ${composerQ} const el = cw && cw.element.querySelector('.chat-permission-stale'); return el ? el.textContent : null; })()`); if (c) return c; await sleep(150); } return null; })();
+      ok(card && /Not run — you took over the browser, so this step went stale/.test(card) && !(await evaluate(`(() => { ${composerQ} return !!(cw && cw.element.querySelector('.chat-perm-allow')); })()`)),
+        `⑥ the chat card of the queued click says so — "${card}" — and offers no Allow`);
+      // ── CONTROL: the same client with the keyboard owner neutered (one edit, rebuilt here) ⇒ the composer gets it ──
+      await q('L.send({ type: "handback" }); return true;');
+      await sleep(300);
+      const KO = path.join(wt, 'src/lib/keyboard-owner.js');
+      const koSrc = fs.readFileSync(KO, 'utf8');
+      const mark = 'export function keyboardOwner() {\n';
+      if (!ok(koSrc.split(mark).length === 2, '⑥ control setup: keyboard-owner.js carries its owner function exactly once')) return;
+      fs.copyFileSync(path.join(wt, 'public/bundle.js'), path.join(wt, 'public/bundle.js.lanej2'));
+      fs.writeFileSync(KO, koSrc.replace(mark, mark + '  return null; // NEGATIVE CONTROL: nobody owns the keyboard (the pre-fix client)\n'));
+      let built = true; try { execFileSync('npx', ['esbuild', 'src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wt, stdio: 'ignore', timeout: 120000 }); } catch { built = false; }
+      const restore = async () => {
+        fs.writeFileSync(KO, koSrc); fs.copyFileSync(path.join(wt, 'public/bundle.js.lanej2'), path.join(wt, 'public/bundle.js')); fs.rmSync(path.join(wt, 'public/bundle.js.lanej2'), { force: true });
+        await send('Page.navigate', { url: `http://127.0.0.1:${PORT5}/` });
+        for (let i = 0; i < 160; i++) { try { if (await evaluate('!!(window.app && window.app.wm && window.app.sidebar)')) break; } catch { } await sleep(250); }
+        try { await evaluate('window.app.ready'); } catch { }
+      };
+      try {
+        if (!ok(built, '⑥ control: the neutered client was rebuilt')) return;
+        await send('Page.navigate', { url: `http://127.0.0.1:${PORT5}/` });
+        let up = false; for (let i = 0; i < 160 && !up; i++) { try { up = await evaluate('!!(window.app && window.app.wm && window.app.sidebar)'); } catch { } if (!up) await sleep(250); }
+        await evaluate('window.app.ready');
+        if (!ok(up, '⑥ control: the neutered client booted')) return;
+        await evaluate(`(() => { if (![...window.app.wm.windows.values()].some((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})) window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)} }); return true; })()`);
+        await (async () => { for (let i = 0; i < 100; i++) { if (await q('return !!(L && L.state().frames >= 1 && L.geometry())')) return; await sleep(150); } })();
+        await q('L.send({ type: "takeover" }); return true;');
+        await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return; await sleep(100); } })();
+        const before = kbds.get('kb1');
+        const hitC = await clickOnce({ dsf: 1, scale: 1, win: [1000, 800], px: 170, py: 40, n: 'kb1' });
+        const stC = await steal();
+        await typeKeys('tomsmith');
+        await sleep(1500);
+        const compC = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
+        ok(!hitC.lost && stC.after1.onComposer && compC === 'tomsmith' && kbds.get('kb1') === before,
+          `⑥ NEGATIVE CONTROL (the keyboard owner neutered — the pre-fix client): the attach puts the caret in the composer and "tomsmith" lands in the CHAT COMPOSER (${JSON.stringify(compC)}) while the page keeps ${JSON.stringify(kbds.get('kb1'))} — the study's password-in-the-chat-box`, JSON.stringify({ hitC, stC, compC, page: kbds.get('kb1') }));
+        await evaluate(`(() => { ${composerQ} if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } return true; })()`); // never sent: cleared in place
+        await q('L.send({ type: "handback" }); return true;');
+      } finally { await restore(); }
+      // back on the real client for what follows (the headed shape)
+      await evaluate(`(() => { if (![...window.app.wm.windows.values()].some((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(sid)})) window.app.openBrowserLive({ sessionId: ${JSON.stringify(sid)} }); return true; })()`);
+      await (async () => { for (let i = 0; i < 60; i++) { if (await q('return !!(L && L.state().frames >= 1)')) return; await sleep(150); } })();
+    };
+    const SHAPES = [
+      { name: 'headless (the default config)', key: 'hl', config: { headed: false, args: '--no-sandbox,--disable-blink-features=AutomationControlled' } },
+      { name: 'HEADED on a 2560×1440 screen (the owner\'s shape)', key: 'hd', config: { headed: true, args: '--no-sandbox,--disable-blink-features=AutomationControlled,--ozone-platform=x11' }, needsDisplay: true },
+    ];
+    for (const shape of SHAPES) {
+      if (shape.needsDisplay && DISPLAY_N === null) { skip(`⑤ ${shape.name}: no Xvfb (or no free display) for a headed browser`); continue; }
+      fs.writeFileSync(path.join(HOME5, '.agent-browser', 'config.json'), JSON.stringify(shape.config));
+      const envBefore = new Set(fs.readdirSync(ENVS));
+      const nCreated = msgs.filter((m) => m.type === 'created').length;
+      wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: D5, cols: 80, rows: 24, reqId: 'r5-' + shape.key, name: 'live-' + shape.key }));
+      await until(() => msgs.filter((m) => m.type === 'created').length > nCreated, 20000);
+      const created = msgs.filter((m) => m.type === 'created').length > nCreated ? msgs.filter((m) => m.type === 'created').at(-1) : null;
+      if (!ok(created && created.sessionId, `⑤ ${shape.name}: a chat session was created`, journal.slice(-500))) continue;
+      createdIds.push(created.sessionId);
+      await until(() => fs.readdirSync(ENVS).some((f) => !envBefore.has(f) && f.endsWith('.env')), 15000, 100);
+      const envFile = fs.readdirSync(ENVS).find((f) => !envBefore.has(f) && f.endsWith('.env'));
+      const stdinFile = path.join(ENVS, envFile.replace(/\.env$/, '.stdin')); // lane J r2: what the server wrote to the fake CLI
+      const senv = {}; for (const line of fs.readFileSync(path.join(ENVS, envFile), 'utf8').split('\n')) { const i = line.indexOf('='); if (i > 0) senv[line.slice(0, i)] = line.slice(i + 1); }
+      const pairs = Object.fromEntries(Object.entries(senv).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
+      if (pairs.AGENT_BROWSER_SESSION) sessionNames.add(pairs.AGENT_BROWSER_SESSION);
+      if (!ok(pairs.AGENT_BROWSER_SESSION && senv.VIBESPACE_SESSION_TOKEN && senv.VIBESPACE_API, `⑤ ${shape.name}: the session was spawned with its own browser pairs (rung ${senv.VIBESPACE_BROWSER_VARIANT || '?'})`, JSON.stringify(Object.keys(pairs)))) continue;
+      const vb = (args, timeout = 120000) => new Promise((resolve) => { const { execFile } = require('child_process'); execFile(process.execPath, [path.join(wt, 'data/bin/vibespace-browser'), ...args], { env: { ...baseEnv, ...pairs, VIBESPACE_API: senv.VIBESPACE_API, VIBESPACE_SESSION_TOKEN: senv.VIBESPACE_SESSION_TOKEN }, timeout, encoding: 'utf8' }, (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || ''), code: err && err.code })); });
+      const tag = shape.key + '1';
+      const opened = await vb(['open', `http://127.0.0.1:${CP}/grid?n=${tag}`]);
+      if (!opened.ok && /exited early|DevToolsActivePort|crash|exit code|Missing X server|cannot open display/i.test(opened.stderr + opened.stdout)) { skip(`⑤ ${shape.name}: the real chromium did not launch here: ${(opened.stderr || opened.stdout).replace(/\s+/g, ' ').slice(0, 200)}`); continue; }
+      if (!ok(opened.ok, `⑤ ${shape.name}: \`vibespace-browser open\` started the session's own ephemeral browser on the grid page`, (opened.stderr || opened.stdout).slice(0, 400))) continue;
+      await until(() => vps.has(tag), 20000, 100);
+      const truth = vps.get(tag);
+      if (!ok(truth && truth.w > 0, `⑤ ${shape.name}: the page reports its own viewport (${truth ? truth.w + '×' + truth.h + ' @' + truth.dpr : 'none'})`)) continue;
+      // the live view
+      const opened2 = await evaluate(`(() => { const w = window.app.openBrowserLive({ sessionId: ${JSON.stringify(created.sessionId)} }); w.gridBounds = null; return !!(w && w._browserLive); })()`);
+      ok(opened2, `⑤ ${shape.name}: the live view opened`);
+      const q = (js) => evaluate(`(() => { const w = [...window.app.wm.windows.values()].filter((x) => x.type === 'browser-live' && x._browserLive && x._browserLive.state().sessionId === ${JSON.stringify(created.sessionId)})[0]; const L = w && w._browserLive; ${js} })()`);
+      const live = await (async () => { for (let i = 0; i < 150; i++) { const st = await q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source } : null'); if (st && st.frames >= 1 && st.nat > 0 && st.src === 'page') return st; await sleep(200); } return q('const g = L && L.geometry(); return L ? { frames: L.state().frames, nat: L.img().naturalWidth, src: g && g.source, err: L.state().error } : null'); })();
+      if (!ok(live && live.frames >= 1 && live.src === 'page', `⑤ ${shape.name}: frames drawn and the page's own viewport read (geometry source "${live && live.src}")`, JSON.stringify(live))) continue;
+      const geo0 = await q('return { g: L.geometry(), claim: L.frameClaim() }');
+      ok(Math.abs(geo0.g.cssW - truth.w) <= 1 && Math.abs(geo0.g.cssH - truth.h) <= 1, `⑤ ${shape.name}: the view's page size ${Math.round(geo0.g.cssW)}×${Math.round(geo0.g.cssH)} IS the page's (${truth.w}×${truth.h}); the picture is ${geo0.g.picW}×${geo0.g.picH}; the stream's metadata claims ${geo0.claim && geo0.claim.width}×${geo0.claim && geo0.claim.height}`);
+      shape.picture = `${geo0.g.picW}×${geo0.g.picH}`; shape.page = `${truth.w}×${truth.h}`; shape.claim = geo0.claim ? `${geo0.claim.width}×${geo0.claim.height}` : '?';
+      // ⑥: the approval must be QUEUED before the takeover (the study's order) — judged on its terminal signal, never a
+      // sleep: the server's own normalizer published the pending card (the creator's socket hears every `msg` op)
+      {
+        const queued = () => msgs.some((m) => m.type === 'msg' && m.sessionId === created.sessionId && m.op === 'edit' && m.fields && m.fields.permission && m.fields.permission.requestId === 'req_lj2_click' && !m.fields.permission.resolved);
+        await until(queued, 15000, 50);
+        ok(queued(), `⑥ ${shape.name}: the agent's approval for \`vibespace-browser click @e3\` is pending on the server (its card published) BEFORE the takeover`);
+      }
+      await q('L.send({ type: "takeover" }); return true;');
+      if (!ok(await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(100); } return false; })(), `⑤ ${shape.name}: Take over — this viewer drives`)) continue;
+      {
+        // ⑥ lane J r2: the approval the agent queued at spawn (a browser `click`) is answered STALE by this takeover
+        const denied = () => { try { return fs.readFileSync(stdinFile, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((x) => x && x.type === 'control_response' && x.response && x.response.request_id === 'req_lj2_click') || null; } catch { return null; } };
+        await until(() => !!denied(), 8000, 100);
+        const d = denied();
+        ok(d && d.response.response.behavior === 'deny' && /^browser_paused — the user took over your browser before this step ran, so it did NOT run/.test(d.response.response.message),
+          `⑥ ${shape.name}: the TAKEOVER answered the approval the agent queued before it (vibespace-browser click @e3) — the CLI's stdin received a deny naming browser_paused, never a stale Allow`, d ? JSON.stringify(d).slice(0, 300) : `stdin: ${fs.existsSync(stdinFile) ? JSON.stringify(fs.readFileSync(stdinFile, 'utf8').slice(0, 300)) : 'no file'} · journal: ${journal.split('\n').filter((l) => /approval|stale|took over|handed back/i.test(l)).slice(-6).join(' | ').slice(0, 1500)}`);
+      }
+      /** One click where page point (px, py) is DRAWN, by the judge's own object-fit arithmetic over the page's reported viewport. */
+      const clickOnce = async ({ dsf, scale, win, px = 525, py = 275, n = tag, control = false }) => {
+        await metrics(dsf);
+        await evaluate(`(() => { document.body.style.zoom = ${scale} === 1 ? '' : '${scale}'; document.documentElement.style.setProperty('--ui-scale', '${scale}'); return true; })()`);
+        // the live window at the requested VIEWPORT size (layout px = viewport px / the UI scale)
+        await q(`const s = ${scale}; const el = w.element; w.gridBounds = null; window.app.wm.focusWindow?.(w.id); el.style.left = (24 / s) + 'px'; el.style.top = (12 / s) + 'px'; el.style.width = (${win[0]} / s) + 'px'; el.style.height = (${win[1]} / s) + 'px'; w.onResize && w.onResize(); return true;`);
+        await sleep(250);
+        const t0 = vps.get(n);
+        const g = await q('const r = L.img().getBoundingClientRect(); const op = getComputedStyle(L.img()).objectPosition; return { left: r.left, top: r.top, width: r.width, height: r.height, natW: L.img().naturalWidth, natH: L.img().naturalHeight, claim: L.frameClaim(), page: L.pageReading(), op };');
+        const k = Math.min(g.width / g.natW, g.height / g.natH); const dw = g.natW * k, dh = g.natH * k;
+        // the judge's own object-fit arithmetic over the RENDERED object-position (the browser's computed CSS — never our
+        // LIVE_ALIGN constant): lane J r2 top-aligns the picture, so the drawn picture no longer sits in the element's middle
+        const frac = (v, room) => (/%$/.test(v) ? parseFloat(v) / 100 : room ? parseFloat(v) / room : 0.5);
+        const [opx = '50%', opy = '50%'] = String(g.op || '').split(/\s+/);
+        const cx = g.left + (g.width - dw) * frac(opx, g.width - dw) + px * dw / t0.w, cy = g.top + (g.height - dh) * frac(opy, g.height - dh) + py * dh / t0.h;
+        const before = clicks.length;
+        if (!control) {
+          await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cx, y: cy });
+          await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
+          await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
+        } else {
+          // the PRE-FIX client: the same pointer through the same two calls of the PATCHED module, sent through the same socket
+          const g0 = S0.frameGeometry({ picW: g.natW, picH: g.natH, page: g.page, meta: g.claim });
+          const pre = g0 && S0.pointerToDevice({ clientX: cx, clientY: cy, elRect: { left: g.left, top: g.top, width: g.width, height: g.height }, frameW: g0.cssW, frameH: g0.cssH, picW: g0.picW, picH: g0.picH });
+          if (!pre) return { dropped: true };
+          await q(`L.send(${JSON.stringify(S.mouseRecord({ kind: 'down', pt: pre }))}); L.send(${JSON.stringify(S.mouseRecord({ kind: 'up', pt: pre }))}); return true;`);
+        }
+        await until(() => clicks.length > before, 4000, 25);
+        const c = clicks.slice(before).find((x) => x.n === n);
+        return c ? { x: c.x, y: c.y, dx: c.x - px, dy: c.y - py, off: Math.hypot(c.x - px, c.y - py) } : { lost: true };
+      };
+      for (const dsf of [2, 1]) for (const scale of [1, 1.25]) for (const win of [[1400, 800], [700, 900]]) {
+        const fixed = await clickOnce({ dsf, scale, win });
+        const pre = await clickOnce({ dsf, scale, win, control: true });
+        results.push({ kind: 'combo', shape: shape.name, dsf, scale, win: win.join('×'), fixed, pre });
+      }
+      const mine = results.filter((r) => r.kind === 'combo' && r.shape === shape.name);
+      console.log(`    ⑤ ${shape.name}: page ${shape.page}, picture ${shape.picture}, metadata claims ${shape.claim} — click on grid cell (10,5) = page (525,275):\n` + mine.map((r) => `      DSF ${r.dsf} · UI ${Math.round(r.scale * 100)}% · window ${r.win}: FIXED ${r.fixed.lost ? 'LOST' : `(${r.fixed.x},${r.fixed.y}) off ${r.fixed.off.toFixed(1)}px`} · PRE-FIX ${r.pre.dropped ? 'dropped (mapped outside the picture)' : r.pre.lost ? 'LOST' : `(${r.pre.x},${r.pre.y}) off ${r.pre.off.toFixed(0)}px`}`).join('\n'));
+      ok(mine.length === 8 && mine.every((r) => !r.fixed.lost && r.fixed.off <= 2), `⑤ ${shape.name}: at DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window, the click lands within 2 px of the drawn grid cell (worst ${Math.max(...mine.map((r) => (r.fixed.lost ? Infinity : r.fixed.off))).toFixed(1)} px)`, JSON.stringify(mine.filter((r) => r.fixed.lost || r.fixed.off > 2)));
+      ok(mine.every((r) => r.pre.dropped || (!r.pre.lost && r.pre.off > 20)), `⑤ ${shape.name}: control — the PRE-FIX mapping (the metadata's ${shape.claim}) misses by > 20 px or drops the click, on the same rung (worst ${Math.max(...mine.map((r) => (r.pre.dropped || r.pre.lost ? 0 : r.pre.off))).toFixed(0)} px)`, JSON.stringify(mine.map((r) => r.pre)));
+      if (shape.key === 'hl') {
+        // the ephemeral browser's viewport after the agent opens a tab and after it resizes the page
+        await q('L.send({ type: "handback" }); return true;');
+        await sleep(300);
+        const tabRes = await vb(['tab', 'new', `http://127.0.0.1:${CP}/grid?n=hl2`]);
+        await until(() => vps.has('hl2'), 20000, 100);
+        const setRes = tabRes.ok ? await vb(['set', 'viewport', '1000', '700']) : { ok: false };
+        await until(() => vps.get('hl2') && vps.get('hl2').w === 1000, 15000, 100);
+        const tv = vps.get('hl2');
+        const settled = await (async () => { for (let i = 0; i < 100; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH, src: g.source, nat: L.img().naturalWidth }'); if (g && tv && Math.abs(g.w - tv.w) <= 1 && Math.abs(g.h - tv.h) <= 1 && g.src !== 'picture-stale') return g; await sleep(150); } return null; })();
+        ok(tabRes.ok && setRes.ok && tv && tv.w === 1000 && settled, `⑤ a NEW TAB then \`set viewport 1000 700\`: the view re-reads the page (${settled ? Math.round(settled.w) + '×' + Math.round(settled.h) + ' from ' + settled.src : 'no'}; the page says ${tv ? tv.w + '×' + tv.h : '?'})`, JSON.stringify({ tab: tabRes.stderr.slice(0, 200), set: setRes.stderr && setRes.stderr.slice(0, 200) }));
+        await q('L.send({ type: "takeover" }); return true;');
+        await sleep(300);
+        const after = await clickOnce({ dsf: 2, scale: 1.25, win: [700, 900], n: 'hl2' });
+        results.push({ kind: 'combo-extra', fixed: after });
+        ok(!after.lost && after.off <= 2, `⑤ …and a click on grid cell (10,5) of the new tab at its new viewport lands within 2 px (${after.lost ? 'LOST' : `(${after.x},${after.y}) off ${after.off.toFixed(1)} px`})`);
+        await laneJ2({ q, clickOnce, created, vb });
+      }
+      await q('L.send({ type: "handback" }); return true;');
+      await sleep(200);
+      await vb(['close'], 30000).catch(() => { });
+    }
+    try { cdp.close(); } catch { }
+  } finally {
+    if (wsKill && wsKill.readyState === 1) { for (const id of createdIds) { try { wsKill.send(JSON.stringify({ type: 'kill', sessionId: id })); } catch { } } await sleep(1200); try { wsKill.close(); } catch { } }
+    for (const p of procs5.reverse()) { try { p.kill('SIGKILL'); } catch { } }
+    if (xvfb) { try { xvfb.kill('SIGTERM'); } catch { } await new Promise((r) => { if (xvfb.exitCode !== null || xvfb.signalCode) r(); else { xvfb.once('exit', r); setTimeout(r, 3000); } }); }
+    await new Promise((r) => col.close(() => r()));
+    // the REAL daemons this leg's sessions started (the keeper launched them, detached) and their browsers — every
+    // process still standing in the leg's own worktree (the server's cwd, inherited by the daemons and their chromes)
+    reapDaemons(sessionNames, { cwdUnder: path.join(ROOT, 'wt5') });
+    cleanupHome5();
+  }
+})().catch((e) => ok(false, '⑤ the real-rung leg threw', e && (e.stack || e.message)));
 
 done();

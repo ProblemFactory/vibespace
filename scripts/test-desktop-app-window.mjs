@@ -8,8 +8,21 @@
 // server + reboot ⇒ the session is ADOPTED and the window reconnects (the
 // status chip reads "vnc-display (xpra not on PATH)" on this box) → Stop ⇒ the
 // window closes itself with a toast (round 3 A2), and no X/x11vnc survives. Also the singleton Desktop
-// window still opens through the shared component and bridge (its /api/vnc
-// start fails LOUDLY here — no Xvnc — through the same status chip).
+// window still opens through the shared component and bridge — its chip says
+// what THIS box can produce: 'Connected' when an Xvnc-style server is on PATH
+// (this box has Xtigervnc since 2026-09-21 — the old "no Xvnc here" note was
+// stale and the leg quietly adopted whatever held :7/5901), the server's own
+// "no VNC server installed" text when none is, and the leg names which.
+//
+// THE SINGLETON'S NAMES + SHUTDOWN (2026-09-25, the heavy RED on 69720f2b:
+// this leg read `null` twice). The worktree server gets PER-RUN
+// VIBESPACE_VNC_DISPLAY/_PORT (scratch.mjs vncEnv — never the machine-global
+// :7/5901 every run and the owner's production instance shared; a keeper's
+// `-displayfd` Xvfb can hold :7 itself). With an Xvnc on PATH the legs prove the
+// singleton runs on THIS run's names, that a SIGTERMed throwaway server stops
+// the Xvnc it started (and its session with it), and — CONTROL — that a patched
+// server copy without the shutdown hook (scripts/mutant-copy.mjs) leaves it
+// running; the suite then ends it by evidence (our display + port + cwd).
 //
 // THE LAUNCH DIALOG'S GEOMETRY (2026-09-14, the owner's picture reproduced at
 // 1000×800@2x): a body min-width of 760px inside `.dialog`'s fixed 440px +
@@ -34,8 +47,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import zhDict from '../src/lib/i18n-zh.js';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 // P8-2 (2026-09-21): xpra is wired and wins the default ladder when installed; this suite drives the noVNC picture, so the
 // worktree server is PINNED to vnc-display through settings `desktop.backendPrefs` (a reorder — nothing falls, the chip reads
 // the plain rung). The xpra window is chunk x2's leg.
@@ -71,16 +85,28 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' })); // the pin (see the header)
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
-const srvEnv = { ...process.env, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
 let srv = null;
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };
 bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskapp-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const recordedPids = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps).flatMap((a) => Object.values(a.pids || {})).filter(Boolean); } catch { return []; } };
+// the singleton's X server THIS run caused, by evidence: an Xvnc-style argv naming our per-run display AND port
+const VNC_DISPLAY = VNC_ENV.VIBESPACE_VNC_DISPLAY, VNC_PORT = VNC_ENV.VIBESPACE_VNC_PORT;
+const ourXvnc = () => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).filter((pid) => {
+  try { const a = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); return /^X(tiger)?vnc$/.test(path.basename(a[0])) && a.includes(VNC_DISPLAY) && a[a.indexOf('-rfbport') + 1] === VNC_PORT; } catch { return false; }
+});
+// every process on our display (the Xvnc's session: xterm / xfce4-session …) — DISPLAY in its environ
+const onOurDisplay = () => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).filter((pid) => {
+  try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').includes(`DISPLAY=${VNC_DISPLAY}`); } catch { return false; }
+});
+let ctlSrv = null;
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv?.kill('SIGKILL'); } catch {}
+  try { ctlSrv?.kill('SIGKILL'); } catch {}
   for (const p of recordedPids()) { try { process.kill(p, 'SIGKILL'); } catch {} } // a failed leg leaves no X server behind
+  for (const p of [...ourXvnc(), ...onOurDisplay()]) { try { process.kill(p, 'SIGTERM'); } catch {} } // …nor the singleton it caused (a SIGKILLed server runs no shutdown; SIGTERM lets Xvnc remove its own lock + socket after we are gone — the reaper is the net)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   try { fs.rmSync(scratch('deskapp-chrome'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
@@ -421,11 +447,49 @@ try {
   const rec2 = await p1.evalJs(`fetch('/api/desktop/apps/${appId}').then((r) => r.json())`);
   check('…the record says who ended it (exited, stoppedBy user) — the verdict every client closes on', rec2.state === 'exited' && rec2.stoppedBy === 'user', { state: rec2.state, stoppedBy: rec2.stoppedBy });
 
-  // the singleton Desktop window still goes through the shared component + bridge
+  // the singleton Desktop window still goes through the shared component + bridge — on THIS run's names
+  const XVNC = D.binOnPath('Xtigervnc', { env: process.env }) || D.binOnPath('Xvnc', { env: process.env });
+  const expected = XVNC ? 'Connected' : 'no VNC server installed';
   await p1.evalJs(`app.openDesktop(); true`);
   const singleton = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._isDesktop); const s = w?.content.querySelector('.desktop-status')?.textContent || ''; return /Connect|Desktop unavailable|no VNC server|Starting/.test(s) && s !== 'Connecting…' && s !== 'Starting desktop…' ? s : null; })()`), 15000);
-  check('the singleton Desktop window renders through the shared component (its status chip speaks — here the server\'s own "no VNC server installed" text, since this box has no Xvnc)', !!singleton && (/no VNC server installed/.test(singleton) || singleton === 'Connected'), singleton);
+  check(`the singleton Desktop window renders through the shared component — its status chip says what this box produces: ${XVNC ? `"Connected" (${path.basename(XVNC)} on PATH)` : 'the server\'s own "no VNC server installed" text (no Xvnc on PATH)'}; saw ${JSON.stringify(singleton)}`, !!singleton && (XVNC ? singleton === 'Connected' : /no VNC server installed/.test(singleton)), { expected, singleton });
   check('the singleton window carries the counter-zoom rule on its container', await p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._isDesktop); return w.content.firstChild.style.zoom === 'calc(1 / var(--ui-scale, 1))'; })()`));
+  const vst = await p1.evalJs(`fetch('/api/vnc/status').then((r) => r.json())`);
+  check(`the singleton runs on THIS run's names (${VNC_DISPLAY} / ${VNC_PORT}), never the machine-global :7 / 5901`, String(vst.port) === VNC_PORT && VNC_DISPLAY !== ':7' && VNC_PORT !== '5901', vst);
+  if (!XVNC) console.log('  · SKIP the stop-at-shutdown legs: no Xtigervnc/Xvnc on PATH (nothing is started, so nothing can survive)');
+  else {
+    const mine = ourXvnc();
+    const mineCwd = mine.map((pid) => { try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } });
+    check(`the Xvnc listening for it is the one THIS run's server started (pid ${mine.join(',')}, cwd the worktree)`, mine.length === 1 && mineCwd[0] === wt, { mine, mineCwd, wt });
+    const session = onOurDisplay().filter((pid) => !mine.includes(pid));
+    // a child's exit, bounded — resolves at once for one already gone (a listener added after the exit never fires)
+    const exitOf = (c, ms = 8000) => (c.exitCode !== null || c.signalCode !== null) ? Promise.resolve() : new Promise((r) => { const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch {} }, ms); c.once('exit', () => { clearTimeout(t); r(); }); });
+    // SIGTERM ⇒ server.js shutdown() ⇒ vnc.shutdown(): a throwaway root stops the Xvnc IT started
+    const exited = exitOf(srv); srv.kill('SIGTERM'); await exited;
+    const gone = await until(() => (ourXvnc().length === 0 && onOurDisplay().length === 0 ? true : null), 8000, 100);
+    check(`a SIGTERMed throwaway server stops the Xvnc it started — and its session (${session.length} process(es) on ${VNC_DISPLAY}) dies with the display`, !!gone, { xvnc: ourXvnc(), onDisplay: onOurDisplay() });
+    // CONTROL: the same server WITHOUT the hook (a patched copy — scripts/mutant-copy.mjs, never the checkout)
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const MC = mutantCopies('deskapp-vnc', wt);
+    const srvSrc = fs.readFileSync(path.join(wt, 'server.js'), 'utf8');
+    const noHook = srvSrc.replace('try { vnc.shutdown(); } catch {} ', '');
+    check('CONTROL: the patched copy really drops the shutdown hook', noHook !== srvSrc && !/vnc\.shutdown\(\)/.test(noHook));
+    // its port is taken NOW, not at the suite's start: ~80 s of CDP/fetch/ws traffic later a pre-picked ephemeral
+    // port can be some outgoing socket's source port; its output is kept so a control that never answers says why
+    const [PORT_CTL] = await freePorts(1);
+    const ctlLog = [];
+    ctlSrv = spawn(process.execPath, [MC.write('server.js', noHook, 'no-vnc-shutdown')], { cwd: wt, env: { ...srvEnv, PORT: String(PORT_CTL) }, stdio: ['ignore', 'pipe', 'pipe'] });
+    ctlSrv.stdout.on('data', (d) => ctlLog.push(String(d))); ctlSrv.stderr.on('data', (d) => ctlLog.push(String(d)));
+    const ctlUp = await until(async () => { if (ctlSrv.exitCode !== null || ctlSrv.signalCode !== null) return 'exited'; try { return (await fetch(`http://127.0.0.1:${PORT_CTL}/api/home`)).ok; } catch { return null; } }, 20000, 250);
+    const st = ctlUp === true ? await (await fetch(`http://127.0.0.1:${PORT_CTL}/api/vnc/start`, { method: 'POST' })).json() : null;
+    const started = ourXvnc();
+    const ctlExit = exitOf(ctlSrv); ctlSrv.kill('SIGTERM'); await ctlExit;
+    await sleep(1500);
+    const survivors = ourXvnc();
+    check(`CONTROL: without the hook a SIGTERMed server LEAVES its Xvnc running (started ${started.join(',') || 'none'}, alive after exit: ${survivors.join(',') || 'none'}) — the leak the hook closes`, !!st?.running && started.length === 1 && survivors.length === 1 && survivors[0] === started[0], { ctlUp, st, started, survivors, log: ctlLog.join('').slice(-1500) });
+    for (const p of [...survivors, ...onOurDisplay()]) { try { process.kill(p, 'SIGTERM'); } catch {} }
+    check('…and the suite ends it by evidence (our display + port + cwd), leaving nothing behind', !!(await until(() => (ourXvnc().length === 0 && onOurDisplay().length === 0 ? true : null), 8000, 100)), { xvnc: ourXvnc(), onDisplay: onOurDisplay() });
+  }
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);
 } finally {

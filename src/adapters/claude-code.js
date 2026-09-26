@@ -333,7 +333,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
   }
 
   formatPermissionResponse(data) {
-    return JSON.stringify(ClaudeCodeAdapter.buildPermissionResponse(data.requestId, data.approved, data.toolInput, data.permissionUpdates));
+    return JSON.stringify(ClaudeCodeAdapter.buildPermissionResponse(data.requestId, data.approved, data.toolInput, data.permissionUpdates, data.denyMessage));
   }
 
   formatSetPermissionMode(mode) {
@@ -352,14 +352,18 @@ class ClaudeCodeAdapter extends BackendAdapter {
 
   // ── Static helpers (kept for backward compat) ──
 
-  static buildPermissionResponse(requestId, approved, toolInput, permissionUpdates) {
+  // `denyMessage` (lane J r2): the words the MODEL reads for a deny — the
+  // browser takeover's stale sweep names browser_paused here; a user's own
+  // Deny keeps the CLI's familiar sentence.
+  static buildPermissionResponse(requestId, approved, toolInput, permissionUpdates, denyMessage) {
     const allowResponse = { behavior: 'allow', updatedInput: toolInput || {} };
     if (permissionUpdates?.length) allowResponse.permission_updates = permissionUpdates;
+    const message = typeof denyMessage === 'string' && denyMessage.trim() ? denyMessage.slice(0, 2000) : 'User denied this action';
     return {
       type: 'control_response',
       response: approved
         ? { subtype: 'success', request_id: requestId, response: allowResponse }
-        : { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message: 'User denied this action' } },
+        : { subtype: 'success', request_id: requestId, response: { behavior: 'deny', message } },
     };
   }
 

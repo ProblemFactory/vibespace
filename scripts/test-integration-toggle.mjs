@@ -18,7 +18,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch } from './scratch.mjs';
+import { freePort, scratch, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,7 +52,7 @@ fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
 // silently red since that release (found during the 2.271.0 lag/CS audit
 // campaign; a red suite = zero coverage on the registration path). HOME is a
 // throwaway dir here, so forcing only ever touches the fake configs.
-const SRV_ENV = { ...process.env, HOME: home, PORT: String(PORT), VIBESPACE_FORCE_AGENT_HOOKS: '1' };
+const SRV_ENV = { ...process.env, ...VNC_ENV, HOME: home, PORT: String(PORT), VIBESPACE_FORCE_AGENT_HOOKS: '1' };
 let srv = null;
 // A stale listener on our port would silently absorb every assertion (real
 // debugging cost: yesterday's crashed smoke servers still held the port).

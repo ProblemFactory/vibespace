@@ -1308,6 +1308,8 @@ Gate: test-profile-blindness-chip (heavy — a MUTATION on a real server: the
 agent's own resolve flips the chip without a rebuild, the digest moves once and
 not for the same fact again, the notice reaches the next prompt context once).
 
+**The live view's bar, and where to open it (lane I, 2026-09-25 — the owner: "你这些UI都检查过吗？").** The bar never wraps or overlaps in any language or width: the mode badge in short words ("Agent is driving" / "You are driving" / "Another viewer is driving"; the "— agent asked to pause" sentence is its tooltip), ONE toggle (Take over ↔ Hand back), an icon-only bind button (Snap beside / Unbind — its words, which carry the session's name, are its tooltip), the URL (the one flexible item, ≥ 120 px, ellipsised) with its globe hand-off to a web view, the viewer count, the recording chip, the backend chip (profiles only) and Tabs / Console / Actions with their counts. What does not fit folds into a ⋯ menu by priority — Tabs / Console / Actions first, then the backend chip, then bind / viewers / recording, then the URL, the mode badge last (folded, its sentence is the ⋯'s first row and the ⋯ wears its colour); the toggle and Reconnect never fold — and the ⋯ rows carry the live counts and do the items' own acts. A live view bound beside its chat keeps its pane at least as wide as its own bar's minimum ([toggle][⋯], 87–115 px): dragging the divider further stops the divider there (verify r1 — at the clamp the ⋯ used to be clipped out of the bar). The desktop-app strip follows the same rule (the status flexes; the agent / origin / fact chips and Keep running / Stop fold into its ⋯; the window-live form has the same one toggle and short badge). THE WINDOW MENU: a chat (or terminal) window whose conversation has a browser — running now, or used since the session started — offers "Agent browser — live view" on its title-bar / tab / taskbar menu (between Locate in sidebar and Session properties…); it opens the live view BOUND beside that window, or binds / brings forward the one already open (never a second viewer). A bound live pane's menu says Unsplit once (its own Unbind is offered only while it is a free window). The sidebar card, the status-bar Browser chip, Session Properties and the phone nav keep their entries. Gates: test-live-bar-layout (fast), test-browser-live-ui (heavy: every state shot + measured at zh / ja / en × 600 / 900 / 1400 × dark / light).
+
 ### Agent browser v2 — P3: takeover and handback (2026-09-16, design §4.3 / §4.3.1)
 
 The live view has §4.3's three modes, each one sentence. **Watch** ("Agent is
@@ -1344,6 +1346,28 @@ daemon's 60 s countdown, one inbox item, and the answer is upstream's own
 `confirm <id>` / `deny <id>` under the lease's session (the stream's `confirm`
 verb or `POST /api/browser/confirm`) — never a second mechanism. Gate:
 test-browser-takeover (fast, 109).
+
+**While you drive (lane J r2, 2026-09-25 — the second naive-user study: text
+typed into a takeover vanished or landed in the chat composer).** A takeover
+OWNS the keyboard: every key, paste and IME composition goes to the page
+whatever has focus in the app; the chat's attach/reconnect focus stands down and
+a text box elsewhere that takes focus gives it straight back (a toast says
+"Typing goes to the agent's browser while you drive it — press Hand back to type
+here"); the bar shows "Typing goes to the browser" and the picture a focus ring.
+Only Ctrl+\ (command mode) and Ctrl+Alt+←/→ (desktop switch) stay the app's; Esc
+goes to the page; handing back is the button. A paste arrives as TEXT; an IME
+composes inside the view and the committed text is sent. The keyboard is
+released on the hand back, a dropped socket, or when the view is hidden. Every
+click ripples at the page point it reached, the bar echoes "input sent · n"
+("not sent — …" when disconnected), and a small marker shows where the page has
+your pointer. The picture is TOP-aligned and fills the pane's width (spare room
+below it, never bands above and below). When you take over, pending approval
+cards for browser page commands aimed at that browser are answered with a deny
+naming `browser_paused` and read "Not run — you took over the browser, so this
+step went stale. The agent re-plans after you hand back." (one queued while you
+drove: the same at the hand back; `status`, a mention, another profile's command
+are untouched). Gate: test-browser-takeover ⑦ (fast) + test-browser-live ⑥
+(heavy, the real rung).
 
 ### Agent browser v2 — P4 first half: provider rows, the egress precondition, the remote `cdp` provider, the `browser-serve` op (2026-09-16, design §7.1–§7.3, §7.2.1)
 
@@ -1907,6 +1931,18 @@ The owner (2026-09-24): VibeSpace takes the browser tool over completely — no 
 * **Surfaces:** `vibespace-browser profiles` never lists it (not attachable); `status` says "this session browses its own managed browser (ephemeral: <state>, started <ago>)"; the Browser profiles panel gains an **Ephemeral browsers** section (record, conversation, state, Stop — zh + ja); the digest carries `ephemerals` beside the named `profiles`.
 * **Unmanaged, honestly:** a remote session (rung H, D8) and an instance with `browser.isolateSessions` off (the shared rung, D7 — `close --all` refused `shared_browser`) still answer `kind:'none'`. The managed ephemeral browser is `sharing:'owner'` and not CDP-mediated (it has one conversation); a takeover stops its verbs at `/resolve` (`browser_paused`).
 * **The attach gap (T6):** a desktop-app BROWSER window (a record or registry row carrying `browser` OR `category: 'browser'` — the DEFAULT_REGISTRY's firefox / chromium rows carry only the category, r1 — or an ad-hoc launch of a browser row's executable) is the user's own window: `vibespace-window attach` / `snapshot` / `act` / `screenshot` / `watch` refuse it `browser_is_human` (403, the remedy names `vibespace-browser`), `list` omits it, and a browser registry row is never an id an agent may open.
+
+### The agent's ephemeral browser shows itself (2.369.180 lane H, owner 2026-09-25: "我在前端完全没看到浏览器出现啊 … 也没记录任何浏览器操作")
+
+* **The live view opens beside the chat.** When a conversation's own (managed ephemeral) browser starts and its chat window is open on the desktop you are looking at, the live view is born INSIDE that chat's window as a side-by-side split, silently, exactly as when a session attaches a profile (`browser.autoBindLiveView`, default on; never on a phone; one window per session, syncId `win-blive-<session>`). It streams THAT browser, even if the conversation also holds attachments. A sub-agent's own browser is never auto-opened.
+* **It greys, and comes back.** When the ephemeral browser stops (it idled out, or somebody pressed Stop), the view says so ("this conversation's browser is not running … the agent's next browser command starts it again, and this view reconnects then"). Opening or reconnecting a view never starts that browser. The agent's next browser command restarts it and the same window reconnects.
+* **Its actions are recorded with nobody watching.** Every action the agent sends to its ephemeral browser is in the action trace (scope `ephemeral`), from the very first `open`: the trace is armed when the browser starts, and the command waits (at most 3 s) until it is. The tool card of the call shows the Browser actions thumbnails; the Agent browser panel lists them. The same wait now covers a named profile's first command after an attach.
+* **The chips.** The chat status bar's Agent browser chip names it `Agent browser · (ephemeral) <session>`, and its tooltip says whether it is running. The session card shows an `Agent browser · …` chip while the session's agent holds a running browser (its ephemeral one or a profile); click opens the live view.
+* **The status route's `leases`** lists the running ephemeral browser too (marked `ephemeral`), beside the `ephemeral` record.
+* **agent-browser 0.38.1** on this machine (was 0.32.0): shared profiles are available (floor 0.37.1). New refusals by name: `webmcp` (page-declared tools, experimental), `--ca-cert` / `--no-ca-cert` / `--no-webmcp` (launch), `--no-pin-tab` (the lease decides the tab). New verb: `a11y [url]` (an accessibility audit; a `file:` / `chrome:` url is refused like `open`'s).
+* **Verify r1 (2026-09-25).** A dead ephemeral browser leaves at once: when its daemon dies, the live view's stream closing tells the keeper and the holder row goes (it used to linger up to 5 s, and a view reconnecting in that window started a daemon nobody held). Only the command that STARTED the browser waits for the trace to be armed; later commands never wait, and a failed arming is not retried by a command for 30 s. `vibespace-browser detach` in a conversation whose only browser is its own ephemeral one stops that browser now and says so ("… is stopped now … the next browser command starts it again"); the next command's browser is traced again. test-browser-resources re-ran green on 0.38.1 (the shared-profile floor stands).
+* **Naive study 2 (2026-09-25).** A named profile works for more than one conversation again: VibeSpace alone starts a profile's browser, and every conversation reaches it through its debugging address with its own tab (before, each conversation's own browser process tried to start a second Chrome on the profile's folder and died on "SingletonLock", the study's "bank"). "Open live view" goes to the session's one live view instead of opening another window. A live view never starts a browser: a stopped one keeps the last picture, greyed, labelled "Browser stopped", and reconnects when the browser runs again. A helper's (sub-agent's) browser is recorded too, and never gets a live view of its own.
+* Gates: test-browser-profiles ㉒, test-browser-ephemeral ④ ⑤, test-browser-verbs, test-browser-live ① ③b / ④ (heavy), test-browser-mediation-chrome ④ (heavy, the real 0.38.1).
 
 ### Browser takeover — THE THREE BROWSER FACES RENAMED (2.369.168 chunk 3; docs/design-browser-takeover.zh.md §7 T5 / D10 = docs/design-browser-faces.zh.md direction B)
 

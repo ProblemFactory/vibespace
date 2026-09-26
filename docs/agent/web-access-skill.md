@@ -189,7 +189,7 @@ Every line is checked before any runs; one refused line refuses the whole batch 
 ```bash
 vibespace-browser tab close         # Close the CURRENT tab only
 vibespace-browser close             # Close your tab / browser
-vibespace-browser close --all       # Safe: closes YOUR browser only (refused where others share it)
+vibespace-browser close --all       # Safe: closes YOUR browser only (on an attached profile: only your session + your lease)
 vibespace-browser detach            # Drop a named profile you attached
 ```
 

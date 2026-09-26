@@ -35,6 +35,8 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+import { vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { WebSocket } = require('ws');
@@ -110,7 +112,7 @@ async function scenario(tag, wt) {
   fs.writeFileSync(path.join(BIN, 'lock-dir-' + path.basename(ROOT) + '-home-' + tag), path.join(HOME, '.claude', 'sessions'));
   const cwdOf = (n) => { const d = path.join(ROOT, `work-${tag}-${n}`); fs.mkdirSync(d, { recursive: true }); return d; };
   const PORT = await freePort();
-  const env = { ...withoutVendorKeys(process.env), HOME, PATH: `${BIN}:${process.env.PATH}`, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
+  const env = { ...withoutVendorKeys(process.env), ...VNC_ENV, HOME, PATH: `${BIN}:${process.env.PATH}`, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
     VIBESPACE_AGENTD_ROOT: path.join(ROOT, 'agentd-' + tag), VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules') };
   delete env.CLAUDE_CODE_CHILD_SESSION; delete env.CLAUDECODE;
   const boot = async () => {

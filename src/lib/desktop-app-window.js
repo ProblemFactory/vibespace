@@ -124,9 +124,13 @@ import { memoryText } from '../runaway-guard.js';
 import { launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
+import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
+import { shortModeBadge } from './live-bar-layout.js';
 import { seamlessVerdict, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
 
 const WATCH_HINT_EVERY_MS = 8000;
+/** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
+export const DESK_STATUS_MIN_PX = 40;
 
 const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/>');
 
@@ -381,6 +385,21 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
     for (const el of [view.bar, view.pane]) if (el && minRo) minRo.observe(el); // the status strip's height is chrome; the pane shown again re-measures (the RFB view has no pane)
     for (const el of controls) view.addControl(el);
+    // lane I: the strip never wraps — every child at its natural width on one line, the status alone flexing; the rest
+    // folds into ⋯ by DESK_BAR_PRIORITY (the shell's own items never fold). One fold per view (a retarget disposes it).
+    barFold?.dispose();
+    const bar = view.bar;
+    barFold = createBarFold(bar, {
+      more: moreBtn,
+      moreAlways: () => !!rec && rec.stream === 'xpra',
+      items: () => [...bar.children].filter((el) => el !== moreBtn && !el.classList.contains('bar-ruler-host')).map((el, i) => ({
+        key: DESK_BAR_KEY.get(el) || `shell-${i}-${String(el.className || el.tagName).split(/\s+/)[0]}`, el,
+        priority: DESK_BAR_PRIORITY.get(el) || 0,
+        flexMin: el.classList.contains('desktop-status') ? DESK_STATUS_MIN_PX : undefined,
+      })),
+      signal: winInfo._listenerCtl?.signal,
+      onLayout: (v) => { winInfo._desktopBarLayout = v; }, // the raw handle the heavy census reads (never the DOM)
+    });
     view.mount.appendChild(blockedEl); // x5: the overlay of a blocked pane (hidden while active / watching)
     // in Watch a click on the picture is a hint, never input (the view is view-only; the bridge would drop it anyway)
     view.mount.addEventListener('pointerdown', () => {
@@ -484,21 +503,32 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over');
   const handBtn = document.createElement('button'); handBtn.className = 'file-tool-btn browser-live-handback'; handBtn.textContent = t('Hand back'); handBtn.title = t('Hand back to the agent');
   // round 3 A3: the ⋯ button — the window's own menu (Scale ▸ today); the same rows ride the title-bar / taskbar menu
-  const moreBtn = document.createElement('button'); moreBtn.type = 'button'; moreBtn.className = 'file-tool-btn desktop-app-more'; moreBtn.style.cssText = 'width:auto;padding:0 6px';
+  // lane I: the ⋯ is ALSO the strip's overflow — shown while anything is folded (bar-fold.js owns its `bar-folded` class)
+  const moreBtn = document.createElement('button'); moreBtn.type = 'button'; moreBtn.className = 'file-tool-btn desktop-app-more bar-folded'; moreBtn.style.cssText = 'width:auto;padding:0 6px';
   moreBtn.innerHTML = UI_ICONS.more; moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
   const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, hostChip, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
-  // the badge's words come from the PURE table; t() needs the literal keys below to be extractable
-  void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause')];
+  // lane I: THE STRIP'S FOLD PRIORITIES (src/lib/live-bar-layout.js; the live view's rule): the picture shell's own items
+  // (status — the ONE flexible item —, Paste, Reconnect, the copy chip + hint) and the mode badge + Take over / Hand
+  // back never fold (0); the holder chip 2; the origin marker and the fact chips 3 (the machine chip of a paired-machine app, 2.369.178, is one); Keep running / Stop 4 (both are
+  // rows of this ⋯ menu already). Equal priorities fold right-to-left.
+  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
+  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
+  let barFold = null;
+  // the badge's words come from the PURE tables; t() needs the literal keys below to be extractable
+  void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause'), t('You are driving'), t('Another viewer is driving')];
   const renderLease = () => {
     const m = windowLiveMode({ lease, viewerTag: myTag });
     const show = m.leased;
-    for (const el of [originChip, agentChip, modeBadge, takeBtn]) el.style.display = show ? '' : 'none';
+    for (const el of [originChip, agentChip, modeBadge]) el.style.display = show ? '' : 'none';
+    // lane I: ONE toggle, as on the live view — Take over while the agent drives, Hand back while a human does
+    takeBtn.style.display = show && m.mode !== 'takeover' ? '' : 'none';
     handBtn.style.display = show && m.mode === 'takeover' ? '' : 'none';
     if (!show) { winInfo.content.classList.remove('window-live-driving'); applyViewOnly(); return; }
     const who = lease.sessionName || lease.sessionId || '';
     agentChip.textContent = m.orphaned ? t('Agent gone: {name}', { name: who }) : t('Agent: {name}', { name: who });
     agentChip.title = m.orphaned ? t('The session that held this window is no longer live — the lease is free for the next agent') : t('The agent session holding this window (one holder per window)');
-    modeBadge.textContent = t(windowModeBadge(m));
+    modeBadge.textContent = t(shortModeBadge(m)); // lane I: the short words on the strip, the full sentence in the tooltip
+    modeBadge.title = t(windowModeBadge(m));
     modeBadge.classList.toggle('takeover', m.mode === 'takeover' && m.mine);
     modeBadge.classList.toggle('other', m.mode === 'takeover' && !m.mine);
     takeBtn.classList.toggle('active', m.mine);
@@ -543,7 +573,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     if (rec.stream === 'xpra') backendChip.title += ' — ' + t('xpra streams each app window as pixels; text stays crisp at your screen’s scale');
     const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none'; scaleChip.title = scaleChipTitle(rec);
     winInfo._desktopAppStream = rec.stream || null;
-    moreBtn.style.display = rec.stream === 'xpra' ? '' : 'none'; // the menu holds Scale ▸ only — nothing to offer on a whole-display rung
+    barFold?.schedule(); // lane I: the ⋯ is shown for xpra (Show window frame ▸ / Scale ▸) or while anything is folded — bar-fold.js decides
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
     liveChip.title = rec.live && rec.live.over ? String(rec.live.over) : ''; // the keeper's report (never a stop) — the sentence names the metric
@@ -629,9 +659,16 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     const r = moreBtn.getBoundingClientRect();
-    const items = [{ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() }];
+    // lane I: first the strip's FOLDED facts (their live words; Keep running / Stop are rows below already), then the window's own rows
+    const folded = barFold ? barFold.folded() : [];
+    const items = [];
+    for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ label: el.textContent, title: el.title || '', disabled: true });
+    if (items.length) items.push({ separator: true });
+    if (rec && rec.stream === 'xpra') items.push({ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() });
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
+    if (items.length && items[items.length - 1].separator) items.pop();
+    if (!items.length) return;
     showContextMenu(r.left, r.bottom + 2, items);
   };
   let relaunching = false;
@@ -658,6 +695,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     // another window already shows the successor (a second client's replay, a manual open): this one goes quietly
     for (const [, w] of app.wm.windows) if (w !== winInfo && w._desktopAppId === nextId) { closed = true; app.wm.closeWindow(winInfo.id); return; }
     if (view) { try { view.dispose(); } catch {} try { view.container.remove(); } catch {} }
+    barFold?.dispose(); barFold = null;
     view = null; rec = null; gone = false; exitDecided = false; closeAskedAt = 0; lastSeat = null;
     mainMeta = null; viewConnected = false; appIconified = false; applySeamless();
     seats = { known: false, active: null, viewers: [] }; optimistic = null; lease = null; myTag = null;

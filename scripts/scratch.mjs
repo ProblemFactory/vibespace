@@ -38,6 +38,9 @@ export const ONBOARDED_SOURCE = "try { localStorage.setItem('vs-onboarded', '1')
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 export function scratch(name) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error(`scratch(): bad name ${JSON.stringify(name)}`);
+  // lane H verify r2: `vs-ab-<n>` is the PRODUCT's socket-dir fallback shape (src/browser-profiles.js socketDirDecision),
+  // which the scratch reaper (scripts/ci.mjs PRODUCT_ROOT_RE) never judges — a suite minting it would hide from the sweep
+  if (name === 'ab') throw new Error('scratch(): "ab" would mint /tmp/vs-ab-<pid> — the product\'s own socket-dir shape; pick another name');
   return path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}${name}-${process.pid}`);
 }
 
@@ -78,6 +81,76 @@ export async function freePorts(n) {
 }
 
 export async function freePort() { return (await freePorts(1))[0]; }
+
+/** THE SINGLETON DESKTOP'S NAMES, PER RUN (2026-09-25 — the heavy RED on
+ *  69720f2b). src/vnc.js's singleton Desktop claims the MACHINE-GLOBAL X display
+ *  `:7` and RFB port 5901 unless VIBESPACE_VNC_DISPLAY / VIBESPACE_VNC_PORT name
+ *  others, and it ADOPTS whatever already listens on its port (by design —
+ *  KasmVNC, an app-only restart). This box has Xtigervnc on PATH since
+ *  2026-09-21, so every scratch server that opened the Desktop started — or
+ *  adopted — ONE Xtigervnc shared by every run on the box and by the owner's
+ *  production instance, and `:7` sits in the band `-displayfd` hands out
+ *  lowest-first to every desktop-app keeper's Xvfb (measured: picks 6 9 11 …
+ *  around a live :7), so a suite's Xvfb could hold the display the singleton
+ *  needs. Every suite that spawns server.js spreads this into the server env
+ *  (test-architecture §57 is the census). The port comes from freePort(); the
+ *  display from `freeDisplay` seeded by that port. */
+export async function vncEnv() {
+  const port = await freePort();
+  return { VIBESPACE_VNC_DISPLAY: `:${freeDisplay(port)}`, VIBESPACE_VNC_PORT: String(port) };
+}
+/** Far above the lowest-first `-displayfd` band the keepers draw from, below
+ *  the X TCP ceiling (6000 + n). */
+export const VNC_DISPLAY_RANGE = Object.freeze({ lo: 1000, span: 20000 });
+/** The first X display number at or after a seed-derived start whose lock file
+ *  AND socket are both absent (a lock alone is left behind by a SIGKILLed
+ *  server; a socket alone by a crashed one — either may still be claimed).
+ *  `exists` is a parameter so the rule is testable without an X server. */
+export function freeDisplay(seed, { exists = (p) => fs.existsSync(p) } = {}) {
+  const { lo, span } = VNC_DISPLAY_RANGE;
+  const s = Math.abs(Math.trunc(Number(seed) || 0));
+  for (let i = 0; i < span; i++) {
+    const n = lo + ((s + i) % span);
+    if (!exists(`/tmp/.X${n}-lock`) && !exists(`/tmp/.X11-unix/X${n}`)) return n;
+  }
+  throw new Error(`freeDisplay(): no free X display in :${lo}..:${lo + span - 1}`);
+}
+
+/** EVERY PROCESS ROOTED IN A SCRATCH DIR — the teardown of a suite whose worktree
+ *  server spawned sessions (2026-09-25, test-browser-resources: 140 live leftovers
+ *  from 20 runs). A server's terminal/chat sessions run under dtach — DETACHED by
+ *  design (production's must outlive a restart; systemd's KillMode=process is the
+ *  same rule) — so killing the server ends none of them, and they run with the
+ *  REAL HOME and cwd `/tmp`: the scratch root is only in their arguments
+ *  (`dtach -c <root>/…/data/sockets/cw-…`, `node <root>/…/data/bin/pty-wrapper.js`).
+ *  A suite that boots a server owns what that server started: this lists every
+ *  process whose cwd, HOME or any argv token (its start, or after `=`) lies in
+ *  `root` — never this process or its ancestors — and signals each (SIGKILL by
+ *  default; synchronous, so it runs inside an 'exit' handler). Returns the pids.
+ *  The gate's reaper (scripts/ci.mjs argvScratchRoots) is the net for a suite that
+ *  never got here. */
+export function endRootedProcesses(root, { signal = 'SIGKILL', procRoot = '/proc', self = process.pid } = {}) {
+  const r = path.resolve(String(root || ''));
+  if (!r || r === '/' || !r.startsWith('/tmp/')) throw new Error(`endRootedProcesses(): refusing root ${JSON.stringify(root)} (a /tmp scratch dir only)`);
+  const under = (x) => { const v = String(x || ''); return v === r || v.startsWith(r + '/'); };
+  const skip = new Set();
+  for (let q = self; q > 1 && !skip.has(q);) {
+    skip.add(q);
+    try { const st = fs.readFileSync(`${procRoot}/${q}/stat`, 'latin1'); q = Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { break; }
+  }
+  const hit = [];
+  let pids = []; try { pids = fs.readdirSync(procRoot).filter((d) => /^\d+$/.test(d)).map(Number); } catch { return hit; }
+  for (const pid of pids) {
+    if (skip.has(pid)) continue;
+    let rooted = false;
+    try { rooted = under(fs.readlinkSync(`${procRoot}/${pid}/cwd`)); } catch { }
+    if (!rooted) try { rooted = fs.readFileSync(`${procRoot}/${pid}/cmdline`, 'utf8').split(/[\0\s]+/).some((t) => under(t) || t.split('=').slice(1).some((v) => under(v))); } catch { }
+    if (!rooted) try { rooted = under((fs.readFileSync(`${procRoot}/${pid}/environ`, 'utf8').split('\0').find((kv) => kv.startsWith('HOME=')) || '').slice(5)); } catch { }
+    if (!rooted) continue;
+    try { process.kill(pid, signal); hit.push(pid); } catch { }
+  }
+  return hit;
+}
 
 /** The ambient vendor credentials a REAL agent CLI would bill against instead
  *  of the login the leg means to use (B-5f0b, the 2.369.69 lesson): a fake

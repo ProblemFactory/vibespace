@@ -497,7 +497,9 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   ok(!dump.includes(fake.url) && !dump.includes('RAW-ID') && !dump.includes(atA.cdpUrl.split('/m/')[1].slice(0, 32)), 'the raw url and the tokens reach no digest, broadcast, status or lease view');
   ok(keeper.list().mediation.port === med.port() && keeper.list().mediation.grants.length === 2 && keeper.list().mediation.grants.every((g) => !('token' in g)), 'the digest carries the proxy\'s port and two grant views (no token)');
   const atC = await keeper.attach({ profileId: solo.id, browserKey: KEY_C, sessionId: 'sess-c' });
-  ok(atC.mediated === false && atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && !atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=')), 'NEGATIVE CONTROL: an owner profile attaches exactly as before (the directory, no CDP pair)');
+  // naive study 2: an owner profile is NOT mediated — its lease reaches the keeper's browser over that browser's OWN url
+  // (never a scoped /m/ url), and never its directory (the keeper is the only launcher; was: the directory, no CDP pair)
+  ok(atC.mediated === false && !atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && atC.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=') && !kv.includes('/m/') && kv.slice('AGENT_BROWSER_CDP='.length) === keeper.browserOf(solo.id).cdpUrl), 'NEGATIVE CONTROL: an owner profile attaches unmediated — its browser\'s own CDP url, no scoped url, no directory');
   // ─ scope across the two conversations, through the keeper's own grants
   const cA = cdpClient(atA.cdpUrl); await cA.open;
   const cB = cdpClient(atB.cdpUrl); await cB.open;

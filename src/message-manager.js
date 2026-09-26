@@ -17,6 +17,7 @@ const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
+const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
 
 // System subtypes _processSystem actually renders/consumes — anything else
@@ -1736,10 +1737,14 @@ class MessageManager {
     const requestId = raw.response?.request_id;
     if (!requestId) return;
     const approved = raw.response?.response?.behavior === 'allow';
+    // lane J r2: a deny that names browser_paused is the takeover's STALE answer — the
+    // card says why (and keeps saying it after a restart: this record is replayed from the buffer)
+    const staleBy = approved ? null : staleFromDenyMessage(raw.response?.response?.message);
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
       if (m.permission?.requestId === requestId) {
         m.permission.resolved = approved ? 'allowed' : 'denied';
+        if (staleBy) m.permission.staleBy = staleBy;
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
       }

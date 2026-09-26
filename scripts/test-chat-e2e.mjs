@@ -21,7 +21,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, withoutVendorKeys } from './scratch.mjs';
+import { freePort, scratch, scratchHome, withoutVendorKeys, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
 
@@ -104,7 +105,7 @@ fs.mkdirSync(cwd, { recursive: true });
 // ANTHROPIC_AUTH_TOKEN to the CLI (a user's own choice), and either one
 // OUTRANKS the oat this suite seeds — the turn would bill metered API while
 // the badge assert below still read "the oat account".
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 // UNCONDITIONAL cleanup (2026-09-09). The transcript removal used to live at
 // the very END of the happy path, so every early `process.exit(1)` — and every
 // signal — left it behind. It runs here, from one function, on 'exit' AND on

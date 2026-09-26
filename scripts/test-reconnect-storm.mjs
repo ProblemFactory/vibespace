@@ -86,8 +86,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 
@@ -268,7 +269,7 @@ setInterval(() => { if (mx || fr) { try { fs.appendFileSync(${JSON.stringify(buf
 `);
   let journal = '';
   const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+    env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
   procs.add(srv);
   // (j): the server's own journal line for a cut is the FIRST sign of it (the telemetry ledger flushes seconds later) — it stops the burst
   let cutSeenAt = 0;

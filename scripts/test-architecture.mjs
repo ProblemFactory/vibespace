@@ -1979,5 +1979,150 @@ console.log('§56 a capability is pinned by content, never by the capability lis
   ok(planted.every((l) => TAIL.test(l)) && !clean.some((l) => TAIL.test(l)), `§56 NEGATIVE CONTROL: the four tail spellings (regex both quotes, esbuild's string, a template) are caught; the by-content regex, a stub capability array and a plain argv are not (${JSON.stringify(planted.filter((l) => !TAIL.test(l)).concat(clean.filter((l) => TAIL.test(l))))})`);
 }
 
+// §57 NO SCRATCH SERVER CLAIMS THE SINGLETON DESKTOP'S :7 / 5901 (2026-09-25 — the heavy RED on 69720f2b:
+// test-desktop-app-window's singleton leg read `null` twice). src/vnc.js's singleton Desktop takes the MACHINE-GLOBAL
+// X display :7 and RFB port 5901 unless VIBESPACE_VNC_DISPLAY / VIBESPACE_VNC_PORT name others, and ADOPTS whatever
+// listens on its port. With Xtigervnc on this box every scratch server that opened the Desktop started or adopted ONE
+// Xtigervnc — another run's, left behind under a deleted scratch dir (observed live) — and a keeper's Xvfb, whose
+// `-displayfd` hands out the lowest free number, could hold :7 so the singleton could not start at all (reproduced:
+// the leg's exact `null`). The "gate suites never claim machine-global names" class (§6 for literal ports/paths):
+// these names are IMPLICIT — the server's defaults — so the census is on the spawn ENV. DERIVED: every
+// scripts/test-*.mjs spawn of `server.js` (argv `['server.js']`, `['-r', x, 'server.js']`, `[path.join(x, 'server.js')]`)
+// names an env that carries scratch.mjs `vncEnv()` — inline, or through the variable / spread it is built from.
+console.log('§57 every suite that spawns server.js hands it per-run singleton-Desktop names (scratch.mjs vncEnv)');
+{
+  const SPAWN = /\b(?:spawn|fork)\(\s*(?:process\.execPath|'node'|"node")\s*,\s*\[[^\]]*?(?:['"`]server\.js['"`]|path\.join\([^)]*?['"`]server\.js['"`]\s*\))\s*\]/g;
+  // walk(t, i, false) = the balanced text from the opening bracket at `i`; walk(t, i, true) = from `i` to the end of its statement (strings skipped)
+  const walk = (t, i, stopAtStatementEnd) => {
+    let d = 0, q = null;
+    for (let j = i; j < t.length; j++) {
+      const c = t[j];
+      if (q) { if (c === '\\') j++; else if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === '`') { q = c; continue; }
+      if ('{(['.includes(c)) d++;
+      else if ('})]'.includes(c)) { if (stopAtStatementEnd && d === 0) return t.slice(i, j); d--; if (!stopAtStatementEnd && d === 0) return t.slice(i, j + 1); }
+      else if (stopAtStatementEnd && d === 0 && (c === ';' || c === '\n')) return t.slice(i, j);
+    }
+    return t.slice(i);
+  };
+  // offsets inside a string literal, a template's text, a regex literal or a comment: a spawn SPELLED there is data (a
+  // control or a pin), never a spawn. Templates nest through `${ … }` (a brace-depth stack); a regex literal is told
+  // from a division by the token before it (a regex carrying a backtick desynced the first cut for 90 lines).
+  const dataRanges = (t) => {
+    const out = [], tpl = []; let depth = 0;
+    const chunk = (j) => { // template text from the ` or } at j to the next ` or ${
+      let k = j + 1;
+      while (k < t.length && t[k] !== '`' && !(t[k] === '$' && t[k + 1] === '{')) k += t[k] === '\\' ? 2 : 1;
+      out.push([j, k + 1]);
+      if (t[k] === '$') { tpl.push(depth); depth++; return k + 1; }
+      return k;
+    };
+    for (let j = 0; j < t.length; j++) {
+      const c = t[j], n = t[j + 1];
+      if (c === '/' && (n === '/' || n === '*')) { const e = n === '/' ? t.indexOf('\n', j) : t.indexOf('*/', j + 2); const end = e < 0 ? t.length : e + (n === '/' ? 0 : 2); out.push([j, end]); j = end - 1; continue; }
+      if (c === '"' || c === "'") { let k = j + 1; while (k < t.length && t[k] !== c && t[k] !== '\n') k += t[k] === '\\' ? 2 : 1; out.push([j, k + 1]); j = k; continue; }
+      if (c === '/' && /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\breturn|\btypeof)\s*$/.test(t.slice(Math.max(0, j - 12), j))) {
+        let k = j + 1, cls = false;
+        while (k < t.length && t[k] !== '\n' && (cls || t[k] !== '/')) { if (t[k] === '\\') k++; else if (t[k] === '[') cls = true; else if (t[k] === ']') cls = false; k++; }
+        out.push([j, k + 1]); j = k; continue;
+      }
+      if (c === '`') { j = chunk(j); continue; }
+      if (c === '}' && tpl.length && depth - 1 === tpl[tpl.length - 1]) { depth--; tpl.pop(); j = chunk(j); continue; }
+      if (c === '{') depth++; else if (c === '}') depth--;
+    }
+    return out;
+  };
+  const judge = (t) => {
+    const data = dataRanges(t);
+    const isData = (i) => data.some(([a, b]) => i >= a && i < b);
+    const defsOf = (name) => [...t.matchAll(new RegExp(`(?:\\b(?:const|let|var)\\s+|(?:^|[;{}\\n])\\s*)${name.replace(/\$/g, '\\$')}\\s*=(?![=>])\\s*`, 'g'))].map((m) => walk(t, m.index + m[0].length, true));
+    const carries = (text, depth = 0) => {
+      if (/\bvncEnv\s*\(/.test(text) || (/\bVIBESPACE_VNC_DISPLAY\b/.test(text) && /\bVIBESPACE_VNC_PORT\b/.test(text))) return true;
+      if (depth > 4) return false;
+      for (const m of text.matchAll(/\.\.\.\s*\(?\s*([A-Za-z_$][\w$]*)\b(?!\s*[.(])/g)) if (defsOf(m[1]).some((d) => carries(d, depth + 1))) return true;
+      return false;
+    };
+    const findings = []; let spawns = 0;
+    for (const m of t.matchAll(SPAWN)) {
+      if (isData(m.index)) continue;
+      spawns++;
+      const line = t.slice(0, m.index).split('\n').length;
+      let j = m.index + m[0].length; while (/[\s,]/.test(t[j] || '')) j++;
+      const opts = t[j] === '{' ? walk(t, j, false) : '';
+      const e = /\benv\s*:\s*/.exec(opts);
+      let envText = null;
+      if (e) { const k = e.index + e[0].length; if (opts[k] === '{') envText = walk(opts, k, false); else { const id = /^[A-Za-z_$][\w$]*/.exec(opts.slice(k)); if (id) envText = defsOf(id[0]).join('\n'); } }
+      else if (/[{,]\s*env\s*[,}]/.test(opts)) envText = defsOf('env').join('\n');
+      if (envText === null) findings.push(`line ${line}: names no env (inherits the machine-global :7/5901)`);
+      else if (!carries(envText)) findings.push(`line ${line}: its env carries no vncEnv() names`);
+    }
+    return { spawns, findings };
+  };
+  // NO EXEMPTIONS: this file and test-fixture-isolation spell the shape only inside string literals (their controls),
+  // which the census reads as data — asserted, so a real spawn added to either is judged like any other.
+  for (const f of ['test-architecture.mjs', 'test-fixture-isolation.mjs']) {
+    const src = fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8');
+    const spelled = [...src.matchAll(SPAWN)].length;
+    ok(spelled > 0 && judge(src).spawns === 0, `§57 ${f} spells a server.js spawn ${spelled}× — only inside string literals (its controls), so it is out of scope by the rule, not by a list`);
+  }
+  const suites = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^test-.*\.mjs$/.test(f)).sort();
+  const scope = [], bad = [];
+  for (const f of suites) { const r = judge(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8')); if (!r.spawns) continue; scope.push(f); for (const x of r.findings) bad.push(`${f} ${x}`); }
+  ok(scope.length >= 50 && scope.includes('test-desktop-app-window.mjs'), `§57 census scope is non-vacuous (${scope.length} suites spawn server.js, the incident's suite among them)`);
+  ok(bad.length === 0, `§57 every server.js spawn carries the per-run singleton-Desktop names${bad.length ? ' — ' + bad.join(' | ') : ''}`);
+  // NEGATIVE CONTROLS: the incident's own pre-fix shape (a named env, no names), an inline env, a spawn with NO env,
+  // the preload and path.join argv forms — caught; the idiom through each route (inline, a variable, a spread of a
+  // variable, a function-built env, the two literal names) — passes; a git ls-files ending in 'server.js' is no spawn.
+  const plant = {
+    named: "const srvEnv = { ...process.env, PORT: String(PORT), HOME: home };\nconst bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };",
+    inline: "const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });",
+    none: "const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: 'ignore' });",
+    joined: "const srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env,PORT:String(PORT)},stdio:'ignore'});",
+  };
+  const pass = {
+    inline: "const VNC_ENV = await vncEnv();\nconst srv = spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT) } });",
+    named: "const VNC_ENV = await vncEnv();\nconst srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT) };\nsrv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv });",
+    spread: "const VNC_ENV = await vncEnv();\nconst srvEnv = { ...process.env, ...VNC_ENV };\nconst sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(P2) } });",
+    fn: "const VNC_ENV = await vncEnv();\nconst srvEnv = (extra = {}) => ({ ...process.env, ...VNC_ENV, ...extra });\nsrv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv(extraEnv) });",
+    shorthand: "const env = { ...process.env, ...(await vncEnv()) };\nconst c = spawn(process.execPath, ['server.js'], { cwd: wt, env, stdio: 'ignore' });",
+    literal: "const srv = spawn('node', ['server.js'], { env: { ...process.env, VIBESPACE_VNC_DISPLAY: ':1234', VIBESPACE_VNC_PORT: String(P) } });",
+    git: "execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js'], {});",
+    quoted: "const ctl = \"const srv = spawn('node', ['server.js'], { env: { PORT } });\"; // spawn(process.execPath, ['server.js'])",
+  };
+  const caught = Object.entries(plant).filter(([, v]) => judge(v).findings.length === 1).map(([k]) => k);
+  const passed = Object.entries(pass).filter(([, v]) => judge(v).findings.length === 0).map(([k]) => k);
+  ok(caught.length === Object.keys(plant).length && passed.length === Object.keys(pass).length && judge(pass.git).spawns === 0 && judge(pass.quoted).spawns === 0,
+    `§57 NEGATIVE CONTROL: the pre-fix shapes are caught (${caught.join(', ')}), the idiom passes by every route (${passed.join(', ')}); a git ls-files and a spawn spelled in a string or comment are no spawn`);
+}
+
+// §58 EVERY ICON A MODULE NAMES EXISTS (lane I, 2026-09-25 — the owner's live-view screenshot printed the word
+// "undefined" in the bar: `openBtn.innerHTML = UI_ICONS.web` since 2.369.134, while `web` lives in FILE_ICONS and
+// UI_ICONS has `globe`; innerHTML = undefined writes the literal string). DERIVED: every `UI_ICONS.k` /
+// `FILE_ICONS.k` / `UI_ICONS['k']` spelled anywhere under src/ is a key of that object in src/lib/icons.js.
+console.log('§58 every UI_ICONS / FILE_ICONS name a module spells exists in icons.js');
+{
+  const icons = await import(new URL('../src/lib/icons.js', import.meta.url).href);
+  const have = { UI_ICONS: new Set(Object.keys(icons.UI_ICONS || {})), FILE_ICONS: new Set(Object.keys(icons.FILE_ICONS || {})) };
+  const walk = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : /\.(c|m)?js$/.test(d.name) ? [path.join(dir, d.name)] : []));
+  const files = walk('src');
+  const misses = (texts) => {
+    const out = [];
+    for (const [f, src] of Object.entries(texts)) {
+      for (const m of src.matchAll(/\b(UI_ICONS|FILE_ICONS)(?:\.([A-Za-z_$][\w$]*)|\[\s*['"]([^'"]+)['"]\s*\])/g)) {
+        const k = m[2] || m[3];
+        if (!have[m[1]].has(k)) out.push(`${f}:${src.slice(0, m.index).split('\n').length} ${m[1]}.${k}`);
+      }
+    }
+    return out;
+  };
+  const texts = Object.fromEntries(files.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));
+  const refs = Object.values(texts).reduce((n, src) => n + (src.match(/\b(?:UI_ICONS|FILE_ICONS)(?:\.[A-Za-z_$]|\[\s*['"])/g) || []).length, 0);
+  ok(have.UI_ICONS.size > 50 && have.FILE_ICONS.size > 10 && refs > 100, `§58 census scope is non-vacuous (${have.UI_ICONS.size} UI + ${have.FILE_ICONS.size} FILE icons, ${refs} references in ${files.length} files)`);
+  const bad = misses(texts);
+  ok(bad.length === 0, `§58 every icon reference resolves${bad.length ? ' — ' + bad.join(' | ') : ''}`);
+  const planted = misses({ ...texts, 'src/lib/browser-live-window.js': texts['src/lib/browser-live-window.js'] + "\nopenBtn.innerHTML = UI_ICONS.web;\nx.innerHTML = UI_ICONS['nope'];" });
+  ok(planted.length === 2 && planted.every((p) => p.startsWith('src/lib/browser-live-window.js:')), `§58 NEGATIVE CONTROL: the shipped miss (UI_ICONS.web) and a bracket miss planted into a patched listing are both caught (${planted.join(' | ')})`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

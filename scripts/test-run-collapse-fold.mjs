@@ -4,7 +4,8 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import net from 'node:net';
-import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
@@ -20,7 +21,7 @@ for (const f of ['src','public','server.js']) execSync(`rm -rf ${wt}/${f} && cp 
 fs.symlinkSync(path.join(repo,'node_modules'), path.join(wt,'node_modules'));
 execSync('npm run build',{cwd:wt,stdio:'ignore'});
 fs.mkdirSync(path.join(wt,'data'),{recursive:true}); fs.rmSync(fakeHome,{recursive:true,force:true}); fs.mkdirSync(fakeHome,{recursive:true});
-const srv = spawn(process.execPath,['server.js'],{cwd:wt,env:{...process.env,PORT:String(PORT),HOME:fakeHome,VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
+const srv = spawn(process.execPath,['server.js'],{cwd:wt,env:{...process.env, ...VNC_ENV,PORT:String(PORT),HOME:fakeHome,VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
 const chrome = spawn(CHROME,['--headless=new',`--remote-debugging-port=${CDP}`,'--no-first-run','--disable-gpu','--disable-background-timer-throttling',`--user-data-dir=${chromeDir}`,'about:blank'],{stdio:'ignore'});
 process.on('exit',()=>{ for (const p of [chrome,srv]) { try{p.kill('SIGKILL');}catch{} } try{execSync(`git worktree remove --force ${wt}`,{stdio:'ignore'});}catch{} try{fs.rmSync(chromeDir,{recursive:true,force:true});}catch{} try{fs.rmSync(fakeHome,{recursive:true,force:true});}catch{} });
 for (let i=0;i<40;i++){ try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250);} }

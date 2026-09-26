@@ -40,10 +40,11 @@ export function canPinBrowser(app, s) {
  *  the adopt item. `pinnedId` is the session row's `browserProfileId`. */
 export function pickerItems({ profiles = [], pinnedId = null, browserVariant = null, chips = {}, onSwitch = null, onPin, onAdopt }) {
   const items = [];
-  items.push({ label: (pinnedId ? '  ' : '✓ ') + t('Unpinned (ephemeral)'), action: () => onPin(null) });
+  // the ticked row is where the pin already is: choosing it again changes nothing, so it asks the server nothing (lane J — it used to queue a "ephemeral → ephemeral" notice)
+  items.push({ label: (pinnedId ? '  ' : '✓ ') + t('Unpinned (ephemeral)'), action: () => { if (pinnedId) onPin(null); } });
   // P6: a mediated (instance-shared) profile is attached through its scoped url, never pinned — a pin would hand the next launch its directory
   for (const p of profiles.filter((x) => !x.mediated)) {
-    items.push({ label: (p.id === pinnedId ? '✓ ' : '  ') + p.label + (p.legacy ? ' ' + t('(legacy shared)') : '') + (chips && chips[p.id] ? ' · ' + chips[p.id] : ''), action: () => onPin(p.id) });
+    items.push({ label: (p.id === pinnedId ? '✓ ' : '  ') + p.label + (p.legacy ? ' ' + t('(legacy shared)') : '') + (chips && chips[p.id] ? ' · ' + chips[p.id] : ''), action: () => { if (p.id !== pinnedId) onPin(p.id); } });
   }
   // P4 (§7.4): the pinned profile's BACKEND CHIP as an item, opening the switcher (the second of the chip's two homes)
   if (pinnedId && typeof onSwitch === 'function') { items.push({ separator: true }); items.push({ label: t('Backend: {chip} — switch…', { chip: (chips && chips[pinnedId]) || '?' }), action: () => onSwitch(pinnedId) }); }

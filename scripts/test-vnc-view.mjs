@@ -18,6 +18,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { gitEnvFrom } from './git-env.mjs';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
+import { scratch } from './scratch.mjs';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(repo, f), 'utf8');
@@ -344,6 +348,54 @@ console.log('§8 (desktop A r1) a gesture copy hands the keyboard focus BACK to 
   ok(refused === false && fdoc.activeElement === body, 'a refused write returns false; from <body> nothing is focused afterwards (no stray focus)');
   fdoc.activeElement = ime; fdoc.execCommand = () => { throw new Error('boom'); };
   ok(S.copyViaSelection('y', fdoc) === false && fdoc.activeElement === ime, 'a throwing execCommand still hands the focus back');
+}
+
+// ── THE SINGLETON'S SERVER HALF: WHAT A SHUTDOWN MAY STOP (src/vnc.js, 2026-09-25 — the heavy RED on 69720f2b) ──
+// A throwaway server stops the Xvnc THIS process spawned, identified by pid + /proc start time; never an adopted
+// one, never whatever pid the pid file names (it outlives its writer; pids wrap daily on a busy box); an installed
+// server stops nothing (its desktop outlives a restart by design). Driven over `sleep` stand-ins — nothing is started
+// on a display; the heavy half (a real Xvnc, a real SIGTERMed server, the patched-server control) is
+// test-desktop-app-window. CONTROL: the pre-fix stop() (the pid file's pid, no identity) in a patched copy.
+console.log('\nthe singleton\'s server half: a shutdown stops only the Xvnc this process started');
+{
+  const req = createRequire(import.meta.url);
+  const { VncManager } = req('../src/vnc.js');
+  const dataDir = scratch('vncstop'); fs.mkdirSync(dataDir, { recursive: true });
+  const kids = [];
+  const stand = () => { const c = spawn('sleep', ['60'], { stdio: 'ignore' }); kids.push(c); return c; };
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  const startOf = (pid) => { try { const x = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return x.slice(x.lastIndexOf(')') + 2).split(' ')[19]; } catch { return null; } };
+  const gone = async (pid) => { for (let i = 0; i < 40 && alive(pid); i++) await sleep(25); return !alive(pid); };
+  try {
+    if (!fs.existsSync('/proc/self/stat')) console.log('  · SKIP: no /proc (the identity is /proc start time)');
+    else {
+      // the pid file names a live process this manager never started (an adopted desktop / a recycled pid)
+      const foreign = stand(); await sleep(50);
+      fs.writeFileSync(path.join(dataDir, 'vnc.pid'), String(foreign.pid));
+      const v = new VncManager({ dataDir, stopOnShutdown: true });
+      ok(v.stop() === false && v.shutdown() === false && alive(foreign.pid), 'nothing started here ⇒ stop()/shutdown() signal nothing, even with a pid file naming a live process (an adopted desktop is never stopped)');
+      const pre = mutantCopies('vncstop', repo).load('src/vnc.js', read('src/vnc.js').replace(/  stop\(\) \{\n[\s\S]*?\n  \}\n\n  \/\*\* server\.js/, "  stop() {\n    try {\n      const pid = parseInt(fs.readFileSync(this._pidFile, 'utf-8'), 10);\n      if (pid > 1) process.kill(pid, 'SIGTERM');\n      fs.unlinkSync(this._pidFile);\n      return true;\n    } catch { return false; }\n  }\n\n  /** server.js"), 'pre-fix-stop');
+      const pv = new pre.VncManager({ dataDir, stopOnShutdown: true });
+      ok(pv.stop() === true && await gone(foreign.pid), 'CONTROL: the pre-fix stop() (the pid file\'s pid, no identity) SIGTERMs that stranger');
+      // THIS process's own spawn, identity intact ⇒ stopped; the pid file cleared only when it names that pid
+      const own = stand(); await sleep(50);
+      fs.writeFileSync(path.join(dataDir, 'vnc.pid'), String(own.pid));
+      const v2 = new VncManager({ dataDir, stopOnShutdown: true });
+      v2._own = { pid: own.pid, start: startOf(own.pid) };
+      ok(v2.shutdown() === true && await gone(own.pid) && !fs.existsSync(path.join(dataDir, 'vnc.pid')) && v2._own === null, 'a throwaway server\'s shutdown() SIGTERMs the Xvnc it spawned (pid + start time match) and clears its pid file');
+      // the same pid, another start time = a recycled pid ⇒ never signalled
+      const rec = stand(); await sleep(50);
+      const v3 = new VncManager({ dataDir, stopOnShutdown: true });
+      v3._own = { pid: rec.pid, start: String(Number(startOf(rec.pid)) - 1) };
+      ok(v3.shutdown() === false && alive(rec.pid), 'a pid whose /proc start time differs from the recorded one (a recycled pid) is never signalled');
+      // an INSTALLED server (stopOnShutdown false) keeps its desktop for the next boot to adopt
+      const inst = stand(); await sleep(50);
+      const v4 = new VncManager({ dataDir });
+      v4._own = { pid: inst.pid, start: startOf(inst.pid) };
+      ok(v4.shutdown() === false && alive(inst.pid) && v4._own !== null, 'an INSTALLED server\'s shutdown() stops nothing — its desktop outlives an app-only restart (adopted next boot)');
+      ok(/new VncManager\(\{ dataDir: path\.join\(__dirname, 'data'\), stopOnShutdown: throwawayRoot \}\)/.test(read('server.js')) && /^\s*try \{ vnc\.shutdown\(\); \} catch \{\}/m.test(read('server.js').slice(read('server.js').indexOf('function shutdown()'))), 'WIRING: server.js builds the manager with stopOnShutdown = throwawayRoot and calls vnc.shutdown() in its SIGINT/SIGTERM shutdown()');
+    }
+  } finally { for (const c of kids) { try { c.kill('SIGKILL'); } catch { } } try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch { } }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

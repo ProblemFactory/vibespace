@@ -1,6 +1,6 @@
 'use strict';
 /**
- * TAKEOVER AND HANDBACK — PURE (imports nothing; CJS so the keeper, the ws
+ * TAKEOVER AND HANDBACK — PURE (imports only its PURE sibling browser-stale.js; CJS so the keeper, the ws
  * bridge, the routes AND the browser bundle carry ONE rule set).
  * docs/design-agent-browser-v2.md §4.3 / §4.3.1, phase P3.
  *
@@ -16,8 +16,9 @@
  *     prevent); the same viewer again is idempotent.
  *   · `decideHandback` — flips it back and RECORDS WHY (`HANDBACK_CAUSES`):
  *     `explicit` (the click), `idle` (the timer — §4.3.1's zero-spend moment),
- *     `viewer-left` (the holder's window closed), `restart`, `detach`. Any
- *     viewer may hand back: releasing the agent is never a fight.
+ *     `viewer-left` (the holder's window closed), `restart`, `detach`,
+ *     `stop` (lane H verify r6: the browser was stopped while the user drove
+ *     it). Any viewer may hand back: releasing the agent is never a fight.
  *   · `browserPausedRefusal` — the typed refusal an agent command gets while
  *     the user drives (the `tab_gone` precedent): who took over, when, and
  *     what to do — never a timeout, never a guess.
@@ -25,8 +26,8 @@
  *     (the agent is told by the refusal, free); an EXPLICIT handback delivers
  *     through the ladder (the agent may be idle and only a turn wakes it);
  *     an IDLE / viewer-left handback delivers NOTHING unless the default-OFF
- *     setting `browser.announceIdleHandback` says so. `restart`/`detach`
- *     never deliver. The lease flip is a state change and happens regardless.
+ *     setting `browser.announceIdleHandback` says so. `restart`/`detach`/
+ *     `stop` never deliver. The lease flip is a state change and happens regardless.
  *   · `handbackText` — the announcement, CARRYING THE CURRENT URL so the
  *     agent re-orients (the human may have logged in, solved a captcha, or
  *     navigated — that is the point). `handbackNotice` is the zero-spend
@@ -47,12 +48,36 @@
  *     `target: 'browser' | 'window'` and change only the NOUN and the
  *     re-orient line (a window has no URL to carry: the agent snapshots it).
  *     The browser strings are byte-identical to before (pinned).
+ *   · THE KEYBOARD WHILE YOU DRIVE (lane J r2 — the 2026-09-25 naive-user
+ *     study: typed text vanished or landed in the CHAT COMPOSER, one Enter
+ *     from sending "tomsmith…" — a password — to the agent). While THIS
+ *     client drives, the live view owns the keyboard at DOCUMENT level:
+ *     `keyboardOwnership` says when (takeover + mine + connected + displayed
+ *     + open), `keyRoute` says where each key goes (the page; the app for the
+ *     named `RESERVED_CHORDS` only; the IME sink while composing; the browser's
+ *     own paste event for the paste chord), `focusVerdict` says that no
+ *     editable element outside the live view may hold focus meanwhile, and
+ *     `ownerOf` picks ONE owner when two views drive on one client. Esc goes
+ *     to the page — pages close their own dialogs with it; handing back is
+ *     the bar's button, never a key a user presses for another reason.
+ *   · STALE APPROVALS (lane J r2, the study's S8-36): an approval card the
+ *     agent queued for a browser PAGE command before the user took over
+ *     would, once allowed, run a step planned on a page that may be gone.
+ *     `browserApprovalVerdict` reads a pending shell permission's command
+ *     (the shell words, `vibespace-browser`'s own verb table through an
+ *     injected `classify`, the handle it names) and says whether it targets
+ *     the browser the user took; `staleDenyText` is the deny the CLI hands
+ *     the model (it NAMES browser_paused), `staleFromDenyMessage` reads it
+ *     back (a rebuild after a restart keeps the reason). Two moments: at
+ *     the takeover (queued before it) and at the handback (queued during it).
  * Gate: scripts/test-browser-takeover.mjs (fast); the window noun in
- * scripts/test-window-target.mjs.
+ * scripts/test-window-target.mjs; the real rung in test-browser-live ⑥.
  */
 
 const INPUT_SIDES = Object.freeze(['agent', 'user']);
-const HANDBACK_CAUSES = Object.freeze(['explicit', 'idle', 'viewer-left', 'restart', 'detach']);
+// lane H verify r6 LOW 3: `stop` — the browser the takeover was on was STOPPED (a panel Stop while the user drove it): the
+// takeover cannot outlive its browser, so control goes back with the stop (a state change, never a delivered turn)
+const HANDBACK_CAUSES = Object.freeze(['explicit', 'idle', 'viewer-left', 'restart', 'detach', 'stop']);
 /** What a takeover is OF: a browser tab (the default, every string unchanged)
  *  or a native window target (P9b — the noun changes, the rules do not). */
 const TARGETS = Object.freeze(['browser', 'window']);
@@ -176,7 +201,10 @@ function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, 
   const head = c === 'explicit' ? `The user handed ${who} back to you after ${spellDur(heldMs)} of driving it.`
     : c === 'idle' ? `The user's takeover of ${who} lapsed (no input for ${spellDur(idleMs)}); control is back with you.`
       : c === 'viewer-left' ? `The user closed the live view that held ${who}; control is back with you.`
-        : `Control of ${who} is back with you (${c}).`;
+        : c === 'stop' ? `The user stopped ${who} while they were driving it; control is back with you.`
+          : `Control of ${who} is back with you (${c}).`;
+  // lane H verify r6 LOW 3: a stopped browser has no page to re-orient on — its pages are gone; the next command starts it
+  if (c === 'stop' && tg === 'browser') return `${head} Its open pages are closed — your next browser command starts it again${url ? ` (the user was last on ${url})` : ''}.`;
   if (tg === 'window') return `${head} Snapshot it before continuing (\`vibespace-window snapshot ${handle || '<handle>'}\`) — the window may have changed (something typed, a dialog opened, a different state); refs from before the takeover are stale.`;
   const where = url ? `Current URL: ${url}` : 'Current URL: unknown (read it with `vibespace-browser -- get url`)';
   return `${head} ${where}. Re-orient before continuing — the page may have changed (a login, a captcha, a navigation).`;
@@ -269,11 +297,181 @@ function agentCursorFromCommand(msg) {
 }
 
 /** The badge's words: one of three, never ambiguous (§4.3's table). */
-function modeBadge({ mode = 'watch', mine = false } = {}) {
+function modeBadge({ mode = 'watch', mine = false, stopped = false, unstable = null } = {}) {
+  // naive study 2 (finding 3): a view of a STOPPED browser never says somebody drives it (it read "Agent is driving"
+  // over about:blank as if a new browser had started) — a view never starts a browser; it waits for the next command
+  // lane H verify r5: `stopped` may name WHY (the refusal's code) — a closed browser is not a stopped one
+  if (stopped === 'browser_closed') return 'Browser closed';
+  // lane H verify r6 MINOR 1: `unstable: 'failing'` = every ask to start it again FAILED — no browser ever came back to close
+  if (stopped === 'browser_unstable') return unstable === 'failing' ? 'Browser could not start' : 'Browser keeps closing';
+  if (stopped) return 'Browser stopped';
   if (mode !== 'takeover') return 'Agent is driving';
   return mine ? 'You are driving — agent asked to pause' : 'Another viewer is driving — agent asked to pause';
 }
 
+// ── lane J r2: THE KEYBOARD WHILE YOU DRIVE ────────────────────────────────
+/** The ONLY chords a driving viewer does not send to the page — each named
+ *  with why. Everything else goes to the page (Esc and Tab included). */
+const RESERVED_CHORDS = Object.freeze([
+  Object.freeze({ id: 'command-mode', spell: 'Ctrl+\\', why: "the window manager's prefix key: the one keyboard way to another window, and no page uses it" }),
+  Object.freeze({ id: 'desktop-switch', spell: 'Ctrl+Alt+Left / Ctrl+Alt+Right', why: 'switches virtual desktops — hiding the live view hands the keyboard back to the app by itself' }),
+]);
+const kflags = (k) => ({ key: String((k && k.key) || ''), ctrl: !!(k && k.ctrlKey), alt: !!(k && k.altKey), meta: !!(k && k.metaKey), shift: !!(k && k.shiftKey) });
+function reservedChordOf(k) {
+  const f = kflags(k);
+  if (f.key === '\\' && f.ctrl && !f.alt && !f.meta) return 'command-mode';
+  if ((f.key === 'ArrowLeft' || f.key === 'ArrowRight') && f.ctrl && f.alt && !f.meta) return 'desktop-switch';
+  return null;
+}
+/** Ctrl+V / Cmd+V / Shift+Insert: the browser's own `paste` event carries the
+ *  text (the page gets the TEXT, never the chord — the remote browser's
+ *  clipboard is not yours). */
+function isPasteChord(k) {
+  const f = kflags(k);
+  if ((f.key === 'v' || f.key === 'V') && (f.ctrl || f.meta) && !f.alt) return true;
+  return f.key === 'Insert' && f.shift && !f.ctrl && !f.meta && !f.alt;
+}
+/**
+ * Does THIS live view own the keyboard right now? Only while this viewer holds
+ * the takeover (`mode:'takeover'`, `mine`), its socket is open (a dead socket
+ * would swallow every key — the input side went back to the agent anyway),
+ * the view is on screen (typing blind into a hidden page is not driving) and
+ * the window is open. `{owns, why}`.
+ */
+function keyboardOwnership({ mode = 'watch', mine = false, connected = true, displayed = true, closed = false } = {}) {
+  if (closed) return { owns: false, why: 'closed' };
+  if (mode !== 'takeover') return { owns: false, why: 'watch' };
+  if (!mine) return { owns: false, why: 'another viewer drives' };
+  if (!connected) return { owns: false, why: 'disconnected' };
+  if (!displayed) return { owns: false, why: 'hidden' };
+  return { owns: true, why: 'driving' };
+}
+/**
+ * Where one key goes while a view owns the keyboard:
+ *   'compose' — an IME composition (or a dead key) is in progress: the view's
+ *               own input sink composes, `compositionend` hands the text over;
+ *   'app'     — a RESERVED_CHORDS chord, or the window manager's command mode
+ *               is armed (after its prefix the next key is the app's);
+ *   'paste'   — the paste chord: let the browser raise `paste`, forward its text;
+ *   'page'    — everything else, forwarded as a key record.
+ * `k` = the DOM KeyboardEvent's fields; `appMode` = 'command' while the
+ * command-mode prefix is armed.
+ */
+function keyRoute(k, { appMode = null } = {}) {
+  const f = kflags(k);
+  if ((k && (k.isComposing || Number(k.keyCode) === 229)) || f.key === 'Dead' || f.key === 'Process') return { to: 'compose' };
+  const chord = reservedChordOf(k);
+  if (chord) return { to: 'app', chord };
+  if (appMode === 'command') return { to: 'app', chord: 'command-mode' };
+  if (isPasteChord(k)) return { to: 'paste' };
+  return { to: 'page' };
+}
+/**
+ * Focus while a view owns the keyboard: an EDITABLE element (a textarea, an
+ * input, a contenteditable — the chat composer, a terminal's hidden textarea,
+ * a dialog's field) outside the owning view may not hold it — the view takes
+ * it back (`'reclaim'`); the view's own sink and every non-editable element
+ * are left alone (`'allow'`). Not owning ⇒ always `'allow'`.
+ */
+function focusVerdict({ owns = false, editable = false, insideView = false } = {}) {
+  if (!owns || !editable || insideView) return 'allow';
+  return 'reclaim';
+}
+/** Two views driving on one client (two browsers taken over): the LAST claim
+ *  that still owns wins. `claims` = [{id, owns:boolean}] in claim order. */
+function ownerOf(claims) {
+  const list = Array.isArray(claims) ? claims : [];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].owns) return list[i].id;
+  return null;
+}
+
+// ── lane J r2: STALE APPROVALS ────────────────────────────────────────────
+// the deny's words + their read-back live in src/browser-stale.js (the normalizer reads them back, and a module the
+// device bundle carries must not grow the CLI's name — test-architecture §52b); re-exported here for one import site
+const { STALE_MOMENTS, STALE_MARK, staleDenyText, staleFromDenyMessage } = require('./browser-stale.js');
+/** The permission tool names that carry a shell command (claude's Bash; the
+ *  codex normalizer maps commandExecution approvals onto the same name). */
+const SHELL_TOOLS = Object.freeze(['bash', 'shell']);
+/** Words that run the NEXT word as the command (so `timeout 30 vibespace-browser
+ *  click` and `env X=1 node …/vibespace-browser click` are invocations, and
+ *  `echo vibespace-browser click` is not). */
+const RUNNERS = Object.freeze(['env', 'command', 'exec', 'nohup', 'time', 'timeout', 'sudo', 'node', 'nice', 'stdbuf']);
+const BROWSER_CLI = 'vibespace-browser';
+/** A shell command → its simple commands, each as words (POSIX quoting:
+ *  '…', "…" with \ escapes, \ outside quotes; ; & | && || newline ( ) $( `
+ *  separate). `{ok:false}` when a quote never closes — the caller decides. */
+function shellSegments(command) {
+  const src = String(command || '');
+  const segs = []; let words = []; let cur = ''; let has = false; let i = 0;
+  const endWord = () => { if (has) words.push(cur); cur = ''; has = false; };
+  const endSeg = () => { endWord(); if (words.length) segs.push(words); words = []; };
+  while (i < src.length) {
+    const c = src[i];
+    if (c === "'") { const j = src.indexOf("'", i + 1); if (j < 0) return { ok: false, segments: segs }; cur += src.slice(i + 1, j); has = true; i = j + 1; continue; }
+    if (c === '"') {
+      let j = i + 1; let buf = '';
+      for (; j < src.length && src[j] !== '"'; j++) { if (src[j] === '\\' && j + 1 < src.length && '"\\$`'.includes(src[j + 1])) { buf += src[j + 1]; j++; } else buf += src[j]; }
+      if (j >= src.length) return { ok: false, segments: segs };
+      cur += buf; has = true; i = j + 1; continue;
+    }
+    if (c === '\\' && i + 1 < src.length) { cur += src[i + 1]; has = true; i += 2; continue; }
+    if (c === ' ' || c === '\t') { endWord(); i++; continue; }
+    if (c === '\n' || c === ';' || c === '&' || c === '|' || c === '(' || c === ')' || c === '`') { endSeg(); i++; continue; }
+    if (c === '$' && src[i + 1] === '(') { endSeg(); i += 2; continue; }
+    cur += c; has = true; i++;
+  }
+  endSeg();
+  return { ok: true, segments: segs };
+}
+const baseName = (w) => String(w || '').split('/').pop();
+/** The argv after `vibespace-browser` in one simple command, or null when the
+ *  command does not RUN it (a mention in an echo, a grep, a path). */
+function browserArgvOf(words) {
+  const w = Array.isArray(words) ? words : [];
+  let i = 0;
+  while (i < w.length) {
+    const x = w[i];
+    if (baseName(x) === BROWSER_CLI) return w.slice(i + 1);
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(x)) { i++; continue; }                        // an env assignment
+    if (RUNNERS.includes(baseName(x))) { i++; while (i < w.length && (/^-/.test(w[i]) || /^\d+[smhd]?$/.test(w[i]))) i++; continue; } // a runner and its flags / duration
+    return null;
+  }
+  return null;
+}
+/**
+ * Is this pending approval a browser PAGE command aimed at the browser the
+ * user took? `permission` = the normalized card ({toolName, input:{command}}),
+ * `classify` = browser-verbs.classify (injected — this module imports
+ * nothing), `taken` = {handles:[alias, profileId…], isDefault} of the browser
+ * taken over (the ephemeral browser: `isDefault:true`, no handles).
+ * → `{stale, why, verb?, handle?}`. An unparseable command that names the
+ * CLI is stale (the user is driving; denying costs one re-plan, allowing
+ * could act on a page nobody planned for).
+ */
+function browserApprovalVerdict({ permission = null, classify = null, taken = {} } = {}) {
+  const p = isObj(permission) ? permission : null;
+  if (!p) return { stale: false, why: 'no permission' };
+  if (p.resolved) return { stale: false, why: 'already answered' };
+  if (p.kind === 'user_input') return { stale: false, why: 'a question, not a command' };
+  if (!SHELL_TOOLS.includes(String(p.toolName || '').toLowerCase())) return { stale: false, why: 'not a shell command' };
+  const input = isObj(p.input) ? p.input : {};
+  const cmd = Array.isArray(input.command) ? input.command.map(String).join(' ') : String(input.command || '');
+  if (!cmd.includes(BROWSER_CLI)) return { stale: false, why: 'does not run the browser CLI' };
+  const parsed = shellSegments(cmd);
+  if (!parsed.ok) return { stale: true, why: 'names the browser CLI in a command that could not be read (an unclosed quote)' };
+  const handles = Array.isArray(taken && taken.handles) ? taken.handles.map(String) : [];
+  for (const words of parsed.segments) {
+    const argv = browserArgvOf(words);
+    if (!argv) continue;
+    let c = null;
+    try { c = typeof classify === 'function' ? classify(argv, { ours: true }) : null; } catch { c = null; }
+    const kind = c && c.kind;
+    if (kind !== 'page' && kind !== 'escape') continue;                                  // `status`, `profiles`, `help`… never touch the page
+    const handle = c.profile ? String(c.profile) : null;
+    if (handle ? handles.includes(handle) : !!(taken && taken.isDefault)) return { stale: true, why: `a page command (${c.verb || '?'}) on the browser the user took`, verb: c.verb || null, handle };
+  }
+  return { stale: false, why: 'no page command on the browser the user took' };
+}
 /** What the session card / status bar publish: 'user' while anybody drives
  *  ANY of this conversation's browsers, 'agent' when it has one, null when none. */
 function inputSummary(states, hasBrowser) {
@@ -289,4 +487,7 @@ module.exports = {
   browserPausedRefusal, handbackText, handbackNotice, renderHandbackNotice, idleInboxItem,
   confirmationFromUpstream, confirmationResolvedFromUpstream, confirmationView, decisionArgv, decisionVerdict,
   agentCursorFromCommand, modeBadge, inputSummary,
+  // lane J r2: the keyboard while you drive; stale approvals
+  RESERVED_CHORDS, reservedChordOf, isPasteChord, keyboardOwnership, keyRoute, focusVerdict, ownerOf,
+  STALE_MOMENTS, STALE_MARK, SHELL_TOOLS, shellSegments, browserArgvOf, browserApprovalVerdict, staleDenyText, staleFromDenyMessage,
 };

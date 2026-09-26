@@ -3,6 +3,7 @@ import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
 import { isNotificationQueueItem } from '../notification-senders.js';
+import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -1042,6 +1043,9 @@ export class ChatInput {
   }
 
   focus() {
+    // lane J r2: while a live view drives the agent's browser it OWNS the keyboard — an attach / reconnect / window
+    // focus must not put the caret back in this composer (the study's "tomsmithtomsmith…": a password one Enter from sent)
+    if (keyboardOwned()) return;
     if (this._textarea) this._textarea.focus();
   }
 

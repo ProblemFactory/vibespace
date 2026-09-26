@@ -389,6 +389,24 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     gchip.dataset.tip = tr('Last git event the agent reported: {kind}{branch}{when}', { kind: s.vcs.kind, branch: s.vcs.branch ? ' on ' + s.vcs.branch : '', when: s.vcs.at ? ' · ' + new Date(s.vcs.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '' });
     stateChip?.after(gchip);
   }
+  // AGENT BROWSER CHIP (lane H, 2026-09-25 — the owner watched an agent's
+  // ephemeral browser start and nothing said so): the browser this session's
+  // agent holds LIVE right now (`browserLive`: 'ephemeral' = its own managed
+  // ephemeral browser, else a profile id). Click = the live view. The label
+  // is a session name / a profile label — escaped; SVG icon (the icon law).
+  if (s.browserLive && (s.status === 'live' || s.status === 'tmux') && s.webuiId) {
+    const bchip = document.createElement('span');
+    bchip.className = 'sess-state-chip sess-state-derived sess-browser-chip';
+    bchip.style.setProperty('--chip-color', 'var(--accent)');
+    const blabel = s.browserLive === 'ephemeral'
+      ? tr('(ephemeral) {name}', { name: s.webuiName || s.name || tr('this conversation') })
+      : (((app && app._browserProfiles && app._browserProfiles.profiles) || []).find((p) => p && p.id === s.browserLive)?.label || s.browserLive);
+    const btext = tr('Agent browser') + ' · ' + blabel;
+    bchip.innerHTML = `<span class="chip-icon">${UI_ICONS.browserLive || ''}</span><span class="chip-text">${escHtml(btext)}</span>`;
+    bchip.dataset.tip = tr('{what} is running — click for the live view', { what: btext });
+    bchip.onclick = (e) => { e.stopPropagation(); app?.openBrowserLive?.({ sessionId: s.webuiId }); };
+    stateChip?.after(bchip);
+  }
   // PR CHIPS: every change this session published ("PR #608") — an ESCAPED link
   // the user may click; never auto-opened, never fetched (the CLI itself calls
   // the url unverified). The transcript's pr-link row and the live record are

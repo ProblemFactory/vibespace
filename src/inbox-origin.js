@@ -15,6 +15,8 @@
  *   channels — src/server/channels-engine.js (adapter failures, outbox, reach)
  *   browser  — src/server/browser-handback.js + the browser-switch proposal
  *              (src/server/mounts-plugins-wiring.js wires the browser routes)
+ *              + src/server/browser-keeper.js (a profile's browser keeps
+ *              closing: the heal budget's ONE notice, lane H verify r5)
  *   agent    — src/agent-routes.js (`vibespace-ask`, an agent's own item)
  *
  * Exactly the producers that file (r2: a `system` row was dropped — nothing

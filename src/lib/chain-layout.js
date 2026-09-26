@@ -111,11 +111,28 @@ function pairFor({ anchorId, guestId, side = 'right' } = {}) {
   return side === 'left' ? [String(guestId), String(anchorId)] : [String(anchorId), String(guestId)];
 }
 
-/** The ONE spelling of the host's grid columns for a ratio (left pane, divider, right pane). */
-function splitColumns(ratio) {
+/** The largest floor a PANE may claim (layout px): the `.window` CSS floor (320, window-min-size.js WINDOW_FLOOR)
+ *  minus the divider — a split host at its own minimum still holds a pane at its floor. */
+const SPLIT_PANE_MIN_MAX = 320 - SPLIT_DIVIDER_PX;
+
+/** A pane's own floor as the grid spells it: a positive finite px, rounded UP, capped at SPLIT_PANE_MIN_MAX; else 0 (none). */
+function paneMinPx(px) {
+  const n = Number(px);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(SPLIT_PANE_MIN_MAX, Math.ceil(n));
+}
+
+/** The ONE spelling of the host's grid columns for a ratio (left pane, divider, right pane). `mins` = the panes' OWN
+ *  floors [left, right] in layout px (lane I verify r1, 2026-09-25 — a bound live view dragged to the clamp was
+ *  narrower than its own bar): a pane with a floor is a `minmax(<floor>px, …fr)` track, so the grid never renders it
+ *  narrower — the divider stops there (the cursor may overshoot, as a window's resize drag does) and the partner takes
+ *  the rest; no floor = `minmax(0, …)`, the spelling every split had before. The RATIO is untouched (it stays the
+ *  user's intent — a wider host gives the pane its share back). */
+function splitColumns(ratio, mins = null) {
   const r = clampRatio(ratio);
   const l = Math.round(r * 10000) / 10000, rr = Math.round((1 - r) * 10000) / 10000;
-  return `minmax(0, ${l}fr) ${SPLIT_DIVIDER_PX}px minmax(0, ${rr}fr)`;
+  const a = paneMinPx(mins && mins[0]), b = paneMinPx(mins && mins[1]);
+  return `minmax(${a ? a + 'px' : 0}, ${l}fr) ${SPLIT_DIVIDER_PX}px minmax(${b ? b + 'px' : 0}, ${rr}fr)`;
 }
 
 // ── split UX (docs/design-split-ux.zh.md §4, 2026-09-23) ──
@@ -202,7 +219,7 @@ function ownerDots({ leases = [], profileId = null, sessionId = null, nameOf = n
 }
 
 module.exports = {
-  SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_SIDES, LAYOUTS,
-  clampRatio, splitValid, normalizeChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, splitReplaceable, pairFor, splitColumns, visualTabOrder, swappedPair, splitPartner,
+  SPLIT_RATIO_MIN, SPLIT_RATIO_MAX, SPLIT_RATIO_DEFAULT, SPLIT_DIVIDER_PX, SPLIT_SIDES, LAYOUTS, SPLIT_PANE_MIN_MAX,
+  clampRatio, splitValid, normalizeChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, splitReplaceable, pairFor, splitColumns, paneMinPx, visualTabOrder, swappedPair, splitPartner,
   ownerSeq, ownerColor, ownerBadge, ownerDots,
 };

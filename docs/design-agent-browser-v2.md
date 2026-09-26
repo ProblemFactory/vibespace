@@ -1118,6 +1118,32 @@ rule would turn the commonest shape into two commands). What is deliberately **n
 "guess the alias out of the user's message" — that is an implicit natural-language resolution, and
 killing implicit resolution is this whole section's purpose.
 
+> **2026-09-25 (lane H, dated note).** Layer ③'s chip and the session card now name the agent's OWN
+> browser the way its record is named: `Agent browser · (ephemeral) <session>` (it read
+> `ephemeral (no profile)`, which the owner could not place). The card's chip exists only while that
+> browser RUNS (the live fact `browserLive`). The status route's `leases` lists a running ephemeral
+> browser as a row marked `ephemeral` (the owner read `leases: []` beside a running one). The rule
+> under it: a thing that holds a browser is a ROW wherever holders are listed
+> (browser-profiles `holderRows`).
+>
+> **2026-09-25 (lane H verify r1, dated note).** Three corrections to that row's lifetime, and one
+> re-measurement. (1) The row follows the browser's PROCESS, not its record. A record says `ready`
+> until the 5 s tick, so a view reconnecting inside that window asked the CLI `stream status`, which
+> STARTS a daemon nobody holds (re-measured on 0.38.1). Every reader that would act on `ready` now
+> judges the pid first, and the bridge reports an ephemeral stream closing, so the row leaves with
+> the browser (25 ms measured, where it used to wait for the tick). (2) The 3 s arm wait belongs to the
+> command that STARTED the browser. A later command never waits on a tap it did not start, and a
+> failed tap is not retried by a command for 30 s. (3) `detach` on the conversation's own ephemeral
+> browser says what it does: the browser stops now and its record goes, and the next command starts
+> it again. It is a detach of THAT browser (an ephemeral seam event naming its session), so no stale
+> tap survives it. (4) The gate behind `floorVerdict(...).sharedProfiles`, test-browser-resources
+> (12 real Chromes), re-ran GREEN on 0.38.1 (71/71, 22 s; k=12: 199 processes, 17.6 GB RSS / 2.9 GB
+> PSS). Two sessions on one profile-naming host each get their own per-key directory, and round 2's
+> line reproduces the SingletonLock collision as its control. The floor stands. That suite never puts
+> two sessions on ONE named profile, which is the shape that collided (the verifier's L3, the naive
+> study's "bank"). It is fixed by the keeper being the only launcher (§4.2's dated note) and pinned on
+> the real 0.38.1 by test-browser-mediation-chrome ④.
+
 ---
 
 ## 4. The live view (1.c)
@@ -1177,6 +1203,22 @@ bomb otherwise, which the VNC bridge learned the hard way).
 upstream is the **max** across viewers; each viewer is served at its own rate. Input is accepted
 only from the viewer holding the user side of the lease.
 
+> **2026-09-25 (lane H verify r1 + naive study 2, dated note).** Two rules the P2 build did not have.
+> (1) **A view never starts a browser.** P2 made the live view of a stopped PROFILE browser a start
+> ("like an attach"), so a Reconnect after the user's own Stop relaunched it, and a view of a stopped
+> ephemeral showed about:blank labelled "Agent is driving", as if a new browser had started. A view now
+> judges the browser's process, refuses `browser_stopped` without asking the CLI, keeps the last frame
+> greyed with the badge "Browser stopped", and reconnects by itself when the digest says the browser
+> runs again. (2) **The keeper is the only launcher of a profile browser.** Every CLI call under a
+> lease's own session (its commands, the stream port, confirmations, screencasts) reaches the
+> keeper's ONE browser over its CDP url and never gets the profile directory. On 0.38.1 a daemon is per
+> session, and a second one given the directory started a second Chrome that died on SingletonLock (the
+> study's "bank" profile, and the live view's "Live view unavailable … SingletonLock" screen). Every
+> call also repeats its session's LAUNCH VIEW (the idle timeout, headed), because on 0.38.1 a call with
+> another view restarts the daemon and relaunches Chrome. One live view per session: a manual "Open
+> live view" goes to the existing window. A sub-agent's browser is recorded (a `~child:` tap) but
+> never viewed.
+
 ### 4.3 Takeover and handback
 
 Three modes on the window, always visible, never ambiguous:
@@ -1203,6 +1245,24 @@ Three modes on the window, always visible, never ambiguous:
 * **Sensitive-action approval** rides upstream's own mechanism rather than a second one:
   `--confirm-actions <categories>` plus `confirm` / `deny`. A pending confirmation surfaces as a
   card in the live view *and* in the conversation, and either one can answer it.
+* **Note — lane J r2 (2026-09-25, SHIPPED; the second naive-user study).** "User input:
+  forwarded" was true only while the view's own element had focus, and every chat attach /
+  reconnect put the caret back in the composer: three operators' typing vanished or landed in the
+  CHAT COMPOSER ("tomsmithtomsmith…" — a credential one Enter from sent to the agent). The row now
+  means: **a takeover owns the keyboard at document level** — every key, paste (as text) and IME
+  composition goes to the page whatever has focus; the chat's focus calls stand down
+  (src/lib/keyboard-owner.js) and an editable element that takes focus anyway is reclaimed;
+  only Ctrl+\ and Ctrl+Alt+←/→ stay the app's; Esc goes to the page and handing back stays the
+  button; ownership ends on the hand back, a dropped socket or a hidden view. Every click
+  ripples where it was sent and the bar echoes it (a lost input no longer looks like a frozen
+  picture); the picture is top-aligned. And **taking over (or handing back) answers the
+  conversation's pending approvals for browser page commands on that browser** with a deny that
+  names `browser_paused` — a step planned on the old page never runs after the hand back (the
+  study's S8-36); `vibespace-browser status`, mentions and other profiles' commands are left alone.
+  Verified beside it, unchanged: saucedemo's "Add to cart" is swallowed by Chrome's tab-modal
+  password-breach dialog (invisible to the screencast), not by a trusted-events check; the
+  reCAPTCHA checkbox answers one live-view click with its challenge. Gates: test-browser-takeover ⑦,
+  test-browser-live ⑥ (kb-bugfix-invariants: the composer-focus theft).
 
 #### 4.3.1 Announcing a handback is spending money, and this design owes that a gate
 
@@ -1282,11 +1342,72 @@ unknown openSpec action is loud instead of silently vanishing).
   factor, growing with distance from the origin. The canvas lives at net zoom 1
   (`zoom: calc(1 / var(--ui-scale, 1))`), and pointer coordinates are converted once, in one
   helper, with a test.
+* **Two sizes, never one (lane J, 2026-09-25, inc-muhgv0fb-9i4u — the owner: "接管浏览器的时候鼠标
+  操作位置不对", takeover clicks landed in the wrong place).** The stream's `metadata.deviceWidth/
+  Height` and the status' `viewportWidth/Height` are the stream server's CONFIGURED 1280×720,
+  never the page (measured on 0.32.0 and 0.38.1; Chrome's own screencast metadata said otherwise
+  — the upstream overwrites it): headless the page is 1280×577 in a 1280×577 JPEG, a headed window
+  on a 2560×1440 screen is a 1265×1277 page DOWNSCALED into a 713×720 JPEG. The pointer map
+  therefore uses the drawn image's own size (`naturalWidth/Height` — what `object-fit: contain`
+  letterboxes) and the page's real CSS viewport (the bridge reads it server-side over CDP —
+  `Page.getLayoutMetrics` of the active tab, on the first frame / a picture-size change / an
+  active-tab change / a takeover — and sends every viewer a `viewport` record); the metadata is
+  used only where its aspect IS the picture's, else the picture 1:1 (`frameGeometry`,
+  src/browser-stream.js). The agent cursor overlay goes through the same rect basis
+  (`getBoundingClientRect` → `toLocal`). The daemon's `cdp_url` command/result pair that the
+  viewport read causes is never relayed (the raw endpoint never leaves the server). Measured
+  before/after on the real rung (test-browser-live ⑤, a click on grid cell (10,5) = page
+  (525,275), DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window): 71 px off headless
+  and 132 px off or dropped headed before; 0 px after, every combination.
 * **XSS:** page titles and URLs are page-controlled strings that sync to every client. They go
   through `escHtml`, never `innerHTML`, and the frame is drawn to a `<canvas>` / `<img>` via the
   `.src` property — never interpolated markup (the image-overlay law).
 * **Theme/UI conventions:** theme vars only, SVG icons only, `createModalShell` for any dialog,
   no native `confirm()` — the standing UI laws.
+* **The bar never wraps, never overlaps (lane I, 2026-09-25 — the owner's zh screenshots, "你这些UI都检查过吗？").**
+  Every item keeps its words on one line at its own width, the URL alone flexes (≥ 120 px), and what does not fit
+  folds into ONE ⋯ menu by priority (PURE `src/lib/live-bar-layout.js` `barLayout`, the DOM half
+  `src/lib/bar-fold.js`): the one mode toggle (Take over ↔ Hand back) and Reconnect never fold; Tabs / Console /
+  Actions go first, then the backend chip, then bind / viewers / recording, then the URL, the mode badge LAST (its
+  sentence becomes the ⋯'s first row and the ⋯ wears its colour). The chat window's own menu offers "Agent browser —
+  live view" when the conversation has a browser and opens it BOUND beside that window (open-or-focus). Gates:
+  test-live-bar-layout (fast), test-browser-live-ui (heavy: screenshots + rects at zh / ja / en × widths × themes ×
+  free / bound × Watch / Take over).
+* **The split floor (lane I verify r1, 2026-09-25).** A bound live pane dragged to the divider's clamp (ratio 0.85 ⇒
+  the pane at 0.15 of its window) was 134 px beside a 900 px chat while the never-fold badge + toggle needed
+  169–222 px: the toggle was cut and the ⋯ — the only way to the folded items — clipped out of the bar, in every
+  language (ja already at a 1400 px window; 19 of 24 measured states). Fixed in two halves, each measured: the badge
+  folds (last), so the bar's own minimum is [toggle][⋯] = 71–99 px (`barLayout(...).floor`); and a split PANE never
+  renders narrower than its bar's floor + the bar's padding — the view publishes it through
+  `WindowManager.setPaneMinWidth(id, px)` (tab-group.js; `winInfo.paneMinWidth`), `splitColumns(ratio, mins)`
+  (chain-layout.js) spells it as the pane track's `minmax(<floor>px, …fr)` (capped at the window floor minus the
+  divider, so a host at its own 320 px minimum still holds it), the divider stops there and the partner pane takes
+  the rest; the ratio stays the user's. At the clamp on 900 / 600 / 320 px windows the panes are 134 / 87–115 /
+  87–115 px and the toggle and the ⋯ lie inside the bar in all 18 states (zh / ja / en × Watch / Take over); with the
+  floor removed at runtime the 320 px window leaves a 47 px pane and both fall outside again (test-browser-live-ui ⑥
+  + its control). A free window never needed it (the `.window` floor is 320 px).
+* **Lane I verify lows (not fixed) — recorded 2026-09-25, each reproduced by the verifier:**
+  1. *Two entry points, two gates.* The sidebar card offers the live view for any live local session with a browser
+     key (session-card.js `session.browserLive`); the window menu only when the conversation has browsed
+     (`browserProfileActive != null || browserInput`, taskbar.js). A never-browsed session shows the row on its card
+     and not on its window. Fix when touched: ONE exported predicate used by both registrations (the stricter one);
+     pin in test-contributions (the same fixture rows fed to both menus agree).
+  2. *The ⋯ is not a keyboard menu.* Enter / Space open it and Escape closes it, but it carries no
+     `aria-haspopup` / `aria-expanded`, and its rows (showContextMenu's `.context-menu-item` divs, no role, no
+     tabindex) are not reachable by ArrowDown — the product-wide showContextMenu convention (desktop-app-more is the
+     same). Fix product-wide in showContextMenu: role=menu / menuitem, tabindex −1 rows, Arrow / Home / End / Enter,
+     focus the first row on a keyboard open and return it to the opener on close.
+  3. *The switcher strip scrolls at 480 px with two 40-character labels* (pre-existing since P2, outside the bar):
+     strip 478 × 42 px (a 15 px scrollbar), the second tab cut mid-word. Fix: ellipsise strip labels (the full label
+     in the tab's title) or run the strip through the same fold rule with the active pane never folding.
+  4. *After the stream drops the bar still says "Agent is driving" and offers Take over* beside Reconnect (the mode
+     is the last `mode` record); a click sends `takeover` into a dead relay. Fix: while the stream is down (an
+     error / ended status), disable the toggle ("stream not connected") and dim the badge with the status as its
+     tooltip; re-enable on `upstream-open`.
+  5. *The heavy census's wrap test is not zoom-aware* (test-browser-live-ui MEASURE compares a zoomed text rect
+     with a layout-px font size): under a 125 % UI scale 16 one-line labels read as wraps. Only bites if a UI-scale
+     leg is added — then judge wraps by line count alone (or scale the font size by the body zoom), with one 125 %
+     state asserting zero wraps as the control.
 
 ### 4.5 Recording for the transcript
 
@@ -1299,6 +1420,15 @@ Default **off**, for two reasons: video of a logged-in profile is a secret (upst
 boundary says so about screenshots already), and 30 fps WebM of a long session is a storage bill
 nobody has budgeted. A cheap always-on middle ground exists: keep the last frames the bridge
 already holds in memory and write one JPEG per agent action as a transcript thumbnail.
+
+> **2026-09-25 (lane H, dated note).** The always-on middle ground (P5's action trace) did not hold
+> for the conversation's own EPHEMERAL browser. It was armed only by a live view's tap, and no view
+> opened, so the owner's first `open` left `data/browser-trace/` empty. Now the trace is armed by the
+> HOLDER, never by a viewer: the keeper announces the ephemeral's start on the lease seam, the
+> recorder taps THAT browser (`EPHEMERAL_REF`) with nobody watching, and the command that started it
+> waits (bounded, 3 s) until the tap is connected, so the first action is on the record. The live
+> view opens beside the chat on the same event (§4.6's auto-bind, since its holder row is new). A
+> view never starts a stopped ephemeral browser; it greys and reconnects on the next verb.
 
 ---
 

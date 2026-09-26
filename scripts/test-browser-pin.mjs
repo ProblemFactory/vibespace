@@ -29,7 +29,8 @@
 //   ⑤ the routes on an in-process express app (a non-local host refused by
 //      name, every failure `{error, code}`, the UI answer never carries a CDP
 //      url) and the shipped CLI (`use` prints no env and no CDP url, `close --all`
-//      is refused while another session is attached, the wrapper form passes
+//      on an attachment closes only ITS session — never the namespace, whoever
+//      else is attached (lane H verify r2 L6) — the wrapper form passes
 //      `--pin-tab`, the no-token exit).
 //
 // The fake binary's shebang names the interpreter running THIS suite and its
@@ -87,7 +88,12 @@ if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, session: process.env.AGENT_BROWSER_SESSION || null }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser (the real CLI would LAUNCH here)' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19222/devtools/browser/fake-' + ns } }); process.exit(0); }
-if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } fs.appendFileSync(path.join(st, 'closes.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, closed, pinTab }) + '\\n'); out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
+if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } fs.appendFileSync(path.join(st, 'closes.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, closed, pinTab, all: true }) + '\\n'); out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
+// MEASURED on 0.38.1 (lane H verify r2 L6): a plain \`close\` under a lease's session closes THAT session only — the
+// namespace's other daemons (the keeper's, whose Chrome every lease shares) keep running; \`close --all\` (above) is the
+// namespace-wide close ({closed:2, sessions:[both]}) that stopped the profile's browser
+// FAKE_CLOSE_HOLD (lane H verify r3): the close says it started, then waits for the suite's go — a takeover begins meanwhile
+if (a === 'close') { const h = process.env.FAKE_CLOSE_HOLD; if (h) { fs.writeFileSync(h + '.started', '1'); for (let i = 0; i < 500 && !fs.existsSync(h); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } fs.appendFileSync(path.join(st, 'closes.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, closed: 1, pinTab, all: false }) + '\\n'); out({ success: true, data: { closed: true } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
 
@@ -218,8 +224,12 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(!('runawayVerdict' in B) && !('runawayParkVerdict' in B) && !('providerGuard' in B) && !('runawayParkedUntil' in B.normalizeRegistry({ runawayParkedUntil: { 'bp-00000001': 9e15 } })), 'browser-profiles carries NO verdict and NO park: an old file\'s park map is dropped on read');
   ok(B.pidVerdict({ alive: false }) === 'gone' && B.pidVerdict({ alive: true, sameStart: false }) === 'unproven' && B.pidVerdict({ alive: true, sameStart: true }) === 'ours', 'pid verdicts: gone / unproven / ours');
   ok(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: true }).state === 'ready' && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven', active: true }).state === 'stopped' && /never signalled/.test(B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'unproven' }).lastError) && B.adoptVerdict({ state: 'ready', pid: 7 }, { verdict: 'ours', active: false }).state === 'stopped' && B.adoptVerdict({ state: 'stopped' }, { verdict: 'ours', active: true }) === null, 'adoption: ready only for a proven pid whose namespace answers; unproven ⇒ ended and never signalled');
-  const env = B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir' });
-  ok(env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_A}`) && env.includes('AGENT_BROWSER_NAMESPACE=vs-bp-00000002') && env.includes('AGENT_BROWSER_PROFILE=/p/dir') && env.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS=0'), 'an attached session browses in the profile\'s daemon with its OWN context (the tab is the unit) and the CLI timeout off (the keeper owns the clock)');
+  // naive study 2 (2026-09-25): THE KEEPER IS THE ONLY LAUNCHER — an attached session reaches the keeper's browser over its
+  // CDP url, never the profile DIRECTORY (measured on 0.38.1: a second session given the directory starts its own Chrome
+  // there and dies on SingletonLock). This pin said `AGENT_BROWSER_PROFILE=/p/dir` — the shape that broke "bank".
+  const env = B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir', cdpUrl: 'ws://127.0.0.1:9333/devtools/browser/k' });
+  ok(env.includes(`AGENT_BROWSER_SESSION=vs-${KEY_A}`) && env.includes('AGENT_BROWSER_NAMESPACE=vs-bp-00000002') && env.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:9333/devtools/browser/k') && !env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && env.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS=0'), 'an attached session browses in the profile\'s namespace with its OWN context (the tab is the unit), over the keeper browser\'s CDP url — NEVER its directory — and the CLI timeout off (the keeper owns the clock)');
+  ok(B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir' }) === null && B.attachedEnvFor({ browserKey: KEY_A, profileId: 'bp-00000002', profileDir: '/p/dir', cdpUrl: 'ws://10.0.0.5:9333/x' }) === null, 'no loopback CDP url ⇒ null (the keeper refuses `browser_no_cdp` by name) — never a directory fallback');
   const reg = B.normalizeRegistry({ profiles: [rec, { id: 'junk' }], leases: [{ profileId: 'bp-00000002', browserKey: 'zzz' }, a1.lease], browsers: { x: 1 }, pins: null, extra: 1 });
   ok(reg.profiles.length === 1 && reg.leases.length === 1 && reg.version === 1 && !('extra' in reg) && reg.pins && typeof reg.pins === 'object', 'normalizeRegistry keeps only well-formed rows and drops unknown keys');
 }
@@ -267,7 +277,7 @@ let kA, workId, teamId, thirdId;
   const recW = reg(kA).browsers[workId];
   ok(Number.isInteger(recW.pid) && alive(recW.pid) && recW.starttime != null && F.sameProcess(recW.pid, recW.starttime), 'the record carries the daemon\'s pid AND starttime, and the process is alive');
   ok(/^ws:\/\//.test(at1.cdpUrl) && at1.pinTab === true, 'the wrapper answer carries the CDP url and pinTab (floor satisfied)');
-  ok(at1.env.includes(`AGENT_BROWSER_PROFILE=${work.dir}`) && at1.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + workId), 'the session\'s env names the profile dir + the profile\'s daemon');
+  ok(at1.env.includes(`AGENT_BROWSER_CDP=${recW.cdpUrl}`) && !at1.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && at1.env.includes('AGENT_BROWSER_NAMESPACE=vs-' + workId), 'the session\'s env names the keeper browser\'s CDP url + the profile\'s namespace — never the directory (naive study 2: a second Chrome on it dies on SingletonLock)');
   ok(kA.list().browsers[workId].cdpUrl === undefined, 'the LIST view never carries a CDP url');
   const at2 = await kA.attach({ profile: workId, browserKey: KEY_A, sessionId: 'sess-2' });
   ok(!at2.created && at2.resumed && reg(kA).leases.filter((l) => l.profileId === workId).length === 1 && launches().length === 1, 'a resume re-carries the ONE lease (one holder) and launches nothing new');
@@ -488,7 +498,7 @@ console.log('— ④ migration step 2 (§8): the shared profile becomes "Shared 
   const k2 = mkKeeper(new Set([KEY_C]), { dataDir: path.join(ROOT2, 'data'), homeDir: HOME2 });
   ok(k2.adoptDirectory({ label: 'Shared (legacy)', dir: legacy.dir, legacy: true }).created === false, 'adoptDirectory is idempotent on the directory too');
   const at = await k2.attach({ profile: 'Shared (legacy)', browserKey: KEY_C, sessionId: 'sess-c' });
-  ok(at.created && at.env.includes(`AGENT_BROWSER_PROFILE=${legacy.dir}`), 'a conversation that asks for the legacy profile gets its OWN tab in it (a pinned tab instead of a stolen one)');
+  ok(at.created && at.env.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://')) && !at.env.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')), 'a conversation that asks for the legacy profile gets its OWN tab in it (a pinned tab over its browser\'s CDP url instead of a stolen one — never a second Chrome on its directory)');
   await k2.stop(legacy.id);
   k2.shutdown();
   // a machine with no shared profile adopts nothing
@@ -595,19 +605,68 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   ok(c.status === 0 && /unpinned/.test(c.stdout), '`pin --none` unpins');
   c = await cli(['watch']);
   ok(c.status === 0 && /browser_paused/.test(c.stdout) && /Take over/.test(c.stdout) && !/not available yet/.test(c.stdout), '`watch` explains the user\'s live view, Take over and the typed browser_paused refusal (P3 — never "not available yet")');
-  // close --all refused while another session is attached
+  // LANE H VERIFY r2 L6: `close --all` under an ATTACHMENT closes MY session only — never the namespace. The binary's own
+  // `close --all` closes every session of the namespace, and for a profile that is the keeper's daemon + the one Chrome
+  // every lease shares (measured on 0.38.1: {closed:2, sessions:[s1,s2]}, the profile daemon dead). The CLI maps it to
+  // its session's `close` (then drops its lease) — with another session attached AND alone.
   await kR.attach({ profile: 'Squad', browserKey: KEY_B, sessionId: 'sess-b' });
-  const closesBefore = closes().length;
+  const daemonPid = reg(kR).browsers[teamId2].pid;
   c = await cli(['--', 'close', '--all']);
-  ok(c.status === 1 && /close_all_refused/.test(c.stderr) && /1 other session/.test(c.stderr), '`-- close --all` is REFUSED while another session is attached, naming how many');
-  ok(closes().length === closesBefore && reg(kR).browsers[teamId2].state === 'ready', '…and nothing was closed');
+  let last = closes()[closes().length - 1];
+  ok(c.status === 0 && last && last.all === false && last.ns === 'vs-' + teamId2 && last.session === 'vs-' + KEY_A && last.pinTab === true && /\[close_all_scoped\]/.test(c.stderr) && /1 other session/.test(c.stderr), 'r2 L6: with another session attached, `-- close --all` runs MY session\'s close (the profile\'s namespace, my session, `--pin-tab`) — never the namespace-wide one — and says so', JSON.stringify({ last, se: c.stderr.slice(0, 300) }));
+  ok(alive(daemonPid) && reg(kR).browsers[teamId2].state === 'ready' && reg(kR).leases.some((l) => l.browserKey === KEY_B && l.profileId === teamId2) && !reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2) && /lease dropped/.test(c.stderr), 'r2 L6: …the keeper\'s daemon still runs, the record is ready, the OTHER lease stands and only MY lease was dropped');
   kR.detach({ profileId: teamId2, browserKey: KEY_B });
-  c = await cli(['--', 'close', '--all']);
-  const last = closes()[closes().length - 1];
-  ok(c.status === 0 && last && last.ns === 'vs-' + teamId2 && last.session === 'vs-' + KEY_A && last.pinTab === true, 'alone, `-- close --all` runs the CLI under the profile\'s namespace with MY session and `--pin-tab` (the wrapper form supplies it)');
-  ok(/lease dropped/.test(c.stderr) && !reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2), 'a `close` through the wrapper drops my lease afterwards');
+  c = await cli(['use', 'Squad']);
+  const closeAllAlone = async (cliPath) => { const c1 = await new Promise((resolve) => execFile(process.execPath, [cliPath, '--', 'close', '--all'], { env: cliEnv, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') }))); return { c1, last: closes()[closes().length - 1], daemonAlive: alive(reg(kR).browsers[teamId2].pid), state: reg(kR).browsers[teamId2].state, leaseLeft: reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2) }; };
+  const alone = await closeAllAlone(CLI);
+  ok(c.status === 0 && alone.c1.status === 0 && alone.last.all === false && alone.last.session === 'vs-' + KEY_A && alone.daemonAlive && alone.state === 'ready' && !alone.leaseLeft && /\[close_all_scoped\]/.test(alone.c1.stderr), 'r2 L6: the SINGLE holder\'s `-- close --all` leaves the keeper\'s daemon pid alive and the record ready (its session\'s close, then its lease dropped)', JSON.stringify({ last: alone.last, daemonAlive: alone.daemonAlive, state: alone.state }));
+  // CONTROL (scripts/mutant-copy.mjs): the pre-fix CLI passes `--all` through — the namespace-wide close kills the profile's daemon
+  {
+    const M6 = mutantCopies('browser-pin-l6', REPO);
+    const csrc = fs.readFileSync(CLI, 'utf8');
+    const cmut = csrc.replace("  const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];", '  const argv = [...rest];');
+    if (cmut !== csrc) {
+      const cliCopy = M6.write('data/bin/vibespace-browser', cmut, 'close-all-namespace');
+      c = await cli(['use', 'Squad']);
+      const ctl = await closeAllAlone(cliCopy);
+      ok(c.status === 0 && ctl.last.all === true && !ctl.daemonAlive, 'r2 L6 CONTROL: a CLI copy that passes `--all` through runs the namespace-wide close and the keeper\'s daemon is DEAD — the legs above can go red', JSON.stringify({ last: ctl.last, daemonAlive: ctl.daemonAlive }));
+    } else ok(false, 'r2 L6 CONTROL: the argv line was not found in data/bin/vibespace-browser');
+    for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r2 L6 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  }
   c = await cli(['detach']);
   ok(c.status === 1 && /\[no_lease\]/.test(c.stderr), '`detach` with no lease ⇒ no_lease');
+  // LANE H VERIFY r3 (the verifier's code-read note): a takeover that BEGINS while the binary runs a `close` on an attachment
+  // makes the post-close detach `browser_paused` — the CLI says the close ran and the lease was NOT dropped, with the code
+  // and the way out, and exits non-zero (r2: the detach sat in a bare `try { … } catch {}`)
+  {
+    const hold = path.join(ROOT, 'close-hold');
+    const heldClose = async (cliPath) => {
+      for (const f of [hold, hold + '.started']) { try { fs.unlinkSync(f); } catch { } }
+      const u = await cli(['use', 'Squad']);
+      const pr = new Promise((resolve) => execFile(process.execPath, [cliPath, 'close'], { env: { ...cliEnv, FAKE_CLOSE_HOLD: hold }, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
+      for (let i = 0; i < 400 && !fs.existsSync(hold + '.started'); i++) await sleep(20);
+      let took = null; try { took = kR.takeover({ browserKey: KEY_A, profileId: teamId2, viewerId: 'v-r3', sessionId: 'sess-1' }); } catch (e) { took = { error: e.code || e.message }; }
+      fs.writeFileSync(hold, '1');
+      const r = await pr;
+      const leased = reg(kR).leases.some((l) => l.browserKey === KEY_A && l.profileId === teamId2);
+      try { kR.handback({ browserKey: KEY_A, profileId: teamId2, viewerId: 'v-r3', cause: 'explicit' }); } catch { }
+      const d = await cli(['detach']);
+      return { ...r, use: u.status, took, leased, detachAfter: d.status };
+    };
+    const hc = await heldClose(CLI);
+    ok(hc.use === 0 && hc.took && !hc.took.error && hc.status !== 0 && /\[browser_paused\]/.test(hc.stderr) && /your `close` ran, but your lease on "Squad" was NOT dropped/.test(hc.stderr) && /after they hand it back/.test(hc.stderr) && !/lease dropped/.test(hc.stderr) && hc.leased && hc.detachAfter === 0, `r3: a takeover begun DURING the binary's \`close\` — the post-close detach is refused browser_paused and the CLI says so (the close ran, the lease was NOT dropped, [browser_paused], exit ${hc.status}); the lease stands until the agent detaches after the handback (observed: exit ${hc.status}, last line "${hc.stderr.trim().split('\n').pop().slice(0, 200)}", lease ${hc.leased ? 'stands' : 'gone'})`);
+    const M7 = mutantCopies('browser-pin-r3-detach', REPO);
+    const csrc7 = fs.readFileSync(CLI, 'utf8');
+    const R2LINE = "    if (rest[0] === 'close' && profileId && r.kind === 'attachment') { try { await call('POST', '/api/agent/browser/detach', { profile: profileId }); console.error(profileLine(r.profile, null, r.others, r.handle) + ' · lease dropped'); } catch { } }\n";
+    const fixStart = csrc7.indexOf("    if (rest[0] === 'close' && profileId && r.kind === 'attachment') {\n");
+    const fixEnd = fixStart < 0 ? -1 : csrc7.indexOf('\n    }\n', fixStart);
+    if (fixStart >= 0 && fixEnd > fixStart) {
+      const cmut7 = csrc7.slice(0, fixStart) + R2LINE + csrc7.slice(fixEnd + '\n    }\n'.length);
+      const ctl7 = await heldClose(M7.write('data/bin/vibespace-browser', cmut7, 'r2-detach'));
+      ok(!/was NOT dropped/.test(ctl7.stderr) && ctl7.leased, `r3 CONTROL: the r2 CLI (the detach in a bare try/catch) never says the lease was NOT dropped — it prints ${ctl7.status === 0 ? 'nothing (exit 0)' : 'only the server\'s refusal, exit ' + ctl7.status} while the lease stands: the leg above can go red (observed: exit ${ctl7.status}, last line "${ctl7.stderr.trim().split('\n').pop().slice(0, 200)}")`);
+    } else ok(false, 'r3 CONTROL: the post-close detach block was not found in data/bin/vibespace-browser');
+    for (const r of copiesCensus(M7.files, M7.dir, REPO, { minCopies: 1, label: 'r3 detach ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  }
   c = await cli(['new', 'Fresh', '--notes', 'hello']);
   ok(c.status === 0 && /created Fresh \(bp-/.test(c.stdout) && reg(kR).profiles.find((p) => p.label === 'Fresh').owner.id === KEY_A, '`new <label>` creates a profile owned by this conversation');
   await kR.stop(teamId2).catch(() => { });

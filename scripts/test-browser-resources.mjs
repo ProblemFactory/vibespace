@@ -49,8 +49,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const BE = require('../src/server/browser-env.js');
 const B = require('../src/browser-profiles.js');
@@ -183,6 +184,7 @@ function strayNamespaceDirs() {
 function reap() {
   let n = 0;
   for (const p of allProcs()) if (isOurs(p)) { try { process.kill(p.pid, 'SIGKILL'); n++; } catch { } }
+  n += endRootedProcesses(ROOT).length + endRootedProcesses(HB).length; // …and whatever the ⓒ server started (its dtach sessions: real HOME, root only in argv)
   for (const f of strayNamespaceDirs()) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } }
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
   try { fs.rmSync(HB, { recursive: true, force: true }); } catch { }
@@ -408,8 +410,12 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
   const freePort = () => new Promise((res, rej) => { const sv = net.createServer(); sv.once('error', rej); sv.listen(0, '127.0.0.1', () => { const pp = sv.address().port; sv.close(() => res(pp)); }); });
   const PORT = await freePort();
   let srv = null;
+  // THE SUITE OWNS WHAT ITS SERVER STARTED (2026-09-25): the two shell sessions run under dtach, DETACHED by
+  // design, with the real HOME and cwd /tmp — killing the server ended none of them (140 dtach + pty-wrapper + zsh
+  // from 20 runs were alive). Every process rooted in the worktree goes with the server, BEFORE the worktree does.
   const killSrv = () => {
     try { srv?.kill('SIGKILL'); } catch { }
+    try { endRootedProcesses(wt); } catch { }
     try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { }
   };
   try {
@@ -426,7 +432,7 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
     srv = spawn('node', ['server.js'], {
       cwd: wt,
       env: {
-        ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
+        ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
         AGENT_BROWSER_PROFILE: '/tmp/ambient-should-never-appear',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -481,6 +487,11 @@ console.log('\nⓒ two real sessions on a real server (the exit criterion)');
   } catch (e) {
     ok(false, 'end-to-end server leg: ' + (e && e.message));
   } finally { killSrv(); }
+  // the teardown really ended the server's sessions: nothing rooted in the worktree is alive (dtach, pty-wrapper, the
+  // device daemon) — endRootedProcesses with signal 0 only LISTS; a survivor would be the 2026-09-25 leak
+  await new Promise((r) => setTimeout(r, 300));
+  const left = endRootedProcesses(wt, { signal: 0 });
+  ok(left.length === 0, `the teardown ends every process the ⓒ server started — its dtach sessions included (${left.length ? 'alive: ' + left.join(' ') : 'none alive'})`);
 }
 
 // ═══ ⓔ THE PROJECT-LEVEL FENCE REACHES THE GENERATED CONFIG (r3) ══════════

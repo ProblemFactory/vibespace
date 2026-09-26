@@ -24,7 +24,9 @@
  *                   `{x, y, width, height}` in CSS px — the ONE way the target
  *                   element's box is resolved, and an OBSERVATION never traced
  *   · frames carry `metadata.{deviceWidth, deviceHeight, pageScaleFactor,
- *                   scrollOffsetX/Y}` and a base64 JPEG in `data`
+ *                   scrollOffsetX/Y}` and a base64 JPEG in `data` — the metadata's
+ *                   size is the stream server's CONFIGURED 1280×720, not the page
+ *                   (lane J): an entry's frame size comes from `frameGeometry`
  *
  * WHAT IS NEVER STORED: a `fill`'s value and a `type`'s text — the §3.7 audit
  * rule ("the verb only, never a fill's content") applies to the trace too; the
@@ -179,10 +181,16 @@ function resultError(result) {
   if (result.data && typeof result.data === 'object' && result.data.error) return String(result.data.error).slice(0, 500);
   return null;
 }
-/** What an entry keeps of a frame record (never the bytes — those are a file). */
-function frameMeta(frameMsg) {
+/** What an entry keeps of a frame record (never the bytes — those are a file).
+ *  `w/h` = the PAGE's CSS size the frame shows — the space every position is in
+ *  (`overlayGeometry` scales by it). `page` = the recorder's `{cssW, cssH}` from
+ *  src/browser-stream.js frameGeometry (lane J: the stream's metadata claims the
+ *  configured 1280×720 whatever the page is — 1280×577 headless — so a dot drawn
+ *  by the claim sat 720/577 too high); absent, the metadata stands. */
+function frameMeta(frameMsg, page = null) {
   const md = (frameMsg && frameMsg.metadata) || {};
-  return { w: Number(md.deviceWidth) || 0, h: Number(md.deviceHeight) || 0, scale: Number(md.pageScaleFactor) || 1, scrollX: Number(md.scrollOffsetX) || 0, scrollY: Number(md.scrollOffsetY) || 0, seq: Number.isFinite(frameMsg && frameMsg.seq) ? frameMsg.seq : null };
+  const pw = page && Number(page.cssW) > 0 && Number(page.cssH) > 0 ? page : null;
+  return { w: pw ? Number(pw.cssW) : Number(md.deviceWidth) || 0, h: pw ? Number(pw.cssH) : Number(md.deviceHeight) || 0, scale: Number(md.pageScaleFactor) || 1, scrollX: Number(md.scrollOffsetX) || 0, scrollY: Number(md.scrollOffsetY) || 0, seq: Number.isFinite(frameMsg && frameMsg.seq) ? frameMsg.seq : null };
 }
 /** The box a probe answered (`boundingbox` data), or null. */
 function boxFromProbe(json) {
@@ -241,6 +249,15 @@ function traceWindowFor({ ts, nextTs = null, now } = {}) {
   const t = Number(ts) || 0;
   const n = Number(nextTs) || 0;
   return { from: Math.max(0, t - 2000), to: n > t ? n + 2000 : Math.max(t + 2000, Number(now) || 0) };
+}
+/** VERIFY r2 L5: the recorder's `browser-trace-status` arm_failed {at, until, error} covers a card's window when the
+ *  window overlaps [at, until] — the card with no entries then says WHY ("not recorded until <t>: <why>"); anything
+ *  else (no status, `armed`, a window outside the gap) is null. */
+function armGapFor(win, status) {
+  if (!win || !status || status.code !== 'arm_failed') return null;
+  const at = Number(status.at) || 0, until = Number(status.until) || 0;
+  if (!(until > at) || !(Number(win.to) >= at) || !(Number(win.from) <= until)) return null;
+  return { at, until, error: String(status.error || '') };
 }
 /** Does a shell tool call's command drive the agent browser? (the tool card gates its entry on this) */
 function commandDrivesBrowser(cmd) { return /(^|[\s;&|(`])(agent-browser|vibespace-browser)(\s|$)/.test(String(cmd || '')); }
@@ -339,12 +356,17 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
     const facts = dirFacts[p.id] || {};
     const held = (leases || []).filter((l) => l.profileId === p.id).length;
     const live = B.isLiveBrowser(browsers[p.id]);
+    // lane H verify r5: a live daemon whose browser is CLOSED / keeps closing is said on the row (never "running" alone)
+    const br = browsers[p.id];
+    const browserClosed = live && br && !br.browser && br.closed && typeof br.closed.code === 'string' ? br.closed.code : null;
+    // lane H verify r6 MINOR 1: an unstable record whose relaunch ASKS kept failing (no browser ever started) says so — never "keeps closing"
+    const closedWhy = browserClosed === 'browser_unstable' ? (br.closed.unstable === 'failing' ? ' — its browser could not be started: VibeSpace stopped trying (Stop resets it)' : ' — its browser keeps closing: VibeSpace stopped starting it again (Stop resets it)') : browserClosed === 'profile_locked' ? ' — its folder is held by another browser' : browserClosed ? ' — its browser is closed (the next command starts it again)' : '';
     const lastWrite = Math.max(Number(p.lastUsedAt) || 0, Number(facts.mtime) || 0);
     const ageMs = lastWrite ? Math.max(0, t - lastWrite) : null;
-    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live };
+    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed };
     if (!q.ok) return { ...base, state: 'not-ours', why: q.error, canForget: false };
-    if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)`, canForget: false };
-    if (live) return { ...base, state: 'live', why: 'its browser is running', canForget: false };
+    if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)${closedWhy}`, canForget: false };
+    if (live) return { ...base, state: 'live', why: browserClosed ? `its daemon is running${closedWhy}` : 'its browser is running', canForget: false };
     if (ageMs !== null && ageMs < graceMs) return { ...base, state: 'recent', why: `written ${Math.round(ageMs / 60000)} min ago — may be in flight (grace ${Math.round(graceMs / 60000)} min)`, canForget: true };
     if (ageMs !== null && ageMs > staleDays * 86400000) return { ...base, state: 'stale', why: `unused for ${Math.round(ageMs / 86400000)} d (listed, never deleted by itself)`, canForget: true };
     return { ...base, state: 'kept', why: ageMs === null ? 'never used yet' : `last used ${Math.round(ageMs / 3600000)} h ago`, canForget: true };
@@ -472,5 +494,5 @@ module.exports = {
   entryFor, isEntryId, mintEntryId, timelineLabel, traceWindowFor, commandDrivesBrowser, entriesInWindow, overlayGeometry,
   traceRetentionPlan, recordingVerdict, recordingFileFor, isRecordingFile,
   sweepScope, queueVerdict, housekeepingVerdict, forgetVerdict, forgottenDirName, isForgottenName, orphanCandidates, orphanPathVerdict, scopeDigest,
-  HOUSEKEEPING_STATES, frameUrl, bytesText, toolCommandText, traceSummary, unionWindow, assignEntriesToWindows, positionText,
+  HOUSEKEEPING_STATES, frameUrl, bytesText, toolCommandText, traceSummary, unionWindow, assignEntriesToWindows, positionText, armGapFor,
 };

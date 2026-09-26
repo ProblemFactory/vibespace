@@ -481,6 +481,7 @@
 .chat-perm-btn.chat-ask-submit:not(:disabled):hover { background: var(--accent-hover); border-color: var(--accent-hover); opacity: 1; }
 .chat-permission-allowed { color: var(--green); font-weight: 600; }
 .chat-permission-denied { color: var(--red); font-weight: 600; }
+.chat-permission-stale { color: var(--text-secondary); font-weight: 500; line-height: 1.4; } /* lane J r2: a browser approval answered stale at a takeover — informational, not a refusal the user made */
 
 .chat-diff { margin: 4px 0 0; font-size: 12px; }
 .chat-diff > summary { list-style: none; cursor: pointer; }

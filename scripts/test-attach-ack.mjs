@@ -21,7 +21,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome } from './scratch.mjs';
+import { scratch, scratchHome, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,7 +51,7 @@ for a in "$@"; do case "$a" in --version) echo "2.1.274 (Claude Code) stub"; exi
 printf '%s\\n' '{"type":"system","subtype":"init","session_id":"e2e00000-0000-4000-8000-00000000ac01","model":"claude-fable-5","cwd":"/tmp","tools":[],"permissionMode":"default","claude_code_version":"2.1.274"}'
 exec cat >/dev/null
 `, { mode: 0o755 });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stub, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch {}
   try { execSync(`pkill -9 -f ${JSON.stringify(wt)}`, { stdio: 'ignore' }); } catch {} // the dtach'd wrapper + stub outlive their server

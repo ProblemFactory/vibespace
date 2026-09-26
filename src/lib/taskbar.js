@@ -247,6 +247,14 @@ export function registerWindowMenu() {
   registerMenuItem({ menu: M, group: '2_session', order: 20, command: 'window.terminateSession', kind: 'terminate', when: live, style: 'color:var(--red, #e55)' });
   registerMenuItem({ menu: M, group: '2_session', order: 10, id: 'window/resume-session', command: 'session.restart', kind: 'resume', when: (c) => hasSess(c) && c.s.status !== 'live' && !!c.s.sessionId, label: () => t('Resume session') });
   registerMenuItem({ menu: M, group: '2_session', order: 30, command: 'session.locate', kind: 'locate', when: hasSess });
+  // AGENT BROWSER — the live view from the session's OWN window (lane I, 2026-09-25: the owner was told to open it "from
+  // the menu" and looked here; only the sidebar card had it). Offered on a live local session whose conversation HAS a
+  // browser — one running now (`browserInput`) or used since its start (`browserProfileActive`: null = never) — and it
+  // opens the live view BOUND beside this window (open-or-focus: an existing view is bound / brought forward, never a
+  // second viewer; browser-live-window.js openBrowserLiveBeside).
+  const hasBrowser = (c) => live(c) && !!c.app._browserProfiles && !!c.s.webuiId && !!c.s.browserKey && !c.s.host && (c.s.browserProfileActive != null || !!c.s.browserInput);
+  registerCommand({ id: 'window.browserLive', title: () => t('Agent browser — live view'), run: (c) => c.app.openBrowserLiveBeside(c.win, c.s.webuiId) });
+  registerMenuItem({ menu: M, group: '2_session', order: 35, command: 'window.browserLive', kind: 'browser-live', when: hasBrowser });
   registerMenuItem({ menu: M, group: '2_session', order: 40, command: 'session.properties', kind: 'props', when: hasSess, label: () => t('Session properties…') });
   registerMenuItem({ menu: M, group: '2_session', order: 50, when: hasSess, separator: true });
   registerMenuItem({ menu: M, group: '3_close', order: 10, id: 'window/move-to-desktop', kind: 'desktop', label: () => '➤ ' + t('Move to Desktop'), children: (c) => c.app.desktopManager?.getDesktopMenuItems(c.id) || [] });

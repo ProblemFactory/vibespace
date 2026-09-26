@@ -39,13 +39,31 @@
  * functions (the PURE noun switch in browser-takeover.js). ONE announcer,
  * ONE billed site, ONE reason — a second module for windows would be a twin
  * of this one and a second row in the spend census.
+ *
+ * STALE APPROVALS (lane J r2, the 2026-09-25 naive-user study's S8-36): the
+ * take-over moment and the handback moment each sweep the conversation's
+ * PENDING approval cards — a card for a browser page command aimed at the
+ * browser the user took (PURE `browserApprovalVerdict`, the CLI's own verb
+ * table) is answered through THE one permission answer
+ * (src/server/permission-answer.js, the `approvals` seam) with a deny that
+ * names browser_paused (`staleDenyText`), and the card is marked
+ * `staleBy:{code, moment, at}` so it says why. At the takeover: the cards
+ * queued before it (planned on a page the user is about to change); at the
+ * handback: the cards queued while the user drove (the agent was told to
+ * wait; one it queued anyway was planned blind). A deny opens no turn — it
+ * answers a question asked inside a turn somebody started — so this adds no
+ * spend site. A window target (P9b) is not swept: its commands are
+ * `vibespace-window`, and nothing queued there acts on a page.
  */
 const T = require('../browser-takeover.js');
+const VERBS = require('../browser-verbs.js'); // the CLI's own verb table: a pending `vibespace-browser status` is never stale, `click` is
 
 const FROM_NAME = 'VibeSpace browser';
 
 function create({ keeper = null, deliver = null, serverSetting = () => undefined, userTodos = null, activeSessions = null,
-  sessionKeyFor = null, notice = null, onLiveFactsChanged = null, log = console } = {}) {
+  sessionKeyFor = null, notice = null, onLiveFactsChanged = null, log = console,
+  // lane J r2: the stale sweep's seam — {pending(session) → [{requestId, toolName, input, kind}], answer(sessionId, session, data) → {ok}, note(session, requestId, staleBy)}
+  approvals = null } = {}) {
   const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
   const announceIdle = () => { const v = setting('browser.announceIdleHandback', false); return v === true || v === 'true' || v === 'yes'; };
 
@@ -122,6 +140,49 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     return out;
   }
 
+  /** Which browser the user took, as the verdict reads it: the handles a
+   *  command may name it by, and whether a command that names NONE lands on
+   *  it (the default attachment / the only one / the ephemeral browser when
+   *  the conversation has no attachment — resolveHandle's ladder). */
+  function takenFor(ev) {
+    let atts = [];
+    try { atts = (keeper && typeof keeper.setFor === 'function' ? (keeper.setFor(ev.browserKey) || {}).attachments : []) || []; } catch { atts = []; }
+    if (!ev.profileId) return { handles: [], isDefault: atts.length === 0 };
+    const a = atts.find((x) => x && x.profileId === ev.profileId) || null;
+    return { handles: [String(ev.profileId), ...(a && a.alias ? [String(a.alias)] : [])], isDefault: !!(a && (a.isDefault || atts.length === 1)) };
+  }
+  /**
+   * lane J r2: answer every pending approval for a browser page command on the
+   * browser this event names with the stale deny, and mark its card. `moment`
+   * ∈ browser-takeover.STALE_MOMENTS. Returns what it did (journal + suite).
+   */
+  function sweepStale(ev, moment) {
+    const out = { moment, sessionId: null, stale: [], kept: 0, why: null };
+    if (!ev || isWindow(ev)) { out.why = 'a window target has no browser approvals'; return out; }
+    if (!approvals || typeof approvals.pending !== 'function' || typeof approvals.answer !== 'function') { out.why = 'the approvals seam is not wired'; return out; }
+    const sess = sessionFor(ev.sessionId, ev.browserKey);
+    if (!sess) { out.why = 'no live session carries this browser key'; return out; }
+    out.sessionId = sess.id;
+    let pend = [];
+    try { pend = approvals.pending(sess.s) || []; } catch (e) { out.why = 'pending cards unreadable: ' + (e && e.message); return out; }
+    if (!pend.length) return out;
+    const taken = takenFor(ev);
+    const label = labelOf(ev.profileId);
+    for (const p of pend) {
+      const v = T.browserApprovalVerdict({ permission: p, classify: VERBS.classify, taken });
+      if (!v.stale) { out.kept++; continue; }
+      const staleBy = { code: 'browser_paused', moment, at: Date.now() };
+      let r = null;
+      try { r = approvals.answer(sess.id, sess.s, { requestId: p.requestId, approved: false, toolInput: p.input, denyMessage: T.staleDenyText({ moment, label }) }); } catch (e) { r = { ok: false, why: e && e.message }; }
+      if (r && r.ok) {
+        try { approvals.note?.(sess.s, p.requestId, staleBy); } catch { /* the deny was written; the card's words are cosmetic */ }
+        out.stale.push({ requestId: p.requestId, verb: v.verb || null });
+      } else out.why = (r && r.why) || 'the answer was not written';
+    }
+    if (out.stale.length || out.why) log.log?.(`[browser] ${moment} on ${ev.browserKey}${ev.profileId ? ' ' + ev.profileId : ' (ephemeral)'} for ${sess.id}: ${out.stale.length} pending browser approval(s) answered stale (browser_paused${out.stale.length ? ': ' + out.stale.map((x) => x.verb || '?').join(', ') : ''}), ${out.kept} left alone${out.why ? ' — ' + out.why : ''}`);
+    return out;
+  }
+
   /** A pending `--confirm-actions` confirmation reaches the conversation's
    *  side as ONE "For you" item (zero-spend; the daemon auto-denies in 60 s). */
   function noteConfirmation(ev) {
@@ -153,6 +214,8 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!keeper) return false;
     if (!unsubInput && typeof keeper.onInput === 'function') unsubInput = keeper.onInput((ev) => {
       try { onLiveFactsChanged?.(ev); } catch { /* optional */ }
+      // lane J r2: both moments sweep the conversation's pending browser approvals (answered stale, browser_paused)
+      if (ev.kind === 'takeover' || ev.kind === 'handback') { try { sweepStale(ev, ev.kind); } catch (e) { log.warn?.(`[browser] stale-approval sweep failed — ${e && e.message}`); } }
       if (ev.kind !== 'handback') return;
       announce(ev).catch((e) => log.warn?.(`[browser] handback announce failed — ${e && e.message}`));
     });
@@ -161,7 +224,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   }
   function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; }
 
-  return { announce, noteConfirmation, install, installWindow, shutdown, announceIdle, FROM_NAME };
+  return { announce, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, FROM_NAME };
 }
 
 module.exports = { create, FROM_NAME };

@@ -109,7 +109,7 @@ class WindowManager {
     el.append(titleBar, content); this.workspace.appendChild(el);
 
     const winInfo = { id, element: el, titleBar, titleSpan, iconSpan, iconWrap, backendIconSlot, agentKindSlot, content, title, type,
-      isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false, minWidth: null, minHeight: null,
+      isMaximized: false, isMinimized: false, prevBounds: null, onResize: null, onClose: null, exited: false, minWidth: null, minHeight: null, paneMinWidth: null,
       _typeIcon: windowTypeIcon(type), _tabChain: null, titleMeta: { ...(titleMeta || {}) },
       // All document-level listeners for this window register with this signal
       // and are removed together on close (they used to leak per window).

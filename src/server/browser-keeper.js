@@ -73,6 +73,10 @@ const STORE_FILE = 'browser-profiles.json';
 const AUDIT_FILE = 'browser-audit.jsonl';
 const TICK_MS = 5000;
 const STOP_GRACE_MS = 3000;
+/** Lane H: the longest a verb waits for the lease seam's listeners (the action-trace recorder arming its tap). */
+const ARM_WAIT_MS = 3000;
+/** VERIFY r1 L2: what a detach of a conversation's managed ephemeral browser does, said to the agent (and the UI). */
+const EPHEMERAL_DETACH_NOTE = 'this conversation\'s own browser (its managed ephemeral) is stopped now and its record removed — its open pages close; the next browser command starts it again';
 const FILE_MODE = 0o600;
 /** The telemetry event of a resource crossing (report only — it was
  *  `browser-runaway` while the guard stopped and parked, until 2026-09-25). */
@@ -99,13 +103,16 @@ function keeper() { return installed; }
  *   broadcast      — (msg) => void  (`browser-profiles-updated`)
  *   serverSetting  — (key) => value (browser.idleTimeoutMs / browser.headed / browser.defaultProfile)
  *   serverNotice   — (key, text, opts) => number (resource-crossing / ceiling notices; the clients reached — 0 ⇒ re-sent)
+ *   userTodos      — the For-you store (lane H verify r5: the ONE notice when a profile's browser keeps closing — origin browser)
  *   getTelemetry   — () => telemetry | null
  *   liveKeys       — () => Set of the browser keys live sessions carry (activeSessions)
  *   facts / runtime / limits / log / now / tickMs / guardSampleMs — injectable for the gate
  */
 function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast = null, serverSetting = () => undefined,
-  serverNotice = null, getTelemetry = () => null, liveKeys = () => new Set(),
+  serverNotice = null, getTelemetry = () => null, liveKeys = () => new Set(), userTodos = null,
   facts = null, runtime = null, limits = LIMITS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, install = true,
+  // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
+  armWaitMs = ARM_WAIT_MS,
   taskGroupDefault = null, access = null, hostKnown = null,
   // P4 second half (§7.4 / §7.5): the integration store (a handle or a
   // getter) the key consumer resolves through; `keys` = src/server/browser-
@@ -153,7 +160,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const opts = o && typeof o === 'object' ? o : {};
       const ex = opts.extraEnv && typeof opts.extraEnv === 'object' ? opts.extraEnv : {};
       if (Object.prototype.hasOwnProperty.call(ex, VERBS.CONFIG_KEY)) return opts;
-      const file = machineConfigFile(ns ? 'machine' : 'ephemeral');
+      const file = configForCall(ns, opts.session || null, ex);
       return file ? { ...opts, extraEnv: { ...ex, [VERBS.CONFIG_KEY]: file } } : opts;
     };
     const out = { ...r };
@@ -215,7 +222,25 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // `digestExtras` lets them add their facts (recording state) to `list()`.
   const leaseListeners = new Set();
   const digestExtras = new Set();
-  function emitLease(ev) { for (const fn of leaseListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] lease listener failed: ${e && e.message}`); } } }
+  function emitLease(ev) {
+    const out = [];
+    for (const fn of leaseListeners) {
+      try { const r = fn(ev); if (r && typeof r.then === 'function') out.push(Promise.resolve(r).catch((e) => log.warn?.(`[browser] lease listener failed: ${e && e.message}`))); }
+      catch (e) { log.warn?.(`[browser] lease listener failed: ${e && e.message}`); }
+    }
+    return out;
+  }
+  /** Lane H (2026-09-25): a listener that answers a PROMISE (the recorder
+   *  arming its tap on the browser that just became ready / the lease just
+   *  taken) holds the verb that caused the event for at most `armWaitMs` — so
+   *  the command the agent runs next lands on a TAPPED stream (the owner's
+   *  first `open` was never recorded: the tap connected after it ran). A slow
+   *  or failed arming never holds a verb longer and never fails it. */
+  function settleArming(ps) {
+    if (!ps || !ps.length || !(armWaitMs > 0)) return Promise.resolve();
+    let t = null;
+    return Promise.race([Promise.allSettled(ps), new Promise((r) => { t = setTimeout(r, armWaitMs); if (t.unref) t.unref(); })]).finally(() => { if (t) clearTimeout(t); });
+  }
   function onLease(fn) { leaseListeners.add(fn); return () => leaseListeners.delete(fn); }
   function addDigest(fn) { digestExtras.add(fn); return () => digestExtras.delete(fn); }
   function digestExtra() { const out = {}; for (const fn of digestExtras) { try { Object.assign(out, fn() || {}); } catch (e) { log.warn?.(`[browser] digest extra failed: ${e && e.message}`); } } return out; }
@@ -270,7 +295,32 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const l = live.get(rec.profileId) || null;
     return { ...rec, cdpUrl: undefined, remoteCdpUrl: undefined, envPairs: undefined, live: l ? { ...l } : null };
   }
-  function leaseView(l) { return { ...l, mediated: !!(l && isMediated(profile(l.profileId))) }; }
+  function leaseView(l) {
+    const p = l ? profile(l.profileId) : null;
+    const v = { ...l, mediated: !!(l && isMediated(p)) };
+    // lane H: a managed ephemeral browser's lease is a lease row like any other, SAID to be one
+    if (isEph(p)) { v.ephemeral = true; v.child = B.isChildKey(l.browserKey); }
+    return v;
+  }
+  /** Lane H: THE holder rows (browser-profiles.holderRows) — named leases +
+   *  each managed ephemeral browser's lease while its browser is READY. The
+   *  digest's `leases` and the status route's `leases` are this, and nothing
+   *  else; `leasesOn` / `leasesFor` answer the registry (an idle ephemeral's
+   *  lease included, marked `ephemeral`). */
+  const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView });
+  /** The event fields every lease-seam event about a managed ephemeral
+   *  browser carries: the listener needs its conversation (key + session) and
+   *  whether it is a sub-agent's (a child's pairs are not its session's). */
+  function ephEventFields(profileId) {
+    const p = profile(profileId);
+    if (!isEph(p)) return {};
+    const l = reg.leases.find((x) => x.profileId === profileId) || null;
+    // VERIFY r1 L2: a stop AFTER the lease left (a detach, a reconcile) still names its session — the last one its
+    // lease named (in memory; at boot the lease is still there to read)
+    return { ephemeral: true, browserKey: p.owner.id, sessionId: (l && l.sessionId) || ephSessions.get(profileId) || null, child: B.isChildKey(p.owner.id) };
+  }
+  /** VERIFY r1 L2: profileId → the session id a managed ephemeral browser's lease last named. */
+  const ephSessions = new Map();
   /** takeover C3: the managed ephemeral browsers — one row each (the record,
    *  whose conversation, the browser's state), for the housekeeping panel and
    *  the digest; never listed as a profile. */
@@ -291,12 +341,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     for (const [id, r] of Object.entries(reg.browsers)) browsers[id] = browserView(r);
     const running = Object.values(reg.browsers).filter(B.isLiveBrowser).length + othersNow().length;
     const lv = bf.lastVersion();
-    const namedIds = new Set(named().map((p) => p.id));
     return {
       // takeover C3: a managed ephemeral record is NOT a profile (no picker,
       // no handle, no label to resolve) — it rides `ephemerals`, and the
       // ceiling's `used` counts it (and the desktop apps the seam reports)
-      profiles: named().map(pview), leases: reg.leases.filter((l) => namedIds.has(l.profileId)).map(leaseView), browsers, ephemerals: ephemerals(),
+      // lane H: `leases` = the HOLDER rows — a live managed ephemeral browser is one, marked `ephemeral: true`
+      profiles: named().map(pview), leases: holders(reg.leases), browsers, ephemerals: ephemerals(),
       // P6 (§6.2 / §6.5): is `sharing:"instance"` a value HERE, and the grants
       // (counts only — never a token, never a raw url)
       mediation: { available: mediationOn(), port: mediator && mediationOn() ? mediator.port() : null, grants: mediator && mediationOn() ? mediator.list() : [] },
@@ -355,8 +405,44 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const configMemo = new Map();
   const configSaid = new Set();
   const configSay = (key, line) => { if (configSaid.has(key)) return; configSaid.add(key); try { log.warn?.(`[browser] ${line}`); } catch { /* none */ } };
-  function machineConfigFile(kind = 'machine') {
-    const file = path.join(CONFIG_DIR, kind === 'ephemeral' ? 'machine-ephemeral.json' : 'machine.json');
+  /**
+   * LANE H VERIFY r4 (MAJOR 2): THE LAUNCH MARK. Every browser THIS keeper launches runs with a config whose `args` carry
+   * `--vibespace-keeper=<mark>` (a named profile's id, an ephemeral's browser key) — the file `machine-<mark>.json` /
+   * `machine-ephemeral-<mark>.json`, the same rule as the unmarked one plus that switch. Measured on the real 0.38.1: the
+   * switch reaches the Chrome's (title-rewritten) command line, Chrome runs normally with it, and a CONFIG that differs
+   * (the mark added or dropped) makes the daemon's next verb RELAUNCH its Chrome — so a record keeps the config it was
+   * launched with for every later call (`rec.mark`, set at the launch; a record launched before the mark keeps the
+   * unmarked file, its Chrome proven by the pre-mark rule). A lease's own session never launches (it reaches the keeper's
+   * browser over CDP) and keeps `machine.json`.
+   */
+  const MARK_RE = /^[a-z0-9][a-z0-9.-]{0,80}$/i;
+  const markOf = (p) => (p ? (isEph(p) ? p.owner.id : p.id) : null);
+  function markFileName(kind, mark) {
+    const m = mark && MARK_RE.test(String(mark)) ? String(mark) : '';
+    return (kind === 'ephemeral' ? 'machine-ephemeral' : 'machine') + (m ? '-' + m : '') + '.json';
+  }
+  /** The config ONE call runs with (no config in its env): the keeper's own session of a named profile ⇒ that record's
+   *  launch file; an ephemeral's pairs (no config of their own) ⇒ its record's launch file; anything else (a lease's
+   *  session, a mediated namespace) ⇒ `machine.json`. */
+  function configForCall(ns, session, ex) {
+    if (ns) {
+      if (session && session !== ns) return machineConfigFile('machine');
+      const rec = ns.startsWith('vs-') ? recordFor(ns.slice(3)) : null;
+      return machineConfigFile('machine', rec && rec.mark ? rec.mark : null);
+    }
+    return ephemeralConfigFor(ex);
+  }
+  function recordFor(profileId) { try { const p = profile(profileId); return p && !isEph(p) ? reg.browsers[profileId] || null : null; } catch { return null; } }
+  /** An ephemeral browser's keeper file, found by the SESSION its pairs name (`vs-<browserKey>`). */
+  function ephemeralConfigFor(pairEnv) {
+    const sess = pairEnv && typeof pairEnv.AGENT_BROWSER_SESSION === 'string' ? pairEnv.AGENT_BROWSER_SESSION : '';
+    let rec = null;
+    try { const p = sess ? reg.profiles.find((x) => isEph(x) && B.sessionNameFor(x.owner.id) === sess) : null; rec = p ? reg.browsers[p.id] || null : null; } catch { rec = null; }
+    return machineConfigFile('ephemeral', rec && rec.mark ? rec.mark : null);
+  }
+  function machineConfigFile(kind = 'machine', mark = null) {
+    const markOk = mark && MARK_RE.test(String(mark)) ? String(mark) : null;
+    const file = path.join(CONFIG_DIR, markFileName(kind, markOk));
     const src = path.join(homeDir, B.USER_CONFIG_REL);
     let user = null;
     try { user = JSON.parse(fs.readFileSync(src, 'utf8')); } catch (e) {
@@ -366,10 +452,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (user !== null && (typeof user !== 'object' || Array.isArray(user))) { configSay(`notobj:${src}`, `${src} is not a JSON object — the keeper's calls keep the CLI's own config search until it is fixed`); return null; }
     const h = headedSetting();
     let cfg;
-    if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h });
-    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; }
+    if (kind === 'ephemeral') cfg = B.generatedConfig({ userConfig: user || {}, projectConfig: null, pinnedDir: null, headed: h, mark: markOk });
+    else { cfg = VERBS.sanctionedConfig({ user }).config; if (h !== null) cfg.headed = h; if (markOk) cfg.args = B.withKeeperMark(cfg.args, markOk); }
     const text = JSON.stringify(cfg);
-    const memo = configMemo.get(kind);
+    const memoKey = kind + '|' + (markOk || '');
+    const memo = configMemo.get(memoKey);
     // r4 (takeover finding 7, symmetry with the CLI's composeConfig): the memo names the file only while it is
     // still the keeper's own — a regular file (lstat: a symlink swapped in is NOT followed), this uid's, with the
     // content it wrote; anything else is re-written (the atomic rename replaces a planted link itself)
@@ -380,7 +467,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       writeJsonAtomic(file, cfg);
       const back = JSON.parse(fs.readFileSync(file, 'utf8'));
       if (!back || typeof back !== 'object' || Array.isArray(back)) throw new Error('read-back was not an object');
-      configMemo.set(kind, text);
+      configMemo.set(memoKey, text);
       return file;
     } catch (e) {
       configSay(`write:${file}`, `the keeper's ${kind} browser config could not be written at ${file} (${e && e.message}) — its calls keep the CLI's own config search (a project agent-browser.json in this process's directory would apply)`);
@@ -392,9 +479,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  AGENT_BROWSER_CONFIG, else the keeper's file for the kind. null = none
    *  could be written (the CLI composes its own). */
   function configFileFor({ ephemeral = false, pairs = null } = {}) {
-    const own = S0.pairsToEnv(Array.isArray(pairs) ? pairs : [])[VERBS.CONFIG_KEY];
+    const pe = S0.pairsToEnv(Array.isArray(pairs) ? pairs : []);
+    const own = pe[VERBS.CONFIG_KEY];
     if (typeof own === 'string' && own.startsWith('/')) return own;
-    return machineConfigFile(ephemeral ? 'ephemeral' : 'machine');
+    // r4: an ephemeral's command runs with the file its browser was LAUNCHED with (marked when the keeper launched it) —
+    // a different one would relaunch its Chrome (measured); a lease's session with machine.json (it never launches)
+    return ephemeral ? ephemeralConfigFor(pe) : machineConfigFile('machine');
   }
   /**
    * Create a profile. `owner` = { kind, id }: a session-created profile is
@@ -449,7 +539,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) delete reg.pins[k];
-    ephPairs.delete(id);
+    ephPairs.delete(id); ephSessions.delete(id);
+    // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
+    { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
     commit();
     if (isEph(p)) log.log?.(`[browser] ephemeral browser record ${id} "${p.label}" removed with its conversation ${p.owner.id}${p.dir ? ' (its scratch directory ' + p.dir + ' is browser-env\'s sweep to reclaim)' : ''}`);
     else log.log?.(`[browser] profile ${id} "${p.label}" removed from the registry (its directory ${p.dir} is kept — deletion is a human act)`);
@@ -557,6 +649,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
 
   // ── the browser: reuse-or-spawn ──
   function idleMs() { return B.idleTimeoutMs(setting('browser.idleTimeoutMs', B.DEFAULT_IDLE_TIMEOUT_MS)); }
+  /** r4 LOW 5: the idle timeout an ephemeral's spawn pairs carry (frozen at spawn), else the setting. */
+  function pairsIdleMs(pairs) {
+    const v = pairsEnv(pairs || []).AGENT_BROWSER_IDLE_TIMEOUT_MS;
+    return typeof v === 'string' && /^\d+$/.test(v.trim()) ? B.idleTimeoutMs(Number(v)) : idleMs();
+  }
   /** The ceiling over EVERY live browser record (named + managed ephemeral)
    *  plus the holders the count seam reports (desktop apps, D2). */
   function ceilingNow({ ephemeral = false } = {}) {
@@ -564,13 +661,421 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** An ephemeral daemon whose pid is gone idled out (the CLI's own timeout):
    *  recorded `stopped` — not an error; the next verb starts it again. */
-  function markEphemeralGone(rec) {
+  function markEphemeralGone(rec, seenBy = 'the tick') {
     rec.state = 'stopped'; rec.endedAt = now(); rec.stoppedBy = 'idle'; rec.lastError = null;
-    rec.note = `the browser idled out (${Math.round(idleMs() / 60000)} min without a command) — the next command starts it again`;
+    rec.note = `the browser idled out (${Math.round(pairsIdleMs(pairsOf(rec.profileId)) / 60000)} min without a command) — the next command starts it again`;
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
-    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}) — recorded stopped (idle), the next verb restarts it`);
+    log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (idle), the next verb restarts it`);
+    emitLease({ kind: 'browser-stopped', profileId: rec.profileId, why: 'idle', local: true, ...ephEventFields(rec.profileId) }); // lane H: its holder row leaves the digest
+    reapOrphan(rec, seenBy); // verify r2 M1: the Chrome its dead daemon left behind is ended (tracked; a start waits on it)
   }
+  /** VERIFY r2 M1: a NAMED profile's local record whose daemon is gone (dead, or its pid recycled) — recorded stopped,
+   *  and the browser that daemon launched is ended (it would hold the profile's SingletonLock: the relaunch's exit 21). */
+  function markDaemonGone(rec, seenBy) {
+    const v = livenessOf(rec);
+    rec.state = 'stopped'; rec.endedAt = now();
+    rec.lastError = v === 'recycled' ? `the browser daemon exited (pid ${rec.pid} is another process now)` : 'the browser daemon exited';
+    guard.delete(rec.profileId); live.delete(rec.profileId);
+    dirty = true;
+    log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}${v === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped`);
+    return reapOrphan(rec, seenBy);
+  }
+  // ── VERIFY r2 M1 (2026-09-25): A KEEPER THAT STARTS A BROWSER IS THE ONE THAT ENDS IT ──
+  // Measured on the real 0.38.1: `kill -9` of a daemon (a crash, an OOM — and stop()'s own SIGKILL after its close
+  // grace) leaves its Chrome ALIVE, reparented, holding `<dir>/SingletonLock` and DevToolsActivePort; the relaunch on
+  // that directory died "Chrome exited early (exit code: 21)" (the owner's "bank never starts" from a second path) and
+  // an ephemeral's orphan just leaked (19 on the dev box, ≈3 GB). The browser a launch started is RECORDED (`rec.browser`
+  // = the daemon's child: pid + starttime + its user-data-dir, browser-facts.browserOfDaemon); a gone daemon's browser is
+  // ended while it is STILL that process naming that directory; and before EVERY launch on a directory the lock's holder
+  // is judged (browser-profiles.profileLockVerdict): the keeper's own orphan is ended, anything it cannot prove its own is
+  // refused `profile_locked` by name — never signalled, never the raw exit code.
+  const reaping = new Map(); // profileId → the in-flight end of an orphaned browser (a launch on it waits)
+  /** 'ours' | 'gone' | 'recycled' (alive, ANOTHER starttime) | 'unrecorded' (verify r3 LOW 3: its starttime readable, the
+   *  record has none — unprovable) | 'unknown' (no starttime readable at all, no /proc — never guessed). */
+  function livenessOf(rec) {
+    if (!rec || !Number.isInteger(rec.pid) || rec.pid <= 0) return 'gone';
+    const alive = F.pidAlive(rec.pid);
+    const readable = alive && F.procStart(rec.pid) != null;
+    return B.pidLiveness({ alive, sameStart: alive && F.sameProcess(rec.pid, rec.starttime), startKnown: rec.starttime != null && readable, startReadable: readable });
+  }
+  /** VERIFY r2 L4 + r3 LOW 3: a LOCAL record's daemon is gone when it is dead, its pid is another process now, or the record
+   *  carries no starttime on a machine that reads them (the tick, judgeEphemeral, a view's port and a start decide by
+   *  this); `stop()` still signals only a pid proven `ours`. */
+  const daemonGone = (rec) => ['gone', 'recycled', 'unrecorded'].includes(livenessOf(rec));
+  /** r5 MAJOR 1 (iii): did THIS launch bring a browser up on `dir`? (its DevToolsActivePort / SingletonLock written anew
+   *  since `stamp0`, on a machine that reads process facts) — the evidence that makes "no browser identified" a closure. */
+  const launchEvidenced = (dir, stamp0) => !!dir && F.startsReadable() && F.launchStampMoved(stamp0, F.dirLaunchStamp(dir));
+  /** Record the browser this record's daemon launched (after a launch, while the daemon is ours). */
+  function captureBrowser(rec, dir = null) {
+    if (!rec || !isLocalRec(rec) || !Number.isInteger(rec.pid)) return null;
+    // r4 LOW 4: the directory's LOCK names the browser itself — preferred over an argv match (a wrapper between the daemon
+    // and Chrome that does not exec carries the same flags) while its holder descends from THIS daemon (≤ 2 levels)
+    let b = lockHeldUnder(rec, dir);
+    if (!b) { try { b = F.browserOfDaemon(rec.pid, { dir: dir || null }); } catch { b = null; } }
+    rec.browser = b ? { pid: b.pid, starttime: b.starttime, dir: b.dir, devtoolsPort: F.readDevToolsPort(b.dir) } : null;
+    return rec.browser;
+  }
+  /** r4 LOW 4: the holder of `dir`'s lock when it is alive, names `dir`, has a starttime and THIS record's daemon is its
+   *  parent or grandparent → `{pid, starttime, dir, devtoolsPort}` | null. */
+  function lockHeldUnder(rec, dir) {
+    if (!dir || !rec || !Number.isInteger(rec.pid)) return null;
+    const f = F.lockHolderFacts(dir);
+    const h = f.holder;
+    if (!(h && h.alive && h.starttime != null && (h.ancestors || [h.parentPid]).includes(rec.pid) && (h.dirs || []).some((d) => B.sameDir(d, dir)))) return null;
+    return { pid: h.pid, starttime: h.starttime, dir, devtoolsPort: f.devtoolsPort };
+  }
+  // ── VERIFY r3 (2026-09-25) M1: A RECORD OF A BROWSER IS RE-CAPTURED EVERY TIME IT IS JUDGED ──
+  // Measured on the real 0.38.1 (five shapes): when the daemon's Chrome dies (the user closing a headed window, a
+  // crash) the DAEMON LIVES and its next verb relaunches Chrome IN PLACE — a new pid, a new SingletonLock and
+  // DevToolsActivePort, and without a profile a NEW temp user-data-dir. The browser recorded at launch then named a
+  // dead pid: after a daemon SIGKILL the tick found it 'gone' and never ended the relaunched Chrome, and (the real
+  // Chrome's environ carries no AGENT_BROWSER_* — the binary scrubs it — so r2's namespace witness never fired) a named
+  // profile answered `profile_locked … it may be the user's own browser` FOREVER; an ephemeral's relaunched Chrome leaked
+  // unseen. So: (a) the record FOLLOWS the relaunch — re-captured whenever it is judged while the daemon is provably ours
+  // (the tick, a start's live return, a view's port, stop() before its first signal); (b) a holder nobody recorded is
+  // still the keeper's own when its --user-data-dir IS a directory the keeper minted and no live daemon parents it.
+  /** (b) Is `dir` a directory THIS KEEPER minted for `p` — a named profile's `<home>/.agent-browser/vs-<id>`
+   *  (createProfile's own name, never a directory the user picked), an ephemeral's own directory (browser-env's, on its
+   *  record) or the temp directory recorded for an ephemeral's browser (`recorded.dir`: the binary's per-launch one)?
+   *  An ADOPTED directory (the user's, kept at its path) is never minted. */
+  function mintedDirOf(p, dir, recorded) {
+    if (!p || !dir) return false;
+    if (!isEph(p)) return B.sameDir(dir, path.join(homeDir, '.agent-browser', B.profileDirName(p.id)));
+    return !!((p.dir && B.sameDir(dir, p.dir)) || (recorded && recorded.dir && B.sameDir(dir, recorded.dir)));
+  }
+  /** (a) The record's browser AFTER judging it: kept while it is still the recorded process naming its directory; else —
+   *  only while the daemon is provably OURS (pid AND starttime) — re-captured: the directory's LOCK read first (its
+   *  holder a child of THIS daemon naming it), else the daemon's child naming it (rung N: no directory is known — each
+   *  relaunch mints a temp one); a daemon with no Chrome right now records none (nothing to end). → rec.browser. */
+  function recaptureBrowser(rec, seenBy) {
+    if (!rec || !isLocalRec(rec) || !Number.isInteger(rec.pid) || rec.pid <= 0) return rec ? rec.browser || null : null;
+    const b = rec.browser && Number.isInteger(rec.browser.pid) ? rec.browser : null;
+    if (b && F.pidAlive(b.pid) && F.sameProcess(b.pid, b.starttime) && B.userDataDirsOf(F.procCmdline(b.pid), [b.dir]).some((d) => B.sameDir(d, b.dir))) return b;
+    if (livenessOf(rec) !== 'ours') return rec.browser || null; // never re-captured under a daemon we cannot prove ours
+    const p = profile(rec.profileId);
+    const dir = (p && p.dir) || null;
+    // r4 LOW 4: the lock's holder under THIS daemon — its child OR grandchild (a wrapper that does not exec between them)
+    let next = lockHeldUnder(rec, dir);
+    if (!next) { let c = null; try { c = F.browserOfDaemon(rec.pid, { dir }); } catch { c = null; } if (c && c.starttime != null) next = { pid: c.pid, starttime: c.starttime, dir: c.dir, devtoolsPort: F.readDevToolsPort(c.dir) }; }
+    if (!b && !next) return null;
+    rec.browser = next; dirty = true;
+    // r4 MAJOR 1: the EVIDENCE a heal needs — a browser this record had identified is gone and nothing replaced it (a daemon
+    // whose browser was never identifiable — a provider launched some other way — is never "closed", never healed)
+    rec.browserLost = next ? null : { pid: b.pid, at: now() };
+    log.log?.(`[browser] ${rec.profileId}: its daemon ${rec.pid} ${next ? `relaunched its browser in place — re-captured pid ${next.pid} (${next.dir}${next.devtoolsPort ? ', DevToolsActivePort ' + next.devtoolsPort : ''})` : 'has no browser right now'}${b ? `; the recorded pid ${b.pid} is gone` : ''} (seen by ${seenBy})`);
+    return next;
+  }
+  /** (a) + a NAMED profile's CDP url: a re-captured browser serves a new DevTools endpoint, so the cached url is re-asked
+   *  under the keeper's own session and launch view (never a restart; the mediated leases follow — leaseCdpUrl). */
+  async function followRelaunch(rec, seenBy, { heal = true, force = false } = {}) {
+    const before = rec && rec.browser ? rec.browser.pid : null;
+    const b = recaptureBrowser(rec, seenBy);
+    const p = rec ? profile(rec.profileId) : null;
+    if (!p || isEph(p) || rec.state !== 'ready' || !isLocalRec(rec)) return b;
+    // r4 MAJOR 1: a named profile's daemon whose identified browser is GONE (the user closed its window, a crash) —
+    // nothing else relaunches it
+    if (!b) return heal && (rec.browserLost || rec.closed) ? healBrowser(rec, p, seenBy, { force }) : null;
+    if (rec.closed || rec.browserLost) { rec.closed = null; rec.browserLost = null; dirty = true; }
+    if (b.pid === before) return b;
+    rec.cdpUrl = null;
+    try { await leaseCdpUrl(rec.profileId); } catch { /* the next lease call asks again */ }
+    return b;
+  }
+  // ── VERIFY r4 (2026-09-25) MAJOR 1: A PROFILE BROWSER THE PRODUCT CANNOT RELAUNCH IS A DEAD LEASE — HEAL WHERE THE ABSENCE IS SEEN ──
+  // Measured on the real keeper + 0.38.1 (3/3): SIGTERM the Chrome of a named profile (the user closing a headed window, a
+  // crash) and the daemon LIVES with no browser; the agents run under their LEASE's session over AGENT_BROWSER_CDP (a CDP
+  // client cannot launch), the keeper asked under its own session only when the cdp url was null — so the profile stayed
+  // `ready` on a dead port and every verb, the live view, the recorder answered "Connection refused" for the rest of the
+  // conversation. `get cdp-url` under the KEEPER's session on that daemon relaunches Chrome IN it (161 ms, a new
+  // DevToolsActivePort, measured): the tick (while a lease holds it), a start's live return and a view's port — the three
+  // places that already judge the record — heal it; the mediated grants are repointed, and a non-mediated lease is handed
+  // the new port by its next /resolve (every verb asks). NEVER over a directory somebody else now holds (the user opened
+  // the profile themselves): that is reported by name (`profile_locked`, the pid) and never raced — a relaunch there would
+  // open a window in THEIR browser. A failed heal is retried by a verb at once, by the tick after HEAL_RETRY_MS.
+  // ── VERIFY r5 (2026-09-25) MAJOR 1: A HEAL IS EVIDENCE-BOUND AND BUDGETED — NEVER A LOOP ──
+  // r4's heal remembered nothing but the failed-heal gate and cleared its evidence after every answer. Measured (the
+  // verifier, real keeper + 0.38.1 + a real Chrome): (a) a Chrome that dies ~1 s after every relaunch (a crash-on-load
+  // page, a headed window the user keeps closing, an OOM) was relaunched on EVERY tick — 12/12 in 60 s, 39 journal lines a
+  // minute, ≈600 CPU-s/h, a 165 MB Chrome every 5 s, `ready`, nobody told; (b) one that died before the recapture left
+  // `ready` + no browser + no verdict, so nothing healed it again and an attach handed out the dead url (r4's dead lease,
+  // reached through the fix) — and the same at a START whose Chrome died before its capture. Now: every relaunch is COUNTED
+  // in the record's own persisted ledger (`rec.heals`, browser-profiles.healLedger); HEAL_BUDGET of them inside
+  // HEAL_WINDOW_MS and the next closure is `browser_unstable` — no more relaunches (a verb's force included), ONE For-you
+  // notice (origin browser) naming the profile and the count, the panel row says so, until a Stop ends the record (the next
+  // start is a new record, a new ledger); a relaunch (or a start) after which no browser process is identified is
+  // `browser_closed` by name — never a success — retried by the tick HEAL_RETRY_MS after THAT close, by a verb at once.
+  // ── VERIFY r6 (2026-09-25) MINOR 1: only a relaunch whose url ANSWERED is an attempt (r5 counted before the ask, so three
+  // asks the binary refused made the profile "keeps closing" in 93 s); a failed ask has its own streak + cap + words
+  // (`rec.heals.failed`, B.failedAskVerdict: 10 spanning 4.5 min ⇒ `browser_unstable` "could not be started", `closed.unstable
+  // = 'failing'`). LOW 2 is a KNOWN BOUND, not fixed: the window slides, so a browser closing less often than 3 in 10 min
+  // (one every ~4 min) is restarted on every closure for as long as a lease holds it — bounded, never the 5-s storm.
+  const HEAL_RETRY_MS = B.HEAL_RETRY_MS;
+  const healing = new Map();
+  const closedText = (p, why) => `"${p.label}"'s browser was closed (its window or process ended) and could not be started again${why ? ' — ' + why : ''}; stop it from the Browser panel, then run the command again`;
+  const leasedNow = (profileId) => reg.leases.some((l) => l.profileId === profileId);
+  /** r5 LOW 5: a closure a relaunch ATTEMPT made carries `retryAt` (its close + HEAL_RETRY_MS) and the tick waits for it; a
+   *  refusal that attempted nothing (another browser holds the directory, a cloak record) carries none — the tick re-reads
+   *  the lock every pass (a /proc read), so the heal follows the human's close within one tick. */
+  const healGated = (rec) => !!(rec && rec.closed && Number.isFinite(rec.closed.retryAt) && now() < rec.closed.retryAt);
+  /** r5: record a close verdict on a live record. `at` is when this close was FIRST seen (kept while the same code and holder
+   *  recur — a re-judged refusal never re-writes the store); `retry` (a relaunch attempt made it) arms the gate from NOW.
+   *  → true when the verdict is new (said once). */
+  function setClosed(rec, c, { retry = false } = {}) {
+    const same = !!(rec.closed && rec.closed.code === c.code && (rec.closed.holderPid || null) === (c.holderPid || null));
+    if (same && !retry && rec.closed.error === c.error && !Number.isFinite(rec.closed.retryAt)) return false;
+    rec.closed = { at: same && Number.isFinite(rec.closed.at) ? rec.closed.at : now(), code: c.code, error: c.error, holderPid: c.holderPid || null, ...(retry ? { retryAt: now() + HEAL_RETRY_MS } : {}), ...(c.unstable ? { unstable: c.unstable } : {}) };
+    dirty = true;
+    return !same;
+  }
+  const noteHeal = (rec, patch) => { rec.heals = { ...B.healLedger(rec.heals), ...patch }; dirty = true; };
+  /** r5: the budget is spent — `browser_unstable` (no more relaunches until a stop ends the record) + the ONE notice. r6
+   *  MINOR 1: `kind` 'closing' (HEAL_BUDGET relaunches that each produced a browser that closed) or 'failing' (the failed-ask
+   *  cap: every ask to start it again failed, `spanMs` the time they spanned) — two verdicts, two sets of words, one code. */
+  function markUnstable(rec, p, count, seenBy, { kind = 'closing', spanMs = null } = {}) {
+    const failing = kind === 'failing';
+    const first = setClosed(rec, { code: 'browser_unstable', error: B.unstableText({ label: p.label, count, windowMs: B.HEAL_WINDOW_MS, kind, spanMs }), ...(failing ? { unstable: 'failing' } : {}) });
+    noteHeal(rec, { lastOutcome: 'unstable', unstableCount: count, unstableKind: failing ? 'failing' : null, unstableSpanMs: failing ? spanMs : null });
+    if (first) {
+      if (failing) log.warn?.(`[browser] ${p.id} "${p.label}": its browser could not be started — ${count} relaunch asks in ${Math.round((spanMs || 0) / 1000)} s all failed (daemon ${rec.pid} alive, seen by ${seenBy}; no browser started) — NOT asked again (browser_unstable) until it is stopped from the Browser panel`);
+      else log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed again (daemon ${rec.pid} alive, seen by ${seenBy}) after ${count} restarts in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min — NOT started again (browser_unstable) until it is stopped from the Browser panel`);
+    }
+    noticeUnstable(rec, p);
+  }
+  /** r5: ONE For-you notice per unstable record (origin browser) — filed once (`heals.noticedAt`, persisted); a store that is
+   *  not wired or refuses is said in the journal and tried again on the next pass (a failed filing is never "filed"). */
+  function noticeUnstable(rec, p) {
+    const L = B.healLedger(rec.heals);
+    if (L.noticedAt) return false;
+    // a store that is not wired / refuses: said ONCE (never a journal line per tick), tried again silently on each pass
+    const unfiled = (why) => { if (L.lastOutcome !== 'unstable-unfiled') { noteHeal(rec, { lastOutcome: 'unstable-unfiled' }); log.warn?.(`[browser] ${p.id} "${p.label}": keeps closing — ${why}`); } return false; };
+    if (!userTodos || typeof userTodos.add !== 'function') return unfiled('no For-you store is wired, so only this journal says so');
+    const n = B.unstableNotice({ label: p.label, count: L.unstableCount || B.HEAL_BUDGET, windowMs: B.HEAL_WINDOW_MS, kind: L.unstableKind === 'failing' ? 'failing' : 'closing', spanMs: L.unstableSpanMs }); // r6: its own words
+    try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); }
+    catch (e) { return unfiled(`the For-you notice was not filed (${e && e.message}) — tried again on the next pass`); }
+    noteHeal(rec, { noticedAt: now() });
+    return true;
+  }
+  function healBrowser(rec, p, seenBy, { force = false } = {}) {
+    if (!rec || !p || rec.state !== 'ready' || !isLocalRec(rec) || starting.has(p.id) || stopping.has(p.id) || switching.has(p.id)) return Promise.resolve(null);
+    if (livenessOf(rec) !== 'ours') return Promise.resolve(null); // never under a daemon we cannot prove ours (the tick marks it gone)
+    if (healing.has(p.id)) return healing.get(p.id);
+    // r5 MAJOR 1: an UNSTABLE browser is never started again by itself — not by a verb's force either; only a stop ends it
+    if (rec.closed && rec.closed.code === 'browser_unstable') { if (noticeUnstable(rec, p)) commit(); return Promise.resolve(null); }
+    if (!force && healGated(rec)) return Promise.resolve(null);
+    const pr = (async () => {
+      // a browser launched with the provider's own flags (cloak's executable + fingerprint) is never relaunched by a bare
+      // `get cdp-url` (a launch view without them would relaunch it as plain chromium on that directory): said, not guessed
+      if (rec.launchFlags === true || (rec.launchFlags == null && String(p.provider) === 'cloak')) { // (a record from before r4 carries no flag: its provider says)
+        if (setClosed(rec, { code: 'browser_closed', error: closedText(p, `a ${p.provider} browser is started again only by a start (its own launch flags)`) })) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) — ${rec.closed.error}`); commit(); }
+        return null;
+      }
+      const f = F.lockHolderFacts(p.dir);
+      const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, null), recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark });
+      if (v.kind === 'own-orphan') {
+        const e = await endProcess(v.pid, f.holder.starttime);
+        log.warn?.(`[browser] ${p.id} "${p.label}": ended its own orphaned browser pid ${v.pid} before healing (${v.why}): ${e}`);
+        if (e === 'survived' || e === 'unproven') { setClosed(rec, B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: { ...v, kind: e === 'survived' ? 'survived' : 'foreign' } })); commit(); return null; }
+      } else if (v.kind !== 'free') {
+        // r5 LOW 5: a refusal that attempted nothing — no gate armed, `at` kept, said once per holder
+        const rf = B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: v });
+        if (setClosed(rec, rf)) { log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and is NOT started again — ${rf.error}`); commit(); }
+        return null;
+      }
+      // r5 MAJOR 1 (a): THE BUDGET — HEAL_BUDGET relaunches inside HEAL_WINDOW_MS ⇒ unstable, judged BEFORE the next ask.
+      // r6 MINOR 1: a relaunch is COUNTED once its url ANSWERED (a browser was produced — whether or not it then died); an
+      // ask the binary refused started nothing: it keeps the 30 s gate and its OWN streak, cap and words (below), so a
+      // transient fault (the binary mid-reinstall, the folder unreadable, a full disk) never reads as "closed each time"
+      const L = B.healLedger(rec.heals);
+      const bud = B.healBudgetVerdict({ attempts: L.attempts, now: now() });
+      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy); commit(); return null; }
+      const tAsk = now();
+      const t0 = Date.now();
+      rec.cdpUrl = null;
+      let url = null; try { url = await leaseCdpUrl(p.id); } catch { url = null; }
+      if (reg.browsers[p.id] !== rec || rec.state !== 'ready') return null;
+      if (!url) {
+        // r6 MINOR 1: a FAILED ask — its streak (consecutive, since its first) grows; HEAL_FAIL_BUDGET of them spanning
+        // HEAL_FAIL_SPAN_MS ⇒ `browser_unstable` "could not be started" + ONE notice in those words, else `browser_closed`
+        const F0 = B.healLedger(rec.heals).failed;
+        const failed = { count: (F0 ? F0.count : 0) + 1, since: F0 ? F0.since : tAsk };
+        noteHeal(rec, { lastOutcome: 'failed', failed });
+        const fv = B.failedAskVerdict({ failed, now: now() });
+        if (!fv.ok) { markUnstable(rec, p, fv.count, seenBy, { kind: 'failing', spanMs: fv.spanMs }); commit(); return null; }
+        setClosed(rec, { code: 'browser_closed', error: closedText(p, 'its daemon answered no CDP url (the relaunch failed)') }, { retry: true });
+        log.warn?.(`[browser] ${p.id} "${p.label}": its browser closed (daemon ${rec.pid} alive, seen by ${seenBy}) and the relaunch failed — ${rec.closed.error} (failed ask ${failed.count}; the tick tries again in ${HEAL_RETRY_MS / 1000} s, a command at once; ${B.HEAL_FAIL_BUDGET} failed asks over ${B.HEAL_FAIL_SPAN_MS / 60000} min ⇒ browser_unstable)`);
+        commit();
+        return null;
+      }
+      // r6 MINOR 1: the url answered — THIS is a relaunch (the budget's attempt), and the failed streak ends
+      noteHeal(rec, { attempts: [...B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: tAsk }).recent, tAsk], failed: null });
+      const lost = rec.browserLost;
+      const b = recaptureBrowser(rec, `${seenBy}, healed`);
+      if (!b) { // r5 MAJOR 1 (b): its CDP url answered but no browser process holds the directory — it died at birth: CLOSED, never a success
+        rec.browserLost = { pid: lost ? lost.pid : null, at: now() };
+        setClosed(rec, { code: 'browser_closed', error: closedText(p, 'it was started again but died before VibeSpace could identify it (a crash at startup?)') }, { retry: true });
+        noteHeal(rec, { lastOutcome: 'unidentified' });
+        log.warn?.(`[browser] ${p.id} "${p.label}": started again in daemon ${rec.pid} (seen by ${seenBy}) but no browser process holds ${p.dir} — it died at birth: browser_closed (the tick tries again in ${HEAL_RETRY_MS / 1000} s, a command at once)`);
+        commit();
+        return null;
+      }
+      rec.closed = null; rec.browserLost = null; dirty = true;
+      noteHeal(rec, { lastOutcome: 'healed' });
+      log.log?.(`[browser] ${p.id} "${p.label}": its browser had closed (${lost && lost.pid ? 'pid ' + lost.pid + ' gone, ' : ''}daemon ${rec.pid} alive, seen by ${seenBy}) — started again in that daemon in ${Date.now() - t0} ms: ${b ? 'pid ' + b.pid + (b.devtoolsPort ? ', DevToolsActivePort ' + b.devtoolsPort : '') : 'its CDP url answers (the process is not identified)'} (restart ${B.healLedger(rec.heals).attempts.length} of ${B.HEAL_BUDGET} in ${Math.round(B.HEAL_WINDOW_MS / 60000)} min); the leases follow (mediated: repointed; others: their next command)`);
+      commit();
+      return b;
+    })();
+    healing.set(p.id, pr);
+    return pr.finally(() => { if (healing.get(p.id) === pr) healing.delete(p.id); });
+  }
+  /** r4 MAJOR 1 + r5: the refusal a lease / a view gets while its profile's browser is not there — the close verdict
+   *  (`profile_locked` — somebody else's browser holds the directory —, `browser_closed`, `browser_unstable`), else (r5
+   *  MINOR 2) a browser it had identified that is gone and nobody healed (an UNLEASED profile's: a view never starts one)
+   *  ⇒ `browser_closed` "the next command starts it"; a browser never identifiable is not judged (null). */
+  function closedRefusalOf(profileId) {
+    const rec = reg.browsers[profileId];
+    if (!(rec && rec.state === 'ready' && isLocalRec(rec)) || rec.browser) return null;
+    if (rec.closed) return { code: rec.closed.code, error: rec.closed.error, holderPid: rec.closed.holderPid || null, ...(rec.closed.unstable ? { unstable: rec.closed.unstable } : {}) }; // r6: the verdict's kind rides
+    if (rec.browserLost) { const p = profile(profileId); return { code: 'browser_closed', error: `"${p ? p.label : profileId}"'s browser was closed (its window or process ended) — the next browser command starts it again, and a live view reconnects then`, holderPid: null }; }
+    return null;
+  }
+  /** SIGTERM, then SIGKILL — each only while the pid is STILL the process (pid + starttime). Real time, never the
+   *  injectable clock (a stuck fake clock must not spin this). → 'ended' | 'gone' | 'unproven' | 'survived'. */
+  async function endProcess(pid, starttime) {
+    const same = () => F.pidAlive(pid) && F.sameProcess(pid, starttime);
+    if (!F.pidAlive(pid)) return 'gone';
+    if (!same()) return 'unproven';
+    try { process.kill(pid, 'SIGTERM'); } catch { /* gone meanwhile */ }
+    for (let i = 0; i < 15 && F.pidAlive(pid); i++) await sleep(100);
+    if (same()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } for (let i = 0; i < 10 && F.pidAlive(pid); i++) await sleep(50); }
+    return F.pidAlive(pid) && F.sameProcess(pid, starttime) ? 'survived' : 'ended';
+  }
+  /** End the browser a record's (gone) daemon launched — tracked per profile, single flight. The RECORDED browser first
+   *  (while it is still that process naming its directory); then (verify r3 M1 b) the LOCK of each directory the keeper
+   *  minted for this record — ended only on browser-profiles.profileLockVerdict's `own-orphan` (r4: the holder carries
+   *  THIS record's launch mark, or is the pre-mark CLI launch); a `foreign` holder (r4 MAJOR 2: a Chrome the user opened on
+   *  our directory) is REPORTED — said once in the journal — and never signalled; then (r4 LOW 3) an ephemeral's browser
+   *  wherever it runs — every Chrome carrying its mark with no live daemon above it (a relaunch in a NEW temp dir). */
+  const saidForeign = new Map(); // `${profileId}|${pid}` → said once (a foreign holder is reported, not re-logged each tick)
+  function reapOrphan(rec, seenBy) {
+    if (!rec || !isLocalRec(rec)) return Promise.resolve(null);
+    const b = rec.browser && Number.isInteger(rec.browser.pid) ? rec.browser : null;
+    const p = profile(rec.profileId);
+    const dirs = [...new Set([b && b.dir, p && p.dir].filter(Boolean).map(String))].filter((d) => mintedDirOf(p, d, b));
+    const scanMark = isEph(p) && rec.mark ? String(rec.mark) : null;
+    if (!b && !dirs.length && !scanMark) return Promise.resolve(null);
+    if (reaping.has(rec.profileId)) return reaping.get(rec.profileId);
+    const pr = (async () => {
+      let r = null;
+      if (b && !F.pidAlive(b.pid)) { rec.browser = null; dirty = true; r = 'gone'; }
+      else if (b && (!F.sameProcess(b.pid, b.starttime) || !B.userDataDirsOf(F.procCmdline(b.pid), [b.dir]).some((d) => B.sameDir(d, b.dir)))) {
+        log.warn?.(`[browser] ${rec.profileId}: pid ${b.pid} is no longer the browser recorded for it — left alone, never signalled`);
+        rec.browser = null; dirty = true; r = 'unproven';
+      } else if (b) {
+        r = await endProcess(b.pid, b.starttime);
+        log.warn?.(`[browser] ${rec.profileId}: ended its own orphaned browser pid ${b.pid} (${b.dir}) — the one recorded for it; its daemon ${rec.pid} is gone (seen by ${seenBy}): ${r}`);
+        if (r !== 'survived') { rec.browser = null; dirty = true; }
+        if (!scanMark) return r;
+      }
+      for (const d of dirs) {
+        const f = F.lockHolderFacts(d);
+        const v = B.profileLockVerdict({ lock: f.lock, holder: f.holder, hostname: os.hostname(), dir: d, minted: true, recorded: null, mark: markOf(p), preMarkAllowed: !rec.mark });
+        if (v.kind === 'foreign' && v.pid) {
+          // r4 MAJOR 2: the owner's law — a used session is REPORTED, never killed (a start on it is refused by name)
+          const k = `${rec.profileId}|${v.pid}`;
+          if (!saidForeign.has(k)) { saidForeign.set(k, now()); log.warn?.(`[browser] ${rec.profileId}: its daemon ${rec.pid} is gone (seen by ${seenBy}); ${d} is held by pid ${v.pid}, which is left running — ${v.why}`); }
+          continue;
+        }
+        if (v.kind !== 'own-orphan') continue; // free: nothing to end (the next start judges it again, by name)
+        const e = await endProcess(v.pid, f.holder.starttime);
+        log.warn?.(`[browser] ${rec.profileId}: ended its own orphaned browser pid ${v.pid} (${d}) — found by the directory's lock: ${v.why}; its daemon ${rec.pid} is gone (seen by ${seenBy}): ${e}`);
+        if (e === 'survived') { rec.browser = { pid: v.pid, starttime: f.holder.starttime, dir: d }; dirty = true; }
+        r = e;
+      }
+      // r4 LOW 3: an ephemeral's Chrome relaunched in place in a NEW temp directory after the record was made (rung N: no
+      // directory the keeper knows names it) — its command line carries THIS conversation's mark, so it is found wherever it
+      // runs; ended only when no live browser daemon is its parent or grandparent (a new start's Chrome carries it too)
+      if (scanMark) {
+        let hits = [];
+        try { hits = await F.markedBrowsers(scanMark); } catch { hits = []; }
+        for (const h of hits) {
+          if (h.daemonPid || h.starttime == null) continue;
+          const e = await endProcess(h.pid, h.starttime);
+          log.warn?.(`[browser] ${rec.profileId}: ended its own orphaned browser pid ${h.pid}${h.dirs && h.dirs[0] ? ' (' + h.dirs[0] + ')' : ''} — it carries this conversation's launch mark (${B.keeperMarkArg(scanMark)}) and no live browser daemon is its parent; its daemon ${rec.pid} is gone (seen by ${seenBy}): ${e}`);
+          r = e;
+        }
+      }
+      return r;
+    })();
+    reaping.set(rec.profileId, pr);
+    return pr.finally(() => { if (reaping.get(rec.profileId) === pr) reaping.delete(rec.profileId); });
+  }
+  /** Before a launch on `p.dir`: who holds its SingletonLock? The keeper's own orphan is ended; anything it cannot prove
+   *  its own is a refusal by name (`profile_locked`, the pid named). → `{ok}` | `{ok:false, code, error, holderPid}`. */
+  async function clearProfileLock(p, ns, prev) {
+    if (!p || !p.dir) return { ok: true };
+    const facts = F.lockHolderFacts(p.dir);
+    const recorded = prev && prev.browser ? prev.browser : null;
+    // verify r3: the holder is the keeper's own when it is the browser recorded (re-captured) for it OR the directory is
+    // one the keeper minted (never "its environment names our namespace": the real binary scrubs its Chrome's env)
+    // r4 MAJOR 2: …and a holder on a minted directory is the keeper's own only when it carries THIS record's launch mark (or
+    // is the CLI's pre-mark launch) — a Chrome the user opened there is `foreign` (user): refused by name, left running
+    // r5 LOW 3: the pre-mark fallback only for a record launched BEFORE the mark (its last record carries none)
+    const v = B.profileLockVerdict({ lock: facts.lock, holder: facts.holder, hostname: os.hostname(), dir: p.dir, minted: mintedDirOf(p, p.dir, recorded), recorded, mark: markOf(p), preMarkAllowed: !(prev && prev.mark) });
+    if (v.kind === 'free') return { ok: true, verdict: v };
+    if (v.kind === 'own-orphan') {
+      const r = await endProcess(v.pid, facts.holder.starttime);
+      log.warn?.(`[browser] ${p.id} "${p.label}": ended its own orphaned browser pid ${v.pid} before launching on ${p.dir} (${v.why}${facts.devtoolsPort ? ', DevToolsActivePort ' + facts.devtoolsPort : ''}): ${r}`);
+      if (r === 'ended' || r === 'gone') return { ok: true, ended: v.pid };
+      return { ok: false, ...B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: { ...v, kind: r === 'survived' ? 'survived' : 'foreign', why: r === 'unproven' ? 'it changed while being judged' : v.why } }) };
+    }
+    const rf = B.profileLockedRefusal({ label: p.label, dir: p.dir, verdict: v });
+    log.warn?.(`[browser] ${p.id} "${p.label}": NOT launched — ${rf.error}`);
+    return { ok: false, ...rf };
+  }
+  /**
+   * VERIFY r1 H2: a managed ephemeral browser's liveness is its PROCESS, never its record. The record says `ready`
+   * until the tick (5 s) notices the pid is gone, and a view reconnecting inside that window (the client retries 1 s
+   * after `upstream-closed`) would ask the CLI `stream status` — which, measured on 0.38.1 as on 0.32.0, STARTS a
+   * daemon the keeper never holds. So every reader that would act on `ready` judges the pid first: a ready local
+   * record whose daemon is gone is marked stopped NOW and the digest is told (its holder row leaves at once).
+   * Never while it is starting or stopping. → true when it marked it.
+   */
+  function judgeEphemeral(browserKey, seenBy) {
+    const e = ephemeralFor(browserKey);
+    if (!e || e.state !== 'ready') return false;
+    const rec = reg.browsers[e.profileId];
+    if (!rec || starting.has(e.profileId) || stopping.has(e.profileId) || !isLocalRec(rec) || !daemonGone(rec)) return false; // r2 L4: dead OR recycled
+    markEphemeralGone(rec, seenBy);
+    commit();
+    return true;
+  }
+  /**
+   * VERIFY r1 H2: the live-view bridge's upstream (the daemon's own stream server) closed on an EPHEMERAL relay —
+   * the usual way a daemon's death is first seen. Judge the process at once; a daemon still exiting (its sockets
+   * close before its pid is reaped) is re-judged every 200 ms for a second. A browser still alive is left alone.
+   */
+  function noteStreamClosed(target) {
+    if (!target || target.kind !== 'ephemeral') return false;
+    const bk = String(target.ns || '').replace(/^vs-/, '');
+    if (!bk) return false;
+    ensureLoaded();
+    if (judgeEphemeral(bk, 'its stream closing')) return true;
+    let n = 0;
+    const again = () => { if (judgeEphemeral(bk, 'its stream closing') || ++n >= 5) return; const t2 = setTimeout(again, 200); if (t2.unref) t2.unref(); };
+    const t = setTimeout(again, 200); if (t.unref) t.unref();
+    return false;
+  }
+  /** VERIFY r3 (LOW 3): the daemon's starttime at launch, read twice (50 ms apart) before it is given up — on a machine that
+   *  reads starttimes a null means the daemon was already gone, and a record without its identity is not `ready` (a
+   *  recycled pid kept one ready forever). With no /proc (macOS) it stays null and the record is never signalled by pid. */
+  async function launchStart(pid) {
+    if (!pid) return null;
+    let st = F.procStart(pid);
+    if (st == null && F.startsReadable()) { await sleep(50); st = F.procStart(pid); }
+    return st;
+  }
+  const unrecordedLaunch = (pid) => `the browser daemon (pid ${pid}) was gone right after its launch — its identity could not be recorded, so it is not held; run the command again`;
   /**
    * takeover C3 (§5.2 row 1): START a conversation's managed ephemeral
    * browser — the ceiling (`browser_cap`, D2), then ADOPT a
@@ -592,12 +1097,21 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         hostId: null, external: false, forward: null, remoteCdpUrl: null, dir: p.dir || null, ephemeral: true, envPairs: pairs.slice(), starts: ((prev && prev.starts) || 0) + 1, note: null };
       reg.browsers[profileId] = rec;
       commit();
+      if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
       let info = null;
       try { info = await rt.info(null, { extraEnv: env0 }); } catch { info = null; }
       let adopted = false;
       if (info && info.active && Number.isInteger(info.pid)) adopted = true;
       else {
-        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: env0 });
+        // r2 M1: a rung-C/D ephemeral launches on a DIRECTORY — its lock is judged first (the keeper's own orphan ended, a stranger's refused by name)
+        const lk = await clearProfileLock(p, ns, prev);
+        if (!lk.ok) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = lk.error; commit(); throw namedError(lk.code, lk.error, { holderPid: lk.holderPid }); }
+        // r4 (MAJOR 2 / LOW 3): the launch carries this conversation's MARK (the keeper's file for it, unless its pairs name
+        // their own config — rung D's, marked by browser-env); every later call of this record uses the same file
+        rec.mark = p.owner.id;
+        // r4 LOW 5: the idle the session's spawn pairs froze (what every command of it carries) — never the setting NOW: a
+        // different value makes the binary restart the daemon and its Chrome on the agent's next verb (measured)
+        const r = await rt.launch(null, { idleMs: pairsIdleMs(pairs), headed: null, extraEnv: env0 });
         if (!r.ok) {
           const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
           rec.state = 'failed'; rec.endedAt = now(); rec.lastError = `the browser did not start: ${text}`;
@@ -611,12 +1125,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         commit();
         throw namedError('launch_failed', rec.lastError);
       }
-      rec.pid = info.pid; rec.starttime = info.pid ? F.procStart(info.pid) : null; rec.socketDir = info.socketDir;
+      rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
+      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
+      captureBrowser(rec, p.dir || null); // r2 M1: the browser it launched (the binary's temp dir on rung N) — ended if its daemon dies
       rec.state = 'ready';
       if (adopted) rec.adoptedAt = now();
       p.lastUsedAt = now(); p.lastBackend = 'chromium';
       commit();
       log.log?.(`[browser] ephemeral ${profileId} "${p.label}" ${adopted ? 'ADOPTED (a daemon was already running under its pairs)' : 'started'} (${why}, ${ns}): daemon pid ${rec.pid ?? '?'}${rec.starttime != null ? '' : ' (starttime unreadable — never signalled by pid)'}`);
+      // lane H: a first-class holder — the recorder arms its tap on this
+      // browser before the verb that started it runs (bounded), exactly as a
+      // named profile's start / attach does
+      await settleArming(emitLease({ kind: 'browser-ready', profileId, why, local: true, adopted, ...ephEventFields(profileId) }));
       return browserView(rec);
     })();
     starting.set(profileId, p0);
@@ -649,10 +1169,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     let l = B.findLease(reg.leases, p.id, bk);
     if (!l) { l = { profileId: p.id, browserKey: bk, sessionId: sessionId || null, targetId: null, since: now(), input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }; reg.leases.push(l); }
     else { if (sessionId && l.sessionId !== sessionId) l.sessionId = sessionId; l.carrierLostAt = null; }
+    if (l.sessionId) ephSessions.set(p.id, l.sessionId); // VERIFY r1 L2
     ephPairs.set(p.id, v.pairs);
     commit();
     if (created) log.log?.(`[browser] ${bk}${sessionId ? ' (' + sessionId + ')' : ''}: managed ephemeral browser ${p.id} "${p.label}" recorded (rung ${variant || '?'}, ns ${B.sessionNameFor(bk)})`);
+    const rec0 = reg.browsers[p.id] || null;
+    const wasReady = !!(rec0 && rec0.state === 'ready');
     const browser = await start(p.id, { why: created ? 'first verb' : 'verb' });
+    // lane H: a verb on a browser that was ALREADY live (no browser-ready this
+    // time — a server restart adopted it, or its tap ended) still asks the
+    // seam's listeners to hold a tap on it before the command runs
+    if (wasReady && reg.browsers[p.id] === rec0 && rec0.state === 'ready') await settleArming(emitLease({ kind: 'verb', profileId: p.id, local: true, ...ephEventFields(p.id) }));
     ensureTimer();
     return { profile: pview(p), browser, lease: leaseView(l), created };
   }
@@ -683,8 +1210,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // takeover C3: an ephemeral daemon that idled out between two ticks is
     // judged NOW (a /proc read) so the verb restarts it instead of running on
     // a record that only looks live
-    if (isEph(p) && B.isLiveBrowser(cur) && !starting.has(profileId) && pidVerdictOf(cur) === 'gone') markEphemeralGone(cur);
-    if (B.isLiveBrowser(cur)) return browserView(cur);
+    if (isEph(p) && B.isLiveBrowser(cur) && !starting.has(profileId) && daemonGone(cur)) markEphemeralGone(cur, 'a start');
+    // VERIFY r2 M1: a NAMED profile's record is judged by its PROCESS too (the ephemeral rule) — a ready record whose
+    // daemon is gone is recorded stopped and its browser ended before this start launches (never returned as live)
+    if (!isEph(p) && cur && cur.state === 'ready' && isLocalRec(cur) && !starting.has(profileId) && !stopping.has(profileId) && daemonGone(cur)) { markDaemonGone(cur, 'a start'); commit(); }
+    if (B.isLiveBrowser(cur)) {
+      // verify r3 M1 (a): a live record returned to a verb is re-captured first (the daemon may have relaunched its Chrome)
+      // r4 MAJOR 1: …and a daemon with NO browser (the user closed it) is healed here — a verb is asking for it
+      if (cur.state === 'ready' && isLocalRec(cur) && !starting.has(profileId) && !stopping.has(profileId)) await followRelaunch(cur, 'a start', { force: true });
+      return browserView(cur);
+    }
     if (starting.has(profileId)) return starting.get(profileId);
     if (isEph(p)) return startEphemeral(p, { why });
     const cap = ceilingNow({ ephemeral: false });
@@ -714,11 +1249,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     } else if (!p.host) argvPrefix = SW.launchArgsFor(p.provider, {});
     const p0 = (async () => {
       const ns = nsOf(profileId);
+      const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)
       const rec = { profileId, ns, pid: null, starttime: null, socketDir: null, cdpUrl: null, state: 'starting', startedAt: now(), endedAt: null, lastError: null, stoppedBy: null, lastLeaseDroppedAt: null, startedBy: why,
         // P4: WHERE the process is (a paired machine) / that there is no
         // process of ours at all (an external browser over CDP), the hub-side
         // forward of its loopback port, and the machine's own url + dir
         hostId: p.host || null, external: !(B.providerRow(p.provider) || {}).starts, forward: null, remoteCdpUrl: null, dir: null };
+      // r5 LOW 3: the LAUNCH-MARK lineage rides every new record (a refused start too) — a profile once launched with the
+      // mark never falls back to the pre-mark rule, whatever record comes next (set again at the launch below)
+      if (prevRec && prevRec.mark) rec.mark = prevRec.mark;
       reg.browsers[profileId] = rec;
       commit();
       const failed = (code, msg) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg); };
@@ -758,7 +1297,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       }
       // the vendor's key names exist in THIS child's environment and nowhere
       // else (§7.5); the provider's launch flags ride argv (no secret there)
-      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headedSetting(), extraEnv: vendorEnv, argvPrefix });
+      // naive study 2 (measured on 0.38.1): a later call under this session whose LAUNCH VIEW differs (the idle
+      // timeout, headed) RESTARTS the daemon and RELAUNCHES Chrome — the keeper's own `get cdp-url` without the idle 0
+      // killed the pid it had just recorded and started a second Chrome. Every call of the keeper's own session
+      // carries this view (`rec.launchEnv`, no secret in it; the vendor's key names ride alongside, never recorded).
+      const headed0 = headedSetting();
+      const launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0', ...(headed0 === true ? { AGENT_BROWSER_HEADED: '1' } : headed0 === false ? { AGENT_BROWSER_HEADED: '0' } : {}) };
+      rec.launchEnv = launchEnv;
+      // VERIFY r2 M1: BEFORE EVERY LAUNCH ON THE DIRECTORY — a dead daemon's browser is ended first (in flight: waited),
+      // then the lock's holder judged: the keeper's own orphan ended, anything else refused `profile_locked` by name
+      if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
+      const lk = await clearProfileLock(p, ns, prevRec);
+      if (!lk.ok) { const e = failed(lk.code, lk.error); e.holderPid = lk.holderPid; throw e; }
+      rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
+      rec.launchFlags = argvPrefix.length > 0; // r4: a provider's own launch flags (cloak) — a heal's bare re-ask would not repeat them
+      const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
+      const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: vendorEnv, argvPrefix });
       if (!r.ok) {
         const text = (r.stderr || r.error || r.stdout || '').trim().slice(0, 300);
         // a key-bearing launch that fails on licence/concurrency is the THIRD
@@ -770,13 +1324,27 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         throw namedError(cls.code, cls.error, { provider: p.provider, action: cls.action || null });
       }
       const info = await rt.info(ns, { dir: p.dir });
-      rec.pid = info.pid; rec.starttime = info.pid ? F.procStart(info.pid) : null; rec.socketDir = info.socketDir;
-      const cdp = await rt.cdpUrl(ns, { dir: p.dir });
+      rec.pid = info.pid; rec.starttime = await launchStart(info.pid); rec.socketDir = info.socketDir;
+      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }
+      captureBrowser(rec, p.dir); // r2 M1: the Chrome it launched on the profile dir — ended if this daemon dies
+      const cdp = await rt.cdpUrl(ns, { dir: p.dir, extraEnv: { ...launchEnv, ...vendorEnv } });
       rec.cdpUrl = cdp.ok ? cdp.url : null;
       if (!info.active) {
         rec.state = 'failed'; rec.endedAt = now(); rec.lastError = 'the daemon did not report itself active after open';
         commit();
         throw namedError('launch_failed', rec.lastError);
+      }
+      // r5 MAJOR 1 (iii): a start whose browser died before its capture is never `ready` with no browser and no verdict (the
+      // r4 dead lease at birth). `get cdp-url` above relaunches a dead Chrome in the daemon (0.38.1), so it is captured once
+      // more; still none while THIS launch provably brought a browser up on the directory ⇒ `browser_closed` by name, the
+      // loss kept (a verb retries at once, the tick after HEAL_RETRY_MS). A launch that never wrote the directory's stamp
+      // (a machine without /proc, a provider whose browser is not identifiable) is never judged.
+      if (!rec.browser) captureBrowser(rec, p.dir);
+      if (!rec.browser && launchEvidenced(p.dir, stamp0)) {
+        rec.browserLost = { pid: null, at: now() };
+        setClosed(rec, { code: 'browser_closed', error: closedText(p, 'it died right after it started (a crash at startup?)') }, { retry: true });
+        noteHeal(rec, { lastOutcome: 'unidentified' });
+        log.warn?.(`[browser] ${profileId} "${p.label}": started (daemon pid ${rec.pid}) but no browser process holds ${p.dir} — it died at birth: browser_closed (a command retries at once, the tick in ${HEAL_RETRY_MS / 1000} s)`);
       }
       rec.state = 'ready';
       if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: a restarted browser ⇒ live mediated connections close 1012, the SAME url reconnects
@@ -835,6 +1403,40 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!rec || !Number.isInteger(rec.pid) || rec.pid <= 0) return 'gone';
     return B.pidVerdict({ alive: F.pidAlive(rec.pid), sameStart: F.sameProcess(rec.pid, rec.starttime) });
   }
+  /**
+   * NAIVE STUDY 2 (2026-09-25, the "bank" profile that never started): THE KEEPER IS THE ONLY LAUNCHER OF A
+   * PROFILE BROWSER. Every CLI call made under a LEASE's own session (`vs-<browserKey>`) — its commands, the live
+   * view's stream port, a confirmation answer, a screencast, a box probe, the backend switch's re-open — reaches
+   * the keeper's ONE browser over its CDP url and gets its own tab; it is NEVER handed the profile directory.
+   * Measured on the real 0.38.1: a second session given `AGENT_BROWSER_PROFILE` on a directory the keeper's browser
+   * holds starts its OWN Chrome there and dies on `SingletonLock: File exists` (exit 21) — every launch, and the
+   * live view's `stream status` too; with the CDP url, two sessions each got their own tab in the one Chrome.
+   * The url is the record's (a local launch reads it right after `open`; a paired / external browser's is the
+   * hub-side forward). A local record that has none is asked ONCE more under the keeper's OWN session (the
+   * launcher's) and only while its daemon is provably ours. null ⇒ the caller refuses `browser_no_cdp`.
+   */
+  async function leaseCdpUrl(profileId) {
+    const rec = reg.browsers[profileId];
+    if (!rec || rec.state !== 'ready') return null;
+    if (B.isLoopbackCdpUrl(rec.cdpUrl)) return rec.cdpUrl;
+    const p = profile(profileId);
+    if (!p || !isLocalRec(rec) || pidVerdictOf(rec) !== 'ours') return null;
+    const c = await rt.cdpUrl(rec.ns, { dir: p.dir, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); // the launch's own view (a different one restarts the daemon)
+    if (!(c.ok && B.isLoopbackCdpUrl(c.url)) || reg.browsers[profileId] !== rec) return null;
+    rec.cdpUrl = c.url;
+    if (mediator) mediator.repoint(profileId, rec.cdpUrl); // P6: the mediated leases follow the url too
+    commit();
+    return rec.cdpUrl;
+  }
+  const noCdpError = (p) => `"${p ? p.label : 'this profile'}"'s browser answered no CDP url — a command cannot join it without starting a second browser on the same profile directory (Chrome refuses that); stop it from the Browser panel and run the command again`;
+  /** The options of ONE CLI call under a lease's own session: `{ session, extraEnv: { AGENT_BROWSER_CDP } }` —
+   *  never a `dir`. null when the browser has no CDP url (the caller refuses `browser_no_cdp`). */
+  async function leaseCliOpts(profileId, browserKey) {
+    const url = await leaseCdpUrl(profileId);
+    // the lease session's OWN launch view = what its CLI child runs with (attachedEnvFor: the CDP url + idle 0) —
+    // a keeper call with another view would restart that daemon and lose the agent's pinned tab (measured on 0.38.1)
+    return url ? { session: B.sessionNameFor(String(browserKey || '')), extraEnv: { AGENT_BROWSER_CDP: url, AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } } : null;
+  }
   async function stop(profileId, { why = 'user' } = {}) {
     ensureLoaded();
     const rec = reg.browsers[profileId];
@@ -862,25 +1464,39 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         guard.delete(profileId); live.delete(profileId);
         if (mediator) mediator.repoint(profileId, null); // P6: a mediated url answers browser_stopped until the next start
         log.log?.(`[browser] ${profileId} "${p ? p.label : profileId}" ${rec.external ? 'released (external browser left running)' : 'stopped on ' + rec.hostId} (${why})${left ? ' — NOT clean: ' + left : ''}`);
+        handBackOnStop(profileId, p, why); // r6 LOW 3
         commit();
         return browserView(rec);
       }
+      // verify r3 M1 (a): BEFORE the first signal the record follows the daemon's in-place relaunch — the browser the
+      // SIGKILL below might orphan is the one running NOW, not the one launched
+      recaptureBrowser(rec, 'the stop');
       // The CLI's own stop first — it owns the daemon and chromium. A managed
       // ephemeral browser is asked under its session's pairs (its socket dir).
       if (isEph(p)) await rt.closeAll(null, { extraEnv: pairsEnv(pairsOf(profileId) || [`AGENT_BROWSER_SESSION=${rec.ns}`, `AGENT_BROWSER_NAMESPACE=${rec.ns}`]) });
-      else await rt.closeAll(rec.ns, { dir: p ? p.dir : null });
+      else await rt.closeAll(rec.ns, { dir: p ? p.dir : null, extraEnv: rec.launchEnv || { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' } }); // naive study 2: the launch's own view
       let left = null;
       const until = now() + STOP_GRACE_MS;
       while (now() < until && rec.pid && F.pidAlive(rec.pid)) await sleep(100);
       if (rec.pid && F.pidAlive(rec.pid)) {
         const v = pidVerdictOf(rec);
         if (v === 'ours') {
+          recaptureBrowser(rec, 'the stop'); // verify r3: again, right before our own signal
           try { process.kill(rec.pid, 'SIGTERM'); } catch { /* gone */ }
           const t2 = now() + 1500;
           while (now() < t2 && F.pidAlive(rec.pid)) await sleep(100);
           if (F.pidAlive(rec.pid)) { try { process.kill(rec.pid, 'SIGKILL'); } catch { /* gone */ } await sleep(200); }
           if (F.pidAlive(rec.pid)) left = `daemon pid ${rec.pid} survived SIGKILL`;
         } else left = `daemon pid ${rec.pid} is still alive but not provably ours (${v}) — left alone, never signalled`;
+      }
+      // VERIFY r2 M1: the daemon is gone (its own close, or the SIGKILL above) — its browser must be too: a moment to
+      // exit by itself, then the recorded identity is ended (a SIGKILLed daemon leaves its Chrome holding the lock)
+      if (!left) {
+        // a moment for it to exit by itself (the recorded browser, or — verify r3 — whatever holds a minted directory's lock)
+        const holderAlive = () => (rec.browser && F.pidAlive(rec.browser.pid)) || [rec.browser && rec.browser.dir, p && p.dir].filter(Boolean).some((d) => { const l = F.readSingletonLock(d); return !!(l && l.host === os.hostname() && F.pidAlive(l.pid)); });
+        for (let i = 0; i < 15 && holderAlive(); i++) await sleep(100);
+        const rr = await reapOrphan(rec, 'the stop');
+        if (rr === 'survived') left = `its browser pid ${rec.browser ? rec.browser.pid : '?'} survived SIGKILL`;
       }
       rec.state = why === 'failed' ? 'failed' : 'stopped';
       rec.endedAt = now(); rec.stoppedBy = why;
@@ -891,8 +1507,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       guard.delete(profileId); live.delete(profileId);
       if (mediator) mediator.repoint(profileId, null); // P6
       log.log?.(`[browser] ${profileId} "${p ? p.label : profileId}" stopped (${why})${left ? ' — NOT clean: ' + left : ''}`);
+      handBackOnStop(profileId, p, why); // r6 LOW 3
       commit();
-      if (!isEph(p)) emitLease({ kind: 'browser-stopped', profileId, why, local: true });
+      emitLease({ kind: 'browser-stopped', profileId, why, local: true, ...ephEventFields(profileId) }); // lane H: an ephemeral browser's stop is said like any other (ephemeral: true)
       return browserView(rec);
     } finally { stopping.delete(profileId); }
   }
@@ -934,12 +1551,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // answer 'unknown' and pinTab false, never a throw out of an attach.
     if (bf.lastVersion() === undefined) { try { await bf.probeVersion(); } catch { /* floorVerdict spells it */ } }
     const browser = await start(p.id, { why: `attach ${browserKey}` });
+    // r4 MAJOR 1: a browser that was closed and could not be started again is refused BY NAME (the user's own browser
+    // holds the directory: profile_locked naming its pid; else browser_closed) — never a dead port handed to the agent
+    { const cr = closedRefusalOf(p.id); if (cr) throw namedError(cr.code, cr.error, cr.holderPid ? { holderPid: cr.holderPid } : {}); }
+    // naive study 2: a non-mediated lease reaches the keeper's browser over its CDP url — resolved BEFORE the
+    // lease is taken; none ⇒ refused by name (never the directory: a second Chrome on it dies on SingletonLock)
+    const leaseCdp = isMediated(p) ? null : await leaseCdpUrl(p.id);
+    if (!isMediated(p) && !leaseCdp) throw namedError('browser_no_cdp', noCdpError(p));
     if (d.created) reg.leases.push(d.lease);
     else reg.leases = reg.leases.map((l) => (l.profileId === p.id && l.browserKey === browserKey ? d.lease : l));
     p.lastUsedAt = now();
     commit();
     log.log?.(`[browser] ${browserKey}${sessionId ? ' (' + sessionId + ')' : ''} ${d.created ? 'attached to' : (d.resumed ? 're-carries its lease on' : 'already holds')} ${p.id} "${p.label}" (${d.others} other session(s) on it)`);
-    emitLease({ kind: 'attach', browserKey, profileId: p.id, sessionId: sessionId || d.lease.sessionId || null, created: !!d.created, resumed: !!d.resumed });
+    await settleArming(emitLease({ kind: 'attach', browserKey, profileId: p.id, sessionId: sessionId || d.lease.sessionId || null, created: !!d.created, resumed: !!d.resumed })); // lane H: the recorder's tap is armed before the verb runs (bounded)
     const rec = reg.browsers[p.id];
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
     // P6 (§6.2 / §6.5): a MEDIATED profile hands the lease ITS OWN scoped url
@@ -956,9 +1580,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4: a browser REACHED (external / on a paired machine) is named by the
     // hub-side CDP url, never by a directory — the pair rides the env only
     // (the subshell and the `--` form), `use --print` withholds it (§5.1)
-    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, profileDir: p.dir, cdpUrl: rec && !isLocalRec(rec) ? rec.cdpUrl : null }), cdpUrl: rec ? rec.cdpUrl : null, pinTab };
+    return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: false, env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseCdp }), cdpUrl: rec ? rec.cdpUrl : null, pinTab };
   }
-  function detach({ profileId, profile: ref, browserKey } = {}) {
+  /** VERIFY r2 L8: the paused sentence, said about a DETACH (the refusal's own words name a command). */
+  const detachPausedText = (err) => String(err || '').replace('your command did NOT run', 'your detach did NOT run (it would end their takeover and take the browser out from under them)');
+  /**
+   * `by` = who asks: 'agent' (the default — the agent route, the CLI's `detach` and its post-`close` drop) or 'user'
+   * (the UI route). VERIFY r2 L8: while the USER drives this browser an agent's detach is REFUSED by name
+   * (`browser_paused`) — it used to hand the takeover back with a `detach` cause the agent caused and, on a managed
+   * ephemeral, retire the browser under the user. The user's own detach ends it as before.
+   */
+  function detach({ profileId, profile: ref, browserKey, by = 'agent' } = {}) {
     ensureLoaded();
     let id = profileId;
     if (!id && ref) { const p = profileByRef(ref); if (p && !p.ambiguous) id = p.id; }
@@ -972,14 +1604,27 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     }
     const d = B.decideDetach({ leases: reg.leases, profileId: id, browserKey });
     if (!d.ok) throw namedError(d.code, d.error);
-    dropInputsFor(browserKey, id); // P3: a lease that goes away takes its input side with it
+    // VERIFY r1 L2: read BEFORE the lease leaves — a managed ephemeral browser's detach is an EPHEMERAL seam event
+    // (its key, its session), so the recorder drops `<session>|ephemeral` instead of a `<session>|bp-…` it never had
+    const evFields = ephEventFields(id);
+    // r2 L8: the input side of THIS browser — a managed ephemeral's is keyed `<key>|ephemeral` (profileId null), a profile's by its id
+    const inPid = evFields.ephemeral ? null : id;
+    if (by !== 'user') { const paused = pausedVerdictFor(browserKey, inPid); if (paused) throw namedError(paused.code, detachPausedText(paused.error), { takenAt: paused.takenAt, lastUserInputAt: paused.lastUserInputAt }); }
+    dropInputsFor(browserKey, inPid); // P3: a lease that goes away takes its input side with it
     if (mediator) mediator.revoke({ profileId: id, browserKey }); // P6: its url goes, and its own tabs are closed in the browser
     reg.leases = d.remaining;
     const rec = reg.browsers[id];
     if (rec && !d.others) rec.lastLeaseDroppedAt = now();
     commit();
-    log.log?.(`[browser] ${browserKey} detached from ${id} (${d.others} lease(s) remain${!d.others && rec && B.isLiveBrowser(rec) ? `; the browser idles out in ${Math.round(idleMs() / 60000)} min unless re-attached` : ''})`);
-    emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null });
+    const eph = !!evFields.ephemeral;
+    log.log?.(`[browser] ${browserKey} detached from ${id} (${d.others} lease(s) remain${eph ? '; it is this conversation\'s managed ephemeral browser — stopped and removed now, the next verb starts it again' : (!d.others && rec && B.isLiveBrowser(rec) ? `; the browser idles out in ${Math.round(idleMs() / 60000)} min unless re-attached` : '')})`);
+    emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null, ...evFields });
+    // VERIFY r1 L2: an ephemeral browser has no life without its lease (the next reconcile retired it silently) —
+    // the detach retires it itself, now, and SAYS so (why 'user' — an explicit act, on §54b's closed list); a verb meanwhile waits on the retire and starts a fresh one
+    if (eph) {
+      retireEphemeral(id, 'user').catch((e) => log.warn?.(`[browser] ephemeral ${id}: retire after detach failed — ${e && e.message}`));
+      return { lease: leaseView(d.lease), others: d.others, ephemeral: true, retiring: true, note: EPHEMERAL_DETACH_NOTE };
+    }
     return { lease: leaseView(d.lease), others: d.others };
   }
   // ── P3 (§4.3 / §4.3.1): the INPUT SIDE of a lease — takeover, handback, idle ──
@@ -1099,6 +1744,33 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       handback({ browserKey: bk, profileId: pid === 'ephemeral' ? null : pid, cause: 'idle', url: s.url || '' });
     }
   }
+  /** LANE H VERIFY r6 LOW 3: a STOP ends the browser a takeover was ON. r5 put Stop on every live named row (the remedy the
+   *  unstable notice names) and `stop()` never touched the input side: the takeover outlived its browser, so the browser the
+   *  agent's next command started was already `browser_paused` for it until the idle handback. Now every input state keyed on
+   *  the stopped profile is handed back with cause `stop` through `handback` — the lease flips, the bridge and the card
+   *  follow, the announcer queues the zero-spend notice for the conversation's next message (a state change, never a
+   *  delivered turn) — and a pending confirmation of the ended browser is resolved `gone` (the daemon that asked is gone:
+   *  nothing can answer it). A switch (§7.4) restarts the SAME profile's browser for the same holders at once: its takeover
+   *  stands. → how many were handed back. */
+  function handBackOnStop(profileId, p, why) {
+    if (why === 'switch') return 0;
+    const eph = !!p && isEph(p);
+    const keys = eph ? [inputKey(p.owner.id, null)] : [...new Set([...inputs.keys(), ...pending.keys()])].filter((k) => k.endsWith('|' + profileId));
+    let n = 0;
+    for (const k of keys) {
+      const bk = eph ? String(p.owner.id) : k.slice(0, k.length - String(profileId).length - 1);
+      const pid = eph ? null : profileId;
+      const s = inputs.get(k);
+      if (s && s.input === 'user') {
+        const l = eph ? null : B.findLease(reg.leases, profileId, bk);
+        const sessionId = eph ? ephEventFields(profileId).sessionId || null : (l && l.sessionId) || null;
+        if (handback({ browserKey: bk, profileId: pid, cause: 'stop', url: s.url || '', sessionId }).ok) n++;
+      }
+      const m = pending.get(k);
+      if (m) for (const id of [...m.keys()]) resolvePending({ browserKey: bk, profileId: pid, id, decision: 'gone' });
+    }
+    return n;
+  }
   /** A lease that goes away takes its input state with it (never a delivery). */
   function dropInputsFor(browserKey, profileId = null) {
     const k = inputKey(browserKey, profileId);
@@ -1178,7 +1850,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const url = mediator && mediationOn() ? mediator.urlFor(profileId, browserKey) : null;
         if (!url) return { ok: false, code: 'no-browser', error: `"${p.label}" is shared instance-wide and this conversation holds no mediated url for it (attach again)` };
         r = await rt.exec(M.mediatedNamespace(profileId, browserKey), a.argv, { session: 'vs-' + String(browserKey || ''), extraEnv: { AGENT_BROWSER_CDP: url } });
-      } else r = await rt.exec(nsOf(profileId), a.argv, { dir: p.dir, session: 'vs-' + String(browserKey || '') });
+      } else {
+        // naive study 2: under the lease's own session over the keeper browser's CDP url — never the directory
+        const o = await leaseCliOpts(profileId, browserKey);
+        if (!o) return { ok: false, code: 'browser_no_cdp', error: noCdpError(p) };
+        r = await rt.exec(nsOf(profileId), a.argv, o);
+      }
     } else {
       const S = require('../browser-stream.js');
       const pairs = Array.isArray(envPairs) ? envPairs : [];
@@ -1196,10 +1873,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  browser status` and Session Properties read this one answer. */
   function statusFor(browserKey) {
     ensureLoaded();
-    const namedIds = new Set(named().map((p) => p.id));
-    const leases = B.leasesOf(reg.leases, browserKey, { children: true }).filter((l) => namedIds.has(l.profileId)).map((l) => {
+    // lane H: the HOLDER rows — a live managed ephemeral browser is one (ephemeral: true), beside `ephemeral` below
+    const leases = holders(B.leasesOf(reg.leases, browserKey, { children: true })).map((l) => {
       const p = profile(l.profileId);
-      return { ...leaseView(l), label: p ? p.label : l.profileId, browser: browserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length };
+      return { ...l, label: l.label || (p ? p.label : l.profileId), browser: browserView(reg.browsers[l.profileId]), others: reg.leases.filter((x) => x.profileId === l.profileId && x.browserKey !== l.browserKey).length };
     });
     const set = setFor(browserKey);
     return { browserKey, leases, pin: pinFor(browserKey), defaultProfile: set.defaultId, attachments: set.attachments, handles: set.handles, children: set.children, fingerprint: set.fingerprint, told: reg.told[String(browserKey || '')]?.fingerprint || null,
@@ -1207,6 +1884,26 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       inputs: inputsFor(browserKey), input: inputSummaryFor(browserKey), pending: pendingAllFor(browserKey),
       // takeover C3: this conversation's managed ephemeral browser (null until its first page verb)
       ephemeral: ephemeralFor(browserKey) };
+  }
+
+  /** Lane H: the browser this conversation's agent holds LIVE right now, as
+   *  the ONE scalar the session card and the status-bar chip publish
+   *  (`browserLive`): '' none · 'ephemeral' its own managed ephemeral browser
+   *  (a sub-agent's never counts — it is not this session's pane) · else a
+   *  profile id: the one it LAST USED (`active`) when that is live, else the
+   *  first live attachment, else its live ephemeral. From the holder rows,
+   *  never a second reading of the registry. */
+  function liveHoldingFor(browserKey, active = null) {
+    ensureLoaded();
+    const bk = String(browserKey || '');
+    if (!bk) return '';
+    const rows = holders(B.leasesOf(reg.leases, bk));
+    const liveNamed = rows.filter((r) => !r.ephemeral && reg.browsers[r.profileId] && reg.browsers[r.profileId].state === 'ready');
+    const eph = rows.find((r) => r.ephemeral && !r.child) || null;
+    if (active === '' && eph) return 'ephemeral';
+    if (active && liveNamed.some((r) => r.profileId === active)) return active;
+    if (liveNamed.length) return liveNamed[0].profileId;
+    return eph ? 'ephemeral' : '';
   }
 
   // ── §3.7 the attachment set + handles; §3.8 layer ① the one-time refusal ──
@@ -1456,7 +2153,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         const url = l.lastUrl || 'about:blank';
         let targetId = null, ok = false, error = null;
         try {
-          const r = await rt.exec(ns, [...(pinTab ? ['--pin-tab'] : []), 'open', url], { dir: p.dir, session: B.sessionNameFor(l.browserKey) });
+          // naive study 2: the keeper's own re-open reaches the NEW browser over its CDP url under the lease's session —
+          // never the directory (a second Chrome on it dies on SingletonLock); a mediated lease's tab is admitted below
+          const o = await leaseCliOpts(p.id, l.browserKey);
+          if (!o) throw new Error(noCdpError(p));
+          const r = await rt.exec(ns, [...(pinTab ? ['--pin-tab'] : []), 'open', url], o);
           ok = !!r.ok;
           const d = r.json && r.json.data && typeof r.json.data === 'object' ? r.json.data : null;
           targetId = d ? (d.targetId || d.tabId || d.id || null) : null;
@@ -1528,7 +2229,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (d.lease.profileId) dropInputsFor(d.lease.browserKey, d.lease.profileId); // P3
       if (mediator && d.lease.profileId) mediator.revoke({ profileId: d.lease.profileId, browserKey: d.lease.browserKey }); // P6
       log.log?.(`[browser] dropped the lease of ${d.lease.browserKey} on ${d.lease.profileId}: ${d.why}`);
-      emitLease({ kind: 'lease-dropped', browserKey: d.lease.browserKey, profileId: d.lease.profileId, sessionId: d.lease.sessionId || null, why: d.why });
+      emitLease({ kind: 'lease-dropped', browserKey: d.lease.browserKey, profileId: d.lease.profileId, sessionId: d.lease.sessionId || null, why: d.why, ...(isEph(profile(d.lease.profileId)) ? { ephemeral: true, child: B.isChildKey(d.lease.browserKey) } : {}) });
     }
     // P3: an EPHEMERAL takeover (no lease) dies with its session too
     for (const k of [...inputs.keys()]) if (k.endsWith('|ephemeral') && !B.keyCarried(k.slice(0, -'|ephemeral'.length), live)) dropInputsFor(k.slice(0, -'|ephemeral'.length), null);
@@ -1593,8 +2294,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (verdict === 'ours') { try { active = (isEph(p) && Array.isArray(rec.envPairs) ? await rt.info(null, { extraEnv: pairsEnv(rec.envPairs) }) : await rt.info(rec.ns, { dir: p ? p.dir : null })).active; } catch { active = false; } }
       const v = B.adoptVerdict(rec, { verdict, active });
       if (!v) continue;
-      if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); }
-      else { rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`); }
+      if (v.state === 'ready') { rec.state = 'ready'; rec.adoptedAt = now(); recaptureBrowser(rec, 'boot'); log.log?.(`[browser] adopted ${rec.profileId} "${p ? p.label : ''}" (daemon pid ${rec.pid})`); }
+      else {
+        rec.state = v.state; rec.lastError = v.lastError; rec.endedAt = now(); log.warn?.(`[browser] ${rec.profileId} ${v.state} at boot: ${v.lastError}`);
+        if (daemonGone(rec)) reapOrphan(rec, 'boot'); // r2 M1: the daemon died while VibeSpace was down — its browser is ended too
+      }
     }
   }
   /** The boot path (§3.5), in this order and no other: drop every lease nobody
@@ -1605,6 +2309,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const r = reconcile({ graceMs: 0 });
     await r.retired;
     await adoptAll();
+    await Promise.allSettled([...reaping.values()]); // r2 M1
     commit();
     if (Object.values(reg.browsers).some(B.isLiveBrowser) || reg.leases.length) startTimer();
     return { droppedLeases: r.dropped.length, browsers: Object.values(reg.browsers).filter(B.isLiveBrowser).length };
@@ -1622,10 +2327,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const p = profile(rec.profileId);
       // takeover C3: an ephemeral daemon's CLI owns its idle clock — a gone
       // pid is an idle-out (stopped, not an error); the next verb restarts it
-      if (isEph(p) && pidVerdictOf(rec) === 'gone') { markEphemeralGone(rec); continue; }
+      // (verify r2 L4: dead OR recycled — a pid that is another process now is not the daemon; M1: its browser is ended)
+      if (isEph(p) && daemonGone(rec)) { markEphemeralGone(rec); continue; }
       // P4: a process on a paired machine / an external browser is never
       // pid-judged or sampled here (the pid is not ours, or not local)
-      if (isLocalRec(rec) && pidVerdictOf(rec) === 'gone') { rec.state = 'stopped'; rec.endedAt = t; rec.lastError = 'the browser daemon exited'; dirty = true; log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}) — recorded stopped`); continue; }
+      if (isLocalRec(rec) && daemonGone(rec)) { markDaemonGone(rec, 'the tick'); continue; }
+      // verify r3 M1 (a): the daemon is ours — its browser record follows an in-place relaunch (re-captured from the lock)
+      // r4 MAJOR 1: a daemon with no browser is healed by the tick while a lease holds it (a conversation is using it); an
+      // unleased one waits for its next start / view (or its idle clock) — nobody is asking for a window to reappear
+      if (isLocalRec(rec) && rec.state === 'ready') { await followRelaunch(rec, 'the tick', { heal: reg.leases.some((l) => l.profileId === rec.profileId) }); if (stopping.has(rec.profileId) || reg.browsers[rec.profileId] !== rec) continue; }
       const idle = B.browserIdle(rec, reg.leases, t, idleMs());
       if (idle.expired) { stop(rec.profileId, { why: 'idle' }).catch(() => { }); continue; }
       const g = guard.get(rec.profileId) || { prev: null, hotSince: 0, lastSampleAt: 0 };
@@ -1657,6 +2367,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         }
       }
     }
+    await Promise.allSettled([...reaping.values()]); // r2 M1: every orphan this tick found is ended before it returns
     if (dirty) commit();
     // P3 (§4.3): a takeover somebody walked away from hands back by itself, a
     // pending confirmation the daemon has already auto-denied is forgotten.
@@ -1689,6 +2400,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!target || !target.ok) return { ok: false, port: null, code: (target && target.code) || 'bad-request', error: (target && target.error) || 'no target' };
     const S = require('../browser-stream.js');
     if (target.kind === 'ephemeral') {
+      // lane H (measured on 0.32.0: `stream status` with no daemon STARTS one under the pairs): a conversation's
+      // MANAGED ephemeral browser that is not running is refused BY NAME — a view of it (the auto-opened one
+      // reconnecting after an idle-out, the recorder's tap) must never launch a daemon the keeper does not hold;
+      // its next verb starts it, its holder row returns and the view reconnects
+      const bk = String(target.ns || '').replace(/^vs-/, '');
+      if (bk) judgeEphemeral(bk, 'a view asked for its port'); // VERIFY r1 H2: the PROCESS, not the record (a ready record lies until the tick)
+      const e = bk ? ephemeralFor(bk) : null;
+      { const eRec = e && e.state === 'ready' ? reg.browsers[e.profileId] : null; if (eRec && isLocalRec(eRec) && !starting.has(e.profileId) && !stopping.has(e.profileId)) recaptureBrowser(eRec, 'a view asked for its port'); } // verify r3 M1 (a)
+      if (e && e.state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', error: e.state === 'starting' ? 'this conversation\'s browser is starting — the view connects when it is ready' : 'this conversation\'s browser is not running (it idled out or was stopped) — the agent\'s next browser command starts it again, and this view reconnects then' };
       const r = await rt.streamPort(null, { extraEnv: S.pairsToEnv(target.envPairs) });
       return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
     }
@@ -1697,7 +2417,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4: the stream server is the LOCAL daemon's; a browser reached over CDP
     // or running on a paired machine has none the hub can bridge yet
     if (p.host || !(B.providerRow(p.provider) || {}).starts) return { ok: false, port: null, code: 'stream_unavailable', error: `"${p.label}" is ${p.host ? 'on ' + p.host : 'an external browser over CDP'} — its live view is not bridged in this release` };
-    try { await start(p.id, { why: 'live view' }); } catch (e) { return { ok: false, port: null, code: e.code || 'launch_failed', error: String(e.message || e) }; }
+    // NAIVE STUDY 2 (finding 3): A VIEW NEVER STARTS A BROWSER — not an ephemeral one (lane H), not a profile's
+    // (P2's "a view of a stopped browser is a start" made a reconnect after the user's Stop relaunch it, the view
+    // showing about:blank "Agent is driving" as if a new browser had started). The PROCESS is judged first (the
+    // tick's verdict, now); a start somebody else is making is waited for; a stopped browser is refused by name
+    // and the view resumes when the digest says it runs again.
+    { const rec0 = reg.browsers[p.id]; if (rec0 && rec0.state === 'ready' && isLocalRec(rec0) && !starting.has(p.id) && !stopping.has(p.id) && daemonGone(rec0)) { markDaemonGone(rec0, 'a view asking for its port'); commit(); } } // r2: dead OR recycled; its browser ended (M1)
+    if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }
+    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return { ok: false, port: null, code: 'browser_stopped', error: `"${p.label}"'s browser is not running — the agent's next browser command starts it again, and this view reconnects then` };
+    { const recV = reg.browsers[p.id]; if (recV && recV.state === 'ready' && isLocalRec(recV) && !stopping.has(p.id)) await followRelaunch(recV, 'a view asking for its port', { heal: leasedNow(p.id), force: true }); } // verify r3 M1 (a): the cdp url follows too; r4 MAJOR 1: a closed browser is healed — r5 MINOR 2: only while a lease holds it (a view never starts a browser nobody uses: `browser_closed` below, the next command starts it)
+    { const cr = closedRefusalOf(p.id); if (cr) return { ok: false, port: null, code: cr.code, error: cr.error, ...(cr.unstable ? { unstable: cr.unstable } : {}) }; } // r4: never a dead port; r6: the unstable kind (the view's words)
     // P6: a mediated lease's stream server is ITS OWN daemon's (the session's
     // namespace over its scoped url) — the profile daemon holds no session of it
     if (isMediated(p)) {
@@ -1708,8 +2437,48 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const r = await rt.streamPort(M.mediatedNamespace(p.id, bk), { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: g.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) } });
       return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
     }
-    const r = await rt.streamPort(target.ns, { dir: p.dir, session: target.sessionName });
+    // naive study 2: the lease's own session over the keeper browser's CDP url — never the directory (on 0.38.1 a
+    // `stream status` under the lease's session with the directory STARTS a second Chrome, which dies on SingletonLock)
+    const o = await leaseCliOpts(p.id, String(target.sessionName || '').replace(/^vs-/, ''));
+    if (!o) return { ok: false, port: null, code: 'browser_no_cdp', error: noCdpError(p) };
+    const r = await rt.streamPort(target.ns, { session: target.sessionName, extraEnv: o.extraEnv });
     return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
+  }
+
+  /** lane J (inc-muhgv0fb-9i4u): the PAGE's own viewport reading for a live
+   *  view's target — CDP layout metrics of its active tab, asked server-side
+   *  (src/server/browser-viewport.js). A profile browser's endpoint is on its
+   *  record; an EPHEMERAL one is asked of its daemon under the session's own
+   *  pairs (`get cdp-url` — the bridge drops that pair from the mirror, so the
+   *  raw endpoint never reaches a viewer). The endpoint is remembered per
+   *  target and forgotten on the first failure (a restarted browser has a new
+   *  port), then asked once more. Never throws: `{ok, clientWidth, clientHeight}`. */
+  const vpUrls = new Map();
+  async function viewportFor(target, { activeUrl = '' } = {}) {
+    ensureLoaded();
+    if (!target || !target.ok) return { ok: false, error: 'no target' };
+    const S = require('../browser-stream.js');
+    const VP = require('./browser-viewport.js');
+    const key = target.kind === 'ephemeral' ? 'eph:' + String(target.sessionName || '') : 'p:' + String(target.profileId || '');
+    const resolveUrl = async () => {
+      if (target.kind === 'ephemeral') {
+        const r = await rt.cdpUrl(null, { extraEnv: S.pairsToEnv(target.envPairs) });
+        return r.ok ? r.url : null;
+      }
+      const rec = reg.browsers[target.profileId];
+      return rec && rec.cdpUrl && !rec.hostId ? rec.cdpUrl : null;
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let url = vpUrls.get(key) || null;
+      const cached = !!url;
+      if (!url) { try { url = await resolveUrl(); } catch { url = null; } }
+      if (!url) return { ok: false, error: 'no CDP endpoint for this browser' };
+      const v = await VP.readViewport(url, { activeUrl });
+      if (v.ok) { vpUrls.set(key, url); return v; }
+      vpUrls.delete(key);
+      if (!cached) return v;
+    }
+    return { ok: false, error: 'unreachable' };
   }
 
   const api = {
@@ -1718,10 +2487,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     usageOf: (id) => { const l = live.get(id); return l ? { ...l } : null; }, // 2026-09-25: the Browser panel's memory cell (memBytes + memMetric, over)
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,
+    liveHoldingFor, // lane H: the session card / status chip's `browserLive` fact
+    holdersFor: (browserKey) => { ensureLoaded(); return holders(B.leasesOf(reg.leases, String(browserKey || ''), { children: true })); }, // lane H: THE holder rows of one conversation (the recorder arms only on a holder)
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
     streamPortFor, // P2: the live view's port (attachment or ephemeral)
+    noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
+    leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
+    ephemeralPairsFor: (browserKey) => { ensureLoaded(); const p = reg.profiles.find((x) => isEph(x) && x.owner.id === String(browserKey || '')); return p ? (pairsOf(p.id) || null) : null; }, // naive study 2 (finding 4): a sub-agent browser's OWN pairs — the recorder's tap on it
+    viewportFor, // lane J: the page's own viewport (the live view's input space)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
     start, stop, attach: attachTimed, detach, statusFor,
     // P3 (§4.3 / §4.3.1): the input side — takeover/handback/idle, the typed paused refusal, the confirmation registry
@@ -1746,4 +2521,4 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   return api;
 }
 
-module.exports = { create, keeper, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, RESOURCE_METRIC };
+module.exports = { create, keeper, STORE_FILE, AUDIT_FILE, TICK_MS, STOP_GRACE_MS, ARM_WAIT_MS, RESOURCE_METRIC, EPHEMERAL_DETACH_NOTE };

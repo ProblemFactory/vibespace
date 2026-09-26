@@ -55,6 +55,8 @@ const PAGE_VERBS = Object.freeze([
   'snapshot', 'eval', 'back', 'forward', 'reload', 'pushstate', 'highlight', 'clipboard', 'frame', 'dialog', 'window', 'tab',
   'get', 'is', 'find', 'mouse', 'set', 'network', 'cookies', 'storage', 'state', 'diff', 'console', 'errors', 'vitals',
   'react', 'trace', 'profiler', 'record', 'addinitscript', 'removeinitscript', 'batch', 'close', 'profiles',
+  // 0.38.1 (lane H re-measure): `a11y [url]` — an axe-core audit of the page (or of a url it NAVIGATES to first: a NAV verb)
+  'a11y',
 ]);
 
 const R = (code, error, remedy) => Object.freeze({ code, error, remedy });
@@ -79,18 +81,27 @@ const REFUSED_VERBS = Object.freeze({
   dashboard: NOT_OFFERED('the dashboard is a server on a port, not a page verb', 'the user watches you through the live view'),
   chat: NOT_OFFERED('`chat` is a vendor model call, not a page verb', 'drive the page yourself: `vibespace-browser snapshot`, then act on @refs'),
   skills: NOT_OFFERED('the browser CLI\'s own skill texts teach a road this session does not have', 'the manual is `vibespace-docs browser`'),
+  // 0.38.1 (lane H re-measure): WebMCP (experimental) invokes tools the PAGE declares — a channel this CLI neither
+  // mediates nor records in the action trace the user reviews, so it is not offered until it can be both
+  webmcp: NOT_OFFERED('WebMCP runs tools the PAGE declares — an experimental channel VibeSpace neither mediates nor records in the action trace the user reviews', 'drive the page through its own UI: `vibespace-browser snapshot`, then `click` / `fill` its @refs'),
 });
 
 /** Flags that decide WHICH browser a command lands on — the lease decides. */
-const IDENTITY_FLAGS = Object.freeze(['--session', '--namespace', '--session-name', '--config', '--state', '--restore', '--restore-save', '--restore-check-url', '--restore-check-text', '--restore-check-fn']);
+// 0.38.1 (lane H re-measure): `--no-pin-tab` is a GLOBAL boolean that drops the session's sticky tab binding —
+// on a shared profile the next command would then fall back to ANOTHER session's tab, so which tab a command lands on
+// stays the lease's decision (`--pin-tab` itself only tightens it and passes)
+const IDENTITY_FLAGS = Object.freeze(['--session', '--namespace', '--session-name', '--config', '--state', '--restore', '--restore-save', '--restore-check-url', '--restore-check-text', '--restore-check-fn', '--no-pin-tab']);
 const RAW_CDP_FLAGS = Object.freeze(['--cdp', '--auto-connect']);
 /** Flags that describe how the browser is LAUNCHED — VibeSpace launches it. */
-const LAUNCH_FLAGS = Object.freeze(['--executable-path', '--provider', '-p', '--engine', '--extension', '--args', '--user-agent', '--proxy', '--proxy-bypass', '--headed', '--webgpu', '--allowed-domains', '--action-policy', '--confirm-actions', '--confirm-interactive', '--init-script', '--enable', '--ignore-https-errors', '--allow-file-access', '--color-scheme', '--download-path', '--no-auto-dialog', '--hide-scrollbars', '--idle-timeout']);
+// 0.38.1 (lane H re-measure): `--ca-cert <path>` / `--no-ca-cert` change which certificate authorities the browser
+// TRUSTS (an interception proxy's CA — a launch decision, and a trust decision that is the user's), `--no-webmcp`
+// how locally launched Chrome starts; all three are VibeSpace's to launch with, never a command's
+const LAUNCH_FLAGS = Object.freeze(['--executable-path', '--provider', '-p', '--engine', '--extension', '--args', '--user-agent', '--proxy', '--proxy-bypass', '--headed', '--webgpu', '--allowed-domains', '--action-policy', '--confirm-actions', '--confirm-interactive', '--init-script', '--enable', '--ignore-https-errors', '--allow-file-access', '--color-scheme', '--download-path', '--no-auto-dialog', '--hide-scrollbars', '--idle-timeout', '--ca-cert', '--no-ca-cert', '--no-webmcp']);
 /** Per-PAGE launch-looking flags that pass beside `open` (D12). */
 const OPEN_FLAGS = Object.freeze(['--enable', '--init-script']);
 /** Output/format flags that pass through (documentation; an unknown flag also
  *  passes — subcommands own many: --clear, --bail, --baseline, --url …). */
-const PASS_FLAGS = Object.freeze(['--json', '--annotate', '--screenshot-dir', '--screenshot-quality', '--screenshot-format', '--content-boundaries', '--max-output', '--debug', '-i', '-c', '-d', '-s', '--full', '--load', '--text', '--url', '--fn', '--stdin', '-b', '--pin-tab', '--interactive', '--compact', '--depth', '--selector']);
+const PASS_FLAGS = Object.freeze(['--json', '--annotate', '--screenshot-dir', '--screenshot-quality', '--screenshot-format', '--content-boundaries', '--max-output', '--debug', '-i', '-c', '-d', '-s', '--full', '--load', '--text', '--url', '--fn', '--stdin', '-b', '--pin-tab', '--interactive', '--compact', '--depth', '--selector', '--input-mode', '--tags']);
 /** THE BINARY'S OWN GLOBAL FLAGS, BY ARITY — MEASURED, never read off its
  *  --help (r3). 0.32.0 strips a global flag ANYWHERE in the argv, so every
  *  decision below that names "the verb" or "the noun" is only as good as this
@@ -99,16 +110,18 @@ const PASS_FLAGS = Object.freeze(['--json', '--annotate', '--screenshot-dir', '-
  *  endpoint — `--idle-timeout` is documented only as an ENVIRONMENT variable,
  *  so the r2 census over the help's option sections never saw it). The table
  *  is the launch-free measurement in scripts/fixtures/browser-verbs/global-
- *  flags-0.32.0.json (`<flag> zzq9 session list` for every flag-shaped string
+ *  flags-<TABLE_VERSION>.json (`<flag> zzq9 session list` for every flag-shaped string
  *  in the binary: a value flag swallows zzq9, a boolean leaves it as the
  *  unknown command, a non-global flag is itself the unknown command); the fast
  *  gate holds these two sets EQUAL to it and the heavy gate re-measures the
  *  installed binary. `--config` answers "config file not found" for zzq9 (a
  *  value flag whose value is checked first); `--help`/`-h`/`--version`/`-V`
  *  print and exit. */
-const VALUE_FLAGS = new Set(['--action-policy', '--allowed-domains', '--args', '--cdp', '--color-scheme', '--config', '--confirm-actions', '--device', '--download-path', '--enable', '--engine', '--executable-path', '--extension', '--headers', '--idle-timeout', '--init-script', '--max-output', '--model', '--namespace', '--profile', '--provider', '--proxy', '--proxy-bypass', '--restore', '--restore-check-fn', '--restore-check-text', '--restore-check-url', '--restore-save', '--screenshot-dir', '--screenshot-format', '--screenshot-quality', '--session', '--session-name', '--state', '--user-agent', '-p']);
+// 0.38.1 (lane H re-measure, scripts/fixtures/browser-verbs/global-flags-0.38.1.json): + `--ca-cert`, `--input-mode`
+const VALUE_FLAGS = new Set(['--action-policy', '--allowed-domains', '--args', '--ca-cert', '--cdp', '--color-scheme', '--config', '--confirm-actions', '--device', '--download-path', '--enable', '--engine', '--executable-path', '--extension', '--headers', '--idle-timeout', '--init-script', '--input-mode', '--max-output', '--model', '--namespace', '--profile', '--provider', '--proxy', '--proxy-bypass', '--restore', '--restore-check-fn', '--restore-check-text', '--restore-check-url', '--restore-save', '--screenshot-dir', '--screenshot-format', '--screenshot-quality', '--session', '--session-name', '--state', '--user-agent', '-p']);
 /** …and the global BOOLEANS (each takes an optional `true`/`false`). */
-const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect', '--confirm-interactive', '--content-boundaries', '--debug', '--fix', '--headed', '--hide-scrollbars', '--ignore-https-errors', '--json', '--no-auto-dialog', '--offline', '--quick', '--quiet', '--verbose', '--webgpu', '-q', '-v']);
+/**  0.38.1: + `--no-ca-cert`, `--no-pin-tab`, `--no-webmcp`, `--pin-tab` (a per-command flag on 0.32.0, global now). */
+const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect', '--confirm-interactive', '--content-boundaries', '--debug', '--fix', '--headed', '--hide-scrollbars', '--ignore-https-errors', '--json', '--no-auto-dialog', '--no-ca-cert', '--no-pin-tab', '--no-webmcp', '--offline', '--pin-tab', '--quick', '--quiet', '--verbose', '--webgpu', '-q', '-v']);
 /** r4 — THE VERSION THE TABLES ABOVE WERE MEASURED ON (the fixture's). The
  *  heavy gate re-measures only where it runs; a user's box may carry another
  *  build, whose flags may have changed ARITY. So the CLI reads the version off
@@ -116,7 +129,7 @@ const BOOL_FLAGS = new Set(['--allow-file-access', '--annotate', '--auto-connect
  *  and, when it is not this one, judges EVERY flag under both readings
  *  (`classify(…, {drift})`) and says so once — the table stops being trusted
  *  exactly where it was never measured. */
-const TABLE_VERSION = '0.32.0';
+const TABLE_VERSION = '0.38.1'; // lane H (2026-09-25): re-measured on 0.38.1 — was 0.32.0 (its fixtures stay as the r3 evidence)
 /** → the installed version when it is not the table's (`'unknown'` when the
  *  probe could not read one), else null. */
 function versionDrift(installed) {
@@ -171,7 +184,7 @@ function splitWords(line) {
  *  `record start <path> [url]`. Every positional word after such a verb is
  *  judged by `localSchemeOf` — and so is every word of an escape (`-- <verb>`
  *  newer than this table may navigate too). */
-const NAV_VERBS = Object.freeze(['open', 'goto', 'navigate', 'tab', 'window', 'pushstate', 'diff', 'read', 'vitals', 'record']);
+const NAV_VERBS = Object.freeze(['open', 'goto', 'navigate', 'tab', 'window', 'pushstate', 'diff', 'read', 'vitals', 'record', 'a11y']); // 0.38.1: + `a11y [url]`
 const NAV_SET = new Set(NAV_VERBS);
 /** Schemes whose pages are the browser's own or this machine's — never the
  *  web. Measured on 0.32.0 + Chrome 153: `open chrome://version` shows the
@@ -551,7 +564,14 @@ function resolveRealBinary({ PATH = '', shimDirs = [], exists = () => false, isS
 const CONFIG_KEY = 'AGENT_BROWSER_CONFIG';
 const PROJECT_CONFIG_KEYS = Object.freeze(['allowedDomains', 'actionPolicy', 'confirmActions', 'confirmInteractive', 'contentBoundaries', 'maxOutput']);
 const RAW_CONFIG_KEYS = Object.freeze(['cdp', 'autoConnect']);
-const RAW_ARG_RE = /^--(?:remote-debugging-[a-z-]+|remote-allow-origins|user-data-dir|profile-directory)(?:=|$)/;
+/** LANE H VERIFY r4 (MAJOR 2): THE KEEPER'S LAUNCH MARK — a harmless unknown Chrome switch the keeper adds to the `args`
+ *  of the config every browser IT launches runs with (`--vibespace-keeper=<profile id | the ephemeral's browser key>`).
+ *  Measured on the real 0.38.1: the config's `args` reach the Chrome's (title-rewritten) command line and Chrome runs
+ *  normally with it; the environment does not (the binary scrubs its Chrome's). It is how a process is proven the
+ *  keeper's own — never the directory it sits in (a human may open that) — so no user or project file may carry it:
+ *  it is in RAW_ARG_RE (dropped from both, said like every raw switch) and only the keeper writes it. */
+const KEEPER_MARK = '--vibespace-keeper';
+const RAW_ARG_RE = /^--(?:remote-debugging-[a-z-]+|remote-allow-origins|user-data-dir|profile-directory|vibespace-keeper)(?:=|$)/;
 /** `args` as the binary reads it (a string, comma or newline separated — or a
  *  list), minus the raw-debugging / user-data-dir switches. Untouched (the
  *  same value, byte for byte) when nothing is dropped. */
@@ -692,6 +712,7 @@ module.exports = {
   ENV_PASS, ENV_LEGACY_KEEP, SOCKET_KEY, VALUE_FLAGS: Object.freeze([...VALUE_FLAGS]), BOOL_FLAGS: Object.freeze([...BOOL_FLAGS]), GET_NOUNS,
   classify, splitWords, collisions, known, resolveRealBinary, childEnv, hostProfilePath, hostSocketDirPath,
   CONFIG_KEY, PROJECT_CONFIG_KEYS, RAW_CONFIG_KEYS, RAW_ARG_RE, sanitizeArgs, sanctionedConfig,
+  KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
 };

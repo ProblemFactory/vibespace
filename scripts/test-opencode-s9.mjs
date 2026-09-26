@@ -25,8 +25,9 @@ import { execFileSync, spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import { startMockServe, createMockState, QUESTION_PART, emit } from './dev/mock-opencode-serve.mjs';
-import { ONBOARDED_SOURCE, withoutVendorKeys } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, vncEnv } from './scratch.mjs';
 
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const serve = require(path.join(REPO, 'src/opencode-serve.js'));
@@ -2296,7 +2297,7 @@ console.log('\n— A REAL BOOT WITH THE SERVICE OFF (nothing of ours runs or wat
     for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execFileSync('bash', ['-c', `mkdir -p ${wt}/${path.dirname(f)} && rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`]);
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
     const env = {
-      ...withoutVendorKeys(process.env), PORT: String(PORT), VIBESPACE_PASSWORD: '',
+      ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), VIBESPACE_PASSWORD: '',
       VIBESPACE_OPENCODE_SERVE: '',                     // no ops override: the PLUGIN is the switch, exactly as a user has it
       HOME: ocHome, XDG_DATA_HOME: path.join(ocHome, '.local/share'), XDG_CONFIG_HOME: path.join(ocHome, '.config'),
       XDG_CACHE_HOME: path.join(ocHome, '.cache'), XDG_STATE_HOME: path.join(ocHome, '.local/state'),
@@ -2613,7 +2614,7 @@ console.log('\n— IN A REAL BROWSER (the surfaces a user actually touches) —'
       for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`mkdir -p ${wt}/${path.dirname(f)} && rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`);
       fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
       const env = {
-        ...withoutVendorKeys(process.env), PORT: String(PORT), VIBESPACE_PASSWORD: '',
+        ...withoutVendorKeys(process.env), ...VNC_ENV, PORT: String(PORT), VIBESPACE_PASSWORD: '',
         VIBESPACE_OPENCODE_SERVE: '',                        // no ops override: the PLUGIN is the switch, exactly as a user has it
         HOME: ocHome, XDG_DATA_HOME: path.join(ocHome, '.local/share'), XDG_CONFIG_HOME: path.join(ocHome, '.config'),
         XDG_CACHE_HOME: path.join(ocHome, '.cache'), XDG_STATE_HOME: path.join(ocHome, '.local/state'),

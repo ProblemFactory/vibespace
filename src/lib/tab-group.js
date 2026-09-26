@@ -4,7 +4,7 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
-import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColumns, pairFor, visualTabOrder, swappedPair, splitPartner, ownerColor, SPLIT_RATIO_DEFAULT } from './chain-layout.js';
+import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColumns, paneMinPx, pairFor, visualTabOrder, swappedPair, splitPartner, ownerColor, SPLIT_RATIO_DEFAULT } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -261,7 +261,7 @@ const tabGroupMethods = {
         el.appendChild(divider);
       }
       el.classList.add('tab-split');
-      el.style.gridTemplateColumns = splitColumns(split.ratio);
+      el.style.gridTemplateColumns = splitColumns(split.ratio, this._paneMins(split));
     } else {
       if (divider) divider.remove();
       el.classList.remove('tab-split');
@@ -285,6 +285,31 @@ const tabGroupMethods = {
 
   _resizePanes(chain) {
     for (const id of displayedPanes(chain)) { const w = this.windows.get(id); if (w && w.onResize) w.onResize(); }
+  },
+
+  /** The split pair's OWN pane floors [left, right] (layout px; `winInfo.paneMinWidth`, 0 = none) — splitColumns turns
+   *  them into the tracks' minimums. */
+  _paneMins(split) {
+    return split && Array.isArray(split.pair) ? split.pair.map((id) => { const w = this.windows.get(id); return (w && w.paneMinWidth) || 0; }) : [0, 0];
+  },
+
+  /** A window's OWN floor as a split PANE (layout px; null/0 clears — lane I verify r1, 2026-09-25: a bound live view
+   *  dragged to the divider's clamp was 134 px beside a bar whose never-fold set was 169–222 px, its toggle cut and its
+   *  ⋯ clipped out). While the window is a pane of a split its grid track never renders narrower (chain-layout.js
+   *  splitColumns — capped at SPLIT_PANE_MIN_MAX so a host at the window floor still holds it); the divider stops there
+   *  and the partner takes the rest; the ratio is untouched. A free window is unaffected (its floor is the .window
+   *  320 px), a tab that is not a pane too; the value waits for the next split. Local to this client (never persisted:
+   *  every client's view measures its own). The phone layout ignores the grid (style.css). */
+  setPaneMinWidth(id, px) {
+    const win = this.windows.get(id); if (!win) return;
+    const v = paneMinPx(px) || null;
+    if ((win.paneMinWidth || null) === v) return;
+    win.paneMinWidth = v;
+    const chain = win._tabChain;
+    if (!chain || chain.layout !== 'split' || !chain.split || !chain.split.pair.includes(id)) return;
+    const host = this.windows.get(chain.tabs[0]); if (!host) return;
+    host.element.style.gridTemplateColumns = splitColumns(chain.split.ratio, this._paneMins(chain.split));
+    requestAnimationFrame(() => this._resizePanes(chain)); // the partner pane just changed width
   },
 
   /** The divider drag — this repository's three laws: a PER-DRAG
@@ -322,7 +347,7 @@ const tabGroupMethods = {
     if (!chain || chain.layout !== 'split' || !chain.split) return;
     const host = this.windows.get(chain.tabs[0]); if (!host) return;
     chain.split.ratio = clampRatio(ratio);
-    host.element.style.gridTemplateColumns = splitColumns(chain.split.ratio);
+    host.element.style.gridTemplateColumns = splitColumns(chain.split.ratio, this._paneMins(chain.split));
     if (notify) { this._resizePanes(chain); this._notify(); }
     else if (!this._splitResizeRaf) this._splitResizeRaf = requestAnimationFrame(() => { this._splitResizeRaf = 0; this._resizePanes(chain); });
   },

@@ -88,8 +88,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const D = require('../src/desktop-display.js');
@@ -137,7 +138,7 @@ fs.mkdirSync(FAKE_BIN, { recursive: true });
   fs.writeFileSync(FAKE_CLAUDE, `#!/bin/sh\ncase " $* " in *" --output-format "*) sleep 1; printf '%s\\n' '${init}';; esac\nexec sleep 600\n`, { mode: 0o755 });
 }
 const agentTokens = [];
-const srvEnv = { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
+const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: FAKE_CLAUDE, PATH: FAKE_BIN + ':' + (process.env.PATH || '') };
 let srv = null;
 const srvLog = [];
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'] }); srv.stdout.on('data', (d) => srvLog.push(String(d))); srv.stderr.on('data', (d) => srvLog.push(String(d))); return srv; };
@@ -674,7 +675,7 @@ try {
     fs.writeFileSync(path.join(wtc, 'src/server/window-live-wiring.js'), wiring.replace(seatsAt, '    viewerSeatsPreX5: { // pre-x5 CONTROL:'));
     const [PORTC] = await freePorts(1);
     const homeC = scratchHome('deskxpra-x5ctl-home', fs);
-    const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+    const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
     let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
     check('CONTROL: the pre-x5 copy boots', upC);
     if (upC) {
@@ -955,7 +956,7 @@ try {
     execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
     const [PORTH] = await freePorts(1);
     const homeH = scratchHome('deskxpra-hidpictl-home', fs);
-    const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
+    const sh = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTH), HOME: homeH }, stdio: 'ignore' }); ctlServers.push(sh);
     let upH = false; for (let i = 0; i < 80 && !upH; i++) { try { await fetch(`http://127.0.0.1:${PORTH}/api/home`); upH = true; } catch { await sleep(250); } }
     check('CONTROL: the pre-fix copy boots', upH);
     if (upH) {
@@ -1107,7 +1108,7 @@ try {
     execSync('npm run build', { cwd: wtr, stdio: 'ignore' });
     const [PORTR] = await freePorts(1);
     const homeR = scratchHome('deskxpra-r2ctl-home', fs);
-    const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
+    const sr = spawn(process.execPath, ['server.js'], { cwd: wtr, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTR), HOME: homeR }, stdio: 'ignore' }); ctlServers.push(sr);
     let upR = false; for (let i = 0; i < 80 && !upR; i++) { try { await fetch(`http://127.0.0.1:${PORTR}/api/home`); upR = true; } catch { await sleep(250); } }
     check('CONTROL (r1): the r1 copy boots', upR);
     if (upR) {
@@ -1534,7 +1535,7 @@ try {
       execSync('npm run build', { cwd: wtc, stdio: 'ignore' });
       const [PORTA] = await freePorts(1);
       const homeA = scratchHome('deskxpra-a2ctl-home', fs);
-      const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
+      const sa = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTA), HOME: homeA }, stdio: 'ignore' }); ctlServers.push(sa);
       let upA = false; for (let i = 0; i < 80 && !upA; i++) { try { await fetch(`http://127.0.0.1:${PORTA}/api/home`); upA = true; } catch { await sleep(250); } }
       check('CONTROL: the pre-A2 copy boots', upA);
       if (upA) {
@@ -1674,7 +1675,7 @@ try {
       fs.writeFileSync(path.join(wtc, 'src/desktop-serve.js'), kSrc.replace(pickLine, "const pick = { scale: M.appScaleFor(serverSetting('desktop.appScale'), v.launch.dpr), origin: null, from: null }; // pre-A3 CONTROL: dpr only"));
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-a3ctl-home', fs);
-      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
       let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
       check('CONTROL: the pre-A3 copy boots', upC);
       if (upC) {
@@ -2017,7 +2018,7 @@ try {
       execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtc, stdio: 'ignore' });
       const [PORTC] = await freePorts(1);
       const homeC = scratchHome('deskxpra-seamctl-home', fs);
-      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
+      const sc = spawn(process.execPath, ['server.js'], { cwd: wtc, env: { ...srvEnv, ...VNC_ENV, PORT: String(PORTC), HOME: homeC }, stdio: 'ignore' }); ctlServers.push(sc);
       let upC = false; for (let i = 0; i < 80 && !upC; i++) { try { await fetch(`http://127.0.0.1:${PORTC}/api/home`); upC = true; } catch { await sleep(250); } }
       check('CONTROL: the forced-false copy boots', upC);
       if (upC) {

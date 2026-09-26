@@ -48,6 +48,44 @@ function feedPeerCard(session, card) {
   return true;
 }
 
+/**
+ * lane J r2 (the browser takeover's STALE sweep): the pending permission cards
+ * of a live session, newest first — `{requestId, toolName, input, kind}` of
+ * every unanswered card in the last `scan` messages (a CLI only asks inside its
+ * current turn, so the pending ones are recent). Harness-neutral: every
+ * normalizer keeps `messages` with the same `permission` shape.
+ */
+function pendingPermissions(session, { scan = 600 } = {}) {
+  const list = session && session._normalizer && Array.isArray(session._normalizer.messages) ? session._normalizer.messages : [];
+  const out = [];
+  for (let i = list.length - 1, n = 0; i >= 0 && n < scan; i--, n++) {
+    const p = list[i] && list[i].permission;
+    if (p && p.requestId !== undefined && p.requestId !== null && !p.resolved) out.push({ requestId: p.requestId, toolName: p.toolName || null, input: p.input || {}, kind: p.kind || null, resolved: p.resolved || null });
+  }
+  return out;
+}
+function applyPermissionStale(mm, requestId, staleBy) {
+  const list = mm && Array.isArray(mm.messages) ? mm.messages : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (!m || !m.permission || m.permission.requestId !== requestId) continue;
+    if (m.permission.staleBy && m.permission.staleBy.moment === staleBy.moment) return true; // the harness's own record already said it (claude's deny text)
+    m.permission.staleBy = { ...staleBy };
+    if (typeof mm._emit === 'function') mm._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
+    return true;
+  }
+  return false;
+}
+/** Mark one card stale (`staleBy` = {code:'browser_paused', moment, at}) — the
+ *  same gate as every other writer: a rebuild in progress queues it. For a
+ *  harness whose deny carries no message (codex, ACP) this is what makes the
+ *  card say why; for claude the deny text already did (and survives a rebuild). */
+function notePermissionStale(session, requestId, staleBy) {
+  if (!session?._normalizer || requestId === undefined || requestId === null || !staleBy) return false;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'perm-stale', requestId, staleBy }); return true; }
+  return applyPermissionStale(session._normalizer, requestId, staleBy);
+}
+
 function drainQueue(session, mm) {
   // Records that arrive DURING the drain queue behind (the queue stays armed
   // until it is empty) — no interleaving window.
@@ -55,6 +93,7 @@ function drainQueue(session, mm) {
     const e = session._rebuildQueue.shift();
     try {
       if (e.kind === 'peer') mm.injectPeerCard?.(e.card);
+      else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else mm.processLive(e.msg);
     } catch (err) { console.error('[normalizer] queued record skipped after rebuild:', err.message); }
   }
@@ -121,4 +160,4 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords };
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, notePermissionStale };

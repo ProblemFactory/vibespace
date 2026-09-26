@@ -80,7 +80,8 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -125,7 +126,7 @@ let srv = null;
 const STUB = path.join(repo, 'scripts/fixtures/channels-vendor-stub.cjs');
 const bootServer = (extraEnv = {}) => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: process.env.VS_DEBUG_SERVER ? 'inherit' : 'ignore',
-  env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_GDRIVE_CLIENTS: PRESETS,
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_GDRIVE_CLIENTS: PRESETS,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require ${STUB}`.trim(), VS_VENDOR_STUB_DIR: stubDir, ...extraEnv },
 });
 srv = bootServer();

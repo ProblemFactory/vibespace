@@ -23,8 +23,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let passed = 0, failed = 0;
@@ -902,7 +903,7 @@ if (!CHROME) {
   // reports nothing at all (it did, once, on a slow boot).
   const srvLog = `${wt}-server.log`;
   const logFd = fs.openSync(srvLog, 'a');
-  const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_PASSWORD: '' }, stdio: ['ignore', logFd, logFd] });
+  const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_PASSWORD: '' }, stdio: ['ignore', logFd, logFd] });
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
     '--window-size=375,667', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
   const cleanup = () => {

@@ -24,7 +24,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, withoutVendorKeys } from './scratch.mjs';
+import { scratch, scratchHome, freePort, withoutVendorKeys, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
@@ -181,7 +182,7 @@ else {
   // PATH: A then B, and NO directory that holds a real claude — the re-resolve
   // must only ever find the fake.
   const basePath = (process.env.PATH || '').split(path.delimiter).filter((d) => d && !hasClaude(d));
-  const env = { ...withoutVendorKeys(), PATH: [A, B, ...basePath].join(path.delimiter), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' };
+  const env = { ...withoutVendorKeys(), ...VNC_ENV, PATH: [A, B, ...basePath].join(path.delimiter), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' };
   delete env.CLAUDE_CMD;
   const PORT = await freePort();
   env.PORT = String(PORT);

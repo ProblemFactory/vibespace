@@ -32,7 +32,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
 const C = require('../src/lib/chain-layout.js');
@@ -116,7 +117,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   const baseEnv = { ...process.env, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), FAKE_AB_STATE: AB_STATE };
   for (const k of Object.keys(baseEnv)) if (k.startsWith('AGENT_BROWSER_')) delete baseEnv[k];
   let journal = '';
-  const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
   procs.add(srv);
   srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
   const booted = await until(() => journal.includes('Ready.'), 40000, 100);
@@ -220,9 +221,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   ok(badge.tab && badge.member && badge.dots.length === 1 && badge.dots[0] === badge.want && badge.owners.length === 1 && badge.owners[0].sessionId === sessionId, `the browser tab carries the OWNERSHIP badge in the session's own colour (${wantColor} = ${badge.want}) and is marked a split member`, JSON.stringify(badge));
   ok(badge.rowName && badge.title === badge.rowName, `the badge names the owner by the sidebar row's own name (${JSON.stringify(badge.title)})`);
   // the bar's Unbind / Snap beside round trip
-  const ub = await ev(A, `const l = live(); const btn = l._browserLive.el().querySelector('.browser-live-bind'); const before = btn.textContent; btn.click(); const ch = l._tabChain; return { before, after: btn.textContent, layout: ch.layout, tabs: ch.tabs.length, split: 'split' in ch, hostGrid: wm.windows.get(ch.tabs[0]).element.classList.contains('tab-split'), divider: !!wm.windows.get(ch.tabs[0]).element.querySelector(':scope > .tab-split-divider'), chatHidden: chat().content.classList.contains('tab-hidden'), liveHidden: l.content.classList.contains('tab-hidden') };`);
-  ok(ub.before === 'Unbind' && ub.layout === 'tabs' && ub.tabs === 2 && !ub.split && !ub.hostGrid && !ub.divider && ub.chatHidden && !ub.liveHidden && /Snap beside/.test(ub.after), 'Unbind ⇒ back to tabs in the SAME chain (two tabs, the live one active, no grid, no divider); the button now offers "Snap beside"', JSON.stringify(ub));
-  const rb = await ev(A, `const l = live(); l._browserLive.el().querySelector('.browser-live-bind').click(); const ch = l._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair, text: l._browserLive.el().querySelector('.browser-live-bind').textContent, titleBtn: !!l.titleBar.querySelector('.win-bind') };`);
+  const ub = await ev(A, `const l = live(); const btn = l._browserLive.el().querySelector('.browser-live-bind'); const before = btn.getAttribute('aria-label'); btn.click(); const ch = l._tabChain; return { before, after: btn.getAttribute('aria-label'), layout: ch.layout, tabs: ch.tabs.length, split: 'split' in ch, hostGrid: wm.windows.get(ch.tabs[0]).element.classList.contains('tab-split'), divider: !!wm.windows.get(ch.tabs[0]).element.querySelector(':scope > .tab-split-divider'), chatHidden: chat().content.classList.contains('tab-hidden'), liveHidden: l.content.classList.contains('tab-hidden') };`);
+  ok(ub.before === 'Unbind' && ub.layout === 'tabs' && ub.tabs === 2 && !ub.split && !ub.hostGrid && !ub.divider && ub.chatHidden && !ub.liveHidden && /Snap beside/.test(ub.after), 'Unbind ⇒ back to tabs in the SAME chain (two tabs, the live one active, no grid, no divider); the button now offers "Snap beside" (its accessible name — the button is icon-only since lane I: the label carries the session name)', JSON.stringify(ub));
+  const rb = await ev(A, `const l = live(); l._browserLive.el().querySelector('.browser-live-bind').click(); const ch = l._tabChain; return { layout: ch.layout, pair: ch.split && ch.split.pair, text: l._browserLive.el().querySelector('.browser-live-bind').getAttribute('aria-label'), titleBtn: !!l.titleBar.querySelector('.win-bind') };`);
   ok(rb.layout === 'split' && rb.pair && rb.pair[0] === chatId && rb.pair[1] === liveId && rb.text === 'Unbind' && rb.titleBtn, 'Snap beside ⇒ split again [chat, live]; the title bar carries its own bind button', JSON.stringify(rb));
 
   // ── ② the divider under a NON-1 UI scale ──

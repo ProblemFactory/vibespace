@@ -692,7 +692,7 @@ export class ChatStatusBar {
     // ACTUALLY USED vs the PINNED default — amber when they differ, because
     // this is the only surface that answers "I pinned it, now what?". Drawn
     // for the pinned half alone (neutral) before the agent has used anything.
-    if (this._browserProfile && (this._browserProfile.pinned || this._browserProfile.active != null || this._browserProfile.input === 'user')) {
+    if (this._browserProfile && (this._browserProfile.pinned || this._browserProfile.active != null || this._browserProfile.input === 'user' || this._browserProfile.live)) {
       const b = this._browserProfile;
       const differs = b.active != null && (b.active || '') !== (b.pinned || '');
       // P3 (§4.3): while the USER drives, the chip says so before anything else —
@@ -700,7 +700,9 @@ export class ChatStatusBar {
       const driving = b.input === 'user';
       const shown = driving ? t('You are driving') : (b.active == null ? b.pinnedLabel : b.activeLabel);
       const facts = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
-      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts;
+      // lane H: say whether a browser of this conversation is RUNNING right now (the live fact `browserLive`)
+      const running = b.live ? t('Running now — click for the live view') : t('Not running — the agent’s next browser command starts it');
+      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts + '\n' + running;
       // the three browser faces (design-browser-faces direction B): the chip names WHOSE browser this is — the agent's — on its window-with-a-dot glyph (the globe is the web view's); the tooltip's first line carries the same prefix
       const face = t('Agent browser') + ' · ';
       chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} ${escHtml(face + String(shown || ''))}`);

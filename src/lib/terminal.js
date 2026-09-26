@@ -7,6 +7,7 @@ import { THEMES } from './themes.js';
 import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM, copyText } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
+import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
 
 // Web fonts loaded via Google Fonts (always available)
 const WEB_FONTS = [
@@ -1051,7 +1052,7 @@ class TerminalSession {
     this._exitOverlayEl = ov;
   }
 
-  focus() { this.terminal.focus(); this._setBell(false); this._setWaiting(false); }
+  focus() { if (!keyboardOwned()) this.terminal.focus(); this._setBell(false); this._setWaiting(false); } // lane J r2: a driven live view owns the keyboard — never steal it into a shell
   dispose() {
     if (this._fitTimer) { clearTimeout(this._fitTimer); this._fitTimer = null; }
     if (this._fontPollTimer) { clearInterval(this._fontPollTimer); this._fontPollTimer = null; }

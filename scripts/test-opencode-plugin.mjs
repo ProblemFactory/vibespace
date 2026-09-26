@@ -21,8 +21,9 @@ import path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MOCK = path.join(REPO, 'scripts/dev/mock-opencode-serve.mjs');
@@ -271,7 +272,7 @@ console.log('— ④ a REAL server: fresh = nothing spawned; enable/replay/disab
 
   const boot = (extraEnv = {}) => spawn(process.execPath, ['server.js'], {
     cwd: wt, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, PORT: String(PORT), VIBESPACE_PASSWORD: '', OPENCODE_CMD: STUB, VIBESPACE_OPENCODE_SERVE: '', ...extraEnv },
+    env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_PASSWORD: '', OPENCODE_CMD: STUB, VIBESPACE_OPENCODE_SERVE: '', ...extraEnv },
   });
   const waitReady = (p) => new Promise((res, rej) => {
     let out = '';
@@ -373,7 +374,7 @@ console.log('— ⑤ the first-use dialog in a real browser');
     execSync(`git worktree add --detach ${wt} HEAD`, { cwd: REPO, stdio: 'ignore' });
     for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`);
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
-    const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore', env: { ...process.env, PORT: String(PORT), VIBESPACE_PASSWORD: '', OPENCODE_CMD: STUB, VIBESPACE_OPENCODE_SERVE: '' } });
+    const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore', env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_PASSWORD: '', OPENCODE_CMD: STUB, VIBESPACE_OPENCODE_SERVE: '' } });
     const udd = `/tmp/vs-ocp-chrome-udd-${process.pid}`;
     const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${udd}`, 'about:blank'], { stdio: 'ignore' });
     const cleanup2 = () => {

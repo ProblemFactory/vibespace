@@ -1,0 +1,4 @@
+{
+  "source": "the browser CLI's `skills get core --full` on 0.38.1 (2026-09-25, lane H re-measure): top-level verbs the --help text does not list (0.32.0's seven + `a11y`, whose help row wraps its description onto the next line)",
+  "verbs": ["addinitscript", "frame", "dialog", "keydown", "keyup", "window", "state", "a11y"]
+}

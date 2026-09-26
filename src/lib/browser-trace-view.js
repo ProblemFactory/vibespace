@@ -40,7 +40,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
-import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, EPHEMERAL_SCOPE, TRACE_RETENTION_MS, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
+import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_RETENTION_MS, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -179,7 +179,8 @@ export function openTraceEntryDialog(app, entry, list = null) {
  * the `browser-trace-appended` broadcast; `dispose()`.
  */
 export function createCardTraceLoader(view) {
-  const st = { queued: new Set(), timer: null, appendTimer: null, key: null, disposed: false, loads: 0 };
+  // r2 L5: `armFail` = the recorder's last `browser-trace-status` arm_failed for this conversation (null once `armed`)
+  const st = { queued: new Set(), timer: null, appendTimer: null, key: null, disposed: false, loads: 0, armFail: null };
   const holders = () => [...(view._messageList?.querySelectorAll?.('.chat-browser-trace') || [])];
   /** The ids the ask carries: the live webui id, and the conversation id for a stopped one. */
   function askParams() {
@@ -237,9 +238,9 @@ export function createCardTraceLoader(view) {
     // "为啥都是没有记录到操作" — every card on an instance whose agents drive their own profiles read that)
     const untraced = !r.browserKey && !r.sessionId;
     const byCard = assignEntriesToWindows(windows.map((x) => x.w), r.entries || []);
-    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false, untraced });
+    for (const { h, w } of windows) render(h, byCard[w.id] || [], { off: r.traceOn === false, untraced, gap: armGapFor(w, st.armFail) });
   }
-  function render(h, entries, { off = false, error = null, unknown = false, untraced = false } = {}) {
+  function render(h, entries, { off = false, error = null, unknown = false, untraced = false, gap = null } = {}) {
     h.dataset.traceState = error ? 'error' : 'loaded';
     h.dataset.traceUntraced = untraced && !entries.length ? '1' : '';
     h._traceEntries = entries;
@@ -251,6 +252,8 @@ export function createCardTraceLoader(view) {
       else if (s.n) sum.textContent = t('{n} action(s)', { n: s.n }) + (s.failed ? ' · ' + t('{n} failed', { n: s.failed }) : '');
       else if (off) sum.textContent = t('action trace is off (Settings → Agent browser)');
       else if (unknown) sum.textContent = t('no conversation id to look up');
+      // r2 L5: the recorder could not tap this browser — its actions in [at, until] were NOT recorded, and that is said
+      else if (gap) sum.textContent = t('not recorded until {time}: {why}', { time: clockText(gap.until), why: gap.error });
       else if (untraced) sum.textContent = t('not traced — this browser was not started through VibeSpace (Agent browser)');
       else sum.textContent = h.closest('.chat-msg')?.querySelector('.chat-tool-output-pending') ? t('waiting for actions…') : t('no recorded actions in this call');
       sum.classList.toggle('empty', !s.n);
@@ -302,8 +305,19 @@ export function createCardTraceLoader(view) {
     if (st.appendTimer) clearTimeout(st.appendTimer);
     st.appendTimer = setTimeout(() => { st.appendTimer = null; observe(view._messageList); }, APPEND_DEBOUNCE_MS);
   }
+  /** r2 L5: the recorder's `browser-trace-status` for this conversation — `arm_failed` (its verbs until `until` are
+   *  not recorded, and why) or `armed` (cleared); the cards whose window it covers are asked again (debounced). */
+  function onStatus(msg) {
+    if (st.disposed || !msg || msg.type !== 'browser-trace-status') return;
+    const mine = (msg.sessionId && msg.sessionId === view.sessionId) || (st.key && msg.browserKey === st.key);
+    if (!mine) return;
+    st.armFail = msg.code === 'arm_failed' ? { code: 'arm_failed', at: Number(msg.at) || Date.now(), until: Number(msg.until) || 0, error: String(msg.error || '') } : null;
+    for (const h of holders()) delete h.dataset.traceState;
+    if (st.appendTimer) clearTimeout(st.appendTimer);
+    st.appendTimer = setTimeout(() => { st.appendTimer = null; observe(view._messageList); }, APPEND_DEBOUNCE_MS);
+  }
   function dispose() { st.disposed = true; if (st.timer) clearTimeout(st.timer); if (st.appendTimer) clearTimeout(st.appendTimer); st.queued.clear(); }
-  return { observe, onAppended, dispose, flush, state: () => ({ queued: st.queued.size, key: st.key, loads: st.loads }) };
+  return { observe, onAppended, onStatus, dispose, flush, state: () => ({ queued: st.queued.size, key: st.key, loads: st.loads, armFail: st.armFail }) };
 }
 
 // ── the live view's timeline pane ──
@@ -473,6 +487,15 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     cb.onchange = async () => { st.busy = true; cb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { record: cb.checked }), t('Could not change recording')); st.busy = false; if (!ok) cb.checked = !cb.checked; load(); };
     recWrap.append(cb, document.createTextNode(' ' + t('record')));
     row.appendChild(recWrap);
+    // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
+    // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
+    if (r.live && !r.host) {
+      const stop = el('button', 'file-tool-btn bprof-btn bprof-stop', t('Stop'));
+      stop.disabled = st.busy;
+      stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
+      stop.onclick = async () => { stop.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
+      row.appendChild(stop);
+    }
     const forget = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Set aside'));
     forget.disabled = !r.canForget || st.busy;
     forget.title = r.canForget ? t('Move this profile\'s directory beside itself and remove the record — nothing is deleted until you click Delete permanently below') : String(r.why || '');

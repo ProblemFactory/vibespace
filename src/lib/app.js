@@ -35,7 +35,7 @@ import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
-import { openBrowserLive as openBrowserLiveFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
+import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
 import { openUsageWindow } from './usage-window.js';
@@ -2039,6 +2039,7 @@ class App {
     });
   }
   openBrowserLive(opts) { return openBrowserLiveFn(this, opts); } // agent browser P2: {sessionId, profileId?, syncId?}
+  openBrowserLiveBeside(win, sessionId) { return openBrowserLiveBesideFn(this, win, sessionId); } // lane I: the window menu's live view — bound beside `win`, open-or-focus
 
   openTaskDetail(taskId, opts) { return openTaskDetailFn(this, taskId, opts); }
   openTaskLog(taskId, opts) { return openTaskLogFn(this, taskId, opts); }

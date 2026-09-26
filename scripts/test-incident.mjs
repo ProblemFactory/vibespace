@@ -6,7 +6,8 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { freePort, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = await freePort(), CDP_PORT = await freePort(), wt = scratch('incident-smoke'); // per-process (scripts/scratch.mjs)
 let failed = 0;
@@ -18,7 +19,7 @@ for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 // NO_AUTO_UPDATE is dropped so the boot takes the path every scratch server takes
 const { NO_AUTO_UPDATE: _nau, ...bootEnv } = process.env;
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...bootEnv, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...bootEnv, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
 let bootLog = '';
 srv.stdout.on('data', (d) => { bootLog += d; }); srv.stderr.on('data', (d) => { bootLog += d; });
 process.on('exit', () => { try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {} });

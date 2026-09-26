@@ -545,6 +545,27 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
     'window actions call the same wm/app handlers with the same arguments (session ops via the shared session.* commands)', J(calls));
   ok(J(items.map((i) => i.kind).filter(Boolean)) === J(['move', 'minimize', 'rename', 'restart', 'terminate', 'locate', 'props', 'close']), 'every window item carries its onAction kind');
 
+  // ── lane I (2026-09-25, the owner looked for the live view on the chat window's own menu; only the sidebar card had it) ──
+  {
+    const bcalls = [];
+    const win1 = { id: 'win-1' };
+    const appB = { _browserProfiles: { profiles: [] }, sidebar: { _tasks: [] }, desktopManager: { getDesktopMenuItems: () => [] }, wm: { windows: new Map([['win-1', win1]]) }, openBrowserLiveBeside: (w, sid) => bcalls.push(['beside', w && w.id, sid]) };
+    const base = { status: 'live', webuiId: 'w1', sessionId: 'abc', name: 'N', browserKey: 'bk-1', browserProfileActive: null, browserInput: null };
+    const its = (s, app = appB) => menuItems('window', { app, id: 'win-1', win: app.wm.windows.get('win-1'), s, switchSubmenu: false, closeLabel: '✕ Close' });
+    const ROW = 'Agent browser — live view';
+    const has = (s, app) => its(s, app).some((i) => i.label === ROW);
+    ok(has({ ...base, browserProfileActive: '' }) && has({ ...base, browserInput: 'agent' }) && has({ ...base, browserProfileActive: 'bp-00000001' }) && has({ ...base, browserInput: 'user' }),
+      'the window menu offers "Agent browser — live view" for a live local session whose conversation HAS a browser (used: the ephemeral \'\' or a profile id; running: browserInput agent / user)');
+    ok(!has(base) && !has({ ...base, browserProfileActive: '', status: 'stopped' }) && !has({ ...base, browserProfileActive: '', host: 'h1' }) && !has({ ...base, browserProfileActive: '', browserKey: null }) && !has({ ...base, browserProfileActive: '' }, { ...appB, _browserProfiles: null }) && !has(null),
+      '…and NOT for one that never browsed, a stopped one, a remote one, one without a browser key, a client without the profile digest, or a non-session window');
+    const withRow = its({ ...base, browserProfileActive: '' });
+    const lab = withRow.map((i) => (i.separator ? '|' : i.label));
+    ok(lab.indexOf(ROW) === lab.indexOf('Locate in sidebar') + 1 && lab.indexOf('Session properties…') === lab.indexOf(ROW) + 1, 'it sits in the session block between Locate in sidebar and Session properties…', J(lab));
+    const row = withRow.find((i) => i.label === ROW);
+    row.action();
+    ok(row.kind === 'browser-live' && J(bcalls) === J([['beside', 'win-1', 'w1']]), 'its action opens the live view BOUND beside THIS window (app.openBrowserLiveBeside(win, webuiId)), kind browser-live', J({ kind: row.kind, bcalls }));
+  }
+
   // ── split UX chunk 2 (docs/design-split-ux.zh.md R1 ②/R2): the window menu names the side-by-side verbs by the CHAIN ──
   const splitCalls = [];
   const mkWins = () => new Map([['w1', { id: 'w1', title: 'Alpha — /work/a' }], ['w2', { id: 'w2', title: 'Beta — /work/b' }], ['w3', { id: 'w3', title: 'Gamma' }]]);

@@ -899,6 +899,8 @@ class ChatView {
           this._onOp(msg);
         } else if (msg.type === 'browser-trace-appended') {
           this._browserTrace?.onAppended(msg); // a stopped conversation reviewed while its resume acts: the key matches
+        } else if (msg.type === 'browser-trace-status') {
+          this._browserTrace?.onStatus?.(msg); // lane H verify r2 L5: "not recorded until <t>: <why>"
         }
       };
       this.ws.onGlobal(this._handler);
@@ -1209,6 +1211,9 @@ class ChatView {
       } else if (msg.type === 'browser-trace-appended') {
         // agent browser P5 (§4.5 / D35): a new action for SOME conversation — the loader keeps only this one's
         this._browserTrace?.onAppended(msg);
+      } else if (msg.type === 'browser-trace-status') {
+        // lane H verify r2 L5: the recorder could not tap this conversation's browser — the empty rows say so
+        this._browserTrace?.onStatus?.(msg);
       }
     };
     this.ws.onGlobal(this._handler);
@@ -4605,14 +4610,18 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     const row = Array.isArray(list) ? list.find((s) => s && s.id === this.sessionId) : null;
     if (!row) return;
     if (!row.browserKey) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
-    this._browserFacts = { key: row.browserKey, active: row.browserProfileActive === undefined ? null : row.browserProfileActive, pinned: row.browserProfileId || '', input: row.browserInput || null };
+    this._browserFacts = { key: row.browserKey, active: row.browserProfileActive === undefined ? null : row.browserProfileActive, pinned: row.browserProfileId || '', input: row.browserInput || null, live: row.browserLive || '', name: row.webuiName || row.name || '' };
     this._renderBrowserChip();
   }
   _renderBrowserChip() {
     const f = this._browserFacts;
     if (!f) return;
-    const labelOf = (id) => (id ? ((this.app?._browserProfiles?.profiles || []).find((p) => p.id === id)?.label || id) : t('ephemeral (no profile)'));
-    this._statusBar?.setBrowserProfile?.({ key: f.key, active: f.active, pinned: f.pinned, activeLabel: f.active == null ? null : labelOf(f.active), pinnedLabel: labelOf(f.pinned), input: f.input || null });
+    // lane H (2026-09-25): the agent's OWN ephemeral browser is named the way its record is —
+    // "(ephemeral) <this session>" — never an anonymous "ephemeral (no profile)" the owner cannot place
+    const ephLabel = t('(ephemeral) {name}', { name: f.name || t('this conversation') });
+    const labelOf = (id) => (id ? ((this.app?._browserProfiles?.profiles || []).find((p) => p.id === id)?.label || id) : ephLabel);
+    const pinnedLabel = f.pinned ? labelOf(f.pinned) : t('ephemeral (no profile)');
+    this._statusBar?.setBrowserProfile?.({ key: f.key, active: f.active, pinned: f.pinned, activeLabel: f.active == null ? null : labelOf(f.active), pinnedLabel, input: f.input || null, live: f.live || '' });
   }
   _onBrowserAction(what, ev) {
     const row = (this.app?.sidebar?._allSessions || []).find((s) => s.webuiId === this.sessionId) || null;

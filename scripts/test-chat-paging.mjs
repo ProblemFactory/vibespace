@@ -13,9 +13,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
 import { judgeGesture, formatGesture, SNAP_SOURCE, RING_SINCE_SOURCE, WHEEL_POINT_SOURCE, JUMP_SLACK_VIEWPORTS, DELIVERY_MIN_FRACTION, PAGE_UP_BAND_PX } from './paging-gesture-rules.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
@@ -126,7 +127,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // UNMINIFIED bundle for the worktree: scrollTop-write stacks must carry real
 // function names so each jump can be attributed to its exact call site.
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1920,1000', // the owner's width (1920×963): a compact row's wrap width decides the px per card, which is what the §1c shape is about
   '--disable-background-timer-throttling', `--user-data-dir=${scratch('chatpage-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
@@ -843,7 +844,7 @@ console.log('§4d pre-fix control: the same legs on a copy with the keep zone an
   check(`control setup: all ${CONTROL_PATCHES.length} patch anchors found exactly once in the fix (a control that cannot be built proves nothing)`, patched === CONTROL_PATCHES.length, `${patched} patched`);
   fs.writeFileSync(cvPath, src);
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: cwt, stdio: 'ignore' });
-  const csrv = spawn(process.execPath, ['server.js'], { cwd: cwt, env: { ...process.env, PORT: String(CPORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+  const csrv = spawn(process.execPath, ['server.js'], { cwd: cwt, env: { ...process.env, ...VNC_ENV, PORT: String(CPORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
   const prevCleanup = cleanup;
   const cleanupControl = () => { try { csrv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${cwt}`, { cwd: repo, stdio: 'ignore' }); } catch {} };
   process.on('exit', cleanupControl);
@@ -955,7 +956,7 @@ console.log('§4f first paint by text count: the §1c attach slab holds ≥ minT
   for (const [f, from, to] of TAIL50) { const fp = path.join(twt, f); const src = fs.readFileSync(fp, 'utf8'); if (src.split(from).length === 2) { fs.writeFileSync(fp, src.replace(from, to)); tp++; } }
   check(`§4f control setup: all ${TAIL50.length} tail(50) anchors found exactly once (a control that cannot be built proves nothing)`, tp === TAIL50.length, `${tp} patched`);
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: twt, stdio: 'ignore' });
-  const tsrv = spawn(process.execPath, ['server.js'], { cwd: twt, env: { ...process.env, PORT: String(TPORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+  const tsrv = spawn(process.execPath, ['server.js'], { cwd: twt, env: { ...process.env, ...VNC_ENV, PORT: String(TPORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
   const cleanupTail = () => { try { tsrv.kill('SIGKILL'); } catch {} try { execSync(`git worktree remove --force ${twt}`, { cwd: repo, stdio: 'ignore' }); } catch {} };
   process.on('exit', cleanupTail);
   for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${TPORT}/api/home`); break; } catch { await sleep(250); } }

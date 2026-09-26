@@ -104,6 +104,10 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // conversation's browsers, 'agent' when it has one, null when none — the
   // card's "Hand back" row and the status-bar chip's driving state gate on it
   browserInput: { digest: (v) => v || '' },
+  // lane H (2026-09-25): the browser this conversation's agent holds LIVE right
+  // now — '' none, 'ephemeral' its own managed ephemeral browser, else a
+  // profile id. The card's Agent browser chip and the status-bar chip read it.
+  browserLive: { digest: (v) => v || '' },
   worktree: { digest: (v) => (v ? '1' : '0') },       // owner ruling 9 badge
   worktreePath: { digest: (v) => v || '' },           // …and the path its tooltip names
   // design-unknown-records (2026-09-21): the last VCS fact (git chip) and the

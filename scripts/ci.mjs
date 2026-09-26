@@ -102,7 +102,9 @@
 //   node scripts/ci.mjs --check-heavy    exit 1 if a red heavy blocks a push
 //   node scripts/ci.mjs --status         last heavy result per sha
 //   node scripts/ci.mjs --census         the tier census self-test
-//   node scripts/ci.mjs --reap           kill scratch-dir orphans (what every suite run does after itself)
+//   node scripts/ci.mjs --reap           kill scratch-dir orphans (what every suite run does after itself),
+//                                        printing every victim (pid, ppid, command, root, rule);
+//                                        --reap --dry-run prints the same list and signals nothing
 // Ops flags: --markers=<dir> (where heavy results live), --head=<sha> (which
 // commit the verdict is about), --only=a,b (a subset of the heavy tier, e.g.
 // re-running one suite after a fix; an unknown name is a loud exit 2),
@@ -170,9 +172,9 @@ export const SUITES = [
   { name: 'test-browser-handles', tier: 'fast' }, // AGENT BROWSER P1 second half (design-agent-browser-v2 §3.7 + §3.8 layer ①, §3.2.5 adopt): the ATTACHMENT SET + HANDLES — the PURE aliases/child handles/path-vs-handle/set view/fingerprint/`resolveHandle` outcomes (profile_required listing every handle with the default marked, the sub-agent clause an ASIDE, not_attached, ambiguous, profile_path_refused with the `new --adopt` remedy) + the one-time `profile_changed` bookkeeping + the audit line (verb only, never a fill's content), then the REAL keeper over a fake `agent-browser` (aliases, resolveFor = blindness check THEN handle, children minted/resolved/reaped by prefix, the audit file, adoptScratch moving a scratch dir under ~/.agent-browser/), then the routes + the shipped CLI + a REAL browser-env: two attachments ⇒ a bare `--` command refused, `--profile`/VIBESPACE_BROWSER run under that profile's daemon, a USER pin re-points the per-session config WITHOUT a restart (the direct `agent-browser` command resolves to the DEFAULT's dir and to no other) and the CLI's next command is refused ONCE with was → now, the agent's own pin never is. ~5 s, port 0, scratch dirs only
   { name: 'test-browser-continuity', tier: 'fast' },
   { name: 'test-browser-verbs', tier: 'fast' }, // BROWSER TAKEOVER C2 (design-browser-takeover §3 T1 / §4 T2 / §10): the PURE router src/browser-verbs.js (12 OURS words; the collision set COMPUTED from the checked-in --help census == {profiles}; page / refused-by-name with a remedy; identity/launch flags; --enable/--init-script beside open; batch judged per line; the same rules after `--`; resolveRealBinary skips the shim dirs and the shim by content) + the SHIM data/bin/agent-browser (exit 2, one line naming the vibespace-browser command; a forwarding copy is caught) + the CLI over a fake server (`click` ≡ `-- click`, local refusals with ZERO server calls, `use --print` not_offered, `new-child` prints only VIBESPACE_BROWSER, binary_absent behind a shim); r1: every flag-ordered `get … cdp-url` spelling, and the ENV TWINS of refused flags never reaching a fake real binary on any /resolve kind (a pre-fix patched copy is the control); r2: only the NOUN decides (`get attr @e cdp-url` passes, a boolean flag's `true`/`false` skipped so `get --json true cdp-url` is refused), the --help GLOBAL-option census over VALUE_FLAGS, the SOCKET ROOT legs (the answer's socketDir/runtimeDir win over a decoy SOCKET_DIR/XDG, rung H keeps only `<base>/vs-ab-<uid>`), patched r1 copies as controls. ~3 s, port 0, scratch dirs only r3: VALUE_FLAGS/BOOL_FLAGS EQUAL the measured global-flag fixture (scripts/browser-flag-census.mjs; `--idle-timeout` was the gap), the `get` noun allow-list, every-reading judgement of an unknown flag, the config rule (sanctionedConfig: a project file only narrows, no raw-debugging switch) + the answer's `config` set last + the CLI's composed file, rung H's lstat; patched r2 copies as controls. r4: a navigation to the web only (every spelling of file:/chrome:/about:version/… refused, web controls), `state load` of a crafted file, the stdin batch in the binary's JSON form (the fake reads ONLY JSON), the ACCOUNT's passwd home (a --require preload injects it; a disagreeing $HOME refused, once with the real entry), the older-server config, the version gate, the census CLI; patched r3 copies as controls.
-  { name: 'test-browser-ephemeral', tier: 'fast' }, // BROWSER TAKEOVER C3 (design-browser-takeover §5 T3, D2/D7/D8): the MANAGED EPHEMERAL browser — PURE record shape / set exclusion / the ceiling counting ephemerals + the desktop-app count seam (`browser_cap` naming every holder; a named start keeps `cap`, control) + the REAL keeper, routes and shipped CLI over a fake agent-browser: first verb ⇒ ONE record (ns vs-<key>), ONE lease `ephemeral`, ONE audit line, /resolve kind:'ephemeral' with the session's EXACT pairs (the browser-env resolver never asked), reuse, idle-out = stopped + relaunch, the live-view port PARITY with the legacy path, takeover pause, fork/child records, conversation death ⇒ record removed (a named profile never), the 7th conversation refused, runaway park, restart adoption; r2: every /resolve kind names the keeper's socket root (rung H only hostSocketBase) and a decoy SOCKET_DIR + XDG through the shipped CLI lands on it (the r1 table beside a CLI copy is the control). ~6 s, port 0, scratch dirs + an isolated HOME r3: the keeper launches a config-less browser with its named file, /resolve names the same `config`, a command from a directory holding its own agent-browser.json runs with it; the pre-r3 keeper in a patched copy is the control. r4: the keeper names its own machine*.json only while lstat says it is its regular file with its content (a swapped-in symlink / an edit re-written; the r3 existsSync check in a patched copy is the control).
+  { name: 'test-browser-ephemeral', tier: 'fast' }, // BROWSER TAKEOVER C3 (design-browser-takeover §5 T3, D2/D7/D8): the MANAGED EPHEMERAL browser — PURE record shape / set exclusion / the ceiling counting ephemerals + the desktop-app count seam (`browser_cap` naming every holder; a named start keeps `cap`, control) + the REAL keeper, routes and shipped CLI over a fake agent-browser: first verb ⇒ ONE record (ns vs-<key>), ONE lease `ephemeral`, ONE audit line, /resolve kind:'ephemeral' with the session's EXACT pairs (the browser-env resolver never asked), reuse, idle-out = stopped + relaunch, the live-view port PARITY with the legacy path, takeover pause, fork/child records, conversation death ⇒ record removed (a named profile never), the 7th conversation refused, runaway park, restart adoption; r2: every /resolve kind names the keeper's socket root (rung H only hostSocketBase) and a decoy SOCKET_DIR + XDG through the shipped CLI lands on it (the r1 table beside a CLI copy is the control). ~6 s, port 0, scratch dirs + an isolated HOME r3: the keeper launches a config-less browser with its named file, /resolve names the same `config`, a command from a directory holding its own agent-browser.json runs with it; the pre-r3 keeper in a patched copy is the control. r4: the keeper names its own machine*.json only while lstat says it is its regular file with its content (a swapped-in symlink / an edit re-written; the r3 existsSync check in a patched copy is the control). lane H ④: the ephemeral is a HOLDER ROW (digest + status `leases`, `browserLive`), its start/verb/stop are seam events that HOLD the verb until the recorder armed, `browser_stopped` without a CLI ask, the REAL recorder taps it with no viewer (boot too); a mutant-copy keeper dropping the row is the control. verify r1: a dead ephemeral is judged by its PROCESS before the tick (0 CLI asks) and the REAL bridge's upstream close takes its row out at once; only the verb that started the browser waits for the arming (stuck ⇒ the next verbs 0 ms; a failed arming backs off); `detach` on an ephemeral is an ephemeral seam event that retires it now and says so; naive study 2: a sub-agent's browser is tapped under its OWN pairs (`~child:`, the real bridge) and recorded; each with a mutant-copy control. ⑤ the keeper is the ONLY launcher of a profile browser (CDP, never the directory; every call repeats the launch view) and a view never starts one, over a fake binary that behaves like 0.38.1 (per-session daemons, a held profile lock, launch-view restarts), three mutant-copy controls.
   { name: 'test-cli-cmd-refresh', tier: 'fast' }, // B-a18e: the agent-CLI path re-resolved at SPAWN time when the boot answer went stale (the installer-window restart) — the helper over injected facts, the wiring pins, and a scratch server whose fake claude is renamed A → B → A between spawns (each spawn runs it where it NOW is, no restart; gone everywhere ⇒ the old error path + one line). ~8 s, dtach required (SKIP names it)
-  { name: 'test-browser-takeover', tier: 'fast' }, // AGENT BROWSER P3 (design-agent-browser-v2 §4.3/§4.3.1): the PURE takeover/handback/idle/announce verdicts + the CDP-shaped input records, the REAL keeper's input side over the fake agent-browser (browser_paused on resolve, idle lapse on the keeper's own tick with an injected clock, detach, the confirmation registry answered through the CLI's own confirm/deny), the announcer's three moments against a fake ladder (one billed site under 'browser-handback', a refusal stashed + noticed), the REAL bridge over a fake upstream (mode records, holder-only forwarding, held, viewer-left), the routes in-process and the shipped CLI's refusal. ~6s, no real chromium
+  { name: 'test-browser-takeover', tier: 'fast' }, // AGENT BROWSER P3 (design-agent-browser-v2 §4.3/§4.3.1): the PURE takeover/handback/idle/announce verdicts + the CDP-shaped input records, the REAL keeper's input side over the fake agent-browser (browser_paused on resolve, idle lapse on the keeper's own tick with an injected clock, detach, the confirmation registry answered through the CLI's own confirm/deny), the announcer's three moments against a fake ladder (one billed site under 'browser-handback', a refusal stashed + noticed), the REAL bridge over a fake upstream (mode records, holder-only forwarding, held, viewer-left), the routes in-process and the shipped CLI's refusal; lane J: the picture-vs-page table (4 shapes × 2 windows × 2 zooms ≤ 1 px, the pre-fix formula as control), the bridge's viewport record (first frame / picture / tab / takeover, replay, the private cdp_url pair, a failed read said once), the CDP reader over a fake endpoint, the trace's frame size + wiring pin. ~6s, no real chromium
   { name: 'test-browser-providers', tier: 'fast' }, // AGENT BROWSER P4 first half (design-agent-browser-v2 §7.1–§7.3, §7.2.1, §3.6 row 3): the PURE provider rows with their capability cells and the exact typed refusal each control produces (provider_unavailable naming the §7.2.1 refusal, provider_needs_local_key on host != null, provider_local_only, provider_lacks_capability per cell), the local-oracles discipline over the egress proof record (a `blocks` claim's cell IS false; a measured record without its four runs FAILS), the cdp env pair + url re-pointing, the cloakserve plan's typed refusals + docker argv, the egress allowlist verdict table; the SHARED browser-serve runner over the fake agent-browser; a REAL agentd daemon answering `browser-serve` with its capability asserted and an old daemon never asked; the ORCH access layer forwarding a paired machine's CDP port over a fake tcpForward (bytes round-trip), the keeper's remote chromium / remote cdp / local cdp records (never pid-signalled, stop closes the forward), the routes (providers, create with host/cdpPort, refusals by name) and the allowlisting egress proxy over real loopback sockets. ~8s, port 0, scratch dirs, no real browser, no vendor call
   { name: 'test-browser-backend', tier: 'fast' }, // AGENT BROWSER P4 second half (design-agent-browser-v2 §7.4 / §7.5 / §7.6, D17 / D32–D34, round 8): the PURE switch model in src/browser-switch.js — the version ladder over a matrix (target ≥ / < / unrecorded, registry-vs-`Last Version` disagreement ⇒ the HIGHER), the carried seed, the fingerprint sentence, SEATS AS THREE STATES (known-fresh / known-stale / unknown; an unknown total never satisfies the ceiling — controls that treat it as 0 and as ∞ are red; a stale verdict degrades past SEAT_TIER_STALE_MS), the ceiling wording forked on key source (the user's own names holders; the cluster default lists no profile and offers the one click out), the launch-failure classifier's SHAPE (backend_seat_taken), the site hint carrying WHO claimed it with `tier` legal only while `backend === null`, `blocked` a CLAIM the server never manufactures, the gate's ORDER (keyScope refused before any key is resolved) — then the REAL keeper over a fake `agent-browser` playing cloak: the gate's three named refusals (backend_unavailable / backend_no_key + action / backend_seat_taken) and a real in-place switch (stop → same dir + carried seed → one tab re-opened per lease at its lastUrl → re-pinned → targetId rewritten → the lease OBJECT never destroyed; attach/resolve answer browser_restarting mid-way), a proposal when another session holds a lease, the routes + the shipped CLI's `backend`/`blocked`. ~4 s, port 0, scratch dirs only, no real browser, no vendor call
   { name: 'test-browser-housekeeping', tier: 'fast' }, // AGENT BROWSER P5 (design-agent-browser-v2 §4.5 / §6.4 / §7.1 / §8 step 3, D7 / D8 / D35): the PURE trace model (the action table — an observation is never traced; a fill's value / a type's text never stored, only their length; the position kinds; the after-frame pick matrix; the retention PLAN naming every removal's rule; the recording gate by name; the sweep SCOPE = exactly the provider rows with ownsDir true, the cloud:* / local-window / cdp / remote records refused `not_ours` as the negative control; the housekeeping verdict that never answers "delete" and names the in-flight grace with its age; forget refused while leased or running; the orphan candidates + path verdict), the REAL recorder over a fake bridge + a stub keeper (before-frame off the ring, after-frame by settle / latest / same, the box probe through the runtime, 0600 files + index, the fill value absent from every byte on disk, tap-end finalizing, the lease seam arming/disarming, the setting gate, the sweep by age and by size, forget = rename beside + ledger BEFORE the record goes, orphans listed / adopted / forgotten, the ONE permanent deletion refusing anything not `.forgotten-`, recording start/stop through the lease's own session + the floor refusal), the routes in-process (session-id OR browser-key match, the frame served nosniff, PATCH's editable fields, host refused by name), and the REAL keeper's seam over the fake agent-browser (attach → attach + browser-ready, updateProfile → profile-updated, detach → detach, the digest hook merged into list()). ~6 s, port 0, scratch dirs only, no real browser, no vendor call
@@ -219,6 +221,7 @@ export const SUITES = [
   { name: 'test-window-minsize', tier: 'fast' }, // 2.369.158 (docs/design-desktop-apps §7.6, the owner's cropped calculator): a window's OWN minimum — the PURE rule (the .window floor, the drag clamp that keeps the opposite edge, raise-to-min, the window minimum from a content minimum + chrome under the UI scale), the REAL WindowManager.setMinSize + resize drag over a fake DOM (a minimized window never shrunk from a zero reading, the phone layout never raised) with a patched copy of the pre-fix drag as the control, and the wiring pins (desktop-app-window → setMinSize, the phone min 0 !important). <1 s, no browser
   { name: 'test-title-chips', tier: 'fast' }, // lane G (2026-09-25, the owner's tab strip "V.." beside "≋ 全部 → UCI Max"): THE TITLE WINS — the PURE chipMode table (full / compact / icon at their exact boundaries, monotonic in the room), memberShortName / chipWords / titleMinText / inboxCountText, three patched-copy controls of the rule (always-full = the pre-fix chip, full-while-six-characters-show, no icon floor), the REAL WindowManager._fitChip over a fake box (same answer from every starting form, overflow, not-laid-out, measured once per words) with a label-only-room patched window.js as the control, and the wiring pins (every re-decision trigger, ONE ResizeObserver unobserved on close, one rAF per burst, the tooltip's full words, the CSS forms, the inbox chip's flex:none + 99+). <1 s, no browser
   { name: 'test-browser-faces', tier: 'fast' }, // THE THREE BROWSER FACES RENAMED (docs/design-browser-faces.zh.md direction B, takeover §7 / D10): every face's label at its source (toolbar Web view, the phone '+' sheet's three rows + gates + the session picker, card-menu commands, Session Properties, Settings category + Services group, customize, the Apps dialog's intro / 'Browser app ·' gate / pointers, trace + live-view pointers, rail) with the ids pinned unchanged; the i18n census (every new key in zh AND ja with the tabled words, every retired key gone unless still said, a live-t() control); the mockup-parity control (index.json 12/12 drawn, every shot's own control undrawn, a planted undrawn record refused); the doc's SHIPPED line. ~0.2 s, reads files only
+  { name: 'test-live-bar-layout', tier: 'fast' }, // LANE I (2026-09-25, the owner's zh live-view screenshots — labels stacked one glyph per line, "undefined" in the bar): the PURE chrome-bar fold rule src/lib/live-bar-layout.js over hand-computed tables (priority, right-to-left ties, the ⋯ charged, never-fold overflow, absent items, DOM order, the live view's real table at zh 600/400/330) + 3000 seeded bars (fits / minimal / monotone), the short mode badge (zh + ja), THE CASCADE-TIE CENSUS (no (0,1,0) style.css rule on a file-tool-btn companion class sets a property viewers.css's 24×24 icon rule wins — the root cause), the wiring pins (both views fold through bar-fold.js, URL / status minimums = their CSS, ONE mode toggle, the globe, the window menu's live-view row, zh + ja), mutant-copy controls (fold by position; the ⋯ forgotten) + a planted pre-fix rule. ~0.3 s, no browser
   { name: 'test-window-types', tier: 'fast' }, // window-type registry (Plugin Ph1): node-functional dispatch + loud unknown-action + the exact core type/action sets + no switch/TYPE_ICONS literal left
   { name: 'test-status-bar-chips', tier: 'fast' }, // THE STATUS BAR UPDATES IN PLACE (design-accessibility-tree §3 row 8 (b), §8 lean, chunk a3): the REAL ChatStatusBar driven through a 40-line counting fake DOM — ① the same chip node object survives 20 context%/cache/cost/turn-state ticks (hot chips re-write their markup, cold chips never, zero elements created) ② turn-state / health / held / workflow chips appear at their place and leave with the neighbours' identity intact, the goal chip flips on ONE element ③ attribute parity with the innerHTML era (raw titles, classless cache/cost, the pie markup) ④ NEGATIVE CONTROL: a scratch copy neutered to the whole-bar rebuild fails ① ⑤ wiring pins (render ends in _reconcile, no this._element.innerHTML, the one delegated click listener)
   { name: 'test-ax-paint', tier: 'fast' }, // paint-only OUT of the accessibility tree at the source (design-accessibility-tree §3 rows 2+3 lean, chunk a2): icons.js `_s()` aria-hidden + focusable=false over every exported value, the icon-only <button> census (template + DOM-built: an aria-hidden icon is no longer a name ⇒ title/aria-label required; a DOM-built rhs is icon-only when nothing but icons / whitespace strings is left, e.g. `icon + ' '`; classifier negative-controlled on a fixture AND on a scratch copy of src/lib with a planted nameless button), every gutter/diff-prefix/run-arrow/spinner/resize-handle/minimap-strip site marked, the CSS glyph census (every generated ▸/▾/·/LRM glyph in the alt-text form `content: '…' / ""`, no sentence carries it)
@@ -331,8 +334,9 @@ export const SUITES = [
   // deliberately, with a measurement — never by default.
   { name: 'test-paging-collapse-guard', tier: 'heavy', reads: ['src/lib/chat-view.js'], why: 'adopted 2026-09-07, was in NO runner (14ms)' }, // COLLAPSED-GEOMETRY guard, pinned against the REAL incident numbers (inc-mso818ry). The scroll tracer recorded 14 extendTop landings in the affected window: 11…
   { name: 'test-browser-resources', tier: 'heavy', why: 'launches up to 12 real Chromium instances (~90s, ~20 GB RSS at peak) — what only the binary can answer: that two sessions really stop seeing each other (with a pre-fix control), the k=1/4/12 envelope §12.10 makes a P0 deliverable, (r3) that a project-level fence survives the generated config and that two remote-shaped sessions both launch on a profile-naming host (round 2\'s line reproduces the SingletonLock collision), and (r4) that a fenced session on rung N browses where round 3\'s rung C is refused by the CLI, that a pin RELAUNCHES the running browser on the next command (page lost, new pid on the pinned dir), and the HOME 38/39 pair: round 3 refused at 39 where the bare CLI works, r4\'s AGENT_BROWSER_SOCKET_DIR launches' },
-  { name: 'test-browser-live', tier: 'heavy', why: 'headless chrome + a worktree server + one REAL chromium (~60-90 s)' }, // AGENT BROWSER P2 (design-agent-browser-v2 §4.2/§4.4/§3.7): the PURE stream rules over the REAL captured 0.32.0 shapes (scripts/fixtures/browser-stream/session-0.32.0.json), the real bridge on a real http server over a fake upstream (cookie auth before the upgrade, fan-out on ONE upstream connection with replay, maxFps = the max across viewers, typed watch-mode refusals, per-viewer frame drop + upstream pause/resume at the VNC numbers, typed teardown), the browser-live window in headless chrome on a worktree server (frames drawn, URL/tabs panes, the switcher strip for two attachments, viewer count, the DPI pointer helper at ui-scale 1/0.8 and 375×667), and one real headless chromium through the real stream server + real bridge (SKIPs with evidence)
-  { name: 'test-browser-mediation-chrome', tier: 'heavy', why: 'one REAL headless chrome behind the mediating proxy + the real agent-browser as two sessions (~20-40 s; SKIPs with evidence without a chrome / the binary)' }, // AGENT BROWSER P6 (design-agent-browser-v2 §6.2 / §6.5 / D6 — the §10 P6 row's EXIT): through a second lease's mediated url a real Chrome shows only that lease's tab, attach/close/activate of the other's tab are target_out_of_scope, a takeover makes navigate/Input.* browser_paused while reads answer, Browser.close is method_refused, revoke closes the lease's own tabs and leaves the other's; then the real agent-browser 0.32 as two sessions — each `tab list` is its own, the typed browser_paused lands inside the CLI's own JSON, `close --all` never reaches Browser.close; r1 ③: the real binary answers `get --json cdp-url` and honours the AGENT_BROWSER_CDP twin when run directly (the controls for test-browser-verbs' router and env legs), and through vibespace-browser the same shell lands on the lease's browser with the twins dropped. r2 ③: the real binary is the ORACLE — every `get … cdp-url` spelling run for real with the router held to it (`get attr #e cdp-url` a read), another SOCKET_DIR is another daemon, through vibespace-browser the answer's root wins and the decoy dirs stay empty; the suite reaps its own daemon namespace dirs. r3: the installed binary's global flags re-measured against the router's tables; every measured flag fuzzed between `get` and `cdp-url` on a live daemon; the config-file twin (a bare command from a hostile directory runs its executable with its raw port, through vibespace-browser nothing of it lands); the suite's runs inherit no AGENT_BROWSER_* of the shell starting them. r4: a real chrome launched by the binary — bare, `open chrome://version` + `open file://…/DevToolsActivePort` and a crafted `state load` print/land on the endpoint (the controls); through vibespace-browser every spelling is refused with no /resolve; the stdin batch (bare plain lines are Invalid JSON, both forms run through the CLI).
+  { name: 'test-browser-live-ui', tier: 'heavy', why: 'headless chrome (a 3200×1100 page) on a worktree server with a fake claude + a fake agent-browser over fake stream upstreams, a real `vibespace-browser open`, and (when the box has a display rung) a real xterm desktop app under an agent lease — ~170 measured + shot states incl. ⑥ the split floor (real divider drags; ~3 min; SKIPs without chrome / dtach, the strip legs without a display rung)' }, // LANE I (2026-09-25, the owner: "你这些UI都检查过吗？"): THE LIVE-VIEW BAR, SEEN — a screenshot + rect census of the agent browser's live view (the owner's ephemeral path) at zh/ja/en × 600/900/1400 × dark/light × free/bound × Watch/Take over, two profiles (strip + backend chip), and the desktop-app strip (no lease / agent lease / your takeover): no overlapping paint rects, no wrapped label (> 1.7 × its font or > 1 line), every button's words fit, nothing outside the bar, no undefined/null/NaN/[object; THE FOLD re-derived by barLayout from the page's own inputs, the ⋯ exactly when folded (never gratuitous — an independent max-content measurement), its menu = the folded items with live counts; the chat WINDOW menu's "Agent browser — live view" (present with a browser, absent without; opens BOUND beside; open-or-focus; one Unsplit on a bound pane); controls = a neutral stylesheet swap stays green, patched copies of public/style.css without the bar rules (live bar + strip) or without nowrap alone (unfolded) go RED. PNG + JSON per state under /tmp/vibespace-live-ui-shots/run-<pid>-<time>/ (newest three kept)
+  { name: 'test-browser-live', tier: 'heavy', why: 'headless chrome + a worktree server + one REAL chromium (~60-90 s)' }, // AGENT BROWSER P2 (design-agent-browser-v2 §4.2/§4.4/§3.7): the PURE stream rules over the REAL captured 0.32.0 shapes (scripts/fixtures/browser-stream/session-0.32.0.json), the real bridge on a real http server over a fake upstream (cookie auth before the upgrade, fan-out on ONE upstream connection with replay, maxFps = the max across viewers, typed watch-mode refusals, per-viewer frame drop + upstream pause/resume at the VNC numbers, typed teardown), the browser-live window in headless chrome on a worktree server (frames drawn, URL/tabs panes, the switcher strip for two attachments, viewer count, the DPI pointer helper at ui-scale 1/0.8 and 375×667), and one real headless chromium through the real stream server + real bridge (SKIPs with evidence); lane H ③b: the shipped CLI's first `open` in a chat session with no attachment ⇒ within 5 s a split live view born beside the chat (silent), the navigation in data/browser-trace/ephemeral, the tool card's thumbnail, both chips, grey on stop / reconnect on the next verb, CONTROL a worktree keeper copy dropping the ephemeral holder row ⇒ none of it; ④ launches with its streamed config (the week-long exit-21 skip was the suite) and records a real `open`; naive study 2: ① one live view per session (liveViewPlan) + a stopped view's resume rule + the `~child:` target (patched-copy controls), ③b "Open live view" twice ⇒ ONE window and the focus in its chain, a stopped browser's view keeps its last frame with "Browser stopped" — CONTROL the pre-fix client rebuilt in the leg's own worktree ⇒ 3 windows and "Agent is driving"; lane J ⑤ (inc-muhgv0fb-9i4u): the REAL rung end to end — a session's own ephemeral browser (headless, and headed on its own 2560×1440 Xvfb) opened by the real vibespace-browser, the live view in chrome as the owner's client (DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window), Take over, a real click on grid cell (10,5) lands within 2 px; CONTROL = the pre-fix belief (the metadata IS the frame) in a patched copy through the same socket (71 px / 132 px or dropped); a new tab + set viewport re-read; the leg reaps its daemons
+  { name: 'test-browser-mediation-chrome', tier: 'heavy', why: 'one REAL headless chrome behind the mediating proxy + the real agent-browser as two sessions (~20-40 s; SKIPs with evidence without a chrome / the binary)' }, // AGENT BROWSER P6 (design-agent-browser-v2 §6.2 / §6.5 / D6 — the §10 P6 row's EXIT): through a second lease's mediated url a real Chrome shows only that lease's tab, attach/close/activate of the other's tab are target_out_of_scope, a takeover makes navigate/Input.* browser_paused while reads answer, Browser.close is method_refused, revoke closes the lease's own tabs and leaves the other's; then the real agent-browser 0.32 as two sessions — each `tab list` is its own, the typed browser_paused lands inside the CLI's own JSON, `close --all` never reaches Browser.close; r1 ③: the real binary answers `get --json cdp-url` and honours the AGENT_BROWSER_CDP twin when run directly (the controls for test-browser-verbs' router and env legs), and through vibespace-browser the same shell lands on the lease's browser with the twins dropped. r2 ③: the real binary is the ORACLE — every `get … cdp-url` spelling run for real with the router held to it (`get attr #e cdp-url` a read), another SOCKET_DIR is another daemon, through vibespace-browser the answer's root wins and the decoy dirs stay empty; the suite reaps its own daemon namespace dirs. r3: the installed binary's global flags re-measured against the router's tables; every measured flag fuzzed between `get` and `cdp-url` on a live daemon; the config-file twin (a bare command from a hostile directory runs its executable with its raw port, through vibespace-browser nothing of it lands); the suite's runs inherit no AGENT_BROWSER_* of the shell starting them. r4: a real chrome launched by the binary — bare, `open chrome://version` + `open file://…/DevToolsActivePort` and a crafted `state load` print/land on the endpoint (the controls); through vibespace-browser every spelling is refused with no /resolve; the stdin batch (bare plain lines are Invalid JSON, both forms run through the CLI). naive study 2 ④: the REAL keeper + the real 0.38.1 + a real Chrome — two sessions on ONE named profile both run on their own tabs with exactly one Chrome on its directory, the keeper's recorded pid alive after its own `get cdp-url` (the launch view), the stream port answered; CONTROL the pre-fix env (the directory) dies on SingletonLock on the real binary.
   { name: 'test-browser-tier3-chrome', tier: 'heavy', why: 'launches a REAL Google Chrome / Chromium window on its own Xvfb with NO CDP and drives it through AT-SPI (~20-40 s; SKIPs with evidence without a chrome / Xvfb / python3-gi / a session bus)' }, // AGENT BROWSER P10 — the §9 test-browser-tier3 row's heavy half: the browser is listed as a desktop-class row, snapshot comes from the real AT-SPI tree, one click @ref lands on a node that self-reports an action, a chord and a point click refuse by name although xdotool is on PATH, screenshot is x11grab of the window's own pixmap (§4.9 column 1), and the browser's argv carries NO automation flag before and after — the definition of tier 3 as an assertion
   { name: 'test-window-target', tier: 'heavy', why: 'server: boots the desktop-app keeper\'s REAL Xvfb + x11vnc + a GTK app and drives vibespace-window as a child process (~20-40 s; SKIPs with evidence without python3-gi / Xvfb / x11vnc / a session bus)' }, // AGENT BROWSER P9 second half (design-agent-browser-v2 §4.3 / §4.9 / §6.6, the §9 row): the sieve\'s strip (a refused KeyEvent cut out, the update request beside it relayed), the window noun in the shared takeover model, the PURE window-live mode arithmetic, the engine over a fake keeper (the lease PERSISTS across a rebuild, orphans, reconcile grace, takeover/handback/idle/viewer-left, the audit with origin), the ONE announcer taking a window handback, the bridge policy over a fake RFB server, then the REAL leg: an agent CLI drives the fixture through the API, a second session is refused by the lease, a viewer in Watch cannot type into it, the user\'s takeover pauses the agent and lets the same key land, the handback is announced, a restart keeps the lease
   { name: 'test-window-binding', tier: 'heavy', why: 'headless chrome (a desktop page + a 390×844 phone page) on a worktree server with a fake claude + a fake agent-browser over a fake stream upstream (~2-3 min; SKIPs without chrome / dtach)' }, // AGENT BROWSER P7 (design-agent-browser-v2 §4.6 / §3.7, D19 / D24 — the §10 P7 row's EXIT): auto-bind births the live view inside the chat's chain as a split (one visible window, two measured panes, the deterministic syncId, frames drawn, the ownership badge in the session's own colour), the bar's Unbind / Snap beside round trip, the divider under body zoom 1.25 landing within 4 px of the pointer + double-click, a real title-bar drag / minimise / restore / a desktop switch keeping the panes together, closing the browser pane collapsing to tabs WITHOUT moving the chat (rect before == after), the three-tab chain (D19 (a) replaces the non-anchor pane; closing the CHAT host promotes with no dangling id), layouts.json carrying layout + split, a PHONE page restoring the split in its model while displaying one pane and its own save leaving the split on disk and on the desktop, a remote same-tabs layout flip applied (the pre-fix key would not), a ratio-only change applied in place, a shared profile = two owner dots, a second profile = the strip with per-pane dots
@@ -657,30 +661,99 @@ export const killedFromOutside = (r) => !!(r && r.signal && OUTSIDE_SIGNALS.incl
 // 2026-09-16: 504 vibespace-device processes (34.8 GB RSS, up to 76 h old),
 // 552 node processes under /tmp/vs-* scratch dirs and 2,137 orphaned
 // `dtach -a` bridge clients — 86 GB used, load 15, the owner's display blank.
-// EVIDENCE, NEVER A HEURISTIC: a process is a scratch orphan only when its
-// cwd / HOME / device root lies under a `/tmp/vs-<name>-<random>` scratch dir
-// (the shape scripts/scratch.mjs mints; production is rooted in a checkout)
-// AND either that scratch dir is GONE (the suite cleaned up and left the
-// process behind) or every process rooted there is reparented (no live suite
-// owns any of them) and older than the fixture stale floor. A ci.mjs runner
-// is never a candidate (the isolated heavy tier lives in /tmp/vs-ci-heavy-*
-// for its whole run), and a group with ANY live-parented member is left alone
-// — that is a suite in flight, possibly another lane's.
+// EVIDENCE, NEVER A HEURISTIC: a process is a scratch orphan only when one of
+// its ROOTS lies under a `/tmp/vs-<name>-<random>` scratch dir (the shape
+// scripts/scratch.mjs mints; production is rooted in a checkout) AND either
+// that scratch dir is GONE (the suite cleaned up and left the process behind)
+// or every process rooted there is reparented (no live suite owns any of
+// them) and older than the fixture stale floor. A ci.mjs runner is never a
+// candidate (the isolated heavy tier lives in /tmp/vs-ci-heavy-* for its
+// whole run), and a group with ANY live-parented member is left alone — that
+// is a suite in flight, possibly another lane's.
+// LANE H VERIFY r1 (2026-09-25): CANDIDACY IS EVIDENCE, NEVER A NAME. The
+// sweep used to drop every process whose executable was not on REAP_NAMES
+// BEFORE it looked at the evidence, so a leaked `agent-browser-linux-x64`
+// daemon (its roots only in AGENT_BROWSER_SOCKET_DIR / _PROFILE / _CONFIG, its
+// cwd a checkout) and a `headless_shell` (its root only in --user-data-dir)
+// were invisible under a GONE scratch dir while `--reap` said "no scratch
+// orphans" — the class that leaked 1045 daemons/Chromes (47 GB). Now: the
+// roots are cwd, HOME, the device/agentd roots, the three agent-browser env
+// names and a `--user-data-dir=` argv (a Chrome's cwd is inherited and is
+// often `/` or a checkout); a GONE root lists every process rooted there that
+// nobody alive outside the group owns, WHATEVER its name (a user's shell in a
+// deleted dir, parented by its terminal, is owned and spared); the name
+// allowlist below survives ONLY for the not-gone/stale rule, where the dir
+// still exists and a name is the one extra fact that it is a suite's.
 export const SCRATCH_ROOT_RE = /^\/tmp\/vs-[A-Za-z0-9._-]+/;
-export const REAP_NAMES = new Set(['node', 'npm', 'claude', 'codex', 'opencode', 'Xvfb', 'Xvnc', 'x11vnc', 'xmessage', 'esbuild', 'dtach']);
+// LANE H VERIFY r2 (M2): THE PRODUCT'S OWN ROOT IS NEVER SCRATCH. src/browser-profiles.js socketDirDecision's
+// long-home remedy is `<base>/vs-ab-<uid>` (`vs-ab-u` when the uid is unknown) under the LITERAL /tmp — the scratch
+// shape exactly, and AGENT_BROWSER_SOCKET_DIR is a root, so a production daemon and its Chrome were candidates
+// ('scratch dir gone' after a tmp cleaner, 'orphaned' by name when not). That exact shape is excluded here, and
+// scripts/scratch.mjs refuses to mint it (`scratch('ab')`), so no suite can ever hide under it either.
+export const PRODUCT_ROOT_RE = /^\/tmp\/vs-ab-(?:\d+|u)$/;
+/** LANE H VERIFY r2 (L3): a Chrome that rewrote its process title has ONE space-joined /proc cmdline (a CfT build: no
+ *  NUL at all, measured on this box) — the flag is read off the joined string too, both spellings. VERIFY r3 (MINOR 2):
+ *  ONLY off such a cmdline — a NUL-separated argv is read exactly (the value is the whole element, a space in it
+ *  included), and a flag merely MENTIONED inside another argument (a script's code, `sh -c '…'`) roots nothing. */
+const UDD_JOINED_RE = /(?:^|\s)--user-data-dir(?:=|\s+)(\S+)/g;
+// LANE N (2026-09-25, found on test-browser-resources: 140 live leftovers from 20 runs): A ROOT NAMED ONLY IN THE
+// ARGUMENTS. A worktree server's terminal sessions run with the REAL HOME and cwd `/tmp`, so their scratch root appears
+// nowhere but their arguments — `dtach -c /tmp/vs-browser-res-<pid>/wt/data/sockets/cw-…`, `node /tmp/vs-browser-res-<pid>/
+// wt/data/bin/pty-wrapper.js …` — and they were never candidates. A root is taken where an argv element STARTS with the
+// scratch shape or is a `<flag>=<scratch>` element (`--user-data-dir=…`, `-auth=…`); the product's own root is never one.
+// Read like lane H's --user-data-dir (verify r3 MINOR 2, the integration of 2.369.180): a NUL-separated argv is read
+// EXACTLY — a path merely MENTIONED inside another argument (`sh -c '… --user-data-dir=/tmp/vs-…'`) roots nothing — and
+// only a title-rewritten cmdline (`joined`: ONE string, no NUL) is split on whitespace and read word by word.
+// scratchRootsOf takes these AFTER cwd + ROOT_ENV + the --user-data-dir reading.
+export function argvScratchRoots(argv = [], { joined = argv.length <= 1 } = {}) {
+  const out = [];
+  const take = (p) => { const r = SCRATCH_ROOT_RE.exec(p)[0]; if (!PRODUCT_ROOT_RE.test(r) && !out.includes(r)) out.push(r); };
+  for (const a of argv) {
+    const s = String(a || '');
+    if (joined) { for (const tok of s.split(/\s+/)) for (const m of tok.matchAll(/(?:^|=)(\/tmp\/vs-[A-Za-z0-9._-]+)/g)) take(m[1]); }
+    else { const m = /^(?:[^\s=]+=)?(\/tmp\/vs-[A-Za-z0-9._-]+)/.exec(s); if (m) take(m[1]); }
+  }
+  return out;
+}
+export const REAP_NAMES = new Set(['node', 'npm', 'claude', 'codex', 'opencode', 'Xvfb', 'Xvnc', 'Xtigervnc', 'x11vnc', 'xmessage', 'esbuild', 'dtach']); // Xtigervnc (lane N 2026-09-25, the heavy RED on 69720f2b): the singleton Desktop's X server by its own argv[0] (`Xvnc` is only Debian's symlink) — a leaked `Xtigervnc :7` under a GONE scratch dir held the machine-global :7/5901 for the next run to adopt (observed: cwd a deleted /tmp/vs-deskapp-smoke-*, adopted 40 s later by another run's server; test-ci-gate §9b)
+/** The environment names that ROOT a process (besides its cwd and a Chrome's --user-data-dir). */
+export const ROOT_ENV = ['HOME', 'VIBESPACE_DEVICE_ROOT', 'VIBESPACE_AGENTD_ROOT', 'AGENT_BROWSER_SOCKET_DIR', 'AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_CONFIG'];
+/** Every scratch root a process names, in order (cwd, ROOT_ENV, --user-data-dir), de-duplicated. `joined` = its /proc
+ *  cmdline carried NO NUL (a title-rewritten process: the one string is scanned as words); default: a one-element argv. */
+export function scratchRootsOf({ cwd = '', env = {}, argv = [], joined = argv.length <= 1 } = {}) {
+  const cands = [cwd, ...ROOT_ENV.map((k) => env[k])];
+  for (let j = 0; j < argv.length; j++) {
+    const a = String(argv[j] || '');
+    if (a.startsWith('--user-data-dir=')) cands.push(a.slice('--user-data-dir='.length));
+    else if (a === '--user-data-dir' && j + 1 < argv.length) cands.push(argv[j + 1]);
+  }
+  if (joined) for (const m of argv.join(' ').matchAll(UDD_JOINED_RE)) cands.push(m[1]);
+  cands.push(...argvScratchRoots(argv, { joined })); // lane N: a root named only in the arguments (dtach / pty-wrapper)
+  const out = [];
+  for (const c of cands) { const m = SCRATCH_ROOT_RE.exec(String(c || '')); if (m && !PRODUCT_ROOT_RE.test(m[0]) && !out.includes(m[0])) out.push(m[0]); }
+  return out;
+}
+const reapNamed = (a0) => REAP_NAMES.has(a0) || a0.startsWith('vibespace-devic') || a0.startsWith('chrome');
+// verify r2 L3: a process answers to its argv[0] (the first whitespace token — a title-rewritten Chrome's argv is one
+// string) OR its /proc comm (/usr/bin/google-chrome's comm is `chrome`); never comm alone (the claude CLI's comm is its version)
+const reapNamedProc = (i) => reapNamed(i.a0) || (!!i.comm && reapNamed(i.comm));
 const REAP_STALE_MS = 10 * 60 * 1000; // = src/fixture-guard.js FIXTURE_STALE_MS (a run in flight is never older)
 function procRead(procRoot, pid, f) { try { return fs.readFileSync(path.join(procRoot, String(pid), f)); } catch { return null; } }
 function procInfo(procRoot, pid) {
   const stat = procRead(procRoot, pid, 'stat'); if (!stat) return null;
   const s = stat.toString('latin1'); const rp = s.lastIndexOf(')'); if (rp < 0) return null;
   const ppid = Number(s.slice(rp + 2).split(' ')[1]);
-  const argv = (procRead(procRoot, pid, 'cmdline') || Buffer.alloc(0)).toString('utf8').split('\0').filter((x, i) => i === 0 || x);
-  const a0 = argv[0] ? path.basename(argv[0]) : '';
+  const raw = (procRead(procRoot, pid, 'cmdline') || Buffer.alloc(0)).toString('utf8').replace(/\0+$/, '');
+  const argv = raw.split('\0').filter((x, i) => i === 0 || x);
+  const joined = !raw.includes('\0'); // verify r3: no NUL = a title-rewritten cmdline (read as words); else exact argv
+  const first = argv[0] ? String(argv[0]).split(/\s+/)[0] : '';
+  let comm = ''; const cb = procRead(procRoot, pid, 'comm'); if (cb) comm = cb.toString('utf8').trim();
+  const a0 = first ? path.basename(first) : comm;
   let cwd = ''; try { cwd = fs.readlinkSync(path.join(procRoot, String(pid), 'cwd')); } catch { }
   const env = {}; const eb = procRead(procRoot, pid, 'environ');
   if (eb) for (const kv of eb.toString('utf8').split('\0')) { const i = kv.indexOf('='); if (i > 0) env[kv.slice(0, i)] = kv.slice(i + 1); }
   let bornMs = null; try { bornMs = fs.statSync(path.join(procRoot, String(pid))).mtimeMs; } catch { }
-  return { pid, ppid, a0, argv, cwd, env, bornMs };
+  return { pid, ppid, a0, comm, argv, joined, cwd, env, bornMs };
 }
 /** The orphans a sweep would reap: [{pid, name, root, why}]. PURE over a proc
  *  root (a test drives a fake one). `now`/`staleMs`/`exists` are parameters
@@ -693,39 +766,59 @@ export function scratchOrphans({ procRoot = '/proc', now = Date.now(), staleMs =
   const systemd = new Set([1, ...[...infos.values()].filter((i) => i.a0 === 'systemd').map((i) => i.pid)]);
   const skip = new Set(); // this process and its ancestors
   for (let q = self; q && infos.has(q) && !skip.has(q); q = infos.get(q).ppid) skip.add(q);
-  const rootOf = (i) => {
-    for (const cand of [i.cwd, i.env.HOME, i.env.VIBESPACE_DEVICE_ROOT, i.env.VIBESPACE_AGENTD_ROOT]) {
-      const m = SCRATCH_ROOT_RE.exec(String(cand || '')); if (m) return m[0];
-    }
-    return null;
-  };
+  // a process's GROUP is its FIRST root in scratchRootsOf's order (cwd first, as
+  // before — a daemon a heavy suite still has in flight under the isolated
+  // worktree stays grouped there); existence is asked once per root
+  const existsMemo = new Map();
+  const isGone = (r) => { if (!existsMemo.has(r)) existsMemo.set(r, !!exists(r)); return !existsMemo.get(r); };
   const groups = new Map();
   for (const i of infos.values()) {
     if (skip.has(i.pid)) continue;
-    const named = REAP_NAMES.has(i.a0) || i.a0.startsWith('vibespace-devic') || i.a0.startsWith('chrome');
-    if (!named) continue;
     if (i.argv.some((a) => /scripts\/ci\.mjs$/.test(a))) continue; // a gate runner, never a candidate
-    const root = rootOf(i); if (!root) continue;
+    const root = scratchRootsOf(i)[0]; if (!root) continue;
     if (!groups.has(root)) groups.set(root, []);
     groups.get(root).push(i);
   }
-  const out = [];
-  for (const [root, members] of groups) {
-    const gone = !exists(root);
-    // a member is OWNED when walking its parents (through fellow members) reaches a
-    // live process outside the group — a suite, a runner, this process; reaching
-    // systemd/init or a vanished pid means nobody owns it
-    const orphaned = (i) => { let q = i; const seen = new Set(); while (q && !seen.has(q.pid)) { seen.add(q.pid); if (systemd.has(q.ppid)) return true; const p = infos.get(q.ppid); if (!p) return true; if (!members.includes(p)) return false; q = p; } return true; };
-    const live = members.some((i) => !orphaned(i));
-    const ages = members.map((i) => (i.bornMs == null ? Infinity : now - i.bornMs));
-    const oldEnough = Math.min(...ages) >= staleMs;
-    let why = null;
-    if (gone) why = 'scratch dir gone';
-    else if (!live && oldEnough) why = `orphaned ${Math.round(Math.min(...ages) / 60000)} min (no live suite owns ${root})`;
-    if (!why) continue;
-    for (const i of members) out.push({ pid: i.pid, name: i.a0, root, why, cmd: i.argv.slice(0, 3).join(' ').slice(0, 120), ppid: i.ppid });
+  // verify r2 L7: the judgement runs to a FIXPOINT — a parent outside a group that is itself a victim of this sweep
+  // (another gone root's orphan) owns nothing, so its children are listed in the SAME sweep, not the next one
+  // verify r3 (LOW 4): bounded by the candidates, never a constant — every round that continues adds a victim, so a chain
+  // of N gone groups needs N rounds (a cap of 8 listed 8 of a chain of 10 and left the rest for the next sweep)
+  const victimPids = new Set();
+  const maxRounds = [...groups.values()].reduce((n, m) => n + m.length, 0) + 1;
+  let out = [];
+  for (let round = 0; round < maxRounds; round++) {
+    out = judgeGroups();
+    const before = victimPids.size;
+    for (const o of out) victimPids.add(o.pid);
+    if (victimPids.size === before) break;
   }
   return out;
+  function judgeGroups() {
+  const out = [];
+  for (const [root, members] of groups) {
+    const gone = isGone(root);
+    const inGroup = new Set(members.map((i) => i.pid));
+    // a member is OWNED when walking its parents (through fellow members) reaches a
+    // live process outside the group — a suite, a runner, this process, a user's
+    // terminal; reaching systemd/init, a vanished pid or a victim of this very sweep means nobody owns it
+    const orphaned = (i) => { let q = i; const seen = new Set(); while (q && !seen.has(q.pid)) { seen.add(q.pid); if (systemd.has(q.ppid)) return true; const p = infos.get(q.ppid); if (!p) return true; if (!inGroup.has(p.pid)) return victimPids.has(p.pid); q = p; } return true; };
+    let victims = [], why = null;
+    if (gone) {
+      // the dir is gone: every member nobody alive outside the group owns, WHATEVER its name
+      why = 'scratch dir gone';
+      victims = members.filter(orphaned);
+    } else {
+      // the dir still exists: only when NO member is owned and all are stale — and then
+      // only the executables a suite starts (the name is the one extra fact here)
+      const live = members.some((i) => !orphaned(i));
+      const ages = members.map((i) => (i.bornMs == null ? Infinity : now - i.bornMs));
+      const oldEnough = Math.min(...ages) >= staleMs;
+      if (!live && oldEnough) { why = `orphaned ${Math.round(Math.min(...ages) / 60000)} min (no live suite owns ${root})`; victims = members.filter(reapNamedProc); }
+    }
+    for (const i of victims) out.push({ pid: i.pid, name: i.a0, root, why, cmd: i.argv.slice(0, 3).join(' ').slice(0, 120), ppid: i.ppid });
+  }
+  return out;
+  }
 }
 /** THE VICTIM LIST, ONE LINE PER PID (B-a965, 2026-09-24): a sweep that named only its
  *  roots left "22 roots / 34 processes" unattributable after a stray `ci.mjs --help`
@@ -762,6 +855,25 @@ export async function reapScratchOrphansAsync({ log = console.log, graceMs = 300
   while (Date.now() < until && list.some((o) => alive(o.pid))) await new Promise((r) => setTimeout(r, 100));
   for (const o of list) { if (alive(o.pid)) { try { process.kill(o.pid, 'SIGKILL'); } catch { } } }
   return list;
+}
+
+/** `--reap` BY HAND (lane H verify r1): the operator is shown EVERY victim — the
+ *  per-pid report (pid, ppid, command head, root, the rule that fired) before the
+ *  first SIGTERM, then a closing line naming any survivor. `--dry-run` prints the
+ *  same report and signals nothing. */
+export function reapByHand({ dryRun = false, log = console.log, ...opts } = {}) {
+  if (dryRun) {
+    const list = scratchOrphans(opts);
+    if (!list.length) { log('[ci] no scratch orphans'); return 0; }
+    for (const line of reapReport(list)) log(line);
+    log(`[ci] --dry-run: ${list.length} process(es) listed above, none signalled`);
+    return 0;
+  }
+  const list = reapScratchOrphans({ log, ...opts });
+  if (!list.length) { log('[ci] no scratch orphans'); return 0; }
+  const left = list.filter((o) => alive(o.pid));
+  log(`[ci] reaped ${list.length - left.length} of ${list.length} scratch orphan process(es)${left.length ? ` — ${left.length} still alive after SIGKILL: ${left.map((o) => o.pid).join(' ')}` : ''}`);
+  return 0;
 }
 
 function runSuite(s, { root = repo, absentIsSkip = false, sha = '' } = {}) {
@@ -1878,7 +1990,7 @@ function main(argv) {
   // --range=<old>..<new> (or --range <x>): the impact scope for --heavy
   // --affected / --heavy-affected, and what --heavy-launch hands its child.
   const rangeArg = str('range') !== null ? str('range') : (argv.includes('--range') ? (argv[argv.indexOf('--range') + 1] || null) : null);
-  if (arg('reap')) { const l = reapScratchOrphans({}); console.log(l.length ? l.map((o) => `${o.pid} ${o.name} ${o.root} — ${o.why}`).join('\n') : 'no scratch orphans'); process.exit(0); }
+  if (arg('reap')) { process.exit(reapByHand({ dryRun: !!arg('dry-run') })); }
   if (arg('census')) process.exit(census());
   if (arg('status')) process.exit(status({ dir, head }));
   if (arg('check-heavy')) process.exit(checkHeavy({ dir, head }));

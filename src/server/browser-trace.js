@@ -22,7 +22,14 @@
  *   · THE KEEPER'S LEASE SEAM (`onLease`): attach / browser-ready arm a tap
  *     (a tap NEVER starts a browser — only a live one is tapped; the bridge's
  *     `streamPortFor` then only asks the daemon for its port); detach /
- *     lease-dropped / browser-stopped disarm it. The same seam starts and
+ *     lease-dropped / browser-stopped disarm it. LANE H (2026-09-25): a
+ *     conversation's managed EPHEMERAL browser is a holder like any lease — its
+ *     `browser-ready` (and every `verb` on it while no tap holds it) arms a tap
+ *     on THAT browser (`EPHEMERAL_REF`, never the session's default pane) with
+ *     no viewer at all, scope `ephemeral`; the arming promise is RETURNED so the
+ *     keeper holds the verb until the tap is connected (bounded) and the first
+ *     command is on the record; a sub-agent's ephemeral (its pairs are not its
+ *     session's) is not tapped in this release. The same seam starts and
  *     stops the per-profile SCREENCAST (`record start <file>` / `record stop`
  *     under the lease's own session, `record: true` profiles only, refused BY
  *     NAME below the 0.37.0 floor — D7's opt-in; frames of a logged-in profile
@@ -49,6 +56,8 @@ const S = require('../browser-stream.js');
 
 const SWEEP_EVERY_MS = 60 * 60 * 1000;
 const SIZE_CACHE_MS = 10 * 60 * 1000;
+/** VERIFY r1 L1: a `verb` does not re-arm a tap whose arming FAILED within this long (a new browser always arms). */
+const ARM_RETRY_MS = 30 * 1000;
 const DU_TIMEOUT_MS = 120 * 1000;
 const INDEX_FILE = 'index.ndjson';
 const FILE_MODE = 0o600;
@@ -83,9 +92,26 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   let lastSweep = null;
   let timer = null;
   let unsubLease = null;
+  // VERIFY r1 L1: tap key → when its last arming FAILED — a `verb` does not re-arm (and hold) it inside ARM_RETRY_MS
+  const armFailedAt = new Map();
+  // VERIFY r2 L5: tap key → the failure (its armFailedAt) already SAID to the clients — a verb inside the backoff records
+  // nothing, and that is said ONCE per failure (typed), never an unexplained empty Browser actions row
+  const armFailSaid = new Map();
 
   const bc = (m) => { try { broadcast?.(m); } catch (e) { log.warn?.(`[browser-trace] broadcast failed: ${e && e.message}`); } };
-  const tapKey = (sessionId, profileId) => `${sessionId}|${profileId || T.EPHEMERAL_SCOPE}`;
+  /** VERIFY r2 L5: `browser-trace-status` — `arm_failed` {until = the end of the backoff, the why} when an EPHEMERAL
+   *  tap's arming failed (until then its verbs are not recorded), `armed` when a later arming clears it. Once per failure. */
+  function sayTapStatus(tp, code, { at = null, error = null } = {}) {
+    if (!tp || tp.profileId) return; // the backoff (and so the gap) is the ephemeral tap's alone
+    const base = { type: 'browser-trace-status', sessionId: tp.sessionId, profileId: null, browserKey: tp.wantKey || tp.browserKey || null, child: !!tp.childKey, code };
+    if (code === 'arm_failed') {
+      if (armFailSaid.get(tp.key) === at) return;
+      armFailSaid.set(tp.key, at);
+      bc({ ...base, at, until: at + ARM_RETRY_MS, error: String(error || 'the tap could not be armed').slice(0, 300) });
+    } else if (armFailSaid.has(tp.key)) { armFailSaid.delete(tp.key); bc({ ...base, at: now() }); }
+  }
+  // naive study 2 (finding 4): a SUB-AGENT's ephemeral browser is its own tap (`<session>|child:<key>`), scope `ephemeral`
+  const tapKey = (sessionId, profileId, childKey = null) => (childKey ? `${sessionId}|child:${childKey}` : `${sessionId}|${profileId || T.EPHEMERAL_SCOPE}`);
   const scopeDir = (scope) => path.join(traceRoot, scope);
 
   // ── the index per scope ──
@@ -122,12 +148,19 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function tapState(key, { sessionId, profileId, browserKey, target }) {
     return { key, sessionId, profileId: profileId || null, browserKey: browserKey || null, target, untap: null, pending: new Map(), frames: [], lastUrl: '', ended: false, timers: new Set(), entries: 0 };
   }
-  function onRecord(tp, msg) {
+  /** lane J: the page size a frame shows — the picture's own size + the relay's page reading (src/browser-stream.js). */
+  function pageOf(msg, relay) {
+    const pic = typeof msg.data === 'string' ? S.jpegSize(msg.data) : null;
+    const v = relay && relay.viewport && relay.viewport.ok ? relay.viewport : null;
+    const md = msg.metadata || {};
+    return S.frameGeometry({ picW: pic ? pic.width : 0, picH: pic ? pic.height : 0, page: v, meta: Number(md.deviceWidth) > 0 ? { width: Number(md.deviceWidth), height: Number(md.deviceHeight) } : null });
+  }
+  function onRecord(tp, msg, relay = null) {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.type === 'tap-end') { tp.ended = true; for (const p of [...tp.pending.values()]) finalizeNow(tp, p, 'the stream ended'); taps.delete(tp.key); for (const t of tp.timers) clearTimeout(t); return; }
+    if (msg.type === 'tap-end') { tp.ended = true; for (const p of [...tp.pending.values()]) finalizeNow(tp, p, 'the stream ended'); if (taps.get(tp.key) === tp) taps.delete(tp.key); for (const t of tp.timers) clearTimeout(t); return; }
     if (msg.type === 'url' && typeof msg.url === 'string') { tp.lastUrl = msg.url; return; }
     if (msg.type === 'frame') {
-      const rec = { at: now(), seq: Number.isFinite(msg.seq) ? msg.seq : tp.frames.length ? (tp.frames[tp.frames.length - 1].seq || 0) + 1 : 1, meta: T.frameMeta(msg), data: typeof msg.data === 'string' ? msg.data : '' };
+      const rec = { at: now(), seq: Number.isFinite(msg.seq) ? msg.seq : tp.frames.length ? (tp.frames[tp.frames.length - 1].seq || 0) + 1 : 1, meta: T.frameMeta(msg, pageOf(msg, relay)), data: typeof msg.data === 'string' ? msg.data : '' };
       tp.frames.push(rec);
       if (tp.frames.length > T.FRAME_RING) tp.frames.splice(0, tp.frames.length - T.FRAME_RING);
       for (const p of tp.pending.values()) if (p.resultAt && !p.afterDone) { p.since.push({ at: rec.at, seq: rec.seq, rec }); checkAfter(tp, p); }
@@ -165,9 +198,12 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const r = rt();
     if (!r || typeof r.exec !== 'function') { p.boxWhy = 'no runtime to ask'; p.boxDone = true; maybeFinalize(tp, p); return; }
     const tg = tp.target || {};
-    const opts = tg.kind === 'ephemeral' ? { extraEnv: S.pairsToEnv(tg.envPairs || []), timeout: T.BOX_PROBE_TIMEOUT_MS } : { dir: tg.dir || null, session: tg.sessionName || null, timeout: T.BOX_PROBE_TIMEOUT_MS };
     const ns = tg.kind === 'ephemeral' ? null : tg.ns;
-    Promise.resolve().then(() => r.exec(ns, ['get', 'box', selector], opts)).then((res) => {
+    // naive study 2: a profile's probe runs under the lease's session over the keeper browser's CDP url
+    // (keeper.leaseCliOpts) — never with the profile directory, which would start a second Chrome on it
+    const optsP = tg.kind === 'ephemeral' ? Promise.resolve({ extraEnv: S.pairsToEnv(tg.envPairs || []) })
+      : Promise.resolve(keeper && typeof keeper.leaseCliOpts === 'function' ? keeper.leaseCliOpts(tg.profileId, String(tg.sessionName || '').replace(/^vs-/, '')) : null);
+    optsP.then((o) => { if (!o) throw new Error('the browser answered no CDP url — nothing to probe without starting a second browser'); return r.exec(ns, ['get', 'box', selector], { ...o, timeout: T.BOX_PROBE_TIMEOUT_MS }); }).then((res) => {
       const box = T.boxFromProbe(res && res.json);
       if (box) p.box = box; else p.boxWhy = (res && (res.error || (res.json && res.json.error) || res.stderr || '').toString().trim().slice(0, 200)) || 'the element box was not answered';
     }).catch((e) => { p.boxWhy = String(e && e.message || e).slice(0, 200); }).finally(() => { p.boxDone = true; maybeFinalize(tp, p); });
@@ -194,34 +230,62 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try { fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
     appendIndex(scope, entry);
     tp.entries++;
-    try { bridge?.broadcastTo?.(tp.sessionId, tp.profileId, { type: 'trace', entry }); } catch { /* optional */ }
+    if (!tp.childKey) { try { bridge?.broadcastTo?.(tp.sessionId, tp.profileId, { type: 'trace', entry }); } catch { /* optional */ } } // a sub-agent's browser has no live view of its own
     bc({ type: 'browser-trace-appended', sessionId: tp.sessionId, profileId: tp.profileId, browserKey: tp.browserKey, entry: { id: entry.id, at: entry.at, action: entry.action, kind: entry.kind, text: entry.text, ok: entry.ok, scope } });
   }
 
   // ── arming ──
-  async function watch({ sessionId, profileId = null } = {}) {
-    if (!enabled()) return { ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' };
-    if (!bridge || typeof bridge.tap !== 'function') return { ok: false, code: 'unavailable', error: 'the stream bridge is not wired' };
-    if (!sessionId) return { ok: false, code: 'bad-request', error: 'a session id is required' };
-    const key = tapKey(sessionId, profileId);
-    if (taps.has(key)) return { ok: true, key, already: true };
+  /**
+   * Arm ONE tap: a named profile's (`profileId`) or — `profileId` null — the
+   * session's own EPHEMERAL browser (`S.EPHEMERAL_REF`: never whatever pane is
+   * the session's default, which would file an attachment's actions under the
+   * `ephemeral` scope). A tap never STARTS a browser: a profile must be live,
+   * and an ephemeral one must be `ready` in the keeper (asking its stream
+   * status with no daemon would make the CLI launch one). Concurrent callers
+   * share the one arming (`tp.arming`) — the keeper's verb waits on it.
+   */
+  function watch({ sessionId, profileId = null, browserKey = null, child = false } = {}) {
+    if (!enabled()) return Promise.resolve({ ok: false, code: 'trace_off', error: 'the action trace is off (browser.actionTrace)' });
+    if (!bridge || typeof bridge.tap !== 'function') return Promise.resolve({ ok: false, code: 'unavailable', error: 'the stream bridge is not wired' });
+    if (!sessionId) return Promise.resolve({ ok: false, code: 'bad-request', error: 'a session id is required' });
+    const childKey = !profileId && child && B.isChildKey(browserKey) ? String(browserKey) : null;
+    const key = tapKey(sessionId, profileId, childKey);
+    const had = taps.get(key);
+    if (had) return had.arming ? had.arming.then((r) => (r && r.ok ? { ...r, already: true } : r)) : Promise.resolve({ ok: true, key, already: true });
     // a tap never STARTS a browser — a named profile must already be live
-    if (profileId && keeper) { const rec = keeper.browserOf(profileId); if (!rec || rec.state !== 'ready') return { ok: false, code: 'not-live', error: `profile ${profileId} has no live browser to trace` }; }
+    if (profileId && keeper) { const rec = keeper.browserOf(profileId); if (!rec || rec.state !== 'ready') return Promise.resolve({ ok: false, code: 'not-live', error: `profile ${profileId} has no live browser to trace` }); }
+    // lane H: an ephemeral tap needs its HOLDER ROW (the keeper's one representation — ready, not a sub-agent's)
+    if (!profileId && keeper && browserKey && typeof keeper.holdersFor === 'function') { const held = keeper.holdersFor(browserKey).some((r) => r.ephemeral && !!r.child === !!childKey && r.browserKey === browserKey); if (!held) return Promise.resolve({ ok: false, code: 'not-live', error: `the ephemeral browser of ${browserKey} is not running — nothing to trace` }); }
     const tp = tapState(key, { sessionId, profileId, browserKey: null, target: null });
+    tp.childKey = childKey;
+    tp.wantKey = browserKey ? String(browserKey) : null; // r2 L5: the key a status names before the relay says it
     taps.set(key, tp);
+    tp.arming = arm(tp, key, sessionId, profileId).finally(() => { tp.arming = null; });
+    return tp.arming;
+  }
+  async function arm(tp, key, sessionId, profileId) {
     let r;
-    try { r = await bridge.tap(sessionId, profileId || '', (msg) => onRecord(tp, msg)); } catch (e) { taps.delete(key); return { ok: false, code: 'internal', error: String(e && e.message) }; }
-    if (!r || !r.ok) { taps.delete(key); try { r && r.untap && r.untap(); } catch { /* */ } return { ok: false, code: (r && r.code) || 'refused', error: (r && r.error) || 'tap refused' }; }
+    // the ref: a named profile's id, a sub-agent's `~child:<key>` (its OWN browser, naive study 2), else the session's own ephemeral
+    const ref = profileId || (tp.childKey ? S.childRefFor(tp.childKey) : S.EPHEMERAL_REF);
+    // r2 L5: every failed arming is recorded for the backoff AND said (once) to the clients
+    const failArm = (code, error) => { const at = now(); armFailedAt.set(key, at); sayTapStatus(tp, 'arm_failed', { at, error }); return { ok: false, code, error }; };
+    try { r = await bridge.tap(sessionId, ref, (msg, _text, relay) => onRecord(tp, msg, relay)); } catch (e) { if (taps.get(key) === tp) taps.delete(key); return failArm('internal', String(e && e.message)); } // lane J: the relay rides along (its page reading stamps the frame)
+    if (!r || !r.ok) { if (taps.get(key) === tp) taps.delete(key); try { r && r.untap && r.untap(); } catch { /* */ } return failArm((r && r.code) || 'refused', (r && r.error) || 'tap refused'); }
+    armFailedAt.delete(key);
+    // disarmed while it was connecting (the browser stopped, the lease went): let the relay go
+    if (taps.get(key) !== tp) { try { r.untap && r.untap(); } catch { /* */ } return { ok: false, code: 'ended', error: 'disarmed while the tap was connecting' }; }
     tp.untap = r.untap;
     const relay = bridge._relays ? [...bridge._relays.values()].find((x) => x.key === r.key) : null;
-    tp.browserKey = relay ? relay.browserKey : null;
+    tp.browserKey = relay ? relay.browserKey : (tp.childKey || null);
     tp.target = relay ? relay.target : (r.target || null);
-    if (tp.ended) { taps.delete(key); return { ok: false, code: 'ended', error: 'the stream ended at once' }; }
-    log.log?.(`[browser-trace] tracing ${sessionId} on ${profileId || 'its ephemeral browser'}`);
+    if (tp.ended) { taps.delete(key); return failArm('ended', 'the stream ended at once'); }
+    sayTapStatus(tp, 'armed');
+    log.log?.(`[browser-trace] tracing ${sessionId} on ${profileId || (tp.childKey ? 'its sub-agent browser ' + tp.childKey : 'its ephemeral browser')}`);
     return { ok: true, key };
   }
-  function unwatch({ sessionId, profileId = null } = {}) {
-    const key = tapKey(sessionId, profileId);
+  function unwatch({ sessionId, profileId = null, childKey = null } = {}) {
+    const key = tapKey(sessionId, profileId, childKey);
+    armFailedAt.delete(key); armFailSaid.delete(key);
     const tp = taps.get(key);
     if (!tp) return false;
     for (const p of [...tp.pending.values()]) finalizeNow(tp, p, 'tracing stopped');
@@ -232,16 +296,50 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   }
   /** Arm a tap for every lease on a profile whose browser is live (attach / browser-ready / boot). */
   function armProfile(profileId) {
-    if (!keeper) return;
-    for (const l of keeper.leasesOn(profileId)) if (l.sessionId) watch({ sessionId: l.sessionId, profileId }).catch(() => { });
+    if (!keeper) return Promise.resolve([]);
+    const ps = [];
+    for (const l of keeper.leasesOn(profileId)) if (l.sessionId) ps.push(watch({ sessionId: l.sessionId, profileId }).catch(() => null));
+    return Promise.all(ps);
   }
+  /** Lane H: the tap on a conversation's managed EPHEMERAL browser (scope
+   *  `ephemeral`) — armed on its `browser-ready`, re-armed on a `verb` when no
+   *  tap holds it; a sub-agent's ephemeral is not its session's pane. */
+  /** Naive study 2 (finding 4): a SUB-AGENT's ephemeral browser is recorded too ("no recorded actions" under every
+   *  helper's command: nobody was viewing) — its own tap, `~child:<key>`, never a live view. */
+  function armEphemeral(ev) {
+    if (!ev.sessionId) return Promise.resolve(null);
+    return watch({ sessionId: ev.sessionId, profileId: null, browserKey: ev.browserKey || null, child: !!ev.child }).catch(() => null);
+  }
+  /** VERIFY r1 L1: THE ARM WAIT BELONGS TO THE VERB THAT STARTED THE BROWSER. A `verb` on an already-live browser
+   *  arms only when NO tap holds it — never joining an arming another event started (a tap stuck arming used to
+   *  hold EVERY verb for the whole wait: 3150 / 3098 / 3108 ms on 0.38.1) — and not within ARM_RETRY_MS of a
+   *  FAILED arming of the same key (a failed tap was deleted and every next verb re-armed and waited again). A
+   *  `browser-ready` (a NEW browser) always arms. */
+  function armOnVerb(ev) {
+    if (!ev.sessionId) return null;
+    const key = tapKey(ev.sessionId, null, ev.child && B.isChildKey(ev.browserKey) ? ev.browserKey : null);
+    if (taps.has(key)) return null;
+    const failed = armFailedAt.get(key);
+    // r2 L5: inside the backoff this verb is not recorded — said once per failure (a no-op when the failure already was)
+    if (failed != null && now() - failed < ARM_RETRY_MS) { sayTapStatus({ key, sessionId: ev.sessionId, profileId: null, wantKey: ev.browserKey || null, childKey: ev.child && B.isChildKey(ev.browserKey) ? ev.browserKey : null }, 'arm_failed', { at: failed, error: 'the last arming failed' }); return null; }
+    return armEphemeral(ev);
+  }
+  /** Every event answers a promise when it ARMS a tap — the keeper holds the
+   *  verb that caused it until the tap is connected (bounded, lane H). */
   function onLeaseEvent(ev) {
-    if (!ev) return;
-    if (ev.kind === 'attach') { if (ev.sessionId) watch({ sessionId: ev.sessionId, profileId: ev.profileId }).catch(() => { }); maybeStartRecording(ev.profileId, ev.browserKey, ev.sessionId).catch(() => { }); }
-    else if (ev.kind === 'browser-ready') { armProfile(ev.profileId); for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) maybeStartRecording(ev.profileId, l.browserKey, l.sessionId).catch(() => { }); }
+    if (!ev) return null;
+    if (ev.ephemeral) {
+      if (ev.kind === 'browser-ready') return armEphemeral(ev);
+      if (ev.kind === 'verb') return armOnVerb(ev);
+      if ((ev.kind === 'browser-stopped' || ev.kind === 'lease-dropped' || ev.kind === 'detach') && ev.sessionId) unwatch({ sessionId: ev.sessionId, profileId: null, childKey: ev.child && B.isChildKey(ev.browserKey) ? ev.browserKey : null });
+      return null;
+    }
+    if (ev.kind === 'attach') { const p = ev.sessionId ? watch({ sessionId: ev.sessionId, profileId: ev.profileId }).catch(() => null) : null; maybeStartRecording(ev.profileId, ev.browserKey, ev.sessionId).catch(() => { }); return p; }
+    else if (ev.kind === 'browser-ready') { const p = armProfile(ev.profileId); for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) maybeStartRecording(ev.profileId, l.browserKey, l.sessionId).catch(() => { }); return p; }
     else if (ev.kind === 'detach' || ev.kind === 'lease-dropped') { if (ev.sessionId) unwatch({ sessionId: ev.sessionId, profileId: ev.profileId }); stopRecording(ev.profileId, ev.browserKey, ev.kind).catch(() => { }); }
     else if (ev.kind === 'browser-stopped') { for (const tp of [...taps.values()]) if (tp.profileId === ev.profileId) unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); for (const k of [...recordings.keys()]) if (k.startsWith(ev.profileId + '|')) recordings.delete(k); }
     else if (ev.kind === 'profile-updated' && ev.changed && ev.changed.record) { if (ev.changed.record.now) { for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) maybeStartRecording(ev.profileId, l.browserKey, l.sessionId).catch(() => { }); } else { for (const k of [...recordings.keys()]) if (k.startsWith(ev.profileId + '|')) stopRecording(ev.profileId, k.slice(ev.profileId.length + 1), 'record off').catch(() => { }); } }
+    return null;
   }
 
   // ── the per-profile screencast (D7) ──
@@ -259,7 +357,10 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const rel = T.recordingFileFor({ profileId, sessionId: sessionId || browserKey, at: now() });
     const file = path.join(recRoot, rel);
     try { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); } catch (e) { return { ok: false, code: 'dir_unwritable', error: e.message }; }
-    const res = await r.exec(B.sessionNameFor(profileId), ['record', 'start', file], { dir: p.dir, session: B.sessionNameFor(browserKey), timeout: 20000 });
+    // naive study 2: under the lease's session over the keeper browser's CDP url — never the profile directory
+    const o = typeof keeper.leaseCliOpts === 'function' ? await keeper.leaseCliOpts(profileId, browserKey) : null;
+    if (!o) { const why = 'the browser answered no CDP url — a screencast cannot join it without starting a second browser'; recordingRefusals.set(profileId, { code: 'browser_no_cdp', error: why, at: now() }); return { ok: false, code: 'browser_no_cdp', error: why }; }
+    const res = await r.exec(B.sessionNameFor(profileId), ['record', 'start', file], { ...o, timeout: 20000 });
     if (!res.ok) { const why = (res.error || res.stderr || res.stdout || '').trim().slice(0, 300); recordingRefusals.set(profileId, { code: 'record_failed', error: why, at: now() }); log.warn?.(`[browser-trace] record start failed for ${profileId}: ${why}`); return { ok: false, code: 'record_failed', error: why }; }
     const st = { profileId, browserKey, sessionId: sessionId || null, file: rel, since: now() };
     recordings.set(key, st);
@@ -275,7 +376,7 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     recordings.delete(key);
     const r = rt(); const p = keeper ? keeper.profile(profileId) : null;
     let res = null;
-    if (r && p) { try { res = await r.exec(B.sessionNameFor(profileId), ['record', 'stop'], { dir: p.dir, session: B.sessionNameFor(browserKey), timeout: 20000 }); } catch (e) { res = { ok: false, error: String(e && e.message) }; } }
+    if (r && p) { try { const o = typeof keeper.leaseCliOpts === 'function' ? await keeper.leaseCliOpts(profileId, browserKey) : null; res = o ? await r.exec(B.sessionNameFor(profileId), ['record', 'stop'], { ...o, timeout: 20000 }) : { ok: false, error: 'the browser answered no CDP url (it stopped?) — nothing to tell to stop recording' }; } catch (e) { res = { ok: false, error: String(e && e.message) }; } }
     log.log?.(`[browser-trace] recording of ${profileId} (${browserKey}) stopped (${why})${res && !res.ok ? ' — record stop answered: ' + (res.error || res.stderr || '').trim().slice(0, 200) : ''}`);
     try { keeper && keeper.list && bc({ type: 'browser-profiles-updated', ...keeper.list() }); } catch { /* */ }
     return { ok: true, file: st.file, stopped: !!(res && res.ok) };
@@ -306,8 +407,10 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     let all = [];
     for (const sc of names) { if (!SCOPE_RE.test(sc)) continue; all = all.concat(loadIndex(sc)); }
     let hits = T.entriesInWindow(all, { sessionId: anyOf ? null : sessionId, from: Number(from) || 0, to: Number.isFinite(Number(to)) && to !== Infinity ? Number(to) : Infinity });
-    if (anyOf && (sessionId || browserKey)) hits = hits.filter((e) => (sessionId && e.sessionId === sessionId) || (browserKey && e.browserKey === browserKey));
-    else if (browserKey) hits = hits.filter((e) => e.browserKey === browserKey);
+    // naive study 2 (finding 4): a conversation's key also finds its SUB-AGENTS' browsers (`bk-<key>.<n>`) — the helpers' actions stay findable after it stops
+    const keyHit = (e) => e.browserKey === browserKey || (B.isChildKey(e.browserKey) && B.parentKeyOf(e.browserKey) === browserKey);
+    if (anyOf && (sessionId || browserKey)) hits = hits.filter((e) => (sessionId && e.sessionId === sessionId) || (browserKey && keyHit(e)));
+    else if (browserKey) hits = hits.filter(keyHit);
     hits.sort((a, b) => a.at - b.at);
     const n = Math.max(1, Math.min(1000, Number(limit) || 200));
     return hits.length > n ? hits.slice(hits.length - n) : hits;
@@ -488,8 +591,14 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     let armed = 0;
     if (keeper && enabled()) {
       const reg = keeper._reg();
-      // takeover C3: a managed ephemeral browser's lease arms nothing here (its trace scope is `ephemeral`, armed by the live view's tap)
-      for (const l of reg.leases) { if (typeof keeper.isEphemeral === 'function' && keeper.isEphemeral(l.profileId)) continue; const rec = reg.browsers[l.profileId]; if (rec && rec.state === 'ready' && l.sessionId) { const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { }); } }
+      // lane H: a managed ephemeral browser that is READY (adopted across the restart) is tapped too — scope `ephemeral`,
+      // on THAT browser; never a screencast (a per-profile opt-in), never a sub-agent's (its pairs are not its session's)
+      for (const l of reg.leases) {
+        const rec = reg.browsers[l.profileId];
+        if (!rec || rec.state !== 'ready' || !l.sessionId) continue;
+        if (typeof keeper.isEphemeral === 'function' && keeper.isEphemeral(l.profileId)) { const r = await watch({ sessionId: l.sessionId, profileId: null, browserKey: l.browserKey, child: B.isChildKey(l.browserKey) }); if (r.ok) armed++; continue; } // naive study 2: a sub-agent's too
+        const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { });
+      }
     }
     let sw = null; try { sw = sweep(); } catch (e) { log.warn?.(`[browser-trace] boot sweep failed: ${e && e.message}`); }
     if (!timer && sweepEveryMs > 0) { timer = setInterval(() => { try { sweep(); } catch (e) { log.warn?.(`[browser-trace] sweep failed: ${e && e.message}`); } }, sweepEveryMs); if (timer.unref) timer.unref(); }
@@ -505,4 +614,4 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   };
 }
 
-module.exports = { create, SWEEP_EVERY_MS, INDEX_FILE };
+module.exports = { create, SWEEP_EVERY_MS, INDEX_FILE, ARM_RETRY_MS };

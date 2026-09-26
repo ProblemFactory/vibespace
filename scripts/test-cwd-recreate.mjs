@@ -2,7 +2,8 @@ import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePort, scratch } from './scratch.mjs';
+import { freePort, scratch, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(new URL('../server.js', import.meta.url));
 const repo = process.cwd();
 const PORT = await freePort(); // per-process (scripts/scratch.mjs) — fixed ports collided across concurrent gates
@@ -22,7 +23,7 @@ fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); // the cw
 const projDir = path.join(fakeHome, '.claude', 'projects', MISSING_CWD.replace(/[/._]/g, '-'));
 fs.mkdirSync(projDir, { recursive: true });
 fs.writeFileSync(path.join(projDir, `${SID}.jsonl`), JSON.stringify({ type: 'user', uuid: 'u1', timestamp: new Date().toISOString(), sessionId: SID, cwd: MISSING_CWD, message: { role: 'user', content: [{ type: 'text', text: 'hello from before the deletion' }] } }) + '\n');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
 process.on('exit', () => { try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}; try { fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); } catch {} });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 const WebSocket = require('ws');

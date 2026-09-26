@@ -354,7 +354,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
       // SEPARATELY — the project file only narrows (the fence, the policy);
       // its launch keys and every raw-debugging switch in `args` are dropped
       // and said (`projectDropped` / `argsDropped`, journalled below)
-      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting() });
+      // lane H verify r4: the config carries the keeper's launch MARK for this browser key — its Chrome is then proven
+      // VibeSpace's by its own command line (the binary scrubs the Chrome's environment; a directory proves nothing)
+      composed = B.generatedConfigParts({ userConfig: eff.user, projectConfig: eff.projectFile, pinnedDir: pin, headed: headedSetting(), mark: key });
       const cfg = composed.config;
       writeJson(p, cfg);
       const back = JSON.parse(fs.readFileSync(p, 'utf8'));
@@ -707,6 +709,7 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     const namesProfile = B.configNamesProfile(cfg);
     const out = { ...cfg };
     delete out.profile;
+    out.args = B.withKeeperMark(out.args, childKey); // lane H verify r4: the child's browser carries ITS OWN launch mark, never the parent's
     try {
       ensureDirs();
       const p = configPathFor(childKey);

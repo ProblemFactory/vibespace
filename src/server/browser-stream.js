@@ -110,7 +110,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (keeper) { try { set = keeper.setFor(f.browserKey); profiles = keeper.list().profiles; } catch (e) { log.warn?.(`[browser-live] keeper unreadable: ${e && e.message}`); } }
     const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef, envPairs: f.envPairs, profiles });
     if (!target.ok) return refuse(ws, target.code, target.error, { handles: target.handles || [] });
-    const key = `${sessionId}|${target.kind === 'attachment' ? target.profileId : 'ephemeral'}`;
+    const key = relayKeyOf(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
     const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now() };
@@ -118,6 +118,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
     if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; }
+    if (relay.viewport) send(ws, relay.viewport); // lane J: the page's viewport reading, replayed like the last frame
+    // 2.369.180 (lanes H + J on one tree): a viewer that joins a relay whose upstream is ALREADY open is told so — the
+    // 'upstream-open' broadcast went out before it came, and lane H's recorder taps a holder's relay before anybody
+    // watches, so EVERY live view of an ephemeral browser is such a joiner. Without it the view never read itself
+    // connected, and lane J's keyboard ownership (`connected` is one of its facts) never let a takeover own the keyboard.
+    if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
     // P3: a late viewer is told what is still waiting on a confirmation
     if (keeper && typeof keeper.pendingFor === 'function') { try { for (const c of keeper.pendingFor(relay.browserKey, relay.target.profileId || null)) send(ws, c); } catch { /* optional */ } }
     broadcastViewers(relay);
@@ -127,16 +133,22 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     await relay.ensureUpstream();
   }
 
+  /** One relay per (session, target): an attachment by its profile, the session's own ephemeral, or (naive study 2,
+   *  finding 4) a SUB-AGENT's ephemeral by its child key — a tap only, never a viewer's. */
+  const relayKeyOf = (sessionId, target) => `${sessionId}|${target.kind === 'attachment' ? target.profileId : (target.child ? 'child:' + target.browserKey : 'ephemeral')}`;
   function createRelay(key, sessionId, target) {
     const f = sessionFacts(sessionId) || {};
     const relay = {
-      key, sessionId, target, browserKey: f.browserKey || null, envPairs: f.envPairs || null, viewers: new Map(), upstream: null, connecting: null, last: {}, lastFrame: null,
+      // a sub-agent's relay is keyed and answered under ITS key and pairs (the session's are its parent's)
+      key, sessionId, target, browserKey: target.browserKey || f.browserKey || null, envPairs: target.envPairs || f.envPairs || null, viewers: new Map(), upstream: null, connecting: null, last: {}, lastFrame: null,
       // P5 (§4.5): server-side TAPS — the action-trace recorder listens to the
       // same upstream (every record, frames included) and keeps the relay
       // alive with no viewer at a low fps; a tap never drives, never counts
       // as a viewer, and is told `tap-end` when the relay ends.
       taps: new Set(),
       paused: false, resumePoll: null, mode: 'watch', holder: null, modeSince: 0, lastInputNoteAt: 0, upstreamMaxFps: null, port: null,
+      // lane J (inc-muhgv0fb-9i4u): the picture's own size (off each frame's JPEG) and the page's own viewport reading
+      picture: null, viewport: null, activeTab: '', activeUrl: '', vp: { busy: false, again: null, warned: false },
       stats: { frames: 0, dropped: 0, ordered: 0 }, lastLiveCheck: now(), since: now(),
     };
     // P3: the keeper may already say somebody drives (an HTTP takeover, a
@@ -156,7 +168,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!keeper) { broadcast(relay, { type: 'status', state: 'error', code: 'unavailable', error: 'browser profiles are not available on this server' }); return endRelay(relay, 1011); }
     const r = await keeper.streamPortFor(relay.target);
     if (!relay.viewers.size && !relay.taps.size) return endRelay(relay);           // everyone left while the port was asked for
-    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error }); return endRelay(relay, 1011); }
+    if (!r.ok) { broadcast(relay, { type: 'status', state: 'error', code: r.code || 'stream_unavailable', error: r.error, ...(r.unstable ? { unstable: r.unstable } : {}) }); return endRelay(relay, 1011); } // lane H verify r6: an unstable verdict's kind rides (the view's words)
     relay.port = r.port;
     const up = new WebSocketImpl(`ws://127.0.0.1:${r.port}`, { headers: { Origin: S.originHeaderFor(r.port) }, maxPayload: MAX_PAYLOAD, handshakeTimeout: connectTimeoutMs });
     relay.upstream = up;
@@ -168,6 +180,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       if (relay.upstream !== up) return;
       relay.upstream = null;
       stopResumePoll(relay);
+      // VERIFY r1 H2: an EPHEMERAL browser's stream server closing is usually its daemon dying — the keeper judges the
+      // process NOW, so its holder row leaves at once (and the viewer's 1 s reconnect is refused browser_stopped, never a CLI ask)
+      if (relay.target.kind === 'ephemeral' && keeper && typeof keeper.noteStreamClosed === 'function') { try { keeper.noteStreamClosed(relay.target); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: keeper.noteStreamClosed failed — ${e && e.message}`); } }
       broadcast(relay, { type: 'status', state: 'upstream-closed', code: Number(code) || 0 });
       endRelay(relay, 1001);
     });
@@ -184,6 +199,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     let msg = null; try { msg = JSON.parse(text); } catch { return; }
     const cls = S.classifyUpstream(msg);
     if (cls === 'invalid') return;
+    if (S.privateUpstream(msg)) return; // lane J: the daemon's own cdp_url pair (the viewport read asks it) — the raw CDP endpoint never reaches a viewer or a tap
+    notePicture(relay, msg, cls);
     // P5: every tap sees every record (a tap that throws never breaks the fan-out)
     for (const fn of relay.taps) { try { fn(msg, text, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
     if (cls !== 'frame') onOrderedForKeeper(relay, msg);
@@ -263,6 +280,44 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     return d;
   }
 
+  // ── lane J (inc-muhgv0fb-9i4u): the two sizes a pointer maps through ──
+  /** The picture's size off every frame's JPEG and the active tab off every
+   *  `tabs` record: a change of either re-reads the page's viewport. */
+  function notePicture(relay, msg, cls) {
+    if (cls === 'frame') {
+      const sz = typeof msg.data === 'string' ? S.jpegSize(msg.data) : null;
+      if (sz && (!relay.picture || relay.picture.width !== sz.width || relay.picture.height !== sz.height)) { relay.picture = sz; scheduleViewport(relay, relay.viewport ? 'picture' : 'first-frame'); }
+      return;
+    }
+    if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
+      const act = msg.tabs.find((x) => x && x.active);
+      const u = act && typeof act.url === 'string' ? act.url : '';
+      if (act && (String(act.tabId || '') + '|' + u) !== relay.activeTab) { const first = !relay.activeTab; relay.activeTab = String(act.tabId || '') + '|' + u; relay.activeUrl = u; if (!first && relay.picture) scheduleViewport(relay, 'tab'); }
+    }
+  }
+  /** Ask the keeper for the page's own viewport (CDP layout metrics) — single
+   *  flight, a request during a read re-runs once after it — and tell every
+   *  viewer (`{type:'viewport'}`; the last good one is replayed to a late
+   *  viewer). A failure is said once in the journal and to the viewers; the
+   *  view then maps by the picture (frameGeometry's last rung). */
+  function scheduleViewport(relay, why) {
+    if (!keeper || typeof keeper.viewportFor !== 'function') return;
+    if (relay.vp.busy) { relay.vp.again = why; return; }
+    relay.vp.busy = true;
+    const activeUrl = relay.activeUrl || lastUrlOf(relay); // the ACTIVE TAB's url (the screencast's page), else the last url mirrored
+    Promise.resolve().then(() => keeper.viewportFor(relay.target, { activeUrl })).catch((e) => ({ ok: false, error: String(e && e.message) })).then((r) => {
+      relay.vp.busy = false;
+      if (relays.get(relay.key) !== relay) return;                                  // the relay ended meanwhile
+      const rec = r && r.ok
+        ? { type: 'viewport', ok: true, clientWidth: Number(r.clientWidth), clientHeight: Number(r.clientHeight), picture: relay.picture, why, at: now() }
+        : { type: 'viewport', ok: false, error: String((r && r.error) || 'unreadable'), picture: relay.picture, why, at: now() };
+      if (rec.ok) relay.viewport = rec;
+      else if (!relay.vp.warned) { relay.vp.warned = true; log.warn?.(`[browser-live] ${relay.key}: the page's viewport could not be read (${rec.error}) — the view maps by the picture`); }
+      broadcast(relay, rec);
+      if (relay.vp.again) { const w = relay.vp.again; relay.vp.again = null; scheduleViewport(relay, w); }
+    });
+  }
+
   function applyBackpressure(relay) {
     if (relay.paused || !relay.upstream) return;
     const v = S.backpressureVerdict([...relay.viewers.values()].map((x) => x.ws.bufferedAmount), false, limits);
@@ -295,6 +350,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // P3 (§4.3): the control verbs
     if (v.kind === 'takeover') {
       const r = takeoverFor(relay, viewer);
+      if (r.ok) scheduleViewport(relay, 'takeover'); // lane J: the page is re-read the moment input starts to matter (a window resized in the same proportions keeps its picture size)
       if (!r.ok) send(viewer.ws, { type: 'refused', code: r.code || 'held', error: r.error || 'refused', holder: r.holder ? r.holder.viewerId : relay.holder, mode: relay.mode });
       else send(viewer.ws, { type: 'mode-ack', ok: true, mode: relay.mode, mine: relay.holder === viewer.id, already: !!r.already });
       return;
@@ -345,9 +401,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (f.host) return { ok: false, code: 'unsupported-host', error: `session ${sessionId} runs on host ${JSON.stringify(f.host)} — its stream is not bridged` };
     let set = null, profiles = [];
     if (keeper) { try { set = keeper.setFor(f.browserKey); profiles = keeper.list().profiles; } catch (e) { return { ok: false, code: 'unavailable', error: `keeper unreadable: ${e && e.message}` }; } }
-    const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef: profileRef || '', envPairs: f.envPairs, profiles });
+    // naive study 2 (finding 4): a sub-agent's browser is tapped under ITS OWN pairs, which only the keeper holds
+    const ck = S.childKeyOfRef(profileRef, f.browserKey);
+    const childPairs = ck && keeper && typeof keeper.ephemeralPairsFor === 'function' ? keeper.ephemeralPairsFor(ck) : null;
+    const target = S.streamTargetFor({ browserKey: f.browserKey, set, profileRef: profileRef || '', envPairs: f.envPairs, profiles, childPairs });
     if (!target.ok) return { ok: false, code: target.code, error: target.error };
-    const key = `${sessionId}|${target.kind === 'attachment' ? target.profileId : 'ephemeral'}`;
+    const key = relayKeyOf(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
     relay.taps.add(fn);
@@ -360,12 +419,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     };
     await relay.ensureUpstream();
     if (relays.get(key) !== relay) return { ok: false, code: 'ended', error: 'the relay ended while its upstream was connected', untap };
-    return { ok: true, key, untap, target: { kind: target.kind, profileId: target.profileId || null } };
+    return { ok: true, key, untap, target: { kind: target.kind, profileId: target.profileId || null, child: !!target.child, browserKey: target.browserKey || null } };
   }
   /** Send one JSON record to every viewer of the relays on (session, profileId|null). */
   function broadcastTo(sessionId, profileId, obj) {
     let n = 0;
-    for (const r of relays.values()) { if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null)) continue; broadcast(r, obj); n += r.viewers.size; }
+    for (const r of relays.values()) { if (r.sessionId !== sessionId || (r.target.profileId || null) !== (profileId || null) || r.target.child) continue; broadcast(r, obj); n += r.viewers.size; }
     return n;
   }
   /** Close every viewer (typed status first, when a reason is given) and the
@@ -392,6 +451,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     return [...relays.values()].map((r) => ({
       key: r.key, sessionId: r.sessionId, target: { kind: r.target.kind, profileId: r.target.profileId || null, alias: r.target.alias || null }, port: r.port,
       upstream: r.upstream ? r.upstream.readyState : null, paused: r.paused, upstreamMaxFps: r.upstreamMaxFps, mode: r.mode, holder: r.holder,
+      picture: r.picture, viewport: r.viewport ? { clientWidth: r.viewport.clientWidth, clientHeight: r.viewport.clientHeight, why: r.viewport.why } : null, // lane J
       viewers: [...r.viewers.values()].map((v) => ({ id: v.id, maxFps: v.maxFps, sent: v.sent, dropped: v.dropped, bufferedAmount: v.ws.bufferedAmount })),
       ...r.stats,
     }));

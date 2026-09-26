@@ -159,7 +159,7 @@ console.log('— ① the provider rows, their refusals, the egress record, the c
   const e1 = B.attachedEnvFor({ browserKey: 'bk-0123abcd', profileId: 'bp-0123abcd', profileDir: '/p', cdpUrl: 'ws://127.0.0.1:4444/devtools/browser/x' });
   ok(e1.includes('AGENT_BROWSER_CDP=ws://127.0.0.1:4444/devtools/browser/x') && !e1.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE=')) && e1.includes('AGENT_BROWSER_NAMESPACE=vs-bp-0123abcd'), 'a reached browser: the env names the loopback CDP url and NO profile directory');
   const e2 = B.attachedEnvFor({ browserKey: 'bk-0123abcd', profileId: 'bp-0123abcd', profileDir: '/p', cdpUrl: 'ws://10.0.0.5:4444/x' });
-  ok(e2.includes('AGENT_BROWSER_PROFILE=/p') && !e2.some(B.isCdpPair), 'a NON-loopback CDP url is never handed to a session (§6.1: only through the forward)');
+  ok(e2 === null, 'a NON-loopback CDP url is never handed to a session (§6.1: only through the forward) — and no directory instead (naive study 2: the keeper is the only launcher; the caller refuses `browser_no_cdp`)');
   ok(B.forwardedCdpUrl('ws://127.0.0.1:9222/devtools/browser/abc', 5555) === 'ws://127.0.0.1:5555/devtools/browser/abc' && B.forwardedCdpUrl(9222, 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('', 5555) === 'http://127.0.0.1:5555' && B.forwardedCdpUrl('ftp://x', 5555) === null && B.forwardedCdpUrl('9222', 0) === null, 'forwardedCdpUrl keeps scheme + path and re-points host:port; a bare port becomes an http endpoint');
   ok(B.cdpPortOf('ws://127.0.0.1:19222/devtools/browser/x') === 19222 && B.cdpPortOf('http://localhost:9222') === 9222 && B.cdpPortOf('ws://10.0.0.1:9222/') === null, 'cdpPortOf reads a LOOPBACK url\'s port only');
 

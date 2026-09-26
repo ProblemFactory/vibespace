@@ -21,9 +21,11 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   ensureAgentdOnHost, getPortForwards, onMountsUpdated, activeSessions, getTelemetry = null, serverNotice = null, broadcastActiveSessions = null,
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
-  getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null,
+  getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
   deliver = null, userTodos = null,
+  // lane J r2: the adapter registry the browser takeover's stale sweep answers pending approvals through (THE one permission answer)
+  adapterRegistry = null,
   // agent browser P4 second half (§7.5): the integration store (src/server/integrations-wiring.js, created BEFORE this
   // wiring in server.js) the key consumer resolves through — never process.env
   integrations = null }) {
@@ -640,6 +642,7 @@ function createSessionMessages(session, sessionId) {
     browserKeeper = require('./browser-keeper').create({
       dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
       serverSetting, serverNotice, getTelemetry,
+      userTodos, // lane H verify r5: the ONE For-you notice (origin browser) when a profile's browser keeps closing (the heal budget)
       access: browserAccess, hostKnown: (h) => browserAccess.hostKnown(h),
       integrations: () => integrations, keys: browserBackend, mediator: cdpMediator,
       liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
@@ -688,6 +691,8 @@ function createSessionMessages(session, sessionId) {
       persistPin: (session, profileId, origin) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserProfileId: profileId || undefined, browserPinOrigin: origin || undefined }); },
       // P2 (§3.8 ③): the profile the agent LAST USED rides the meta (a restart keeps the chip honest) and re-publishes the live facts (the chip gates on its own digest)
       persistActive: (session, v) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserProfileActive: v === null || v === undefined ? undefined : String(v) }); },
+      // lane H: re-run the ONE meta choke point (its binding hook + belts) when an ephemeral browser starts — a missing conversation → key binding is written by the same rule, never a second one
+      ensureBinding: (session) => { if (rebindSessionMeta && session) rebindSessionMeta(session); },
       onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
       // the pin route re-points a RUNNING session's indirection through the
       // same module ws-create resolves it with (file-based, so a second
@@ -700,6 +705,18 @@ function createSessionMessages(session, sessionId) {
       },
     });
     app.use(browserRouter);
+    // lane H (2026-09-25): the session card's + status chip's `browserLive` fact moves when a browser STARTS or
+    // STOPS (a managed ephemeral one included) — re-publish the live facts, debounced; never holds a verb (no promise)
+    {
+      let factsTimer = null;
+      const MOVES = new Set(['browser-ready', 'browser-stopped', 'attach', 'detach', 'lease-dropped']);
+      browserKeeper.onLease((ev) => {
+        if (!ev || !MOVES.has(ev.kind) || factsTimer) return null;
+        factsTimer = setTimeout(() => { factsTimer = null; try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } }, 300);
+        if (factsTimer.unref) factsTimer.unref();
+        return null;
+      });
+    }
     // P3 (§4.3.1): the handback announcer — hangs on the keeper's input/confirmation
     // seams; an explicit handback is delivered through the gated ladder under
     // 'browser-handback', an idle one files one inbox item and queues the
@@ -710,6 +727,16 @@ function createSessionMessages(session, sessionId) {
         sessionKeyFor: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : null),
         notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); },
         onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
+        // lane J r2: pending approvals for a browser page command go STALE at the takeover / handback (answered browser_paused through THE one permission answer)
+        approvals: (() => {
+          const N = require('../normalizers');
+          const { answerPermission } = require('./permission-answer');
+          return {
+            pending: (session) => N.pendingPermissions(session),
+            answer: (_sessionId, session, data) => answerPermission(session, data, { adapterRegistry, feedLive: N.feedLive }),
+            note: (session, requestId, staleBy) => N.notePermissionStale(session, requestId, staleBy),
+          };
+        })(),
       });
       browserHandback.install();
     } catch (e) { console.warn('[browser] handback announcer unavailable — ' + (e && e.message)); }

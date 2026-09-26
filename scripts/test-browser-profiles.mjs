@@ -63,6 +63,14 @@ import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
+/** lane H verify r4: every generated config carries the keeper's launch MARK for its browser key as its LAST `args`
+ *  switch — the config minus that mark (a missing / misplaced mark leaves a '<NO MARK …>' args that fails every pin). */
+const unmark = (cfg, key) => {
+  const m = B.keeperMarkArg(key); const a = cfg && cfg.args;
+  if (typeof a === 'string' && a.endsWith(',' + m) && a.split(m).length === 2) return { ...cfg, args: a.slice(0, -(m.length + 1)) };
+  if (a === m) { const { args: _a, ...rest } = cfg; return rest; }
+  return { ...cfg, args: `<NO MARK ${m}> ${a}` };
+};
 const BE = require('../src/server/browser-env.js');
 const { createBrowserFacts, sanitizeProbeEnv } = require('../src/browser-facts.js');
 
@@ -539,7 +547,7 @@ console.log('\n⑩ the generated config carries the user\'s restrictions (r2)');
   const e = mk({ homeDir: H2, log: { warn: (s) => lines.push(String(s)), log() { } } });
   const r = e.envFor({ browserKey: 'bk-fe0e0001', integrationOn: true });
   const cfg = ok(r.configPath && fs.existsSync(r.configPath), 'setup: the generated config exists (a mutant must go RED, not crash)')
-    ? JSON.parse(fs.readFileSync(r.configPath, 'utf8')) : {};
+    ? unmark(JSON.parse(fs.readFileSync(r.configPath, 'utf8')), 'bk-fe0e0001') : {};
   ok(Array.isArray(cfg.allowedDomains) && cfg.allowedDomains[0] === 'example.com',
     "the user's own browsing FENCE survives — §3.2.2 sells variant D on \"能否带 --allowed-domains: 是\" and §6.3 forbids accepting a flag that is later silently dropped");
   for (const k of ['confirmActions', 'actionPolicy', 'initScripts', 'downloadPath', 'maxOutput', 'aKeyNobodyEnumerated']) {
@@ -580,7 +588,7 @@ console.log('\n⑩ the generated config carries the user\'s restrictions (r2)');
     `and each line carries that key's own reason — ${JSON.stringify(l2.find((l) => /drops `restore`/.test(l))?.slice(0, 110) || '<nothing>')}`);
   ok(l2.every((l) => /carried across unchanged/.test(l)),
     '…and says what it did NOT drop, so the line is not read as "your config was ignored"');
-  const cfgP = JSON.parse(fs.readFileSync(rp.configPath, 'utf8'));
+  const cfgP = unmark(JSON.parse(fs.readFileSync(rp.configPath, 'utf8')), 'bk-fe0e0002');
   ok(!('profile' in cfgP) && !('restore' in cfgP) && cfgP.args === '--no-sandbox' && cfgP.headed === true,
     'the file itself: both denied keys gone, everything else verbatim');
   ok(Object.keys(B.EPHEMERAL_DENY).every((k) => typeof B.EPHEMERAL_DENY[k] === 'string' && B.EPHEMERAL_DENY[k].length > 10),
@@ -859,7 +867,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   const e = mk({ homeDir: H13, log: { warn: (s) => lines.push(String(s)), log() { } } });
   const K = 'bk-13131301';
   const r = e.envFor({ browserKey: K, integrationOn: true, cwd: PROJ });
-  const cfg = ok(!!r.configPath && fs.existsSync(r.configPath), 'setup: variant D wrote a config (a mutant must go RED, not crash)') ? JSON.parse(fs.readFileSync(r.configPath, 'utf8')) : {};
+  const cfg = ok(!!r.configPath && fs.existsSync(r.configPath), 'setup: variant D wrote a config (a mutant must go RED, not crash)') ? unmark(JSON.parse(fs.readFileSync(r.configPath, 'utf8')), K) : {};
   ok(Array.isArray(cfg.allowedDomains) && cfg.allowedDomains[0] === 'example.com', 'THE FIX: the generated config carries the PROJECT-level fence');
   // takeover r3 (finding 2): the project file only NARROWS — its `confirmActions` (a narrowing key) is carried,
   // its `args` and `extensions` (launch keys) are NOT: the user file's stand, and the drop is journalled by name
@@ -896,13 +904,13 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
   // (a) no cwd ⇒ round 2's behaviour by construction: user file only, no line
   const la = [];
   const ra = mk({ homeDir: H13, log: { warn: (s) => la.push(String(s)), log() { } } }).envFor({ browserKey: 'bk-13131303', integrationOn: true });
-  const ca = JSON.parse(fs.readFileSync(ra.configPath, 'utf8'));
+  const ca = unmark(JSON.parse(fs.readFileSync(ra.configPath, 'utf8')), 'bk-13131303');
   ok(!('allowedDomains' in ca) && ca.args === '--no-sandbox,--user' && ra.projectConfig.path === null && la.length === 0,
     'CONTROL (no cwd): the user file alone, no project line — round 2\'s output byte for byte');
   // (b) a cwd with no such file ⇒ identical to (a)
   const NOFILE = path.join(ROOT, 'proj-empty'); fs.mkdirSync(NOFILE, { recursive: true });
   const rb = mk({ homeDir: H13 }).envFor({ browserKey: 'bk-13131304', integrationOn: true, cwd: NOFILE });
-  ok(JSON.stringify(JSON.parse(fs.readFileSync(rb.configPath, 'utf8'))) === JSON.stringify(ca) && rb.projectConfig.path === null,
+  ok(JSON.stringify(unmark(JSON.parse(fs.readFileSync(rb.configPath, 'utf8')), 'bk-13131304')) === JSON.stringify(ca) && rb.projectConfig.path === null,
     'CONTROL (cwd without the file): identical to no cwd');
   // (c) an unparseable project file is REPORTED, not silently skipped
   const BAD = path.join(ROOT, 'proj-bad'); fs.mkdirSync(BAD, { recursive: true });
@@ -923,7 +931,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
     const lp = [];
     const ep = pre.mod.create({ dataDir: DATA, homeDir: H13, ...SESSION_ENV, log: { warn: (s) => lp.push(String(s)), log() { } } });
     const rp = ep.envFor({ browserKey: 'bk-13131306', integrationOn: true, cwd: PROJ });
-    const cp = JSON.parse(fs.readFileSync(rp.configPath, 'utf8'));
+    const cp = unmark(JSON.parse(fs.readFileSync(rp.configPath, 'utf8')), 'bk-13131306');
     ok(!('allowedDomains' in cp) && cp.args === '--no-sandbox,--user',
       'PRE-FIX CONTROL #1: round 2\'s resolver at the SAME cwd drops the project fence and keeps the user args');
     ok((rp.dropped || []).length === 0 && !lp.some((l) => /project-level/.test(l)), '…with `dropped: []` and no journal line — the drop was by OMISSION');
@@ -952,7 +960,7 @@ console.log('\n⑬ the project-level agent-browser.json is layered the way the C
     fs.writeFileSync(path.join(PR, 'agent-browser.json'), JSON.stringify({ args: '--no-sandbox,--remote-debugging-port=42945', userAgent: 'R3-UA-LAYERED', executablePath: '/x/dumpchrome', proxy: 'http://127.0.0.1:1', allowedDomains: ['example.com'] }));
     const lr = [];
     const rr = mk({ homeDir: H13r, log: { warn: (s2) => lr.push(String(s2)), log() { } } }).envFor({ browserKey: 'bk-13131308', integrationOn: true, cwd: PR });
-    const cr = JSON.parse(fs.readFileSync(rr.configPath, 'utf8'));
+    const cr = unmark(JSON.parse(fs.readFileSync(rr.configPath, 'utf8')), 'bk-13131308');
     ok(cr.args === '--no-sandbox,--ozone-platform=wayland' && cr.userAgent === 'U' && !('executablePath' in cr) && !('proxy' in cr) && !('cdp' in cr) && JSON.stringify(cr.allowedDomains) === '["example.com"]',
       'takeover r3: the verifier\'s rung-D shape — the project\'s args / userAgent / executablePath / proxy are not carried, the user\'s raw-debugging switch and `cdp` are dropped, the user\'s other args and the project FENCE stand', JSON.stringify(cr));
     ok(JSON.stringify(rr.argsDropped) === '["--remote-debugging-port=41999"]' && lr.some((l) => /drops --remote-debugging-port=41999 from `args`/.test(l)) && undeclared(lr).length === 0,
@@ -1715,6 +1723,45 @@ console.log('\n⑲ no machine-global name was claimed');
 if (prodSockPreExisted) skip(`${PROD_SOCK} already existed before this run, so whether a leg would have created it cannot be told here`);
 else ok(!fs.existsSync(PROD_SOCK), `this suite did not create the production per-uid socket dir ${PROD_SOCK} — every resolver it builds gets a scratch base or a short runtime dir`);
 
+
+// ── ㉒ LANE H (2026-09-25): THE HOLDER ROWS — the ONE representation of "which session holds which browser" ──
+// The owner watched an agent's managed ephemeral browser start and saw nothing: it was not a lease ROW, so the
+// live view's auto-bind (a NEW row), the recorder's arming and the card never saw it. `holderRows` is what the
+// keeper's digest `leases`, the status route's `leases` and every reader get.
+console.log('\n㉒ lane H: the holder rows (a live managed ephemeral browser is a lease row, marked)');
+{
+  const KA = 'bk-0000a0a1', KB = 'bk-0000b0b2';
+  const named = { id: 'bp-0000e001', label: 'Work', owner: { kind: 'instance', id: null } };
+  const eph = { id: 'bp-0000e002', label: '(ephemeral) fix the bug', ephemeral: true, owner: { kind: 'conversation', id: KA } };
+  const kid = { id: 'bp-0000e003', label: '(ephemeral) fix the bug · child 1', ephemeral: true, owner: { kind: 'conversation', id: KA + '.1' } };
+  const leases = [
+    { profileId: named.id, browserKey: KB, sessionId: 'sess-b', alias: 'work', since: 1 },
+    { profileId: eph.id, browserKey: KA, sessionId: 'sess-a', alias: 'ephemeral', since: 2 },
+    { profileId: kid.id, browserKey: KA + '.1', sessionId: 'sess-a', alias: 'ephemeral', since: 3 },
+    { profileId: 'bp-0000dead', browserKey: KA, sessionId: 'sess-a', since: 4 },
+  ];
+  const profiles = [named, eph, kid];
+  const ready = { [named.id]: { state: 'stopped' }, [eph.id]: { state: 'ready' }, [kid.id]: { state: 'ready' } };
+  const rows = B.holderRows({ leases, profiles, browsers: ready });
+  const e = rows.find((r) => r.profileId === eph.id), k = rows.find((r) => r.profileId === kid.id), n = rows.find((r) => r.profileId === named.id);
+  ok(rows.length === 3 && !!n && !('ephemeral' in n) && n.alias === 'work', '㉒ a NAMED lease is a row as it is (its browser\'s state is not its question) and says nothing about being ephemeral', JSON.stringify(rows));
+  ok(e && e.ephemeral === true && e.child === false && e.sessionId === 'sess-a' && e.browserKey === KA && e.label === eph.label && e.alias === 'ephemeral', '㉒ a managed ephemeral browser whose browser is READY is a row: ephemeral:true, its session, its key, its record\'s label', JSON.stringify(e));
+  ok(k && k.ephemeral === true && k.child === true, '㉒ a sub-agent\'s ephemeral is a row too, marked child (its pairs are not its session\'s — the live view and the recorder skip it)');
+  ok(!rows.some((r) => r.profileId === 'bp-0000dead'), '㉒ a lease naming no known profile is never a row (no dangling holder)');
+  for (const st of ['starting', 'stopped', 'failed']) ok(!B.holderRows({ leases, profiles, browsers: { ...ready, [eph.id]: { state: st } } }).some((r) => r.profileId === eph.id), `㉒ an ephemeral whose browser is ${st} holds nothing — no row (it comes back when the next verb makes it ready: the auto-bind's "it started")`);
+  ok(!B.holderRows({ leases, profiles, browsers: {} }).some((r) => r.ephemeral) && B.holderRows({ leases, profiles, browsers: {} }).length === 1, '㉒ no browser record at all ⇒ only the named lease');
+  const viewed = B.holderRows({ leases, profiles, browsers: ready, view: (l) => ({ ...l, mediated: false }) });
+  ok(viewed.every((r) => r.mediated === false) && viewed.find((r) => r.profileId === eph.id).ephemeral === true, '㉒ the keeper\'s view decorates every row and cannot erase the ephemeral mark');
+  ok(B.holderRows({}).length === 0 && B.holderRows({ leases: null, profiles: null }).length === 0, '㉒ nothing in ⇒ nothing out (never a throw)');
+  // the live view's target rule the ephemeral row opens on: EPHEMERAL_REF names the session's OWN ephemeral browser
+  const SS = require('../src/browser-stream.js');
+  const pairs = ['AGENT_BROWSER_SESSION=vs-' + KA, 'AGENT_BROWSER_NAMESPACE=vs-' + KA];
+  const set = { attachments: [{ profileId: named.id, alias: 'work', label: 'Work', isDefault: true }] };
+  const t1 = SS.streamTargetFor({ browserKey: KA, set, profileRef: SS.EPHEMERAL_REF, envPairs: pairs, profiles });
+  const t0 = SS.streamTargetFor({ browserKey: KA, set, profileRef: '', envPairs: pairs, profiles });
+  ok(t1.ok && t1.kind === 'ephemeral' && t1.ns === 'vs-' + KA && t0.ok && t0.kind === 'attachment', '㉒ EPHEMERAL_REF targets the session\'s own ephemeral browser even beside an attachment (the default pane would be the attachment — the recorder would file its actions under `ephemeral`)', JSON.stringify([t1.kind, t0.kind]));
+  ok(!SS.streamTargetFor({ browserKey: KA, set, profileRef: SS.EPHEMERAL_REF, envPairs: [], profiles }).ok && !B.isAlias(SS.EPHEMERAL_REF), '㉒ …no pairs ⇒ no-browser (typed); and no alias can ever spell the ref');
+}
 
 // ── ㉑ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

@@ -32,10 +32,11 @@ vibespace-browser tab list · tab new · tab 2 · tab close
 vibespace-browser screenshot <path> [--annotate] · pdf <path>
 vibespace-browser eval "<js that READS the page>"
 vibespace-browser cookies get|set|clear · storage local|session · state save|load <file>
-vibespace-browser console · errors · vitals · trace/profiler/record start|stop · network requests|route
+vibespace-browser console · errors · vitals · a11y [url] · trace/profiler/record start|stop · network requests|route
 vibespace-browser batch "open <url>" "snapshot -i" "click @e3"     several verbs in one call
   (or on stdin: one command per line, or a JSON array of string arrays — [["open","<url>"],["snapshot","-i"]])
-vibespace-browser close                         close your tab; `close --all` closes YOUR browser only
+vibespace-browser close                         close your browser session; `close --all` closes YOUR browser only
+                                                (on an attached profile both close only YOUR session + drop your lease)
 vibespace-browser -- <newer verb …>             the valve for a verb newer than this list (same rules)
 ```
 
@@ -49,12 +50,12 @@ which cookie jar you are in.
 | You tried | Code | Instead |
 |---|---|---|
 | `connect <port>`, `get cdp-url` (in any spelling: `get --json cdp-url`, `get --json true cdp-url`, inside a batch), `--cdp`, `--auto-connect` | `raw_cdp_refused` | run the verb directly — every command already acts on your own browser (`get attr @e cdp-url` / `get text cdp-url` read the page and run) |
-| `--session`, `--namespace`, `--session-name`, `--config`, `--state`, `--restore…` | `identity_flag_refused` | drop the flag; `--profile <handle>` names one of your attachments |
-| `--proxy`, `--headed`, `--args`, `--user-agent`, `--executable-path`, `--extension`, `-p/--provider`, … | `launch_flag_refused` | a launch setting is a property of a named profile (`new <label> --proxy <url>`) or of the user's Settings → Agent browser. `--enable react-devtools` and `--init-script` pass beside `open` |
+| `--session`, `--namespace`, `--session-name`, `--config`, `--state`, `--restore…`, `--no-pin-tab` | `identity_flag_refused` | drop the flag; `--profile <handle>` names one of your attachments |
+| `--proxy`, `--headed`, `--args`, `--user-agent`, `--executable-path`, `--extension`, `-p/--provider`, `--ca-cert`, `--no-webmcp`, … | `launch_flag_refused` | a launch setting is a property of a named profile (`new <label> --proxy <url>`) or of the user's Settings → Agent browser. `--enable react-devtools` and `--init-script` pass beside `open` |
 | `confirm <id>`, `deny <id>` | `confirmation_is_human` | a pending confirmation is the user's to answer — tell them and stop |
 | `auth …` | `verb_not_offered` | a password never rides the command line: log in inside the page with `fill`, or hand the login to the user |
-| `session`, `stream`, `inspect`, `install`, `upgrade`, `doctor`, `plugin`, `mcp`, `dashboard`, `chat`, `skills` | `verb_not_offered` | `vibespace-browser status` / the live view / ask the user — the message says which |
-| `open` / `tab new` / `window new` / `pushstate` / `diff url` / `read` / `vitals` / `record start` to an address that is not the web — `file:…`, `chrome://…`, `about:` other than `about:blank`, `view-source:`, `devtools:`, `javascript:`, `blob:`, `filesystem:`, another `x://…` — or a `state load` of a file whose origins include one | `local_scheme_refused` | the browser's own pages and this machine's files are not the web: open an `http(s)` page (or `data:…` / `about:blank`); read a file of yours with your shell, or serve its directory over http (`python3 -m http.server`) and open `http://127.0.0.1:<port>/…` |
+| `session`, `stream`, `inspect`, `install`, `upgrade`, `doctor`, `plugin`, `mcp`, `dashboard`, `chat`, `skills`, `webmcp` | `verb_not_offered` | `vibespace-browser status` / the live view / ask the user — the message says which (`webmcp`: drive the page through its own UI with `snapshot` + `click`/`fill`) |
+| `open` / `tab new` / `window new` / `pushstate` / `diff url` / `read` / `vitals` / `a11y` / `record start` to an address that is not the web — `file:…`, `chrome://…`, `about:` other than `about:blank`, `view-source:`, `devtools:`, `javascript:`, `blob:`, `filesystem:`, another `x://…` — or a `state load` of a file whose origins include one | `local_scheme_refused` | the browser's own pages and this machine's files are not the web: open an `http(s)` page (or `data:…` / `about:blank`); read a file of yours with your shell, or serve its directory over http (`python3 -m http.server`) and open `http://127.0.0.1:<port>/…` |
 | a batch with one refused line | `batch_line_refused` | the message names the line (or, for JSON on stdin, the command's index); nothing in the batch ran |
 | a stdin batch that is neither lines nor a JSON array of string arrays (or is empty) | `batch_stdin_refused` | pipe one command per line, or `[["open","https://x"],["snapshot","-i"]]` |
 | a word not in the list | `unknown_verb` (exit 2) | `vibespace-browser help`; a genuinely newer verb runs as `vibespace-browser -- <verb> …` |
@@ -109,11 +110,16 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   naming the **current URL** — re-orient before continuing (a login, a captcha
   or a navigation may have happened). A takeover the user walks away from
   hands back by itself after an idle window; that is not announced by default —
-  your next command simply succeeds again. `vibespace-browser watch` prints
-  this contract.
-* **Everything you do is on the record.** Each page verb writes one audit line
-  (who, when, which browser, the verb — never a `fill`'s text), and the live
-  view keeps an action trace the user can page through.
+  your next command simply succeeds again. If the user STOPS the browser while
+  driving it, control comes back to you too (a note rides your next message):
+  its pages are gone, and your next command starts it again for you to drive.
+  `vibespace-browser watch` prints this contract.
+* **Everything you do is on the record — and on screen.** Each page verb writes
+  one audit line (who, when, which browser, the verb — never a `fill`'s text),
+  and every action is kept in an action trace the user can page through (the
+  tool card of your call shows its thumbnails), whether or not anybody is
+  watching. When your browser starts and the user has your conversation open,
+  its live view opens beside the chat — your own ephemeral browser included.
 * **The machine's own browser settings still apply.** VibeSpace builds your
   browser's configuration from the user's `~/.agent-browser/config.json` — the
   ACCOUNT's home, never whatever `$HOME` your shell has (a moved `HOME` is
@@ -157,10 +163,55 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
 * **Ownership is by conversation.** A profile you create with `new` admits
   your conversation (and its sub-agents); an instance profile admits anyone.
   Attaching to a profile you do not own answers `not_owner`.
-* **`close --all` never closes a browser somebody else is attached to**
-  (`close_all_refused`); `detach` drops your own tab and lease. A profile's
-  browser is stopped by its keeper — after the last lease has gone idle, or
-  when it runs away (sustained CPU / memory: stopped, parked, the user told).
+* **`close --all` on an attached profile closes only YOUR session** — your
+  connection to the profile's browser, then your lease (the note says
+  `[close_all_scoped]`); the profile's one browser keeps running for the keeper
+  and every other session on it, whether or not anyone else is attached (the
+  browser CLI's own `close --all` would close every session of the profile).
+  `detach` drops your own tab and lease — on your conversation's own ephemeral
+  browser (no profile attached) it stops that browser now (its pages close;
+  your next command starts it again). While the USER has taken a browser over,
+  `detach` is refused `browser_paused` like any command (it would end their
+  takeover) — wait for the handback. If they take over WHILE your `close` runs,
+  the close still ran but your lease is NOT dropped: the note says so with
+  `[browser_paused]` and the command exits non-zero — run `vibespace-browser
+  detach` after the handback. A profile's browser is stopped by its
+  keeper after the last lease has gone idle; a resource crossing is only
+  reported, never a stop.
+* **When the user closes a profile's browser (or it crashes).** VibeSpace
+  starts it again by itself, within seconds while you hold it, or on your next
+  command — your open pages are gone. Your next command then answers
+  `tab_gone` ("bound tab is gone"): run `vibespace-browser tab new <url>` and
+  carry on. If it answers `browser_closed`, it could not be started again
+  (or it died right after starting): run your command once more — a command
+  retries at once — and if it still answers `browser_closed`, tell the user
+  to stop it from the Browser panel, then run your command again.
+* **`browser_unstable` — VibeSpace stopped starting the browser by itself.**
+  It comes in two wordings; read which one you got:
+  - **"… keeps closing — it was started again 3 times in 10 min and closed
+    each time"**: VibeSpace restarts a closed profile browser at most 3 times
+    in 10 minutes, and the browser died after each restart. Tell the user it
+    keeps closing (a page that crashes it, its window being closed, too
+    little memory). A page that crashes the browser on load will do it again,
+    so open something else first.
+  - **"… could not be started — VibeSpace asked for it 10 times in 5 min and
+    every ask failed"**: every attempt to start it again failed before any
+    browser started. A short fault never gets here, because VibeSpace keeps
+    retrying on its own every 30 seconds. Tell the user it cannot start (the
+    browser program missing or being reinstalled, the profile folder
+    unreadable, a full disk).
+  Either way VibeSpace files one notice for the user, and every command on
+  that profile answers `browser_unstable` until the user presses Stop on it in
+  ⚙ → Tools → Agent browser… (that resets it). Do not retry in a loop: tell
+  the user, wait for them to stop it, then run your command again.
+* **The user may have the profile open themselves.** A start answers
+  `profile_locked … is open in a browser VibeSpace did not start (pid N) — it
+  may be your own browser — close it first`: that is the USER's browser on
+  that profile's folder. VibeSpace never ends a browser it did not start —
+  tell the user, wait for them to close it, then run the command again; do not
+  try to close it yourself. (A `profile_locked` naming "another VibeSpace
+  browser" or "a live browser daemon" is VibeSpace's own and clears when that
+  one stops.)
 * **A pin is a preference for the NEXT launch.** Mid-session it applies from
   your next command, which relaunches the browser (open pages are lost).
   `--none` goes back to ephemeral.

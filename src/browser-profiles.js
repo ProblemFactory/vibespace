@@ -644,12 +644,15 @@ function pinFenceConflict({ userConfig = {}, pinnedDir = null }) {
  * watched browser (measured). `userConfig` alone (no `projectConfig`) is the
  * pre-r3 call shape and composes the same way.
  */
-function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null }) {
+function generatedConfigParts({ userConfig = {}, projectConfig = null, pinnedDir = null, headed = null, mark = null }) {
   const r = VERBS.sanctionedConfig({ user: userConfig, project: projectConfig, deny: Object.keys(EPHEMERAL_DENY) });
   const out = r.config;
   // OUR value is ours to coerce; the user's rides across verbatim.
   if (headed !== null) out.headed = !!headed;
   if (pinnedDir) out.profile = String(pinnedDir);
+  // lane H verify r4: the keeper's launch MARK (the browser key this config's browser runs for) — how its Chrome is
+  // proven VibeSpace's by its command line after its daemon is gone (a user/project file's own mark was dropped above)
+  if (mark) out.args = withKeeperMark(out.args, mark);
   return { config: out, dropped: r.dropped };
 }
 function generatedConfig(args) { return generatedConfigParts(args).config; }
@@ -1193,6 +1196,33 @@ function ephemeralLabel(sessionName) {
   const n = String(sessionName == null ? '' : sessionName).replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
   return `(ephemeral) ${n || 'this conversation'}`;
 }
+/**
+ * THE HOLDER ROWS (lane H, 2026-09-25 — design §3.8 / §4.5 / §4.6; the owner
+ * watched an agent's ephemeral browser start and saw nothing: no live view, no
+ * recorded action). The ONE representation every reader of "which session
+ * holds which browser" gets — the keeper's digest `leases`, the status route's
+ * `leases`, the live view's auto-bind, the owner dots, the recorder's arming:
+ * each NAMED lease as it is, AND a managed ephemeral browser's lease WHILE ITS
+ * BROWSER IS READY, marked `ephemeral: true` (+ `child` for a sub-agent's key,
+ * `label` = its record's). An ephemeral lease whose browser idled out holds
+ * nothing, so its row leaves the digest and COMES BACK when the next verb
+ * restarts it — that return is the "it started" event the auto-bind opens on,
+ * exactly as a new named lease is. A lease naming no known profile is dropped
+ * (never a dangling row). `view` decorates a row (the keeper's `mediated`).
+ */
+function holderRows({ leases = [], profiles = [], browsers = {}, view = (l) => ({ ...l }) } = {}) {
+  const byId = new Map((Array.isArray(profiles) ? profiles : []).filter(Boolean).map((p) => [p.id, p]));
+  const out = [];
+  for (const l of Array.isArray(leases) ? leases : []) {
+    const p = l ? byId.get(l.profileId) : null;
+    if (!p) continue;
+    if (!isEphemeralProfile(p)) { out.push(view(l)); continue; }
+    const b = browsers ? browsers[l.profileId] : null;
+    if (!b || b.state !== 'ready') continue;
+    out.push({ ...view(l), ephemeral: true, child: isChildKey(l.browserKey), label: p.label });
+  }
+  return out;
+}
 /** The pair list a managed ephemeral browser is started, probed and stopped
  *  under: exactly the session's spawn pairs (never a re-run of the ladder —
  *  the r3 lesson), and only when they NAME this conversation's browser
@@ -1351,6 +1381,229 @@ function pidVerdict({ alive, sameStart } = {}) {
   if (!alive) return 'gone';
   return sameStart ? 'ours' : 'unproven';
 }
+/**
+ * LANE H VERIFY r2 (L4): a LOCAL record's LIVENESS — finer than `pidVerdict`, which only decides what may be
+ * SIGNALLED. A pid that is alive with ANOTHER starttime (both readable) is not the daemon any more (`recycled`) and
+ * is as gone as a dead one for "is this browser running". VERIFY r3 (LOW 3): so is a pid whose starttime IS readable now
+ * while the record carries none (`unrecorded` — every launch on a machine that reads starttimes records one, so a
+ * record without it cannot be proven to name this process; a recycled pid kept such a record `ready` forever). Only
+ * when no starttime is readable at all (`unknown` — no /proc: macOS) is a live pid never guessed gone. `stop()` keeps
+ * `pidVerdict`: an unproven pid is never signalled either way.
+ *   startKnown    = the record has a starttime AND the pid's is readable now
+ *   startReadable = the pid's starttime is readable now
+ */
+function pidLiveness({ alive, sameStart, startKnown, startReadable = false } = {}) {
+  if (!alive) return 'gone';
+  if (sameStart) return 'ours';
+  if (startKnown) return 'recycled';
+  return startReadable ? 'unrecorded' : 'unknown';
+}
+/**
+ * A Chrome's `--user-data-dir` values off its /proc cmdline, both spellings (`=value` and a separate word). PURE.
+ * VERIFY r3 (MINOR 2): a NUL-separated cmdline is parsed EXACTLY — the value is the whole argv element (a directory
+ * with a space in it is one value), and a flag merely MENTIONED inside another argument (a script's code) is not one.
+ * Only a cmdline with NO NUL (a Chrome that rewrote its process title — measured on 0.38.1: the daemon's Chrome child
+ * is ONE space-joined string) is scanned as words; there a value ends at the first whitespace, so each `known`
+ * directory is also looked for WHOLE (the flag, the directory, an optional trailing slash, then whitespace or the end)
+ * and answered exactly — the one reading that names a directory with a space off a title-rewritten Chrome.
+ */
+function userDataDirsOf(cmdline, known = []) {
+  const s = String(cmdline == null ? '' : cmdline).replace(/\0+$/, '');
+  const out = [];
+  const add = (d) => { if (d && !out.includes(d)) out.push(d); };
+  if (s.includes('\0')) {
+    const argv = s.split('\0');
+    for (let j = 0; j < argv.length; j++) {
+      const a = argv[j];
+      if (a.startsWith('--user-data-dir=')) add(a.slice('--user-data-dir='.length));
+      else if (a === '--user-data-dir' && j + 1 < argv.length) add(argv[j + 1]);
+    }
+    return out;
+  }
+  const esc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const k of Array.isArray(known) ? known : [known]) {
+    const d = String(k || '').replace(/\/+$/, '');
+    if (d && new RegExp(`(?:^|\\s)--user-data-dir(?:=|\\s+)${esc(d)}/*(?=\\s|$)`).test(s)) add(d);
+  }
+  for (const m of s.matchAll(/(?:^|\s)--user-data-dir(?:=|\s+)(\S+)/g)) { const v = m[1]; if (!out.some((d) => sameDir(d, v) || d.startsWith(v + ' '))) add(v); } // a known dir found whole drops its space-truncated twin
+  return out;
+}
+/** Two spellings of one directory (a trailing slash is not a different directory). */
+function sameDir(a, b) { const n = (x) => String(x || '').replace(/\/+$/, ''); return !!n(a) && n(a) === n(b); }
+/**
+ * LANE H VERIFY r4 (MAJOR 2): THE KEEPER'S LAUNCH MARK on a process's /proc cmdline — the values of every
+ * `--vibespace-keeper=<v>` it carries. A NUL-separated cmdline is read EXACTLY (a whole argv element; a mark merely
+ * MENTIONED inside another argument is none); a title-rewritten one (the real Chrome's: ONE space-joined string) as
+ * words. Ownership of a process is proven by a mark WE put on its command line — never by the directory it sits in.
+ */
+function keeperMarksOf(cmdline) {
+  const s = String(cmdline == null ? '' : cmdline).replace(/\0+$/, '');
+  const pre = VERBS.KEEPER_MARK + '=';
+  const out = [];
+  const add = (v) => { if (v && !out.includes(v)) out.push(v); };
+  if (s.includes('\0')) { for (const a of s.split('\0')) if (a.startsWith(pre)) add(a.slice(pre.length)); return out; }
+  for (const w of s.split(/\s+/)) if (w.startsWith(pre)) add(w.slice(pre.length));
+  return out;
+}
+/** The mark switch for one launch: `--vibespace-keeper=<value>` (a profile id, or an ephemeral's browser key). */
+function keeperMarkArg(value) { return `${VERBS.KEEPER_MARK}=${String(value)}`; }
+/** A config's `args` WITH the keeper's mark for `value` (any other mark — a forged one — dropped first): a string stays
+ *  a string (joined the way it is separated), a list a list; nothing ⇒ the mark alone. PURE. */
+function withKeeperMark(args, value) {
+  const mark = keeperMarkArg(value);
+  const isMark = (x) => String(x).trim().startsWith(VERBS.KEEPER_MARK + '=') || String(x).trim() === VERBS.KEEPER_MARK;
+  if (Array.isArray(args)) return [...args.filter((x) => !isMark(x)), mark];
+  if (typeof args !== 'string' || !args.trim()) return mark;
+  const sep = args.includes('\n') ? '\n' : ',';
+  const kept = args.split(/[,\n]/).map((x) => x.trim()).filter((x) => x && !isMark(x));
+  return [...kept, mark].join(sep);
+}
+/** The PRE-MARK fallback (the upgrade window): the browser CLI launches every Chrome with `--remote-debugging-port=0`
+ *  (measured on 0.32.0 and 0.38.1) — a Chrome the user opened by hand carries none. Read like the mark: exact on a
+ *  NUL-separated cmdline, as a word on a title-rewritten one. */
+function launchedByCli(cmdline) {
+  const s = String(cmdline == null ? '' : cmdline).replace(/\0+$/, '');
+  return s.includes('\0') ? s.split('\0').includes('--remote-debugging-port=0') : s.split(/\s+/).includes('--remote-debugging-port=0');
+}
+/**
+ * LANE H VERIFY r2 (M1) + r3 + r4: WHO HOLDS A PROFILE DIRECTORY'S `SingletonLock` — decided before EVERY launch on it,
+ * by the orphan sweep when a daemon is found gone (a Chrome whose daemon died keeps the lock: the relaunch died "Chrome
+ * exited early (exit code: 21)"), and before a heal relaunches a closed browser. → `{kind, pid, why, user?}`:
+ *   `free`       no lock / a stale one / a recycled pid that does not name the directory (Chrome clears those itself)
+ *   `own-orphan` THE KEEPER'S OWN, ended: alive, its command line names the directory, no live browser daemon is its
+ *                parent (or grandparent), AND either it is the browser recorded (re-captured) for this record — pid AND
+ *                starttime — or (r4) it carries THIS record's launch MARK (`--vibespace-keeper=<mark>`, only the keeper
+ *                writes it) — or, on a directory THE KEEPER MINTED and for a launch that predates the mark (the upgrade
+ *                window), it carries no mark at all but the browser CLI's own `--remote-debugging-port=0`
+ *   `foreign`    anything else, refused `profile_locked` by name and never signalled: another machine's lock, an
+ *                unreadable process, a live daemon still holding it, another VibeSpace launch (its mark names another
+ *                record) — and (`user: true`, the ONE case whose refusal says it may be the user's own browser) a holder
+ *                with no mark of ours, on any directory: a Chrome the human opened on our directory is REPORTED, never
+ *                ended (r4 MAJOR 2: r3 ended it on "the directory is minted" alone — three paths, measured).
+ * r3: the holder's ENVIRONMENT is no witness at all — the real 0.38.1 scrubs every AGENT_BROWSER_* from its Chrome. r4:
+ * nor is the DIRECTORY — it is a property of where the process sits, not of who launched it.
+ *   lock   = {host, pid} off the symlink `<host>-<pid>` · holder = the facts of that pid (browser-facts.lockHolderFacts)
+ *   minted = the caller's fact that `dir` is a directory the keeper minted · recorded = the record's `browser` {pid, starttime}
+ *   mark   = the value this record's launches carry (a named profile's id / an ephemeral's browser key)
+ */
+function profileLockVerdict({ lock = null, holder = null, hostname = '', dir = '', minted = false, recorded = null, mark = null, preMarkAllowed = true } = {}) {
+  if (!lock || !Number.isInteger(lock.pid) || lock.pid <= 0) return { kind: 'free', pid: null, why: 'no lock' };
+  const pid = lock.pid;
+  // r4 LOW 6: the remedy that EXISTS — a lock written on another hostname is also what a renamed machine (a pod restarted
+  // under a new name, a persistent home) leaves behind, and no browser on "that machine" will ever close it
+  if (lock.host && hostname && lock.host !== hostname) return { kind: 'foreign', pid, host: lock.host, why: `the lock (${dir ? dir.replace(/\/+$/, '') + '/' : ''}SingletonLock) names another machine, ${lock.host} — if a browser on that machine uses this directory, close it there; if this machine was renamed (a pod restarted under a new name), remove ${dir ? dir.replace(/\/+$/, '') + '/' : ''}SingletonLock` };
+  if (!holder || !holder.alive) return { kind: 'free', pid, why: 'a stale lock — its process is gone (Chrome clears it)' };
+  if (holder.cmdline == null) return { kind: 'foreign', pid, why: 'its command line cannot be read (another user\'s process?)' };
+  if (!(holder.dirs || []).some((d) => sameDir(d, dir))) return { kind: 'free', pid, why: 'the process at that pid does not name this directory (a recycled pid — Chrome clears the stale lock)' };
+  const identity = !!(recorded && Number(recorded.pid) === pid && recorded.starttime != null && holder.starttime != null && Number(recorded.starttime) === Number(holder.starttime));
+  const marks = keeperMarksOf(holder.cmdline);
+  const marked = !!(mark && marks.includes(String(mark)));
+  const preMark = !marks.length && launchedByCli(holder.cmdline);
+  const daemonHeld = () => ({ kind: 'foreign', pid, why: `a live browser daemon (pid ${holder.daemonPid || holder.parentPid}) still holds it` });
+  if (identity) return holder.parentIsDaemon ? daemonHeld() : { kind: 'own-orphan', pid, why: 'the browser this keeper recorded for it, its daemon gone' };
+  // the mark IS the proof (only the keeper writes it; user and project files drop it) — on a minted directory and on an
+  // adopted one alike (an adopted directory's relaunched-in-place orphan was otherwise locked out, the r3 shape)
+  if (marked) return holder.parentIsDaemon ? daemonHeld() : { kind: 'own-orphan', pid, why: `it carries this keeper's launch mark (${keeperMarkArg(mark)})${minted ? ` on the directory it created (${dir})` : ''} and no live browser daemon is its parent` };
+  // r5 LOW 3: the pre-mark fallback belongs to a record launched BEFORE the mark (`preMarkAllowed` = the record carries no
+  // mark) — a record launched WITH it never adopts an unmarked --remote-debugging-port=0 holder (a hand-launched Chrome)
+  if (minted && preMark && preMarkAllowed) return holder.parentIsDaemon ? daemonHeld() : { kind: 'own-orphan', pid, why: `a launch by the browser CLI from before the launch mark (--remote-debugging-port=0, no mark) on the directory this keeper created (${dir}), no live browser daemon its parent` };
+  if (marks.length) return { kind: 'foreign', pid, why: `another VibeSpace browser holds it (its launch mark names ${marks.join(', ')}, not ${mark || 'this record'})` };
+  if (holder.parentIsDaemon) return daemonHeld();
+  return { kind: 'foreign', pid, user: true, why: 'VibeSpace did not start it (no VibeSpace launch mark on its command line)' };
+}
+/** The typed refusal a `foreign` (or a surviving `own-orphan`) lock answers — the pid named, never the raw exit 21; "it
+ *  may be your own browser — close it first" ONLY for a holder VibeSpace did not start (r4: no launch mark of ours). */
+function profileLockedRefusal({ label = '', dir = '', verdict = {} } = {}) {
+  const v = verdict || {};
+  const who = `"${label || 'this profile'}"`;
+  const error = v.kind === 'survived'
+    ? `${who}'s profile directory ${dir} is still held by its own orphaned browser (pid ${v.pid}), which survived SIGKILL — the browser cannot start on it; tell the user`
+    : v.user
+      ? `${who}'s profile directory ${dir} is open in a browser VibeSpace did not start (pid ${v.pid}) — it may be your own browser — close it first, then run the command again (VibeSpace never ends a browser it did not start; an agent: ask the user, it may be theirs)`
+      : `${who}'s profile directory ${dir} is held by another browser process (pid ${v.pid}${v.host ? ' on ' + v.host : ''}) — ${v.why || 'not provably VibeSpace\'s'}. VibeSpace does not end it; once it has exited (stop it from the Browser panel if it is VibeSpace's), run the command again`;
+  return { code: 'profile_locked', error, holderPid: Number.isInteger(v.pid) ? v.pid : null };
+}
+// ── LANE H VERIFY r5 (2026-09-25) MAJOR 1: A HEAL IS EVIDENCE-BOUND AND BUDGETED ──
+// r4's heal (the keeper's own `get cdp-url` relaunching a closed profile browser in its live daemon) remembered nothing but
+// the failed-heal gate, and cleared its evidence after every answer: a Chrome that died ~1 s after every relaunch was
+// relaunched on EVERY tick, forever (12/12 real ticks in 60 s, ≈600 CPU-s/h, `ready`, no notice), and one that died before
+// the recapture left `ready` with no browser and no verdict (nothing healed it again). The rules: a relaunch is COUNTED in a
+// per-record ledger that is persisted with the record; HEAL_BUDGET relaunches inside HEAL_WINDOW_MS and the next closure is
+// `browser_unstable` — no more relaunches, ONE For-you notice, until a stop (the panel's Stop) ends the record; a heal (or a
+// start) after which no browser process is identified is `browser_closed` by name, retried after HEAL_RETRY_MS by the tick
+// (a verb at once). Never a loop.
+/** Relaunches a record may make inside HEAL_WINDOW_MS before it is `browser_unstable`. */
+const HEAL_BUDGET = 3;
+const HEAL_WINDOW_MS = 10 * 60 * 1000;
+/** A closure a relaunch attempt made (a failed relaunch, a browser that died before it was identified) is retried by the
+ *  tick after this — counted from THAT close; a refusal that attempted nothing (another browser holds the directory, a
+ *  cloak record) never arms it. A verb retries at once. */
+const HEAL_RETRY_MS = 30000;
+// ── LANE H VERIFY r6 (2026-09-25) MINOR 1: A FAILED RELAUNCH ASK IS NOT A RELAUNCH ──
+// r5 counted the attempt BEFORE `get cdp-url`, so an ask the binary refused (no CDP url — "Chrome exited early", nothing
+// started) spent the budget like a relaunch that spawned a Chrome: three of them (93 s on the 30 s gate) and the profile was
+// `browser_unstable` with words about a browser that "closed each time" — a transient fault (the binary mid-reinstall, the
+// profile folder unreadable, a full disk) turned a self-retrying state into a manual Stop. Now an ATTEMPT is a relaunch whose
+// url answered (a browser was produced, whether or not it then died); a failed ask keeps the 30 s gate and its OWN streak
+// (`failed: {count, since}`, ended by the next url answered) with its OWN cap and words: HEAL_FAIL_BUDGET consecutive failed
+// asks spanning at least HEAL_FAIL_SPAN_MS ⇒ `browser_unstable` "could not be started". A count AND a span: a verb retries
+// at once, so a burst of commands during a short fault reaches the count in seconds and never the span; the tick asks once
+// per HEAL_RETRY_MS, so ten tick-paced asks reach both together.
+/** Consecutive failed relaunch ASKS (nothing started) before `browser_unstable` "could not be started"… */
+const HEAL_FAIL_BUDGET = 10;
+/** …and the least time they must span (what HEAL_FAIL_BUDGET asks paced by the tick's gate take: 4.5 min). */
+const HEAL_FAIL_SPAN_MS = (HEAL_FAIL_BUDGET - 1) * HEAL_RETRY_MS;
+/** A record's heal ledger as stored (a hand-edited store never throws): attempt times (finite, positive, the newest 20),
+ *  the last outcome, when the unstable notice was filed, the count the unstable verdict named, (r6) the failed-ask streak
+ *  `{count, since}` (null when none), and which verdict the unstable record carries — `unstableKind` 'failing' (the asks
+ *  kept failing, `unstableSpanMs` the time they spanned) or null (the browser kept closing — every record from before r6). */
+function healLedger(x) {
+  const h = x && typeof x === 'object' && !Array.isArray(x) ? x : {};
+  const num = (v) => { const n = typeof v === 'number' ? v : NaN; return Number.isFinite(n) && n > 0 ? n : null; };
+  const attempts = (Array.isArray(h.attempts) ? h.attempts : []).map(num).filter((n) => n !== null).slice(-20);
+  const f = h.failed && typeof h.failed === 'object' && !Array.isArray(h.failed) ? h.failed : null;
+  const failed = f && Number.isInteger(f.count) && f.count > 0 && num(f.since) !== null ? { count: f.count, since: num(f.since) } : null;
+  return { attempts, lastOutcome: typeof h.lastOutcome === 'string' && h.lastOutcome ? h.lastOutcome : null, noticedAt: num(h.noticedAt), unstableCount: Number.isInteger(h.unstableCount) && h.unstableCount > 0 ? h.unstableCount : null,
+    failed, unstableKind: h.unstableKind === 'failing' ? 'failing' : null, unstableSpanMs: num(h.unstableSpanMs) };
+}
+/** May a record relaunch its browser NOW? → `{ok, count, recent}`: `recent` = the attempts still inside the window (the
+ *  ledger keeps only these), `count` their number; ≥ budget ⇒ ok:false (`browser_unstable`). */
+function healBudgetVerdict({ attempts = [], now = 0, budget = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS } = {}) {
+  const t = Number(now) || 0;
+  const recent = (Array.isArray(attempts) ? attempts : []).filter((a) => typeof a === 'number' && Number.isFinite(a) && a > t - windowMs);
+  return recent.length >= budget ? { ok: false, code: 'browser_unstable', count: recent.length, recent } : { ok: true, code: null, count: recent.length, recent };
+}
+/** r6 MINOR 1: may a record keep ASKING its daemon to relaunch after `failed` (the streak of consecutive asks the binary
+ *  refused)? → `{ok, count, spanMs}`; HEAL_FAIL_BUDGET of them spanning ≥ HEAL_FAIL_SPAN_MS ⇒ ok:false (`browser_unstable`). */
+function failedAskVerdict({ failed = null, now = 0, budget = HEAL_FAIL_BUDGET, spanMs = HEAL_FAIL_SPAN_MS } = {}) {
+  const f = failed && Number.isInteger(failed.count) && failed.count > 0 && Number.isFinite(failed.since) ? failed : null;
+  const count = f ? f.count : 0;
+  const span = f ? Math.max(0, (Number(now) || 0) - f.since) : 0;
+  return count >= budget && span >= spanMs ? { ok: false, code: 'browser_unstable', count, spanMs: span } : { ok: true, code: null, count, spanMs: span };
+}
+const windowWords = (ms) => `${Math.max(1, Math.round((Number(ms) || HEAL_WINDOW_MS) / 60000))} min`;
+/** The refusal a lease / a view / an attach gets while a profile's browser is `browser_unstable` — `kind` 'closing' (it was
+ *  started again and closed each time) or (r6) 'failing' (every ask to start it again failed: no browser was started). */
+function unstableText({ label = '', count = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS, kind = 'closing', spanMs = null } = {}) {
+  if (kind === 'failing') return `"${label || 'this profile'}"'s browser could not be started — VibeSpace asked for it ${count} times in ${windowWords(spanMs || HEAL_FAIL_SPAN_MS)} and every ask failed (no browser started), so it stopped trying by itself (never a loop). Press Stop on it in the Browser panel (⚙ → Tools → Agent browser…) — that resets it — then run the command again; if it still cannot start, something keeps it from starting (the browser program missing or being reinstalled, its profile folder unreadable, a full disk)`;
+  return `"${label || 'this profile'}"'s browser keeps closing — it was started again ${count} times in ${windowWords(windowMs)} and closed each time, so VibeSpace stopped starting it by itself (never a loop). Press Stop on it in the Browser panel (⚙ → Tools → Agent browser…) — that resets it — then run the command again; if it keeps closing, something ends it (a page that crashes it, its window being closed, too little memory)`;
+}
+/** The ONE For-you notice (origin browser) a profile's unstable browser files — the profile and the count named. */
+function unstableNotice({ label = '', count = HEAL_BUDGET, windowMs = HEAL_WINDOW_MS, kind = 'closing', spanMs = null } = {}) {
+  const who = `"${label || 'this profile'}"`;
+  if (kind === 'failing') {
+    const span = windowWords(spanMs || HEAL_FAIL_SPAN_MS);
+    return {
+      text: `Agent browser ${who} could not be started — VibeSpace stopped trying after ${count} failed attempts in ${span}`,
+      detail: `Its browser closed, and VibeSpace asked for it again ${count} times in ${span}; every ask failed and no browser started — the browser program missing or being reinstalled, its profile folder unreadable, or a full disk. VibeSpace no longer tries by itself, and an agent's browser commands on it answer browser_unstable. Press Stop on ${who} in ⚙ → Tools → Agent browser… (that resets it); the next command then starts it fresh.`,
+    };
+  }
+  return {
+    text: `Agent browser ${who} keeps closing — VibeSpace stopped starting it again after ${count} restarts in ${windowWords(windowMs)}`,
+    detail: `Its browser was started again ${count} times in ${windowWords(windowMs)} and closed each time — a page that crashes it, its window being closed, or too little memory. VibeSpace no longer restarts it by itself, and an agent's browser commands on it answer browser_unstable. Press Stop on ${who} in ⚙ → Tools → Agent browser… (that resets it); the next command then starts it fresh.`,
+  };
+}
+
 /** Boot ADOPTION: a browser record comes back `ready` only when its daemon is
  *  the recorded process (pid AND starttime) AND the CLI says that namespace is
  *  active; otherwise it is recorded ended with the reason, and an unproven pid
@@ -1364,20 +1617,33 @@ function adoptVerdict(rec, { verdict, active } = {}) {
 }
 /** The environment a session attached to a profile browses WITH: the
  *  profile's daemon namespace + the session's OWN context inside it (§3.4 —
- *  the tab is the unit, the browser is shared) + the profile's directory.
+ *  the tab is the unit, the browser is shared) + the keeper browser's CDP url
+ *  (naive study 2: never the profile's directory — see below).
  *  `AGENT_BROWSER_SESSION` stays the session's key so `close` is scoped to it. */
-function attachedEnvFor({ browserKey, profileId, profileDir, cdpUrl = null }) {
+/** A LOOPBACK CDP url (ws/http on 127.0.0.1 / localhost / [::1]) — the only kind a session is ever handed (§6.1). */
+function isLoopbackCdpUrl(u) { return !!u && /^(ws|http)s?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/.test(String(u)); }
+/**
+ * The env an ATTACHED session's commands run under: its OWN session name in
+ * the profile's namespace, reaching the keeper's ONE browser over a LOOPBACK
+ * CDP url (a local launch's own, or the hub-side forward of a paired /
+ * external one, §6.1 / §7.3), so it gets its own tab in that browser.
+ * NAIVE STUDY 2 (2026-09-25 — the "bank" profile never started): THE KEEPER IS
+ * THE ONLY LAUNCHER OF A PROFILE BROWSER, so the profile DIRECTORY is never
+ * handed to a session. Measured on the real 0.38.1: a second session given
+ * `AGENT_BROWSER_PROFILE` on a directory the keeper's browser holds starts its
+ * OWN Chrome there and dies on `SingletonLock: File exists` (exit 21), every
+ * launch, and the live view's `stream status` included; given the CDP url,
+ * two sessions each get their own tab in the one Chrome. No loopback CDP url
+ * ⇒ `null`: the caller refuses BY NAME (`browser_no_cdp`), never a directory
+ * fallback. (`profileDir` is accepted and ignored — the old signature.)
+ */
+function attachedEnvFor({ browserKey, profileId, cdpUrl = null }) {
   if (!isProfileId(profileId)) return [];
-  const bk = String(browserKey || '');
-  // P4 (§7.1 `cdp`, §7.3): a browser REACHED rather than launched — the
-  // session's own agent-browser daemon connects over CDP to the hub-side
-  // loopback url (a paired machine's port arrives tunnelled, §6.1) and no
-  // profile directory is named: the state lives in THAT browser.
-  const viaCdp = !!cdpUrl && /^(ws|http)s?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$)/.test(String(cdpUrl));
+  if (!isLoopbackCdpUrl(cdpUrl)) return null;
   return [
-    `AGENT_BROWSER_SESSION=${sessionNameFor(bk)}`,
+    `AGENT_BROWSER_SESSION=${sessionNameFor(String(browserKey || ''))}`,
     `AGENT_BROWSER_NAMESPACE=${sessionNameFor(profileId)}`,
-    ...(viaCdp ? [`AGENT_BROWSER_CDP=${cdpUrl}`] : (profileDir ? [`AGENT_BROWSER_PROFILE=${profileDir}`] : [])),
+    `AGENT_BROWSER_CDP=${cdpUrl}`,
     'AGENT_BROWSER_IDLE_TIMEOUT_MS=0',
   ];
 }
@@ -1757,10 +2023,14 @@ module.exports = {
   // P1 (§3.3–§3.5): the registry, the lease and the keeper's verdicts
   PROFILE_ID_RE, mintProfileId, isProfileId, profileDirName, PROVIDERS, OWNER_KINDS, LABEL_MAX, cleanLabel,
   normalizeProxy, proxyPublicView, validateProfileInput, newProfileRecord, normalizeRegistry, findProfile, publicProfileView,
-  SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, ephemeralPairsVerdict, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
+  SHARING_VALUES, sharingVerdict, isMediatedProfile, isEphemeralProfile, ephemeralLabel, holderRows, ephemeralPairsVerdict, ephemeralDirOf, mayAttach, CHILD_KEY_RE, isChildKey, parentKeyOf, findLease, decideAttach, decideDetach, leasesOf, keyCarried,
   LEASE_DROP_GRACE_MS, reconcileLeases,
   BROWSER_STATES, LIVE_BROWSER_STATES, isLiveBrowser, browserIdle, ceilingVerdict,
-  pidVerdict, adoptVerdict, attachedEnvFor,
+  pidVerdict, adoptVerdict, attachedEnvFor, isLoopbackCdpUrl,
+  pidLiveness, userDataDirsOf, sameDir, profileLockVerdict, profileLockedRefusal, // lane H verify r2: liveness vs signalling, the orphaned-browser lock
+  keeperMarksOf, keeperMarkArg, withKeeperMark, launchedByCli, // lane H verify r4: the keeper's launch mark (ownership by cmdline, never by directory)
+  HEAL_BUDGET, HEAL_WINDOW_MS, HEAL_RETRY_MS, healLedger, healBudgetVerdict, unstableText, unstableNotice, // lane H verify r5: the heal ledger + budget
+  HEAL_FAIL_BUDGET, HEAL_FAIL_SPAN_MS, failedAskVerdict, // lane H verify r6: a failed relaunch ask is not a relaunch — its own streak + cap
   // P4 (§7.1–§7.3): provider rows + capability gating, the §7.2.1 egress record, the cdp env pair, the cloakserve plan
   CLOUD_PROVIDERS, CLOUD_UNWIRED, providerRow, providerIds, providerControl, capabilityRefusal, providerRows,
   CLOAK_EGRESS_PROOF, CLOAK_EGRESS_RUNS, proofVerdict, blockedCell,

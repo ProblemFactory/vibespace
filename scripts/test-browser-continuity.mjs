@@ -36,7 +36,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort } from './scratch.mjs';
+import { scratch, scratchHome, freePort, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const { fixtureLitter } = require('../src/fixture-guard.js');
 
@@ -115,7 +116,7 @@ const baseEnv = { ...process.env, PATH: BIN + ':' + (process.env.PATH || ''), CL
 for (const k of Object.keys(baseEnv)) if (k.startsWith('AGENT_BROWSER_')) delete baseEnv[k];
 srv = spawn('node', ['server.js'], {
   cwd: wt,
-  env: { ...baseEnv, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' },
+  env: { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 srv.stdout.on('data', (d) => { journal += d; });

@@ -12,7 +12,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +44,7 @@ fs.writeFileSync(path.join(wt, 'data', 'hosts.json'), JSON.stringify({
 
 const srv = spawn(process.execPath, ['server.js'], {
   cwd: wt,
-  env: { ...process.env, PORT: String(PORT), HOME: fakeHome },
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome },
   stdio: 'ignore',
 });
 const chrome = spawn(CHROME, [`--headless=new`, `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',

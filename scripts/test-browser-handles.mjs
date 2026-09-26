@@ -35,12 +35,14 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const F = require('../src/browser-facts.js');
 const K = require('../src/server/browser-keeper.js');
 const BE = require('../src/server/browser-env.js');
 const LIMITS = require('../src/keeper-limits.js');
+const { SessionStatusManager } = require('../src/session-status.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
@@ -77,7 +79,7 @@ if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && ali
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s, session: process.env.AGENT_BROWSER_SESSION || null }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19222/devtools/browser/fake-' + ns } }); process.exit(0); }
 if (a === 'close' && b === '--all') { const s = read(); let closed = 0; if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); closed = 1; } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed, failed: [], sessions: [] } }); process.exit(0); }
-if (a === 'snapshot' || a === 'fill') { fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ verb: a, ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null, config: process.env.AGENT_BROWSER_CONFIG || null, pinTab, argv }) + '\\n'); out({ success: true, data: { ok: true } }); process.exit(0); }
+if (a === 'snapshot' || a === 'fill') { fs.appendFileSync(path.join(st, 'cmds.log'), JSON.stringify({ verb: a, ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null, cdp: process.env.AGENT_BROWSER_CDP || null, config: process.env.AGENT_BROWSER_CONFIG || null, pinTab, argv }) + '\\n'); out({ success: true, data: { ok: true } }); process.exit(0); }
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
 const launches = () => { try { return fs.readFileSync(path.join(AB_STATE, 'launches.log'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
@@ -291,7 +293,8 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   sessA._subNormalizers = new Map();
   c = await cli(['--profile', 'work', '--', 'snapshot']);
   let last = cmds()[cmds().length - 1];
-  ok(c.status === 0 && last && last.verb === 'snapshot' && last.ns === 'vs-' + work.id && last.session === 'vs-' + KEY_A && last.profile === work.dir && /profile: Work account \(bp-.*handle work/.test(c.stderr), '`--profile work -- snapshot` runs under Work\'s daemon with MY session, on Work\'s dir, and names the profile it acted on');
+  // naive study 2: the command reaches Work's browser over its CDP url — never Work's directory (0.38.1: a second Chrome on it dies on SingletonLock)
+  ok(c.status === 0 && last && last.verb === 'snapshot' && last.ns === 'vs-' + work.id && last.session === 'vs-' + KEY_A && last.profile === null && last.cdp === 'ws://127.0.0.1:19222/devtools/browser/fake-vs-' + work.id && /profile: Work account \(bp-.*handle work/.test(c.stderr), '`--profile work -- snapshot` runs in Work\'s namespace with MY session, over Work\'s browser\'s CDP url (never its directory), and names the profile it acted on');
   c = await cli(['--', 'snapshot'], { ...cliEnv, VIBESPACE_BROWSER: 'personal' });
   last = cmds()[cmds().length - 1];
   ok(c.status === 0 && last.ns === 'vs-' + pers.id, 'VIBESPACE_BROWSER=<handle> is the shell\'s default (identical to --profile on every command)');
@@ -300,6 +303,29 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   c = await cli(['--profile', 'ghost', '--', 'snapshot']);
   ok(c.status === 1 && /\[not_attached\]/.test(c.stderr), 'an unknown handle ⇒ not_attached');
   ok(launches().length === 2, 'two profiles ⇒ two daemons (one per profile), the child commands launched nothing new');
+  // ── lane J (2026-09-25): a pin that moves nothing says nothing ──
+  // the owner re-chose the ticked "Unpinned (ephemeral)" row of the live view's title menu and the agent was told
+  // "browser profile changed: ephemeral (no profile) → ephemeral (no profile) (by user)"
+  {
+    const n0 = notices.length;
+    const r0 = await j('POST', '/api/browser/pin', { sessionId: 'sess-1', profile: null });
+    ok(r0.status === 200 && r0.json.pin === null && r0.json.moved === false && notices.length === n0, 'lane J: re-pinning an UNPINNED session to "Unpinned" moved nothing and queues NO notice (was: "ephemeral → ephemeral (by user)")', JSON.stringify({ status: r0.status, moved: r0.json && r0.json.moved, notices: notices.slice(n0) }));
+    // the CONTROL: the pre-fix route in a patched copy (both guards removed) queues exactly that notice through the same keeper
+    const M = mutantCopies('browser-handles', REPO);
+    const src = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+    const pre = src.replace("  if (String(was || '') === String(now || '')) return false;\n", '').replace('if (by === \'user\') { if (moved) noteChange(', 'if (by === \'user\') { if (true) noteChange(');
+    ok(pre !== src && !pre.includes("String(was || '') === String(now || '')") && pre.includes('if (true) noteChange('), 'control: the patched copy really lost both guards (census of the patch)');
+    const R0 = M.load('src/routes/browser.js', pre);
+    const preNotices = [];
+    R0.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: HOME, dataDir: DATA }, notice: (sid, s2, n) => preNotices.push({ sid, n }), persistPin: () => { }, tasksForSession: () => [] });
+    const app0 = express(); app0.use(express.json()); app0.use(R0.router);
+    const srv0 = await new Promise((r) => { const s2 = app0.listen(0, '127.0.0.1', () => r(s2)); });
+    const r1 = await fetch(`http://127.0.0.1:${srv0.address().port}/api/browser/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: 'sess-1', profile: null }) });
+    await new Promise((r) => srv0.close(r));
+    const text = preNotices[0] ? SessionStatusManager.renderNotice(preNotices[0].n) : '';
+    ok(r1.status === 200 && preNotices.length === 1 && /browser profile changed: ephemeral \(no profile\) → ephemeral \(no profile\) \(by user\)/.test(text), 'control: the PRE-FIX route queues the owner\'s exact "ephemeral (no profile) → ephemeral (no profile) (by user)" notice for the same no-op pin', text.slice(0, 200));
+    ok(notices.length === n0, '…and the real route\'s notice list is still untouched');
+  }
   // ── THE MID-TASK PIN NEEDS NO RESTART (the chunk's exit condition) ──
   const before = k.statusFor(KEY_A).told;
   let r = await j('POST', '/api/browser/pin', { sessionId: 'sess-1', profile: 'Work account' });
@@ -309,6 +335,8 @@ console.log('— ③ the routes, the shipped CLI and the per-session config: a m
   ok(sessA._browserProfileId === work.id && sessA._browserPinOrigin === 'chosen' && persisted[persisted.length - 1].id === work.id && persisted[persisted.length - 1].origin === 'chosen', 'the live session is stamped and the pin is persisted to its meta (a restart keeps it)');
   ok(notices.length === 1 && notices[0].sid === 'sess-1' && notices[0].n.kind === 'browser-pin' && notices[0].n.by === 'user' && notices[0].n.now === 'Work account' && notices[0].n.handles.includes('work'), 'a USER pin queues ONE typed browser-pin notice (§3.8 layer ②, zero billed turns)');
   ok(k.statusFor(KEY_A).told === before, '…and does NOT tell the session (only its own commands do)');
+  r = await j('POST', '/api/browser/pin', { sessionId: 'sess-1', profile: 'Work account' });
+  ok(r.status === 200 && r.json.moved === false && notices.length === 1, 'lane J: the USER re-choosing the ticked Work row moves nothing and queues no second notice');
   c = await cli(['--profile', 'work', '--', 'snapshot']);
   ok(c.status === 1 && /\[profile_changed\]/.test(c.stderr) && /was: no default/.test(c.stderr) && /now: work \[default\]/.test(c.stderr) && cmds().length === 2, 'the CLI\'s next command is refused ONCE with profile_changed (was → now) and did NOT run');
   c = await cli(['--profile', 'work', '--', 'snapshot']);

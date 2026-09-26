@@ -1448,6 +1448,16 @@ class ChatRenderers {
       }
 
       section.appendChild(prompt);
+    } else if (msg.permission.resolved === 'denied' && msg.permission.staleBy && msg.permission.staleBy.code === 'browser_paused') {
+      // lane J r2 (the naive-user study's S8-36): an approval for a browser page command the agent queued before —
+      // or while — the user drove its browser was answered STALE by the server (a deny naming browser_paused), never
+      // left to run a step planned on a page that has since changed. The card says so in plain words, no buttons.
+      const line = document.createElement('div');
+      line.className = 'chat-permission-resolved chat-permission-denied chat-permission-stale';
+      line.textContent = '\u2717 ' + (msg.permission.staleBy.moment === 'handback'
+        ? t('Not run — it waited while you drove the browser and the page changed. The agent re-plans from the handback.')
+        : t('Not run — you took over the browser, so this step went stale. The agent re-plans after you hand back.'));
+      section.appendChild(line);
     } else if (msg.permission.resolved) {
       const icon = msg.permission.resolved === 'denied' ? '\u2717' : '\u2713';
       const label = msg.permission.resolved === 'denied' ? t('Denied') : t('Allowed');

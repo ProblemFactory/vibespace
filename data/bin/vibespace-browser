@@ -82,7 +82,9 @@ PAGE VERBS (your own browser, or the attachment you name):
   vibespace-browser cookies|storage|state save <f>  (their OUTPUT is a secret — never echo it)
   vibespace-browser batch "open <url>" "snapshot -i"   several verbs, judged line by line before any runs
                                                   (or on stdin: one command per line, or [["open","<url>"],["snapshot","-i"]])
-  vibespace-browser close                         close your tab; \`close --all\` = your browser only
+  vibespace-browser close                         close your browser session; on an ATTACHED profile \`close\` and
+                                                  \`close --all\` both close only YOUR session and drop your lease (the
+                                                  profile's browser keeps running); on your own browser = that browser
   vibespace-browser -- <newer verb …>             the valve for a verb newer than this list (same rules)
 YOURS:
   vibespace-browser status                        which browser a bare verb lands on; handles, children, pin
@@ -91,7 +93,9 @@ YOURS:
                             [--provider <id>] [--host <machine>] [--cdp-port <n>] [--sharing owner|instance]
                                                   a named profile owned by this conversation (logins survive)
   vibespace-browser use <label|id> [--alias <h>]  attach to it; your page verbs then run there
-  vibespace-browser detach [--profile <handle>]   drop my lease (the browser idles out once nobody holds it)
+  vibespace-browser detach [--profile <handle>]   drop my lease (the browser idles out once nobody holds it;
+                                                  this conversation's own ephemeral browser stops at once);
+                                                  refused [browser_paused] while the user has taken it over
   vibespace-browser pin <handle|label|id> | --none   pin THIS conversation's DEFAULT for its next launches
   vibespace-browser new-child                     a browser of its own for a SUB-AGENT (prints its VIBESPACE_BROWSER)
   vibespace-browser providers [--host <machine>]  which providers can run here (or there), and why not
@@ -311,6 +315,7 @@ async function runPage(c) {
   }
   if (built.dropped.length) console.error(`note: ${built.dropped.join(', ')} from your environment ${built.dropped.length === 1 ? 'was' : 'were'} not passed to the browser — which browser you drive and how it launches is VibeSpace's decision, not an environment variable's [env_twin_dropped]`);
   let profileId = null;
+  let closeAllScoped = false; // lane H verify r2 L6: an attachment's `close --all` is ITS session's close, never the namespace's
   if (r.kind === 'ephemeral') {
     // no attachment: THIS conversation's own browser, managed by VibeSpace
     // (started or adopted by the server under this session's own spawn pairs;
@@ -325,15 +330,18 @@ async function runPage(c) {
     console.error(`profile: none — child handle ${r.handle} (its own ephemeral browser)`);
     profileId = r.profile && r.profile.id ? r.profile.id : null;
   } else {
-    // an attachment
-    if (rest[0] === 'close' && rest.includes('--all') && r.others > 0) {
-      console.error(`refused: 'close --all' would stop the browser of "${r.profile.label}" while ${r.others} other session(s) are attached — use 'vibespace-browser detach' to drop your own tab [close_all_refused]`);
-      process.exit(1);
+    // an attachment. LANE H VERIFY r2 L6: the binary's `close --all` closes EVERY session of the namespace — for a
+    // profile that is the keeper's own daemon and the ONE Chrome every lease shares (measured on 0.38.1: {closed:2,
+    // sessions:[both]}, the profile's daemon dead with one holder). Here it is THIS session's `close` (its own connection;
+    // the lease is dropped below, after the command) — said, never the namespace, whoever else is attached.
+    if (rest[0] === 'close' && rest.includes('--all')) {
+      closeAllScoped = true;
+      console.error(`note: 'close --all' on an attached profile closes only YOUR session (your connection, then your lease) — "${r.profile.label}"'s browser keeps running${r.others > 0 ? ` for the ${r.others} other session(s) on it` : ''}; stopping it is the user's act (Agent browser panel) [close_all_scoped]`);
     }
     console.error(profileLine(r.profile, r.lease, r.others, r.handle) + (r.isDefault ? ' [default]' : ''));
     profileId = r.profile.id;
   }
-  const argv = [...rest];
+  const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];
   if (r.pinTab && !argv.includes('--pin-tab')) argv.unshift('--pin-tab');
   const words = rest.filter((x) => !x.startsWith('-'));
   const navVerb = NAV_VERBS.has(words[0] || '');
@@ -354,7 +362,17 @@ async function runPage(c) {
     // the audit line). Best effort.
     try { await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ok: code === 0, ...(navUrl ? { url: navUrl } : {}) }, { soft: true }); } catch { }
     if (navVerb) { const h = navHint(tail); if (h) console.error(h); }
-    if (rest[0] === 'close' && profileId && r.kind === 'attachment') { try { await call('POST', '/api/agent/browser/detach', { profile: profileId }); console.error(profileLine(r.profile, null, r.others, r.handle) + ' · lease dropped'); } catch { } }
+    if (rest[0] === 'close' && profileId && r.kind === 'attachment') {
+      // LANE H VERIFY r3: the lease drop after a `close` is its own request — a takeover that began while the binary ran
+      // refuses it (browser_paused). Said as what it is (the close RAN, the lease was NOT dropped, the code, the way
+      // out) and the exit is non-zero; r2 sat it in a bare try/catch and printed only the server's words about a `detach`
+      const d = await call('POST', '/api/agent/browser/detach', { profile: profileId }, { soft: true });
+      if (d && d._failed) {
+        console.error(`note: your \`close\` ran, but your lease on "${r.profile.label}" was NOT dropped — ${d.error || 'HTTP ' + d._status}${d.code ? ` [${d.code}]` : ''}${d.code === 'browser_paused' ? '; run `vibespace-browser detach` after they hand it back' : ''}`);
+        process.exit(code != null && code !== 0 ? code : 1);
+      }
+      console.error(profileLine(r.profile, null, r.others, r.handle) + ' · lease dropped');
+    }
     process.exit(code == null ? 1 : code);
   });
 }
@@ -423,6 +441,8 @@ async function runPage(c) {
 
   if (verb === 'detach') {
     const r = await call('POST', '/api/agent/browser/detach', { profile: handle || undefined });
+    // verify r1 L2: detaching the conversation's managed ephemeral browser STOPS it — said, never "idles out"
+    if (r.ephemeral) { console.log(`detached — ${r.note || 'this conversation\'s own browser is stopped now; the next browser command starts it again'}`); return; }
     console.log(`detached from ${r.lease.profileId}${r.others ? ` (${r.others} other session(s) still attached)` : ' (nobody else attached — its browser idles out unless re-attached)'}${(r.attachments || []).length ? `; still attached: ${handlesLine(r.handles)}` : ''}`);
     return;
   }

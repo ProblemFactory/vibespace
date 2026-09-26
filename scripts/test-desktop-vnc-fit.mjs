@@ -28,7 +28,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -68,7 +69,7 @@ for (const dir of (process.env.PATH || '').split(':')) {
   for (const name of ents) { if (HIDDEN.has(name)) continue; const dst = path.join(noVncBin, name); if (fs.existsSync(dst)) continue; try { const st = fs.statSync(path.join(dir, name)); if (st.isFile() && (st.mode & 0o111)) fs.symlinkSync(path.join(dir, name), dst); } catch {} }
 }
 
-const srvEnv = (extra = {}) => ({ ...process.env, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...extra });
+const srvEnv = (extra = {}) => ({ ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...extra });
 let srv = null;
 const SERVER_LOG = path.join(home, 'server.log'); // the server's own words are the evidence a red leg prints
 const bootServer = (extraEnv = {}) => { const fd = fs.openSync(SERVER_LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv(extraEnv), stdio: ['ignore', fd, fd] }); fs.closeSync(fd); return srv; };

@@ -13,6 +13,8 @@ import net from 'net';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+import { vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const wt = `/tmp/vs-restore-smoke-${process.pid}`;
 // FREE port (2026-09-07 round 2). `3971 + pid % 20` is a machine-global claim
@@ -40,7 +42,7 @@ const cleanup = () => {
 };
 process.on('exit', cleanup);
 
-const boot = () => spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+const boot = () => spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
 const waitReady = (p) => new Promise((res, rej) => {
   let out = '';
   p.stdout.on('data', (d) => { out += d; if (out.includes('Ready.')) res(out); });

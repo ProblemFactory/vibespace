@@ -40,6 +40,8 @@ import { createRequire } from 'node:module';
 import { WebSocket } from 'ws';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 
+import { vncEnv } from './scratch.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const { scratch, freePort } = await import(path.join(REPO, 'scripts/scratch.mjs'));
@@ -466,7 +468,7 @@ e2e: {
 
   const PORT = await freePort();
   const bootEnv = {
-    ...process.env, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
+    ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '',
     VIBESPACE_AGENTD_ROOT: wtRoot, VIBESPACE_NODE_MODULES: path.join(REPO, 'node_modules'),
     VS_FAULT_OPEN: 'deadchan', // the incident's exact shape: the open is ANSWERED, the channel never relays
   };

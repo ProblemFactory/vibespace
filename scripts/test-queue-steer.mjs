@@ -39,8 +39,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV } from './scratch.mjs';
+import { ONBOARDED_SOURCE, withoutVendorKeys, VENDOR_KEY_ENV, vncEnv } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -5432,7 +5433,7 @@ process.stdin.on('data', (d) => {
   const boot = async () => {
     srv = spawn(process.execPath, ['server.js'], {
       cwd: wt,
-      env: { ...process.env, PORT: String(PORT), HOME: fakeHome, CODEX_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' },
+      env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CODEX_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';

@@ -113,12 +113,17 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   install_local_only: 400, already_installed: 409, install_running: 409, install_precondition_unmet: 409, install_unavailable: 503,
   // takeover C3 (design-browser-takeover §5): the managed ephemeral browser — the shared ceiling (D2), a record that is
   // never attached / edited by id, pairs that name no browser of this conversation, the real CLI missing on this machine
-  browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503 };
+  browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503,
+  // lane H verify r2 M1: a profile directory another browser holds (a lock the keeper cannot prove its own orphan's)
+  // r4/r5: a profile's browser closed and not started again (a failed / unidentified relaunch), or its heal budget spent
+  profile_locked: 409, browser_closed: 409, browser_unstable: 409 };
 function fail(res, e) {
   const code = e?.code || null;
   res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
-    ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}) });
+    ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}),
+    // lane H verify r2: a thrown `browser_paused` (an agent's detach while the user drives) carries when, like a resolve's; `profile_locked` names the holder pid
+    ...(Number.isInteger(e?.takenAt) && e.takenAt > 0 ? { takenAt: e.takenAt, lastUserInputAt: e.lastUserInputAt || 0 } : {}), ...(Number.isInteger(e?.holderPid) ? { holderPid: e.holderPid } : {}) });
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
 function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}) }); }
@@ -142,10 +147,25 @@ function inputTargetFor(k, f, ref) {
  *  parser keeps while a claude Task tool is open; codex carries no signal. */
 function sidechainOpen(s) { try { return !!(s && s._subNormalizers && s._subNormalizers.size > 0); } catch { return false; } }
 /** A user-side change of the set: queue the free notice (layer ②) so the
- *  agent hears it on the user's next message. Optional wiring, never throws. */
+ *  agent hears it on the user's next message. Optional wiring, never throws.
+ *  A "change" whose two sides are the same words is no change and says
+ *  nothing (lane J, 2026-09-25: re-choosing the ticked "Unpinned" row in the
+ *  live view's title menu told the agent "ephemeral (no profile) → ephemeral
+ *  (no profile) (by user)" — a notice the agent can only misread). */
 function noteChange(f, { kind, was, now, handles }) {
   const B = require('../browser-profiles.js');
+  if (String(was || '') === String(now || '')) return false;
   try { ctx.notice?.(f.sessionId, f.session, { ...B.profileChangeNotice({ was, now, by: 'user', handles }), kind }); } catch (e) { console.warn('[browser] notice not queued — ' + (e && e.message)); }
+}
+/** Lane H (2026-09-25): the conversation → browser-key BINDING (P0 r5's store, written at the meta choke
+ *  point) is re-asked ONCE per live session when its managed ephemeral browser starts or is first used —
+ *  the wiring re-runs that same choke point (`writeSessionMeta`'s rule: bindable id, the move/share
+ *  belts), never a second writer with its own rule; a stopped conversation's trace is found through it. */
+const bindingAsked = new WeakSet();
+function ensureBindingOnce(f) {
+  if (!f || !f.session || bindingAsked.has(f.session)) return;
+  bindingAsked.add(f.session);
+  try { ctx.ensureBinding?.(f.session); } catch (e) { console.warn('[browser] binding not re-asked — ' + (e && e.message)); }
 }
 const spellSet = (set) => (set && set.attachments.length ? set.attachments.map((a) => a.alias + (a.isDefault ? ' [default]' : '')).join(', ') : '');
 /** §3.8 layer ③: the profile the agent LAST ACTUALLY USED — stamped on every
@@ -253,7 +273,7 @@ router.post('/api/browser/detach', (req, res) => {
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   try {
     const was = spellSet(k.setFor(f.browserKey));
-    const r = k.detach({ profile: req.body?.profile, browserKey: f.browserKey });
+    const r = k.detach({ profile: req.body?.profile, browserKey: f.browserKey, by: 'user' }); // lane H verify r2 L8: the UI's detach is the USER's (it may end their own takeover)
     const set = k.setFor(f.browserKey);
     noteChange(f, { kind: 'browser-profile', was, now: spellSet(set), handles: set.handles.map((h) => h.handle) });
     res.json({ ...r, attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
@@ -448,10 +468,12 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }
   const liveBrowser = k.leasesFor(f.browserKey).length > 0;
   const after = k.setFor(f.browserKey);
-  if (by === 'user') noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) });
+  // a USER pin that moved the pin says so, once; one that re-chose the current pin (the ticked row) moved nothing and says nothing
+  const moved = (prevPin ? prevPin.profileId : null) !== (p ? p.id : null);
+  if (by === 'user') { if (moved) noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) }); }
   else k.tell(f.browserKey);
   try { ctx.onPinChanged?.(f.sessionId, f.session, pin); } catch { /* optional */ }
-  return { pin, repoint, appliesFrom: B.pinApplyNotice({ liveBrowser }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint };
+  return { pin, repoint, appliesFrom: B.pinApplyNotice({ liveBrowser }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved };
 }
 
 // ── AGENT (the CLI) ──
@@ -576,6 +598,7 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       if (pairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         stampActive(f, '');
+        ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
         return res.json({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false });
       }
       stampActive(f, '');

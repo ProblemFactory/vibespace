@@ -9,7 +9,8 @@
 //      key as the negative control) while a ratio-only change keeps the key and
 //      is applied in place, the displayed panes on a wide vs a NARROW layout
 //      (the phone renders tabs, the model keeps the split), D19 (a)'s
-//      replaceable pane, the bind pair by side, the one grid-columns spelling;
+//      replaceable pane, the bind pair by side, the one grid-columns spelling (lane I verify r1: + the panes' own
+//      floors as the tracks' minimums, capped at the window floor minus the divider; every write carries them);
 //      and (split UX chunk 1, docs/design-split-ux.zh.md) dropSide GONE, the
 //      strip's visual order, the swap, the default partner;
 //   ② the OWNERSHIP badge: two sessions in one task group produce
@@ -94,6 +95,9 @@ console.log('— ① displayed panes, the anchor, D19 (a), the bind pair, the co
   ok(C.splitReplaceable({ tabs: ['a', 'b'], active: 0 }) === null, 'a tabs chain has nothing to replace');
   ok(J(C.pairFor({ anchorId: 'chat', guestId: 'live', side: 'right' })) === J(['chat', 'live']) && J(C.pairFor({ anchorId: 'chat', guestId: 'live', side: 'left' })) === J(['live', 'chat']), 'pairFor puts the guest on the side it was dropped on');
   ok(C.splitColumns(0.3) === 'minmax(0, 0.3fr) 6px minmax(0, 0.7fr)' && C.splitColumns(2) === 'minmax(0, 0.85fr) 6px minmax(0, 0.15fr)', 'splitColumns is the ONE spelling of the host grid (clamped)');
+  // lane I verify r1 (2026-09-25): a pane's OWN floor — a bound live view dragged to the clamp was narrower than its bar
+  ok(C.splitColumns(0.85, [0, 112.2]) === 'minmax(0, 0.85fr) 6px minmax(113px, 0.15fr)' && C.splitColumns(0.3, null) === C.splitColumns(0.3) && C.splitColumns(0.3, [0, 0]) === C.splitColumns(0.3), 'splitColumns(ratio, mins): a pane floor is its track\'s minimum (rounded UP); no floor = the old spelling byte for byte');
+  ok(C.SPLIT_PANE_MIN_MAX === 320 - C.SPLIT_DIVIDER_PX && C.paneMinPx(9999) === C.SPLIT_PANE_MIN_MAX && C.paneMinPx(-4) === 0 && C.paneMinPx('x') === 0 && C.paneMinPx(NaN) === 0 && C.splitColumns(0.5, [9999, 'junk']) === 'minmax(314px, 0.5fr) 6px minmax(0, 0.5fr)', 'a pane floor is capped at the window floor minus the divider (a host at its own minimum still holds it); junk / ≤ 0 = none');
 }
 
 console.log('— ① split UX chunk 1 (docs/design-split-ux.zh.md §4): no pointer half, the visual order, swap, the default partner');
@@ -147,6 +151,10 @@ console.log('— ③ wiring pins');
   const fnBody = (name) => { const i = tg.indexOf('\n  ' + name + '('); if (i < 0) return ''; const j = tg.indexOf('\n  },', i); return tg.slice(i, j); };
   for (const m of ['createTabChain', 'addToTabChain', '_detachFromChain', 'restoreTabChain', 'switchTab', 'bindSplit', 'unbindSplit', 'swapSplit', 'undoSplit']) ok(/this\._normalizeChain\(chain\)/.test(fnBody(m)), `tab-group.js ${m} runs _normalizeChain (the ONE validation at every chain mutation)`);
   ok(/_normalizeChain\(chain\) \{ return normalizeChain\(chain\); \}/.test(tg), '_normalizeChain IS the PURE normalizeChain (no second spelling)');
+  // lane I verify r1: EVERY write of the host's grid columns carries the pair's own pane floors
+  const colWrites = tg.match(/gridTemplateColumns = splitColumns\([^)]*\)/g) || [];
+  ok(colWrites.length === 3 && colWrites.every((w) => /this\._paneMins\(/.test(w)), `every splitColumns write in tab-group.js passes the pair's pane floors (_applyChainLayout, setSplitRatio, setPaneMinWidth — ${colWrites.length}: ${colWrites.join(' | ')})`);
+  ok(/w && w\.paneMinWidth/.test(fnBody('_paneMins')) && /const v = paneMinPx\(px\) \|\| null;/.test(fnBody('setPaneMinWidth')) && /chain\.split\.pair\.includes\(id\)/.test(fnBody('setPaneMinWidth')) && /paneMinWidth: null/.test(read('src/lib/window.js')), 'setPaneMinWidth stores the floor on the window (window.js declares it), re-spells the grid only while the window IS a pane of a split; _paneMins reads it per pane');
   ok(/splitReplaceable\(chain\)/.test(fnBody('switchTab')), 'switchTab applies D19 (a) through the PURE splitReplaceable');
   const div = fnBody('_setupSplitDivider');
   ok(/new AbortController\(\)/.test(div) && /requestAnimationFrame/.test(div) && /getBoundingClientRect\(\)/.test(div) && !/clientWidth|uiScale/.test(div), 'the divider drag: a PER-DRAG AbortController, rAF-coalesced, ONE kind of pixel (the host rect + clientX, never clientWidth / uiScale)');

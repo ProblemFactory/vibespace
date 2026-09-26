@@ -2335,6 +2335,14 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
   background: var(--bg-panel, var(--bg-titlebar)); border-bottom: 1px solid var(--border); }
 .desktop-status { flex: 1; font-size: 11px; color: var(--text-secondary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* lane I (2026-09-25): the strip follows the live view's bar rule — every child on ONE line at its own width, the status
+   alone flexing (down to 40 px = DESK_STATUS_MIN_PX in desktop-app-window.js, ellipsised), the rest folding into the ⋯
+   by priority (bar-fold.js). Take over / Hand back were `.file-tool-btn` 24 px boxes ("接管" 13×34, "交还控制" 4 lines). */
+.desktop-bar > * { flex: 0 0 auto; white-space: nowrap; }
+.desktop-bar > .desktop-status { flex: 1 1 0; min-width: 40px; }
+.desktop-bar > .desktop-copy-hint { flex: 0 1 auto; min-width: 0; }
+.desktop-bar > .file-tool-btn { width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
+.vnc-paste-actions > .file-tool-btn { width: auto; height: 22px; padding: 0 10px; font-size: 11px; white-space: nowrap; flex: 0 0 auto; } /* lane I: Send / Cancel were 24 px boxes */
 /* round 3, A1: the one-time "Enable HTTPS for seamless copy" hint beside the plain-http copy chip (picture-shell.js) */
 .desktop-copy-hint { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-secondary);
   padding: 1px 2px 1px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); white-space: nowrap;
@@ -2343,7 +2351,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-copy-hint-text { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .desktop-copy-hint-link { color: var(--accent); text-decoration: underline; flex-shrink: 0; }
 .desktop-copied-chip { white-space: nowrap; flex-shrink: 0; }
-.desktop-copy-hint-close { width: 18px; height: 18px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.desktop-copy-hint > .desktop-copy-hint-close { width: 18px; height: 18px; padding: 0; display: inline-flex; align-items: center; justify-content: center; } /* lane I: (0,2,0) — viewers.css's 24×24 won the (0,1,0) tie */
 .desktop-copy-hint-close svg { width: 10px; height: 10px; }
 
 /* ── Desktop-app windows + the launch dialog (docs/design-desktop-apps §2, P8-1) ── */
@@ -2354,7 +2362,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-app-chip-origin { color: var(--text-secondary); }
 .desktop-app-chip-agent { color: var(--accent); }
 .window-live-driving .desktop-app-mount { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
-.desktop-app-stop { color: var(--red, #e55); }
+.file-tool-btn.desktop-app-stop { color: var(--red, #e55); } /* lane I: (0,2,0) — viewers.css's `.file-tool-btn` colour won the (0,1,0) tie: Stop was never red */
 /* round 3 A2: a desktop-app window is unseen until its first record answers — a dead record (a layout replay) closes it before it paints */
 .window.desktop-app-pending { opacity: 0; pointer-events: none; }
 /* P8-2 x2 (2026-09-22) — the xpra seamless pane (xpra-view.js): the pane is the X root and it is a THEME colour, never
@@ -2375,7 +2383,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-app-blocked { z-index: 20; }
 .desktop-app-blocked-title { font-size: 13px; font-weight: 600; color: var(--text); max-width: 90%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-app-is-blocked > :not(.desktop-app-blocked) { visibility: hidden; }
-.desktop-copied-chip { color: var(--accent); border-color: var(--accent); }
+.file-tool-btn.desktop-copied-chip { color: var(--accent); border-color: var(--accent); } /* lane I: (0,2,0) — the tie with viewers.css */
 .window-app-icon { width: 1em; height: 1em; vertical-align: -0.1em; object-fit: contain; }
 /* round 3 lane B — SEAMLESS desktop-app windows (docs/design-desktop-apps-seamless §3.3; desktop-app-window.js decides,
    PURE src/lib/desktop-seamless.js): an app that draws its own title bar gets NO VibeSpace chrome over it. The title bar
@@ -2433,7 +2441,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-machine-why { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .desktop-launch-install { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 4px 0; }
 .desktop-launch-install.is-empty { display: none; }
-.desktop-launch-install-btn { width: auto; padding: 0 10px; font-size: 11px; }
+.file-tool-btn.desktop-launch-install-btn { width: auto; padding: 0 10px; font-size: 11px; } /* (0,2,0): never a cascade-order tie with viewers.css's icon rule (test-live-bar-layout census, 2.369.180) */
 .desktop-launch-host-chip { font-size: 10px; color: var(--text-secondary); margin-left: 6px; }
 /* the install rung's plan + log dialog */
 .desktop-install-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
@@ -4537,16 +4545,32 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-strip-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); }
 .browser-live-strip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); flex-shrink: 0; }
 .browser-live-strip-tab.running .browser-live-strip-dot { background: var(--green, #7fc47f); animation: chat-remote-pulse 1.2s ease-in-out infinite; }
-.browser-live-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 11px; min-width: 0; }
-.browser-live-mode { padding: 0 7px; border-radius: 999px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
+.browser-live-bar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: var(--bg-secondary); font-size: 11px; min-width: 0; overflow: hidden; }
+/* lane I (2026-09-25, the owner's zh screenshots): A CHROME BAR NEVER WRAPS — every child keeps its words on ONE line at
+   its own width (flex: 0 0 auto + nowrap), the URL alone flexes (down to 120 px = URL_MIN_PX in browser-live-window.js),
+   and what does not fit FOLDS into the ⋯ menu by priority (src/lib/live-bar-layout.js + bar-fold.js). The text buttons
+   are `.file-tool-btn`, whose viewers.css rule (a 24×24 ICON box, loaded AFTER this file) won every same-specificity tie:
+   "观看" / "接管" / "标签页 (1)" were 24 px boxes with their words stacked one glyph per line, painting over the bind
+   button and the URL. The bar's own rules are (0,2,0) — never reorder the stylesheets (every other file-tool-btn moves). */
+.browser-live-bar > * { flex: 0 0 auto; white-space: nowrap; }
+.browser-live-bar > .file-tool-btn { width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
+.browser-live-bar > .file-tool-btn.bar-icon-btn { padding: 0 5px; font-size: 13px; }
+.browser-live-bar > .bar-folded, .desktop-bar > .bar-folded { display: none !important; }
+.browser-live-mode { padding: 0 7px; border-radius: 999px; font-size: 11px; line-height: 18px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); white-space: nowrap; }
 .browser-live-mode.takeover { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); }
-.browser-live-mode-btn, .browser-live-side-btn, .browser-live-reconnect, .browser-live-open { width: auto; padding: 0 8px; font-size: 10px; }
-.browser-live-mode-btn.active, .browser-live-side-btn.active { color: var(--accent); border-color: var(--accent); }
-.browser-live-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: var(--font-mono, monospace); }
-.browser-live-viewers, .browser-live-rec { color: var(--text-dim); white-space: nowrap; }
+/* naive study 2 (finding 3): a STOPPED browser's view keeps its last frame, greyed, and never claims somebody drives */
+.browser-live-mode.stopped { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); }
+.browser-live.stopped .browser-live-img { filter: grayscale(1); opacity: 0.45; }
+.file-tool-btn.browser-live-side-btn.active { color: var(--accent); border-color: var(--accent); }
+.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); } /* lane I: Take over is THE act of the bar — a bordered button, never bare text */
+.browser-live-bar > .browser-live-url { flex: 1 1 0; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: var(--font-mono, monospace); }
+/* the RULER (bar-fold.js): a hidden twin of a bar, offscreen, measuring each item's natural width once per text */
+.bar-ruler-host { position: absolute; left: -100000px; top: 0; width: 0; height: 0; overflow: visible; visibility: hidden; pointer-events: none; contain: layout style; }
+.bar-ruler-host > * { position: absolute; left: 0; top: 0; width: max-content; }
+.browser-live-viewers { color: var(--text-dim); white-space: nowrap; }
 .browser-live-body { display: flex; flex: 1; min-height: 0; }
 .browser-live-canvas { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
-.browser-live-img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; }
+.browser-live-img { width: 100%; height: 100%; object-fit: contain; object-position: 50% 0; display: block; user-select: none; } /* lane J r2: TOP-aligned — the spare pixels sit below the page, never a band above and below (browser-stream.js LIVE_ALIGN: every conversion reads the same word) */
 .browser-live-status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 12px; color: var(--text-secondary); background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 12px; max-width: 80%; text-align: center; }
 .browser-live-status.error { color: var(--red, #e55); border-color: var(--red, #e55); }
 .browser-live-side { width: 260px; max-width: 45%; flex-shrink: 0; border-left: 1px solid var(--border); overflow: auto; background: var(--bg-secondary); font-size: 11px; }
@@ -4559,24 +4583,40 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-console-line.level-warn, .browser-live-console-line.level-warning { color: var(--yellow, #e5c07b); }
 /* P3 (§4.3): the three modes, the agent cursor, the --confirm-actions cards */
 .browser-live-mode.other { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); }
-.browser-live-handback { width: auto; padding: 0 8px; font-size: 10px; color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); }
+/* lane I verify r1: the badge FOLDS LAST (a split pane at the divider's clamp could not hold it beside the toggle and
+   the ⋯); folded, the ⋯ wears its colour — who drives stays visible, the sentence is the ⋯ menu's first row */
+.browser-live-bar > .browser-live-more[data-badge="folded"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="takeover"] { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
+.browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="other"] { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent); }
+.file-tool-btn.browser-live-handback { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); }
 .browser-live.driving .browser-live-img { cursor: crosshair; }
 .browser-live.driving .browser-live-canvas { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .browser-live:focus { outline: none; }
+/* lane J r2: the keyboard while you drive — the ring says every key goes to the page; the sink is focusable, never seen */
+.browser-live.kbd-owned .browser-live-canvas { outline: 2px solid var(--accent); outline-offset: -2px; }
+.browser-live-kbd { position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; margin: 0; border: 0; opacity: 0; resize: none; overflow: hidden; pointer-events: none; caret-color: transparent; background: transparent; color: transparent; z-index: 0; }
+.browser-live-kbd-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; white-space: nowrap; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.browser-live-echo { white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; transition: color 300ms; }
+.browser-live-echo.fresh { color: var(--text); }
+.browser-live-echo.error { color: var(--red, #e55); }
+.browser-live-ripple { position: absolute; z-index: 3; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; animation: browser-live-ripple 650ms ease-out forwards; }
+@keyframes browser-live-ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
+.browser-live-you-cursor { position: absolute; z-index: 2; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid var(--bg); background: var(--accent); box-shadow: 0 0 0 1px var(--accent); pointer-events: none; }
 .browser-live-agent-cursor { position: absolute; z-index: 2; pointer-events: none; display: flex; align-items: flex-start; gap: 2px; transform: translate(-1px, -1px); transition: left 80ms linear, top 80ms linear; }
 .browser-live-agent-cursor-label { font-size: 10px; line-height: 1; padding: 2px 5px; margin-top: 12px; border-radius: 999px; color: var(--bg); background: var(--accent); white-space: nowrap; }
 .browser-live-confirms { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 10%, var(--bg-secondary)); }
 .browser-live-confirm { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text); }
 .browser-live-confirm-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.browser-live-confirm-btn { width: auto; padding: 0 10px; font-size: 10px; color: var(--green, #7fc47f); border-color: var(--green, #7fc47f); }
-.browser-live-confirm-btn.deny { color: var(--red, #e55); border-color: var(--red, #e55); }
+.file-tool-btn.browser-live-confirm-btn { width: auto; height: 22px; padding: 0 10px; font-size: 10px; white-space: nowrap; flex: 0 0 auto; color: var(--green, #7fc47f); border-color: var(--green, #7fc47f); }
+.file-tool-btn.browser-live-confirm-btn.deny { color: var(--red, #e55); border-color: var(--red, #e55); }
 .chat-status-browser.driving { color: var(--yellow, #e5c07b); }
-@media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-rec { display: none; } .browser-live-confirm-text { white-space: normal; } }
+@media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } } /* lane I: the recording chip folds into ⋯ like any item (its old display:none here lost to .file-tool-btn's display:flex anyway) */
 
 /* ── agent browser P4 (§7.4): the backend chip, the blocked-claim banner, the switcher dialog ── */
-.browser-live-backend { font-family: var(--font-mono, monospace); font-size: 11px; white-space: nowrap; }
+.browser-live-bar > .browser-live-backend { font-family: var(--font-mono, monospace); }
 .browser-live-blocked { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); flex-shrink: 0; }
 .browser-live-blocked-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.browser-live-blocked-row > .file-tool-btn { width: auto; height: 22px; padding: 0 8px; font-size: 10px; white-space: nowrap; flex: 0 0 auto; } /* lane I: the .file-tool-btn tie (a 24 px box) */
 .browser-live-blocked-text { flex: 1; min-width: 0; }
 .browser-switcher-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
 .browser-switcher-chip, .browser-chip { font-family: var(--font-mono, monospace); font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
@@ -4656,15 +4696,15 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-trace-label { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-live-trace-status { color: var(--green, #7fc47f); font-size: 10px; }
 .browser-live-trace-empty { padding: 10px 8px; font-size: 11px; }
-.browser-live-rec { width: auto; padding: 0 8px; font-size: 10px; color: var(--text-dim); }
-.browser-live-rec.on { color: var(--red, #e55); border-color: var(--red, #e55); }
+.file-tool-btn.browser-live-rec { color: var(--text-dim); }
+.file-tool-btn.browser-live-rec.on { color: var(--red, #e55); border-color: var(--red, #e55); }
 .browser-live-rec.on::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red, #e55); margin-right: 4px; animation: chat-remote-pulse 1.2s ease-in-out infinite; }
 .browser-live-tracepane { height: 100%; }
 /* P5 (§6.4 / §8 step 3 / D8): the Browser profiles panel */
 .bprof { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); font-size: 12px; }
 .bprof-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
 .bprof-summary { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; } /* 2.369.145: a CJK label's min-content is ONE glyph — without nowrap the grid's auto track stacked 收编…/搁置 vertically */
+.file-tool-btn.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; } /* lane I: (0,2,0) — at (0,1,0) viewers.css's later `.file-tool-btn` (24×24) won the tie and this fix never applied */ /* 2.369.145: a CJK label's min-content is ONE glyph — without nowrap the grid's auto track stacked 收编…/搁置 vertically */
 .bprof-hint { padding: 6px 10px; font-size: 11px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .bprof-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
 .bprof-section { padding: 6px 10px 2px; }
@@ -4692,9 +4732,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof-rec-refused { margin-left: 6px; color: var(--yellow, #e5c07b); font-size: 10px; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
 .bprof-record input { margin: 0; }
-.bprof-forget { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); }
-.bprof-forget:disabled { color: var(--text-dim); border-color: var(--border); }
-.bprof-delete { color: var(--red, #e55); border-color: var(--red, #e55); }
+.file-tool-btn.bprof-forget { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); } /* lane I: (0,2,0) — the tie with viewers.css's `.file-tool-btn` */
+.file-tool-btn.bprof-forget:disabled { color: var(--text-dim); border-color: var(--border); }
+.file-tool-btn.bprof-delete { color: var(--red, #e55); border-color: var(--red, #e55); }
 .bprof-row.deleted { opacity: .6; }
 .bprof-empty, .bprof-sweep { padding: 6px 4px; font-size: 11px; }
 .bprof-error { padding: 12px; color: var(--red, #e55); }
@@ -4755,8 +4795,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .win-owner-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--bg-window); box-shadow: 0 0 0 1px var(--border); }
 .browser-live-strip-owners { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
 .browser-live-strip-owners .win-owner-dot { width: 7px; height: 7px; }
-.browser-live-bind { white-space: nowrap; }
-.browser-live-bind.bound { color: var(--accent); }
+.file-tool-btn.browser-live-bind.bound { color: var(--accent); }
 /* ≤768px: TABS ONLY (D19's measurement) — the model keeps the split, the phone shows the focused pane */
 @media (max-width: 768px) {
   .window.tab-split { display: flex !important; }

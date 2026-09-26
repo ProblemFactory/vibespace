@@ -44,6 +44,7 @@ import http from 'node:http';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const M = require('../src/browser-mediation.js');
@@ -204,7 +205,7 @@ if (AB) {
   const bin = execFileSync('sh', ['-c', 'command -v agent-browser'], { encoding: 'utf8', env: BASE_ENV }).trim();
   const cdir = path.join(ROOT, 'flag-census'); fs.mkdirSync(cdir, { recursive: true });
   const m = await measureGlobalFlags(bin, { dir: cdir, env: BASE_ENV });
-  const GF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/browser-verbs/global-flags-0.32.0.json'), 'utf8'));
+  const GF = JSON.parse(fs.readFileSync(path.join(REPO, `scripts/fixtures/browser-verbs/global-flags-${require('../src/browser-verbs.js').TABLE_VERSION}.json`), 'utf8'));
   const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
   const cfgValue = (m.other || []).some((o) => o.flag === '--config' && /config file not found: zzq9/.test(o.said));
   const diff = { valueMissing: m.value.filter((f) => !V.VALUE_FLAGS.includes(f)), valueExtra: V.VALUE_FLAGS.filter((f) => !m.value.includes(f) && !(f === '--config' && cfgValue)), boolMissing: m.bool.filter((f) => !V.BOOL_FLAGS.includes(f)), boolExtra: V.BOOL_FLAGS.filter((f) => !m.bool.includes(f)) };
@@ -245,7 +246,7 @@ else if (AB) {
       // documents only as an env var) + EVERY measured global flag the router lets through its flag rules,
       // between `get` and the noun (a value flag with a benign value, a boolean bare and with `true`), + a
       // flag of unknown arity, + nouns that are not `get` reads
-      const GF = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/browser-verbs/global-flags-0.32.0.json'), 'utf8'));
+      const GF = JSON.parse(fs.readFileSync(path.join(REPO, `scripts/fixtures/browser-verbs/global-flags-${require('../src/browser-verbs.js').TABLE_VERSION}.json`), 'utf8'));
       const benign = { '--headers': '{}', '--model': 'x', '--device': 'x', '--max-output': '400', '--screenshot-dir': ROOT, '--screenshot-format': 'png', '--screenshot-quality': '50', '--idle-timeout': '5m' };
       const passesFlags = (f) => !V.IDENTITY_FLAGS.includes(f) && !V.RAW_CDP_FLAGS.includes(f) && !V.LAUNCH_FLAGS.includes(f);
       const FUZZ = [['get', '--idle-timeout', '5m', 'cdp-url'],
@@ -452,6 +453,242 @@ if (AB && CHROME) {
   stub.close();
   reapDaemons();
 } else skip(AB ? 'no chrome for the navigation legs' : 'no agent-browser for the navigation legs');
+
+// ═══ ④ NAIVE STUDY 2 (2026-09-25): THE REAL KEEPER ON THE REAL BINARY — two sessions on ONE named profile ═══
+// The owner's "bank" profile never started (SingletonLock on every launch, Reconnect too): each lease's session had been
+// handed the profile DIRECTORY, and on 0.38.1 a daemon is per SESSION — the second one launched its own Chrome on a
+// directory the keeper's Chrome held. Now the keeper is the ONLY launcher and a lease reaches it over its CDP url. Here the
+// REAL keeper (real runtime, real config file) + the real binary + a real Chrome: both sessions' commands run, each on its
+// own tab, the live view's stream port is answered, and exactly ONE Chrome ever runs on the directory. CONTROL: a third
+// session given the pre-fix env (the directory) dies on the lock — the binary itself says why the rule exists.
+console.log('— ④ naive study 2: the real keeper + the real binary — two sessions on ONE named profile, one Chrome');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Ss = require('../src/browser-stream.js'), Bp = require('../src/browser-profiles.js');
+  let ver4 = null; try { ver4 = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
+  if (!ver4) skip('④ agent-browser is not runnable here (put the real binary first on PATH) — the keeper-launcher leg needs it');
+  else if (!CHROME) skip('④ no chrome on this box for the keeper-launcher leg');
+  else await (async () => {
+    const KR = scratch('mc4'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x');
+    for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const KA4 = 'bk-00006b01', KB4 = 'bk-00006b02', KC4 = 'bk-00006b03', KD4 = 'bk-00006b04';
+    const live4 = new Set([KA4, KB4, KC4, KD4]);
+    // r5: the For-you store the keeper files its ONE unstable notice into (the product wires the real one)
+    const notices4 = [];
+    const inbox4 = { add: (key, item) => { notices4.push({ key, ...item }); return { id: 'ut-' + notices4.length, ...item }; } };
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, userTodos: inbox4 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR); } catch { return false; } });
+    // Chrome rewrites its process title — /proc/<pid>/cmdline is then ONE space-joined string, not NUL-separated argv
+    const chromesOn = (dir) => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).filter((pid) => { try { const c = ' ' + fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') + ' '; return c.includes(` --user-data-dir=${dir} `) && !c.includes(' --type='); } catch { return false; } }).length;
+    try {
+      const bank = kk.createProfile({ label: 'Bank' }, { owner: { kind: 'instance', id: null } });
+      const cfg = kk.configFileFor({ ephemeral: false });
+      // r4: `cfg` = what /resolve names a LEASE's session (machine.json — it never launches); a call under the KEEPER's own
+      // session runs with the keeper's launch file for the profile (machine-<id>.json, its launch mark — a different config
+      // would relaunch its Chrome, measured)
+      const run = (pairs, args, c = cfg) => new Promise((resolve) => execFile('agent-browser', args, { env: { ...kenv, ...Ss.pairsToEnv(pairs), AGENT_BROWSER_CONFIG: c }, encoding: 'utf8', timeout: 60000 }, (err, so, se) => resolve({ ok: !err, out: String(so || '') + String(se || '') })));
+      const ax = await kk.attach({ profileId: bank.id, browserKey: KA4, sessionId: 'sess-a4' });
+      const ay = await kk.attach({ profileId: bank.id, browserKey: KB4, sessionId: 'sess-b4' });
+      ok(ax.env && ay.env && [ax.env, ay.env].every((e) => e.some((kv) => kv.startsWith('AGENT_BROWSER_CDP=ws://127.0.0.1:')) && !e.some((kv) => kv.startsWith('AGENT_BROWSER_PROFILE='))) && chromesOn(bank.dir) === 1, `④ the keeper launched the profile's ONE Chrome and both leases carry its CDP url, never the directory (${ver4})`, JSON.stringify({ ax: ax.env, ay: ay.env }));
+      const rec4 = kk.browserOf(bank.id);
+      ok(rec4 && Ff.pidAlive(rec4.pid) && Ff.sameProcess(rec4.pid, rec4.starttime), `④ the keeper's recorded daemon pid (${rec4 && rec4.pid}) is alive after its own \`get cdp-url\` — every keeper call carries the launch's view (a different idle value restarted the daemon and relaunched Chrome on 0.38.1, leaving a dead pid recorded)`, JSON.stringify(rec4 && { pid: rec4.pid, state: rec4.state }));
+      const pin = ax.pinTab ? ['--pin-tab'] : [];
+      const oa = await run(ax.env, [...pin, 'open', 'data:text/html,<title>BANK-A4</title>']);
+      const ob = await run(ay.env, [...pin, 'open', 'data:text/html,<title>BANK-B4</title>']);
+      const ta = await run(ax.env, [...pin, 'get', 'title']), tb = await run(ay.env, [...pin, 'get', 'title']);
+      ok(oa.ok && ob.ok && /BANK-A4/.test(ta.out) && /BANK-B4/.test(tb.out) && chromesOn(bank.dir) === 1, `④ two sessions on ONE named profile both run — each on its own tab ("${ta.out.trim().split('\n').pop()}" / "${tb.out.trim().split('\n').pop()}") — with exactly ${chromesOn(bank.dir)} Chrome on its directory (the owner's "bank": SingletonLock on every launch)`, JSON.stringify({ oa: oa.out.slice(-300), ob: ob.out.slice(-300) }));
+      const view = await kk.streamPortFor(Ss.streamTargetFor({ browserKey: KA4, set: kk.setFor(KA4), profiles: kk.list().profiles }));
+      ok(view.ok && Number.isInteger(view.port) && chromesOn(bank.dir) === 1, `④ the live view's stream port is answered under the lease's session (${view.port}) and still ONE Chrome (the S5-45 "Live view unavailable … SingletonLock" screen)`, JSON.stringify(view));
+      const pre = [`AGENT_BROWSER_SESSION=vs-${KC4}`, `AGENT_BROWSER_NAMESPACE=vs-${bank.id}`, `AGENT_BROWSER_PROFILE=${bank.dir}`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=0'];
+      const oc = await run(pre, [...pin, 'open', 'data:text/html,<title>BANK-C4</title>']);
+      ok(!oc.ok && /SingletonLock|exit code: 21|ProcessSingleton/.test(oc.out) && chromesOn(bank.dir) === 1, `④ CONTROL: a third session given the PRE-FIX env (the profile directory) dies on the lock on the real binary — "${(oc.out.match(/[^\n]*SingletonLock[^\n]*/) || [oc.out.trim().split('\n').pop()])[0].trim().slice(0, 140)}"`, oc.out.slice(-500));
+      // LANE H VERIFY r2 M1, ON THE REAL BINARY: `kill -9` of the keeper's daemon (a crash / an OOM / stop()'s own SIGKILL)
+      // leaves its Chrome ALIVE holding the profile's SingletonLock — the binary itself then refuses a relaunch on the
+      // directory (exit 21, the CONTROL). The keeper recorded that Chrome at launch; its tick ends it, and the next start
+      // comes up with a NEW DevToolsActivePort.
+      const chromePidsOn = (dir) => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { const c = ' ' + fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') + ' '; return c.includes(` --user-data-dir=${dir} `) && !c.includes(' --type='); } catch { return false; } });
+      const dtp = () => { try { return fs.readFileSync(path.join(bank.dir, 'DevToolsActivePort'), 'utf8'); } catch { return null; } };
+      const recK = kk.browserOf(bank.id);
+      const c1 = chromePidsOn(bank.dir);
+      ok(recK && recK.browser && c1.length === 1 && recK.browser.pid === c1[0] && Ff.sameProcess(recK.browser.pid, recK.browser.starttime), `④ r2 M1: the keeper RECORDED the Chrome its launch started (pid ${recK && recK.browser && recK.browser.pid}, the daemon's child on the profile dir, pid + starttime)`, JSON.stringify(recK && recK.browser));
+      // the old browser's DevTools port = its recorded cdp url's (the file itself may already be gone: the CONTROL's failed Chrome above removes it on start)
+      const portOf = (u) => { try { return String(new URL(String(u).replace(/^ws/, 'http')).port); } catch { return null; } };
+      const dt0 = portOf(recK.cdpUrl);
+      try { process.kill(recK.pid, 'SIGKILL'); } catch { }
+      for (let i = 0; i < 80 && Ff.pidAlive(recK.pid); i++) await sleep(50);
+      await sleep(300);
+      const orphan = chromePidsOn(bank.dir);
+      const keeperPairs = [`AGENT_BROWSER_SESSION=${Bp.sessionNameFor(bank.id)}`, `AGENT_BROWSER_NAMESPACE=${Bp.sessionNameFor(bank.id)}`, `AGENT_BROWSER_PROFILE=${bank.dir}`, 'AGENT_BROWSER_IDLE_TIMEOUT_MS=0'];
+      const cfgK = kk.machineConfigFile('machine', bank.id);
+      const raw = await run(keeperPairs, ['open', 'about:blank'], cfgK);
+      ok(!Ff.pidAlive(recK.pid) && orphan.length === 1 && orphan[0] === c1[0] && !raw.ok && /exit code: 21|SingletonLock/.test(raw.out), `④ r2 M1 CONTROL (the binary itself): the daemon SIGKILLed, its Chrome ${orphan[0]} survives holding the lock, and a relaunch on the directory under the keeper's own session dies "${(raw.out.match(/Chrome exited early[^\n]*/) || [raw.out.trim().split('\n').pop()])[0].slice(0, 90)}"`, raw.out.slice(-400));
+      await kk.tick();
+      let goneAfterTick = false; for (let i = 0; i < 100 && !(goneAfterTick = chromePidsOn(bank.dir).length === 0); i++) await sleep(50);
+      ok(kk.browserOf(bank.id).state === 'stopped' && goneAfterTick && !Ff.pidAlive(c1[0]), `④ r2 M1: the tick records the dead daemon stopped AND ends the orphaned Chrome ${c1[0]} it had recorded (0 Chromes on the directory)`, JSON.stringify({ state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
+      let restartErr = null; try { await kk.start(bank.id, { why: 'r2 relaunch after a dead daemon' }); } catch (e) { restartErr = (e.code || '') + ' ' + e.message; }
+      const dt1 = String(dtp() || '').split('\n')[0]; const c2 = chromePidsOn(bank.dir);
+      ok(!restartErr && kk.browserOf(bank.id).state === 'ready' && c2.length === 1 && c2[0] !== c1[0] && dt0 && dt1 && dt1 !== dt0 && portOf(kk.browserOf(bank.id).cdpUrl) === dt1 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === c2[0], `④ r2 M1: the next start launches on the directory — ONE new Chrome (${c2[0]}), a NEW DevToolsActivePort (${dt0} → ${dt1}, the record's cdp url follows), recorded again`, restartErr || JSON.stringify({ c2, dt0, dt1, cdp: kk.browserOf(bank.id).cdpUrl }));
+      // LANE H VERIFY r3 MAJOR 1, ON THE REAL BINARY: when the daemon's Chrome dies (SIGTERM = the user closing a headed
+      // window) the DAEMON LIVES and the next verb under the keeper's own session relaunches Chrome IN THE SAME DAEMON — a
+      // new pid, lock and DevToolsActivePort, its environ scrubbed of AGENT_BROWSER_* — so the record made at launch is
+      // stale and no namespace can witness it. The daemon is then SIGKILLed before anything judged it: the tick must end
+      // the RELAUNCHED Chrome (the lock of the directory the keeper minted, no live daemon its parent) and the profile must
+      // start again (r2 left it alive and answered profile_locked "it may be the user's own browser" forever).
+      const ppidOf = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { return null; } };
+      const abEnvKeys = (pid) => { try { return fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0').filter((kv) => kv.startsWith('AGENT_BROWSER_')).map((kv) => kv.split('=')[0]); } catch { return null; } };
+      const recA = kk.browserOf(bank.id); const cA = chromePidsOn(bank.dir);
+      try { process.kill(cA[0], 'SIGTERM'); } catch { }
+      for (let i = 0; i < 100 && Ff.pidAlive(cA[0]); i++) await sleep(50);
+      await sleep(500);
+      const daemonLived = Ff.pidAlive(recA.pid);
+      const reo = await run(keeperPairs, ['open', 'about:blank'], cfgK);
+      const cB = chromePidsOn(bank.dir); const dtB = String(dtp() || '').split('\n')[0]; const envB = cB.length ? abEnvKeys(cB[0]) : null;
+      ok(cA.length === 1 && daemonLived && reo.ok && cB.length === 1 && cB[0] !== cA[0] && ppidOf(cB[0]) === recA.pid && Array.isArray(envB) && envB.length === 0, `④ r3 M1 CONTROL (the binary itself): its Chrome ${cA[0]} ended, the daemon ${recA.pid} LIVED, and the next verb under the keeper's session relaunched Chrome ${cB[0]} IN THE SAME DAEMON — its environment carries no AGENT_BROWSER_* (${JSON.stringify(envB)})`, JSON.stringify({ cA, cB, daemonLived, ppid: cB.map(ppidOf), reo: reo.out.slice(-300) }));
+      try { process.kill(recA.pid, 'SIGKILL'); } catch { }
+      for (let i = 0; i < 80 && Ff.pidAlive(recA.pid); i++) await sleep(50);
+      await sleep(300);
+      const orphanB = chromePidsOn(bank.dir);
+      await kk.tick();
+      let goneB = false; for (let i = 0; i < 100 && !(goneB = chromePidsOn(bank.dir).length === 0); i++) await sleep(50);
+      ok(orphanB.length === 1 && orphanB[0] === cB[0] && kk.browserOf(bank.id).state === 'stopped' && goneB && !Ff.pidAlive(cB[0]), `④ r3 M1: the daemon SIGKILLed after that in-place relaunch — the tick ends the RELAUNCHED Chrome ${cB[0]} (nothing recorded it: the minted directory's lock, no live daemon its parent) — 0 Chromes on the directory`, JSON.stringify({ orphanB, state: kk.browserOf(bank.id).state, left: chromePidsOn(bank.dir) }));
+      let restart3 = null; try { await kk.start(bank.id, { why: 'r3 relaunch after an in-place relaunch' }); } catch (e) { restart3 = (e.code || '') + ' ' + e.message; }
+      const cC = chromePidsOn(bank.dir); const dtC = String(dtp() || '').split('\n')[0];
+      ok(!restart3 && kk.browserOf(bank.id).state === 'ready' && cC.length === 1 && cC[0] !== cB[0] && dtB && dtC && dtC !== dtB && portOf(kk.browserOf(bank.id).cdpUrl) === dtC && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === cC[0], `④ r3 M1: …and the profile starts again — ONE new Chrome (${cC[0]}), a NEW DevToolsActivePort (${dtB} → ${dtC}), recorded — never profile_locked`, restart3 || JSON.stringify({ cC, dtB, dtC, cdp: kk.browserOf(bank.id).cdpUrl }));
+      // LANE H VERIFY r4, ON THE REAL BINARY. The keeper's own Chrome carries its LAUNCH MARK on its (title-rewritten)
+      // command line — the config's `args` reach it; a Chrome the user opens by hand never carries it.
+      const cmdOf = (pid) => { try { return ' ' + fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ') + ' '; } catch { return ''; } };
+      const markArg = Bp.keeperMarkArg(bank.id);
+      ok(cC.length === 1 && cmdOf(cC[0]).includes(' ' + markArg + ' ') && cmdOf(cC[0]).includes(' --remote-debugging-port=0 '), `④ r4: the keeper's own Chrome ${cC[0]} carries ${markArg} on its command line beside the binary's --remote-debugging-port=0 (the launch config's args, measured)`, cmdOf(cC[0]).slice(0, 300));
+      // MAJOR 1: SIGTERM the Chrome (the user closing a headed window / a crash) — the daemon LIVES with no browser, and a
+      // lease is a CDP client (it cannot launch): r3 left `ready` on a dead port, every verb "Connection refused", for good.
+      // Now a `tick` ALONE (the profile leased) — and, again, an `attach` ALONE — heals it: exactly ONE Chrome, its parent
+      // the daemon, a NEW DevToolsActivePort, and a lease verb under the next /resolve env answers.
+      const waitOne = async (dir) => { let c = []; for (let i = 0; i < 120 && (c = chromePidsOn(dir)).length !== 1; i++) await sleep(50); return c; };
+      for (const via of ['tick', 'attach']) {
+        const recH = kk.browserOf(bank.id); const cH = chromePidsOn(bank.dir); const dH = String(dtp() || '').split('\n')[0];
+        const axOld = await kk.attach({ profileId: bank.id, browserKey: KA4, sessionId: 'sess-a4' });
+        try { process.kill(cH[0], 'SIGTERM'); } catch { }
+        for (let i = 0; i < 100 && Ff.pidAlive(cH[0]); i++) await sleep(50);
+        await sleep(500);
+        const dead = await run(axOld.env, [...pin, 'get', 'title']);
+        let axNew = null;
+        if (via === 'tick') await kk.tick(); else axNew = await kk.attach({ profileId: bank.id, browserKey: KA4, sessionId: 'sess-a4' });
+        const cH2 = await waitOne(bank.dir); const dH2 = String(dtp() || '').split('\n')[0];
+        if (!axNew) axNew = await kk.attach({ profileId: bank.id, browserKey: KA4, sessionId: 'sess-a4' });
+        // the lease verb reaches the NEW Chrome over the NEW port: with --pin-tab (0.38.1's floor) its bound tab died with
+        // the old Chrome, so the binary answers its own typed `tab_gone` naming the remedy (measured) — the agent learns
+        // its page is gone instead of "Connection refused" forever; `tab new` rebinds and every verb runs (without
+        // --pin-tab the first verb runs directly, measured)
+        const gH = await run(axNew.env, [...pin, 'get', 'title']);
+        const answered = pin.length ? (!gH.ok && /tab_gone/.test(gH.out) && /tab new/.test(gH.out)) : gH.ok;
+        const nH = pin.length ? await run(axNew.env, [...pin, 'tab', 'new', 'about:blank']) : { ok: true, out: '' };
+        const oH = await run(axNew.env, [...pin, 'open', `data:text/html,<title>HEAL-${via}</title>`]); const tH = await run(axNew.env, [...pin, 'get', 'title']);
+        ok(cH.length === 1 && Ff.pidAlive(recH.pid) && !dead.ok && /refused|connect failed/i.test(dead.out) && cH2.length === 1 && cH2[0] !== cH[0] && ppidOf(cH2[0]) === recH.pid && cmdOf(cH2[0]).includes(' ' + markArg + ' ') && dH && dH2 && dH2 !== dH && portOf(kk.browserOf(bank.id).cdpUrl) === dH2 && kk.browserOf(bank.id).browser && kk.browserOf(bank.id).browser.pid === cH2[0] && answered && nH.ok && oH.ok && tH.ok && tH.out.includes(`HEAL-${via}`),
+          `④ r4 MAJOR 1: its Chrome ${cH[0]} SIGTERMed (the old lease env: "${(dead.out.trim().split('\n').pop() || '').slice(0, 70)}") — a ${via} ALONE heals it: ONE Chrome ${cH2[0]} under the daemon ${recH.pid} (marked), DevToolsActivePort ${dH} → ${dH2}; the lease's next /resolve env answers over the new port (${pin.length ? '"' + (gH.out.trim().split('\n').pop() || '').slice(0, 60) + '…" — its pinned tab died with the old Chrome — then `tab new` and' : ''} "${(tH.out.trim().split('\n').pop() || '').slice(0, 30)}")`, JSON.stringify({ cH, cH2, ppid: cH2.map(ppidOf), dH, dH2, cdp: kk.browserOf(bank.id).cdpUrl, dead: dead.out.slice(-200), g: gH.out.slice(-240), n: nH.out.slice(-160), o: oH.out.slice(-200), t: tH.out.slice(-200) }));
+      }
+      // VERIFY r5 MAJOR 1 ON THE REAL BINARY: a profile whose Chrome is killed right after every relaunch (a crash-on-load
+      // page, a headed window the user keeps closing, an OOM) — r4 relaunched it on EVERY tick, forever (12/12 in 60 s, a
+      // 165 MB Chrome every 5 s, no notice). A watcher SIGTERMs each new Chrome on the directory 2 s after it appears; the
+      // keeper ticks: at most HEAL_BUDGET relaunches, then `browser_unstable`, ONE notice, and nothing relaunches after it
+      {
+        const storm = kk.createProfile({ label: 'Storm' }, { owner: { kind: 'instance', id: null } });
+        await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' });
+        const seen = new Set(); const timers = [];
+        const watch = setInterval(() => { for (const pid of chromePidsOn(storm.dir)) { if (seen.has(pid)) continue; seen.add(pid); timers.push(setTimeout(() => { try { process.kill(pid, 'SIGTERM'); } catch { } }, 2000)); } }, 50);
+        const perTick = [];
+        let unstableAt = -1;
+        try {
+          for (let i = 0; i < 9; i++) {
+            await sleep(3000); await kk.tick();
+            const r = kk.browserOf(storm.id);
+            perTick.push(`${Math.max(0, seen.size - 1)}:${r.closed ? r.closed.code : '-'}`);
+            if (unstableAt < 0 && r.closed && r.closed.code === 'browser_unstable') unstableAt = i;
+            if (unstableAt >= 0 && i >= unstableAt + 2) break;
+          }
+        } finally { clearInterval(watch); for (const t of timers) clearTimeout(t); }
+        await sleep(300);
+        const relaunches = Math.max(0, seen.size - 1);
+        const recS = kk.browserOf(storm.id);
+        let eS = null; try { await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' }); } catch (e) { eS = e; }
+        const left = chromePidsOn(storm.dir);
+        const n = notices4.filter((x) => x.origin === 'browser');
+        ok(relaunches >= 1 && relaunches <= Bp.HEAL_BUDGET && recS.closed && recS.closed.code === 'browser_unstable' && !recS.browser && left.length === 0 && eS && eS.code === 'browser_unstable' && n.length === 1 && n[0].key === 'browser' && n[0].text.includes('Storm') && n[0].text.includes(String(Bp.HEAL_BUDGET)),
+          `④ r5 MAJOR 1: a Chrome killed 2 s after every relaunch on the REAL 0.38.1 — ${relaunches} relaunches (≤ ${Bp.HEAL_BUDGET}), then \`${recS.closed && recS.closed.code}\` with ${left.length} Chromes left, the attach refused by name, ONE notice ("${n[0] ? n[0].text.slice(0, 80) : ''}") (${perTick.join(' ')})`, JSON.stringify({ perTick, relaunches, closed: recS.closed, left, err: eS && (eS.code + ' ' + eS.message), notices: n }));
+        // the user's Stop resets it: the next start runs with a fresh ledger
+        await kk.stop(storm.id, { why: 'user' }).catch(() => { });
+        let eS2 = null; try { await kk.attach({ profileId: storm.id, browserKey: KD4, sessionId: 'sess-d4' }); } catch (e) { eS2 = (e.code || '') + ' ' + e.message; }
+        const recS2 = kk.browserOf(storm.id); const cS2 = await waitOne(storm.dir);
+        ok(!eS2 && recS2.state === 'ready' && !recS2.closed && cS2.length === 1 && recS2.browser && recS2.browser.pid === cS2[0] && !(recS2.heals && recS2.heals.attempts && recS2.heals.attempts.length), `④ r5 MAJOR 1: …the user's Stop resets it — the next attach starts ONE Chrome (${cS2[0]}) on a fresh ledger`, eS2 || JSON.stringify({ closed: recS2.closed, heals: recS2.heals, cS2 }));
+        await kk.stop(storm.id).catch(() => { });
+      }
+      // MAJOR 2: a REAL Chrome the human launched by hand on the MINTED directory (no daemon, no mark, no debugging port) —
+      // the agent's next start is refused BY NAME and the human's Chrome LIVES; closed by hand ⇒ the start runs
+      await kk.stop(bank.id).catch(() => { });
+      const HUMAN = fs.existsSync('/opt/google/chrome/chrome') ? '/opt/google/chrome/chrome' : CHROME;
+      const lockPid = (dir) => { try { return Number((/-(\d+)$/.exec(fs.readlinkSync(path.join(dir, 'SingletonLock'))) || [])[1]) || null; } catch { return null; } };
+      const humanOn = async (dir) => { const h = spawn(HUMAN, ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore', detached: true }); procs.add(h); for (let i = 0; i < 200 && lockPid(dir) !== h.pid; i++) await sleep(25); return h; };
+      const killHuman = async (h) => { try { process.kill(-h.pid, 'SIGKILL'); } catch { try { h.kill('SIGKILL'); } catch { } } for (let i = 0; i < 100 && Ff.pidAlive(h.pid); i++) await sleep(30); procs.delete(h); };
+      const h1 = await humanOn(bank.dir);
+      let eH = null; try { await kk.start(bank.id, { why: 'the agent\'s next verb' }); } catch (e) { eH = e; }
+      await sleep(300);
+      const onDir = chromePidsOn(bank.dir);
+      ok(lockPid(bank.dir) === h1.pid && !cmdOf(h1.pid).includes('--vibespace-keeper') && eH && eH.code === 'profile_locked' && eH.message.includes(String(h1.pid)) && /may be your own browser — close it first/.test(eH.message) && Ff.pidAlive(h1.pid) && onDir.length === 1 && onDir[0] === h1.pid, `④ r4 MAJOR 2: a real ${HUMAN} the human launched on the MINTED directory (pid ${h1.pid}, no mark) — the agent's next start is refused "${eH ? eH.message.slice(0, 120) : 'no refusal'}…", the human's Chrome ALIVE, nothing else on the directory`, JSON.stringify({ err: eH && (eH.code + ' ' + eH.message), onDir, alive: Ff.pidAlive(h1.pid) }));
+      await killHuman(h1);
+      let eH2 = null; try { await kk.start(bank.id, { why: 'after the human closed it' }); } catch (e) { eH2 = (e.code || '') + ' ' + e.message; }
+      const cOwn = chromePidsOn(bank.dir);
+      ok(!eH2 && kk.browserOf(bank.id).state === 'ready' && cOwn.length === 1 && cmdOf(cOwn[0]).includes(' ' + markArg + ' '), `④ r4 MAJOR 2: …closed by hand ⇒ the start runs (ONE Chrome ${cOwn[0]}, marked)`, eH2 || JSON.stringify(cOwn));
+      await kk.stop(bank.id).catch(() => { });
+      // CONTROL (the r3 rule, a runtime neuter of the PURE verdict the keeper reads at call time): "the directory is minted"
+      // ALONE makes the holder the keeper's own — the agent's next start ENDS the human's real Chrome
+      {
+        const realV = Bp.profileLockVerdict;
+        Bp.profileLockVerdict = (a) => { const v = realV(a); return v.kind === 'foreign' && v.user && a.minted ? { kind: 'own-orphan', pid: v.pid, why: 'CONTROL: minted alone (r3)' } : v; };
+        const h2 = await humanOn(bank.dir);
+        let eC = null; try { await kk.start(bank.id, { why: 'control' }); } catch (e) { eC = e; } finally { Bp.profileLockVerdict = realV; }
+        let ended = false; for (let i = 0; i < 60 && !(ended = !Ff.pidAlive(h2.pid)); i++) await sleep(50);
+        ok(!eC && ended, `④ r4 MAJOR 2 CONTROL: with "minted alone" (the r3 rule) the start ENDS the human's real Chrome ${h2.pid} — the leg above can go red`, eC ? eC.message : `alive: ${Ff.pidAlive(h2.pid)}`);
+        await killHuman(h2);
+        await kk.stop(bank.id).catch(() => { });
+      }
+      // CONTROL (MAJOR 1): a keeper copy with NO heal (scripts/mutant-copy.mjs) on the same real binary — after the Chrome's
+      // SIGTERM the leased tick leaves 0 Chromes and a lease verb under the next /resolve env is "Connection refused"
+      {
+        const Mh = mutantCopies('browser-mediation-chrome-heal', REPO);
+        const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+        const HB = '  function healBrowser(rec, p, seenBy, { force = false } = {}) {\n';
+        // r5: the new layer (a lost, unhealed browser refused `browser_closed` by name) is stripped from this r4 control too
+        const LB = '    if (rec.browserLost) { const p = profile(profileId); return {';
+        if (ksrc.includes(HB) && ksrc.includes(LB)) {
+          const KkNo = Mh.load('src/server/browser-keeper.js', ksrc.replace(HB, HB + '    return Promise.resolve(null);\n').replace(LB, '    if (false) { const p = profile(profileId); return {'), 'no-heal');
+          const kc = KkNo.create({ dataDir: path.join(KR, 'data-ctl'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live4, runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false });
+          try {
+            const b2 = kc.createProfile({ label: 'Bank ctl' }, { owner: { kind: 'instance', id: null } });
+            await kc.attach({ profileId: b2.id, browserKey: KC4, sessionId: 'sess-c4' });
+            const c0 = chromePidsOn(b2.dir);
+            try { process.kill(c0[0], 'SIGTERM'); } catch { }
+            for (let i = 0; i < 100 && Ff.pidAlive(c0[0]); i++) await sleep(50);
+            await sleep(500);
+            await kc.tick(); await sleep(800);
+            const after = chromePidsOn(b2.dir);
+            const a3 = await kc.attach({ profileId: b2.id, browserKey: KC4, sessionId: 'sess-c4' });
+            const t3 = await run(a3.env, [...pin, 'get', 'title']);
+            ok(c0.length === 1 && after.length === 0 && kc.browserOf(b2.id).state === 'ready' && !t3.ok && /refused|connect failed/i.test(t3.out), `④ r4 MAJOR 1 CONTROL: a keeper copy with no heal — after the SIGTERM the leased tick leaves ${after.length} Chromes, the record \`${kc.browserOf(b2.id).state}\`, and a lease verb under the next /resolve env fails "${(t3.out.trim().split('\n').pop() || '').slice(0, 80)}"`, JSON.stringify({ c0, after, t3: t3.out.slice(-300) }));
+            await kc.stop(b2.id).catch(() => { });
+          } finally { kc.shutdown(); }
+        } else ok(false, '④ r4 MAJOR 1 CONTROL: the healBrowser anchor was not found in src/server/browser-keeper.js');
+        for (const r of copiesCensus(Mh.files, Mh.dir, REPO, { minCopies: 1, label: '④ r4 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+      }
+    } catch (e) { ok(false, '④ the keeper-launcher leg threw', e && (e.stack || e.message)); }
+    finally {
+      try { kk.shutdown(); } catch { }
+      for (const pid of mine()) { if (pid === process.pid) continue; try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(300);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
 
 if (med) med.shutdown();
 if (raw) raw.ws.close();

@@ -76,7 +76,9 @@ console.log('① the PURE router');
   // flags are read ANYWHERE — `get --json cdp-url`, `get -c cdp-url` and
   // `get cdp-url --json` all answer — so a verb's NOUN is the first non-flag
   // word after it (value flags skip their value), never simply argv[verb + 1]
-  const help = fs.readFileSync(path.join(FIX, 'help-0.32.0.txt'), 'utf8');
+  // the census reads the fixtures of the version the tables CLAIM (lane H: re-measured on 0.38.1; 0.32.0's stay as r3's evidence)
+  const TV = V.TABLE_VERSION;
+  const help = fs.readFileSync(path.join(FIX, `help-${TV}.txt`), 'utf8');
   const head = help.split(/\nSnapshot Options:/)[0];
   const words = [];
   let subSection = false;
@@ -87,7 +89,7 @@ console.log('① the PURE router');
     words.push(m[1]);
   }
   for (const line of head.split('\n')) { const m = new RegExp('^[A-Z][A-Za-z ]+:\\s+' + V.REAL_BINARY + ' (\\w+) <').exec(line); if (m) words.push(m[1]); }
-  const extra = JSON.parse(fs.readFileSync(path.join(FIX, 'core-full-extra-0.32.0.json'), 'utf8')).verbs;
+  const extra = JSON.parse(fs.readFileSync(path.join(FIX, `core-full-extra-${TV}.json`), 'utf8')).verbs;
   const census = [...new Set([...words, ...extra])].sort();
   ok(census.length >= 65, `the census is non-vacuous (${census.length} top-level words)`, census.join(' '));
   ok(['open', 'snapshot', 'get', 'network', 'batch', 'profiles', 'connect', 'mcp', 'window', 'state'].every((w) => census.includes(w)), 'the census reads both listings (core, header-spelled families, the extras)');
@@ -95,6 +97,17 @@ console.log('① the PURE router');
   const unknown = census.filter((w) => !V.known(w));
   ok(unknown.length === 0, `every census word is classified by the table — page or refused by name (${unknown.join(', ') || 'none left over'})`);
   ok(V.classify(['--', 'profiles']).kind === 'page', 'the collided word is reachable as `-- profiles` (the browser CLI\'s, harmless)');
+  // lane H (2026-09-25): the 0.38.1 re-measure's NEW surface, each decided by name
+  {
+    ok(census.includes('a11y') && census.includes('webmcp'), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));
+    const a = V.classify(['a11y']), au = V.classify(['a11y', 'https://example.com', '--tags', 'wcag2a']), af = V.classify(['a11y', 'file:///etc/passwd']), ac = V.classify(['a11y', 'chrome://version']);
+    ok(a.kind === 'page' && au.kind === 'page' && af.code === 'local_scheme_refused' && ac.code === 'local_scheme_refused' && V.NAV_VERBS.includes('a11y'), '0.38.1: `a11y [url]` is a page verb that NAVIGATES — a web url passes, a file:/chrome: one is refused like `open`\'s', JSON.stringify([a.kind, au.kind, af.code, ac.code]));
+    const w = V.classify(['webmcp', 'invoke', 'x']);
+    ok(w.kind === 'refused' && w.code === 'verb_not_offered' && /action trace/.test(w.error) && /snapshot/.test(w.remedy), '0.38.1: `webmcp` (page-declared tools, experimental) is refused BY NAME — neither mediated nor traced — with the page-UI way out', JSON.stringify(w));
+    ok(V.classify(['snapshot', '--no-pin-tab']).code === 'identity_flag_refused' && V.classify(['open', 'https://x', '--pin-tab']).kind === 'page', '0.38.1: `--no-pin-tab` (drops the sticky tab binding) is the lease\'s decision — refused; `--pin-tab` only tightens it and passes');
+    ok(['--ca-cert', '--no-ca-cert', '--no-webmcp'].every((f) => V.classify(['snapshot', f, ...(f === '--ca-cert' ? ['/tmp/x.pem'] : [])]).code === 'launch_flag_refused'), '0.38.1: `--ca-cert` / `--no-ca-cert` (which CAs the browser TRUSTS) and `--no-webmcp` are launch decisions — refused');
+    ok(V.classify(['click', '@e1', '--input-mode', 'human']).kind === 'page' && V.classify(['get', '--input-mode', 'human', 'cdp-url']).code === 'raw_cdp_refused' && V.classify(['get', '--ca-cert', 'x', 'text']).code === 'launch_flag_refused', '0.38.1: the new VALUE flags skip their value (`--input-mode human` never becomes the noun)');
+  }
 
   const PAGE = ['open', 'read', 'click', 'dblclick', 'type', 'fill', 'press', 'keyboard', 'keydown', 'keyup', 'hover', 'focus', 'check', 'uncheck', 'select', 'drag', 'upload', 'download', 'scroll', 'scrollintoview', 'wait', 'screenshot', 'pdf', 'snapshot', 'eval', 'back', 'forward', 'reload', 'pushstate', 'highlight', 'clipboard', 'frame', 'dialog', 'window', 'tab', 'get', 'is', 'find', 'mouse', 'set', 'network', 'cookies', 'storage', 'state', 'diff', 'console', 'errors', 'vitals', 'react', 'trace', 'profiler', 'record', 'addinitscript', 'removeinitscript', 'close'];
   // (r3: `get` passes only with a noun it reads — `get text @e1`, never `get @e1`)
@@ -178,13 +191,15 @@ console.log('① the PURE router');
   // test-browser-mediation-chrome re-measures the installed binary), `get` passes only a noun it READS, and a
   // flag the table does not know is read BOTH ways.
   {
-    const GF = JSON.parse(fs.readFileSync(path.join(FIX, 'global-flags-0.32.0.json'), 'utf8'));
+    const GF = JSON.parse(fs.readFileSync(path.join(FIX, `global-flags-${TV}.json`), 'utf8'));
+    const GF0 = JSON.parse(fs.readFileSync(path.join(FIX, 'global-flags-0.32.0.json'), 'utf8'));   // r3's evidence (the finding was measured on 0.32.0)
+    const help0 = fs.readFileSync(path.join(FIX, 'help-0.32.0.txt'), 'utf8');
     const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
-    ok(GF.version === '0.32.0' && GF.candidates >= 500 && GF.value.length >= 30 && GF.bool.length >= 15 && GF.localCount >= 500, `r3: the measured census is non-vacuous (${GF.candidates} flag-shaped strings probed: ${GF.value.length} value, ${GF.bool.length} boolean, ${GF.localCount} non-global)`);
+    ok(GF.version === TV && GF.candidates >= 500 && GF.value.length >= 30 && GF.bool.length >= 15 && GF.localCount >= 500, `r3: the measured census is non-vacuous (${GF.candidates} flag-shaped strings probed: ${GF.value.length} value, ${GF.bool.length} boolean, ${GF.localCount} non-global)`);
     const cfgOther = (GF.other || []).find((o) => o.flag === '--config');
     ok(same(V.VALUE_FLAGS, [...GF.value, ...(cfgOther && /config file not found: zzq9/.test(cfgOther.said) ? ['--config'] : [])]), 'r3: VALUE_FLAGS IS the measured value set (+ `--config`, which checks its file before anything — `config file not found: zzq9` is the value swallowed)', JSON.stringify({ missing: GF.value.filter((f) => !V.VALUE_FLAGS.includes(f)), extra: V.VALUE_FLAGS.filter((f) => !GF.value.includes(f) && f !== '--config') }));
     ok(same(V.BOOL_FLAGS, GF.bool), 'r3: BOOL_FLAGS IS the measured boolean set', JSON.stringify({ missing: GF.bool.filter((f) => !V.BOOL_FLAGS.includes(f)), extra: V.BOOL_FLAGS.filter((f) => !GF.bool.includes(f)) }));
-    ok(GF.value.includes('--idle-timeout') && !/--idle-timeout/.test((help.split('\nOptions:')[1] || '').split('\nConfiguration:')[0]) && /AGENT_BROWSER_IDLE_TIMEOUT_MS/.test(help), 'r3: the finding\'s flag is a measured VALUE flag the help lists only as an environment variable — why a census of the help\'s option sections was blind to it');
+    ok(GF0.value.includes('--idle-timeout') && GF.value.includes('--idle-timeout') && !/--idle-timeout/.test((help0.split('\nOptions:')[1] || '').split('\nConfiguration:')[0]) && /AGENT_BROWSER_IDLE_TIMEOUT_MS/.test(help0), 'r3: the finding\'s flag is a measured VALUE flag the 0.32.0 help listed only as an environment variable — why a census of the help\'s option sections was blind to it (still measured a value flag on the table\'s version)');
     ok(V.LAUNCH_FLAGS.includes('--idle-timeout') && !V.ENV_PASS.includes('AGENT_BROWSER_IDLE_TIMEOUT_MS'), 'r3: `--idle-timeout` is also REFUSED (launch_flag_refused): how long the browser lives is the keeper\'s decision, like its env twin (dropped)');
     // the closed `get` noun set IS the help's `Get Info` row minus the endpoint
     const row = (/\nGet Info:[^\n]*\n\s+([^\n]+)/.exec(help) || [])[1] || '';
@@ -213,7 +228,7 @@ console.log('① the PURE router');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
     const noAllow = src.replace("if (verb === 'get' && !GET_NOUN_SET.has(sub)) {", "if (false) {");
     const noReadings = src.replace('if (!body.some(ua)) return primary;', 'return primary;');
-    const r2Table = noAllow.replace('if (!body.some(ua)) return primary;', 'return primary;').replace("'--headers', '--idle-timeout', '--init-script'", "'--headers', '--init-script'").replace(", '--hide-scrollbars', '--idle-timeout']);", ", '--hide-scrollbars']);");
+    const r2Table = noAllow.replace('if (!body.some(ua)) return primary;', 'return primary;').replace("'--headers', '--idle-timeout', '--init-script'", "'--headers', '--init-script'").replace(", '--hide-scrollbars', '--idle-timeout', ", ", '--hide-scrollbars', "); // (lane H: LAUNCH_FLAGS gained 0.38.1's three after it)
     ok(r2Table !== noAllow && load(r2Table).classify(['get', '--idle-timeout', '5m', 'cdp-url']).kind === 'page', 'r3 NEGATIVE CONTROL: the r2 shape (no `--idle-timeout` in the tables, the blocklist noun rule) passes the finding\'s spelling — the legs above can go red');
     ok(noAllow !== src && load(noAllow).classify(['get', 'ws-url']).kind === 'page', 'r3 NEGATIVE CONTROL: without the allow-list an endpoint-shaped noun passes as a read');
     ok(noReadings !== src && load(noReadings).classify(['get', '--newglobal', 'text', 'cdp-url']).kind === 'page' && load(noReadings).classify(['--newglobal', 'open', 'connect', '9222']).kind === 'page', 'r3 NEGATIVE CONTROL: without every-reading judgement a flag of unknown arity smuggles the endpoint noun (and a refused verb) past');
@@ -351,11 +366,11 @@ console.log('① the PURE router');
   // r4 (takeover finding 6): the flag table is a measurement of ONE version — another build ⇒ every flag read
   // both ways (the CLI reads the version off the binary it runs; the ③ legs drive it end to end)
   {
-    const GF = JSON.parse(fs.readFileSync(path.join(FIX, 'global-flags-0.32.0.json'), 'utf8'));
+    const GF = JSON.parse(fs.readFileSync(path.join(FIX, `global-flags-${V.TABLE_VERSION}.json`), 'utf8'));
     ok(V.TABLE_VERSION === GF.version, `r4: TABLE_VERSION is the measured fixture's version (${V.TABLE_VERSION})`);
-    ok(V.versionDrift('agent-browser 0.32.0\n') === null && V.versionDrift('agent-browser 0.33.1') === '0.33.1' && V.versionDrift('') === 'unknown' && V.versionDrift(null) === 'unknown', 'r4 PURE: versionDrift — the table\'s version ⇒ none; another ⇒ it; unreadable ⇒ "unknown" (never trusted)');
+    ok(V.versionDrift(`agent-browser ${V.TABLE_VERSION}\n`) === null && V.versionDrift('agent-browser 0.33.1') === '0.33.1' && V.versionDrift('') === 'unknown' && V.versionDrift(null) === 'unknown', 'r4 PURE: versionDrift — the table\'s version ⇒ none; another ⇒ it; unreadable ⇒ "unknown" (never trusted)');
     const d = V.classify(['get', '--json', 'text', 'cdp-url'], { drift: '0.33.0' });
-    ok(V.classify(['get', '--json', 'text', 'cdp-url']).kind === 'page' && d.kind === 'refused' && d.code === 'raw_cdp_refused' && /0\.33\.0/.test(d.error) && /measured on 0\.32\.0/.test(d.error), 'r4: `get --json text cdp-url` is a read on the measured table (a <cdp-url> element\'s text) — under a drift `--json` may take a value, the other reading is the endpoint: refused and SAID', JSON.stringify(d));
+    ok(V.classify(['get', '--json', 'text', 'cdp-url']).kind === 'page' && d.kind === 'refused' && d.code === 'raw_cdp_refused' && /0\.33\.0/.test(d.error) && d.error.includes('measured on ' + V.TABLE_VERSION), 'r4: `get --json text cdp-url` is a read on the measured table (a <cdp-url> element\'s text) — under a drift `--json` may take a value, the other reading is the endpoint: refused and SAID', JSON.stringify(d));
     ok(V.classify(['batch', 'get --json text cdp-url'], { drift: '0.33.0' }).lineCode === 'raw_cdp_refused', 'r4: …inside a batch line too');
     for (const argv of [['get', '--json', 'text', '@e1'], ['snapshot', '-i', '-c'], ['--max-output', '400', 'snapshot'], ['open', 'https://x'], ['click', '@e3']]) {
       const c = V.classify(argv, { drift: '0.33.0' });
@@ -434,7 +449,7 @@ fs.copyFileSync(SHIM, path.join(SHIMDIR, 'agent-browser')); fs.chmodSync(path.jo
 const FAKE_VERSION = path.join(ROOT, 'fake-version');
 fs.writeFileSync(path.join(REALDIR, 'agent-browser'), `#!${process.execPath}
 const fs = require('fs');
-if (process.argv[2] === '--version') { let v = '0.32.0'; try { v = fs.readFileSync(${JSON.stringify(FAKE_VERSION)}, 'utf8').trim() || v; } catch {} console.log('agent-browser ' + v); process.exit(0); }
+if (process.argv[2] === '--version') { let v = ${JSON.stringify(V.TABLE_VERSION)}; try { v = fs.readFileSync(${JSON.stringify(FAKE_VERSION)}, 'utf8').trim() || v; } catch {} console.log('agent-browser ' + v); process.exit(0); }
 let input = ''; try { if (process.argv.includes('batch') && !process.stdin.isTTY) input = fs.readFileSync(0, 'utf8'); } catch {}
 let batchJson = null;
 if (process.argv.includes('batch') && !process.argv.slice(process.argv.indexOf('batch') + 1).some((a) => !a.startsWith('-'))) {
@@ -781,7 +796,7 @@ try {
     ok(r9.status === 1 && /\[raw_cdp_refused\]/.test(r9.stderr) && /\[flag_table_drift\]/.test(r9.stderr) && /0\.33\.0/.test(r9.stderr) && resolves().length === nb && realCalls().length === nr, 'r4: the binary answers 0.33.0 ⇒ the drift is SAID and `get --json text cdp-url` (a read on 0.32.0) is refused — before /resolve, nothing run', r9.stderr);
     r9 = await cli(['get', '--json', 'text', '@e1']);
     ok(r9.status === 0 && /\[flag_table_drift\]/.test(r9.stderr) && (r9.stderr.match(/flag_table_drift/g) || []).length === 1 && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","@e1"]', 'r4: …a read no reading turns into anything else still runs, the drift said ONCE', r9.stderr);
-    fs.writeFileSync(FAKE_VERSION, '0.32.0');
+    fs.writeFileSync(FAKE_VERSION, V.TABLE_VERSION);
     r9 = await cli(['get', '--json', 'text', 'cdp-url']);
     ok(r9.status === 0 && !/flag_table_drift/.test(r9.stderr) && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 CONTROL: on the measured version the same read runs (the <cdp-url> element\'s text) and nothing is said', r9.stderr);
     fs.writeFileSync(FAKE_VERSION, '0.33.0');
@@ -791,7 +806,7 @@ try {
     fs.writeFileSync(path.join(D7, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js'));
     r9 = await nodeCli(path.join(D7, 'vibespace-browser'), ['get', '--json', 'text', 'cdp-url'], { env: baseEnv });
     ok(r3 !== src && r9.status === 0 && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 NEGATIVE CONTROL: without the gate (patched copy) the 0.32.0 table runs silently on a 0.33.0 binary', r9.stderr);
-    fs.writeFileSync(FAKE_VERSION, '0.32.0');
+    fs.writeFileSync(FAKE_VERSION, V.TABLE_VERSION);
   }
   // r4 (takeover finding 5): scripts/browser-flag-census.mjs runs as documented — `[<binary>]` with or without
   // `--write`, a bare name through PATH with the shim skipped (r3: the positional was dropped without --write

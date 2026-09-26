@@ -216,6 +216,8 @@ const stubKeeper = {
   adoptDirectory: ({ label, dir }) => { const p = { id: 'bp-0000000a', label, provider: 'chromium', dir, record: false, lastUsedAt: 0, host: null, notes: '' }; profiles.push(p); return { profile: p }; },
   updateProfile: (id, patch) => { const p = profiles.find((x) => x.id === id); if (!p) throw Object.assign(new Error('no profile'), { code: 'not-found' }); const bad = Object.keys(patch).filter((k) => !['record', 'label', 'notes'].includes(k)); if (bad.length) throw Object.assign(new Error(`these fields cannot be changed here: ${bad.join(', ')}`), { code: 'bad-request' }); const changed = {}; if ('record' in patch) { changed.record = { was: !!p.record, now: !!patch.record }; p.record = !!patch.record; } for (const fn of leaseFns) fn({ kind: 'profile-updated', profileId: id, changed }); return { profile: { ...p }, changed }; },
   _facts: { lastVersion: () => version },
+  // naive study 2: the ONE way a call under a lease's session reaches the keeper's browser — its CDP url, never the directory
+  leaseCliOpts: async (pid, bk) => (reg.browsers[pid] && reg.browsers[pid].state === 'ready' ? { session: 'vs-' + bk, extraEnv: { AGENT_BROWSER_CDP: 'ws://127.0.0.1:19555/devtools/browser/' + pid } } : null),
   _runtime: { exec: async (ns, argv, opts) => { execLog.push({ ns, argv: argv.slice(), opts: { ...opts } }); if (argv[0] === 'get' && argv[1] === 'box') return argv[2] === '#nobox' ? { ok: false, json: null, error: 'fake: element not found', stderr: '' } : { ok: true, json: { success: true, data: { x: 10, y: 20, width: 100, height: 30 } } }; if (argv[0] === 'record') return recordAnswer; return { ok: true, json: {} }; } },
 };
 const pushed = [], bcast = [];
@@ -267,7 +269,7 @@ const K1 = `sess-1|${P1}`;
   ok(!!e1 && e1.action === 'click' && e1.kind === 'target' && e1.ok === true && e1.durationMs === 42 && e1.url === 'https://example.test/login' && e1.browserKey === KEY_A && e1.profileId === P1, 'the entry: click, ok, its duration, the URL at the time, the key, the profile');
   ok(e1.position.kind === 'box' && e1.position.selector === '#go' && e1.position.box.width === 100, 'the position is the element BOX the runtime answered');
   const probe = execLog.find((x) => x.argv[0] === 'get' && x.argv[1] === 'box');
-  ok(!!probe && probe.argv[2] === '#go' && probe.ns === 'vs-' + P1 && probe.opts.session === 'vs-' + KEY_A && probe.opts.dir === dirOf('work') && probe.opts.timeout === T.BOX_PROBE_TIMEOUT_MS, 'the box is asked as `get box <selector>` under the LEASE\'s own session, in the profile\'s namespace, bounded');
+  ok(!!probe && probe.argv[2] === '#go' && probe.ns === 'vs-' + P1 && probe.opts.session === 'vs-' + KEY_A && !('dir' in probe.opts) && probe.opts.extraEnv && probe.opts.extraEnv.AGENT_BROWSER_CDP === 'ws://127.0.0.1:19555/devtools/browser/' + P1 && probe.opts.timeout === T.BOX_PROBE_TIMEOUT_MS, 'the box is asked as `get box <selector>` under the LEASE\'s own session, in the profile\'s namespace, over the keeper browser\'s CDP url (never its directory — naive study 2), bounded');
   ok(e1.before && e1.before.file === e1.id + '-before.jpg' && e1.after && e1.after.file === e1.id + '-after.jpg' && e1.after.seq === 3 && e1.afterSame === false, 'before = seq 1, after = the first SETTLED frame (seq 3), two files');
   const sdir = path.join(trace.traceRoot, P1);
   const mode = (f) => (fs.statSync(path.join(sdir, f)).mode & 0o777);
@@ -344,7 +346,7 @@ const K1 = `sess-1|${P1}`;
   execLog.length = 0;
   const r1 = await fresh.maybeStartRecording(P1, KEY_A, 'sess-1');
   const rs = execLog.find((x) => x.argv[0] === 'record' && x.argv[1] === 'start');
-  ok(r1.ok && !!rs && rs.ns === 'vs-' + P1 && rs.opts.session === 'vs-' + KEY_A && rs.opts.dir === dirOf('work') && rs.argv[2].startsWith(path.join(fresh.recRoot, P1) + '/') && /^sess-1-\d+\.webm$/.test(path.basename(rs.argv[2])), 'record start <file> runs under the LEASE\'s session in the profile\'s namespace, into data/browser-recordings/<profile>/<session>-<ts>.webm');
+  ok(r1.ok && !!rs && rs.ns === 'vs-' + P1 && rs.opts.session === 'vs-' + KEY_A && !('dir' in rs.opts) && rs.opts.extraEnv && rs.opts.extraEnv.AGENT_BROWSER_CDP === 'ws://127.0.0.1:19555/devtools/browser/' + P1 && rs.argv[2].startsWith(path.join(fresh.recRoot, P1) + '/') && /^sess-1-\d+\.webm$/.test(path.basename(rs.argv[2])), 'record start <file> runs under the LEASE\'s session in the profile\'s namespace over the keeper browser\'s CDP url (never its directory), into data/browser-recordings/<profile>/<session>-<ts>.webm');
   ok(fresh._recordings.size === 1 && fresh.digest().recording[P1] && fresh.digest().recording[P1].browserKey === KEY_A && (await fresh.maybeStartRecording(P1, KEY_A, 'sess-1')).already === true, 'the digest names the recording; starting again is idempotent');
   const r2 = await fresh.stopRecording(P1, KEY_A, 'detach');
   ok(r2.ok && r2.stopped && execLog.some((x) => x.argv[0] === 'record' && x.argv[1] === 'stop') && fresh._recordings.size === 0, 'record stop runs the same way and the digest forgets it');
