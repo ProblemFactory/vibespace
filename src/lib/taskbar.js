@@ -1,5 +1,5 @@
 import { createPopover, showContextMenu, uiScale } from './utils.js';
-import { groupClickVerdict, hoverVerdict, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
+import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
@@ -103,6 +103,7 @@ export function updateTaskbar(app) {
     for (const el of container.children) _applyTaskbarItemState(app, el);
   } else {
     container._structKey = structKey;
+    for (const id of _hoverSpent) if (!entries.some((e) => e.id === id && e.group)) _hoverSpent.delete(id); // a group gone from the taskbar ends its visit
     container.innerHTML = '';
     _rebuildTaskbarItems(app, container, entries);
   }
@@ -402,6 +403,22 @@ function _otherPopoverOpen() {
   return false;
 }
 const _finePointer = () => !!window.matchMedia?.('(any-pointer: fine)').matches;
+// THE HOVER VISIT per GROUP (host id), never per button element: a rebuild replaces the element under a resting pointer
+// (no pointerleave reaches the detached one), and the rebuilt button must know the visit is already spent (hoverStep)
+const _hoverSpent = new Set();
+// …and a pointer MOVING anywhere but that group's button ends its visit ('away') even when no pointerleave reached the
+// live element (it left while the button was being rebuilt). A RESTING pointer sends no pointermove, so a rebuild under
+// it keeps the visit. ONE capture listener for the app's life, idle while no visit is spent.
+let _visitWatch = false;
+function _watchHoverVisits() {
+  if (_visitWatch) return;
+  _visitWatch = true;
+  document.addEventListener('pointermove', (e) => {
+    if (!_hoverSpent.size) return;
+    const on = e.target?.closest?.('.taskbar-group')?.dataset.winId;
+    for (const id of [..._hoverSpent]) if (id !== on && !hoverStep({ spent: true }, 'away').spent) _hoverSpent.delete(id);
+  }, { capture: true, passive: true });
+}
 
 // Render a stacked tab-group taskbar item: click activates the group (the chooser
 // when it is already in front), hover shows the chooser, right click acts on the
@@ -436,8 +453,9 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   _chooserOf(hostId)?._chooser.reanchor(item);
   const liveChain = () => app.wm.windows.get(hostId)?._tabChain || null; // never the build-time object (a layout sync may swap it)
   const activeTabOf = (chain) => chain.tabs[Math.min(chain.active, chain.tabs.length - 1)] || hostId;
-  // hover intent: armed on entry by a fine pointer, cancelled by leaving,
-  // pressing, dragging; re-judged when it fires (a drag or a menu may have begun)
+  // hover intent: armed by MOVEMENT over the button (a bare pointerenter is also Chrome re-targeting a RESTING pointer —
+  // this button rebuilt under it, its hover recompute after a layout change), once per visit; cancelled by leaving,
+  // pressing, dragging; re-judged when it fires (a drag or a menu may have begun). The visit is the GROUP's (hoverStep)
   let timer = null, armed = false, enteredAt = 0, lastButtons = 0, fine = false;
   const cancelIntent = () => { armed = false; if (timer) { clearTimeout(timer); timer = null; } };
   const hoverNow = (intentMs) => hoverVerdict({ pointerFine: fine, touch: !!app.isTouch, dragging: _dragInProgress(app, lastButtons), popoverOpen: _otherPopoverOpen(), intentMs });
@@ -451,23 +469,36 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
     const chain = liveChain();
     if (v === 'open' && chain) showTabGroupList(app, item, chain, { hover: true });
   };
-  item.addEventListener('pointerenter', (e) => {
-    lastButtons = e.buttons;
-    const open = _chooserOf(hostId);
-    if (open) { open._chooser.keep(); return; } // back onto the button from its own chooser
+  _watchHoverVisits();
+  const step = (ev) => {
+    const r = hoverStep({ spent: _hoverSpent.has(hostId) }, ev);
+    if (r.spent) _hoverSpent.add(hostId); else _hoverSpent.delete(hostId);
+    if (r.act === 'cancel') cancelIntent();
+    return r.act;
+  };
+  const armFrom = (e) => {
     cancelIntent();
-    fine = (e.pointerType === 'mouse' || e.pointerType === 'pen') && _finePointer(); // a mouse or a pen hovers; a touch pointerenter never arms
+    fine = (e.pointerType === 'mouse' || e.pointerType === 'pen') && _finePointer(); // a mouse or a pen hovers; a touch never arms
     if (hoverNow(0) !== 'wait') return;
     armed = true; enteredAt = performance.now();
     timer = setTimeout(fire, GROUP_HOVER_INTENT_MS);
+  };
+  // enter AND move ask hoverStep (the ONE rule): an enter never arms — the visit's first MOVEMENT does, once
+  item.addEventListener('pointerenter', (e) => {
+    lastButtons = e.buttons;
+    _chooserOf(hostId)?._chooser.keep(); // back onto the button from its own chooser
+    if (step('enter') === 'arm' && !_chooserOf(hostId)) armFrom(e);
   });
-  item.addEventListener('pointermove', (e) => { lastButtons = e.buttons; });
-  item.addEventListener('pointerleave', () => { cancelIntent(); _chooserOf(hostId)?._chooser.leave(); });
-  item.addEventListener('pointerdown', cancelIntent); // a press is not a hover (and the hover does not come back until the pointer leaves)
+  item.addEventListener('pointermove', (e) => {
+    lastButtons = e.buttons;
+    if (step('move') === 'arm' && !_chooserOf(hostId)) armFrom(e); // a chooser already open spends the visit without arming
+  });
+  item.addEventListener('pointerleave', () => { step('leave'); _chooserOf(hostId)?._chooser.leave(); });
+  item.addEventListener('pointerdown', () => step('press')); // a press is not a hover — and the visit stays spent until the pointer leaves, through a rebuild
 
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
-    cancelIntent();
+    step('press');
     const open = _chooserOf(hostId); if (open && open._chooser.mode === 'hover') open.remove();
     e.dataTransfer.setData('text/window-id', hostId);
     e.dataTransfer.effectAllowed = 'move';
@@ -493,7 +524,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   });
   item.addEventListener('contextmenu', (e) => {
     e.preventDefault();
-    cancelIntent();
+    step('press');
     _chooserOf(hostId)?.remove();
     showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 ' + t('Close group') });
   });

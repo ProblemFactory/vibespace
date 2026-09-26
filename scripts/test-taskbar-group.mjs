@@ -33,6 +33,28 @@
 //      two "another popover is open" guards query (_otherPopoverOpen, app.js's
 //      autohide conceal guard), each guard's pre-fix spelling — the dead
 //      `.taskbar-window-list` — as its control.
+//   §10 WHO OPENED THE HOVER CHOOSER (2026-09-26, the 2.369.183 mirror red:
+//      the heavy leg (l) read `pointerType mouse` on a chooser the PEN had
+//      opened — Chrome's hover recompute moves the MOUSE pointer onto the
+//      button where a pen rests one or two frames after the open's layout
+//      change, and the leg's recorder kept only the LAST enter's type): the
+//      shared judge (scripts/pen-hover-judge.mjs, PURE) over a FAKE-CLOCK
+//      model of every interleaving — frame period, timer lateness, recompute
+//      frame, the CDP sample's delay, a layout pending at the pen's arrival,
+//      the mouse-only product — using the product's own hoverVerdict + intent;
+//      a patched copy of the judge with the pre-fix last-enter slot is the
+//      control (red exactly where the recompute beat the sample, green where
+//      the sample won: the race, green standalone); wiring pins that the heavy
+//      suite records typed enters, judges through the module, runs the ×20 leg;
+//   §11 THE HOVER VISIT (found by the load construction — one core, 8 busy
+//      loops — on master: a rebuild of the button under a pointer that had
+//      CLICKED grew a hover chooser; constructed at ×1, 5 of 5): the REAL
+//      hoverStep over a fake clock with the wiring's per-GROUP visit, 378
+//      timed scripts (click / Esc / wiggle then a rebuild, a genuine return, a
+//      return after the pointer moved AWAY during a rebuild, a pen re-targeted
+//      before its open); the controls: a patched copy where every pointerenter
+//      is an arrival (the pre-fix hover) and one that ignores 'away' (a stale
+//      visit — a missed hover); the watcher's wiring pinned.
 // Chrome end to end: scripts/test-taskbar-group-ui.mjs (heavy).
 // Run: node scripts/test-taskbar-group.mjs
 import fs from 'node:fs';
@@ -159,7 +181,12 @@ console.log('§7 wiring pins (comment-stripped taskbar.js)');
     ok(/fine = \(e\.pointerType === 'mouse' \|\| e\.pointerType === 'pen'\) && _finePointer\(\);/.test(line) && !/touch/.test(line), `a hover is a MOUSE or a PEN on a fine-pointer device, never touch (verify r1: a pen got only the click rule) — ${line}`);
   }
   ok(/const v = hoverNow\(elapsed\);/.test(group), 'the intent is RE-JUDGED when it fires (a drag or a menu may have begun)');
-  ok(['pointerleave', 'pointerdown', 'dragstart'].every((ev) => new RegExp(`addEventListener\\('${ev}',[^\\n]*cancelIntent`).test(group) || new RegExp(`addEventListener\\('${ev}', \\(e\\) => \\{\\n\\s*cancelIntent\\(\\)`).test(group)), 'leaving, pressing and dragging cancel the intent');
+  ok(/addEventListener\('pointerleave', \(\) => \{ step\('leave'\);/.test(group) && /addEventListener\('pointerdown', \(\) => step\('press'\)\)/.test(group) && /addEventListener\('dragstart', \(e\) => \{\s*step\('press'\);/.test(group) && /addEventListener\('contextmenu', \(e\) => \{\s*e\.preventDefault\(\);\s*step\('press'\);/.test(group) && /if \(r\.act === 'cancel'\) cancelIntent\(\);/.test(group), 'leaving, pressing, dragging and the window menu go through hoverStep (leave ends the visit, a press spends it) and cancel the intent');
+  // 2026-09-26 (the load construction of the 2.369.183 pen red): the visit is the GROUP's, enter AND move ask hoverStep, only its 'arm' arms
+  ok(/^const _hoverSpent = new Set\(\);$/m.test(tb) && /const r = hoverStep\(\{ spent: _hoverSpent\.has\(hostId\) \}, ev\);\s*if \(r\.spent\) _hoverSpent\.add\(hostId\); else _hoverSpent\.delete\(hostId\);/.test(group), 'the hover VISIT is kept per GROUP (a module-level set of host ids), never in one button element\'s closure — a rebuilt button inherits it');
+  ok(/addEventListener\('pointerenter', \(e\) => \{[^}]*\}\);/.test(group) && /addEventListener\('pointerenter', \(e\) => \{[\s\S]*?if \(step\('enter'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);\s*\}\);/.test(group) && /addEventListener\('pointermove', \(e\) => \{\s*lastButtons = e\.buttons;\s*if \(step\('move'\) === 'arm' && !_chooserOf\(hostId\)\) armFrom\(e\);/.test(group) && (group.match(/setTimeout\(fire, GROUP_HOVER_INTENT_MS\)/g) || []).length === 1 && /const armFrom = \(e\) => \{\s*cancelIntent\(\);/.test(group), 'pointerenter and pointermove both ask hoverStep; the ONE arming (armFrom) runs only on its "arm"');
+  ok(/function _watchHoverVisits\(\) \{[\s\S]*?document\.addEventListener\('pointermove', \(e\) => \{[\s\S]*?closest\?\.\('\.taskbar-group'\)\?\.dataset\.winId;[\s\S]*?hoverStep\(\{ spent: true \}, 'away'\)[\s\S]*?\{ capture: true, passive: true \}\);/.test(tb) && /_watchHoverVisits\(\);\s*const step = /.test(group) && /if \(_visitWatch\) return;/.test(tb), 'ONE app-lifetime capture pointermove ends a spent visit when the pointer moves anywhere but that group\'s button (hoverStep \'away\'), installed once');
+  ok(/for \(const id of _hoverSpent\) if \(!entries\.some\(\(e\) => e\.id === id && e\.group\)\) _hoverSpent\.delete\(id\);/.test(tb), 'a group gone from the taskbar ends its visit (the set never grows past the live groups)');
   ok(/addEventListener\('keydown',[\s\S]*?groupKeyVerdict\(\{ key: e\.key, inFront: _groupInFront\(app, hostId\) \}\)/.test(group) && /item\.tabIndex = 0;/.test(group), 'the button is focusable and its keys go through groupKeyVerdict');
   ok(/addEventListener\('contextmenu',[\s\S]*?showWindowContextMenu\(app, hostId, e\.clientX, e\.clientY, \{ closeLabel: '\\u2715 ' \+ t\('Close group'\) \}\)/.test(group), 'right-click keeps the group\'s window menu');
   ok(!/groupClickVerdict|hoverVerdict|pointerenter|showTabGroupList/.test(single) && /activateWindow\(app, id\)/.test(single) && /app\.wm\.minimize\(id\)/.test(single), 'the SINGLE button asks none of it: its click is today\'s (minimize when focused, else the same activation), no hover');
@@ -289,11 +316,161 @@ console.log('§9 attachPopoverClose OWNS its listener (behaviour, in node over a
   ok(Object.entries(minor).every(([k, v]) => (k === 'liveExclusion' ? v === false : v === true)), 'CONTROL: the r1-minor function fails ONLY the live exclusion (a rebuilt anchor\'s mousedown closed its chooser as "elsewhere")', minor);
 }
 
+console.log('§10 WHO OPENED THE HOVER CHOOSER — the pen leg\'s judge over a fake clock (the 2.369.183 mirror red)');
+{
+  const JREL = 'scripts/pen-hover-judge.mjs';
+  const jSrc = read(JREL);
+  const J = await import(pathToFileURL(path.join(repo, JREL)).href);
+  const jCode = jSrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  ok(!/\bimport\s|\brequire\s*\(|\bdocument\b|\bwindow\b|\bprocess\b/.test(jCode) && typeof J.judgeHoverOpen === 'function', `${JREL} is PURE (imports nothing, no DOM, no process) and exports judgeHoverOpen`);
+  const FIX = 'const by = enters.length ? enters[0] : null;';
+  ok(jSrc.split(FIX).length === 2, 'the attribution (the FIRST enter after the reset armed the intent) is spelled once, where the control patches it');
+  // THE CONTROL: the pre-fix recorder's ONE slot — the last pointerenter at the sample — through the same judge
+  const pre = await import(pathToFileURL(MUT.write(JREL, jSrc.replace(FIX, 'const by = enters.filter((e) => !(e.at > record.sampledAt)).at(-1) || null;'), 'last-enter-slot')).href);
+
+  // THE FAKE CLOCK. One trial = one interleaving of the race's participants, on the page clock:
+  //   the pen ARRIVES at 0 (pointerId 2: enter + move) — the product asks its REAL hoverStep for each event (Chrome's
+  //     re-targeting enter comes WITHOUT a move), arms on its 'arm' (restarting any armed timer, as armFrom does), and
+  //     the timer fires GROUP_HOVER_INTENT_MS + `late` after the arming through the REAL hoverVerdict;
+  //   frames tick at `phase + k·period` (a slow main thread paints less often);
+  //   Chrome's hover recompute: at the `recomputeAt`-th frame after a LAYOUT change it moves the MOUSE pointer (id 1) to
+  //     the last known position — the pen's — a mouse-typed pointerenter on the button (once: the mouse pointer then
+  //     stays there). Layout changes: the chooser's open, and (`pending`) one the leg's previous steps left for a frame
+  //     that had not come yet when the pen arrived;
+  //   the leg's poll saw the open and read the record `sampleAfter` ms later (the CDP round trip);
+  //   `penArms` false = the mouse-only product (CONTROL 2's revert): a pen is not a fine pointer to it.
+  const T = real.GROUP_HOVER_INTENT_MS, HOVER_REAL = real.hoverVerdict; // the PRODUCT's intent, verdict and step, never a copy
+  function trial({ period, phase, late, recomputeAt, sampleAfter, pending = false, penArms = true, waitRecompute = false }, stepMod = real) {
+    const enters = [], opens = [];
+    const frameAfter = (t, n) => { const k = Math.floor((t - phase * period) / period) + 1; return phase * period + (k + n - 1) * period; }; // the n-th frame boundary strictly after t
+    let spent = false, armedAt = null, mouseOn = false;
+    const feed = (ev, ptr, at) => { // the wiring: step, then arm on 'arm' (armFrom — a fine pointer only)
+      if (ev === 'enter') enters.push({ type: ptr, id: ptr === 'pen' ? 2 : 1, at });
+      const r = stepMod.hoverStep({ spent }, ev); spent = r.spent;
+      if (r.act === 'cancel') armedAt = null;
+      if (r.act === 'arm' && (ptr === 'mouse' || (ptr === 'pen' && penArms))) armedAt = at;
+    };
+    feed('enter', 'pen', 0); feed('move', 'pen', 0);
+    if (pending) { feed('enter', 'mouse', frameAfter(0, 1)); mouseOn = true; }
+    let open = null;
+    if (armedAt !== null) {
+      let fireAt = armedAt + T + late;
+      for (let guard = 0; guard < 20 && !open; guard++) {
+        const v = HOVER_REAL({ pointerFine: true, touch: false, dragging: false, popoverOpen: false, intentMs: fireAt - armedAt });
+        if (v === 'open') open = { at: fireAt, mode: 'hover' };
+        else if (v === 'wait') fireAt += Math.max(1, T - (fireAt - armedAt)) + late;
+        else break;
+      }
+    }
+    if (open) opens.push(open);
+    let sampledAt = open ? open.at + sampleAfter : 1200; // the leg's own deadline when nothing opens
+    if (open && !mouseOn) { const m = frameAfter(open.at, recomputeAt); enters.push({ type: 'mouse', id: 1, at: m }); if (waitRecompute) sampledAt = Math.max(sampledAt, m); }
+    const rec = { enters: enters.filter((e) => e.at <= sampledAt), opens: opens.filter((o) => o.at <= sampledAt), sampledAt };
+    return { rec, open, recomputeBeforeSample: enters.some((e) => e.type === 'mouse' && e.at <= sampledAt && (!open || e.at > open.at)) };
+  }
+  const grid = [];
+  for (const period of [1000 / 60, 33, 50, 100, 200]) for (const phase of [0, 0.5]) for (const late of [0, 15, 60]) for (const recomputeAt of [1, 2]) for (const sampleAfter of [0, 10, 25, 40, 80, 160]) grid.push({ period, phase, late, recomputeAt, sampleAfter });
+  // ① the settled page (the heavy leg settles frames before the pen moves): every interleaving, both judges
+  const settled = grid.map((g) => ({ g, ...trial(g) }));
+  const fixBad = settled.filter((x) => J.judgeHoverOpen(x.rec).verdict !== 'opened');
+  ok(settled.length >= 40 && fixBad.length === 0, `① the judge credits the PEN in all ${settled.length} settled interleavings (frame period 16–200 ms, timer late 0–60 ms, recompute at frame 1/2, the sample 0–160 ms after the open)`, fixBad.slice(0, 2).map((x) => ({ g: x.g, v: J.judgeHoverOpen(x.rec) })));
+  const lost = settled.filter((x) => x.recomputeBeforeSample), won = settled.filter((x) => !x.recomputeBeforeSample);
+  const preRed = settled.filter((x) => pre.judgeHoverOpen(x.rec).verdict !== 'opened');
+  ok(lost.length > 0 && won.length > 0 && preRed.length === lost.length && preRed.every((x) => x.recomputeBeforeSample), `CONTROL: the pre-fix last-enter slot is red on EXACTLY the ${lost.length} interleavings where Chrome's recompute beat the sample and green on the ${won.length} where the sample won — a race (green standalone, red on a slow runner)`, { preRed: preRed.length, lost: lost.length, won: won.length });
+  // measured on chrome (--only l): the recompute lands +31 ms after the open at 60 Hz (the 2nd frame), +30–50 ms at CPU ×20,
+  // and the original leg was red 0/20 at ×1 and ×6, 9/20 at ×10, 17/20 at ×20 — the model agrees: at the measured frame a
+  // 60 Hz page sampled within 10 ms of the open never loses; the slow pages do
+  const fastLost = lost.filter((x) => x.g.period < 20 && x.g.recomputeAt === 2 && x.g.sampleAfter <= 10).length, slowLost = lost.filter((x) => x.g.period >= 100).length;
+  ok(fastLost === 0 && slowLost > 0, `…the losing order is the SLOW page's: at the measured recompute frame a 60 Hz page sampled within 10 ms of the open never loses (${fastLost}); 100–200 ms frames do (${slowLost})`);
+  // ② the heavy leg's construction: it WAITS for the recompute before sampling ⇒ the race is in every record
+  const waited = grid.map((g) => trial({ ...g, waitRecompute: true }));
+  ok(waited.every((x) => J.judgeHoverOpen(x.rec).verdict === 'opened' && J.judgeHoverOpen(x.rec).recompute.length === 1) && waited.every((x) => pre.judgeHoverOpen(x.rec).verdict !== 'opened'), `② waiting for the recompute (the heavy leg's construction): the judge credits the pen and reports the recompute in all ${waited.length}; the pre-fix slot is red in all ${waited.length} (its control is deterministic, not a race)`);
+  // ③ a layout PENDING at the pen's arrival: Chrome's mouse enter comes before the open — the judge never assumes which
+  //    enters the product arms on: 'premise' (the leg retries by name), never 'opened', never a false failure verdict;
+  //    and the PRODUCT does not restart the pen's intent on it (hoverStep: an enter is not an arrival)
+  const pend = grid.map((g) => ({ g, ...trial({ ...g, pending: true }) }));
+  const pendV = pend.map((x) => J.judgeHoverOpen(x.rec).verdict);
+  ok(pendV.every((v) => v === 'premise') && pend.every((x) => x.open && x.open.at === settled.find((y) => y.g === x.g)?.open?.at), `③ a layout pending when the pen arrives (Chrome's mouse enter BEFORE the open): 'premise' in all ${pend.length} — never credited to the pen, never judged a failure (${[...new Set(pendV)].join(', ')}); the product opened at the pen's own intent in every one (not restarted by the re-target)`);
+  // ④ CONTROL 2's mouse-only product: a settled page gives the pen nothing ('no-open'); with a pending layout Chrome's
+  //    mouse enter is in the record before the sample — 'premise', never credited to the pen
+  const mo = grid.map((g) => trial({ ...g, penArms: false })).map((x) => J.judgeHoverOpen(x.rec).verdict);
+  const moPend = grid.map((g) => trial({ ...g, penArms: false, pending: true })).map((x) => J.judgeHoverOpen(x.rec).verdict);
+  ok(mo.every((v) => v === 'no-open') && moPend.every((v) => v === 'premise'), `④ the mouse-only product: 'no-open' on a settled page (${mo.length}), 'premise' when Chrome's mouse entered before the sample (${moPend.length}) — the pen is never credited for Chrome's mouse`);
+  // ⑤ the judge's other rows
+  const E = (type, id, at) => ({ type, id, at });
+  ok(J.judgeHoverOpen({ enters: [], opens: [], sampledAt: 900 }).verdict === 'premise' && J.judgeHoverOpen({ enters: [E('pen', 2, 0)], opens: [{ at: 120, mode: 'hover' }], sampledAt: 200 }).verdict === 'early' && J.judgeHoverOpen({ enters: [E('pen', 2, 0)], opens: [{ at: 320, mode: 'click' }], sampledAt: 400 }).verdict === 'wrong-mode' && J.judgeHoverOpen({ enters: [E('mouse', 1, 0)], opens: [{ at: 300, mode: 'hover' }], sampledAt: 400 }).verdict === 'premise', '⑤ no enter / an open before the intent / a click-mode open / a mouse first ⇒ premise / early / wrong-mode / premise');
+  // ⑥ wiring: the heavy suite judges (l) through the module, records TYPED enters, never a last-type slot, runs the ×20 leg; the
+  //    model's assumption about the product (a pointerenter with nothing open re-arms) is still the product's
+  const ui = read('scripts/test-taskbar-group-ui.mjs');
+  ok(/import \{ judgeHoverOpen \} from '\.\/pen-hover-judge\.mjs';/.test(ui) && /R\.enters\.push\(\{ type: e\.pointerType, id: e\.pointerId, at: R\.enterG \}\)/.test(ui) && !/enterType/.test(ui) && /const v = judgeHoverOpen\(rec, \{ type: 'pen' \}\);/.test(ui), '⑥ test-taskbar-group-ui records every enter TYPED (no last-type slot left) and judges the pen leg through judgeHoverOpen');
+  ok(/Emulation\.setCPUThrottlingRate', \{ rate: 20 \}\)/.test(ui) && /l2\.every\(\(x\) => x\.v\.recompute\.length > 0 && x\.pre\.verdict !== 'opened'\)/.test(ui) && /await evalJs\(FRAMES\(3\)\);/.test(ui), '…settles frames before the pen moves, and keeps the ×20 leg with its in-record control');
+}
+
+console.log('§11 THE HOVER VISIT over a fake clock — a rebuild under a RESTING pointer is not an arrival (found by the load construction)');
+{
+  // the one-core load construction (8 busy loops on the suite's core) turned leg (a) red on master: the Explorer's title
+  // landed after the click, the taskbar REBUILT the button under the resting pointer, Chrome re-targeted the pointer onto
+  // the new element (a bare pointerenter), its fresh closure armed, a hover chooser grew 300 ms later — constructed at ×1:
+  // a click, then a tab title change, 5 of 5. The fake clock drives the REAL hoverStep with the wiring's per-GROUP visit
+  // (a rebuild replaces the element, never the visit) and the wiring's arming (a fine pointer, armFrom restarting):
+  //   each script = timed events {at, ev: enter|move|leave|press|esc|rebuild, ptr}; Chrome's re-target = a bare 'enter'
+  //   at `frames` frames of `period` after the rebuild; the timer opens at arming + intent unless cancelled; Esc closes.
+  const T = real.GROUP_HOVER_INTENT_MS;
+  const sim = (mod, script) => {
+    let spent = false, timerAt = null, open = false; const opens = [];
+    const evs = [...script].sort((a, b) => a.at - b.at);
+    const flush = (t) => { if (timerAt !== null && timerAt <= t) { if (!open) { opens.push(timerAt); open = true; } timerAt = null; } };
+    for (const x of evs) {
+      flush(x.at);
+      if (x.ev === 'esc') { open = false; continue; }
+      if (x.ev === 'rebuild') continue; // the element is replaced; the visit (per group) is not
+      const r = mod.hoverStep({ spent }, x.ev); spent = r.spent;
+      if (r.act === 'cancel') timerAt = null;
+      if (r.act === 'arm' && !open) timerAt = x.at + T; // armFrom: cancel any armed timer, arm afresh
+      if (x.ev === 'leave') open = false; // (the chooser's own leave grace is not this table's subject)
+    }
+    flush(Infinity);
+    return opens;
+  };
+  { // the table: every visit state × every event
+    const W = { move: [{ spent: true, act: 'arm' }, { spent: true, act: null }], press: [{ spent: true, act: 'cancel' }, { spent: true, act: 'cancel' }], leave: [{ spent: false, act: 'cancel' }, { spent: false, act: 'cancel' }], away: [{ spent: false, act: null }, { spent: false, act: null }], enter: [{ spent: false, act: null }, { spent: true, act: null }], click: [{ spent: false, act: null }, { spent: true, act: null }] };
+    const bad = [];
+    for (const [ev, want] of Object.entries(W)) for (const spent of [false, true]) { const got = real.hoverStep({ spent }, ev), w = want[spent ? 1 : 0]; if (got.spent !== w.spent || got.act !== w.act) bad.push({ ev, spent, got, w }); }
+    ok(bad.length === 0, 'hoverStep\'s table: the visit\'s FIRST move arms, a later move nothing; a press spends it and cancels; a leave ends it and cancels; a pointer moving AWAY (anywhere but this group\'s button) ends it; an enter (or any other event) arms nothing and ends nothing', bad);
+  }
+  const HS = 'return { spent: !!spent, act: null }; // \'enter\' (and anything else) arms nothing and ends nothing';
+  ok(modSrc.split(HS).length === 2, 'the enter row is spelled once, where the control patches it (and where CONTROL 2 of the heavy suite reverts it)');
+  const preMod = await import(pathToFileURL(MUT.write(MODREL, modSrc.replace(HS, "return event === 'enter' ? { spent: true, act: 'arm' } : { spent: !!spent, act: null };"), 'enter-arms')).href);
+  const rows = [];
+  for (const period of [1000 / 60, 50, 200]) for (const frames of [1, 2, 3]) for (const rebuildAfter of [0, 40, 120, 250, 299, 400, 800]) {
+    const rt = (t0) => t0 + rebuildAfter + frames * period; // Chrome's re-targeting enter on the rebuilt button
+    const arrive = (at, ptr = 'mouse') => [{ at, ev: 'enter', ptr }, { at, ev: 'move', ptr }];
+    rows.push({ kind: 'click', want: 0, script: [...arrive(0), { at: 20, ev: 'press' }, { at: 20 + rebuildAfter, ev: 'rebuild' }, { at: rt(20), ev: 'enter' }] });
+    rows.push({ kind: 'esc', want: 1, script: [...arrive(0), { at: T + 50, ev: 'esc' }, { at: T + 50 + rebuildAfter, ev: 'rebuild' }, { at: rt(T + 50), ev: 'enter' }] });
+    rows.push({ kind: 'wiggle', want: 0, script: [...arrive(0), { at: 20, ev: 'press' }, { at: 20 + rebuildAfter, ev: 'rebuild' }, { at: rt(20), ev: 'enter' }, { at: rt(20) + 30, ev: 'move' }, { at: rt(20) + 90, ev: 'move' }] });
+    rows.push({ kind: 'return', want: 1, script: [...arrive(0), { at: 20, ev: 'press' }, { at: 20 + rebuildAfter, ev: 'rebuild' }, { at: rt(20), ev: 'enter' }, { at: rt(20) + 60, ev: 'leave' }, ...arrive(rt(20) + 200)], opensAt: rt(20) + 200 + T });
+    // the pointer LEFT while the button was being rebuilt: no retarget enter, no leave on the live element — it moved elsewhere
+    rows.push({ kind: 'away', want: 1, script: [...arrive(0), { at: 20, ev: 'press' }, { at: 20 + rebuildAfter, ev: 'rebuild' }, { at: 20 + rebuildAfter + 5, ev: 'away' }, ...arrive(20 + rebuildAfter + 300)], opensAt: 20 + rebuildAfter + 300 + T });
+    rows.push({ kind: 'pen-retarget', want: 1, script: [...arrive(0, 'pen'), { at: Math.min(rebuildAfter, T - 1), ev: 'rebuild' }, { at: Math.min(rebuildAfter, T - 1) + 1, ev: 'enter', ptr: 'mouse' }], opensAt: T });
+  }
+  const judge = (mod) => rows.map((r) => { const o = sim(mod, r.script); return { r, o, good: o.length === r.want && (r.opensAt === undefined || o[0] === r.opensAt) }; });
+  const now = judge(real), pre = judge(preMod);
+  const by = (res, k) => res.filter((x) => x.r.kind === k);
+  ok(rows.length >= 40 && now.every((x) => x.good), `the product's hoverStep: in all ${rows.length} timed scripts — a click then a rebuild (${by(now, 'click').length}), a wiggle on the rebuilt button (${by(now, 'wiggle').length}): nothing grows; Esc then a rebuild: nothing comes back (${by(now, 'esc').length}); a genuine leave + return opens at its own intent (${by(now, 'return').length}), and so does a return after the pointer moved AWAY during the rebuild (no leave reached the live button) (${by(now, 'away').length}); a pen re-targeted before its open opens at the PEN's intent, not restarted (${by(now, 'pen-retarget').length})`, now.filter((x) => !x.good).slice(0, 2).map((x) => ({ kind: x.r.kind, opens: x.o })));
+  const preBad = (k) => by(pre, k).filter((x) => !x.good).length;
+  const AW = "  if (event === 'away') return { spent: false, act: null };";
+  ok(modSrc.split(AW).length === 2, 'the away row is spelled once, where its control patches it');
+  const staleMod = await import(pathToFileURL(MUT.write(MODREL, modSrc.replace(AW, "  if (event === 'away') return { spent: !!spent, act: null };"), 'away-ignored')).href);
+  const stale = judge(staleMod);
+  ok(by(stale, 'away').every((x) => !x.good && x.o.length === 0) && stale.filter((x) => x.r.kind !== 'away').every((x) => x.good), `CONTROL (a patched copy that ignores 'away' — the visit kept per group but never ended off the button): every return after the pointer left during a rebuild MISSES its hover (${by(stale, 'away').filter((x) => !x.good).length}/${by(stale, 'away').length}); every other script unchanged`);
+  ok(preBad('click') === by(pre, 'click').length && preBad('esc') === by(pre, 'esc').length && preBad('pen-retarget') === by(pre, 'pen-retarget').filter((x) => x.r.script[3].at < T).length && preBad('return') === 0, `CONTROL (a patched copy: every pointerenter is an arrival — the pre-fix hover): a chooser grows under the pointer that clicked in ${preBad('click')}/${by(pre, 'click').length}, the Esc-dismissed one comes back in ${preBad('esc')}/${by(pre, 'esc').length}, the pen's intent restarts whenever the re-target came before the open (${preBad('pen-retarget')}/${by(pre, 'pen-retarget').length}); a genuine return is unchanged (${preBad('return')} red)`);
+}
+
 console.log('§8 words + tree');
 {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   for (const k of ['{n} windows grouped', 'Windows in this group']) ok(zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':'), `"${k}" has zh + ja`);
-  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+  for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
