@@ -65,7 +65,8 @@ console.log('§1 channel-groups-view (PURE)');
   const adapters = [{ id: 'lark', kind: 'lark', label: 'Lark' }, { id: 'gmail', kind: 'gmail', label: 'Gmail' }, { id: 'agents', kind: 'agents', label: 'Agents', builtin: true }];
   const conversations = [
     { key: 'lark/c1', id: 'c1', adapterId: 'lark', adapterLabel: 'Lark', title: 'Ops room', tracked: true, lastAt: 3000, lastText: 'deploy done', unread: 2, kind: 'group' },
-    { key: 'lark/c2', id: 'c2', adapterId: 'lark', adapterLabel: 'Lark', title: 'Untracked', tracked: false, lastAt: 9000, unread: 0 },
+    { key: 'lark/c2', id: 'c2', adapterId: 'lark', adapterLabel: 'Lark', title: 'Never tracked', lastAt: 9000, unread: 0 },
+    { key: 'lark/c3', id: 'c3', adapterId: 'lark', adapterLabel: 'Lark', title: 'Left the chat', unlisted: true, lastAt: 9500, unread: 0 },
     { key: 'gmail/t1', id: 't1', adapterId: 'gmail', adapterLabel: 'Gmail', title: 'Invoice', tracked: true, lastAt: 1000, lastText: 'see attached', unread: 0, kind: 'thread' },
     { key: 'agents/s1', id: 's1', adapterId: 'agents', adapterLabel: 'Agents', title: 'worker', tracked: true, lastAt: 8000, unread: 1 },
   ];
@@ -75,23 +76,24 @@ console.log('§1 channel-groups-view (PURE)');
     { id: 'g-00000003', name: 'old', lastAt: 7000, archivedAt: 7500, members: [] },
   ];
   const { rows, archived } = V.groupListRows({ groups, conversations, adapters });
-  ok(JSON.stringify(rows.map((r) => r.key)) === JSON.stringify(['groups/g-00000001', 'lark/c1', 'groups/g-00000002', 'gmail/t1']), 'THE FIRST SCREEN: groups and TRACKED external conversations in ONE list, newest activity first', JSON.stringify(rows.map((r) => r.key)));
-  ok(!rows.some((r) => r.id === 'c2') && !rows.some((r) => r.adapterId === 'agents'), '…an UNTRACKED conversation (no history to show) and the built-in agents SOURCES (the message watcher) are not in it');
+  ok(JSON.stringify(rows.map((r) => r.key)) === JSON.stringify(['lark/c2', 'groups/g-00000001', 'lark/c1', 'groups/g-00000002', 'gmail/t1']), 'THE FIRST SCREEN: groups and EVERY conversation of a linked account in ONE list (2026-09-26: an aggregated IM, no track step), newest activity first', JSON.stringify(rows.map((r) => r.key)));
+  ok(!rows.some((r) => r.id === 'c3') && !rows.some((r) => r.adapterId === 'agents'), '…a conversation the vendor no longer lists (unlisted) and the built-in agents SOURCES (the message watcher) are not in it');
   ok(archived.length === 1 && archived[0].id === 'g-00000003' && !rows.some((r) => r.id === 'g-00000003'), 'an archived group is listed apart (NEGATIVE CONTROL: its lastAt 7000 would otherwise lead the list)');
   const pairRow = rows.find((r) => r.id === 'g-00000002');
   const mailRow = rows.find((r) => r.id === 't1');
-  ok(pairRow.pair === true && rows[0].memberCount === 3 && rows[0].unread === 1 && mailRow.mail === true && mailRow.sourceLabel === 'Gmail' && rows[1].lastText === 'deploy done', 'each row carries its source facts (pair / member count / unread / mail glyph / source label / last line)');
+  const g1 = rows.find((r) => r.id === 'g-00000001'), c1 = rows.find((r) => r.id === 'c1');
+  ok(pairRow.pair === true && g1.memberCount === 3 && g1.unread === 1 && mailRow.mail === true && mailRow.sourceLabel === 'Gmail' && c1.lastText === 'deploy done', 'each row carries its source facts (pair / member count / unread / mail glyph / source label / last line)');
   const shuffled = V.groupListRows({ groups: groups.slice().reverse(), conversations: conversations.slice().reverse(), adapters });
   ok(JSON.stringify(shuffled.rows.map((r) => r.key)) === JSON.stringify(rows.map((r) => r.key)), 'the order is a property of the DATA, not of the input order');
 
   // the composer's mode BY CONVERSATION KIND
   const offers = (u, b, why = 'no-scope') => ({ sendAsUser: { offered: u, why: u ? null : why }, sendAsBot: { offered: b, why: b ? null : 'no-bot' } });
   ok(V.composerMode({ group: { id: 'g' } }).mode === 'group' && V.composerMode({ group: { id: 'g', archivedAt: 5 } }).mode === 'archived', 'a GROUP composes as You (group), an archived one not at all');
-  ok(V.composerMode({ conv: { tracked: true, offers: offers(true, true) } }).mode === 'direct', 'an external conversation offering sendAsUser ⇒ DIRECT as you (even where a bot is offered too)');
-  const pb = V.composerMode({ conv: { tracked: true, offers: offers(false, true, 'send-scope-not-granted') } });
+  ok(V.composerMode({ conv: { offers: offers(true, true) } }).mode === 'direct', 'an external conversation offering sendAsUser ⇒ DIRECT as you (even where a bot is offered too)');
+  const pb = V.composerMode({ conv: { offers: offers(false, true, 'send-scope-not-granted') } });
   ok(pb.mode === 'propose' && pb.why === 'send-scope-not-granted', 'only the BOT identity ⇒ the proposal path, WITH the send-as-user reason (a bot is not the owner speaking)', JSON.stringify(pb));
-  ok(V.composerMode({ conv: { tracked: false, offers: offers(false, false) } }).mode === 'untracked', 'untracked + nothing offered ⇒ the untracked footer');
-  const ro = V.composerMode({ conv: { tracked: true, offers: offers(false, false, 'read-only-mailbox') } });
+  ok(V.composerMode({ conv: { tracked: false, offers: offers(false, false, 'read-only-mailbox') } }).mode === 'readonly', 'a stale `tracked:false` changes nothing — there is no untracked footer any more (2026-09-26)');
+  const ro = V.composerMode({ conv: { offers: offers(false, false, 'read-only-mailbox') } });
   ok(ro.mode === 'readonly' && ro.why === 'read-only-mailbox', 'nothing offered ⇒ read-only WITH the capability row\'s reason', JSON.stringify(ro));
 
   // the @-autocomplete
@@ -153,13 +155,14 @@ console.log('§2 the owner\'s own send, the digest\'s last line, the owner\'s re
   });
   const A = 'fake-poll', C = 'fake-poll-ops';
   await eng.pass(A, { force: true });
-  await eng.setTracked(A, C, true);
+  await eng.refresh(A, C);
   await eng.pass(A, { force: true });
   const newest = eng.store.readTail(A, C, { limit: 1 })[0];
   const row = eng.digest().conversations.find((c) => c.key === `${A}/${C}`);
   ok(newest && row && row.lastText === String(newest.text).replace(/\s+/g, ' ').trim().slice(0, 160) && row.lastText.length > 0, 'the digest\'s `lastText` is the NEWEST logged record\'s text (one line, bounded)', JSON.stringify({ lastText: row && row.lastText, newest: newest && newest.text }));
-  const untracked = eng.digest().conversations.find((c) => c.key === `${A}/fake-poll-announce`);
-  ok(untracked && untracked.lastText === '', 'CONTROL: an untracked conversation (nothing ingested) has no last line');
+  const other = eng.digest().conversations.find((c) => c.key === `${A}/fake-poll-announce`);
+  const otherNewest = eng.store.readTail(A, 'fake-poll-announce', { limit: 1 })[0];
+  ok(other && otherNewest && other.lastText === String(otherNewest.text).replace(/\s+/g, ' ').trim().slice(0, 160), 'every conversation of a linked account is INGESTED (2026-09-26, no track step) — the other room has its own last line too');
 
   const own = await eng.propose({ kind: 'user' }, A, C, { text: 'from me, see https://example.com/x', direct: true });
   ok(own.ok && own.proposal.state === 'sent' && own.decision.mode === 'direct' && own.decision.reasons.length === 0 && own.decision.detail.ownMessage === true && own.proposal.sendAs === 'user', 'THE OWNER\'S OWN MESSAGE: `direct` from the user is SENT at once as the user — no policy, no guard (the link would force review), `detail.ownMessage`', JSON.stringify([own.proposal && own.proposal.state, own.decision]));

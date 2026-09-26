@@ -730,7 +730,9 @@ function rebuildUnderFault(PS, name, code) {
 {
   const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8').replace(/^\s*\/\/.*$/gm, '');
   ok(/store\.trim\(/.test(eng), 'the ingest engine CALLS store.trim — the retention bounds above are enforced by something, not just implemented');
-  ok(/if \(appended\)[^\n]*store\.trim\(/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim/.test(l)).join(' | '));
+  // 2026-09-26: at most every TRIM_EVERY_MS per conversation (the trim rewrites the log) — still
+  // only after a pass that APPENDED, still on the ONE conversation that grew
+  ok(/if \(trimNow\)[^\n]*store\.trim\(rec\.id, convId\)/.test(eng) && /if \(appended && \(!en\.trimmedAt \|\| now\(\) - en\.trimmedAt >= TRIM_EVERY_MS\)\) \{ en\.trimmedAt = now\(\); trimNow = true; \}/.test(eng), '…right after a pass that actually appended, on the ONE conversation that grew, at most every TRIM_EVERY_MS (a timer sweeping every conversation would re-read logs nothing touched)', eng.split('\n').filter((l) => /store\.trim|trimNow = true/.test(l)).join(' | '));
 }
 
 // ── ⑨ tier + hygiene pins ──
@@ -740,7 +742,7 @@ function rebuildUnderFault(PS, name, code) {
   // to have, so prose is blanked before asking whether one survives.
   const noComments = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   const reqs = [...src.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'path'].includes(r)), 'the store is SHARED: node builtins only, and only the two it needs', reqs.join(','));
+  ok(reqs.every((r) => ['fs', 'path', 'crypto'].includes(r)), 'the store is SHARED: node builtins only — fs, path, and crypto for the attachment cache\'s file names (2026-09-26)', reqs.join(','));
   ok(!/module\.exports[\s\S]*writeIndex|exports\.writeIndex/.test(src), 'there is deliberately NO "write the whole index back" export — the serialized owner is the index\'s only writer (§5.1)');
   ok(!/writeAdapters/.test(noComments), '…and none for adapters.json either (r2): every caller used to re-parse and write its own private copy back, which is the read-modify-write lost update this invariant exists to eliminate');
   ok(/appendLines\(fp[\s\S]{0,300}?for \(const r of fresh\) rememberVendorId/.test(src) && !/if \(set\.has\(r\.vendorId\)[\s\S]{0,120}?rememberVendorId/.test(src), 'the dedup set is written AFTER the bytes are durable, never inside the selection loop');

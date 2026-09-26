@@ -99,7 +99,11 @@ const quiet = { log() {}, warn() {}, error() {} };
     'P4 caps: sendAs [user], idempotency TWO-PHASE (a draft, then its send — Gmail has no key on send), an OPT-IN push lane (P1b: Pub/Sub pull, OFF by default — decision 20); identity marking is the MEASURED `marked` at raw-headers (§12.2)');
   ok(CH.validateCaps('gmail', gmail.caps) === true, 'the declaration validates under the registry contract');
   ok(gmail.integration === 'gmail' && gmail.EGRESS.includes('gmail.googleapis.com') && gmail.EGRESS.includes('oauth2.googleapis.com') && gmail.EGRESS.includes('accounts.google.com'), 'it names its integration row and DECLARES its egress hosts');
-  ok(Array.isArray(gmail.OPTIONS) && gmail.OPTIONS[0].key === 'query' && gmail.OPTIONS[0].default === 'label:INBOX', 'the include query is a DECLARED per-record option with the INBOX default');
+  const optScope = (gmail.OPTIONS || []).find((o) => o.key === 'scope'), optQuery = (gmail.OPTIONS || []).find((o) => o.key === 'query');
+  ok(optScope && optScope.default === 'inbox' && optScope.choices.join() === 'inbox,all,labels,query' && optQuery && optQuery.default === 'label:INBOX', 'the MAILBOX scope is a DECLARED per-record option (INBOX by default; all mail / labels / a query selectable — 2026-09-26) beside the include query');
+  ok(gmail.queryOf({}) === 'label:INBOX' && gmail.queryOf({ scope: 'all' }) === 'in:anywhere -in:spam -in:trash' && gmail.queryOf({ scope: 'labels', labels: 'Work' }) === 'label:Work' && gmail.queryOf({ scope: 'labels', labels: 'Work, My Receipts' }) === '{label:Work label:My-Receipts}' && gmail.queryOf({ query: 'from:x' }) === 'from:x', 'the scope becomes the Gmail query (a pre-scope record with its own query keeps it)');
+  // the view says the scope the adapter REALLY reads (the health line / Edit dialog never say "Inbox" over a query)
+  ok(gmail.effectiveOptions({ query: 'from:x' }).scope === 'query' && gmail.effectiveOptions({ scope: 'inbox', query: 'from:x' }).scope === 'query' && gmail.effectiveOptions({}).scope === 'inbox' && gmail.effectiveOptions({ scope: 'all', query: 'from:x' }).scope === 'all', 'effectiveOptions: a custom query on an unset/default scope IS the query scope; an explicit other scope stands');
   const src = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
   ok(/resolveIntegration\('gmail'\s*[,)]/.test(src), 'it asks resolveIntegration for its OAuth client, carrying the ACCOUNT\'s credentialKey (the registry census requires the call)');
   const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
@@ -169,27 +173,30 @@ let flowState = null;
   // the pass connect() kicked: discovery under the include query
   await sleep(80);
   const convs = eng.digest().conversations.filter((c) => c.adapterId === 'gmail');
-  ok(convs.length === 3 && convs.every((c) => c.tracked === false), `discovery announced the 3 threads under label:INBOX, none tracked (opt-in)`, JSON.stringify(convs.map((c) => c.id)));
+  ok(convs.length === 3 && convs.every((c) => !('tracked' in c)), `discovery listed the 3 threads under label:INBOX and every one is fetched (2026-09-26: no opt-in)`, JSON.stringify(convs.map((c) => c.id)));
   const tl = v.calls.filter((c) => c.path.endsWith('/threads'));
   ok(tl.length === 2 && tl.every((c) => c.q.q === 'label:INBOX') && tl[1].q.pageToken === 'pt-threads-2', 'threads.list carried the DEFAULT include query and discovery PAGED through the cursor (page 2 landed)');
   const ops = convs.find((c) => c.id === 'thr_ops_0001');
   ok(ops && ops.title === 'Nightly job slow again' && ops.participants === 'Ada, Member A' && ops.kind === 'thread', 'a thread is titled by its Subject and lists its authors (one metadata read)');
 }
 
-// ── ③ tracking + PAGING + history.list incremental ──
+// ── ③ ingest-all + PAGING + history.list incremental ──
 {
+  // the pass connect() kicked already ingested every thread (no track step):
+  // ONE full read of each — counted from the calls so far
+  const full1 = v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length;
   v.calls.length = 0;
-  await eng.setTracked('gmail', 'thr_ops_0001', true);
+  await eng.refresh('gmail', 'thr_ops_0001');
   await sleep(120);
   const msgs = eng.messages('gmail', 'thr_ops_0001', { limit: 50 });
   ok(msgs.length === 2 && msgs[0].vendorId === 'msg_ops_a' && msgs[1].vendorId === 'msg_ops_b', `tracking ingested the thread's two messages oldest-first (${msgs.map((m) => m.vendorId).join(',')})`);
   ok(msgs[0].text === 'the nightly job was slow again, can someone look at the queue?' && msgs[0].author.name === 'Ada' && msgs[0].author.id === 'ada@example.com' && msgs[0].author.isSelf === false, 'the text is the text/plain part (the html sibling ignored); the author parsed from From');
-  ok(msgs[1].author.isSelf === true && msgs[1].attachments.length === 1 && msgs[1].attachments[0].name === 'queue-graph.pdf' && msgs[1].attachments[0].bytes === 48213 && msgs[1].attachments[0].id === 'ANGjdJ_fixture_att_0001', 'the authorizing user\'s own message is isSelf; an attachment is METADATA only');
+  ok(msgs[1].author.isSelf === true && msgs[1].attachments.length === 1 && msgs[1].attachments[0].name === 'queue-graph.pdf' && msgs[1].attachments[0].bytes === 48213 && msgs[1].attachments[0].id === 'part:1', 'the authorizing user\'s own message is isSelf; an attachment is named by its PART (`part:1` — a Gmail attachmentId outgrows the record, 2026-09-26)');
   ok(msgs[0].raw.subject === 'Nightly job slow again' && msgs[0].raw.messageId === '<a1@example.com>' && msgs[0].at === T0 - 7200000, 'raw carries the subject + Message-ID; at = internalDate');
   const en = eng.store.index.snapshot().conversations['gmail/thr_ops_0001'];
-  ok(en.anchor === 'msg_ops_b' && en.tracked === true, 'the anchor advanced to the newest message after the COMPLETE pass');
-  const full1 = v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length;
+  ok(en.anchor === 'msg_ops_b' && !('tracked' in en), 'the anchor advanced to the newest message after the COMPLETE pass');
   ok(full1 === 1, 'ONE full thread read for the first ingest');
+  ok(!v.calls.some((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full'), 'a refresh of an anchored, unchanged thread reads NOTHING of it (the mailbox cursor says no change)');
 
   // a second pass with NOTHING changed: one history.list, ZERO thread reads
   clock += gmail.MAILBOX_MEMO_MS + 1000;
@@ -207,7 +214,7 @@ let flowState = null;
   await eng.pass('gmail', { force: true });
   const after = eng.messages('gmail', 'thr_ops_0001', { limit: 50 });
   ok(after.length === 3 && after[2].vendorId === 'msg_ops_c' && after[2].text === 'fixed & deployed\nBrook' && after[2].author.name === 'brook@example.com', `history.list named the thread ⇒ one thread read ⇒ the one new message appended, an HTML-only body flattened to text (${JSON.stringify(after[2].text)})`);
-  ok(v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length === 1 && !v.calls.some((c) => /thr_untracked_0009/.test(c.path)), 'exactly one thread read; the untracked thread history also named was never fetched');
+  ok(v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length === 1 && !v.calls.some((c) => /thr_untracked_0009/.test(c.path)), 'exactly one thread read; a thread history named that discovery never listed (outside the scope) was never fetched');
   ok(eng.store.index.snapshot().conversations['gmail/thr_ops_0001'].anchor === 'msg_ops_c', 'the anchor moved to the new newest');
   const hist2 = v.calls.filter((c) => c.path.endsWith('/history'));
   ok(hist2.length === 1 && hist2[0].q.startHistoryId === '500410' || hist2[0].q.startHistoryId === '500100', 'the cursor is the one history.list handed back');
@@ -217,13 +224,13 @@ let flowState = null;
   v.state.history = 'gone'; v.state.reseeded = true;
   v.calls.length = 0;
   await eng.pass('gmail', { force: true });
-  ok(v.calls.some((c) => c.path.endsWith('/history')) && v.calls.some((c) => c.path.endsWith('/profile')) && v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length === 1, 'a 404 on history.list RESEEDS from the profile and walks the tracked thread once');
+  ok(v.calls.some((c) => c.path.endsWith('/history')) && v.calls.some((c) => c.path.endsWith('/profile')) && v.calls.filter((c) => /\/threads\/thr_ops_0001$/.test(c.path) && c.q.format === 'full').length === 1, 'a 404 on history.list RESEEDS from the profile and walks every thread once');
   ok(eng.messages('gmail', 'thr_ops_0001', { limit: 50 }).length === 3, 'the re-read appended nothing (dedup by message id)');
   v.state.history = 'empty';
 
   // a thread the vendor no longer serves is SKIPPED, never a frozen pass
   clock += gmail.MAILBOX_MEMO_MS + 1000;
-  await eng.setTracked('gmail', 'thr_invoice_0002', true);
+  await eng.refresh('gmail', 'thr_invoice_0002');
   await sleep(60);
   clock += gmail.MAILBOX_MEMO_MS + 1000;
   await eng.store.index.update(() => { const e = eng.store.index.entry('gmail', 'thr_ghost_0042', { create: true }); e.tracked = true; e.title = 'ghost'; });
@@ -240,11 +247,14 @@ let flowState = null;
   ok(r.ok && r.options.query === 'label:INBOX -category:promotions', 'setOptions stores the declared option');
   const tl = v.calls.filter((c) => c.path.endsWith('/threads'));
   ok(tl.length >= 1 && tl[tl.length - 1].q.q === 'label:INBOX -category:promotions', 'the discovery pass it kicked used the NEW query');
+  const shown = eng.digest().adapters.find((a) => a.id === 'gmail').options;
+  ok(shown.scope === 'query' && shown.query === 'label:INBOX -category:promotions', 'the digest shows the scope the adapter REALLY reads (a custom query ⇒ "A search query", never "Inbox")', JSON.stringify(shown));
   const e = await threw(() => eng.setOptions('gmail', { pollSeconds: '5' }));
   ok(e && e.code === 'unknown-option' && /pollSeconds/.test(e.message) && /query/.test(e.message), 'an option the adapter did not declare is refused BY NAME, naming the declared ones');
   const r2 = await eng.setOptions('gmail', { query: '' });
   ok(r2.options.query === 'label:INBOX', "'' restores the declared default");
-  ok(eng.digest().adapters.find((a) => a.id === 'gmail').optionsSchema[0].key === 'query', 'the digest publishes the option schema the panel draws');
+  const sch = eng.digest().adapters.find((a) => a.id === 'gmail').optionsSchema;
+  ok(sch.map((o) => o.key).join() === 'scope,labels,query,pushTopic,pushSubscription' && sch[0].choiceLabels && sch[0].choiceLabels.all, 'the digest publishes the option schema the panel draws (the mailbox choices WITH their labels)', JSON.stringify(sch.map((o) => o.key)));
 }
 
 // ── ⑤ typed failures, the refresh, invalid_grant, disconnect ──

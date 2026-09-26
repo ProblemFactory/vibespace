@@ -21,6 +21,7 @@
  * never throws, so a route that returned 200-with-nothing would be a silent
  * failure of a user action.
  */
+const fs = require('fs');
 const express = require('express');
 const router = express.Router();
 
@@ -183,6 +184,57 @@ router.post('/api/channels/adapters/:id/auth/cancel', async (req, res) => {
 router.post('/api/channels/adapters/:id/disconnect', async (req, res) => {
   try { forHost(req); res.json(await engine().disconnect(req.params.id)); } catch (e) { fail(res, e); }
 });
+// ── 2026-09-26: THE ACCOUNT AND PATTERN GRAINS (design §7.3) ────────────
+// Declared BEFORE every `/api/channels/:adapterId/:convId/…` route, which
+// would otherwise swallow `/api/channels/adapters/<id>/assignment`.
+/** A scope verb's typed answer → status BY CODE. */
+function scopeAnswer(res, r) {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filter', 'bad-request'].includes(code) ? 400 : 500;
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}) });
+}
+/** THE ACCOUNT GRAIN — `{assignment}` or `{assignment:null}`; the filter
+ *  rides inside (`assignment.filter`). */
+router.put('/api/channels/adapters/:id/assignment', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    if (!('assignment' in b)) return bad(res, 400, 'assignment is required (an object, or null to unassign)', { code: 'bad-request' });
+    scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'account' }, b.assignment === null ? null : { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+  } catch (e) { fail(res, e); }
+});
+/** THE PATTERN GRAIN — create (`POST`), replace (`PUT …/:pid`), remove
+ *  (`DELETE …/:pid`); `assignment.pattern` = `{match, rules[]}` over
+ *  conversation facts (title / participant / from-address / kind). */
+router.post('/api/channels/adapters/:id/patterns', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern' }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+  } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+  } catch (e) { fail(res, e); }
+});
+router.delete('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
+  try { forHost(req); scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, null)); } catch (e) { fail(res, e); }
+});
+/** THE HONEST ESTIMATE over a scope, BEFORE saving: `{scope:{kind:'account'|
+ *  'pattern'}, pattern?, filter?, notify?, digestMinutes?, dailyWakeCap?}` →
+ *  `{estimate:{…, conversations, covered, sampled}, expectedWakesPerDay}`. */
+router.post('/api/channels/adapters/:id/estimate', (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    scopeAnswer(res, engine().estimateScope(req.params.id, b.scope || { kind: 'account' }, { filter: b.filter === undefined ? null : b.filter, pattern: b.pattern || null, notify: b.notify || 'wake', digestMinutes: b.digestMinutes, dailyWakeCap: b.dailyWakeCap }));
+  } catch (e) { fail(res, e); }
+});
+
 /** ENABLE / OPTIONS / PUSH: `{enabled?}`, `{options:{…}}` (an option the
  *  adapter did not declare is refused by name) and/or `{push:{enabled?,
  *  claimedExclusive?}}` (P1b, design §6.4: the push switch and the
@@ -213,16 +265,30 @@ router.get('/api/channels', (req, res) => {
   try { forHost(req); res.json(engine().digest()); } catch (e) { fail(res, e); }
 });
 
-/** OPEN — one conversation's summary (what the window's context bar shows). */
+/** SEARCH one account's messages (2026-09-26, design §6.5): the local logs,
+ *  read asynchronously with a byte cap — `{results:[{key, convId, title,
+ *  record}], truncated}`. One path segment after /channels, so it never
+ *  collides with a conversation route. */
+router.get('/api/channels/search', async (req, res) => {
+  try {
+    forHost(req);
+    const r = await engine().search(String(req.query.adapter || ''), String(req.query.q || ''), { limit: Number(req.query.limit) || 100 });
+    if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
+    res.json(r);
+  } catch (e) { fail(res, e); }
+});
+
+/** OPEN — ONE conversation's FULL view (2026-09-26: the digest rows are slim;
+ *  the window's bar, the editors and the reach dialog read this) + its
+ *  adapter row. Never a full digest per request. */
 router.get('/api/channels/:adapterId/:convId', (req, res) => {
   try {
     forHost(req);
-    const d = engine().digest();
-    const key = `${req.params.adapterId}/${req.params.convId}`;
-    const conv = d.conversations.find((c) => c.key === key);
+    const eng = engine();
+    const conv = eng.conversationView(req.params.adapterId, req.params.convId);
     if (!conv) return bad(res, 404, 'No such conversation');
-    const adapter = d.adapters.find((a) => a.id === conv.adapterId) || null;
-    res.json({ conversation: conv, adapter });
+    const rec = eng.adapterRecords().adapters.find((a) => a.id === conv.adapterId) || null;
+    res.json({ conversation: conv, adapter: rec ? eng.adapterView(rec) : null });
   } catch (e) { fail(res, e); }
 });
 
@@ -260,16 +326,74 @@ router.post('/api/channels/:adapterId/:convId/read', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-/** TRACK — the opt-in that decides whether anything is ingested at all
- *  (§5 invariant 6). Without it the panel could never show a message, so it
- *  ships with the panel rather than with the adapters. */
-router.post('/api/channels/:adapterId/:convId/track', async (req, res) => {
+// ── 2026-09-26: THE READER SURFACE (design §6.5) ─────────────────────────
+// There is no TRACK route any more: a linked account is an aggregated IM and
+// every conversation is fetched (§5 invariant 6 as rewritten).
+/** A reader verb's typed answer → status BY CODE (a refusal names its number). */
+function readerAnswer(res, r) {
+  if (r && r.ok) return res.json(r);
+  const code = (r && r.code) || 'error';
+  // r5: `refresh-queue-full` (the request set's cap) is a 429 with its wait; `account-changed` (the account rebuilt / removed while the refresh waited) a 409 like `disabled`; `stopped` (the engine stopping) a 503
+  const status = code === 'not-found' ? 404 : code === 'refresh-queue-full' || code === 'vendor-budget' || code === 'refresh-floor' || code === 'backoff' ? 429 : code === 'not-supported' ? 501 : code === 'too-large' ? 413 : code === 'bad-request' ? 400 : code === 'disabled' || code === 'account-changed' ? 409 : code === 'stopped' ? 503 : 502;
+  if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
+  return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
+}
+/** THE REFRESH OVERRIDE ("Refresh every ▸"): `{every: 30|60|300|900|'paused'|null}`. */
+router.put('/api/channels/:adapterId/:convId/refresh', async (req, res) => {
   try {
     forHost(req);
-    const tracked = !(req.body && req.body.tracked === false);
-    const ok = await engine().setTracked(req.params.adapterId, req.params.convId, tracked);
-    if (!ok) return bad(res, 404, 'No such conversation');
-    res.json({ ok: true, tracked });
+    const b = req.body || {};
+    if (!('every' in b)) return bad(res, 400, 'every is required (30, 60, 300, 900, "paused", or null for automatic)', { code: 'bad-request' });
+    readerAnswer(res, await engine().setRefresh(req.params.adapterId, req.params.convId, b.every === null ? null : (b.every === 'paused' ? 'paused' : Number(b.every))));
+  } catch (e) { fail(res, e); }
+});
+/** REFRESH NOW (the owner's "Refresh now"): one conversation, charged to
+ *  the account's vendor budget — refused by name when it is spent. */
+router.post('/api/channels/:adapterId/:convId/refresh', async (req, res) => {
+  try { forHost(req); readerAnswer(res, await engine().refresh(req.params.adapterId, req.params.convId, { origin: 'refresh' })); } catch (e) { fail(res, e); }
+});
+/** THE WINDOW'S HEARTBEAT: open ⇒ hot (90 s per beat); a stale conversation
+ *  is fetched at once. */
+router.post('/api/channels/:adapterId/:convId/watch', async (req, res) => {
+  try { forHost(req); readerAnswer(res, await engine().watch(req.params.adapterId, req.params.convId)); } catch (e) { fail(res, e); }
+});
+/** HISTORY ON DEMAND: `{before, beforeId, limit}` — the local page, topped
+ *  up from the vendor past the log's start (`exhausted` / `vendorHasNoOlder`
+ *  said honestly). */
+router.post('/api/channels/:adapterId/:convId/older', async (req, res) => {
+  try {
+    forHost(req);
+    const b = req.body || {};
+    const before = b.before !== undefined && b.before !== null && b.before !== '' ? Number(b.before) : null;
+    readerAnswer(res, await engine().loadOlder(req.params.adapterId, req.params.convId, { before: Number.isFinite(before) ? before : null, beforeId: b.beforeId ? String(b.beforeId) : null, limit: Number(b.limit) || null }));
+  } catch (e) { fail(res, e); }
+});
+/** ONE ATTACHMENT (design §6.5): fetched through the adapter on first use,
+ *  then served from the account's 0600 LRU cache. NEVER EXECUTED and never
+ *  rendered in our origin: `nosniff`, a `default-src 'none'; sandbox` CSP,
+ *  `Content-Disposition: attachment` for everything — except a raster image
+ *  (png / jpeg / gif / webp; never svg) asked `?inline=1`, which is what the
+ *  window's `img.src` thumbnails load. */
+const INLINE_IMAGE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) => {
+  try {
+    forHost(req);
+    const r = await engine().attachment(req.params.adapterId, req.params.convId, req.params.id, { msg: req.query.msg ? String(req.query.msg) : null });
+    if (!r || !r.ok) return readerAnswer(res, r);
+    const meta = r.meta || {};
+    const mime = String(meta.mime || '').toLowerCase().split(';')[0].trim();
+    const raster = INLINE_IMAGE.has(mime);
+    const inline = raster && String(req.query.inline || '') === '1';
+    const name = String(meta.name || 'attachment').replace(/[\r\n"]/g, '_');
+    const ascii = name.replace(/[^\x20-\x7e]/g, '_');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.setHeader('Content-Type', raster ? mime : 'application/octet-stream');
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+    const st = fs.createReadStream(r.file);
+    st.on('error', (e) => { if (!res.headersSent) bad(res, 500, String((e && e.message) || e)); else res.destroy(); });
+    st.pipe(res);
   } catch (e) { fail(res, e); }
 });
 

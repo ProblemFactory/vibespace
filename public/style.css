@@ -4272,7 +4272,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-sec-health { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); padding: 0 6px 2px 24px; }
 .chan-sec-health.chan-warn { color: var(--warn-text); }
 .chan-sec .mounts-errline { padding-left: 24px; }
-.chan-row.chan-row-tracked { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); }
+.chan-row.chan-row-child { margin-left: 16px; border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); }
 .chan-sec-head .chan-cred-chip { max-width: 38%; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .chan-sec-more { width: 20px; height: 20px; font-size: 13px; flex-shrink: 0; }
 .chan-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; display: inline-block; background: var(--text-dim); }
@@ -4295,7 +4295,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-row:hover { background: var(--bg-hover); border-color: var(--border-active); }
 .chan-row-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .chan-row-title { flex: 1 1 auto; min-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
-.chan-row:not(.chan-tracked) .chan-row-title { color: var(--text-secondary); }
+.chan-row.chan-row-unread .chan-row-title { font-weight: 600; }
 .chan-row-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 1px; font-size: 10px; color: var(--text-dim); }
 .chan-row-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-chip { flex-shrink: 0; font-size: 9px; font-weight: 600; letter-spacing: 0; padding: 1px 6px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); white-space: nowrap; }
@@ -4309,11 +4309,26 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-unread { flex-shrink: 0; font-size: 10px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); font-variant-numeric: tabular-nums; }
 .chan-awaiting { flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px; font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 999px; line-height: 13px; color: var(--attn-text); border: 1px solid var(--accent-dim); background: transparent; font-variant-numeric: tabular-nums; }
 .chan-awaiting .chan-ic { font-size: 9px; }
-.chan-untracked { flex-shrink: 0; font-size: 9px; color: var(--text-dim); }
 .chan-row-needs { display: none; flex-shrink: 0; font-size: 9px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); }
 .chan-row-assign { display: block; font-size: 10px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chan-row-assign .chan-ic { font-size: 10px; margin-right: 3px; vertical-align: -1px; }
 .chan-row-assign.chan-warn { color: var(--warn-text); }
+/* 2026-09-26 (design §7.3): an INHERITED assignment (the account's / a rule's) is dim */
+.chan-row-assign.chan-row-inherited { color: var(--text-dim); }
+.chan-grain-line { cursor: pointer; padding: 1px 8px 2px 22px; }
+.chan-grain-line:hover { color: var(--text); }
+.chan-more-btn { display: block; margin: 4px auto 6px; font-size: 10px; color: var(--text-secondary); background: transparent; border: none; cursor: pointer; }
+.chan-more-btn:hover { color: var(--text); text-decoration: underline; }
+/* the search dialog */
+.chan-search-row { display: flex; gap: 6px; align-items: center; }
+.chan-search-row input { flex: 1; min-width: 0; }
+.chan-search-results { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow: auto; margin-top: 6px; }
+.chan-search-hit { padding: 5px 7px; border-radius: var(--radius-sm); cursor: pointer; }
+.chan-search-hit:hover { background: var(--bg-hover); }
+.chan-search-head { display: flex; gap: 6px; align-items: baseline; font-size: 11px; min-width: 0; }
+.chan-search-head b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-search-who { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.chan-search-text { font-size: 11px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 4.4em; overflow: hidden; }
 /* the narrow rail (the 200px sidebar = 143px of content): the two needs-you
    badges collapse to ONE accent pill carrying their sum, the breakdown in its
    tooltip — the account roster's ≥/< 340px pattern, at this panel's own
@@ -4428,6 +4443,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-assign-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .chan-assign-chip.chan-warn { background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); color: var(--warn-text); }
 .chan-assign-chip.chan-assign-none { background: color-mix(in srgb, var(--text-dim) 10%, transparent); color: var(--text-dim); }
+.chan-assign-chip.chan-assign-inherited { background: color-mix(in srgb, var(--text-dim) 12%, transparent); color: var(--text-secondary); }
 .chan-assign-chip .chan-ic { font-size: 10px; }
 .chanwin-err { font-size: 12px; color: var(--bad-text); }
 .chanwin-list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -4442,6 +4458,14 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-at { font-size: 10px; color: var(--text-dim); flex-shrink: 0; }
 .chanmsg-syn { font-size: 9px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; flex-shrink: 0; }
 .chanmsg-body { font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* 2026-09-26: a message's attachments — thumbnails through our own route, chips for files */
+.chanmsg-atts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.chanmsg-thumb { max-width: 160px; max-height: 120px; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: zoom-in; object-fit: cover; background: var(--bg-secondary); }
+.chanmsg-att { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text); font-size: 10px; text-decoration: none; }
+.chanmsg-att:hover { border-color: var(--accent); }
+.chanmsg-att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chanmsg-att-size { color: var(--text-dim); white-space: nowrap; }
+.chanwin-start { padding: 6px; text-align: center; color: var(--text-dim); font-size: 10px; }
 .chanwin-outbox { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanwin-outbox-head { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
 .chanwin-outbox-head .chan-prop-link { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; cursor: pointer; }
@@ -4517,12 +4541,6 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-flow-status.chan-warn { color: var(--warn-text); }
 .chan-flow-status.chan-ok { color: var(--ok-text); }
 /* the track picker: house check rows, title + participants in the label column */
-.chan-track-list { max-height: 50vh; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
-.chan-track-item { padding: 4px 6px; border-radius: var(--radius-sm); }
-.chan-track-item:hover { background: var(--bg-hover); }
-.chan-track-title { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chan-track-sub { grid-column: 2; font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chan-track-list .empty-hint { padding: 6px; }
 /* the Assign & filter editor (a1 A1–A6) */
 .chan-af-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
 .chan-af-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }

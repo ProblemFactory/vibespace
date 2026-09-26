@@ -84,7 +84,7 @@ function mkEngine(mod, opts = {}) {
 }
 async function prime(eng, conv = C) {
   await eng.pass(A, { force: true });
-  await eng.setTracked(A, conv, true);
+  await eng.refresh(A, conv);
   await eng.pass(A, { force: true });
   await eng.setReach(A, conv, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
 }

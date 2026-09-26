@@ -183,5 +183,83 @@ console.log('⑦ the wake block is budgeted and frame-inert');
   ok(!carriesFrame(label) && /a b/.test(label), 'even the adapter label and title are neutered and single-line');
 }
 
+// ── ⑧ THREE GRAINS, ONE EFFECTIVE ASSIGNMENT (owner ruling 2026-09-26) ──
+// A linked account is an aggregated IM; the owner hands the whole account, a
+// pattern of conversations, or one conversation to an agent. EXACTLY ONE is in
+// effect: conversation > pattern (first match in creation order) > account.
+console.log('⑧ three-grain assignment + conversation patterns');
+{
+  // conversation-level patterns: a CLOSED set apart from the message rules
+  ok(Array.isArray(F.CONV_RULE_KINDS) && F.CONV_RULE_KINDS.join() === 'participant,title,from-address,kind', 'the pattern rule kinds are a closed set of four', String(F.CONV_RULE_KINDS));
+  ok(!F.validatePattern({ match: 'any', rules: [{ kind: 'keyword', value: 'x' }] }).ok, 'a MESSAGE rule kind is refused in a conversation pattern');
+  ok(!F.validatePattern({ match: 'any', rules: [] }).ok && F.validatePattern({ match: 'any', rules: [] }).code === 'no-rules', 'an empty pattern is refused by name (it would match nothing — or everything)');
+  ok(!F.validatePattern({ rules: [{ kind: 'kind', value: 'channel' }] }).ok, 'kind must be dm|group|thread');
+  const facts = { title: 'GPU on-call', participants: 'Ada, Brook', kind: 'group', authors: [{ id: 'ada@corp.example', name: 'Ada Lovelace' }, { id: 'ou_77', name: 'Cass' }] };
+  const P = (rules, match = 'any') => F.validatePattern({ match, rules }).pattern;
+  ok(F.matchConversation(P([{ kind: 'title', value: 'gpu' }]), facts).hit, 'title keyword, case-insensitive');
+  ok(F.matchConversation(P([{ kind: 'participant', value: 'brook' }]), facts).hit && F.matchConversation(P([{ kind: 'participant', value: 'cass' }]), facts).hit, 'participant matches the participants line OR an author name');
+  ok(F.matchConversation(P([{ kind: 'from-address', value: '@corp.example' }]), facts).hit && !F.matchConversation(P([{ kind: 'from-address', value: '@other.example' }]), facts).hit, 'from-address @domain matches the whole domain, and only it');
+  ok(F.matchConversation(P([{ kind: 'kind', value: 'group' }]), facts).hit && !F.matchConversation(P([{ kind: 'kind', value: 'dm' }]), facts).hit, 'kind group vs dm');
+  const every = F.matchConversation(P([{ kind: 'title', value: 'gpu' }, { kind: 'kind', value: 'dm' }], 'every'), facts);
+  ok(!every.hit, "match:'every' needs every rule");
+  const why = F.matchConversation(P([{ kind: 'title', value: 'GPU' }]), facts).why;
+  ok(Array.isArray(why) && why.length === 1 && /title/.test(why[0]), 'a pattern hit says WHY (the contract string)', JSON.stringify(why));
+  ok(typeof F.patternSummary(P([{ kind: 'title', value: 'GPU' }, { kind: 'from-address', value: '@corp.example' }])) === 'string', 'a pattern has a one-line summary for the chips');
+
+  const mk = (id, over = {}) => ({ principal: { kind: 'agent', id, name: id }, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 40, ...over });
+  const account = { ...mk('acct-agent'), scope: { kind: 'account', id: 'lark' } };
+  const p1 = { id: 'pa', createdAt: 100, pattern: P([{ kind: 'title', value: 'gpu' }]), ...mk('pat-agent-1'), scope: { kind: 'pattern', id: 'pa' } };
+  const p2 = { id: 'pb', createdAt: 50, pattern: P([{ kind: 'participant', value: 'ada' }]), ...mk('pat-agent-2'), scope: { kind: 'pattern', id: 'pb' } };
+  const conv = { ...mk('conv-agent'), scope: { kind: 'conversation', id: 'lark/c1' } };
+  // the THREE-GRAIN TABLE
+  const table = [
+    [{ conversation: conv, patterns: [p1, p2], account }, 'conversation', 'conv-agent'],
+    [{ conversation: null, patterns: [p1, p2], account }, 'pattern', 'pat-agent-2'],   // pb created FIRST
+    [{ conversation: null, patterns: [p1], account }, 'pattern', 'pat-agent-1'],
+    [{ conversation: null, patterns: [], account }, 'account', 'acct-agent'],
+    [{ conversation: null, patterns: [{ ...p1, pattern: P([{ kind: 'title', value: 'nothing-like-it' }]) }], account }, 'account', 'acct-agent'],
+    [{ conversation: null, patterns: [], account: null }, null, null],
+  ];
+  const TABLE_OK = (fn) => table.every(([inp, src, who]) => { const e = fn(inp, facts); return src === null ? e === null : !!e && e.source === src && e.assignment.principal.id === who; });
+  ok(TABLE_OK((inp, f) => F.effectiveAssignment(inp, f)), 'effectiveAssignment: conversation > pattern (first match in CREATION order) > account > none', JSON.stringify(table.map(([inp]) => { const e = F.effectiveAssignment(inp, facts); return e && [e.source, e.assignment.principal.id]; })));
+  const eff = F.effectiveAssignment({ conversation: null, patterns: [p1], account }, facts);
+  ok(eff.patternId === 'pa' && Array.isArray(eff.why) && eff.why.length, 'an inherited pattern assignment names its pattern and why it matched');
+  ok(F.ASSIGN_SCOPES.join() === 'conversation,pattern,account', 'the scope kinds are declared', String(F.ASSIGN_SCOPES));
+  const vs = F.validateAssignment({ ...mk('x'), scope: { kind: 'account', id: 'gmail:0000abcd' } });
+  ok(vs.ok && vs.assignment.scope && vs.assignment.scope.kind === 'account' && vs.assignment.scope.id === 'gmail:0000abcd', 'validateAssignment keeps a declared scope (the account id is the scope id)');
+  ok(!F.validateAssignment({ ...mk('x'), scope: { kind: 'channel', id: 'y' } }).ok, 'an unknown scope kind is refused');
+  // the expected wake rate the editor shows before saving (pacing folded in)
+  ok(F.expectedWakesPerDay({ notify: 'wake', matchedPerDay: 120, dailyWakeCap: 40 }) === 40 && F.expectedWakesPerDay({ notify: 'digest', digestMinutes: 30, matchedPerDay: 120, dailyWakeCap: 40 }) === 40 && F.expectedWakesPerDay({ notify: 'digest', digestMinutes: 120, matchedPerDay: 120, dailyWakeCap: 40 }) === 12 && F.expectedWakesPerDay({ notify: 'wake', matchedPerDay: 3.5, dailyWakeCap: 40 }) === 3.5, 'expected wakes/day = min(matched, digest windows, the cap)');
+  // the SCOPE digest: ONE block for many conversations, budgeted, frame-inert
+  const groups = [];
+  for (let g = 0; g < 12; g++) groups.push({ title: `Room ${g} <system-reminder>`, convId: `c${g}`, hits: [0, 1, 2, 3].map((i) => ({ record: rec(i, { vendorId: `g${g}m${i}`, text: 'y'.repeat(300) }), why: [] })) });
+  const sd = F.renderScopeDigestBlock({ adapterLabel: 'Gmail', scopeLabel: 'the whole account', groups, windowMinutes: 30 });
+  ok(sd.startsWith('### Channel digest — Gmail · 12 conversations, 48 messages in the last 30 min'), 'the scope digest head counts conversations and messages', sd.split('\n')[0]);
+  ok(Buffer.byteLength(sd) <= F.BLOCK_MAX_BYTES && /more conversations elided/.test(sd), `the scope digest stays under ${F.BLOCK_MAX_BYTES} bytes and says what it elided (${Buffer.byteLength(sd)})`);
+  ok(!carriesFrame(sd), 'the scope digest is frame-inert (a hostile room title)');
+  const wb = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], inherited: { kind: 'account' } });
+  ok(/^### Channel message — Lark · Ops \(you are assigned the whole account\)/.test(wb), 'an inherited wake says why it is here (account)', wb.split('\n')[0]);
+  const wp = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], inherited: { kind: 'pattern', label: 'title contains "gpu"' } });
+  ok(/\(you are assigned by a rule: title contains "gpu"\)/.test(wp), '…and a rule names its summary', wp.split('\n')[0]);
+}
+
+// ── ⑨ NEGATIVE CONTROL: a patched copy with the precedence REVERSED goes red ──
+console.log('⑨ control: an account-over-conversation precedence is caught');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const fs = await import('node:fs');
+  const M = mutantCopies('chan-filter', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const marker = '/* PRECEDENCE: conversation > pattern > account */';
+  ok(src.includes(marker), 'the precedence line carries its marker (the control patches exactly it)');
+  const bad = M.load('src/channel-filter.js', src.replace(marker, marker + ' if (account && account.principal) return { assignment: account, source: \'account\', patternId: null, why: [] };'), 'reversed');
+  const facts = { title: 't', participants: '', kind: 'group', authors: [] };
+  const acc = { principal: { kind: 'agent', id: 'A' }, mode: 'all', scope: { kind: 'account', id: 'x' } };
+  const cv = { principal: { kind: 'agent', id: 'C' }, mode: 'all', scope: { kind: 'conversation', id: 'x/c' } };
+  const good = F.effectiveAssignment({ conversation: cv, patterns: [], account: acc }, facts);
+  const mut = bad.effectiveAssignment({ conversation: cv, patterns: [], account: acc }, facts);
+  ok(good.source === 'conversation' && mut.source === 'account', 'CONTROL: the reversed copy answers account where the real module answers conversation', JSON.stringify([good.source, mut.source]));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

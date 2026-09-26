@@ -270,7 +270,7 @@ console.log('② the row\'s pick vs the account\'s own');
   // every account follows the row's pick; when the pick moves, A's client
   // swaps. Two needles: the deps hand-down AND the record stamp (the adapter
   // reads its key off the LIVE record as a fallback).
-  const ENG0 = patchedEngine([['deliver, liveSessions, credentialKey: rec.credentialKey || null };', 'deliver, liveSessions };'], ['      credentialKey: credentialKey || null,\n', '      credentialKey: null,\n']]);
+  const ENG0 = patchedEngine([['deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: ', 'deliver, liveSessions, meter: '], ['      credentialKey: credentialKey || null,\n', '      credentialKey: null,\n']]);
   ok(true, 'POSITIVE CONTROL: both patched strings exist exactly once in the engine (the control really removes the key hand-down and the record stamp)');
   const holder0 = { list: [PRESETS[0]] };   // org1 only ⇒ the keyless pick IS org1
   const store0 = STORE.create({ dataDir: path.join(ROOT, 'store0'), env: {}, now, broadcast: () => {}, drivePresets: () => holder0.list, log: quiet });
@@ -468,14 +468,15 @@ console.log('⑦ re-authorize = rebind');
   }
 }
 
-// ── ⑧ duplicate: exactly DUPLICATE_FIELDS, never the token/tracked/assignments/reach/log ──
+// ── ⑧ duplicate: exactly DUPLICATE_FIELDS, never the token/refresh overrides/assignments/reach/log ──
 console.log('⑧ duplicate');
 {
   // shape the source: the custom account C, with options, a push claim, a sender line, a tracked conversation, an assignment and a reach grant
   await eng.setOptions(idC, { query: 'label:important' });
   await eng.setPush(idC, { claimedExclusive: 'exclusive' });
   await eng.setSenderHonesty(idC, true);
-  await eng.setTracked(idC, 'thr_c', true);
+  await eng.refresh(idC, 'thr_c');
+  await eng.setRefresh(idC, 'thr_c', 60);
   await eng.setAssignment(idC, 'thr_c', { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
   await eng.setReach(idC, 'thr_c', { principal: { kind: 'agent', id: 'agent-2' }, level: 'visible' });
   const src = eng.adapterRecords().adapters.find((r) => r.id === idC);
@@ -508,14 +509,14 @@ console.log('⑧ duplicate');
   const ix = eng.store.index.snapshot().conversations;
   const never = {
     token: !dup.auth.tokenEnc && !dup.auth.user,
-    tracked: !Object.values(ix).some((en) => en && en.adapterId === dup.id),
+    refresh: !Object.values(ix).some((en) => en && en.adapterId === dup.id),
     assignments: !Object.values(ix).some((en) => en && en.adapterId === dup.id && en.assignment),
     reach: !Object.values(ix).some((en) => (en.reachEntries || []).some((g) => g.scope && (g.scope.id === dup.id || String(g.scope.id).startsWith(dup.id + '/')))),
     log: !fs.existsSync(path.join(engDir, 'channels', 'msgs', dup.id.replace(':', '%3a'))) && JSON.stringify(dup.state) === '{}' && dup.lastPass === null,
   };
-  ok(ENG.DUPLICATE_NEVER.map((n) => n.key).join() === 'token,tracked,assignments,reach,log' && Object.values(never).every(Boolean), `the copy carries NO token, tracked list, assignment, reach grant, log or cursor (${JSON.stringify(never)})`);
+  ok(ENG.DUPLICATE_NEVER.map((n) => n.key).join() === 'token,refresh,assignments,reach,log' && Object.values(never).every(Boolean), `the copy carries NO token, refresh override, assignment, reach grant, log or cursor (${JSON.stringify(never)})`);
   ok(r.adapter.auth.tokenHeld === false && r.adapter.auth.state !== 'connected' && r.adapter.credentialKey === 'custom' && r.adapter.customClient.appId === CUSTOM_ID, 'the answer is an UNAUTHORIZED account under the copied client');
-  ok(ix[`${idC}/thr_c`] && ix[`${idC}/thr_c`].assignment && ix[`${idC}/thr_c`].tracked, 'the source is untouched (its tracked conversation and assignment stay)');
+  ok(ix[`${idC}/thr_c`] && ix[`${idC}/thr_c`].assignment && ix[`${idC}/thr_c`].refresh && ix[`${idC}/thr_c`].refresh.every === 60, 'the source is untouched (its refresh override and assignment stay)');
   const own = await eng.reauthorize(dup.id, {});
   ok(own.flow && new URL(own.flow.consentUrl).searchParams.get('client_id') === CUSTOM_ID, 'the copy consents on its own, under the copied client');
   await eng.cancelAuth(dup.id);
@@ -575,7 +576,7 @@ console.log('⑨ remove');
   const dB = await eng.disconnect(idB);
   ok(!dB.removed && eng.adapterRecords().adapters.some((x) => x.id === idB) && rowOf(eng, idB).credentialKey === 'cluster:channels', 'a FURTHER account\'s Disconnect keeps its record and client (the pre-r4 "disconnect removes it" special case is gone)');
   // CONTROL: a copy whose reference check answers nothing removes a referenced account
-  await eng.setTracked(idA, 'thr_a', true);
+  await eng.refresh(idA, 'thr_a');
   await eng.setAssignment(idA, 'thr_a', { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
   const ENG4 = patchedEngine([['    const refs = referencesOf(rec.id);\n', '    const refs = [];\n']]);
   const d4 = path.join(ROOT, 'eng4'); fs.mkdirSync(path.join(d4, 'channels'), { recursive: true });
@@ -648,7 +649,7 @@ console.log('⑩ the routes');
   // duplicate + remove
   const du = await api('POST', `/api/channels/adapters/${encodeURIComponent(idR)}/duplicate`, { name: 'Route copy' });
   ok(du.status === 200 && du.body.adapter.label === 'Route copy' && du.body.adapter.auth.tokenHeld === false && du.body.adapter.credentialKey === 'custom', 'POST duplicate {name} → {adapter} unauthorized under the copied client', du.raw.slice(0, 200));
-  await eng.setTracked(idR, 'thr_b', true);
+  await eng.refresh(idR, 'thr_b');
   await eng.setAssignment(idR, 'thr_b', { principal: { kind: 'agent', id: 'agent-3', name: 'Helper' }, mode: 'all' });
   const dl = await api('DELETE', `/api/channels/adapters/${encodeURIComponent(idR)}`);
   ok(dl.status === 409 && dl.body.code === 'account-referenced' && dl.body.detail.refs.length === 1 && dl.body.detail.refs[0].kind === 'assignment' && dl.body.detail.refs[0].principal.name === 'Helper', 'DELETE a referenced account → 409 account-referenced with detail.refs naming the assignment', dl.raw);

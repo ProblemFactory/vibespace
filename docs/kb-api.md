@@ -112,7 +112,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
 - **g3 (the panel):** `GET /api/channel-groups/roster` → `{sessions:[{cid, name, groups:[taskGroupId]}]}` (the live sessions the New group / Invite… dialogs pick from) · `POST /api/channel-groups/:id/read` → `{ok, moved}` (the OWNER's read mark — the window opened/touched; broadcasts only when it moved) · the owner list (`GET /api/channel-groups` and every broadcast's `groups`) carries `unread` = records after the owner's mark the owner did not write. User state gains `channelsPanelFolds {accounts?: true, watcher?: true}` (PATCH merge-only — the panel's secondary sections' folds).
 - **WS `channel-groups-updated`** `{changed:[groupId], groups, messages?}` — every group change (create / invite / leave / kick / rename / archive / notify / post) broadcasts the recomputed list; `messages` = the records that change appended. **r3:** also sent when a member SESSION is renamed or goes/comes live (server.js `broadcastActiveSessions` → `groups.noteRoster()`: exactly the groups whose member names / liveness moved; nothing moved ⇒ nothing sent).
 - **Next-turn group REPORTS ride `GET /api/agent/prompt-context`** — on a USER-initiated turn only (`turnIsUserInitiated(s)`: the session's `_userInputAt`, stamped by ws `input`/`chat-input`, not older than `_machineInputAt`, stamped by the delivery ladder at every local rung and by auto-resume's continue). ONE `### Group messages since your last turn` section, LAST in the payload and budgeted from what the rest left under the 9600 B cap (≤ 4096 B; each group ≤ 2 KiB: post-join messages + the invite context first, newest kept, a `read <group> --before <ts>` pointer when clipped); groups that do not fit are named and wait (at most 3 named, then `+N more`); **the WHOLE section — every report's head, context, pointer and foot, and the trailer — is ≤ its budget, and it is appended (its marks committed) only if it fits the payload uncut, so `capInline` never trims it (r1)**; `reportedUpTo` per (group, member) advances only for what was handed out. A successful wake advances it too.
-- **Channels P3 (vsst_; every route resolves the caller's principal FIRST, reach is decided before any answer, hidden ≡ nonexistent = 404 `not-found`):** `GET /api/agent/channels/list` → `{conversations:[{key, adapterId, adapter, id, title, level, tracked, unread, canSend, sendWhy, sendAs, identityMarking, policy, assigned, authority, awaiting}]}` (never a body) · `GET /api/agent/channels/read?conv=<adapter>/<id>&limit=&since=` → `{conversation, records}` · `POST /api/agent/channels/reply` `{conv, text, why?, replyTo?, attachments?}` → `{ok, proposal, decision:{mode, reasons}}` — PROPOSES; 409 `send-not-available` (+`why`) on a conversation offering no identity, and NO proposal is created · `GET /api/agent/channels/status[?id=]` → own proposals with receipts (somebody else's id = not-found) · `POST /api/agent/channels/request` `{conv, why}` → `{ok, request}` (only on a `requestable` row; hidden = not-found). Docs topic `channels`.
+- **Channels P3 (vsst_; every route resolves the caller's principal FIRST, reach is decided before any answer, hidden ≡ nonexistent = 404 `not-found`):** `GET /api/agent/channels/list` → `{conversations:[{key, adapterId, adapter, id, title, level, tracked, unread, canSend, sendWhy, sendAs, identityMarking, policy, assigned, authority, awaiting}]}` (never a body) · `GET /api/agent/channels/read?conv=<adapter>/<id>&limit=&since=` → `{conversation, records}` · `POST /api/agent/channels/reply` `{conv, text, why?, replyTo?, attachments?}` → `{ok, proposal, decision:{mode, reasons}}` — PROPOSES; 409 `send-not-available` (+`why`) on a conversation offering no identity, and NO proposal is created · `GET /api/agent/channels/status[?id=]` → own proposals with receipts (somebody else's id = not-found) · `POST /api/agent/channels/request` `{conv, why}` → `{ok, request}` (only on a `requestable` row; hidden = not-found) · **2026-09-26** `POST /api/agent/channels/:adapterId/:convId/refresh` → `{ok, appended, polledAt}` — reach FIRST (invisible = the uniform not-found), then the per-conversation floor `channels.agentRefreshFloorSec` (from the last fetch by anyone) ⇒ 429 `refresh-floor` `{error: "refreshed 8 s ago (floor 20 s) — read it now, or refresh again in 12 s", retryAfterSec}` + `Retry-After`, then the account's vendor budget ⇒ 429 `vendor-budget`, and (lane R2 verify) the AGENT SHARE of that minute `channels.agentBudgetSharePct` (25 %) ⇒ 429 `vendor-budget` + `share:{pct, limit, spent, of, unit}` ("agent refreshes may use at most 25 % … (15 of 60 requests) … try again in N s"); **r3:** a vendor BACK-OFF in force (a failed pass set `nextAt`) ⇒ 429 `backoff` `{error: "the vendor refused this account's last fetch (rate-limited) — it is retried in N s; read what is there now", retryAfterSec, backoffUntil, lastCode}` with NO vendor call (answered right after the floor); an `ok` answer is always this refresh's OWN fetch (never another refresh's in-flight pass); **r5:** the route files a REQUEST into the account's set and the fetch loop alone judges it at drain time (reach is still checked first, by the route) — the same codes, plus 429 `refresh-queue-full` (an agent at 180 waiters of any origin — the owner's reserve, r6; a refusal is answered when judged, an `ok` at ITS fetch (r7), `pending` only while the fetch itself has not happened) (`{retryAfterSec:1, queued}`, more than 200 refreshes waiting on the account), 409 `account-changed` (the account rebuilt / removed while the refresh waited), 503 `stopped`; `{ok, pending:true}` after 15 s (the request stays filed) or 30 s (it leaves the set); `list`/`read` no longer carry `tracked`, `read` records carry `attachments` metadata (never bytes) and the conversation its `assignedVia`. Docs topic `channels`.
 - `POST /api/sessions/:id/msg-reachability` (cookie) — {level: inherit|visible|messageable} per-session widening override.
 - agentd op `peer-post` {cid, text} → `peer-post-result` {ok, reason, peerName} (capability 'peer-post').
 - **The wrapper stdin frame carries a TYPED ORIGIN (2026-09-07)**: rung 1.5 of the
@@ -208,8 +208,71 @@ branch (decision 15). v1 serves THIS machine only, and that is a NAMED refusal
 (`501 host-not-served`) for anything else — a silent local answer to a
 question about another machine is the failure the rule exists to stop.
 
+- **2026-09-26 — THE AGGREGATED IM (design §5 inv 6, §6.2, §6.5, §7.3):**
+  there is no `tracked` field and no `/track` route — every conversation of a
+  linked account is listed and fetched. The digest's conversation rows are
+  SLIM (`key, id, adapterId, adapterLabel, title, kind, participants, lastAt,
+  lastText, unread, unlisted, refresh:{every, by}|null, cadence:{seconds,
+  tier: hot|warm|cold, source: override|tier|push-safety, paused}, freshness,
+  offers, assignment (the EFFECTIVE one, with `source:
+  conversation|pattern|account` + `patternLabel`), held, outbox, lane,
+  lastError`); identity warnings, grants and the full assignment ride the FULL
+  view (`GET /api/channels/:a/:c` → `{conversation, adapter}`). Adapter rows
+  add `scheduler {conversations, unread, hot, warm, cold, paused, overridden,
+  unlisted, due, lastDiscoveryAt, discovering}`, `budget {unit, limit, spent,
+  spentBy:{timer, agent, owner}, exhausted, waiting, resetInSeconds,
+  settingKey}` (lane R2 verify: who spent the minute), `lastOkAt` (the last
+  GOOD pass — "last sync"; `lastPass` is stamped by a failure too) and
+  `backoffUntil` (the retry instant while a failed pass backs off, else null),
+  `attachments {files, bytes,
+  budgetBytes, fetch}`, `linkedAt`, `assignment` (the account grain),
+  `patterns[]` (the rule grain), `auth.renews` + `renewWindowMs` (Lark), and
+  `options` AS APPLIED (an adapter's `effectiveOptions`). **`channels-updated`
+  is PARTIAL** after a pass: `{partial:true, changedKeys:[…], digest}` carries
+  only the changed rows (clients merge in place); a structural change sends
+  the whole digest. Reader routes (owner, cookie):
+  - `PUT /api/channels/:a/:c/refresh` `{every: 30|60|300|900|'paused'|null}` —
+    the owner's override (null = back to automatic), persisted `{every, by,
+    at}`, broadcast; 400 `bad-request` outside the set, 404 unknown.
+  - `POST /api/channels/:a/:c/refresh` — Refresh now (owner): a REQUEST into the
+    account's set, judged and fetched by the account's own fetch loop (r5) →
+    `{ok, appended, polledAt}` | `{ok, pending:true}` (unanswered after 30 s —
+    the window updates when it lands); 429 `vendor-budget` + `Retry-After`; 429
+    `refresh-queue-full` (200 waiting — an agent already at 180 of any origin:
+    the owner's reserve, r6; the refusal carries `cap`); 409 `account-changed`;
+    503 `stopped`. A refusal is answered the moment the loop judges it (r6);
+    an `ok` at ITS fetch (r7) — never the pass's end.
+    Inside a vendor back-off the owner's press is honoured ONCE per back-off
+    window (one real attempt; its failure grows the wait one step and spends
+    the press) and every further press in that window is 429 `backoff` with
+    `retryAfterSec` + `backoffUntil` + `Retry-After` (r5); a press that fails
+    INTO a back-off answers the same three (r4); concurrent refreshes of one
+    conversation, whatever their origin, share ONE fetch (r4/r5) — every other
+    refresh origin is refused 429 `backoff` during a back-off (r3).
+  - `POST /api/channels/:a/:c/watch` — the open window's heartbeat (every 60
+    s; hot for 90 s after the last); a stale conversation is fetched at once —
+    never during a vendor back-off (`fetched:false`, r3).
+  - `POST /api/channels/:a/:c/older` `{limit?}` → `{ok, records, source:
+    local|vendor, fetched, appended?, exhausted, truncated?, refused?}` — the
+    local page first, else the vendor page before the oldest stored record
+    (`caps.olderHistory`), PREPENDED, never a wake (a spent budget answers the
+    local page with `refused:'vendor-budget'`).
+  - `GET /api/channels/:a/:c/attachment/:id?msg=<vendorId>[&inline=1]` — cache
+    first, else the adapter's `fetchAttachment` (charged); `X-Content-Type-
+    Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`,
+    `Content-Disposition: attachment` unless png/jpeg/gif/webp with
+    `inline=1`; 413-class refusal `too-large` past 100 MB; 429 on the budget.
+  - `GET /api/channels/search?adapter=<id>&q=` → `{ok, results:[{convId,
+    title, record}], truncated, scannedBytes}` (≤ 64 MB read, ≤ 100 results).
+  - `PUT /api/channels/adapters/:id/assignment` `{assignment|null}` (the
+    account grain) · `POST /api/channels/adapters/:id/patterns` `{pattern,
+    assignment}` · `PUT|DELETE /api/channels/adapters/:id/patterns/:pid` (the
+    rule grain) · `POST /api/channels/adapters/:id/estimate` `{scope, pattern?,
+    filter?, notify?, digestMinutes?, dailyWakeCap?}` → `{estimate:{…,
+    conversations, covered, sampled}, expectedWakesPerDay}` (a bounded read of
+    the matching conversations' last 7 days).
 - `GET /api/channels[?host=]` — the index DIGEST: adapters (with their
-  resolved lane), conversations (title/kind/participants/lastAt/unread/tracked),
+  resolved lane), conversations (title/kind/participants/lastAt/unread; `tracked` until 2026-09-26),
   each conversation's resolved `convCaps`, its `offers` (read / send-as-user /
   send-as-bot, each `{offered, why}`), its `identityWarning`
   `{level, marking, verbatim}` and its `freshness` claim
@@ -251,8 +314,9 @@ question about another machine is the failure the rule exists to stop.
   it was silently marked read). With no record at all the mark is left where
   it was. **404 on an id this instance does not hold** — a route may not mint
   an index row — and a mark that changed nothing broadcasts nothing.
-- `POST /api/channels/:adapterId/:convId/track` `{tracked}` — the opt-in that
-  decides whether anything is ingested at all. Tracking refreshes that
+- ~~`POST /api/channels/:adapterId/:convId/track` `{tracked}`~~ — REMOVED
+  2026-09-26 (the aggregated IM; see the block above). Historically: the opt-in that
+  decided whether anything was ingested at all. Tracking refreshes that
   conversation's `convCaps` (one of its three named refresh triggers),
   BROADCASTS the persisted change (r3 — it used to rely on the pass it kicks,
   which a spent request budget returns from before notifying), and then kicks

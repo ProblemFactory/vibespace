@@ -73,6 +73,26 @@ console.log('§1 channel-acl (PURE)');
   ok(ACL.grantsFor(target, g2).every((g) => g.id && g.origin) && ACL.grantsFor({ key: 'gmail/z', adapterId: 'gmail' }, g2).length === 0, 'grantsFor lists this target\'s rows with ids and origins');
 }
 
+console.log('§1b the three homes of a grant (2026-09-26: account + pattern scopes)');
+{
+  const ctx = { kind: 'agent', id: 'a1', groups: ['g1'] };
+  const lark = { key: 'lark/c1', adapterId: 'lark' };
+  const lark2 = { key: 'lark:0000abcd/c1', adapterId: 'lark:0000abcd' };
+  const acct = ACL.accountGrant({ principal: { kind: 'agent', id: 'a1' }, adapterId: 'lark', at: 1, by: 'user' });
+  ok(acct.scope.kind === 'adapter' && acct.scope.id === 'lark' && acct.origin === 'assignment' && acct.level === 'visible', 'an ACCOUNT assignment implies ONE adapter-scope grant with origin assignment');
+  ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { accountGrants: [acct] })).level === 'visible', 'the account grant reaches every conversation of THAT account');
+  ok(ACL.effective(ctx, lark2, ACL.grantsForConversation(lark2, { accountGrants: [acct] })).level === 'hidden', 'NEGATIVE CONTROL: …and never a second account of the same kind (the adapter id IS the account id — two accounts never mix)');
+  const pg = ACL.patternGrant({ principal: { kind: 'group', id: 'g1' }, key: 'lark/c1', patternId: 'p-1' });
+  ok(pg.scope.kind === 'conversation' && pg.scope.id === 'lark/c1' && pg.origin === 'assignment' && pg.pattern === 'p-1', 'a PATTERN assignment implies a conversation grant that names its pattern (derived at read, never stored)');
+  ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { patternGrants: [pg] })).via === 'group', '…and a group principal reaches its members');
+  const userRow = { principal: { kind: 'agent', id: 'a1' }, scope: { kind: 'conversation', id: 'lark/c1' }, level: 'requestable', origin: 'user' };
+  const all = ACL.grantsForConversation(lark, { entries: [userRow], accountGrants: [acct], patternGrants: [pg] });
+  ok(all.length === 3 && ACL.effective(ctx, lark, all).level === 'visible', 'the three homes MAX together (widen only)');
+  const left = ACL.removeGrant([userRow, acct], { principal: acct.principal, scope: acct.scope, origin: 'assignment' });
+  ok(left.length === 1 && left[0] === userRow, 'un-assigning the account removes ONLY its own origin:assignment row — the user row stays');
+  ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { entries: [userRow] })).level === 'requestable', '…so the agent falls back to what the user granted by hand');
+}
+
 console.log('§2 the real engine');
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['g1'], msgLevelFor: () => 'none' };
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
@@ -80,8 +100,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   const dataDir = path.join(ROOT, 'e1');
   const userTodos = new UserTodoManager({ dataDir });
   const eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, userTodos, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }] });
-  await eng.pass(A, { force: true });
-  await eng.setTracked(A, C, true);
+  // 2026-09-26: no track step — a forced pass discovers AND ingests every conversation
   await eng.pass(A, { force: true });
   // hidden by default: absent from list, read = not-found, and IDENTICAL to a nonexistent id
   ok(eng.listFor(AG).conversations.every((c) => c.adapterId !== A), 'a fresh conversation is absent from the agent\'s list');
@@ -127,6 +146,34 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   ok(eng.readFor(AG, A, C, {}).ok && eng.listFor(AG).conversations.find((c) => c.key === KEY).level === 'visible', 'the agent now reads it');
   ok(eng.listFor({ ...AG, id: 'agent-2' }).conversations.find((c) => c.key === KEY).level === 'requestable', 'another member of the group is still only requestable (the approval touched no default)');
   ok(!(await eng.decideRequest(rq.request.id, true)).ok, 'deciding twice is refused');
+  eng.stop();
+}
+
+console.log('§2b account + pattern grants through the REAL engine');
+{
+  const dataDir = path.join(ROOT, 'e2');
+  const eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }] });
+  await eng.pass(A, { force: true });
+  const W = { kind: 'agent', id: 'agent-1', name: 'Worker' };
+  ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).length === 0, 'before any assignment the agent sees nothing of the account');
+  const r1 = await eng.setScopeAssignment(A, { kind: 'account' }, { principal: W, mode: 'all' });
+  ok(r1.ok, 'an ACCOUNT assignment is accepted', JSON.stringify(r1));
+  const seen = eng.listFor(AG).conversations.filter((c) => c.adapterId === A);
+  ok(seen.length === 2 && seen.every((c) => c.level === 'visible'), 'the account grant makes EVERY conversation of the account visible (both fake rooms)', JSON.stringify(seen.map((c) => c.key)));
+  ok(eng.listFor(AG).conversations.every((c) => c.adapterId === A), 'NEGATIVE CONTROL: …and nothing of any OTHER account', JSON.stringify(eng.listFor(AG).conversations.map((c) => c.key)));
+  await eng.setReach(A, C, { principal: W, level: 'visible' });
+  const userBefore = JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries);
+  await eng.setScopeAssignment(A, { kind: 'account' }, null);
+  ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).map((c) => c.key).join() === KEY, 'un-assigning the account removes ONLY its grant — the user\'s hand-written row on one room still stands');
+  ok(JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries) === userBefore, '…byte-identical');
+  await eng.setReach(A, C, { principal: W, level: null });
+  const pr = await eng.setScopeAssignment(A, { kind: 'pattern' }, { principal: W, mode: 'all', pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] } });
+  ok(pr.ok && pr.assignment && pr.assignment.scope && pr.assignment.scope.kind === 'pattern', 'a PATTERN assignment is accepted', JSON.stringify(pr));
+  const pseen = eng.listFor(AG).conversations.filter((c) => c.adapterId === A).map((c) => c.key);
+  ok(pseen.join() === `${A}/fake-poll-announce`, 'the pattern grant reaches EXACTLY the matching conversation (Announcements), not the Ops room', JSON.stringify(pseen));
+  ok(!(eng.store.index.snapshot().conversations[`${A}/fake-poll-announce`].reachEntries || []).length, 'the pattern grant is DERIVED at read — no row was written to the conversation');
+  await eng.setScopeAssignment(A, { kind: 'pattern', id: pr.assignment.scope.id }, null);
+  ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).length === 0, 'removing the pattern hides it again at once (nothing to clean up)');
   eng.stop();
 }
 

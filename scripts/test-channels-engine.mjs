@@ -103,7 +103,7 @@ function dayStartClock() {
 {
   const { eng } = mkEngine({ name: 'append-fail' });
   const A = 'fake-poll', C = 'fake-poll-ops';
-  await eng.store.index.update(() => { eng.store.index.entry(A, C).tracked = true; });
+  // 2026-09-26: no track step — the forced pass discovers AND ingests
 
   const lp = eng.store.logPath(A, C);
   fs.mkdirSync(path.dirname(lp), { recursive: true });
@@ -123,7 +123,8 @@ function dayStartClock() {
   const after2 = eng.store.index.snapshot().conversations[`${A}/${C}`] || {};
   ok(p2.ok === true && lines === held,
     `THE NEXT PASS WRITES EVERY MESSAGE the failed one was carrying (${lines}/${held})`, JSON.stringify(p2));
-  ok(after2.unread === held, '…and the panel draws them as unread', String(after2.unread));
+  // unread counts what arrived after the account was LINKED (§5 invariant 6 as rewritten)
+  ok(after2.unread > 0 && after2.unread === eng.store.countSince(A, C, after2.readAt), '…and the panel draws the ones after the link as unread', String(after2.unread));
   ok(after2.anchor, '…and only NOW does the cursor advance', String(after2.anchor));
 }
 
@@ -160,7 +161,6 @@ function dayStartClock() {
     const eng = PE.create({ dataDir: path.join(ROOT, 'append-fail-pre'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {} });
     engines.push(eng);
     const A = 'fake-poll', C = 'fake-poll-ops';
-    await eng.store.index.update(() => { eng.store.index.entry(A, C).tracked = true; });
     const lp = eng.store.logPath(A, C);
     fs.mkdirSync(path.dirname(lp), { recursive: true });
     fs.mkdirSync(lp, { recursive: true });
@@ -299,9 +299,8 @@ function dayStartClock() {
   const clock = dayStartClock();
   const { eng, events } = mkEngine({ name: 'markread', now: clock });
   const A = 'fake-poll', C = 'fake-poll-ops';
-  await eng.pass(A, { force: true });          // discovery ANNOUNCES it; ④ refuses a row nobody has
-  ok(await eng.setTracked(A, C, true) === true, 'a discovered conversation tracks');
-  await sleep(400);
+  await eng.pass(A, { force: true });          // discovery ANNOUNCES it AND ingests it (2026-09-26: no track step)
+  ok(!!(eng.store.index.snapshot().conversations[`${A}/${C}`] || {}).anchor, 'the forced pass discovered and INGESTED the conversation');
   const key = `${A}/${C}`;
   const before = eng.store.index.snapshot().conversations[key] || {};
   ok(before.unread > 0, 'the conversation starts with unread records', String(before.unread));
@@ -366,8 +365,6 @@ function dayStartClock() {
     engines.push(eng);
     const A = 'fake-poll', C = 'fake-poll-ops';
     await eng.pass(A, { force: true });
-    await eng.setTracked(A, C, true);
-    await sleep(400);
     events.length = 0;
     for (let i = 0; i < 6; i++) await eng.markRead(A, C);
     const en = eng.store.index.snapshot().conversations[`${A}/${C}`] || {};
@@ -389,10 +386,10 @@ function dayStartClock() {
   // seeds the fake adapter rows — asserted, because a mutant that publishes
   // NO adapters would make every refusal below vacuously true.
   ok(eng.digest().adapters.length === 3, 'the fake adapter rows exist for this leg (a refusal about an empty roster proves nothing)', String(eng.digest().adapters.length));
-  ok(await eng.setTracked('no-such-adapter', 'made-up-0', true) === false,
-    'setTracked on an unknown ADAPTER answers false — the route\'s 404 is reachable code');
-  ok(await eng.setTracked('fake-poll', 'made-up-1', true) === false,
-    '…and so does an unknown CONVERSATION on a real adapter');
+  ok((await eng.setRefresh('no-such-adapter', 'made-up-0', 60)).code === 'not-found',
+    'setRefresh on an unknown ADAPTER answers not-found — the route\'s 404 is reachable code');
+  ok((await eng.setRefresh('fake-poll', 'made-up-1', 60)).code === 'not-found' && (await eng.refresh('fake-poll', 'made-up-1b')).code === 'not-found' && (await eng.watch('fake-poll', 'made-up-1c')).code === 'not-found',
+    '…and so do an unknown CONVERSATION\'s refresh, override and watch on a real adapter');
   ok(await eng.markRead('no-such-adapter', 'made-up-2') === false, 'markRead answers false too');
   ok(await eng.markRead('fake-poll', 'made-up-3') === false, '…on both halves of the key');
   eng.store.index.flush();
@@ -407,9 +404,9 @@ function dayStartClock() {
   // POSITIVE CONTROL: a real pair still works, or the refusal above would be
   // a feature nobody can use.
   await eng.pass('fake-poll', { force: true });
-  ok(await eng.setTracked('fake-poll', 'fake-poll-ops', true) === true, 'POSITIVE CONTROL: a REAL conversation still tracks');
+  ok((await eng.setRefresh('fake-poll', 'fake-poll-ops', 60)).ok === true, 'POSITIVE CONTROL: a REAL conversation takes an override');
   ok(await eng.markRead('fake-poll', 'fake-poll-ops') === true, 'POSITIVE CONTROL: …and still marks read');
-  ok(eng.store.index.snapshot().conversations['fake-poll/fake-poll-ops']?.tracked === true, '…and the row is the ingest pass\'s, not a route\'s');
+  ok(eng.store.index.snapshot().conversations['fake-poll/fake-poll-ops']?.refresh?.every === 60, '…and the row is the ingest pass\'s, not a route\'s');
 }
 
 // ── ④b THE ROUTES ANSWER 404 ──────────────────────────────────────────────
@@ -430,12 +427,13 @@ function dayStartClock() {
     Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
   });
   ok(eng.digest().conversations.some((c) => c.id === 'fake-poll-ops'), 'the discovery pass announced a real conversation for the positive control below');
-  const track = await call('POST', { path: '/api/channels/:adapterId/:convId/track', params: { adapterId: 'nope', convId: 'nope' } }, { tracked: true });
-  ok(track.status === 404 && /No such conversation/.test(track.body.error), 'POST /track on an unknown id is a 404 — the branch that was dead code', JSON.stringify(track));
+  const track = await call('PUT', { path: '/api/channels/:adapterId/:convId/refresh', params: { adapterId: 'nope', convId: 'nope' } }, { every: 60 });
+  ok(track.status === 404 && /No such conversation/.test(track.body.error), 'PUT /refresh on an unknown id is a 404 (2026-09-26: the /track route is gone)', JSON.stringify(track));
+  ok(!routes.router.stack.some((l) => l.route && /\/track$/.test(l.route.path)), 'there is NO /track route any more — a linked account is fetched whole');
   const read = await call('POST', { path: '/api/channels/:adapterId/:convId/read', params: { adapterId: 'nope', convId: 'nope' } }, {});
   ok(read.status === 404 && /No such conversation/.test(read.body.error), 'POST /read answers the same rather than 200-with-a-mint', JSON.stringify(read));
-  const good = await call('POST', { path: '/api/channels/:adapterId/:convId/track', params: { adapterId: 'fake-poll', convId: 'fake-poll-ops' } }, { tracked: true });
-  ok(good.status === 200 && good.body.ok === true, 'POSITIVE CONTROL: a real conversation still answers 200');
+  const good = await call('PUT', { path: '/api/channels/:adapterId/:convId/refresh', params: { adapterId: 'fake-poll', convId: 'fake-poll-ops' } }, { every: 'paused' });
+  ok(good.status === 200 && good.body.ok === true && good.body.refresh.every === 'paused', 'POSITIVE CONTROL: a real conversation still answers 200');
   // The messages route forwards BOTH halves of the page boundary.
   const msrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   ok(/beforeId/.test(msrc) && /messages\(req\.params\.adapterId, req\.params\.convId, \{ before, beforeId, limit \}\)/.test(msrc),
@@ -456,7 +454,9 @@ function dayStartClock() {
   ok(d.conversations.every((c) => c.freshness && !('text' in c.freshness)),
     'no conversation carries a server-composed SENTENCE — the language is per DEVICE and this payload is broadcast to every client',
     JSON.stringify(d.conversations[0] && d.conversations[0].freshness));
-  ok(d.conversations.every((c) => c.identityWarning && !('text' in c.identityWarning)), '…and neither does the identity warning', JSON.stringify(d.conversations[0] && d.conversations[0].identityWarning));
+  // 2026-09-26: the identity warning rides the FULL view (the composer's), not the slim list row
+  const fulls = d.conversations.map((c) => eng.conversationView(c.adapterId, c.id));
+  ok(fulls.every((c) => c && c.identityWarning && !('text' in c.identityWarning)), '…and neither does the identity warning (on the full view)', JSON.stringify(fulls[0] && fulls[0].identityWarning));
   ok(d.conversations.every((c) => c.freshness.state), 'every claim NAMES its state, so the client knows which sentence to render');
 }
 
@@ -477,8 +477,6 @@ function dayStartClock() {
   const row0 = eng.adapterRecords().adapters.find((r) => r.id === A);
   ok(p0.ok === true && row0.scan && row0.scan.hostFacts && row0.scan.hostFacts.platform === process.platform && Number.isFinite(row0.scan.hostFacts.at),
     'TRIGGER ③: a scan pass PRODUCES `scan.hostFacts` (platform + a fresh stamp) — the field had no producer anywhere in the product', JSON.stringify(row0.scan));
-  ok(await eng.setTracked(A, C, true) === true, 'the scan conversation tracks');
-  await sleep(500);
   const d = eng.digest();
   const row = d.conversations.find((c) => c.id === C);
   const n = eng.store.readTail(A, C, { limit: 99 }).length;
@@ -511,8 +509,6 @@ function dayStartClock() {
   // (the wrapped module's world is keyed by the `fake-scan` kind, so its
   // conversation ids are still `fake-scan-ops` / `fake-scan-announce`)
   await ab.pass('fake-scan-absent', { force: true });
-  ok(await ab.setTracked('fake-scan-absent', 'fake-scan-ops', true) === true, 'the no-client adapter\'s conversation tracks');
-  await sleep(500);
   const ar = ab.digest().conversations.find((c) => c.adapterId === 'fake-scan-absent' && c.id === 'fake-scan-ops');
   const an = ab.store.readTail('fake-scan-absent', 'fake-scan-ops', { limit: 99 }).length;
   const aen = ab.store.index.snapshot().conversations['fake-scan-absent/fake-scan-ops'];
@@ -533,7 +529,7 @@ function dayStartClock() {
   ok(laneFn && ingestFn && !/\.receive\b/.test(laneFn) && !/\.receive\b/.test(ingestFn),
     '`laneOrScan` and `ingest` read `caps.receive` NOWHERE — the lane is asked of `laneState` and its `via` is followed (r2 read it in both, once to label a lane it had just been told was unavailable)');
   ok(/\.receive === 'scan' \? scanFor\(rec\) : laneFor\(rec, entry\)/.test("    return c.receive === 'scan' ? scanFor(rec) : laneFor(rec, entry);"), 'POSITIVE CONTROL: the pin matches the retired r2 `laneOrScan`');
-  ok(/opts\.source = lane\.source/.test(esrc) && /await e\.adapter\.scanHost\(/.test(esrc), 'the resolved source is handed to history() and scanHost() has a caller');
+  ok(/opts\.source = lane\.source/.test(esrc) && /e\.adapter\.scanHost\(/.test(esrc), 'the resolved source is handed to history() and scanHost() has a caller');
 }
 
 // ⑥ NEGATIVE CONTROL — the r2 shape needs all three pre-fix pieces back:
@@ -553,7 +549,9 @@ function dayStartClock() {
   const engCopy = patchPath('src/server', 'channels-engine');
   const EPRE = esrc
     .replace("    if (lane.via === 'scan' && !lane.source) return { appended: 0, duplicates: 0, anchorMoved: false, complete: false, why: lane.why };\n", '')
-    .replace(/        let mayIngest = true;\n        if \(laneOrScan\(rec, \{\}\)\.via === 'scan'\) \{[\s\S]*?\n        \}\n/, '        let mayIngest = true;\n')
+    // r9: the host-facts round trip is the PURE drain's `scanHost` action (src/channel-drain.js rule 14) — the r2 shape has none: the fact off and the performer gone
+    .replace('e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });', 'e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: false });')
+    .replace(/            else if \(act\.type === 'scanHost'\) \{[\s\S]*?\n            \} else throw/, '            else throw')
     .replace("      if (lane.via === 'scan') opts.source = lane.source;   // HANDED DOWN, never re-derived by the adapter\n", '')
     .replace("require('../channels/index.js')", `require(${JSON.stringify(idxCopy)})`)
     .replace("require('../channels/fake.js')", `require(${JSON.stringify(fakeCopy)})`);
@@ -566,8 +564,6 @@ function dayStartClock() {
     engines.push(eng);
     const A = 'fake-scan', C = 'fake-scan-ops';
     await eng.pass(A, { force: true });
-    await eng.setTracked(A, C, true);
-    await sleep(500);
     const row = eng.digest().conversations.find((c) => c.id === C);
     const n = eng.store.readTail(A, C, { limit: 99 }).length;
     const en = eng.store.index.snapshot().conversations[`${A}/${C}`];
@@ -615,7 +611,6 @@ function dayStartClock() {
     const eng = ENGINE.create({ dataDir, registry, env: {}, broadcast: (m) => events.push(m) });
     engines.push(eng);
     await eng.pass('past-poll', { force: true });
-    await eng.setTracked('past-poll', 'c', true); await sleep(300);
     const newest = eng.store.readTail('past-poll', 'c', { limit: 1 })[0];
     events.length = 0;
     await eng.markRead('past-poll', 'c'); const b1 = events.length;
@@ -650,16 +645,16 @@ function dayStartClock() {
   } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
-// ── ⑧ TRACKING BROADCASTS EVEN WHEN THE PASS IT KICKS CANNOT BE AFFORDED (r3) ──
-// `setTracked(true)`'s only notification was the pass it kicked, and a pass
-// the request budget refused returned before `notify()` — so the flag was on
-// disk, the route had answered `{ok:true}`, and NO client learned (the panel
-// repaints only on the broadcast). Measured: 26 of 30 tracks silent under the
-// 20/min budget with a 30-conversation adapter (the design measures ~50 for a
-// real account).
+// ── ⑧ A PERSISTED CHANGE BROADCASTS WHETHER OR NOT A PASS IS AFFORDABLE ──
+// (r3, re-aimed 2026-09-26: the track step is gone — the owner's per-
+// conversation REFRESH OVERRIDE is the persisted per-row choice now.) The r3
+// lesson stands: `setTracked(true)`'s only notification was the pass it
+// kicked, and a pass the budget refused returned before `notify()` — 26 of 30
+// changes silent. The override notifies itself, with no pass at all, even
+// with the account's vendor budget spent.
 {
   const many = {
-    kind: 'many-poll', caps: { ...fake.fakePoll.caps },
+    kind: 'many-poll', caps: { ...fake.fakePoll.caps, budget: { unit: 'request', default: 5, settingKey: null, metered: false } },
     create(record, deps) {
       const impl = fake.fakePoll.create(record, deps);
       impl.listConversations = async () => { const convs = []; for (let i = 0; i < 30; i++) convs.push({ id: `c${i}`, vendorId: `c${i}`, title: `Chat ${i}`, kind: 'group', participants: 'U', lastAt: Date.now() - 1000 }); return { conversations: convs, cursor: null, complete: true }; };
@@ -677,56 +672,54 @@ function dayStartClock() {
     const eng = ENGINE.create({ dataDir, registry, env: {}, broadcast: (m) => events.push(m) });
     engines.push(eng);
     await eng.pass('many-poll', { force: true });
-    let silent = 0, said = 0, budgetHit = false;
+    const budgetHit = (await eng.pass('many-poll', { force: true })).why === 'budget';
+    let silent = 0, said = 0;
     for (let i = 0; i < 30; i++) {
       events.length = 0;
-      const r = await eng.setTracked('many-poll', `c${i}`, true);
-      await sleep(30);
-      if (r !== true) continue;
-      const told = events.some((m) => m.digest && m.digest.conversations.some((c) => c.id === `c${i}` && c.tracked));
+      const r = await eng.setRefresh('many-poll', `c${i}`, 300);
+      if (!r || !r.ok) continue;
+      const told = events.some((m) => m.digest && m.digest.conversations.some((c) => c.id === `c${i}` && c.refresh && c.refresh.every === 300));
       if (told) said++; else silent++;
-      if (!budgetHit) { const p = await eng.pass('many-poll', { force: true }); if (p.why === 'budget') budgetHit = true; }
     }
     eng.store.index.flush();
-    const onDisk = Object.values(JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')).conversations).filter((c) => c.tracked).length;
+    const onDisk = Object.values(JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')).conversations).filter((c) => c.refresh && c.refresh.every === 300).length;
     return { silent, said, onDisk, budgetHit };
   };
-  const r = await drive(ENG, 'track-budget');
-  ok(r.budgetHit, 'FIXTURE: the per-minute request budget really was exhausted during the run (a zero below would otherwise be vacuous)');
-  ok(r.onDisk === 30, 'FIXTURE: all 30 tracked flags are persisted', String(r.onDisk));
-  ok(r.silent === 0 && r.said === 30, 'EVERY track broadcast a digest showing the row tracked — a persisted change never depends on whether a pass was affordable', JSON.stringify(r));
-
-  // ⑧ NEGATIVE CONTROL — the r2 shape: notify only on the untrack branch.
+  const r = await drive(ENG, 'override-budget');
+  ok(r.budgetHit, 'FIXTURE: the account\'s vendor budget really was exhausted before the overrides (a zero below would otherwise be vacuous)');
+  ok(r.onDisk === 30, 'FIXTURE: all 30 overrides are persisted', String(r.onDisk));
+  ok(r.silent === 0 && r.said === 30, 'EVERY override broadcast a digest showing the row\'s new period — a persisted change never depends on whether a pass was affordable', JSON.stringify(r));
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const PRE = esrc.replace("    notify([convId]);\n    if (tracked) pass(adapterId, { force: true }).catch(() => {});",
-                           "    if (tracked) pass(adapterId, { force: true }).catch(() => {}); else notify([convId]);");
-  ok(PRE !== esrc, 'NEGATIVE CONTROL setup: the r2 setTracked was reconstructed from the shipped bytes');
+  const PRE = esrc.replace("    notify([`${adapterId}/${convId}`]);\n    const en = store.index.peek(`${adapterId}/${convId}`);", "    const en = store.index.peek(`${adapterId}/${convId}`);");
+  ok(PRE !== esrc, 'NEGATIVE CONTROL setup: an override with no notify of its own was reconstructed from the shipped bytes');
   const engCopy = patchPath('src/server', 'channels-engine');
   writeCopy(engCopy, PRE);
   try {
-    const p = await drive(require(engCopy), 'track-budget-pre');
-    ok(p.silent > 0 && p.onDisk === 30, `NEGATIVE CONTROL: the r2 engine persists all 30 and broadcasts NOTHING for ${p.silent} of them — the route said ok and no client learned`, JSON.stringify(p));
+    const p = await drive(require(engCopy), 'override-budget-pre');
+    ok(p.silent === 30 && p.onDisk === 30, `NEGATIVE CONTROL: without its own notify the override persists all 30 and NO client learns (${p.silent} silent)`, JSON.stringify(p));
   } finally { /* MUTE's scratch dir is removed at exit */ }
 }
 
-// ── ⑨ THE DIGEST'S FRESHNESS CLAIM IS `off` FOR ROWS NOTHING FETCHES (r3) ──
-// The PURE rule is in test-channel-caps; this is the WIRING: the engine hands
-// `enabled` and the entry's `tracked` to the claim at digest time.
+// ── ⑨ EVERY ROW CLAIMS ITS OWN CADENCE; A DISABLED ACCOUNT'S ROWS ARE `off` ──
+// The PURE rules are in test-channel-caps; this is the WIRING (2026-09-26):
+// there is no `untracked` state — a row claims the cadence the scheduler
+// resolves for it (the same `cadenceFor` the tick reads), and a disabled
+// account's rows answer `off` / adapter-disabled.
 {
   const { eng } = mkEngine({ name: 'digest-off' });
   await eng.pass('fake-poll', { force: true });
   const u = eng.digest().conversations.find((c) => c.id === 'fake-poll-ops');
-  ok(u.tracked === false && u.freshness.state === 'off' && u.freshness.why === 'untracked',
-    'an UNTRACKED row is published as `off` / untracked — not "within 5m" about a fetch that will never happen', JSON.stringify(u.freshness));
-  await eng.setTracked('fake-poll', 'fake-poll-ops', true); await sleep(400);
-  const t = eng.digest().conversations.find((c) => c.id === 'fake-poll-ops');
-  ok(t.tracked === true && t.freshness.state === 'bound' && t.freshness.seconds > 0, 'POSITIVE CONTROL: once tracked the same row claims its cadence', JSON.stringify(t.freshness));
+  ok(!('tracked' in u) && u.freshness.state === 'bound' && u.freshness.seconds === eng.cadenceOf('fake-poll', 'fake-poll-ops').seconds && u.cadence.seconds === u.freshness.seconds,
+    'a discovered row claims the cadence the scheduler keeps for it (no tracked flag, no "not polling")', JSON.stringify({ freshness: u.freshness, cadence: u.cadence }));
+  await eng.setRefresh('fake-poll', 'fake-poll-ops', 'paused');
+  const pz = eng.digest().conversations.find((c) => c.id === 'fake-poll-ops');
+  ok(pz.freshness.state === 'paused' && pz.cadence.paused, 'a PAUSED override says "paused" on the chip', JSON.stringify(pz.freshness));
   const rec = eng.adapterRecords().adapters.find((r) => r.id === 'fake-poll');
   await eng.store.adapters.update(() => { rec.enabled = false; });
   const dd = eng.digest();
   const dis = dd.conversations.find((c) => c.id === 'fake-poll-ops');
   ok(dd.adapters.find((a) => a.id === 'fake-poll').enabled === false && dis.freshness.state === 'off' && dis.freshness.why === 'adapter-disabled',
-    'a DISABLED adapter\'s tracked row is `off` / adapter-disabled, and the adapter row says enabled:false beside it', JSON.stringify(dis.freshness));
+    'a DISABLED adapter\'s row is `off` / adapter-disabled, and the adapter row says enabled:false beside it', JSON.stringify(dis.freshness));
 }
 
 // ── ⑤ THE BURST DAY: PAGING TO THE ANCHOR, NEWEST-FIRST (design §3.1 fence 9,
@@ -757,7 +750,10 @@ console.log('⑤ a burst day pages to the anchor newest-first; the anchor moves 
 {
   const { makeRecord } = require(path.join(REPO, 'src/channel-record.js'));
   const PAGE = ENG.PAGE;
-  const base = Date.now() - 86400e3 * 2;   // relative to now — no calendar date, no time-of-day dependence
+  // relative to now — no calendar date, no time-of-day dependence; AHEAD of the
+  // clock (2026-09-26): a burst that arrives after the account was linked is
+  // news (unread), the pre-link backlog is not
+  const base = Date.now() + 60e3;
   const world = { records: [], calls: 0, walks: 0 };
   const mkRec = (i) => ({ vendorId: `b-m${String(i).padStart(5, '0')}`, at: base + i * 250, author: { id: 'u-ada', name: 'Ada' }, text: `burst ${i}` });
   const burstMod = {
@@ -814,45 +810,48 @@ console.log('⑤ a burst day pages to the anchor newest-first; the anchor moves 
   const distinctIds = () => { try { return new Set(fs.readFileSync(path.join(dataDir, 'channels', 'msgs', 'burst', 'burst-ops.ndjson'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l).vendorId)).size; } catch { return 0; } };
   const anchorOf = () => (eng.store.index.snapshot().conversations['burst/burst-ops'] || {}).anchor || null;
 
-  // Day 1: 340 messages (the recorded 300+ day) in one conversation, tracked.
+  // Day 0 (2026-09-26): ONE record — the first ingest anchors the
+  // conversation (the backlog before the link counts read), so the burst
+  // below is a walk TO THAT ANCHOR, which is the shape this leg is about.
+  world.records.push({ vendorId: 'b-m-0', at: Date.now() - 86400e3, author: { id: 'u-ada', name: 'Ada' }, text: 'before the burst' });
+  await eng.pass('burst', { force: true });
+  ok(anchorOf() === 'b-m-0' && logCount() === 1, 'the forced pass discovered AND ingested the conversation (no track step)', String(anchorOf()));
+  // Day 1: 340 messages (the recorded 300+ day) on top.
   for (let i = 0; i < 340; i++) world.records.push(mkRec(i));
-  await eng.pass('burst', { force: true });                  // discovery only — nothing is tracked yet
-  ok(anchorOf() === null && world.calls === 0, 'discovery announces the conversation and fetches NOTHING while it is untracked');
-  clock += 61e3;
-  await eng.setTracked('burst', 'burst-ops', true);           // kicks a pass
-  await sleep(200);
-  ok(logCount() === 340 && distinctIds() === 340, `every record of the 340-message day landed in the durable log (${logCount()} lines, ${distinctIds()} distinct)`);
+  clock += 61e3; world.calls = 0; world.walks = 0;
+  await eng.pass('burst', { force: true });
+  ok(logCount() === 341 && distinctIds() === 341, `every record of the 340-message day landed in the durable log (${logCount()} lines, ${distinctIds()} distinct)`);
   ok(anchorOf() === 'b-m00339', `the anchor is the NEWEST id after the walk completed (${anchorOf()})`);
-  ok(world.calls === Math.ceil(340 / PAGE) && world.walks === 1, `the walk took ${Math.ceil(340 / PAGE)} vendor pages of ${PAGE} in ONE continuation (calls ${world.calls}, walks ${world.walks}) — the fake's oldest-first shape never exercises this`);
+  ok(world.calls === Math.ceil(341 / PAGE) && world.walks === 1, `the walk took ${Math.ceil(341 / PAGE)} vendor pages of ${PAGE} in ONE continuation (calls ${world.calls}, walks ${world.walks}) — the fake's oldest-first shape never exercises this`);
   const unread1 = eng.store.index.snapshot().conversations['burst/burst-ops'].unread;
   ok(unread1 === 340, `unread is derived from the log: ${unread1}`);
 
   // A quiet pass: the newest page carries the anchor, so it costs ONE vendor page.
   clock += 61e3; world.calls = 0; world.walks = 0;
   await eng.pass('burst', { force: true });
-  ok(world.calls === 1 && logCount() === 340 && anchorOf() === 'b-m00339', `nothing new ⇒ ONE vendor page, no append, the anchor stays (calls ${world.calls}, log ${logCount()})`);
+  ok(world.calls === 1 && logCount() === 341 && anchorOf() === 'b-m00339', `nothing new ⇒ ONE vendor page, no append, the anchor stays (calls ${world.calls}, log ${logCount()})`);
 
   // Day 2: another 320 arrive on top. The walk pages newest-first until it
   // MEETS day 1's anchor on the seventh page, appends all 320, and re-anchors.
   for (let i = 340; i < 660; i++) world.records.push(mkRec(i));
   clock += 61e3; world.calls = 0; world.walks = 0;
   const r2 = await eng.pass('burst', { force: true });
-  ok(r2.ok === true && r2.changed.includes('burst-ops'), 'the pass completed and named the conversation that grew');
-  ok(logCount() === 660 && distinctIds() === 660, `day 2's 320 landed whole on top of day 1 — 660 lines, 660 distinct, ZERO duplicates (${logCount()}/${distinctIds()})`);
+  ok(r2.ok === true && r2.changed.includes('burst/burst-ops'), 'the pass completed and named the conversation that grew');
+  ok(logCount() === 661 && distinctIds() === 661, `day 2's 320 landed whole on top of day 1 — 661 lines, 661 distinct, ZERO duplicates (${logCount()}/${distinctIds()})`);
   ok(anchorOf() === 'b-m00659', `the anchor moved to day 2's newest (${anchorOf()})`);
   ok(world.calls === 7 && world.walks === 1, `320 new + the anchor on the 7th page ⇒ 7 vendor pages, one continuation (calls ${world.calls}, walks ${world.walks})`);
   ok(eng.store.index.snapshot().conversations['burst/burst-ops'].unread === 660, 'unread counts both days');
 
-  // A burst WIDER than one pass can walk: 1100 new records. The request
-  // budget (20/min) binds after 19 pages (950 records) — the pass reports
-  // INCOMPLETE, everything it read is durable, the anchor does NOT move.
+  // A burst WIDER than one pass can walk: 1100 new records. MAX_PAGES (20)
+  // binds after 1000 records — the pass reports INCOMPLETE, everything it
+  // read is durable, the anchor does NOT move.
   for (let i = 660; i < 1760; i++) world.records.push(mkRec(i));
   clock += 61e3; world.calls = 0; world.walks = 0;
   const before = anchorOf();
   const r3 = await eng.pass('burst', { force: true });
   ok(r3.ok === true, 'a pass cut short by the budget is still a passing pass (the adapter answered every page)');
   ok(anchorOf() === before, `an INCOMPLETE walk never advances the anchor (fence 9): still ${anchorOf()}`);
-  ok(logCount() >= 660 + 900 && distinctIds() === logCount(), `what the walk read is durable and deduplicated (${logCount()} lines, ${distinctIds()} distinct)`);
+  ok(logCount() >= 661 + 900 && distinctIds() === logCount(), `what the walk read is durable and deduplicated (${logCount()} lines, ${distinctIds()} distinct)`);
   ok(world.calls >= 18 && world.calls <= ENG.MAX_PAGES, `the walk was bounded by the budget/MAX_PAGES (${world.calls} pages)`);
   // The next pass re-walks from the newest: the dedup absorbs every re-read
   // and the log never doubles — the honest half of a bound the walk cannot
@@ -951,13 +950,13 @@ console.log('⑥ (P2) assign, filter, wake');
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = { mode: 'review' }; });
   const view = eng.digest().conversations.find((c) => c.key === `${A}/${CID}`);
   ok(view.assignment.authority === 'draft' && view.assignment.authorityClamped && /review/.test(view.assignment.authorityWhy) && view.assignment.authorityStored === 'send' && en().assignment.authority === 'send', 'READ-TIME CLAMP: the stored send reads as draft with the reason once policy tightens; the bytes are untouched');
-  ok(view.authorityCaps.policyRequiresReview === true && view.authorityCaps.offersSend === true && view.wakeLatency.lane === 'poll' && view.wakeLatency.seconds === 30, 'the digest publishes both caps and the honest poll-lane latency (the hot cadence)');
+  const fullView = eng.conversationView(A, CID);
+  ok(fullView.authorityCaps.policyRequiresReview === true && fullView.authorityCaps.offersSend === true && fullView.wakeLatency.lane === 'poll' && fullView.wakeLatency.seconds === eng.cadenceOf(A, CID).seconds, 'the FULL view publishes both caps and the honest poll-lane latency (the row\'s own cadence)', JSON.stringify(fullView.wakeLatency));
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = null; });
   await eng.setAssignment(A, CID, null);                 // (c)'s ingest must wake nobody
 
   // (c) filter validation + the server-side estimate over the stored log
   ok((await eng.setFilter(A, CID, { rules: [{ kind: 'regex', value: 'x' }] })).code === 'bad-filter', 'a filter with an unknown rule kind is refused by name');
-  await eng.setTracked(A, CID, true);
   await ingest('GPU down', 'lunch?', 'GPU back', 'ok');
   const est = eng.estimateFilter(A, CID, { rules: [{ kind: 'keyword', value: 'gpu' }] });
   ok(est.ok && est.estimate.total === 4 && est.estimate.matched === 2 && !est.estimate.sampled, `the estimate runs over the stored log (${est.estimate.matched} of ${est.estimate.total})`);

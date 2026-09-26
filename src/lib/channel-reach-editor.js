@@ -18,6 +18,11 @@
 //
 // Every string from the server is textContent. Decisions PUT/POST and let the
 // broadcast repaint — nothing waits for its echo.
+//
+// 2026-09-26 (§8, three homes): the rows come from the FULL view (the list's
+// slim rows carry no reach) — the conversation's own rows, the ACCOUNT-scope
+// row an account assignment wrote ("the whole account") and the rows a
+// matching RULE implies ("by a rule", derived, never stored).
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
@@ -63,8 +68,11 @@ function principals(app) {
   return out;
 }
 
-export function showReachDialog(app, conv) {
-  const base = `/api/channels/${encodeURIComponent(conv.adapterId)}/${encodeURIComponent(conv.id)}`;
+export async function showReachDialog(app, conv0) {
+  const base = `/api/channels/${encodeURIComponent(conv0.adapterId)}/${encodeURIComponent(conv0.id)}`;
+  const full = await fetchJson(base);
+  if (!full || full.error) { showToast(routeErrorText(full), { type: 'error' }); return; }
+  const conv = full.conversation;
   const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true });
   let current = conv;
 
@@ -101,7 +109,8 @@ export function showReachDialog(app, conv) {
         who.appendChild(el('span', 'chan-reach-kind', g.principal.kind === 'group' ? t('group') : t('agent')));
         who.appendChild(el('span', '', nameOf(g.principal)));
         const lv = el('span', `chan-reach-level chan-reach-level-${g.level}`, levelLabel(g.level));
-        const org = el('span', 'chan-reach-origin', originLabel(g.origin));
+        // WHERE the row lives (§8, 2026-09-26): the whole account, a rule, or this conversation
+        const org = el('span', 'chan-reach-origin', g.scope && g.scope.kind === 'adapter' ? `${originLabel(g.origin)} · ${t('the whole account')}` : g.pattern ? `${originLabel(g.origin)} · ${t('by a rule')}` : originLabel(g.origin));
         row.append(who, lv, org);
         if (g.origin === 'user') {
           const rm = document.createElement('button');
@@ -112,7 +121,7 @@ export function showReachDialog(app, conv) {
           rm.onclick = async () => { rm.disabled = true; const r = await api(`${base}/reach`, { principal: g.principal, level: null }); if (!r) rm.disabled = false; };
           row.appendChild(rm);
         } else {
-          const n = el('span', 'chan-reach-note', g.origin === 'assignment' ? t('removed with the assignment') : t('a request you approved'));
+          const n = el('span', 'chan-reach-note', g.origin === 'assignment' ? (g.pattern ? t('removed with the rule') : g.scope && g.scope.kind === 'adapter' ? t('removed when the account is no longer handed over') : t('removed with the assignment')) : t('a request you approved'));
           row.appendChild(n);
         }
         listEl.appendChild(row);
@@ -161,13 +170,14 @@ export function showReachDialog(app, conv) {
     body.appendChild(actions);
   }
   draw();
-  // repaint from the broadcast digest (this row's fresh reach + policy)
+  // repaint when the broadcast names THIS conversation (or is a whole
+  // digest): re-read its FULL view — the list's rows carry no reach
+  const key = `${conv.adapterId}/${conv.id}`;
   const onBroadcast = (msg) => {
-    if (msg.type !== 'channels-updated' || !msg.digest) return;
-    const fresh = (msg.digest.conversations || []).find((c) => c.adapterId === conv.adapterId && c.id === conv.id);
-    if (!fresh) return;
-    current = fresh;
-    if (document.getElementById('chan-reach-dialog')) draw(); else { try { app.ws.offGlobal(onBroadcast); } catch {} }
+    if (msg.type !== 'channels-updated') return;
+    if (!document.getElementById('chan-reach-dialog')) { try { app.ws.offGlobal(onBroadcast); } catch {} return; }
+    if (msg.partial && !(Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key))) return;
+    fetchJson(base).then((r) => { if (r && !r.error && r.conversation && document.getElementById('chan-reach-dialog')) { current = r.conversation; draw(); } }).catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
 }

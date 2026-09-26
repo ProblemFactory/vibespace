@@ -143,7 +143,7 @@ export const CHANNEL_FORBIDDEN = [
 // with one of those tags written through innerHTML/outerHTML/
 // insertAdjacentHTML.
 export const PANEL_CONTROL_OWNERS = {
-  trackList: 'the Track… checklist — one box per discovered conversation, not an account field',
+  showSearchDialog: 'the account\'s message search box (2026-09-26) — a query over the logs, not an account field',
   showOptionsDialog: 'the adapter-declared options editor (after connect) — not the OAuth client or the sign-in',
   showPushDialog: 'the push-lane claim — its own dialog, not an account field',
 };
@@ -164,7 +164,9 @@ export function formControls(text) {
   return out;
 }
 // D6: the account ⋯ in the storage row's action order (group, order → label key)
-export const D6_ORDER = ['Open conversation window', 'Track…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
+// 2026-09-26 (the aggregated IM): no Track… — the storage row's ＋ submount
+// slot holds the account's search and its two assignment grains
+export const D6_ORDER = ['Open conversation window', 'Search messages…', 'Hand to an agent…|Handed to an agent — edit…', 'Conversations matching a rule…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
 /** The `channel-adapter` items an ACCOUNT sees, in menu order (group, order),
  *  read off the registrations (the label's key(s); a source-only item is skipped). */
 export function accountMenuOrder(panel) {
@@ -252,23 +254,25 @@ export const DESIGN_I18N = [
   { key: 'Duplicate', built: 'Duplicate…', where: 'channels', why: 'a verb that opens a dialog carries the ellipsis; the storage row\'s ⧉ Duplicate was retired for submounts (design §1)' },
   { key: 'Create & connect', where: 'both' },
   { key: 'List labels', where: 'mounts', why: 'the channel Gmail account filters by its include query (src/channels/gmail.js), not by a label list — the picker stays a storage verb' },
-  { key: 'Track…', where: 'channels' },
+  { key: 'Hand to an agent…', where: 'channels' },
+  { key: 'Conversations matching a rule…', where: 'channels' },
+  { key: 'Search messages…', where: 'channels' },
   { key: 'Options', where: 'channels' },
   { key: 'Push…', where: 'channels' },
   { key: 'Enable', where: 'channels' },
   { key: 'Disable', where: 'channels' },
-  { key: 'Nothing is fetched for a conversation until you track it.', where: 'channels' },
+  { key: 'No conversations yet — the first pass lists them.', where: 'channels' },
   // 新键
   { key: 'Connect an account', where: 'channels' },
   { key: 'Type', where: 'channels' },
-  { key: 'Connected · {filter} · last poll {ago} · push: {claim}', built: ['Connected', 'last poll {ago}', 'push: {claim}'], where: 'channels', why: 'drawn as parts joined by " · " — the storage detail line\'s grammar; the filter is the account\'s own option value' },
+  { key: 'Connected · {filter} · polling · {n} conversations · {n} unread · last sync {ago}', built: ['Connected', 'polling', '{n} conversations', 'last sync {ago}'], where: 'channels', why: 'drawn as parts joined by " · " — the storage detail line\'s grammar; the filter is the account\'s own mailbox choice; 2026-09-26: every conversation is fetched, so the line counts them' },
   { key: 'connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix', where: 'channels' },
-  { key: 'Login only — no conversation tracked yet; nothing is fetched until you track one. Use Track… to pick conversations under this account.', where: 'channels' },
+  { key: 'Show all {n} conversations', where: 'channels' },
   { key: 'Duplicate "{name}"', where: 'channels' },
   { key: '{name} (copy)', where: 'channels' },
   { key: 'Copied from the original; you can change it.', where: 'channels' },
-  { key: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person\'s consent), tracked conversations, assignments, reach grants, the message log — the copy signs in on its own.',
-    built: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), tracked conversations, assignments, reach grants, the message log — the copy signs in on its own.',
+  { key: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person\'s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.',
+    built: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.',
     where: 'channels', why: 'the typographic apostrophe — the house spelling of UI text' },
   { key: 'This copy needs its own sign-in — another account, or the same one authorized again.', where: 'channels' },
   { key: 'Cannot remove "{name}"', where: 'channels' },

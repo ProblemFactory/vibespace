@@ -165,15 +165,15 @@ const lane = () => eng.laneOrScan(rec(), {});
 const missRate = () => C.pushMissRate((rec().push || {}).samples, now());
 const resetBudget = () => { offset += 61e3; };   // the per-adapter request budget is per minute of the injected clock
 
-// seed the world, discover, track (the first walk anchors the conversation)
+// seed the world, discover + ingest (2026-09-26: no track step — the first walk anchors the conversation)
 for (let i = 0; i < 3; i++) emit(CID, mint(CID), { withhold: true });
 await eng.pass(A, { force: true });
-await eng.setTracked(A, CID, true);
+await eng.refresh(A, CID);
 await sleep(150);
 await eng.pass(A, { force: true });
 {
   const en = eng.store.index.snapshot().conversations[`${A}/${CID}`];
-  ok(en && en.tracked && en.anchor, `the conversation is tracked and anchored by the first walk (anchor ${en && en.anchor})`);
+  ok(en && !('tracked' in en) && en.anchor, `the conversation is ingested and anchored by the first walk, no tracked flag (anchor ${en && en.anchor})`);
 }
 
 // ── ① FENCE 11: persist → ack → process ──────────────────────────────────

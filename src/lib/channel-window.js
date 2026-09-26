@@ -5,10 +5,22 @@
 // cannot silently drop it (the registry has a loud default).
 //
 // THE BAR IS THREE TIERS WITH A RHYTHM (a1 W2): title 13/600 + ONE ⋯ button
-// (the `channel-row` contribution menu — Assign & filter… / Reach & policy… /
-// Track / Mark read — with the same ctx the panel's row menu uses), the meta
-// line 11 dim (adapter label · participants · freshness), and the assignment
-// as an accent-tint CHIP that opens the editor. No verbs at title weight.
+// (the `channel-row` contribution menu — Mark read / Refresh now / Refresh
+// every ▸ / Assign & filter… / Reach & policy… — with the same ctx the
+// panel's row menu uses), the meta line 11 dim (adapter label · participants
+// · freshness), and the assignment IN EFFECT as an accent-tint CHIP that
+// opens the editor (inherited from the account or a rule: dim + labelled).
+// No verbs at title weight.
+//
+// THE AGGREGATED IM (2026-09-26, design §6.5): the window is a READER — it
+// beats a `watch` heartbeat while open (the conversation is hot, a stale one
+// is fetched at once), scrolls up into the vendor's older history on demand
+// (`/older`, prepended to the log), and draws each message's ATTACHMENTS:
+// an image as a thumbnail loaded through OUR route (`img.src`, `?inline=1`
+// — raster only, the route refuses anything else inline) that opens the
+// shared image overlay, every other file as a chip with its name, size and
+// a download link (the route answers `Content-Disposition: attachment` +
+// nosniff: never executed, never rendered in our origin).
 //
 // THE LIST reads like a chat, not a form (a1 W4): a day separator when the
 // day changes, consecutive lines by the same author within 5 minutes grouped
@@ -41,7 +53,7 @@
 // standing line under the composer (a1 W1). An AGENT GROUP (the same window
 // type, `adapterId` = the group namespace) is drawn by `openGroupWindow`
 // below: its composer sends as You, @name wakes.
-import { fetchJson, showToast, showContextMenu } from './utils.js';
+import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
@@ -89,9 +101,59 @@ function dayLabel(ms, now = Date.now()) {
 }
 const authorKey = (rec) => (rec.author && (rec.author.id || rec.author.name)) || '';
 
+/** A byte count in a chip's words. */
+function sizeText(n) {
+  const b = Number(n);
+  if (!Number.isFinite(b) || b <= 0) return '';
+  if (b < 1024) return `${b} B`;
+  if (b < 1048576) return `${Math.round(b / 1024)} KB`;
+  return `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`;
+}
+/** A message's ATTACHMENTS (2026-09-26): an image is a thumbnail through OUR
+ *  route (never a vendor URL, never innerHTML — `img.src` only), the rest a
+ *  chip with name · size and a download link. A thumbnail the route will not
+ *  serve inline (not a raster image) falls back to the chip. */
+function renderAttachments(rec, base) {
+  const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id) : [];
+  if (!list.length || !base) return null;
+  const box = el('div', 'chanmsg-atts');
+  for (const a of list) {
+    const url = `${base}/attachment/${encodeURIComponent(a.id)}?msg=${encodeURIComponent(rec.vendorId || '')}`;
+    const chipOf = () => {
+      const c = document.createElement('a');
+      c.className = 'chanmsg-att';
+      c.href = url;
+      c.setAttribute('download', a.name || 'attachment');
+      c.rel = 'noopener';
+      c.dataset.channelAttachment = a.id;
+      c.appendChild(icon('attachment', 11));
+      c.appendChild(el('span', 'chanmsg-att-name', a.name || t('attachment')));
+      const sz = sizeText(a.bytes);
+      if (sz) c.appendChild(el('span', 'chanmsg-att-size', sz));
+      c.appendChild(icon('download', 11, 'chanmsg-att-dl'));
+      c.title = t('Download {name} — it is saved, never opened here', { name: a.name || t('attachment') });
+      return c;
+    };
+    if (/^image\//.test(String(a.mime || ''))) {
+      const img = document.createElement('img');
+      img.className = 'chanmsg-thumb';
+      img.alt = a.name || t('image');
+      img.loading = 'lazy';
+      img.dataset.channelImage = a.id;
+      img.onerror = () => { if (img.isConnected) img.replaceWith(chipOf()); };
+      img.onclick = () => showImageOverlay(img.src);
+      img.title = t('Open the image');
+      img.src = `${url}&inline=1`;   // OUR route, as a property — never markup
+      box.appendChild(img);
+    } else box.appendChild(chipOf());
+  }
+  return box;
+}
+
 /** ONE row. EVERYTHING is textContent — see rule 1. `cont` = a continuation
- *  of the previous author's run (no head, tighter). */
-function renderRecord(rec, { cont = false } = {}) {
+ *  of the previous author's run (no head, tighter). `base` = the
+ *  conversation's route prefix (its attachments load through it). */
+function renderRecord(rec, { cont = false, base = null } = {}) {
   const row = el('div', 'chanmsg' + (cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : ''));
   row.dataset.at = String(rec.at || 0);
   row.dataset.author = authorKey(rec);
@@ -111,6 +173,8 @@ function renderRecord(rec, { cont = false } = {}) {
     row.appendChild(head);
   }
   row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
+  const atts = renderAttachments(rec, base);
+  if (atts) row.appendChild(atts);
   return row;
 }
 function daySeparator(ms) {
@@ -179,7 +243,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const titleRow = el('div', 'chanwin-title-row');
     titleRow.appendChild(el('b', '', c.title || convId));
     // the ONE control at title height: the row menu (the panel's contribution
-    // menu, same ctx) — Assign & filter… / Reach & policy… / Track / Mark read
+    // menu, same ctx) — Mark read / Refresh now / Refresh every ▸ / Assign & filter… / Reach & policy…
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'icon-btn';
@@ -192,16 +256,20 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (c.participants) bits.push(c.participants);
     const fresh = chanCaps.freshnessText(c.freshness, { t });
     if (fresh) bits.push(fresh);
+    // the owner's override, said where it applies (2026-09-26)
+    if (c.refresh && c.refresh.every !== 'paused') bits.push(t('refresh set to every {age}', { age: chanCaps.humanAge(c.refresh.every) }));
     const meta = el('div', 'chanwin-meta', bits.join(' · '));
     meta.title = t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.');
     bar.appendChild(meta);
-    // P2: the assignment as a CHIP (a tracked row only — nothing is fetched
-    // for an untracked one, so nobody could be woken); it opens the editor.
-    if (c.tracked) {
+    // P2: the assignment IN EFFECT as a CHIP (every conversation is fetched
+    // since 2026-09-26, so every one can wake somebody); inherited from the
+    // account or a rule it is dim and says so; it opens the editor.
+    {
       const held = !!(c.stats && c.stats.lastWake && c.stats.lastWake.ok === false);
+      const inherited = !!(c.assignment && c.assignment.source && c.assignment.source !== 'conversation');
       const chipEl = document.createElement('button');
       chipEl.type = 'button';
-      chipEl.className = 'chan-assign-chip' + (c.assignment ? (held ? ' chan-warn' : '') : ' chan-assign-none');
+      chipEl.className = 'chan-assign-chip' + (c.assignment ? (held ? ' chan-warn' : '') : ' chan-assign-none') + (inherited ? ' chan-assign-inherited' : '');
       chipEl.dataset.channelAssign = '1';
       chipEl.appendChild(icon(c.assignment ? 'filter' : 'plus', 10));
       // unassigned: the chip is the VERB (short); the fact rides its tooltip
@@ -256,29 +324,21 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // NO composer element at all — the P0 exit condition.
       foot.textContent = '';
       const ro = el('div', 'chanwin-readonly');
-      if (!c.tracked) {
-        // An UNTRACKED conversation is not "capability unknown" — nothing was
-        // fetched, so nothing could be known (§10 invariant 6; a1 §2.2 W3):
-        // the honest footer names the fact and carries the verb.
-        ro.appendChild(el('span', '', t('Not tracked — messages are fetched once you track it.')));
-        const tb = btn(t('Track this conversation'), null);
-        tb.onclick = async () => {
-          tb.disabled = true;
-          const r2 = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracked: true }) });
-          if (!r2 || r2.error) { tb.disabled = false; showToast(routeErrorText(r2), { type: 'error' }); }
-        };
-        ro.appendChild(tb);
-      } else {
-        const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
-        // P4: the reason in words (a `send-scope-not-granted` answer says what
-        // unlocks sending — never a greyed control), never a bare code.
-        ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
-      }
+      const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
+      // P4: the reason in words (a `send-scope-not-granted` answer says what
+      // unlocks sending — never a greyed control), never a bare code.
+      ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
       foot.appendChild(ro);
     }
     return c;
   }
 
+  /** The beginning of the conversation, said once at the top. */
+  function markStart(noOlderAtVendor) {
+    if (list.querySelector('.chanwin-start')) return;
+    const m = el('div', 'chanwin-start', noOlderAtVendor ? t('Beginning of what this channel keeps') : t('Beginning of the conversation'));
+    list.insertBefore(m, list.firstChild);
+  }
   /** Drop a day separator that repeats the one before it (a prepended page
    *  can end on the day the existing list began). */
   function dedupeDays() {
@@ -288,6 +348,10 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     }
   }
 
+  const base = `/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}`;
+  /** Past the local log's start: nothing older here AND the vendor said so. */
+  let historyExhausted = false;
+  let olderInFlight = false;
   async function loadPage({ prepend = false } = {}) {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (prepend && oldest !== null) {
@@ -295,9 +359,21 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // BOTH halves of the boundary — the store orders by (at, vendorId).
       if (oldestId) q.set('beforeId', String(oldestId));
     }
-    const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/messages?${q}`);
+    let r = await fetchJson(`${base}/messages?${q}`);
     if (!r || r.error) return 0;
-    const recs = r.records || [];
+    let recs = r.records || [];
+    // HISTORY ON DEMAND (2026-09-26): the local log ran out while scrolling up
+    // ⇒ ask the vendor for the page before it (prepended to the log server-side)
+    if (prepend && !recs.length && !historyExhausted && !olderInFlight) {
+      olderInFlight = true;
+      const o = await fetchJson(`${base}/older`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ before: oldest, beforeId: oldestId, limit: PAGE }) });
+      olderInFlight = false;
+      if (o && !o.error) {
+        recs = o.records || [];
+        if (o.exhausted && !recs.length) { historyExhausted = true; markStart(o.vendorHasNoOlder); }
+        if (o.refused === 'vendor-budget') showToast(o.error || t('The vendor budget for this minute is spent — scroll again shortly'), { type: 'warn' });
+      } else if (o && o.error) showToast(routeErrorText(o), { type: 'error' });
+    }
     if (!recs.length) return 0;
     // The page arrives oldest-first in the SAME order the store pages by, so
     // its first element IS the boundary for the next page up.
@@ -309,7 +385,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     for (const rec of recs) {
       if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
       const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic);
-      frag.appendChild(renderRecord(rec, { cont }));
+      frag.appendChild(renderRecord(rec, { cont, base }));
       prev = rec;
     }
     if (prepend) list.insertBefore(frag, list.firstChild); else list.insertBefore(frag, outboxSec.isConnected ? outboxSec : null);
@@ -352,12 +428,13 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (!c) return;
     list.textContent = '';
     oldest = null; oldestId = null;
+    historyExhausted = false;
     const n = await loadPage({});
-    if (!n) list.appendChild(el('div', 'chanwin-empty', c.tracked ? t('No messages yet.') : t('Not tracked — nothing is fetched for this conversation until you track it.')));
+    if (!n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
     list.appendChild(outboxSec);
     await renderOutbox();
     list.scrollTop = list.scrollHeight;
-    if (read && c.tracked && c.unread) markRead();
+    if (read && c.unread) markRead();
   }
 
   // Paging upward: one page per top-scroll, oldest-first (the same shape the
@@ -394,18 +471,35 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       return;
     }
     if (msg.type !== 'channels-updated') return;
-    if (Array.isArray(msg.changed) && msg.changed.length && !msg.changed.includes(convId)) return;
+    // 2026-09-26: a PARTIAL broadcast names its rows by KEY — a pass that
+    // changed nothing (or changed other conversations) repaints nothing here;
+    // a WHOLE digest (an account-level change) repaints every window
+    const key = `${adapterId}/${convId}`;
+    if (msg.partial) { if (!Array.isArray(msg.changedKeys) || !msg.changedKeys.includes(key)) return; }
+    else if (Array.isArray(msg.changed) && msg.changed.length && !msg.changed.includes(convId)) return;
     render().catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} });
+  // a broadcast naming THIS conversation sent while the socket was down never
+  // arrives (lane R2 verify r3): re-read the tail on every reconnect
+  const onState = (up) => { if (up && lastConv) render().catch(() => {}); };
+  app.ws.onStateChange?.(onState);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { app.ws.offGlobal(onBroadcast); } catch {} try { app.ws.offStateChange?.(onState); } catch {} });
 
   // Touching the window is a USER action, so it may mark read; a repaint may
   // not. Bounded by construction: once the mark lands the next digest says
   // `unread: 0` and every later click is a no-op.
   winInfo.element?.addEventListener('pointerdown', () => {
-    if (lastConv && lastConv.tracked && lastConv.unread) markRead();
+    if (lastConv && lastConv.unread) markRead();
   }, { signal: winInfo._listenerCtl?.signal });
+
+  // THE WATCH HEARTBEAT (2026-09-26, design §6.2 "hot = open in a window"):
+  // one beat now (a stale conversation is fetched at once) and one a minute
+  // while the window lives; the server lets a beat lapse after 90 s.
+  const beat = () => fetchJson(`${base}/watch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+  beat();
+  const beatTimer = setInterval(beat, 60e3);
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => clearInterval(beatTimer));
 
   render({ read: true }).catch((e) => showToast(String(e && e.message ? e.message : e), { type: 'error' }));
   return winInfo;

@@ -137,6 +137,32 @@ function approveRequest(grants, { principal, scope, at, by = 'user' }) {
   return { grants: applyGrant(grants, grant), grant: validateGrant(grant).grant };
 }
 
+/** THE ACCOUNT GRANT an account-grain assignment implies (2026-09-26, §7.3):
+ *  ONE `scope:{kind:'adapter', id:<adapterId>}` row, origin `assignment` —
+ *  the adapter id IS the account id, so two accounts of one kind never mix,
+ *  and un-assigning removes exactly this row (`removeGrant` by origin). */
+function accountGrant({ principal, adapterId, at = null, by = 'user' } = {}) {
+  const v = validateGrant({ principal, scope: { kind: 'adapter', id: adapterId }, level: 'visible', origin: 'assignment', at, by });
+  if (!v.ok) throw new Error(`channel-acl.accountGrant: ${v.error}`);
+  return v.grant;
+}
+/** THE GRANT a PATTERN assignment implies on ONE matching conversation —
+ *  DERIVED at read time and never stored (so editing or removing the rule
+ *  takes effect at once, with no rows to clean up); it names its pattern. */
+function patternGrant({ principal, key, patternId }) {
+  const v = validateGrant({ principal, scope: { kind: 'conversation', id: key }, level: 'visible', origin: 'assignment' });
+  if (!v.ok) throw new Error(`channel-acl.patternGrant: ${v.error}`);
+  return { ...v.grant, pattern: String(patternId || '') || null, derived: true };
+}
+/** EVERY grant that applies to ONE conversation, from its three homes: the
+ *  entry's own rows, the account-scope rows, and the derived pattern rows.
+ *  `effective()` MAXes over the result (widen only) — nothing else changes. */
+function grantsForConversation(target, { entries = [], accountGrants = [], patternGrants = [] } = {}) {
+  const out = [];
+  for (const g of [...(entries || []), ...(accountGrants || []), ...(patternGrants || [])]) if (g && scopeApplies(g.scope, target)) out.push(g);
+  return out;
+}
+
 /** The rows that apply to ONE target, for the panel ("why does X see this"). */
 function grantsFor(target, grants) {
   return (Array.isArray(grants) ? grants : []).filter((g) => g && scopeApplies(g.scope, target)).map((g) => ({ ...g, id: grantId(g) }));
@@ -146,4 +172,5 @@ module.exports = {
   LEVELS, RANK, GRANT_ORIGINS, PRINCIPAL_KINDS, SCOPE_KINDS, NOT_FOUND_TEXT,
   notFound, canSee, canRequest, widen, fromMsgLevel, grantId, validateGrant, principalApplies, scopeApplies,
   effective, applyGrant, removeGrant, approveRequest, grantsFor,
+  accountGrant, patternGrant, grantsForConversation,
 };

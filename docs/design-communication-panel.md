@@ -619,8 +619,9 @@ a **fake adapter** plus every registered real one in shape-only mode):
   itself gives, and the outbox **creates no proposal at all**. A proposal that can
   never be sent asks a user to approve something that is then guaranteed to fail;
 - **`convCaps` is a cache with a TTL, not a stored fact** (r4). The TTL defaults to
-  **6 hours** and there are exactly three refresh triggers: ① when the user marks a
-  conversation tracked; ② on the first panel render past the TTL; and ③
+  **6 hours** and there are exactly three refresh triggers: ① when a
+  conversation's window is opened (before 2026-09-26: "is marked tracked" — that
+  step no longer exists); ② on the first panel render past the TTL; and ③
   **unconditionally at approval time, immediately before the send** — the one moment
   where being wrong costs a real message. An entry past the TTL resolves to
   `read:'unknown'` / `sendAs: []` / `why:'stale'`, which `offers()`'s existing rule
@@ -750,8 +751,10 @@ data/channels/
                                                                           // the don't-re-prompt rule
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
-                                participants summary, lastAt, unread, tracked, anchor,
-                                assignment, filterId, policy, pendingTodoId, reachEntries[],
+                                participants summary, authors[] (≤30, for pattern rules),
+                                lastAt, unread, anchor, refresh {every: 30|60|300|900|'paused',
+                                by, at} (the owner's refresh override, 2026-09-26), assignment,
+                                filterId, policy, pendingTodoId, reachEntries[],
                                 stats {hits7d, msgs7d},
                                 convCaps {read, sendAs[], why, at}        // §4: cached WITH its age,
                                                                          //     TTL 6 h, then 'stale'
@@ -760,7 +763,14 @@ data/channels/
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
   outbox.json                   atomic JSON. Proposals + their state machine (§9)
   audit.ndjson                  APPEND-ONLY. Every outbound attempt and every ACL change
-  files/<adapterId>/<convId>/   downloaded attachments (explicit action only)
+  attachments/<adapterId>/<convId>/<sha1(id)>   attachments fetched on demand (0600, never
+                                executed, served through our own route only);
+                                attachments/<adapterId>/lru.json is each ACCOUNT's LRU ledger,
+                                capped by `channels.attachmentBudgetMB` (default 5120 = 5 GB)
+  index.json also carries three per-account tables (2026-09-26, the three assignment grains
+                                of §7.3): accountAssignments{<adapterId>: assignment+stats},
+                                patternAssignments{<id>: {adapterId, pattern, …assignment, stats}},
+                                accountGrants[] (grant rows with scope {kind:'adapter'})
   .channels-key                 0600 instance-local key for token encryption
 ```
 
@@ -805,12 +815,29 @@ Invariants, each with its reason:
    whichever is smaller, with a **floor of 7 days** because the estimator is
    defined over the last 7 days. Trimming streams to a temp file and renames —
    never in place.
-6. **`tracked` is opt-in.** An adapter can *see* far more than the panel should
-   list: one authorized Lark user is routinely a member of dozens of chats
-   (measured on a real account: about fifty), and a mailbox is unbounded. Nothing is ingested until the user marks a
-   conversation tracked (or it matches an inclusion query, for Gmail). This is a
-   privacy decision, a cost decision, and the thing that keeps the panel a panel
-   instead of a mail client.
+6. **A linked account is an aggregated IM (owner ruling 2026-09-26, replacing
+   "`tracked` is opt-in").** The owner: "once linked, this is an IM that
+   aggregates all my IMs — I read the messages, download attachments, view
+   images in it; on top of that I can hand the whole account, or one channel /
+   chat / the chats matching a pattern, to a specific agent to read and act
+   on"; the old interaction was "too restricted to be of practical use". So:
+   **every** conversation inside the account's inclusion scope (Gmail: INBOX by
+   default, all mail or chosen labels per account; Lark: every group
+   `im/v1/chats` lists) is listed and ingested; the owner reads every message,
+   downloads attachments, views images, searches, marks read — **there is no
+   "track" step**. The `tracked` field is removed by migration
+   (`2026-09-channels-aggregated-im`: a previously tracked conversation gets
+   `refresh.every = 30`, "tracked ⇒ hot"; assignments are kept). The old
+   invariant's two reasons did not go away, they moved: **privacy moves to the
+   agent side** — an agent sees nothing unless it is assigned (account /
+   conversation / pattern, §7.3) or granted (§8), the reach law; **cost moves to
+   the scheduler** — push first (§6.5), polling tiered by activity (hot 30 s /
+   warm 5 min / cold 15 min, §6.2), every request counted in the vendor's own
+   unit against a per-account budget that backs off and says so on the account
+   card. Unread counts only messages that arrived **after the account was
+   linked** (the backlog before counts as read; `linkedAt` on the account record
+   is the boundary) — otherwise a freshly linked 800-thread mailbox opens on
+   forty thousand "unread".
 7. **A derived value never becomes a stored fact.** `unread`, `hits7d` and
    `msgs7d` are recomputed from the log and the read marker; they are cached in
    the index for render speed and are always re-derivable. The quota-model
@@ -911,52 +938,94 @@ Everything after `store.append` is PURE except the two ORCH calls at the end.
 That is deliberate: the money-relevant decision chain is unit-testable without a
 server.
 
-### 6.2 The scheduler
+### 6.2 The scheduler (rewritten 2026-09-26: a due time per conversation)
 
-One loop per adapter, never a loop per conversation. Each tick:
+One loop per **account** (single flight; §5.1's serialized door unchanged), but
+**due-ness is per conversation**: a tick every 5 s runs a pass for an account as
+soon as any of its conversations is due, and that pass ingests only the DUE
+conversations, most-overdue first, stopping when the budget is spent — the rest
+stay due and go next minute; nothing starves on insertion order (the old loop
+walked the index in insertion order and `break`-ed when the budget ran out:
+measured, 873 conversations, 200 minutes, 15 anchored).
 
-- spends a **request budget** (default 20/min/adapter, a setting) on: every *hot*
-  conversation (assigned, or open in a client window right now) at the fast
-  cadence (30 s), then *tracked-but-cold* ones round-robin at the slow cadence
-  (5 min) — but both numbers pass through **`laneState(…).pollCadence`** first (§4):
-  `'reconcile'` drops the whole adapter to the 15-minute reconciliation cadence,
-  `'fast'` is the two numbers above. The scheduler **never reads** the claim,
-  `push.state` or `caps.receive` itself (r4);
-- jitters, and backs off exponentially per adapter on `rate-limited` /
-  `transport`, resetting on a clean pass;
-- **stops entirely** on `auth-expired` and surfaces it — a loop that keeps
-  hammering an expired credential is how an integration gets throttled at the
-  vendor;
-- never overlaps **itself** (single-flight per adapter) and never holds the loop:
-  fs writes are async, every request has a timeout. Single-flight per adapter is
-  *not* mutual exclusion between adapters — passes are concurrent by design — so
-  every index mutation goes through the one serialized door in §5.1, and a pass
-  never carries a stale snapshot across an `await`.
+**Cadence = override > tier, clamped to [the adapter's floor, the cold tier]:**
 
-The cost is arithmetic this design owes the reader: fifty tracked Lark chats,
-none hot, 5-minute cadence ⇒ ~10 requests/min. One hot assigned chat ⇒ +2/min. A
-Gmail account is **one** `history.list` request per tick when nothing has
-changed. That number matters because **polling does not disappear when push is
-turned on**: it drops to a much slower **reconciliation cadence** (default
-15 min, a setting) and changes job from *latency* to *completeness*. §6.4 says
-why that is not conservatism but a consequence of what the push lane itself
-guarantees — and "which cadence is it right now" is answered in one place by
-`laneState`, so a demoted or dead push lane hands the fast cadence back
-**immediately** without anything else re-deciding it.
+| Source | Condition | Cadence (setting, default) |
+|---|---|---|
+| owner override | `refresh.every` = 30 / 60 / 300 / 900 s or `paused` (the row menu / window's "Refresh every ▸", persisted, broadcast) | the override; `paused` = the timer never fetches it (opening its window and an agent refresh still may) |
+| hot | open in some client's window right now (`/watch` heartbeat, 90 s expiry), or a message within `channels.hotRecentMinutes` (60) | `channels.pollHotSec` 30 |
+| warm | a message within `channels.warmRecentHours` (24) | `channels.pollWarmSec` 300 |
+| cold | everything else | `channels.pollColdSec` 900 (**900 is also the maximum**: owner, "15 minutes at most") |
+| push safety net | the account's push lane is live AND carries content (`laneState().pollCadence === 'reconcile'`) | every conversation drops to the cold cadence; overrides still apply |
+
+**Discovery (listConversations)** runs on the cold cadence (and right after a
+connect or an options change) and **walks the cursor to the end**: the old
+`DISCOVERY_PAGES = 5` meant conversation 501 never appeared; a walk the budget
+cuts short now keeps its cursor in memory and the next pass resumes it.
+
+**The budget is per account, per minute, in the vendor's own unit.** The adapter
+declares the unit and a setting key in `caps.budget` (the engine never names an
+adapter id); every request actually sent is charged through `deps.meter(units)` —
+no request (an unchanged Gmail thread) costs nothing.
+
+| vendor | unit | setting (default) | why |
+|---|---|---|---|
+| Lark | request | `channels.budgetLarkPerMin` 60 | 1000/min per API per app per tenant (one pool for a cluster app); 60 = 6 % |
+| Gmail | quota unit | `channels.budgetGmailPerMin` 3000 | 6000 units/min per user per project; history.list 2, threads.list 10, threads.get 40, attachments.get 20, drafts.send 100, watch 100 |
+
+An exhausted budget stops the pass; the due conversations wait for the next
+window and the account card says "Vendor budget reached — {n} {unit}/min for this
+account; {k} conversations waiting, next refresh in {s} s". A vendor 429 still
+takes the exponential backoff (30 s → 15 min); `auth-expired` still stops the
+loop and says so.
+
+**The arithmetic** this design owes the reader:
+
+- Lark, 55 groups, one poll = one `im/v1/messages` (a quiet chat's newest page
+  holds the anchor). All cold 3.7 requests/min, all warm 11, all hot 110 (over
+  budget ⇒ backoff, said); typical 5 hot / 15 warm / 35 cold ≈ 10 + 3 + 2.3 +
+  discovery 0.07 + member names 0.15 ≈ **15.6 requests/min**. A first ingest takes
+  ONE page per conversation (`channels.historyPageSize` 50); older history is
+  fetched when the window scrolls up (§6.5), so 55 chats cost 55 requests to
+  anchor, not 220.
+- Gmail: the tiers drive the **mailbox's** `history.list` cadence (the hottest
+  thread's, memoised 20 s in the adapter), never a per-thread `threads.get`: hot
+  2 × 2 = 4 units/min, cold 0.13; plus 40 units per thread `history.list` names —
+  and a named thread becomes **due now** through the adapter's `changed` hint, so
+  new mail in a cold thread does not wait 15 minutes. Discovery: 30 units (247
+  threads) / 60 (573) per pass. The first per-thread walk: 247 × 40 = 9 880 and
+  573 × 40 = 22 920 units — spread by the 3000/min budget over 3.3 / 7.6 minutes.
+  The mailbox cursor (`historyId`) and the not-yet-fetched `changed` set are
+  persisted in the account's `state` (never memory only — the old adapter
+  re-walked every thread on every restart). Per-thread polling would have cost
+  1528 units/min cold and 4584 warm (76 % of the per-user cap) — which is why it
+  is not done.
+
+Never overlaps **itself** and never holds the loop: fs writes are async, every
+request has a timeout; a pass never carries a stale snapshot across an `await`
+(the engine `peek`s ONE entry per conversation instead of deep-cloning the whole
+index per conversation — ~2.5 s of main thread saved per pass at 873
+conversations). Unread is maintained incrementally on append and recomputed from
+the log on mark-read (still a re-derivable derived value). A broadcast carries
+only the **changed** conversations (`partial`); the whole digest goes out only on
+a structural change.
 
 ### 6.3 Per-adapter ingest
 
-**Lark (user token).** `im/v1/chats` for discovery (paginated), then
-`im/v1/messages?container_id=<chat>` per tracked chat, newest-first, paging with
+**Lark (user token).** `im/v1/chats` for discovery (paginated to the end — note
+it does **not** list p2p chats and its items carry no last-message time), then
+`im/v1/messages?container_id=<chat>` per DUE chat (§6.2), newest-first, paging with
 **`next_page_token`** — the field is *not* called `page_token`, and reading only
 the first page is a documented way to lose messages silently. Stop at the stored
 anchor; on a burst day that means several pages, which is the entire point.
 Known vendor limits carried over from the ops notes, all of which the adapter
 tolerates rather than assumes away: bulk DM enumeration is unreliable (DMs are
 added by search or by the user picking them); `im search` treats multi-word
-queries as phrases; its time-window parameters do not filter reliably; images are
-a second authorized fetch against a per-message resource endpoint, so v1 records
-them as attachment metadata only.
+queries as phrases; its time-window parameters do not filter reliably; images and
+files are a second authorized fetch against
+`messages/:message_id/resources/:key?type=image|file` — fetched on demand since
+2026-09-26 (§6.5 attachments); stickers, merged forwards and cards are not served
+by the vendor.
 
 **Gmail (user token).** `history.list?startHistoryId=…&historyTypes=messageAdded`
 per tick — one cheap request when nothing has changed — reusing the existing
@@ -1162,6 +1231,244 @@ coalescing window and the "same number of wakes on every lane" leg land in **P2*
 (they need the wake path). Gmail's Pub/Sub pull lands in P1 behind a switch that
 is off by default.
 
+### 6.5 Push first, polling as the fallback — and the reader surface (owner ruling 2026-09-26)
+
+The owner: "If the API allows callbacks, not polling is better; if polling is
+unavoidable, use your frequencies — 30 minutes is probably too long, 15 at most.
+Let me override any conversation's refresh period at any time. An agent should be
+able to fetch the latest messages itself. Make the cache cap 5 GB per account, and
+every time/capacity parameter configurable."
+
+**What push can do, said honestly** (Feishu docs read 2026-09-26):
+
+- Lark's `im.message.receive_v1` reaches the **bot** only: p2p only for DMs to the
+  bot; in groups only @bot unless `im:message.group_msg` is granted and the bot is
+  a member; user-to-user DMs are **never** delivered; delivery is cluster-mode
+  (one random client per app), so a cluster-shared app is `shared` ⇒ cursor kicks
+  only. For the aggregated IM, push can at best KICK the bot's groups; everything
+  else is polling — which is why the poll tiers are the backbone, not the
+  fallback's fallback.
+- The long connection needs the official SDK `@larksuiteoapi/node-sdk`; without
+  it the lane parks `unavailable` with `sdk-not-installed` and the card gives the
+  remedy **verbatim**: "Real-time push is off: the official Lark SDK is not
+  installed on this instance — run `npm install @larksuiteoapi/node-sdk` in the
+  VibeSpace folder and restart; enable the event subscription (long-connection
+  mode), grant `im:message.group_msg` and add the bot to the chats you want
+  pushed. Until then messages are polled (every 30 s – 15 min)."
+- Gmail push needs Cloud Pub/Sub (a topic, this instance's own pull
+  subscription, the IAM grant, the `pubsub` scope) and is off by default; without
+  it, poll — the card says "push off (turn it on under Push…)".
+- While push is live and carries content, the account's polling drops to the cold
+  cadence (a safety net, the last row of §6.2's table) and the card says "push
+  live — polling reconciles every 15 min". A push KICK that names a conversation
+  (Lark's event carries `chat_id`) makes **that conversation** due now; a Gmail
+  note names none (convId null) ⇒ the account's `history.list` runs now and the
+  threads it names become due. **Ingest has no `untracked` gate any more** — a
+  pushed conversation the product never discovered is still written to the log
+  (discovery fills in its title).
+
+**An agent refresh** (`vibespace-channels refresh <conv>` / `read --fresh` →
+`POST /api/agent/channels/:adapterId/:convId/refresh`): reach first (invisible =
+the uniform not-found), then the **per-conversation floor**
+`channels.agentRefreshFloorSec` (default 20 s, measured from the conversation's
+last fetch by anyone), then the account budget; a refusal **names the number**:
+"this conversation was refreshed 8 s ago (floor 20 s) — read it now, or refresh
+again in 12 s" / "this account's vendor budget for this minute (60 requests/min)
+is spent — try again in 23 s". A refresh counts against the vendor budget and
+answers with what it brought (how many new records).
+
+**Lane R2 verify (2026-09-26).** Three corrections to the paragraph above and
+§7.3, each reproduced on the build's bytes before it was fixed: (1) an agent
+refresh's `ok` is always a fetch of ITS conversation — `refresh()` no longer
+takes another refresh's in-flight (single-flight) pass as its answer (18 of 20
+concurrent refreshes said "0 new" without a call); (2) agents together may
+spend at most `channels.agentBudgetSharePct` (25 %) of an account's minute —
+the floor is per conversation, so a loop over cold rows took the whole minute
+and halved the owner's hot polling — refused `vendor-budget` naming the share,
+the budget view saying who spent it (`spentBy`); (3) an inherited grain's
+(account / pattern) daily wake cap holds under a burst — its wakes queue on the
+grain's scope chain, so the check and the write of its ONE ledger never
+straddle another wake's ladder await (a cap of 5 was 100 turns). Also: "last
+sync" is the last good pass and a vendor 429 is said from the first failure
+(`backoffUntil`); a number setting out of range is clamped by the Settings
+input WITH a toast and by the engine with one log line (one table of bounds,
+pinned against the schema); the migration's counts are computed before its
+write is queued and a refusing store fails the run.
+
+**Lane R2 verify r3 (2026-09-26).** The closing round found one major on the
+r2 bytes: a vendor back-off (`e.nextAt` after a failed pass) was honoured by
+the timer but bypassed by every `pass({only})` — the owner's press on purpose,
+the agent's `refresh` and a window's open by accident — so 40 agent refreshes
+inside a 30 s 429 back-off made 15 vendor calls in a second and escalated
+`consecutiveFailures` 1 → 16 (the 15-minute maximum): the owner's whole
+account stopped polling because an agent pressed refresh. Fixed: `refresh()`
+refuses `backoff` (429, the wait, the retry instant, no call) for every origin
+but the owner's explicit press; `watch` pokes nothing during a back-off. And
+one minor of a known class: the panel and the conversation window now re-read
+on every ws reconnect (a partial digest sent while the socket was down never
+arrives). The r2 fixes held under every other attack: the cap across the
+conversation grain, the boot flush, a group principal, a refusing / throwing
+ladder (never a consumed cap), the 24 h boundary, 40 interleaved wakes +
+scope flushes (no deadlock); the refresh loop under a re-calling pass storm
+(FIFO, bounded); the agent share under 30 concurrent refreshes (15 of 15, no
+overshoot); reach (nothing without an assignment, uniform not-found), attachment
+ids (hashed; unsafe segments refused by name before any path), search (literal
+substring, byte-capped), zero innerHTML sinks in the nine client files.
+
+**Lane R2 verify r4 (2026-09-26, the closing round).** One major on the r3
+bytes, at the seam the r2 loop created: the per-conversation floor is asked
+BEFORE `refresh()` waits on the account's running pass, and after the wait
+every waiter ran its OWN pass — 20 concurrent agent refreshes of ONE
+conversation = 20 vendor calls (19 × "0 new"), 3 refreshes queued behind a
+timer pass that fetched their conversation = 3 more, 5 windows opened on one
+stale conversation = 5. Fixed: a pass awaited that carries a result for OUR
+conversation answers (a real fetch of it, completed after the call began —
+r2's liar was a pass with no entry for it); one fetch, every answer honest,
+the share charged once, origin-neutral. One medium: the owner's press that
+fails into a back-off said only "the refresh failed" — three presses inside
+a 30 s 429 parked the account 15 min (each a real vendor refusal, each a step
+of the back-off: r3's ruling, unchanged) — it now answers the retry instant
+(Retry-After on the route, "rate limited — retrying in N s" in the toast).
+The r3 fix held under every other attack: origin is the ROUTE's (never a
+request field; the owner's door is cookie-only, the agent's routes are the
+vsst_ ones), a kick during a back-off makes no call, a back-off cleared by a
+successful owner press releases a waiting agent's refresh into its own pass,
+a foreign pass that FAILED leaves an agent refused by name and an owner press
+free to run, the share ledger is not charged by a refusal, a restart mid
+back-off restarts it from zero (in-memory `nextAt`; the persisted failure
+count is shown as "retrying at the next pass" until the first pass rewrites
+it), the scope chain releases on a throwing / non-promise ladder and never
+nests a conversation chain (no AB-BA), the two reconnect re-reads fire once
+per reconnect and never loop on a refusal, every string of the fix renders
+through textContent and the vendor's code is a closed set (ChannelError).
+
+**Lane R2 verify r5 (2026-09-26, the structural closure).** Three rounds
+each found ONE money defect at the SAME seam — `refresh()` deciding a vendor
+call against the account's single-flight pass, N callers deciding at once
+(r2 a foreign pass's answer, r3 the back-off door, r4 a pass per waiter) —
+and each fix patched the caller's loop. The r2 verifier's second proposal is
+now the shape: a refresh is a REQUEST into a per-account coalescing set
+(`requestRefresh` → `e.requests`) and ONLY the pass loop drains it; every
+gate (back-off, agent share, vendor budget, per-conversation floor) is judged
+ONCE per key at drain time by the loop, never by a caller; each key is
+fetched at most once per pass; a timer pass fetching the key anyway carries
+its waiters; every waiter hears its own key's outcome from the drain that
+judged it (fetched / refused by name / the pass's failure) — a refusal
+delivered when it is judged (r6), an `ok` at ITS fetch (r7: the loop takes the
+timer's turn at every fetch boundary and interleaves one requested key with one
+due row, so a request stream never starves the due list; one pass is queued
+per account behind the one in flight, `force` sticky; r8: the requested items
+at the front of a pass are served FIFO across boundaries, humans before agents,
+and a re-request rides the one still queued — one vendor call — so a stream
+never starves the earliest waiter either; r9: every one of these decisions is
+now PURE `src/channel-drain.js` — a step function over a snapshot whose 17
+numbered rules the engine only drives, pinned by a seeded invariant walk —
+"each key at most once per pass" is precisely once per ROUND (a request filed
+during its key's fetch is a new round), a pass with no due row ends after 25
+request fetches in a row so a stream never keeps one pass alive, the agent
+share is judged per fetch, discovery never runs ahead of a waiting human, and
+a requested key with news is broadcast at its fetch, before the answer).
+Ruling for the new shape (the r4 low below is closed by it):
+inside a vendor back-off the owner's explicit press is honoured ONCE per
+back-off window — one real attempt, which may step the exponent once — and
+every further press inside the window is refused with the wait (r9: an item
+whose owner left before its fetch — the press's own 30 s bound — is refused
+too, the press not spent: a vendor call inside a back-off is the owner's press
+alone, never an agent riding it); a window
+opens only when a back-off begins from outside one, so the press's own
+failure extends the window and keeps the press spent (the owner's door
+climbs the ladder at most one step per window; the timer's own retries climb
+the rest). Bounds, all typed: 200 waiters per account (`refresh-queue-full`;
+an agent may hold at most 180 of them — the owner's reserve, r6: an agent's
+storm never refuses the owner's press or a window's open),
+30 s ⇒ `pending` (the waiter leaves the set), `account-changed` on a rebuilt
+or removed account, `stopped` at shutdown; pending requests are in memory —
+a restart drops them and never re-files them. The whole class is pinned as
+ONE table (test-channels-aggregate ⑥f, 70 cells) rather than a leg per
+incident. The closing verify of this shape found two starvations (a
+request storm kept the account busy through every tick, so the timer's due
+list never ran; a request behind a long timer pass waited for the whole
+pass) — both closed: the loop drains the set at every fetch boundary
+(a requested due row is promoted to the next one), and a tick that finds
+the account busy while due hands the timer's turn to the pass in flight
+(⑥g + a drain-once control). Two lows stay: `loadOlder`/`attachment` still call during a
+back-off (owner-only, one call per act); the boot's second "For you"
+failure item.
+
+**Lane R2 verify r4 lows (not fixed), 2026-09-26:**
+- ~~The owner's Refresh press inside a back-off still steps the exponent~~ —
+  RULED AND CLOSED in r5 (one honoured press per back-off window, above).
+- `loadOlder` (scroll-up history) and `attachment` make their vendor call
+  during a back-off; owner-only, one call per human act, budget-bounded, and
+  their failure never counts toward the account's back-off.
+- A restart mid back-off files a SECOND "For you" failure item at the third
+  failure after boot (`speakFailure` overwrites `rec.failureItem`; the first
+  item is never retracted — only the current one is). Pre-r2 behaviour.
+- `routeErrorText` has no words for `vendor-budget` / `refresh-floor` (the
+  owner's press when the minute is spent prints the engine's English sentence);
+  `refresh-floor` never reaches the owner's door.
+- The refresh loop can be starved by back-to-back passes (a kick's `kickAfter`
+  pass starting inside the previous pass's `finally`); with kicks ≥ 3 s apart
+  and the r4 rule (a timer pass that fetches the key ends the wait) it is not
+  reachable in practice; the agent's 15 s race answers `pending` regardless.
+
+**Lane R2 verify lows (not fixed), 2026-09-26 (r3 confirmed and extended):**
+- A hung ladder delivery holds its grain's SCOPE chain (every wake of the
+  account / pattern waits behind it) where it held one conversation's chain
+  before r2. Bounded by the ladder's own waits (a device op times out at 30 s,
+  a local socket write at once); measured with a never-resolving stub: the
+  later wakes wait, nothing is lost. A ladder-side deadline is the ladder's.
+- Reach is widen-only (§8): a pattern grant keeps a conversation visible to
+  its agent after the owner assigns that conversation to ANOTHER agent at the
+  conversation grain — the row says `assigned:false`, the effective assignment
+  is the other agent's, and the wake goes to them. By design; noted.
+- `read --fresh` prints nothing when the refresh is still running after 15 s
+  (`pending`), then reads what is there; `refresh` alone says "still running".
+- The mid-burst grain edit (below) measured: 100 queued wakes, the account
+  grain removed and a pattern grain set 30 ms in ⇒ 7 delivered against a cap
+  of 5 (the wakes already queued on the old chain), the pattern ledger 5.
+- The minute's spender is the pass in flight (`e.chargeBy`): an owner's
+  scroll-up page or attachment fetched WHILE an agent's one-conversation
+  refresh pass runs is counted as the agent's. Conservative (it can only
+  shrink the agent share early), bounded by one pass's length; a per-call
+  spender would need every adapter meter call to carry its caller.
+- A wake queued on an inherited grain's scope chain re-reads its effective
+  assignment when it runs; if the owner moves the conversation to ANOTHER
+  inherited grain in that window, that one wake is paced against the new
+  grain's ledger while holding the old grain's chain (one wake, once, at an
+  assignment edit).
+- r10 (2026-09-26): nine lows, none money-class — parked as backlog B-8e10;
+  report r2-verify-r10.md
+
+**History on demand** — a first ingest takes the newest page only; opening a
+window (`/watch`) makes the conversation hot and fetches it at once if it is
+stale; scrolling past the local log's start calls `POST …/older`, which asks the
+adapter for the page before the oldest stored record (Lark: `end_time` = the
+oldest stored, newest-first; Gmail: a thread's first walk is the whole thread —
+nothing older; declared by `caps.olderHistory`). The records are PREPENDED to the
+log (one rewrite, keeping `(at, vendorId)` order, dedup as always), never enter
+the wake funnel (backfill is not news), and the answer says `exhausted` (the
+vendor has nothing older) / `truncated` (retention will trim it) honestly.
+
+**Attachments and images** —
+`GET /api/channels/:adapterId/:convId/attachment/:id?msg=<vendorId>`: the cache
+first, else the adapter's `fetchAttachment` (charged to the budget), written to
+`data/channels/attachments/<adapterId>/<convId>/`, mode 0600, LRU per account,
+capped by `channels.attachmentBudgetMB` (default 5120). Every response carries
+`X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src
+'none'; sandbox`; everything but an image is `Content-Disposition: attachment`
+(never executed, never rendered in our origin); only png / jpeg / gif / webp may
+be `?inline=1` (svg never — it is script). The window shows images as thumbnails
+(`img.src` to this route; a click opens `showImageOverlay`) and every other
+attachment as a chip (name, size, download). Images and videos inside a Lark rich
+text are now attachments too (`image_key` / `file_key`), and so are Gmail inline
+images without a filename (`cid:`).
+
+**Search** — `GET /api/channels/search?adapter=<id>&q=…`: the local logs, read
+asynchronously in chunks with a byte cap (at most 64 MB scanned, at most 100
+results per query), newest first, `truncated` when the cap was hit — never holding
+the event loop.
+
 ---
 
 ## 7. Assignment, filtering, and the cost of waking somebody
@@ -1233,6 +1540,46 @@ assignment = { principal: { kind:'agent'|'group', id },
   action — a **narrowing** operation smuggled into a model whose stated law
   (§8) is widening-only.
 
+**Three grains, one editor (2026-09-26; the owner: "hand the whole account, or a
+channel / a chat / the chats matching a pattern, to a specific agent").** One
+record `{principal, mode all|filtered, filterId, notify wake|digest, authority
+draft|send, dailyWakeCap, scope:{kind, id}}`, three scopes:
+
+| grain | stored in | entry point |
+|---|---|---|
+| `account` — the whole account | `index.accountAssignments[adapterId]` (one per account) | the account card's ⋯ "Hand to an agent…" |
+| `pattern` — the conversations matching a rule (now and later) | `index.patternAssignments[id]` (many per account, in creation order) | the account card's ⋯ "Conversations matching a rule…" |
+| `conversation` — one conversation | the entry's `assignment` (unchanged) | the row menu "Assign & filter…" |
+
+**Exactly one is in effect**: `effectiveAssignment(conversation) = conversation >
+pattern (the first match in creation order) > account` (PURE,
+`src/channel-filter.js`). Patterns are CONVERSATION-level predicates (a closed set
+apart from §7.1's message-level rules): `participant` (a participant or author
+name contains X — "the chats X is in"), `title` (the title contains a keyword),
+`from-address` (an author's address / id, `@domain` matches the domain), `kind`
+(`dm` | `group` | `thread`), `match: any | every`. A new conversation inherits in
+the **same pass** it is discovered — the decision is taken at read time, so there
+is no backlog to catch up.
+
+**The pace ledger is per ASSIGNMENT, not per conversation**: an account
+assignment spans 800 threads and one 40/day ledger each would be 32 000 wakes a
+day; an inherited assignment's `stats.wakes` live on the assignment record and
+`paceVerdict` reads it. In `digest` mode an inherited assignment delivers **once
+per window**, all of its scope's hits in that window in ONE block
+(`renderScopeDigestBlock`, inside §7.5's byte budget). Before saving, the editor
+shows an **honest estimate**: a bounded read of the matching conversations' logs
+(`sampled` / how many conversations it covered), folded through notify and the
+daily cap into "about N wakes a day".
+
+**Reach follows the assignment and removes only its own rows**: an account
+assignment writes ONE `scope:{kind:'adapter', id}` grant with
+`origin:'assignment'` into `index.accountGrants`; a pattern assignment writes **no
+rows** — its grants are recomputed at read time from the current rule
+(`patternGrantsFor(conversation)`), so un-assigning or editing the rule takes
+effect at once with nothing to clean up; the conversation grain is unchanged.
+Chips: the account card "Handed to <name> · all|filtered · wake|digest";
+inherited rows are dim-labelled "(account)" / "(rule)".
+
 ### 7.4 The wake, and who pays for it
 
 A matched message that wakes an agent is a turn nobody typed. It therefore takes
@@ -1298,6 +1645,15 @@ external party can type those characters; they must not be able to forge a frame
 in an agent's context. This is the prompt-injection twin of the XSS rule, and it
 belongs in the PURE renderer where it can be unit-proved.
 
+An inherited assignment's block says **why it is here**:
+`### Channel message — Lark · <title> (you are assigned the whole account)` /
+`(… a rule: <rule summary>)`; a digest block reads
+`### Channel digest — Lark · N conversations, M messages in the last 30 min`, one
+short section per conversation (title + at most 3 records), and past the budget
+"(K more conversations elided — vibespace-channels list)". An agent that wants
+something newer than push/poll delivered runs `vibespace-channels refresh <conv>`
+(§6.5's floor and budget apply).
+
 ---
 
 ## 8. Visibility (AgentReach)
@@ -1316,6 +1672,14 @@ grant  : { principal:{kind:'agent'|'group', id},
 effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default', grantId }
 ```
 
+- **Three scopes (2026-09-26)**: `conversation` (the entry's `reachEntries`),
+  `adapter` — **which IS the account** (the adapterId is the account id: a kind's
+  first account is `<kind>`, later ones `<kind>:<8 hex>`; two Gmail accounts never
+  mix) — stored in `index.accountGrants`, and the conversation rows a pattern
+  assignment implies, recomputed at read time (`origin:'assignment'`, carrying the
+  `pattern` id, never persisted). `reachFor` / `listFor` / `readFor` MAX over all
+  three; `referencesOf` counts account grants and account/pattern assignments as
+  "still pointing at this account".
 - **Default is `hidden` for everything.** There is no "inherit from the
   platform" — the platform's own ACL says what the *user* may see, never what an
   *agent* may.

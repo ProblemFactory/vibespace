@@ -65,6 +65,10 @@ const HISTORY_MODES = Object.freeze(['page', 'since', 'none']);
 const SEND_IDENTITIES = Object.freeze(['user', 'bot']);
 const IDENTITY_MARKING = Object.freeze(['none', 'marked', 'unknown']);
 const TOS_RISK = Object.freeze(['none', 'stated', 'prohibited']);
+/** 2026-09-26: how an adapter pages BACK past the local log (`older()`), and
+ *  the unit its per-account budget is counted in (`caps.budget.unit`). */
+const OLDER_HISTORY = Object.freeze(['page', 'none']);
+const BUDGET_UNITS = Object.freeze(['request', 'quota-unit']);
 
 /** Which capability each optional method is DECLARED by. A method present
  *  without its declaration is refused at registration; a method CALLED without
@@ -73,6 +77,9 @@ const METHOD_GATES = Object.freeze({
   live: (c) => c.receive === 'push',
   scanHost: (c) => c.receive === 'scan',
   fetchAttachment: (c) => c.attachments === 'fetch',
+  // 2026-09-26: history ON DEMAND past the local log's start (the window's
+  // scroll-up) — declared by `caps.olderHistory: 'page'`
+  older: (c) => c.olderHistory === 'page',
   reconcile: (c) => (c.sendAs || []).length > 0,
   send: (c) => (c.sendAs || []).length > 0,
   listConversations: (c) => c.listConversations !== false,
@@ -92,6 +99,14 @@ function validateCaps(kind, caps) {
   if (!IDENTITY_MARKING.includes(c.identityMarking)) bad(`caps.identityMarking must be one of ${IDENTITY_MARKING.join('|')}`);
   if (!TOS_RISK.includes(c.tosRisk || 'none')) bad(`caps.tosRisk must be one of ${TOS_RISK.join('|')}`);
 
+  if (c.olderHistory !== undefined && !OLDER_HISTORY.includes(c.olderHistory)) bad(`caps.olderHistory must be one of ${OLDER_HISTORY.join('|')}`);
+  if (c.budget !== undefined) {
+    const b = c.budget;
+    if (!b || typeof b !== 'object') bad('caps.budget must be an object {unit, default, settingKey?, metered?}');
+    if (!BUDGET_UNITS.includes(b.unit)) bad(`caps.budget.unit must be one of ${BUDGET_UNITS.join('|')}`);
+    if (!(Number(b.default) > 0)) bad('caps.budget.default must be a positive number (per minute)');
+    if (b.settingKey !== undefined && b.settingKey !== null && !/^channels\.[A-Za-z0-9]+$/.test(String(b.settingKey))) bad('caps.budget.settingKey must be a channels.* setting key');
+  }
   if (c.receive === 'push') {
     if (!c.pushTransport) bad("caps.receive 'push' must declare pushTransport");
     if (!Number.isFinite(Number(c.pushAckBudgetMs))) bad("caps.receive 'push' must declare pushAckBudgetMs (the vendor's own deadline — fence 11 acks AFTER durability)");
@@ -211,6 +226,7 @@ function createChannelRegistry() {
 
     const rawConvCaps = gated('convCaps', impl.convCaps && impl.convCaps.bind(impl));
     const rawHistory = gated('history', impl.history && impl.history.bind(impl));
+    const rawOlder = gated('older', impl.older && impl.older.bind(impl));
 
     return {
       kind, caps, record,
@@ -254,7 +270,24 @@ function createChannelRegistry() {
         if (typeof r.reachedAnchor !== 'boolean') {
           throw new ChannelError('vendor-error', `${kind}.history must report reachedAnchor as a boolean (the store decides whether the cursor may advance)`, { retryable: false });
         }
-        return { records, anchor: r.anchor === undefined ? null : r.anchor, reachedAnchor: r.reachedAnchor, complete: r.complete !== false };
+        // `changed` (2026-09-26): OTHER conversations the vendor says gained
+        // messages (Gmail's history.list names threads) — a HINT the engine
+        // turns into "due now", bounded, never records
+        const changed = Array.isArray(r.changed) ? r.changed.filter((x) => typeof x === 'string' && x).slice(0, 2000) : undefined;
+        return { records, anchor: r.anchor === undefined ? null : r.anchor, reachedAnchor: r.reachedAnchor, complete: r.complete !== false, ...(changed ? { changed } : {}) };
+      },
+      /** HISTORY ON DEMAND (2026-09-26): at most `limit` records strictly
+       *  OLDER than `before` ({at, vendorId}; null = the newest page), plus
+       *  whether the vendor holds nothing older (`exhausted`). Advances
+       *  nothing — the caller prepends them to the log. */
+      async older(convId, opts = {}) {
+        const r = (await rawOlder(convId, opts)) || {};
+        const records = Array.isArray(r.records) ? r.records : [];
+        const limit = Number(opts.limit);
+        if (Number.isFinite(limit) && records.length > limit) {
+          throw new ChannelError('vendor-error', `${kind}.older returned ${records.length} records for limit ${limit} — an adapter never returns records the caller did not ask for`, { retryable: false });
+        }
+        return { records, exhausted: r.exhausted === true };
       },
       send: gated('send', impl.send && impl.send.bind(impl)),
       reconcile: gated('reconcile', impl.reconcile && impl.reconcile.bind(impl)),
@@ -269,5 +302,5 @@ function createChannelRegistry() {
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
-  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES,
+  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS,
 };

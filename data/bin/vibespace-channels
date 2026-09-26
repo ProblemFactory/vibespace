@@ -6,8 +6,10 @@
 // does not exist. `reply` PROPOSES — the channel's policy decides whether the
 // user approves it first; it never sends by itself. The receipt (sent /
 // edited / rejected / expired / failed, and WHO the other side saw) arrives
-// in your next turn unless the user configured a wake. Full manual:
-// vibespace-docs channels.
+// in your next turn unless the user configured a wake. `refresh` asks the
+// channel for the newest messages NOW (2026-09-26) — behind a per-conversation
+// floor and the account's vendor budget, both named when they refuse. Full
+// manual: vibespace-docs channels.
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
@@ -32,7 +34,9 @@ const when = (ms) => (ms ? new Date(Number(ms)).toISOString().replace('T', ' ').
 
 const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (Communication panel)
   vibespace-channels list                          ← conversations visible to you (+ send/policy chips)
-  vibespace-channels read <conv> [--limit N] [--since <ms>]
+  vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
+                                                   ← --fresh = refresh first (floor + budget apply)
+  vibespace-channels refresh <conv>                ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply)
   vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
                                                    ← PROPOSES; prints the policy verdict + proposal id
   vibespace-channels status [<proposalId>]         ← your proposals and their receipts
@@ -62,7 +66,7 @@ function printProposal(p, { full = false } = {}) {
     if (!rows.length) { console.log('no channel conversations are visible to you right now (ask the user to grant reach, or to assign you one).'); return; }
     for (const c of rows) {
       const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
-      if (c.assigned) chips.push(`assigned to you (${c.authority})`);
+      if (c.assigned) chips.push(`assigned to you${c.assignedVia && c.assignedVia !== 'conversation' ? ` via the ${c.assignedVia === 'account' ? 'whole account' : 'rule'}` : ''} (${c.authority})`);
       if (c.unread) chips.push(`${c.unread} unread`);
       if (c.awaiting) chips.push(`${c.awaiting} of your proposals awaiting approval`);
       console.log(`${c.key}  — ${c.title}  [${c.adapter}]`);
@@ -71,16 +75,52 @@ function printProposal(p, { full = false } = {}) {
     console.log('\nread: vibespace-channels read <conv>   propose a reply: vibespace-channels reply <conv> "..."');
     return;
   }
+  // THE AGENT'S REFRESH (2026-09-26): reach first, then the per-conversation
+  // floor, then the account's vendor budget — a refusal prints its number and
+  // the wait and exits 4 (a refusal, not an error: read what is there).
+  // THE REFUSED SET (r7): every code the refresh route answers with a
+  // retry-able status — 429 (the floor, the share / budget, a vendor back-off,
+  // the account's full request set), 409 account-changed, 503 stopped — is a
+  // refusal with its sentence, never an error (r6 measured exit 1 on
+  // account-changed / stopped: "error" for "retry in a moment"). The
+  // test-channels-agent-cli census keeps this list equal to the route's.
+  const REFRESH_REFUSED = ['refresh-floor', 'refresh-queue-full', 'vendor-budget', 'backoff', 'account-changed', 'stopped'];
+  const refreshConv = async (conv) => {
+    const i = conv.indexOf('/');
+    if (i <= 0) { console.error('<conv> is <adapter>/<conversation id>, as vibespace-channels list prints it'); process.exit(1); }
+    const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
+    if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
+    let j = {}; try { j = await res.json(); } catch { }
+    if (REFRESH_REFUSED.includes(j.code)) return { refused: true, ...j };   // r5: a full request set is a refusal with its wait, like the others; r7: an account that changed while the refresh waited, the engine stopping
+    if (j.error) { console.error(j.error + (j.code ? ' [' + j.code + ']' : '')); process.exit(1); }
+    return j;
+  };
+  if (verb === 'refresh') {
+    const conv = args[1];
+    if (!conv) { console.error('usage: vibespace-channels refresh <conv>'); process.exit(1); }
+    const r = await refreshConv(conv);
+    if (r.refused) { console.log(`not refreshed: ${r.error}${r.retryAfterSec ? ` (retry in ${r.retryAfterSec} s)` : ''}`); process.exit(4); }
+    console.log(r.pending ? `refresh started for ${conv} — still running; read it in a moment` : `refreshed ${conv}: ${r.appended || 0} new message(s)${r.polledAt ? ` · fetched ${when(r.polledAt)}` : ''}`);
+    return;
+  }
   if (verb === 'read') {
     const conv = args[1];
-    if (!conv) { console.error('usage: vibespace-channels read <conv> [--limit N] [--since <ms>]'); process.exit(1); }
+    if (!conv) { console.error('usage: vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]'); process.exit(1); }
+    if (args.includes('--fresh')) {
+      const r = await refreshConv(conv);
+      if (r.refused) console.log(`(not refreshed: ${r.error})`);
+      else if (!r.pending) console.log(`(refreshed: ${r.appended || 0} new)`);
+    }
     const q = new URLSearchParams({ conv });
     if (flag('--limit')) q.set('limit', flag('--limit'));
     if (flag('--since')) q.set('since', flag('--since'));
     const r = await call('GET', '/api/agent/channels/read?' + q);
     const recs = r.records || [];
-    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.tracked ? '' : ' (not tracked: nothing is fetched for it)'} · ${recs.length} message(s)`);
-    for (const m of recs) console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}`);
+    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)`);
+    for (const m of recs) {
+      console.log(`[${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, '\n    ')}${m.vendorId ? `  (id ${m.vendorId})` : ''}`);
+      for (const a of (m.attachments || [])) console.log(`    attachment: ${a.name || a.id}${a.mime ? ` (${a.mime})` : ''}${Number(a.bytes) > 0 ? `, ${a.bytes} bytes` : ''}`);
+    }
     return;
   }
   if (verb === 'reply') {

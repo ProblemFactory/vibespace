@@ -188,6 +188,26 @@ One-shot tasks that reached a terminal state are triaged (2026-09-14, docs/desig
 | `jobs.archiveDoneAfterHours` | number | `24` | A successfully finished one-shot leaves the live list this many hours after it ended. `0` = never |
 | `jobs.archiveFailedAfterDays` | number | `7` | A failed / missed / interrupted / unverified one-shot leaves the list this many days after somebody **acknowledged** it; an unacknowledged failure is never archived. `0` = never |
 
+### Channels
+
+A linked Lark or Gmail account is an aggregated IM (2026-09-26, docs/design-communication-panel §5 invariant 6 / §6.2 / §6.5): every conversation in the account's scope is listed and fetched, each on its own refresh time — **hot** (open in a window, or a message in the last hour), **warm** (a message in the last day), **cold** (everything else, at most 15 minutes). A conversation's row menu (Refresh every ▸) overrides its time: 30 s / 1 min / 5 min / 15 min / Paused / Automatic. Every number below applies live, at the next tick. A number typed outside a row's range is kept at its nearest bound and a toast says so (every number setting, since lane R2 verify); a value stored out of range by hand is used clamped and logged once (`[channels] setting … is above its maximum …`).
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `channels.pollHotSec` | number | `30` | Refresh a busy (hot) conversation every N seconds (10–300; the vendor's own minimum still applies — Gmail 30 s) |
+| `channels.pollWarmSec` | number | `300` | Refresh a recent (warm) conversation every N seconds (30–900) |
+| `channels.pollColdSec` | number | `900` | Refresh every other conversation every N seconds (60–900; 900 is also the maximum any conversation waits, the conversation-list re-read and the safety-net cadence while push carries messages) |
+| `channels.hotRecentMinutes` | number | `60` | A conversation stays busy this many minutes after a message |
+| `channels.warmRecentHours` | number | `24` | A conversation stays recent this many hours after a message |
+| `channels.agentRefreshFloorSec` | number | `20` | `vibespace-channels refresh` is refused, with the wait, when the conversation was fetched less than this long ago (by anyone) |
+| `channels.agentBudgetSharePct` | number | `25` | Agent refreshes together may spend at most this % of an account's per-minute vendor budget (5–100; 100 = no separate limit) — past it an agent's refresh is refused with the wait, so the conversations you watch keep their cadence |
+| `channels.historyPageSize` | number | `50` | A new conversation is fetched one page deep; older pages load when you scroll up (10–200; Lark serves at most 50 per request) |
+| `channels.attachmentBudgetMB` | number | `5120` | Attachment cache per account; least recently opened files go first (64–102400). Files are 0600 and never executed |
+| `channels.budgetLarkPerMin` | number | `60` | Lark requests per minute per account (Lark allows 1000/min per API for the whole app); a spent budget waits for the next minute and the account card says so with the numbers |
+| `channels.budgetGmailPerMin` | number | `3000` | Gmail quota units per minute per account (Gmail allows 6000 per user; a thread read costs 40, a change check 2) |
+
+The other Channels settings (push coalescing, the outbox guards, off-hours, the sender line) are in Settings → Channels with their own descriptions.
+
 ### Spending
 
 Every turn VibeSpace starts **without you** — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications, messages from another session, a Codex reset credit — passes ONE authorizer with the ceilings below. Turns *you* type are never counted. The counters are per **credential slot** (the account a turn will actually bill, so nine conversations parked on one subscription share one budget) and they are **persisted** in `data/spend-budget.json`: a release restart no longer hands the automatic spenders a fresh hour. A refusal is journalled and filed in the "For you" inbox, and nothing is lost — a notification that cannot be delivered live is injected into that conversation's next turn instead.

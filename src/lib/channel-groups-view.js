@@ -7,11 +7,11 @@
 // spelled ONCE (src/channel-groups.js) and never again here.
 //
 // What lives here, one rule each:
-//   groupListRows   — the first screen: every agent group + every TRACKED
-//                     conversation of a non-built-in source, sorted by last
-//                     activity; archived groups apart. An untracked external
-//                     conversation has no history to show, so it stays in the
-//                     Accounts section (its Track verb lives there).
+//   groupListRows   — the first screen: every agent group + EVERY conversation
+//                     of a linked account (2026-09-26: an aggregated IM, no
+//                     track step), sorted by last activity; archived groups
+//                     apart; a conversation the vendor no longer lists stays
+//                     in its account's section only.
 //   composerMode    — what the window's composer IS for a conversation: a group
 //                     = direct as You; an external source = direct as You when
 //                     `sendAsUser` is offered, the proposal path when only the
@@ -44,9 +44,11 @@ const byActivity = (a, b) => (num(b.lastAt) - num(a.lastAt)) || String(a.title).
  * `channel-groups-updated` broadcast's list), `conversations` + `adapters` =
  * the channels digest. Returns `{rows, archived}` — each row
  * `{kind:'group'|'conv', key, id, title, lastAt, lastText, unread, …}`.
- * A conversation joins the list only when it is TRACKED and its adapter is not
- * the built-in one (the built-in Agents adapter lists live SESSIONS as sources
- * — the owner's "message watcher", a secondary section, §22.1).
+ * EVERY conversation of a linked account joins the list (2026-09-26: an
+ * account is an aggregated IM — there is no track step) unless the vendor no
+ * longer lists it (`unlisted`: a Gmail scope change, a chat the user left);
+ * the built-in Agents adapter's rows stay out (it lists live SESSIONS as
+ * sources — the owner's "message watcher", a secondary section, §22.1).
  */
 export function groupListRows({ groups = [], conversations = [], adapters = [] } = {}) {
   const rows = [], archived = [];
@@ -62,7 +64,7 @@ export function groupListRows({ groups = [], conversations = [], adapters = [] }
   }
   const adapterById = new Map((adapters || []).map((a) => [a.id, a]));
   for (const c of conversations || []) {
-    if (!c || !c.tracked) continue;
+    if (!c || c.unlisted) continue;
     const a = adapterById.get(c.adapterId);
     if (!a || a.builtin) continue;
     rows.push({
@@ -86,8 +88,8 @@ export function groupListRows({ groups = [], conversations = [], adapters = [] }
  *   'propose'    only the bot identity is offered: a message would not be
  *                the owner speaking, so it goes through the proposal path;
  *                `why` = why sending as the user is not offered
- *   'untracked'  nothing fetched, nothing known
- *   'readonly'   `why` = the capability row's reason
+ *   'readonly'   `why` = the capability row's reason (2026-09-26: there is
+ *                no 'untracked' mode — every conversation is fetched)
  */
 export function composerMode({ group = null, conv = null } = {}) {
   if (group) return group.archivedAt ? { mode: 'archived' } : { mode: 'group' };
@@ -96,7 +98,6 @@ export function composerMode({ group = null, conv = null } = {}) {
   const u = o.sendAsUser || {}, b = o.sendAsBot || {};
   if (u.offered) return { mode: 'direct' };
   if (b.offered) return { mode: 'propose', why: u.why || 'unknown' };
-  if (!conv.tracked) return { mode: 'untracked' };
   return { mode: 'readonly', why: u.why || 'unknown' };
 }
 

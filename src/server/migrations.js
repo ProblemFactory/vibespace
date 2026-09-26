@@ -316,6 +316,34 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-channels-aggregated-im',
+      note: "a linked channel account is an AGGREGATED IM (owner ruling 2026-09-26, docs/design-communication-panel.zh.md §5 invariant 6 as rewritten): there is no `tracked` step any more — every conversation of a linked account is fetched, on a per-conversation cadence (hot 30 s / warm 5 min / cold 15 min by activity, or the owner's override). So, through the engine's own serialized door: every conversation the owner had TRACKED keeps being polled fast — `refresh.every = 30` stamped `by:'migration'` (visible and editable as its \"Refresh every ▸\"; 'tracked ⇒ hot'); a conversation that was never ingested gets its backlog marked READ (`readAt` = now), so the upgrade does not open on thousands of unread messages from before; the `tracked` field is removed everywhere; every account is stamped `linkedAt` (unread counts start there). Assignments, filters, reach grants and anchors are untouched. Idempotent: a second run finds nothing tracked and stamps nothing.",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.migrateAggregated !== 'function') {
+          // No engine on this boot: an index still carrying `tracked` makes the
+          // run FAIL by name so a boot with an engine retries it (a recorded
+          // no-op would leave the rows with a gate nothing reads).
+          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')); } catch { return; }
+          const pending = Object.values((doc && doc.conversations) || {}).filter((e) => e && 'tracked' in e).length;
+          if (pending) throw new Error(`no channels engine to migrate ${pending} conversation(s) off the retired tracked flag — retried on a boot that has one`);
+          return;
+        }
+        // The shared runner is synchronous; the engine computes its plan NOW
+        // from the live index (so these counts ARE the rows it changes) and
+        // queues exactly that plan through its serialized door, first in line.
+        // A store that refuses writes THROWS here — a FAILED run, retried next
+        // boot, never a recorded success whose edits were refused (lane R2
+        // verify, 2026-09-26: the report was filled a microtask late and the
+        // boot line said zeros on every instance).
+        const rep = eng.migrateAggregated();
+        rep.write.catch((err) => console.error(`[migrate] channels-aggregated-im: the queued write failed after the plan was counted (${(err && err.message) || err}) — the rows keep \`tracked\` until a boot with a writable store; discovery clears the field and they are then cadenced by activity`));
+        const counts = { hot: rep.hot.length, readStamped: rep.readStamped, cleared: rep.cleared, linked: rep.linked };
+        console.log('[migrate] channels-aggregated-im:', JSON.stringify(counts));
+        return { hot: counts.hot, readStamped: counts.readStamped, cleared: counts.cleared, linked: counts.linked.length };
+      },
+    },
+    {
       id: '2026-09-spend-notices-expire',
       note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
       run() {

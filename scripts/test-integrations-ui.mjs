@@ -32,7 +32,7 @@
 //      (b) the dialog is TYPE-FIRST; Gmail's `OAuth client` preselects
 //          presets[0] (`Preset: Org 1`), lists `Custom (own client
 //          id/secret)` and no Built-in, the registry hint under it, the
-//          `Google authorization` block, the include query;
+//          `Google authorization` block, the Mailbox scope (Inbox by default);
 //      (c) Lark with no preset preselects Custom: `Custom App ID` / `Custom
 //          App Secret` inline, the callback URL as a read-only row whose Copy
 //          copies EXACTLY the registry's URL, the three prerequisites;
@@ -41,9 +41,10 @@
 //          still nothing created; (f) `Connect` creates the record under the
 //          chosen preset;
 //      (g) the credential-first card: name, `Preset: …` chip, the HEALTH line
-//          (`[Gmail] Connected · label:INBOX · last poll …`), ✎ and ⋯; an
-//          account tracking nothing says `Login only — …` with Track… and an
-//          idle dot; (h) Track… ⇒ ↳ rows, the note gone, the dot ok;
+//          (`[Gmail] Connected · Inbox · polling · 3 conversations · last
+//          sync …`), ✎ and ⋯; (h) 2026-09-26 (aggregated IM): EVERY
+//          conversation is a ↳ row with no track step, the dot ok, and a
+//          refresh override repaints page 2 in place;
 //      (i) the ⋯ order is EXACTLY D6;
 //      (j) Edit is prefilled, carries Re-authorize · Duplicate · Remove ·
 //          Save in that order, and switching the client makes Save open
@@ -51,7 +52,7 @@
 //      (k) Duplicate: `{name} (copy)`, the type read-only, client / query /
 //          push claim copied, the copied / not-copied paragraph, its OWN
 //          consent; the copy exists unauthorized (token NOT copied, nothing
-//          tracked) before that consent lands; switched to a custom client it
+//          assigned) before that consent lands; switched to a custom client it
 //          becomes a sibling card with `Custom client`;
 //      (l) a dead refresh token (the stub answers invalid_grant) draws the
 //          storage error line with the mounts' sentence + `(refresh-refused)`
@@ -461,12 +462,12 @@ const p2 = await newPage();
     const hint = client && client.nextElementSibling;
     const block = [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none');
     const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && i.type !== 'hidden');
-    return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], hint: hint && hint.className === 'mounts-field-hint' ? hint.textContent : null, block: block ? block.querySelector('button').textContent : null, blocks: d.querySelectorAll('.mounts-drive-connect').length, query: (inputs.find((i) => i.value === 'label:INBOX') || {}).value || null, submit: d.querySelector('.dialog-actions .btn-create').textContent };
+    return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], hint: hint && hint.className === 'mounts-field-hint' ? hint.textContent : null, block: block ? block.querySelector('button').textContent : null, blocks: d.querySelectorAll('.mounts-drive-connect').length, query: (inputs.find((i) => i.value === 'label:INBOX') || {}).value || null, scope: ([...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'inbox')) || {}).value || null, submit: d.querySelector('.dialog-actions .btn-create').textContent };
   })()`);
-  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Include query']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the include query (${JSON.stringify(gm.labels)})`);
+  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) (${JSON.stringify(gm.labels)})`);
   ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + Custom, no Built-in (${JSON.stringify(gm)})`);
   ok(gm.hint === R.rowById('gmail').clientHint, 'the registry\'s clientHint is the .mounts-field-hint line under the select');
-  ok(gm.block === 'Connect Google' && gm.query === 'label:INBOX' && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the include query, and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, query: gm.query, submit: gm.submit })})`);
+  ok(gm.block === 'Connect Google' && gm.scope === 'inbox' && gm.query === null && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the Mailbox scope on Inbox (the query field hidden), and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, scope: gm.scope, query: gm.query, submit: gm.submit })})`);
   await p1.probe('connect dialog (Gmail, preset)', '#mounts-dialog-overlay .dialog');
   await p1.evaljs(`(() => { const c = [...${DLG('connect')}.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.dataset.probe = 'client'; return 1; })()`);
   await p1.probe('the OAuth client select', '[data-probe="client"]');
@@ -528,36 +529,36 @@ const p2 = await newPage();
   ok(accts.length === 1 && A.kind === 'gmail' && A.credentialKey === 'cluster:org1' && A.auth.tokenHeld && A.auth.user === 'ada@example.test', `Connect CREATED the account under the chosen preset, signed in as the stub's user (${JSON.stringify(accts.map((a) => ({ id: a.id, key: a.credentialKey, user: a.auth.user })))})`);
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('#mounts-dialog-overlay')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'and closed the dialog');
 
-  // (g) the credential-first card; login-only
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!(c && c.querySelector('.chan-sec-health') && /last poll/.test(c.querySelector('.chan-sec-health').textContent) && c.querySelector('.chan-sec-empty')); }`)), 'the account card is drawn with its health line after its first pass');
-  const c0 = await p1.evaljs(`(() => { const c = ${card(A.id)}; const h = c.querySelector('.chan-sec-head'); return { name: h.querySelector('.chan-sec-name').textContent, chip: (h.querySelector('.chan-cred-chip') || {}).textContent, dot: h.querySelector('.chan-dot').dataset.state, edit: !!h.querySelector('.mounts-icon-btn'), more: !!h.querySelector('.chan-sec-more'), tag: c.querySelector('.chan-sec-health .mounts-typetag').textContent, health: c.querySelector('.chan-sec-health-text').textContent, empty: c.querySelector('.chan-sec-empty').textContent, track: (c.querySelector('.chan-sec-empty button') || {}).textContent, rows: c.querySelectorAll('.chan-row').length }; })()`);
+  // (g) the credential-first card (2026-09-26, the aggregated IM: a linked account IS its conversations)
+  ok(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!(c && c.querySelector('.chan-sec-health') && /last sync/.test(c.querySelector('.chan-sec-health').textContent) && c.querySelectorAll('.chan-row').length === 3); }`)), 'the account card is drawn with its health line and its conversations after its first pass');
+  const c0 = await p1.evaljs(`(() => { const c = ${card(A.id)}; const h = c.querySelector('.chan-sec-head'); return { name: h.querySelector('.chan-sec-name').textContent, chip: (h.querySelector('.chan-cred-chip') || {}).textContent, dot: h.querySelector('.chan-dot').dataset.state, edit: !!h.querySelector('.mounts-icon-btn'), more: !!h.querySelector('.chan-sec-more'), tag: c.querySelector('.chan-sec-health .mounts-typetag').textContent, health: c.querySelector('.chan-sec-health-text').textContent, empty: !!c.querySelector('.chan-sec-empty'), rows: c.querySelectorAll('.chan-row').length }; })()`);
   ok(c0.name === 'Gmail · ada@example.test' && c0.chip === 'Preset: Org 1' && c0.edit && c0.more, `the head: name + login, the client chip "Preset: Org 1", ✎ and ⋯ (${JSON.stringify(c0)})`);
-  ok(c0.tag === 'Gmail' && /^Connected · label:INBOX · last poll /.test(c0.health), `the HEALTH line in the storage detail-line grammar: [Gmail] Connected · label:INBOX · last poll … (${c0.health})`);
-  ok(/^Login only — no conversation tracked yet/.test(c0.empty) && c0.track === 'Track…' && c0.dot === 'idle' && c0.rows === 0, `tracking nothing: the "Login only — …" wording + Track…, an idle dot, no rows (${JSON.stringify({ empty: c0.empty.slice(0, 40), dot: c0.dot })})`);
+  ok(c0.tag === 'Gmail' && /^Connected · Inbox · polling · 3 conversations( · \d+ unread)? · last sync /.test(c0.health), `the HEALTH line in the storage detail-line grammar: [Gmail] Connected · Inbox · polling · 3 conversations · last sync … (${c0.health})`);
+  ok(!c0.empty && c0.rows === 3 && c0.dot === 'ok', `no track step: every conversation of the account is a row at once, no login-only note, an ok dot (${JSON.stringify({ rows: c0.rows, dot: c0.dot })})`);
   await p1.probe('the card head', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-sec-head`);
   await p1.probe('the health line', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-sec-health`);
-  await p1.probe('the login-only note', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-sec-empty`);
 
   // (o) page 2 watches the accounts IN PLACE from here on
   ok(await p2.load() && await p2.evaljs(panelWait(`() => !!${card(A.id)}`)), 'page 2 opened the panel and sees the account');
   await p2.evaljs(`(() => { window.__marker = 'p2-alive'; window.__chanFetches = 0; const of = window.fetch; window.fetch = function (u, ...r) { if (/^\\/api\\/channels(\\?|$)/.test(String(u))) window.__chanFetches++; return of.call(this, u, ...r); }; return 1; })()`);
 
-  // (h) Track… ⇒ ↳ rows
-  await p1.evaljs(`${card(A.id)}.querySelector('.chan-sec-empty button').click(); 1`);
-  const picker = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const items = document.querySelectorAll('#chan-track-dialog .chan-track-item input[type="checkbox"]'); if (items.length >= 2) { items[0].click(); await new Promise((r) => setTimeout(r, 300)); items[1].click(); await new Promise((r) => setTimeout(r, 300)); return items.length; } await new Promise((r) => setTimeout(r, 100)); } return 0; })()`);
-  ok(picker === 3, `Track… opens today's picker over the account's conversations (${picker} listed) and two are ticked`);
-  await p1.evaljs(`(() => { const d = document.querySelector('#chan-track-dialog'); const b = [...d.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Done'); b.click(); return 1; })()`);
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!c && c.querySelectorAll('.chan-row.chan-row-tracked').length === 2 && !c.querySelector('.chan-sec-empty'); }`)), 'the two tracked conversations render as the account\'s CHILD rows; the login-only note is gone');
-  const rows = await p1.evaljs(`(() => { const c = ${card(A.id)}; return { arrows: [...c.querySelectorAll('.chan-row-tracked .chan-row-line > .mounts-child-arrow')].map((a) => a.textContent), dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state, count: c.querySelector('.chan-sec-count').textContent }; })()`);
-  ok(rows.arrows.join('') === '↳↳' && rows.dot === 'ok' && rows.count === '2/3', `each child row leads with the storage ↳ arrow; the dot is ok; the count reads 2/3 (${JSON.stringify(rows)})`);
-  await p1.probe('the ↳ tracked rows', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-rows`);
-  const p2rows = await p2.evaljs(panelWait(`() => { const c = ${card(A.id)}; return !!c && c.querySelectorAll('.chan-row-tracked').length === 2; }`));
+  // (h) every conversation is a ↳ CHILD row; a refresh override repaints page 2 in place
+  const rows = await p1.evaljs(`(() => { const c = ${card(A.id)}; return { arrows: [...c.querySelectorAll('.chan-row-child .chan-row-line > .mounts-child-arrow')].map((a) => a.textContent), dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state, count: c.querySelector('.chan-sec-count').textContent }; })()`);
+  ok(rows.arrows.join('') === '↳↳↳' && rows.dot === 'ok' && rows.count === '3', `each child row leads with the storage ↳ arrow; the dot is ok; the count reads 3 (${JSON.stringify(rows)})`);
+  await p1.probe('the ↳ conversation rows', `.rail-panel-channels .chan-account[data-adapter="${A.id}"] .chan-rows`);
+  const firstConv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
+  const chipOfConv = `(() => { const r = document.querySelector('.rail-panel-channels .chan-row[data-conv="${A.id}/' + ${JSON.stringify(firstConv.id)} + '"]'); const c = r && r.querySelector('.chan-row-line .chan-chip'); return c ? c.textContent + '|' + (r.title || '') : null; })()`;
+  const chipBefore = await p2.evaljs(chipOfConv);
+  const ov = await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(firstConv.id)}/refresh`, { every: 'paused' });
+  ok(ov.status === 200, `FIXTURE: one conversation's refresh is paused (${ov.status})`);
+  const p2rows = await p2.evaljs(panelWait(`() => { const v = ${chipOfConv}; return !!v && v !== ${JSON.stringify(chipBefore)}; }`));
   const p2state = await p2.evaljs(`({ marker: window.__marker, fetches: window.__chanFetches })`);
-  ok(p2rows && p2state.marker === 'p2-alive' && p2state.fetches === 0, `page 2 repainted the card IN PLACE from the broadcast — no reload, no /api/channels fetch (${JSON.stringify(p2state)})`);
+  ok(p2rows && p2state.marker === 'p2-alive' && p2state.fetches === 0, `page 2 repainted the row's freshness pill IN PLACE from the broadcast — no reload, no /api/channels fetch (${JSON.stringify(p2state)})`);
+  await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(firstConv.id)}/refresh`, { every: null });
 
   // (i) the ⋯ order = D6
   const menu = await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const m = document.querySelector('.context-menu'); const items = m ? [...m.children].map((e) => e.classList.contains('context-menu-separator') ? '‖' : e.textContent.trim()) : []; if (m) m.remove(); return items; })()`);
-  const D6 = ['Open conversation window', 'Track…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
+  const D6 = ['Open conversation window', 'Search messages…', 'Hand to an agent…', 'Conversations matching a rule…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
   ok(JSON.stringify(menu) === JSON.stringify(D6), `the ⋯ is the storage row's order, EXACTLY D6 (${menu.join(' · ')})`);
 
   // (j) Edit: prefilled, the four buttons in order, switching the client ⇒ Save opens Re-authorize
@@ -589,7 +590,7 @@ const p2 = await newPage();
   const copyRec = (await accounts()).find((a) => a.id !== A.id);
   ok(!!copyRec && copyRec.auth.tokenHeld === false && copyRec.label === 'Gmail (copy)' && copyRec.options.query === A.options.query, `the COPY exists unauthorized — the token is NOT copied, the settings are (${JSON.stringify(copyRec && { id: copyRec.id, tokenHeld: copyRec.auth.tokenHeld, query: copyRec.options.query })})`);
   const idx = (await api('GET', '/api/channels')).json.conversations.filter((c) => c.adapterId === (copyRec && copyRec.id));
-  ok(idx.every((c) => !c.tracked && !c.assignment), 'nothing tracked or assigned on the copy');
+  ok(idx.every((c) => !c.assignment), 'nothing assigned on the copy');
   ok(!!url2 && new URL(url2).searchParams.get('client_id') === CUSTOM_ID, `its OWN consent runs under the custom client it was switched to (client_id ${url2 && new URL(url2).searchParams.get('client_id')})`);
   ok((await followConsent(url2)) === 200, 'the copy\'s redirect lands on the loopback');
   const dupSigned = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = ${DLG('duplicate')}.querySelector('.mounts-drive-connect .mounts-field-hint').textContent; if (/Connected/.test(s)) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
@@ -630,9 +631,9 @@ const p2 = await newPage();
   await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
 
   // (n) Remove: refused BY NAME while referenced; an unreferenced account goes
-  const conv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id && c.tracked);
+  const conv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
   const asg = await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(conv.id)}/assignment`, { assignment: { principal: { kind: 'agent', id: 'agent-7', name: 'Procurement agent' }, mode: 'all' } });
-  ok(asg.status === 200, 'FIXTURE: one tracked conversation of the first account is assigned to an agent');
+  ok(asg.status === 200, 'FIXTURE: one conversation of the first account is assigned to an agent');
   const confirmNewest = `(async () => { for (let i = 0; i < 40; i++) { const b = [...document.querySelectorAll('.dialog-overlay .dialog-footer .btn-create')].pop(); if (b) { b.click(); return true; } await new Promise((r) => setTimeout(r, 50)); } return false; })()`;
   await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Remove…').click(); return 1; })()`);
   ok(await p1.evaljs(confirmNewest), 'Remove… asks first (the confirm dialog)');

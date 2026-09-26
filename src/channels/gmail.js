@@ -93,8 +93,16 @@ const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'g
  *  dictionaries carry zh + ja. The marker is the identity. */
 const i18nKey = (s) => s;
 const OPTIONS = Object.freeze([
-  { key: 'query', label: i18nKey('Include query'), default: 'label:INBOX', placeholder: 'label:INBOX', maxLength: 500,
-    help: i18nKey('A Gmail search query; only threads matching it become conversations. Everything else never appears here.') },
+  // THE MAILBOX SCOPE (2026-09-26, the aggregated IM): INBOX by default; all
+  // mail, chosen labels or a free search query per account. `query` stays
+  // the advanced form (and what a pre-scope record carries).
+  { key: 'scope', label: i18nKey('Mailbox'), default: 'inbox', choices: ['inbox', 'all', 'labels', 'query'],
+    choiceLabels: { inbox: i18nKey('Inbox'), all: i18nKey('All mail (not spam or trash)'), labels: i18nKey('These labels'), query: i18nKey('A search query') },
+    help: i18nKey('Which threads become conversations. Inbox is the default; "These labels" reads the label list below, "A search query" the query below.') },
+  { key: 'labels', label: i18nKey('Labels'), default: '', placeholder: 'Work, Receipts', maxLength: 500, usedWhen: { scope: ['labels'] },
+    help: i18nKey('Comma-separated Gmail label names — used when the mailbox is "These labels".') },
+  { key: 'query', label: i18nKey('Include query'), default: 'label:INBOX', placeholder: 'label:INBOX', maxLength: 500, usedWhen: { scope: ['query'] },
+    help: i18nKey('A Gmail search query; only threads matching it become conversations. Used when the mailbox is "A search query".') },
   // THE PUSH LANE'S TWO RESOURCE NAMES (decision 20). `relive:true`: a change
   // restarts the LANE (single-use), never the adapter — the mailbox cursor is
   // untouched.
@@ -138,8 +146,72 @@ const caps = Object.freeze({
   threading: 'reply-to',
   editSent: false,
   readReceipts: false,
-  attachments: 'metadata',
+  // 2026-09-26 (the aggregated IM): attachments FETCHED on demand
+  // (`messages.get` → the part → `attachments.get`), no "older" paging (a
+  // thread's first walk is the whole thread), and every request METERED in
+  // Gmail's quota units against the account's budget (6000 units/min per
+  // user is the vendor's cap; the default 3000 leaves the other half)
+  attachments: 'fetch',
+  olderHistory: 'none',
+  budget: { unit: 'quota-unit', default: 3000, settingKey: 'channels.budgetGmailPerMin', metered: true },
 });
+
+/** THE QUOTA COST of one Gmail API call (units, the vendor's published table
+ *  as read 2026-09-26: getProfile 1, history.list 2, threads.list 10,
+ *  threads.get 40, messages.get 20, messages.list 5, attachments.get 20,
+ *  drafts.create 10, drafts.send 100, drafts.get 20, drafts.list 5,
+ *  drafts.delete 10, watch 100, labels.list 1). PURE. */
+function unitsFor(pathq, method = 'GET') {
+  const m = String(method || 'GET').toUpperCase();
+  const pth = String(pathq || '').split('?')[0];
+  if (pth === '/profile') return 1;
+  if (pth === '/history') return 2;
+  if (pth === '/threads') return 10;
+  if (pth.startsWith('/threads/')) return 40;
+  if (/^\/messages\/[^/]+\/attachments\//.test(pth)) return 20;
+  if (pth.startsWith('/messages/')) return 20;
+  if (pth === '/messages') return 5;
+  if (pth === '/drafts/send') return 100;
+  if (pth === '/drafts') return m === 'POST' ? 10 : 5;
+  if (pth.startsWith('/drafts/')) return m === 'DELETE' ? 10 : 20;
+  if (pth === '/watch') return 100;
+  if (pth === '/stop') return 50;
+  if (pth.startsWith('/labels')) return 1;
+  return 10;
+}
+/** The scope a record is REALLY read with: a custom query on a record whose
+ *  scope is unset or the default (a pre-scope record, an API write) is the
+ *  query scope — the panel and the Edit dialog read THIS, so the health line
+ *  never says "Inbox" over a mailbox read by a query. */
+function scopeOf(options) {
+  const o = options || {};
+  const q = String(o.query || '').trim();
+  const custom = !!q && q !== 'label:INBOX';
+  return !o.scope || o.scope === 'inbox' ? (custom ? 'query' : 'inbox') : o.scope;
+}
+/** The options as they are APPLIED (the engine's view calls this when an
+ *  adapter declares it) — declared keys only, the scope made explicit. */
+function effectiveOptions(options) {
+  return { ...(options || {}), scope: scopeOf(options) };
+}
+/** The include query a record's options DESCRIBE (PURE): the mailbox scope
+ *  first — `all` / `labels` / `query` as chosen; the DEFAULT scope (`inbox`,
+ *  which every record carries once created) yields to a custom query, so a
+ *  record from before the scope option (or an API caller that sets only
+ *  `query`) keeps its own query. The dialog restores the query's default
+ *  when the owner picks Inbox. */
+function queryOf(options) {
+  const o = options || {};
+  const q = String(o.query || '').trim();
+  const scope = scopeOf(o);
+  if (scope === 'all') return 'in:anywhere -in:spam -in:trash';
+  if (scope === 'labels') {
+    const ls = String(o.labels || '').split(',').map((x) => x.trim()).filter(Boolean).map((x) => x.replace(/\s+/g, '-').replace(/["()]/g, ''));
+    return ls.length ? (ls.length === 1 ? `label:${ls[0]}` : `{${ls.map((x) => `label:${x}`).join(' ')}}`) : 'label:INBOX';
+  }
+  if (scope === 'query') return q || 'label:INBOX';
+  return 'label:INBOX';
+}
 
 // ── the vendor's message shape → ONE plain-text record ──────────────────
 function b64url(data) {
@@ -174,8 +246,14 @@ function walkParts(payload) {
     if (!p || typeof p !== 'object') return;
     const mime = String(p.mimeType || '').toLowerCase();
     const body = p.body || {};
+    // 2026-09-26: an attachment's id is `part:<partId>` — short and stable
+    // (a Gmail attachmentId runs past the record's 256-char bound, and it
+    // is re-minted per fetch); `fetchAttachment` finds the part again. An
+    // INLINE image with no filename (a `cid:` picture) is an attachment too.
     if (p.filename) {
-      out.attachments.push({ id: String(body.attachmentId || p.partId || p.filename), name: String(p.filename), bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime: mime || null });
+      out.attachments.push({ id: p.partId != null && p.partId !== '' ? `part:${p.partId}` : String(body.attachmentId || p.filename), name: String(p.filename), bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime: mime || null });
+    } else if (mime.startsWith('image/') && (body.attachmentId || body.data) && p.partId != null && p.partId !== '') {
+      out.attachments.push({ id: `part:${p.partId}`, name: 'image', bytes: Number.isFinite(Number(body.size)) ? Number(body.size) : null, mime });
     } else if (mime === 'text/plain' && out.plain === null && body.data) out.plain = b64url(body.data);
     else if (mime === 'text/html' && out.html === null && body.data) out.html = b64url(body.data);
     for (const c of p.parts || []) visit(c);
@@ -286,7 +364,8 @@ function create(record = {}, deps = {}) {
 
   /** The include query is read from the LIVE record at call time — the
    *  engine mutates that object in place when the panel edits it. */
-  const query = () => String((record.options && record.options.query) || OPTIONS[0].default).trim() || OPTIONS[0].default;
+  const query = () => queryOf(record.options);
+  const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: quota units per request SENT
   /** The push switch and its two resource names, read LIVE from the record. */
   const pushEnabled = () => !!(record.push && record.push.enabled === true);
   const pushOptions = () => ({ topic: String((record.options && record.options.pushTopic) || '').trim(), subscription: String((record.options && record.options.pushSubscription) || '').trim() });
@@ -301,7 +380,33 @@ function create(record = {}, deps = {}) {
   // the last (re)seed: a thread not in it is fetched whatever history.list
   // says (the first pass after a restart, or after a reseed), one in it is
   // fetched only when history.list names it.
-  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null };
+  const mailbox = { historyId: null, at: 0, changed: new Set(), walked: new Set(), self: null, mustWalk: true };
+  // THE CURSOR SURVIVES A RESTART (2026-09-26): the mailbox's `historyId` and
+  // the threads it named but nobody fetched yet are persisted in the
+  // account's `state` (plain JSON, the engine's serialized door). A restored
+  // cursor means a thread with an anchor is NOT re-walked unless history.list
+  // names it — the old in-memory cursor re-read every thread (40 units each)
+  // on every restart. A reseed (no cursor, or a 404) walks everything once.
+  const stateStore = deps.state && typeof deps.state.read === 'function' ? deps.state : null;
+  try {
+    const st0 = stateStore ? stateStore.read() : {};
+    if (st0 && st0.gmailHistoryId) { mailbox.historyId = String(st0.gmailHistoryId); mailbox.mustWalk = false; for (const id of Array.isArray(st0.gmailChanged) ? st0.gmailChanged : []) mailbox.changed.add(String(id)); }
+  } catch { /* an unreadable state is a fresh seed */ }
+  let persistTimer = null, persisted = '';
+  function persistCursor(soon = true) {
+    if (!stateStore) return;
+    const doIt = () => {
+      persistTimer = null;
+      const next = JSON.stringify([mailbox.historyId, [...mailbox.changed].slice(0, 2000)]);
+      if (next === persisted) return;
+      persisted = next;
+      Promise.resolve(stateStore.write({ gmailHistoryId: mailbox.historyId, gmailChanged: [...mailbox.changed].slice(0, 2000) })).catch((e) => log.warn && log.warn(`[channels] gmail: the mailbox cursor could not be persisted: ${(e && e.message) || e}`));
+    };
+    if (!soon) { if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; } doIt(); return; }
+    if (persistTimer) return;
+    persistTimer = setTimeout(doIt, 5000);
+    if (persistTimer.unref) persistTimer.unref();
+  }
   const threads = new Map();   // convId -> { thread, at }
   const meta = new Map();      // convId -> { title, participants, lastAt, at }
 
@@ -352,6 +457,7 @@ function create(record = {}, deps = {}) {
   }
   const api = async (pathq, opts = {}) => {
     const at = await accessToken();
+    meter(unitsFor(pathq, opts.method));
     return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${at}`, ...(opts.headers || {}) } });
   };
   const selfEmail = () => { const t = readToken().token; return (t && t.email) || mailbox.self || null; };
@@ -367,6 +473,8 @@ function create(record = {}, deps = {}) {
       mailbox.historyId = String(p.historyId || '');
       mailbox.self = p.emailAddress ? String(p.emailAddress).toLowerCase() : mailbox.self;
       mailbox.walked.clear();
+      mailbox.mustWalk = true;
+      persistCursor(false);
       return mailbox;
     }
     let pageToken = null, pages = 0, newest = mailbox.historyId;
@@ -380,7 +488,8 @@ function create(record = {}, deps = {}) {
         pageToken = h.nextPageToken ? String(h.nextPageToken) : null;
       } while (pageToken && ++pages < 20);
       mailbox.historyId = newest;
-      if (mailbox.changed.size > CHANGED_CAP) { mailbox.changed.clear(); mailbox.walked.clear(); }
+      if (mailbox.changed.size > CHANGED_CAP) { mailbox.changed.clear(); mailbox.walked.clear(); mailbox.mustWalk = true; }
+      persistCursor(false);
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'not-found') {
         // The stored historyId is too old for the vendor: reseed from the
@@ -390,6 +499,8 @@ function create(record = {}, deps = {}) {
         mailbox.historyId = String(p.historyId || '');
         mailbox.changed.clear();
         mailbox.walked.clear();
+        mailbox.mustWalk = true;
+        persistCursor(false);
         return mailbox;
       }
       throw e;
@@ -401,6 +512,16 @@ function create(record = {}, deps = {}) {
     if (c && now() - c.at < THREAD_MEMO_MS) return c.thread;
     const t = await api(`/threads/${encodeURIComponent(convId)}?format=full`, { what: 'gmail thread' });
     threads.set(convId, { thread: t, at: now() });
+    // the FULL thread already names its subject and senders — the title cache
+    // is filled for free (a metadata read is 40 more units)
+    try {
+      const msgs = Array.isArray(t.messages) ? t.messages : [];
+      if (msgs.length) {
+        const first = msgs[0] || {};
+        const names = [...new Set(msgs.map((m) => parseAddress(header(m.payload && m.payload.headers, 'From')).name).filter(Boolean))];
+        meta.set(convId, { title: header(first.payload && first.payload.headers, 'Subject') || '(no subject)', participants: names.join(', '), lastAt: msgs.reduce((a, m) => Math.max(a, Number(m.internalDate) || 0), 0) || null, at: now() });
+      }
+    } catch { /* a title is a nicety */ }
     return t;
   }
   /** Title + participants for a thread, from ONE metadata read, cached. */
@@ -622,8 +743,11 @@ function create(record = {}, deps = {}) {
     async history(convId, { anchor = null, limit = 50 } = {}) {
       const size = Math.min(100, Math.max(1, Number(limit) || 50));
       const mb = await syncMailbox();
-      if (anchor && mb.walked.has(convId) && !mb.changed.has(convId) && !threads.has(convId)) {
-        return { records: [], anchor, reachedAnchor: true, complete: true };
+      // the OTHER threads the mailbox names (a HINT: the engine makes them due
+      // now, so new mail in a cold thread does not wait for its own cadence)
+      const hint = () => [...mb.changed].filter((id) => id !== convId).slice(0, 500);
+      if (anchor && !mb.changed.has(convId) && !threads.has(convId) && (mb.walked.has(convId) || !mb.mustWalk)) {
+        return { records: [], anchor, reachedAnchor: true, complete: true, changed: hint() };
       }
       let t;
       try { t = await threadFull(convId); }
@@ -645,14 +769,48 @@ function create(record = {}, deps = {}) {
       const pending = msgs.slice(idx + 1);
       const page = pending.slice(0, size);
       const drained = page.length === pending.length;
-      if (drained) { mailbox.changed.delete(convId); mailbox.walked.add(convId); threads.delete(convId); }
+      if (drained) { if (mailbox.changed.delete(convId)) persistCursor(); mailbox.walked.add(convId); threads.delete(convId); }
       const self = selfEmail();
       return {
         records: page.map((m) => toRecord(adapterId, convId, m, { selfEmail: self })),
         anchor: page.length ? String(page[page.length - 1].id) : (anchor || (msgs.length ? String(msgs[msgs.length - 1].id) : null)),
         reachedAnchor: drained,
         complete: drained,
+        changed: hint(),
       };
+    },
+
+    /**
+     * ONE ATTACHMENT's bytes (2026-09-26): the record names the part
+     * (`part:<partId>`), so the message is read once (`messages.get`, 20
+     * units) and the part's inline data used, or its `attachmentId` fetched
+     * (`attachments.get`, 20 more). A legacy id that IS an attachmentId is
+     * fetched directly. Bounded at 100 MB.
+     */
+    async fetchAttachment(convId, { messageId, attachmentId, mime = null, name = null } = {}) {
+      if (!messageId || !attachmentId) throw new ChannelError('not-found', 'gmail: an attachment needs its message id and part', { retryable: false });
+      const id = String(attachmentId);
+      let data = null, partMime = mime, partName = name;
+      const fetchById = async (aid) => {
+        const d = await api(`/messages/${encodeURIComponent(String(messageId))}/attachments/${encodeURIComponent(aid)}`, { what: 'gmail attachment' });
+        return d && d.data ? Buffer.from(String(d.data).replace(/-/g, '+').replace(/_/g, '/'), 'base64') : Buffer.alloc(0);
+      };
+      if (id.startsWith('part:')) {
+        const partId = id.slice(5);
+        const m = await api(`/messages/${encodeURIComponent(String(messageId))}?format=full`, { what: 'gmail message' });
+        let part = null;
+        const visit = (p) => { if (!p || part) return; if (String(p.partId) === partId) { part = p; return; } for (const c of p.parts || []) visit(c); };
+        visit(m && m.payload);
+        if (!part) throw new ChannelError('not-found', `gmail: message ${messageId} has no part ${partId}`, { retryable: false });
+        partMime = String(part.mimeType || partMime || '') || null;
+        partName = part.filename || partName;
+        const body = part.body || {};
+        if (body.data) data = Buffer.from(String(body.data).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+        else if (body.attachmentId) data = await fetchById(String(body.attachmentId));
+        else data = Buffer.alloc(0);
+      } else data = await fetchById(id);
+      if (data.length > 100 * 1024 * 1024) throw new ChannelError('too-large', `gmail attachment: ${data.length} bytes is over the 100 MB bound`, { retryable: false });
+      return { data, mime: partMime || null, name: partName || null };
     },
   };
 }
@@ -676,6 +834,6 @@ async function integrationTest({ resolved } = {}) {
 const adapter = { kind: KIND, caps, create };
 module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS,
-  EGRESS, SCOPE, SCOPE_SEND, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST,
+  EGRESS, SCOPE, SCOPE_SEND, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader,
 };

@@ -1,0 +1,1749 @@
+#!/usr/bin/env node
+// A LINKED ACCOUNT IS AN AGGREGATED IM (owner ruling 2026-09-26; design
+// docs/design-communication-panel.zh.md §5 invariant 6 as rewritten, §6.2,
+// §6.5, §7.3, §8; gate row `test-channels-aggregate`, fast).
+//
+// The REAL engine over the REAL store and the REAL registry, with a scripted
+// adapter module that talks to nothing and COUNTS every call — the owner's
+// scale (873 conversations on one account, a second account of the same
+// kind beside it), an injected clock moved by hand:
+//
+//   ① every conversation is DISCOVERED (the cursor walked to the end — the
+//      old 5-page bound hid everything past 500) and INGESTED, no track step;
+//      a first ingest takes ONE page and marks the pre-link backlog read
+//   ② the scheduler is PER CONVERSATION: hot 30 s / warm 5 min / cold 15 min
+//      — the history calls of a timer pass ARE the arithmetic
+//   ③ the budget is the account's, in the VENDOR's unit (a metered adapter
+//      charges what it sends); an exhausted window stops the pass, the rest
+//      waits, the account row says so with its numbers
+//   ④ the owner's override (30 s … 15 min, paused) wins, persists, restarts
+//   ⑤ a live push lane that carries content drops polling to the cold
+//      safety net; a pushed record for a never-discovered conversation is
+//      INGESTED (no `untracked` drop); a kick naming a conversation makes it
+//      due; a parked Lark lane without its SDK says the remedy
+//   ⑥ the agent's refresh: reach first, the floor, the budget — refusals
+//      named with their numbers
+//   ⑥f (r5) THE CONCURRENCY TABLE: callers × keys × account state ⇒ exactly
+//      the vendor calls, every answer honest, the share charged the fetch
+//      count, every refusal by name — the request set drained by ONE judge
+//   ⑥g (r5 verify) the set under attack: a request storm cannot starve the
+//      timer, a long timer pass cannot starve a request, the cap, stop, remove
+//   ⑦ history on open + scroll-up: the window's watch refreshes a stale
+//      conversation; older pages are PREPENDED in order and never wake anybody
+//   ⑧ attachments through the ROUTE (a real express server on a free port):
+//      nosniff + sandbox CSP, `attachment` unless a raster image asked
+//      inline, svg never inline, 0600 files, LRU eviction at the budget
+//   ⑨ the three assignment grains reach EXACTLY their sets; a new matching
+//      conversation inherits within one pass; wakes count against ONE ledger
+//      per assignment; an inherited digest is ONE block per window
+//   ⑩ a restart keeps all of it; the migration turns tracked into hot
+//   ⑪ negative controls (patched copies outside the tree): the old discovery
+//      bound hides conversation 501+; a scheduler that polls everything each
+//      pass breaks the arithmetic
+//
+// Zero vendor calls; per-pid scratch dirs (scripts/scratch.mjs).
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { createRequire } from 'node:module';
+import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+const CH = require(path.join(REPO, 'src/channels/index.js'));
+const fake = require(path.join(REPO, 'src/channels/fake.js'));
+const caps = require(path.join(REPO, 'src/channel-caps.js'));
+const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
+const routes = require(path.join(REPO, 'src/routes/channels.js'));
+// r9: THE DRAIN IS PURE (src/channel-drain.js) — the engine only drives it. A control that reconstructs an
+// old SCHEDULING shape patches the MODEL (and, for a delivery / seam shape, the engine's driver); both copies
+// live in the suite's scratch dir (scripts/mutant-copy.mjs), the engine copy requiring the model copy by
+// absolute path — a CLOSED WORLD — so every control still runs the real driver, store and scripted adapter
+// over the one patched rule.
+const DRAIN_SRC = fs.readFileSync(path.join(REPO, 'src/channel-drain.js'), 'utf-8');
+const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const DRAIN_REQUIRE = "const Drain = require('../channel-drain.js');";
+function closedWorld(M, tag, { drain = [], engine = [] } = {}) {
+  let d = DRAIN_SRC, e = ENGINE_SRC;
+  const missing = [];
+  for (const [a, b] of drain) { if (!d.includes(a)) missing.push('drain: ' + a.slice(0, 70)); d = d.replace(a, b); }
+  for (const [a, b] of engine) { if (!e.includes(a)) missing.push('engine: ' + a.slice(0, 70)); e = e.replace(a, b); }
+  const changed = d !== DRAIN_SRC || e !== ENGINE_SRC;
+  if (!e.includes(DRAIN_REQUIRE)) missing.push('engine: the drain require');
+  const dPath = M.write('src/channel-drain.js', d, null, { esm: false, name: `drain-${tag}-${process.pid}` });
+  e = e.replace(DRAIN_REQUIRE, `const Drain = require(${JSON.stringify(dPath)});`);
+  return { mod: M.load('src/server/channels-engine.js', e, tag), setup: changed && missing.length === 0, missing: missing.join('; ') };
+}
+// the drain's rule lines the controls patch (each spelled ONCE in src/channel-drain.js)
+const DRAIN_LINES = {
+  round: '    waiters: ids(pick.reqs),   // THE ROUND',
+  backoffGate: "    else return { refuse: true, code: 'backoff', rule: 'backoff' };   // THE BACK-OFF GATE",
+  backoffAtFetch: "  if (p.backoff && !pick.reqs.some((r) => r.origin === 'owner')) return { ...base, type: 'refuse', key: pick.key, code: 'backoff', rule: 'backoff', waiters: ids(pick.reqs) };",
+  slot: 'function slotOf(r) { return r.key; }',
+  pressFree: '  const pressFree = p.backoff && p.pressKey === null && s.backoff.pressEpoch !== s.backoff.epoch;',
+  pressOne: '    const v = verdict(s, g, pressFree && granted === null);',
+  cap: "  const cap = origin === 'agent' ? REFRESH_QUEUE_CAP - REFRESH_OWNER_RESERVE : REFRESH_QUEUE_CAP;",
+  cut: '  if (!(s.budget.remainingUnits > 0)) {\n    if (seen.length)',
+  interleave: "  if (p.last === 'request' && !pick.due) { const t = queue.find((it) => it.due); if (t) pick = t; }   // THE INTERLEAVE",
+  rank: 'const byRank = (a, b) => (Number(b.human) - Number(a.human)) || (a.minSeq - b.minSeq);',
+  seen: '  const seen = s.requests;   // every waiter present',
+};
+
+const ROOT = scratch('chan-agg');
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+fs.rmSync(ROOT, { recursive: true, force: true });
+fs.mkdirSync(ROOT, { recursive: true });
+const quiet = { log() {}, warn() {}, error() {} };
+
+// ── THE SCRIPTED WORLD ─────────────────────────────────────────────────────
+// One world per test engine: conversations with a deterministic record set,
+// the clock that stamps them, and a CALL LEDGER keyed by method + convId.
+const MIN = 60e3, HOUR = 3600e3, DAY = 86400e3;
+function makeWorld(t0, { n = 873, hot = 50, warm = 200, perConv = 3, deep = [] } = {}) {
+  const convs = new Map();
+  const add = (id, { title, lastAgo, count = perConv, kind = 'group', participants = 'Ada, Brook', authors = null, attach = false } = {}) => {
+    const recs = [];
+    for (let i = 0; i < count; i++) {
+      const at = t0 - lastAgo - (count - 1 - i) * 60e3;
+      const who = authors ? authors[i % authors.length] : { id: `u-${i % 3}`, name: ['Ada', 'Brook', 'Cass'][i % 3] };
+      recs.push({ vendorId: `${id}-m${i}`, at, author: who, text: `message ${i} in ${title || id}`, attachments: attach && i === count - 1 ? [{ id: `${id}-img`, name: 'photo.png', mime: 'image/png' }, { id: `${id}-doc`, name: 'notes.txt', mime: 'text/plain' }, { id: `${id}-svg`, name: 'vector.svg', mime: 'image/svg+xml' }] : [] });
+    }
+    convs.set(id, { id, title: title || id, kind, participants, recs });
+  };
+  for (let i = 0; i < n; i++) {
+    const tier = i < hot ? 'hot' : i < hot + warm ? 'warm' : 'cold';
+    const lastAgo = tier === 'hot' ? 10 * MIN : tier === 'warm' ? 3 * HOUR : 3 * DAY;
+    add(`c${String(i).padStart(4, '0')}`, { title: i % 50 === 7 ? `GPU on-call ${i}` : `Room ${i}`, lastAgo, count: deep.includes(i) ? 120 : 3, kind: i % 9 === 0 ? 'dm' : 'group', authors: i % 50 === 7 ? [{ id: 'ada@corp.example', name: 'Ada' }] : null, attach: i === 1 });
+  }
+  const calls = { history: new Map(), older: 0, list: 0, attach: 0, units: 0 };
+  const hit = (m, id) => { const c = calls[m]; c.set(id, (c.get(id) || 0) + 1); };
+  // ⑥f: every history call's real start / end (the honesty judge), an optional
+  // hold before one (`beforeHistory(id)`) and a delay every call answers after
+  return { convs, calls, add, hit, t0, log: [], beforeHistory: null, delayMs: 0 };
+}
+/** A scripted adapter MODULE. `worlds` = one world, or `{<adapterId>: world}`
+ *  so two ACCOUNTS of the same kind read two different mailboxes. */
+function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null } = {}) {
+  const worldOf = (id) => (worlds && worlds.convs ? worlds : (worlds[id] || Object.values(worlds)[0]));
+  const c = {
+    ...fake.fakePoll.caps,
+    receive,
+    pushTransport: receive === 'push' ? 'ws-long-conn' : null,
+    pushAckBudgetMs: receive === 'push' ? 3000 : null,
+    pollInterval: { hot: 30, cold: 300, floor: 10 },
+    attachments: 'fetch', olderHistory: 'page',
+    budget: { unit: unitsPerHistory > 1 ? 'quota-unit' : 'request', default: budgetDefault, settingKey: budgetSettingKey, metered: true },
+  };
+  return {
+    kind, caps: c,
+    create(record, deps) {
+      const adapterId = record.id;
+      const world = worldOf(adapterId);
+      const meter = deps.meter || (() => {});
+      const rec = (id, m) => makeRecord({ adapterId, convId: id, vendorId: m.vendorId, at: m.at, author: { ...m.author, isSelf: false, isBot: false }, text: m.text, mentions: [], attachments: m.attachments || [], replyTo: null, threadKey: id, raw: {} });
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
+        async listConversations({ cursor = null, limit = 100 } = {}) {
+          meter(1); world.calls.list++;
+          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; throw new CH.ChannelError(code, 'HTTP 429 Too Many Requests'); }
+          const all = [...world.convs.values()];
+          const from = cursor ? Number(cursor) : 0;
+          const page = all.slice(from, from + limit);
+          const next = from + limit < all.length ? String(from + limit) : null;
+          return { conversations: page.map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.title, kind: x.kind, participants: x.participants, lastAt: x.recs.length ? x.recs[x.recs.length - 1].at : null })), cursor: next, complete: !next };
+        },
+        async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
+        async history(id, { anchor = null, limit = 50, initialMax = null } = {}) {
+          meter(unitsPerHistory); world.hit('history', id);
+          const startedAt = Date.now();
+          if (world.beforeHistory) await world.beforeHistory(id);
+          if (world.delayMs) await sleep(world.delayMs);
+          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; world.log.push({ id, startedAt, endedAt: Date.now(), failed: code }); throw new CH.ChannelError(code, 'HTTP 429 Too Many Requests'); }
+          world.log.push({ id, startedAt, endedAt: Date.now() });
+          const x = world.convs.get(id);
+          if (!x) return { records: [], anchor, reachedAnchor: true, complete: true };
+          let idx = 0;
+          if (anchor) { const at = x.recs.findIndex((m) => m.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; }
+          else if (Number(initialMax) > 0) idx = Math.max(0, x.recs.length - Number(initialMax));
+          const pending = x.recs.slice(idx);
+          const page = pending.slice(0, limit);
+          const drained = page.length === pending.length;
+          return { records: page.map((m) => rec(id, m)), anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
+        },
+        async older(id, { before = null, limit = 50 } = {}) {
+          meter(1); world.calls.older++;
+          const x = world.convs.get(id);
+          const all = x ? x.recs : [];
+          const olderOnes = before ? all.filter((m) => m.at < before.at || (m.at === before.at && m.vendorId < before.vendorId)) : all;
+          const page = olderOnes.slice(-limit);
+          return { records: page.map((m) => rec(id, m)), exhausted: page.length === olderOnes.length };
+        },
+        async fetchAttachment(id, { messageId, attachmentId } = {}) {
+          meter(1); world.calls.attach++;
+          const x = world.convs.get(id);
+          const m = x && x.recs.find((r) => r.vendorId === messageId);
+          const a = m && m.attachments.find((q) => q.id === attachmentId);
+          if (!a) throw new CH.ChannelError('not-found', 'no such attachment');
+          if (a.mime === 'image/png') return { data: world.bigAttachments ? Buffer.alloc(world.bigAttachments, 7) : fake.fixturePng(a.id), mime: 'image/png', name: a.name };
+          if (a.mime === 'image/svg+xml') return { data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'), mime: 'image/svg+xml', name: a.name };
+          return { data: Buffer.from(`notes of ${messageId}\n`), mime: 'text/plain', name: a.name };
+        },
+        live: receive === 'push' ? live : undefined,
+      };
+    },
+  };
+}
+function mkEngine(name, { kinds, settings = {}, now, deliver = null, sessions = [], dataDir = null, env = {}, log = quiet } = {}) {
+  const registry = CH.createChannelRegistry();
+  for (const m of kinds) registry.register(m);
+  const events = [];
+  const dir = dataDir || path.join(ROOT, name);
+  const eng = ENG.create({ dataDir: dir, registry, env, now, broadcast: (m) => events.push(m), serverSetting: (k) => settings[k], liveSessions: () => sessions, deliver, log });
+  return { eng, events, dataDir: dir };
+}
+function seedAccounts(dataDir, records) {
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: records.map(([id, kind]) => ({ id, kind, label: id, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null })) }));
+}
+const historyCalls = (w) => [...w.calls.history.values()].reduce((a, b) => a + b, 0);
+/** Drive forced passes until every conversation is anchored (the budget of
+ *  a scripted module is generous, so one or two passes do it). */
+async function ingestAll(eng, A, max = 5) { for (let i = 0; i < max; i++) { await eng.pass(A, { force: true }); if (Object.values(eng.store.index.live()).filter((e) => e.adapterId === A).every((e) => e.anchor)) return true; } return false; }
+
+// ═══ ① + ② + ③ at the owner's scale ═══════════════════════════════════════
+console.log('① every conversation discovered and ingested, no track step');
+let clock = Date.UTC(2026, 8, 26, 12, 0, 0);
+const now = () => clock;
+const W = makeWorld(clock, { n: 873, deep: [5, 6] });
+const W2 = makeWorld(clock, { n: 12, hot: 2, warm: 3 });
+// TWO ACCOUNTS OF THE SAME KIND, two mailboxes: the adapter id IS the account id
+const kindMany = worldModule('many', { many: W, 'many:0000abcd': W2 });
+const dirMain = path.join(ROOT, 'main');
+seedAccounts(dirMain, [['many', 'many'], ['many:0000abcd', 'many']]);
+const delivered = [];
+const deliver = { async deliverToConversation(cid, text, opts) { delivered.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor() {} };
+const SESS = [{ cid: 'agent-A', name: 'Alpha', groups: [] }, { cid: 'agent-B', name: 'Beta', groups: [] }, { cid: 'agent-C', name: 'Gamma', groups: [] }];
+const SET = {};
+let { eng, events } = mkEngine('main', { kinds: [kindMany], settings: SET, now, deliver, sessions: SESS, dataDir: dirMain });
+{
+  const t0 = Date.now();
+  ok(await ingestAll(eng, 'many'), 'forced passes anchor EVERY conversation of the account');
+  const mine = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many');
+  ok(mine.length === 873, `all 873 conversations are DISCOVERED (the cursor walked past 500 — ${W.calls.list} list pages)`, String(mine.length));
+  ok(W.calls.list >= 9, 'discovery paged through the whole cursor (9 pages of ≤100)', String(W.calls.list));
+  ok(mine.every((e) => !('tracked' in e)), 'no conversation carries a `tracked` flag — nothing is gated on one');
+  ok(mine.every((e) => e.anchor && eng.store.readTail('many', e.id, { limit: 5 }).length > 0), 'every conversation has records in its log (ingest-all)');
+  const deep = eng.store.readTail('many', 'c0005', { limit: 500 });
+  ok(deep.length === 50, 'a FIRST ingest takes one page (50 of 120) — older history comes on demand', String(deep.length));
+  const rec0 = eng.adapterRecords().adapters.find((r) => r.id === 'many');
+  ok(Number(rec0.linkedAt) === clock, 'the account is stamped `linkedAt` at its first discovery (unread counts start there)');
+  ok(mine.every((e) => (e.unread || 0) === 0), 'the pre-link BACKLOG counts as read (no 40 000-unread first screen)', JSON.stringify(mine.filter((e) => e.unread).slice(0, 3).map((e) => [e.id, e.unread])));
+  ok(delivered.length === 0, 'a first ingest wakes nobody (backlog is not news)');
+  const other = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many:0000abcd');
+  ok(other.length === 0, 'the SECOND account is untouched until its own pass (accounts never mix)');
+  await ingestAll(eng, 'many:0000abcd');
+  ok(Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many:0000abcd').length === 12, '…and its own pass discovers its own 12');
+  console.log(`    (873-conversation first ingest: ${Date.now() - t0} ms)`);
+  // the digest is SLIM: a whole-account broadcast stays small per row
+  const d = eng.digest();
+  const per = Buffer.byteLength(JSON.stringify(d.conversations)) / d.conversations.length;
+  ok(per < 800, `a digest row is slim (${Math.round(per)} bytes per conversation; the old row was ~1.2 KB)`);
+  ok(d.conversations.every((c) => !('tracked' in c) && !('reach' in c) && c.freshness && c.cadence), 'a row carries freshness + cadence and NO tracked flag / reach rows');
+  const lastEv = events[events.length - 1];
+  ok(lastEv && lastEv.type === 'channels-updated', 'passes broadcast channels-updated');
+}
+
+console.log('② the scheduler is per conversation: the arithmetic IS the call count');
+{
+  const hot = 50, warm = 200, cold = 623;
+  const tier = (id) => { const i = Number(id.slice(1)); return i < hot ? 'hot' : i < hot + warm ? 'warm' : 'cold'; };
+  ok(eng.cadenceOf('many', 'c0001').tier === 'hot' && eng.cadenceOf('many', 'c0001').seconds === 30, 'a conversation with a message 10 min ago is HOT (30 s)');
+  ok(eng.cadenceOf('many', 'c0100').tier === 'warm' && eng.cadenceOf('many', 'c0100').seconds === 300, 'a message 3 h ago is WARM (5 min)');
+  ok(eng.cadenceOf('many', 'c0500').tier === 'cold' && eng.cadenceOf('many', 'c0500').seconds === 900, 'a message 3 days ago is COLD (15 min — the owner\'s maximum)');
+  const snapCalls = () => new Map(W.calls.history);
+  let before = snapCalls();
+  const diff = (b) => { const m = new Map(); for (const [k, v] of W.calls.history) { const d0 = v - (b.get(k) || 0); if (d0) m.set(k, d0); } return m; };
+  clock += 31e3;
+  await eng.pass('many');
+  let d1 = diff(before);
+  ok(d1.size === hot && [...d1.keys()].every((k) => tier(k) === 'hot'), `at +31 s a timer pass polls EXACTLY the ${hot} hot conversations (${d1.size})`, JSON.stringify([...d1.keys()].slice(0, 5)));
+  before = snapCalls();
+  clock += 270e3;   // +301 s since the first ingest
+  await eng.pass('many');
+  d1 = diff(before);
+  ok(d1.size === hot + warm && [...d1.keys()].every((k) => tier(k) !== 'cold'), `at +301 s: hot + warm (${hot + warm}), no cold one (${d1.size})`);
+  before = snapCalls();
+  clock += 600e3;   // +901 s
+  await eng.pass('many');
+  d1 = diff(before);
+  ok(d1.size === hot + warm + cold, `at +901 s every conversation is due once (${d1.size}/873) — nothing waits past 15 min`);
+  before = snapCalls();
+  clock += 5e3;
+  await eng.pass('many');
+  ok(diff(before).size === 0, 'a pass with nothing due polls nothing (zero vendor calls)');
+  // the steady-state arithmetic per minute (the design's table) — requests/min for this mix
+  const perMin = hot * 2 + warm * 0.2 + cold / 15;
+  ok(Math.round(perMin) === 182, `the declared arithmetic: ${hot} hot ×2 + ${warm} warm ×0.2 + ${cold} cold ÷15 ≈ ${perMin.toFixed(1)} requests/min`);
+}
+
+console.log('③ the budget is the account\'s, in the vendor\'s unit; exhaustion is SAID');
+{
+  const Wb = makeWorld(clock, { n: 40, hot: 40, warm: 0 });
+  const kb = worldModule('budgeted', Wb, { unitsPerHistory: 5, budgetDefault: 100 });
+  const dirB = path.join(ROOT, 'budget');
+  seedAccounts(dirB, [['budgeted', 'budgeted']]);
+  const { eng: eb } = mkEngine('budget', { kinds: [kb], now, dataDir: dirB });
+  await eb.pass('budgeted', { force: true });
+  const first = historyCalls(Wb);
+  // 100 units a minute, 1 unit per list page, 5 per history call: a call may START while the
+  // window is under its limit, so one list page + 20 history calls (101 units) and then it stops
+  ok(first === 20, `a METERED adapter spends its own units: 100 units a minute at 5 per history call (after a 1-unit list page) = 20 conversations (${first})`);
+  const b = eb.budgetOf('budgeted');
+  ok(b.exhausted && b.limit === 100 && b.unit === 'quota-unit' && b.waiting > 0 && b.resetInSeconds > 0, 'the account row says the budget is spent, its unit, how many wait and when it resets', JSON.stringify(b));
+  const sentence = caps.budgetText(b);
+  ok(/100 quota units\/min/.test(sentence) && /conversations waiting/.test(sentence), 'the card\'s sentence names the number', sentence);
+  const stalled = await eb.pass('budgeted', { force: true });
+  ok(stalled.ok === false && stalled.why === 'budget' && historyCalls(Wb) === first, 'inside the same minute nothing more is sent (a refusal, not a silent skip)');
+  const polledFirst = new Set(Wb.calls.history.keys());
+  clock += 61e3;
+  await eb.pass('budgeted');
+  const second = [...Wb.calls.history.keys()].filter((k) => !polledFirst.has(k));
+  ok(historyCalls(Wb) === first + 20 && second.length === 20, 'the next minute\'s timer pass continues with the 20 that WAITED (most overdue first — nothing starves on insertion order)', JSON.stringify([historyCalls(Wb), second.length]));
+  eb.stop();
+}
+
+// ONE VENDOR 429 IS SAID FROM THE FIRST FAILURE (lane R2 verify, 2026-09-26):
+// the account card read "Connected · polling · … · last sync 12 s ago" while
+// the pass had just failed and nothing was being fetched — `last sync` came
+// from a FAILED pass, the failure line waited for the third one, and the
+// retry instant lived only in memory.
+console.log('③b a rate-limited pass is said at once: the retry instant, no "last sync" from a failure');
+{
+  const Wr = makeWorld(clock, { n: 3, hot: 3, warm: 0 });
+  const kr = worldModule('ratey', Wr);
+  const dirR = path.join(ROOT, 'ratey');
+  seedAccounts(dirR, [['ratey', 'ratey']]);
+  const { eng: er } = mkEngine('ratey', { kinds: [kr], now, dataDir: dirR });
+  const recOf = () => er.adapterRecords().adapters.find((r) => r.id === 'ratey');
+  Wr.failNext = 'rate-limited';
+  const p1 = await er.pass('ratey', { force: true });
+  const v1 = er.adapterView(recOf());
+  ok(p1.ok === false && p1.why === 'rate-limited' && v1.consecutiveFailures === 1, 'FIXTURE: one scripted 429 fails the pass with rate-limited', JSON.stringify(p1));
+  ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt, 'after ONE rate-limited pass the view carries the retry instant (backoffUntil) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, lastOkAt: v1.lastOkAt }));
+  const ps1 = typeof caps.passStateText === 'function' ? caps.passStateText(v1, { now: clock }) : { note: '', lastOkAt: 'n/a' };
+  ok(/rate limited/.test(ps1.note) && /retrying in 30 s/.test(ps1.note) && ps1.lastOkAt === null, 'the card\'s line builder says "rate limited — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
+  const panelSrc = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  ok(/chanCaps\.passStateText\(a, /.test(panelSrc) && !/last sync \{ago\}', \{ ago: agoText\(a\.lastPass\.at\)/.test(panelSrc), 'the panel words its sync + retry through that builder (never "last sync" from lastPass.at, which a failure stamps)');
+  const waited = await er.pass('ratey');
+  ok(waited.ok === false && waited.why === 'backoff', 'FIXTURE: inside the back-off a timer pass waits');
+  clock += 31e3;
+  const p2 = await er.pass('ratey', { force: true });
+  const v2 = er.adapterView(recOf());
+  const ps2 = typeof caps.passStateText === 'function' ? caps.passStateText(v2, { now: clock }) : { note: 'n/a', lastOkAt: null };
+  ok(p2.ok && Number(v2.lastOkAt) === clock && !v2.backoffUntil && ps2.note === '' && ps2.lastOkAt === clock, 'the next GOOD pass stamps lastOkAt, clears the retry instant and the note', JSON.stringify({ lastOkAt: v2.lastOkAt, backoffUntil: v2.backoffUntil, ps2 }));
+  er.stop();
+}
+
+// A SETTING OUT OF ITS RANGE IS NEVER CLAMPED SILENTLY (lane R2 verify): the
+// Settings window stored 1800 while the engine ran 900 and nothing said so.
+// The input clamps to the schema and says it; the engine reads the SAME
+// bounds (one table, pinned against the schema) and logs a clamp once.
+console.log('③c channel settings: the input clamps to the schema and says so; the engine\'s bounds ARE the schema\'s');
+{
+  const schemaMod = await import(path.join(REPO, 'src/lib/settings-schema.js'));
+  const S = schemaMod.SETTINGS_SCHEMA;
+  const cl = typeof schemaMod.clampToSchema === 'function' ? schemaMod.clampToSchema(S['channels.pollColdSec'], 1800) : null;
+  ok(cl && cl.value === 900 && cl.bound === 'max', 'clampToSchema(pollColdSec, 1800) ⇒ 900 at the maximum', JSON.stringify(cl));
+  const lo = typeof schemaMod.clampToSchema === 'function' ? schemaMod.clampToSchema(S['channels.pollHotSec'], 5) : null;
+  ok(lo && lo.value === 10 && lo.bound === 'min' && schemaMod.clampToSchema(S['channels.pollHotSec'], 45).bound === null, '…5 s for the busy tier ⇒ 10 at the minimum; an in-range value passes untouched', JSON.stringify(lo));
+  const ui = fs.readFileSync(path.join(REPO, 'src/lib/settings-ui.js'), 'utf-8');
+  const numBranch = ui.slice(ui.indexOf("if (schema.type === 'number') {"), ui.indexOf("if (schema.type === 'enum') {"));
+  ok(/clampToSchema\(schema, num\)/.test(numBranch) && /showToast\(/.test(numBranch) && /input\.value = /.test(numBranch), 'the Settings number input clamps through clampToSchema, writes the clamped value back into the field and TOASTS it');
+  const B = ENG.SETTING_BOUNDS || {};
+  const rows = Object.entries(S).filter(([k, v]) => /^channels\./.test(k) && v.type === 'number' && k !== 'channels.pushCoalesceSeconds');
+  const drift = rows.filter(([k, v]) => !B[k] || B[k].min !== v.min || B[k].max !== v.max || (B[k].dflt !== null && B[k].dflt !== v.default)).map(([k, v]) => `${k}: schema ${v.default}/${v.min}/${v.max} engine ${JSON.stringify(B[k] || null)}`);
+  ok(rows.length >= 11 && drift.length === 0, `every channels.* number setting (${rows.length}) is read by the engine with the schema's own default and bounds`, drift.join('; '));
+  const logged = [];
+  const cap = { log: (m) => logged.push(String(m)), warn: (m) => logged.push(String(m)), error() {} };
+  const Wk = makeWorld(clock, { n: 4, hot: 0, warm: 0 });
+  const dirK = path.join(ROOT, 'clamp');
+  seedAccounts(dirK, [['clampy', 'clampy']]);
+  const SK = { 'channels.pollColdSec': 1800 };
+  const { eng: ek } = mkEngine('clamp', { kinds: [worldModule('clampy', Wk)], settings: SK, now, dataDir: dirK, log: cap });
+  await ek.pass('clampy', { force: true });
+  const c1 = ek.cadenceOf('clampy', 'c0000');
+  ek.cadenceOf('clampy', 'c0001');
+  const lines = logged.filter((m) => /channels\.pollColdSec/.test(m));
+  ok(c1.seconds === 900 && lines.length === 1 && /1800/.test(lines[0]) && /900/.test(lines[0]) && /maximum/.test(lines[0]), 'the engine runs 900 for a stored 1800 and SAYS it once (the key, the stored value, the maximum it used)', JSON.stringify({ c1, lines }));
+  ek.stop();
+}
+
+// ═══ ④ the owner's override ═════════════════════════════════════════════════
+console.log('④ the refresh override wins, is refused outside its set, persists');
+{
+  const r1 = await eng.setRefresh('many', 'c0500', 60);
+  ok(r1.ok && r1.cadence.seconds === 60 && r1.cadence.source === 'override', 'a cold conversation set to 60 s reads 60 s (override)');
+  const bad = await eng.setRefresh('many', 'c0500', 45);
+  ok(!bad.ok && bad.code === 'bad-request' && /30, 60, 300, 900, paused/.test(bad.error), 'a period outside the choices is refused by name', JSON.stringify(bad));
+  const r2 = await eng.setRefresh('many', 'c0001', 'paused');
+  ok(r2.ok && r2.cadence.paused, 'a hot conversation can be PAUSED');
+  const before = new Map(W.calls.history);
+  clock += 61e3;
+  await eng.pass('many');
+  const got = [...W.calls.history].filter(([k, v]) => v !== (before.get(k) || 0)).map(([k]) => k);
+  ok(got.includes('c0500') && !got.includes('c0001'), 'at +61 s the 60 s override is polled and the paused one is NOT (the other hot rows are)', JSON.stringify(got.slice(0, 8)));
+  const row = eng.digest({ keys: ['many/c0001', 'many/c0500'] }).conversations;
+  ok(row.find((c) => c.id === 'c0001').freshness.state === 'paused' && row.find((c) => c.id === 'c0500').freshness.seconds === 60, 'the rows\' chips say "paused" and "within 60s"');
+  const evs = events.filter((m) => m.type === 'channels-updated' && m.partial && (m.changedKeys || []).includes('many/c0500'));
+  ok(evs.length >= 1, 'the override broadcast names the conversation (a partial digest, not the whole account)');
+}
+
+// ═══ ⑤ push first ═════════════════════════════════════════════════════════
+console.log('⑤ push first: the safety net, pushed records of unknown conversations, kicks, the parked-SDK remedy');
+{
+  const Wp = makeWorld(clock, { n: 6, hot: 3, warm: 1 });
+  let onEvent = null, onState = null;
+  const live = { start(h) { onEvent = h.onEvent; onState = h.onState; onState({ state: 'live', at: clock, heard: true }); return { stop() {} }; } };
+  const kp = worldModule('pushy', Wp, { receive: 'push', live });
+  const dirP = path.join(ROOT, 'push');
+  seedAccounts(dirP, [['pushy', 'pushy']]);
+  const { eng: ep } = mkEngine('push', { kinds: [kp], now, dataDir: dirP, deliver, sessions: SESS });
+  await ep.pass('pushy', { force: true });
+  await ep.syncPushLanes();
+  await ep.setPush('pushy', { claimedExclusive: 'exclusive' });
+  onState({ state: 'live', at: clock, heard: true });
+  const cad = ep.cadenceOf('pushy', 'c0000');
+  ok(cad.seconds === 900 && cad.source === 'push-safety', 'a live, content-carrying lane drops even a HOT conversation to the 15-min safety net', JSON.stringify(cad));
+  const before = historyCalls(Wp);
+  clock += 31e3; onState({ state: 'live', at: clock, heard: true });
+  await ep.pass('pushy');
+  ok(historyCalls(Wp) === before, 'at +31 s nothing is polled while push carries content');
+  const r = await onEvent({ kind: 'record', eventId: 'e-1', convId: 'dm-new', record: makeRecord({ adapterId: 'pushy', convId: 'dm-new', vendorId: 'p1', at: clock, author: { id: 'u9', name: 'Stranger' }, text: 'hello from a chat nobody listed', mentions: [], attachments: [], raw: {} }) });
+  ok(r && r.ok && r.persisted === true, 'a pushed record for a conversation discovery never listed is PERSISTED (no `untracked` drop)', JSON.stringify(r));
+  ok(ep.store.readTail('pushy', 'dm-new', { limit: 5 }).length === 1 && ep.store.index.live()['pushy/dm-new'], '…its log and its row exist');
+  // kick mode: shared ⇒ a kick naming a conversation makes exactly it due
+  await ep.setPush('pushy', { claimedExclusive: 'shared' });
+  onState({ state: 'live', at: clock, heard: true });
+  const b2 = new Map(Wp.calls.history);
+  await onEvent({ kind: 'record', eventId: 'e-2', convId: 'c0004', record: makeRecord({ adapterId: 'pushy', convId: 'c0004', vendorId: 'k1', at: clock, author: { id: 'u1', name: 'A' }, text: 'kick', mentions: [], attachments: [], raw: {} }) });
+  for (let i = 0; i < 60 && (Wp.calls.history.get('c0004') || 0) === (b2.get('c0004') || 0); i++) await sleep(100);
+  ok((Wp.calls.history.get('c0004') || 0) > (b2.get('c0004') || 0), 'in kick mode an event NAMING a cold conversation makes it due now (one kick pass)');
+  ok(ep.store.readTail('pushy', 'c0004', { limit: 50 }).every((x) => x.vendorId !== 'k1'), '…and the kick carried no content (the poll carries it)');
+  ep.stop();
+  // the Lark lane with no SDK parks unavailable with its CODE, and the card says the remedy
+  const { createLarkLive } = require(path.join(REPO, 'src/channels/live/lark.js'));
+  const states = [];
+  const lane = createLarkLive({ adapterId: 'lark', credential: () => ({ values: { appId: 'cli_x', appSecret: 's' } }), toRecord: async () => null, log: quiet, reconnectMinMs: 10, reconnectMaxMs: 20 });
+  const h = lane.start({ onEvent: async () => ({ ok: true }), onState: (s) => states.push(s) });
+  for (let i = 0; i < 30 && !states.some((s) => s.state === 'unavailable'); i++) await sleep(20);
+  h.stop();
+  const un = states.find((s) => s.state === 'unavailable');
+  ok(un && un.code === 'sdk-not-installed', 'without @larksuiteoapi/node-sdk the Lark lane parks unavailable with code sdk-not-installed', JSON.stringify(un));
+  const words = caps.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: un && un.code, lastStateWhy: un && un.why }, { via: 'poll' });
+  ok(/npm install @larksuiteoapi\/node-sdk/.test(words) && /restart/.test(words) && /polled/.test(words), 'the card\'s sentence is the exact remedy + "polled meanwhile"', words);
+}
+
+// ═══ ⑥ the agent's refresh ════════════════════════════════════════════════
+console.log('⑥ the agent refresh: reach first, the floor, the budget');
+{
+  const A = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
+  const hidden = await eng.agentRefresh(A, 'many', 'c0002');
+  ok(hidden.ok === false && hidden.code === 'not-found', 'before any assignment the agent cannot even refresh (uniform not-found)');
+  await eng.setScopeAssignment('many', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'wake' });
+  await eng.refresh('many', 'c0002');
+  const floor = await eng.agentRefresh(A, 'many', 'c0002');
+  ok(floor.ok === false && floor.code === 'refresh-floor' && /floor 20 s/.test(floor.error) && floor.retryAfterSec > 0, 'right after a fetch the floor refuses BY NAME with the wait', JSON.stringify(floor));
+  W.convs.get('c0002').recs.push({ vendorId: 'c0002-new', at: clock + 1000, author: { id: 'u-0', name: 'Ada' }, text: 'fresh news', attachments: [] });
+  clock += 21e3;
+  const good = await eng.agentRefresh(A, 'many', 'c0002');
+  ok(good.ok && good.appended === 1, 'past the floor the refresh fetches and says how many arrived', JSON.stringify(good));
+  SET['channels.agentRefreshFloorSec'] = 60;
+  clock += 21e3;
+  const floor60 = await eng.agentRefresh(A, 'many', 'c0002');
+  ok(floor60.ok === false && /floor 60 s/.test(floor60.error), 'the floor is a SETTING, read live', floor60.error);
+  delete SET['channels.agentRefreshFloorSec'];
+}
+
+// CONCURRENT REFRESHES EACH GET THEIR OWN FETCH (lane R2 verify, major): a
+// refresh that found another refresh's pass in flight took THAT pass's result
+// (single flight), found no answer for its own conversation and said
+// `ok, 0 new` without a single vendor call — `vibespace-channels refresh`
+// printed "refreshed: 0 new" on stale data for 18 of 20.
+console.log('⑥b twenty concurrent agent refreshes: every "ok" is a real fetch of ITS conversation');
+{
+  const A = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
+  const ids = Array.from({ length: 20 }, (_, i) => `c0${610 + i}`);   // none matches the pattern of ⑨ (i % 50 === 7)
+  for (const id of ids) W.convs.get(id).recs.push({ vendorId: `${id}-burst`, at: clock + 100, author: { id: 'u-2', name: 'Cass' }, text: `burst news in ${id}`, attachments: [] });
+  clock += 1000;
+  const before = new Map(W.calls.history);
+  const answers = await Promise.all(ids.map((id) => eng.agentRefresh(A, 'many', id)));
+  const called = (id) => (W.calls.history.get(id) || 0) - (before.get(id) || 0);
+  const liars = ids.filter((id, i) => answers[i].ok && !answers[i].pending && (called(id) !== 1 || answers[i].appended !== 1));
+  ok(answers.every((a) => a.ok && !a.pending) && liars.length === 0, `each of 20 concurrent refreshes fetched ITS conversation once and counted its one new message (liars: ${liars.length})`, JSON.stringify(liars.slice(0, 4).map((id) => ({ id, calls: called(id), answer: answers[ids.indexOf(id)] }))));
+  ok(ids.every((id) => (eng.readFor(A, 'many', id).records || []).some((r) => r.vendorId === `${id}-burst`)), '…and a read right after shows every one of them');
+  await eng.settleWakes();
+  // CONTROL: the shipped refresh (take whatever the single-flight pass answered) lies again
+  const burst = async (ENGmod, label) => {
+    const Wf = makeWorld(clock, { n: 20, hot: 0, warm: 0 });
+    const dirF = path.join(ROOT, `burst-${label}`);
+    seedAccounts(dirF, [['burst', 'burst']]);
+    const regF = CH.createChannelRegistry(); regF.register(worldModule('burst', Wf));
+    const ef = ENGmod.create({ dataDir: dirF, registry: regF, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(ef, 'burst');
+    await ef.setScopeAssignment('burst', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+    const fids = [...Wf.convs.keys()];
+    for (const id of fids) Wf.convs.get(id).recs.push({ vendorId: `${id}-burst`, at: clock + 100, author: { id: 'u-2', name: 'Cass' }, text: 'burst', attachments: [] });
+    clock += 30e3;
+    const b0 = new Map(Wf.calls.history);
+    const ans = await Promise.all(fids.map((id) => ef.agentRefresh(A, 'burst', id)));
+    const lied = fids.filter((id, i) => ans[i].ok && !ans[i].pending && ((Wf.calls.history.get(id) || 0) - (b0.get(id) || 0) !== 1 || ans[i].appended !== 1)).length;
+    await ef.settleWakes(); ef.stop();
+    return { lied, allOk: ans.every((a) => a.ok && !a.pending) };
+  };
+  const good = await burst(ENG, 'real');
+  ok(good.lied === 0 && good.allOk, `FIXTURE: the same burst on a fresh engine answers every refresh truthfully (${good.lied} liars)`);
+  // CONTROL (re-pointed at the drain, r5; at the PURE drain's round, r9): a fetch that answers EVERY waiter of the account — r2's class, an answer from a fetch that was not of YOUR key — lies again
+  const M6 = mutantCopies('chan-agg-refresh', REPO);
+  const cw6 = closedWorld(M6, 'foreign-pass', { drain: [[DRAIN_LINES.round, '    waiters: ids(s.requests),']] });
+  ok(cw6.setup, 'CONTROL setup: a drain whose fetch answers every waiter of the account (r2\'s foreign-pass answer) is reconstructed', cw6.missing);
+  const bad = await burst(cw6.mod, 'ctl');
+  ok(bad.lied >= 10, `CONTROL: that drain says "ok" without a fetch of its own conversation for ${bad.lied} of 20 — the legs above would go red`);
+  for (const r of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+}
+
+// AN AGENT CANNOT SPEND THE ACCOUNT'S MINUTE (lane R2 verify, low): the floor
+// is per conversation, so a loop over cold rows took the whole per-minute
+// budget and the owner's hot rows got half their polls, the card naming the
+// budget but not who spent it. Agent refreshes are now a SHARE of the minute
+// (`channels.agentBudgetSharePct`, 25 %), refused by name; the view says who
+// spent what.
+console.log('⑥c agent refreshes are a share of the vendor budget; the owner\'s hot rows keep their cadence');
+{
+  const X = { kind: 'agent', id: 'agent-X', name: 'Xi', groups: [] };
+  const scenario = async (label, { agent, sharePct = null }) => {
+    const Ws = makeWorld(clock, { n: 300, hot: 20, warm: 0 });
+    const ks = worldModule('share', Ws, { budgetDefault: 60, budgetSettingKey: 'channels.budgetShareTestPerMin' });
+    const dirS = path.join(ROOT, `share-${label}`);
+    seedAccounts(dirS, [['share', 'share']]);
+    const SS = { 'channels.budgetShareTestPerMin': 100000 };
+    if (sharePct !== null) SS['channels.agentBudgetSharePct'] = sharePct;
+    const { eng: es } = mkEngine(`share-${label}`, { kinds: [ks], settings: SS, now, dataDir: dirS, sessions: [{ cid: 'agent-X', name: 'Xi', groups: [] }] });
+    await ingestAll(es, 'share');
+    await es.setScopeAssignment('share', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-X', name: 'Xi' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+    SS['channels.budgetShareTestPerMin'] = 60;
+    clock += 61e3;
+    await es.pass('share');                          // the minute opens with the hot rows' own poll
+    const hot = Array.from({ length: 20 }, (_, i) => `c${String(i).padStart(4, '0')}`);
+    const hotCalls = () => hot.reduce((n, id) => n + (Ws.calls.history.get(id) || 0), 0);
+    const h0 = hotCalls();
+    const refusals = [];
+    let next = 20, budgetAt30 = null;
+    for (let tick = 1; tick <= 12; tick++) {
+      clock += 5e3;
+      if (agent) for (let k = 0; k < 10; k++) { const r = await es.agentRefresh(X, 'share', `c${String(next++).padStart(4, '0')}`); if (!r.ok) refusals.push(r); }
+      await es.pass('share');
+      if (tick === 6) budgetAt30 = es.budgetOf('share');
+    }
+    await es.settleWakes();
+    es.stop();
+    return { hot: hotCalls() - h0, refusals, budgetAt30 };
+  };
+  const base = await scenario('base', { agent: false });
+  const shared = await scenario('shared', { agent: true });
+  ok(base.hot === 40, `FIXTURE: with no agent the 20 hot rows get 40 timer polls in the minute (${base.hot})`);
+  ok(shared.hot >= 0.75 * base.hot, `with an agent looping refreshes over cold rows the hot rows still get ${shared.hot} of ${base.hot} polls (≥ 75 %)`);
+  const named = shared.refusals.find((r) => r.code === 'vendor-budget' && r.share);
+  ok(named && /agent refreshes/.test(named.error) && /25 %/.test(named.error) && named.share.pct === 25 && named.share.limit === 15, 'the refusal names the AGENT share (25 % = 15 of 60 requests a minute) and the wait', JSON.stringify(named || shared.refusals[0]));
+  ok(shared.budgetAt30 && shared.budgetAt30.spentBy && shared.budgetAt30.spentBy.agent === 15 && shared.budgetAt30.spentBy.timer >= 20, 'the budget view says who spent this minute (agent 15, the timer the rest)', JSON.stringify(shared.budgetAt30 && shared.budgetAt30.spentBy));
+  // CONTROL (a runtime neuter): the share at 100 % is the pre-fix engine — the agent takes the minute
+  const open = await scenario('open', { agent: true, sharePct: 100 });
+  ok(open.hot < 0.75 * base.hot, `CONTROL: with the share at 100 % the same loop starves the hot rows (${open.hot} of ${base.hot}) — the leg above would go red`);
+  const bt = open.budgetAt30 ? caps.budgetText(open.budgetAt30) : '';
+  ok(/by agent refreshes/.test(bt), 'CONTROL: …and the spent-budget sentence names the agents as the spender', bt);
+}
+
+// A VENDOR BACK-OFF IS HONOURED BY EVERY REFRESH BUT THE OWNER'S OWN PRESS
+// (lane R2 verify r3, major): `pass({only})` skips `nextAt` so an explicit
+// Refresh runs — and the agent's verb and a window's open came through the
+// same door. 40 agent refreshes across 40 conversations during a 30 s 429
+// back-off made 15 vendor calls in a second (only the share bounded them),
+// every one refused again, and `consecutiveFailures` climbed 1 → 16: the
+// account's back-off went to its 15-minute maximum and the OWNER's whole
+// account stopped polling because an agent pressed refresh.
+console.log('⑥d a vendor back-off: agent refreshes and window opens make NO call and say the wait; the owner\'s own press still runs');
+async function backoffBurst(ENGmod, label) {
+  const Wb = makeWorld(clock, { n: 40, hot: 40, warm: 0 });
+  const kb = worldModule('bo', Wb);
+  const dirB = path.join(ROOT, `backoff-${label}`);
+  seedAccounts(dirB, [['bo', 'bo']]);
+  const regB = CH.createChannelRegistry(); regB.register(kb);
+  const eb = ENGmod.create({ dataDir: dirB, registry: regB, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+  await ingestAll(eb, 'bo');
+  const X = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
+  await eb.setScopeAssignment('bo', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+  clock += 30e3;
+  Wb.failNext = 'rate-limited'; Wb.failSticky = true;
+  const p1 = await eb.pass('bo', { force: true });
+  const recOf = () => eb.adapterRecords().adapters.find((r) => r.id === 'bo');
+  const v1 = eb.adapterView(recOf());
+  const fixture = p1.ok === false && p1.why === 'rate-limited' && v1.consecutiveFailures === 1 && Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1];
+  const before = historyCalls(Wb);
+  const answers = [];
+  for (let i = 0; i < 40; i++) answers.push(await eb.agentRefresh(X, 'bo', `c${String(i).padStart(4, '0')}`));
+  const agentCalls = historyCalls(Wb) - before;
+  const v2 = eb.adapterView(recOf());
+  const w = await eb.watch('bo', 'c0001');
+  const watchCalls = historyCalls(Wb) - before - agentCalls;
+  await eb.settleWakes();
+  const owner = await eb.refresh('bo', 'c0002');
+  const ownerCalls = historyCalls(Wb) - before - agentCalls - watchCalls;
+  const v3 = eb.adapterView(recOf());
+  // the back-off lifts: the vendor answers again, the agent's verb works
+  Wb.failNext = null; Wb.failSticky = false;
+  clock += ENG.BACKOFF_MS[2] + 1000;
+  Wb.convs.get('c0003').recs.push({ vendorId: 'c0003-after', at: clock, author: { id: 'u-0', name: 'Ada' }, text: 'after the back-off', attachments: [] });
+  const after = await eb.agentRefresh(X, 'bo', 'c0003');
+  eb.stop();
+  return { fixture, answers, agentCalls, failuresAfterAgents: v2.consecutiveFailures, backoffAfterAgents: v2.backoffUntil, watch: w, watchCalls, owner, ownerCalls, failuresAfterOwner: v3.consecutiveFailures, backoffAfterOwner: v3.backoffUntil, after };
+}
+{
+  const r = await backoffBurst(ENG, 'real');
+  ok(r.fixture, 'FIXTURE: one scripted 429 fails the pass with rate-limited, consecutiveFailures 1, backoffUntil = +30 s');
+  const codes = r.answers.reduce((m, a) => { m[a.code || 'ok'] = (m[a.code || 'ok'] || 0) + 1; return m; }, {});
+  ok(r.agentCalls === 0 && codes.backoff === 40, `40 agent refreshes over 40 conversations inside the back-off make ZERO vendor calls (${r.agentCalls}) — every one answers code backoff (${JSON.stringify(codes)})`);
+  const a0 = r.answers[0];
+  ok(a0.retryAfterSec > 0 && a0.retryAfterSec <= 30 && Number(a0.backoffUntil) === r.backoffAfterAgents && /rate-limited/.test(a0.error) && /retried in \d+ s/.test(a0.error), 'the refusal names the vendor\'s code, the wait and the retry instant', JSON.stringify(a0));
+  ok(r.failuresAfterAgents === 1, `…and consecutiveFailures stays 1 (${r.failuresAfterAgents}) — the back-off is not escalated by the agent`);
+  ok(r.watch.ok && r.watch.fetched === false && r.watchCalls === 0, `a window opened during the back-off is hot but pokes nothing (fetched:false, ${r.watchCalls} calls)`, JSON.stringify(r.watch));
+  ok(r.ownerCalls === 1 && r.owner.ok === false && r.owner.code === 'rate-limited' && r.failuresAfterOwner === 2, `the owner's OWN Refresh press still runs (human-gated: ${r.ownerCalls} call), fails by name and counts as one more failure (${r.failuresAfterOwner})`, JSON.stringify(r.owner));
+  // r4: the failed press answers the wait it just escalated into (Retry-After rides readerAnswer; the toast words it) — a bare "failed" invited the next press
+  ok(r.owner.retryAfterSec > 0 && r.owner.retryAfterSec <= ENG.BACKOFF_MS[2] / 1000 && Number(r.owner.backoffUntil) === Number(r.backoffAfterOwner), `…and its answer carries the retry instant of the back-off it escalated into (retry in ${r.owner.retryAfterSec} s)`, JSON.stringify({ owner: r.owner, backoffAfterOwner: r.backoffAfterOwner }));
+  const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+  ok(/case 'rate-limited': case 'transport': case 'backoff': \{/.test(words) && /retrying in \{s\} s/.test(words), 'the owner\'s toast words a refused fetch with its code and the wait (channel-words: rate-limited / transport / backoff), never the bare English sentence');
+  ok(r.after.ok && r.after.appended === 1, 'once the back-off has passed the agent\'s refresh fetches again', JSON.stringify(r.after));
+  // the two route maps, the CLI and the panel/window contracts around the new code
+  const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-channels'), 'utf-8');
+  ok(/code === 'refresh-floor' \|\| code === 'backoff' \? 429/.test(rsrc) && /code === 'vendor-budget' \|\| code === 'backoff' \? 429/.test(asrc), 'both route maps answer `backoff` as 429 (+ Retry-After from retryAfterSec)');
+  ok(/const REFRESH_REFUSED = \[[^\]]*'backoff'[^\]]*\]/.test(cli) && /REFRESH_REFUSED\.includes\(j\.code\)\) return \{ refused: true/.test(cli), 'the CLI treats `backoff` as a refusal (exit 4, "not refreshed: … (retry in N s)"), never an error — through the ONE refused set test-channels-agent-cli\'s census keeps equal to the route\'s (r7)');
+  const panel = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  const win = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
+  ok(/app\.ws\.onStateChange\?\.\(onState\)/.test(panel) && /app\.ws\.offStateChange\?\.\(onState\)/.test(panel) && /app\.ws\.onStateChange\?\.\(onState\)/.test(win) && /app\.ws\.offStateChange\?\.\(onState\)/.test(win), 'the panel and the window re-read on every ws reconnect (a broadcast sent while the socket was down never arrives) and remove that listener by name on teardown');
+  // CONTROL: the shipped refresh (no back-off gate on the agent's verb or the loop) hammers the vendor and escalates the back-off
+  const M6d = mutantCopies('chan-agg-backoff', REPO);
+  // (re-pointed at the drain, r5; r9: the PURE drain's two back-off lines — the judgement gate AND the fetch-time owner check, both stripped: a new guard layer is removed from the old control too)
+  const cw6d = closedWorld(M6d, 'ungated', { drain: [[DRAIN_LINES.backoffGate, ''], [DRAIN_LINES.backoffAtFetch, '']] });
+  ok(cw6d.setup, 'CONTROL setup: the drain without its back-off gate (r3\'s open door) is reconstructed', cw6d.missing);
+  const rc = await backoffBurst(cw6d.mod, 'ctl');
+  ok(rc.agentCalls >= 10 && rc.failuresAfterAgents >= 11 && rc.backoffAfterAgents - clock > 0, `CONTROL: without the gate the same 40 refreshes call the vendor ${rc.agentCalls} times and escalate consecutiveFailures to ${rc.failuresAfterAgents} — the legs above would go red`);
+  for (const r2 of copiesCensus(M6d.files, M6d.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// A PASS THAT FETCHED THIS CONVERSATION WHILE WE WAITED ANSWERS (lane R2
+// verify r4, major): the r2 loop ran every caller's OWN pass after the wait
+// and the per-conversation floor is asked BEFORE the wait — so 20 concurrent
+// agent refreshes of ONE conversation made 20 vendor calls (the floor's
+// "never a poll loop" defeated by parallelism), 3 refreshes queued behind a
+// timer pass that had just fetched their conversation made 3 more, and 5
+// windows opened on one stale conversation made 5. A pass with a result for
+// OUR key is a real fetch of this conversation, completed after the call
+// began (r2's liar was a pass with NO entry for it) — it answers.
+console.log('⑥e concurrent refreshes of ONE conversation share ONE fetch: agents, a queued timer pass, windows');
+async function sameConvBurst(ENGmod, label) {
+  const Ws = makeWorld(clock, { n: 40, hot: 40, warm: 0 });
+  const ks = worldModule('one', Ws);
+  const dirS = path.join(ROOT, `sameconv-${label}`);
+  seedAccounts(dirS, [['one', 'one']]);
+  const regS = CH.createChannelRegistry(); regS.register(ks);
+  const es = ENGmod.create({ dataDir: dirS, registry: regS, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+  await ingestAll(es, 'one');
+  const X = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
+  await es.setScopeAssignment('one', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+  clock += 31e3;
+  // (a) 20 concurrent AGENT refreshes of the same conversation, one new message waiting
+  Ws.convs.get('c0001').recs.push({ vendorId: 'c0001-burst', at: clock, author: { id: 'u-0', name: 'Ada' }, text: 'burst', attachments: [] });
+  const a0 = Ws.calls.history.get('c0001') || 0;
+  const agents = await Promise.all(Array.from({ length: 20 }, () => es.agentRefresh(X, 'one', 'c0001')));
+  const agentCalls = (Ws.calls.history.get('c0001') || 0) - a0;
+  const spentByAgent = es.budgetOf('one').spentBy.agent;
+  // (b) 5 windows opened at once on a stale conversation
+  const w0 = Ws.calls.history.get('c0002') || 0;
+  const watches = await Promise.all(Array.from({ length: 5 }, () => es.watch('one', 'c0002')));
+  await sleep(20); await es.settleWakes();
+  const watchCalls = (Ws.calls.history.get('c0002') || 0) - w0;
+  // (c) 3 agent refreshes queued (same tick) behind a timer pass that fetches their conversation itself
+  clock += 31e3;
+  const q0 = Ws.calls.history.get('c0006') || 0;
+  const timerPass = es.pass('one');
+  const queued = await Promise.all([es.agentRefresh(X, 'one', 'c0006'), es.agentRefresh(X, 'one', 'c0006'), es.agentRefresh(X, 'one', 'c0006')]);
+  await timerPass; await es.settleWakes();
+  const queuedCalls = (Ws.calls.history.get('c0006') || 0) - q0;
+  es.stop();
+  return { agents, agentCalls, spentByAgent, watches, watchCalls, queued, queuedCalls };
+}
+{
+  const r = await sameConvBurst(ENG, 'real');
+  ok(r.agentCalls === 1 && r.agents.every((a) => a.ok && !a.pending && a.appended === 1), `20 concurrent agent refreshes of ONE conversation = ONE vendor call (${r.agentCalls}), every answer ok with the one new message`, JSON.stringify({ calls: r.agentCalls, sample: r.agents.slice(0, 2) }));
+  ok(r.spentByAgent === 1, `…and the agent share is charged exactly once (${r.spentByAgent})`);
+  ok(r.watchCalls === 1 && r.watches.every((w) => w.ok && w.fetched), `5 windows opened at once on a stale conversation = ONE vendor call (${r.watchCalls})`, JSON.stringify(r.watches[0]));
+  ok(r.queuedCalls === 1 && r.queued.every((a) => a.ok && !a.pending), `3 agent refreshes queued behind a timer pass that fetched their conversation add NO call (${r.queuedCalls} on the key in all)`, JSON.stringify(r.queued));
+  // CONTROL: a copy without the r4 rule (every caller runs its own pass after the wait) calls 20× for one conversation
+  const M6e = mutantCopies('chan-agg-sameconv', REPO);
+  // (re-pointed at the drain, r5; r9: the PURE drain's slot — one item per WAITER, so no rider rule and no one-fetch-per-key — r4's pass per caller)
+  const cw6e = closedWorld(M6e, 'own-pass', { drain: [[DRAIN_LINES.slot, 'function slotOf(r) { return r.id; }']] });
+  ok(cw6e.setup, 'CONTROL setup: a drain with one item per WAITER — no rider rule, no one fetch per key (r4\'s pass per caller) — is reconstructed', cw6e.missing);
+  const rc = await sameConvBurst(cw6e.mod, 'ctl');
+  ok(rc.agentCalls >= 10 && rc.watchCalls >= 2 && rc.queuedCalls >= 2, `CONTROL: without the rule the same bursts call the vendor ${rc.agentCalls} / ${rc.watchCalls} / ${rc.queuedCalls} times — the legs above would go red`);
+  for (const r2 of copiesCensus(M6e.files, M6e.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// THE CONCURRENCY TABLE (lane R2 verify r5 — the structural closure). Three
+// rounds each found ONE money defect at the SAME seam: the caller's
+// `refresh()` deciding a vendor call against the account's single-flight
+// pass (r2: a foreign pass's answer; r3: the back-off door; r4: a pass per
+// waiter). N callers decided concurrently. Now a refresh is a REQUEST into
+// the account's set and the pass loop is the ONE judge: every gate once per
+// key at drain time, one fetch per key per pass, every waiter answered by the
+// drain that judged its key. The whole class is pinned as ONE table —
+// callers × keys × state × origin — against a scripted adapter that answers
+// after ≥ 20 ms (a real vendor never answers in the same tick), judged on
+// the vendor's own call log: an `ok` is a fetch of ITS key that ENDED after
+// the call began, `appended` is the news, the agent share is charged exactly
+// the agent-caused fetches, every refusal names itself and its wait, and no
+// waiter is left in the set. Cells share one clock: every engine is built
+// and ingested first, the clock moves once, the cells run a few at a time.
+console.log('⑥f THE CONCURRENCY TABLE (r5): callers × keys × state × origin ⇒ the vendor calls, honest answers, the share, the refusal by name');
+const TABLE_STATES = ['idle', 'timer-fetching-key', 'timer-not-fetching-key', 'backoff', 'budget', 'share', 'floor'];
+const X6F = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
+/** Phase 1 (at the shared clock): the engine, its world, its ingest. */
+async function prep6f(ENGmod, cell, label) {
+  const n = 45;
+  const Wf = makeWorld(clock, { n, hot: cell.state === 'timer-not-fetching-key' ? 1 : n, warm: 0 });   // every row hot (due at +31 s) — or ONLY c0000 (the rest cold, not due)
+  const kf = worldModule('tab', Wf, { budgetDefault: 1000, budgetSettingKey: 'channels.budgetTabTestPerMin' });
+  const dirF = path.join(ROOT, `tab-${label}`);
+  seedAccounts(dirF, [['tab', 'tab']]);
+  const SF = { 'channels.budgetTabTestPerMin': 100000 };
+  const regF = CH.createChannelRegistry(); regF.register(kf);
+  const ef = ENGmod.create({ dataDir: dirF, registry: regF, env: {}, now, broadcast: () => {}, serverSetting: (k) => SF[k], liveSessions: () => SESS, deliver: null, log: quiet });
+  await ingestAll(ef, 'tab');
+  await ef.setScopeAssignment('tab', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+  return { cell, Wf, SF, ef };
+}
+/** Phase 2 (the clock moved +31 s: every hot row stale and past the agent
+ *  floor; the timer's queue is c0000, c0001, … — equal due time, by key). */
+async function run6f({ cell, Wf, SF, ef }) {
+  const { N, distinct, state, origin } = cell;
+  const recOf = () => ef.adapterRecords().adapters.find((r) => r.id === 'tab');
+  // the keys under test start at c0000 when a held timer pass is INSIDE its fetch (the r4 boundary), else at c0001
+  const first = state === 'timer-fetching-key' ? 0 : 1;
+  const keys = Array.from({ length: distinct ? N : 1 }, (_, i) => `c${String(first + i).padStart(4, '0')}`);
+  const news = () => { for (const id of keys) if (!Wf.convs.get(id).recs.some((r) => r.vendorId === `${id}-news`)) Wf.convs.get(id).recs.push({ vendorId: `${id}-news`, at: clock, author: { id: 'u-0', name: 'Ada' }, text: 'news', attachments: [] }); };
+  if (state !== 'floor') news();
+  // ── the STATE ──
+  let release = null, timerPass = null;
+  if (state === 'backoff') { Wf.failNext = 'rate-limited'; Wf.failSticky = true; await ef.pass('tab', { force: true }); }
+  if (state === 'budget') SF['channels.budgetTabTestPerMin'] = 1;   // the minute already spent more than that
+  if (state === 'share') { SF['channels.budgetTabTestPerMin'] = 200; SF['channels.agentBudgetSharePct'] = 5; for (let i = 30; i < 40; i++) await ef.agentRefresh(X6F, 'tab', `c00${i}`); }   // 5 % (the setting's minimum) of 200 = 10 units: ten agent fetches spend it (the minute's 46 so far are the timer's)
+  if (state === 'floor') { await ef.pass('tab', { force: true }); news(); }   // every key fetched THIS instant; the news lands after
+  const before = new Map(Wf.calls.history);
+  const agent0 = ef.budgetOf('tab').spentBy.agent;
+  Wf.delayMs = 20;
+  if (state === 'timer-fetching-key' || state === 'timer-not-fetching-key') {
+    let started; const entered = new Promise((r) => { started = r; });
+    const hold = new Promise((r) => { release = r; });
+    let once = false;
+    Wf.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); await hold; } };
+    timerPass = ef.pass('tab');
+    await entered;   // the timer pass is INSIDE history(c0000)
+  }
+  // ── the CALLERS, one tick ──
+  const reqs = [];
+  // r6 verify: `answeredAt` — the instant the caller's promise SETTLED (the judge reads the answer's own timing, not only the vendor log)
+  const call = (id) => { const startedAt = Date.now(); const q = { id, startedAt, answeredAt: 0 }; q.p = (origin === 'agent' ? ef.agentRefresh(X6F, 'tab', id) : ef.refresh('tab', id)).then((a) => { q.answeredAt = Date.now(); return a; }); reqs.push(q); };
+  for (let i = 0; i < N; i++) call(keys[distinct ? i : 0]);
+  if (release) release();
+  const answers = await Promise.all(reqs.map((r) => r.p));
+  if (timerPass) await timerPass;
+  await ef.settleWakes();
+  // a SECOND round of presses inside the same back-off window: none is honoured
+  let second = null;
+  if (state === 'backoff' && origin === 'refresh') { const b2 = historyCalls(Wf); const a2 = await Promise.all(keys.map((id) => ef.refresh('tab', id))); second = { calls: historyCalls(Wf) - b2, codes: a2.map((a) => a.code) }; }
+  await sleep(30);   // r6: a fetch the pass still owes (> delayMs) lands in the log BEFORE the judge reads it — an answer that came early is then caught by its instant, not by a fetch the harness's stop cut short
+  const failures = recOf().consecutiveFailures;
+  const agentCharged = ef.budgetOf('tab').spentBy.agent - agent0;
+  const queue = ef.refreshQueueOf('tab');
+  ef.stop();
+  Wf.beforeHistory = null;
+  const calls = (id) => (Wf.calls.history.get(id) || 0) - (before.get(id) || 0);
+  return { cell, keys, reqs, answers, calls, log: Wf.log, second, failures, queue, agentCharged };
+}
+/** What the table EXPECTS of one key's answers in a state — calls on the
+ *  key, and the answer every caller of it hears. */
+function expect6f({ state, origin, key }) {
+  const agent = origin === 'agent';
+  const ok1 = { calls: 1, ok: true, appended: 1 };
+  switch (state) {
+    case 'idle': return ok1;
+    case 'timer-not-fetching-key': return ok1;
+    case 'timer-fetching-key': return key === 'c0000' ? (agent ? { calls: 1, code: 'refresh-floor' } : { calls: 2, ok: true, appended: 0 }) : ok1;   // the r4 boundary: filed mid-fetch ⇒ judged by the NEXT drain (the floor; the owner's second fetch) — every other key rides the timer's fetch
+    case 'backoff': return agent ? { calls: 0, code: 'backoff' } : { calls: 'one-key', code: 'backoff', pressed: 'rate-limited' };
+    case 'budget': return { calls: 0, code: 'vendor-budget' };
+    case 'share': return agent ? { calls: 0, code: 'vendor-budget', share: true } : ok1;
+    case 'floor': return agent ? { calls: 0, code: 'refresh-floor' } : ok1;
+    default: throw new Error('no such state ' + state);
+  }
+}
+/** The share is charged exactly the AGENT-caused fetches: a key the agent's
+ *  request fetched (idle / not-fetching), never a rider, a refusal or the owner. */
+function agentFetches6f({ state, origin, keys }) { return origin === 'agent' && (state === 'idle' || state === 'timer-not-fetching-key') ? keys.length : 0; }
+function judge6f(r) {
+  const cell = r.cell;
+  const problems = [];
+  const byKey = new Map(); for (const k of r.keys) byKey.set(k, []);
+  r.reqs.forEach((q, i) => byKey.get(q.id).push({ ...q, a: r.answers[i] }));
+  let oneKeyCalls = 0;
+  for (const key of r.keys) {
+    const ex = expect6f({ ...cell, key });
+    const c = r.calls(key);
+    if (ex.calls === 'one-key') { oneKeyCalls += c; if (c > 1) problems.push(`${key}: ${c} calls (the owner's press is honoured once)`); }
+    else if (c !== ex.calls) problems.push(`${key}: ${c} calls, expected ${ex.calls}`);
+    for (const q of byKey.get(key)) {
+      const a = q.a || {};
+      if (ex.calls === 'one-key') {
+        if (c === 1) { if (a.ok || a.code !== ex.pressed || !(a.retryAfterSec > 0) || !a.backoffUntil) problems.push(`${key}: the honoured press hears ${JSON.stringify(a)}`); }
+        else if (a.ok || a.code !== 'backoff' || !(a.retryAfterSec > 0)) problems.push(`${key}: a refused press hears ${JSON.stringify(a)}`);
+        continue;
+      }
+      if (ex.ok) {
+        if (!a.ok || a.pending) { problems.push(`${key}: expected ok, got ${JSON.stringify(a)}`); continue; }
+        if ((a.appended || 0) !== ex.appended) problems.push(`${key}: appended ${a.appended}, expected ${ex.appended}`);
+        // HONEST: a fetch of ITS key that ENDED after this call began AND before its answer landed (r6 verify: the vendor log alone let an `ok` resolved BEFORE its fetch ended pass — the fetch still happened, later)
+        if (!r.log.some((l) => l.id === key && !l.failed && l.endedAt >= q.startedAt)) problems.push(`${key}: ok without a fetch of it that ended after the call began`);
+        else if (!r.log.some((l) => l.id === key && !l.failed && l.endedAt >= q.startedAt && l.endedAt <= q.answeredAt)) problems.push(`${key}: ok delivered at +${q.answeredAt - q.startedAt} ms, before any fetch of it had ended`);
+      } else {
+        if (a.ok || a.code !== ex.code) problems.push(`${key}: expected ${ex.code}, got ${JSON.stringify(a)}`);
+        else if (!(a.retryAfterSec > 0)) problems.push(`${key}: the ${ex.code} refusal carries no wait`);
+        else if (ex.share && !(a.share && a.share.pct === 5 && a.share.limit === 10)) problems.push(`${key}: the share refusal does not name the share`);
+        else if (ex.code === 'refresh-floor' && !/floor 20 s/.test(a.error)) problems.push(`${key}: the floor refusal does not name the floor`);
+      }
+    }
+  }
+  if (r.keys.length && expect6f({ ...cell, key: r.keys[0] }).calls === 'one-key' && oneKeyCalls !== 1) problems.push(`${oneKeyCalls} calls across ${r.keys.length} keys — the owner's press is honoured exactly once per window`);
+  if (r.second && (r.second.calls !== 0 || !r.second.codes.every((c) => c === 'backoff'))) problems.push(`a second round of presses in the same window: ${r.second.calls} calls, codes ${JSON.stringify(r.second.codes)}`);
+  if (cell.state === 'backoff' && r.failures !== (cell.origin === 'refresh' ? 2 : 1)) problems.push(`consecutiveFailures ${r.failures} (expected ${cell.origin === 'refresh' ? 2 : 1})`);
+  const want = agentFetches6f({ ...cell, keys: r.keys });
+  if (r.agentCharged !== want) problems.push(`the agent share was charged ${r.agentCharged}, expected ${want}`);
+  if (r.queue.waiters !== 0) problems.push(`${r.queue.waiters} waiter(s) left in the set`);
+  return problems;
+}
+/** The whole table on one engine module: prep every cell at the shared
+ *  clock, move it once, run the cells a few at a time. */
+async function table6f(ENGmod, tag, cells) {
+  const preps = [];
+  for (let i = 0; i < cells.length; i++) preps.push(await prep6f(ENGmod, cells[i], `${tag}-${i + 1}`));
+  clock += 31e3;
+  const out = new Array(preps.length);
+  let next = 0;
+  const lane = async () => { for (;;) { const i = next++; if (i >= preps.length) return; out[i] = await run6f(preps[i]); } };
+  await Promise.all(Array.from({ length: 6 }, lane));
+  return out;
+}
+{
+  const cells = [];
+  for (const state of TABLE_STATES) for (const origin of ['agent', 'refresh']) for (const N of [1, 5, 20]) for (const distinct of (N === 1 ? [false] : [false, true])) cells.push({ N, distinct, state, origin });
+  const t6f = Date.now();
+  const results = await table6f(ENG, 'real', cells);
+  let red = 0;
+  for (const r of results) {
+    const problems = judge6f(r);
+    if (problems.length) red++;
+    const cell = r.cell;
+    ok(problems.length === 0, `${cell.state} · ${cell.origin} · ${cell.N} caller(s) on ${cell.distinct ? cell.N + ' keys' : '1 key'}: ${cell.distinct ? 'per key ' : ''}${JSON.stringify(expect6f({ ...cell, key: r.keys[r.keys.length - 1] }))}${r.keys.length > 1 && cell.state === 'timer-fetching-key' ? ' (c0000 mid-fetch: the floor / a second fetch)' : ''}`, problems.slice(0, 3).join('; '));
+  }
+  ok(cells.length === 70 && red === 0, `the table holds: ${cells.length} cells (7 states × 2 origins × {1, 5×2, 20×2} callers), ${red} red, ${Date.now() - t6f} ms`);
+  // CONTROL: the owner-once rule neutered (every press inside a window is honoured) — N presses on N keys in a back-off are N vendor calls
+  const M6f = mutantCopies('chan-agg-table', REPO);
+  // (r9: the owner-once rule is the PURE drain's press line — every owner group pressed, every window)
+  const cwEvery = closedWorld(M6f, 'every-press', { drain: [[DRAIN_LINES.pressFree, '  const pressFree = p.backoff;'], [DRAIN_LINES.pressOne, '    const v = verdict(s, g, pressFree);']] });
+  ok(cwEvery.setup, 'CONTROL setup: a drain honouring EVERY owner press inside a back-off window is reconstructed', cwEvery.missing);
+  const ctl = await table6f(cwEvery.mod, 'ctl', [{ N: 5, distinct: true, state: 'backoff', origin: 'refresh' }]);
+  const cp = judge6f(ctl[0]);
+  const ctlCalls = ctl[0].keys.reduce((a, k) => a + ctl[0].calls(k), 0);
+  ok(ctlCalls >= 2 && ctl[0].failures >= 3 && cp.length > 0, `CONTROL: without the once-per-window rule the same presses inside a 30 s back-off make ${ctlCalls} vendor calls (a second round is honoured again) and climb consecutiveFailures to ${ctl[0].failures} — the cell above would go red`);
+  // CONTROL (r6 verify): the EARLY ANSWER — a drain that resolves a request `ok` at judgement, before the fetch it then makes — is caught by the answer's own instant; the vendor log alone (a fetch of its key ended after the call began) let it through
+  // (r9: the ENGINE seam — the waiter's promise resolved `ok` at the step that ACCEPTS it, the request left in the drain so its fetch is still made after: r6's shape)
+  const STEP_LINE = '          e.dq = Drain.apply(e.dq, act);   // the step is taken (an async action BEGINS)\n';
+  const RESOLVE_LINE = '      w.resolve = (outcome) => {\n';
+  const cwEarly = closedWorld(M6f, 'early-answer', { engine: [[RESOLVE_LINE, '      w.raw = resolve;\n' + RESOLVE_LINE], [STEP_LINE, STEP_LINE + '          for (const id of act.accept || []) { const w = e.waiters.get(id); if (w && w.raw) w.raw({ ok: true, appended: 1, polledAt: null }); }\n']] });
+  ok(cwEarly.setup, 'CONTROL setup: a drain answering `ok` at judgement (the fetch still made after) is reconstructed', cwEarly.missing);
+  const ctlE = await table6f(cwEarly.mod, 'ctl-early', [{ N: 1, distinct: false, state: 'idle', origin: 'refresh' }, { N: 5, distinct: true, state: 'floor', origin: 'refresh' }, { N: 1, distinct: false, state: 'timer-not-fetching-key', origin: 'agent' }]);
+  const ctlEp = ctlE.map((r) => judge6f(r));
+  const logOnly = ctlE.map((r) => ctlEp[ctlE.indexOf(r)].filter((p) => !/delivered at \+/.test(p)).length);
+  ok(ctlEp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x))) && logOnly.some((n) => n === 0), `CONTROL: the early answer is caught in ${ctlEp.length}/${ctlEp.length} cells by the answer's instant — and in ${logOnly.filter((n) => n === 0).length} of them by NOTHING ELSE (the vendor-log clause alone was green there)`, JSON.stringify(ctlEp.map((p) => p.slice(0, 2))));
+  // CONTROL (B4, r7): the RIGHT fetch answered at its START — the waiter resolved with its key's fetch in flight, the fetch ending after — is a lie about time the clause catches (the vendor-log clause sees a fetch of its key that ended after the call began)
+  // (r9: the ENGINE seam — the driver's delivery at the START of the right fetch)
+  const INGEST_LINE = '        let got;\n        try { got = await ingest(e, rec, idOf(key), origin); }\n';
+  const cwStart = closedWorld(M6f, 'at-start', { engine: [[INGEST_LINE, '        deliver(act.waiters, { ok: true, appended: 1, polledAt: lastPollOf(key) });\n' + INGEST_LINE]] });
+  ok(cwStart.setup, 'CONTROL setup: a loop answering ok at the START of the right fetch is reconstructed', cwStart.missing);
+  const ctlS = await table6f(cwStart.mod, 'ctl-start', [{ N: 1, distinct: false, state: 'idle', origin: 'refresh' }, { N: 5, distinct: true, state: 'timer-not-fetching-key', origin: 'agent' }, { N: 20, distinct: true, state: 'idle', origin: 'agent' }]);
+  const ctlSp = ctlS.map((r) => judge6f(r));
+  const onlyTime = ctlSp.filter((p) => p.length && p.every((x) => /delivered at \+\d+ ms, before any fetch/.test(x))).length;
+  ok(ctlSp.every((p) => p.some((x) => /delivered at \+\d+ ms, before any fetch/.test(x))), `CONTROL: the ok at the right fetch's START is caught in ${ctlSp.length}/${ctlSp.length} cells by the answer's instant — in ${onlyTime} of them by NOTHING ELSE (the fetch of its key did end after the call began)`, JSON.stringify(ctlSp.map((p) => p.slice(0, 2))));
+  for (const r2 of copiesCensus(M6f.files, M6f.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// THE SHAPE UNDER ATTACK (r5 verify — the closing round on the request set):
+// (1) STARVATION OF THE TIMER by a storm of requests — a request pass keeps
+//     `e.passing` set through every tick, so the due list never ran; now a
+//     tick that finds the account busy while due hands the timer's turn to the
+//     pass in flight (`e.timerDue`), and the storm's own passes do it;
+// (2) THE REVERSE — a request filed behind a long timer pass waited for the
+//     whole pass and, at 30 s, left as `pending` with no fetch ever made; now
+//     the loop drains the set at EVERY fetch boundary (one fetch at most);
+// (3) THE CAP — past 200 waiters an account refuses `refresh-queue-full`
+//     by name, and the set is empty once the drain answered;
+// (4) STOP with requests pending: every waiter hears `stopped`;
+// (5) an account REMOVED while a request waits (behind a held fetch): the
+//     waiter hears `account-changed`, the held fetch's own waiter still ok.
+console.log('⑥g the request set under attack: a storm cannot starve the timer, a long pass cannot starve a request, the cap, stop, remove');
+{
+  const mk = async (label, { n = 45, hot = n } = {}) => {
+    const Wg = makeWorld(clock, { n, hot, warm: 0 });
+    const kg = worldModule('atk', Wg, { budgetDefault: 100000 });
+    const dirG = path.join(ROOT, `atk-${label}`);
+    seedAccounts(dirG, [['atk', 'atk']]);
+    const regG = CH.createChannelRegistry(); regG.register(kg);
+    const eg = ENG.create({ dataDir: dirG, registry: regG, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(eg, 'atk');
+    return { Wg, eg };
+  };
+  // (1) the storm: owner refreshes re-filed the instant each answers, on ten rotating keys, for ~600 ms; the tick every 100 ms
+  {
+    const { Wg, eg } = await mk('storm');
+    clock += 31e3;
+    Wg.delayMs = 20;
+    let stop = false, filed = 0;
+    const storm = async (k) => { while (!stop) { await eg.refresh('atk', `c000${k}`); filed++; } };
+    const lanes = Array.from({ length: 10 }, (_, k) => storm(k));
+    const before = new Map(Wg.calls.history);
+    let ticks = 0;
+    const tick = setInterval(() => { eg.tick(); ticks++; }, 100);
+    const dueRows = Array.from({ length: 35 }, (_, i) => `c00${10 + i}`);   // never in the storm's rotation: only the timer's work fetches them
+    const fetchedByTimer = () => dueRows.filter((id) => (Wg.calls.history.get(id) || 0) > (before.get(id) || 0)).length;
+    await sleep(2500);
+    const during = fetchedByTimer();   // r7: read while the storm is still on — the interleave serves the due rows INSIDE the storm, not after it
+    stop = true; clearInterval(tick);
+    await Promise.all(lanes); await eg.idle('atk'); await eg.settleWakes();   // r7: an ok lands at its fetch, so the lanes are answered before the pass ends — wait for the account to go idle before counting
+    const total = fetchedByTimer();
+    const timerSpent = eg.budgetOf('atk').spentBy.timer;
+    eg.stop();
+    ok(filed >= 20 && ticks >= 4 && total === 35, `a storm of ${filed} refreshes kept the account busy through ${ticks} ticks, and the timer's ${total}/35 due rows were still fetched (charged to the timer: ${timerSpent})`, JSON.stringify({ filed, ticks, total }));
+    ok(during === 35, `…and every one of them DURING the 2.5 s storm (${during}/35 — r7's interleave: one requested key, one due row; r6 served them only once the storm paused, the no-interleave copy below never)`, JSON.stringify({ during, filed }));
+  }
+  // (2) the reverse: a 45-row timer pass (20 ms each = 900 ms); a request for a NOT-due row filed once the pass is inside its first fetch
+  {
+    const { Wg, eg } = await mk('long', { n: 45, hot: 40 });   // c0040..c0044 cold: not due
+    clock += 31e3;
+    Wg.delayMs = 20;
+    let started; const entered = new Promise((r) => { started = r; });
+    let once = false;
+    Wg.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); } };
+    const logAt = Wg.log.length;   // this pass's calls start here
+    const timerPass = eg.pass('atk');
+    await entered;
+    Wg.convs.get('c0040').recs.push({ vendorId: 'c0040-news', at: clock, author: { id: 'u-0', name: 'Ada' }, text: 'news', attachments: [] });
+    const late = eg.refresh('atk', 'c0039');   // a DUE row, last in the timer's queue: promoted to the next boundary, one fetch
+    const r = await eg.refresh('atk', 'c0040');
+    const rl = await late;
+    await timerPass; await eg.settleWakes();
+    const calls = Wg.log.slice(logAt).map((l) => l.id);
+    const pos = calls.indexOf('c0040'), posLate = calls.indexOf('c0039');
+    eg.stop();
+    // the FETCH is at the next boundary (positions 1 and 2: right after the row the pass was inside); a REFUSAL lands when it is judged (r6, leg (7)) and an `ok` at ITS fetch (r7, leg (8)) — never at the pass's end
+    ok(r.ok && !r.pending && r.appended === 1 && rl.ok && !rl.pending && pos >= 1 && pos <= 2 && posLate >= 1 && posLate <= 2 && calls.length === 41 && calls.filter((k) => k === 'c0039').length === 1, `requests filed behind a 40-row timer pass are fetched at the NEXT boundary — a not-due row at position ${pos}, the last DUE row promoted to position ${posLate} (one fetch, not two) of the pass's ${calls.length} calls — never after the whole pass`, JSON.stringify({ r, rl, pos, posLate, head: calls.slice(0, 4) }));
+  }
+  // (3) the cap
+  {
+    const { Wg, eg } = await mk('cap', { n: 5 });
+    clock += 31e3;
+    Wg.delayMs = 20;
+    const a0 = Wg.calls.history.get('c0001') || 0;
+    const answers = await Promise.all(Array.from({ length: 260 }, () => eg.refresh('atk', 'c0001')));
+    const okN = answers.filter((a) => a.ok && !a.pending && a.appended === 0).length;
+    const full = answers.filter((a) => a.code === 'refresh-queue-full');
+    const q = eg.refreshQueueOf('atk');
+    eg.stop();
+    ok(okN === ENG.REFRESH_QUEUE_CAP && full.length === 60 && full.every((a) => a.retryAfterSec === 1 && a.queued === 200 && /already waiting/.test(a.error)) && (Wg.calls.history.get('c0001') || 0) - a0 === 1 && q.waiters === 0, `260 refreshes of one conversation at once: ${okN} accepted and answered by ONE fetch, ${full.length} refused refresh-queue-full by name with the wait; the set is empty after`, JSON.stringify({ okN, full: full.length, sample: full[0], calls: (Wg.calls.history.get('c0001') || 0) - a0, q }));
+  }
+  // (3b) THE OWNER'S RESERVE (r6 verify, major): one agent's storm fills the set only to CAP − RESERVE — the owner's press and a window's open filed on top are still accepted (and answered by the fetch), the agent past its cap is refused by name
+  {
+    const { Wg, eg } = await mk('reserve', { n: 10 });
+    await eg.setScopeAssignment('atk', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+    clock += 31e3;
+    Wg.delayMs = 20;
+    let release; const hold = new Promise((r) => { release = r; });
+    let started; const entered = new Promise((r) => { started = r; }); let once = false;
+    Wg.beforeHistory = async (id) => { if (id === 'c0001' && !once) { once = true; started(); await hold; } };
+    const held = eg.refresh('atk', 'c0001');
+    await entered;                                        // the set cannot drain: the pass is inside a fetch
+    const agents = Array.from({ length: ENG.REFRESH_QUEUE_CAP }, (_, i) => eg.agentRefresh(X6F, 'atk', `c000${2 + (i % 5)}`));
+    await sleep(5);
+    const q1 = eg.refreshQueueOf('atk');
+    const ownerP = eg.refresh('atk', 'c0008');           // the OWNER's press on top of the agent's storm
+    const openP = eg.refresh('atk', 'c0009', { origin: 'open' });   // a window's open
+    await sleep(5);
+    const q2 = eg.refreshQueueOf('atk');
+    release();
+    const [h, owner, open, ...ra] = await Promise.all([held, ownerP, openP, ...agents]);
+    eg.stop();
+    const agentCap = ENG.REFRESH_QUEUE_CAP - ENG.REFRESH_OWNER_RESERVE;
+    const refused = ra.filter((a) => a.code === 'refresh-queue-full');
+    ok(q1.waiters === agentCap && q1.agents === agentCap && refused.length === ENG.REFRESH_OWNER_RESERVE && refused.every((a) => a.cap === agentCap && a.queued === agentCap && a.retryAfterSec === 1) && ra.filter((a) => a.ok && !a.pending).length === agentCap, `one agent's ${ENG.REFRESH_QUEUE_CAP} refreshes fill the set to ${q1.waiters} (its cap ${agentCap}): ${refused.length} refused refresh-queue-full naming the cap, ${ra.filter((a) => a.ok).length} answered`, JSON.stringify({ q1, refused: refused[0] }));
+    ok(h.ok && owner.ok && !owner.pending && open.ok && !open.pending && q2.waiters === agentCap + 2, `the OWNER's press and a window's open filed on top of the full agent set are ACCEPTED (${q2.waiters} waiting) and answered by their fetch — never refused by an agent's storm`, JSON.stringify({ owner, open, q2 }));
+  }
+  // (4) stop with requests pending — every waiter hears `stopped`, typed, at once: the ones in the set, one filed after, AND the one a pass in flight holds (a hung adapter never answers it)
+  {
+    const { Wg, eg } = await mk('stop', { n: 5 });
+    clock += 31e3;
+    let started; const entered = new Promise((r) => { started = r; }); let once = false;
+    Wg.beforeHistory = async (id) => { if (id === 'c0001' && !once) { once = true; started(); await new Promise(() => {}); } };   // never answers
+    const held = eg.refresh('atk', 'c0001');
+    await entered;
+    const ps = [eg.refresh('atk', 'c0002'), eg.refresh('atk', 'c0003')];
+    const t0 = Date.now();
+    eg.stop();
+    const late = await eg.refresh('atk', 'c0004');
+    const rs = await Promise.all([held, ...ps]);
+    ok(rs.every((r) => r.ok === false && r.code === 'stopped' && /restart/.test(r.error)) && late.code === 'stopped' && Date.now() - t0 < 1000, 'at stop() the waiter a HUNG fetch holds, the two in the set and one filed after all hear `stopped` at once (never a hung promise, never the 30 s bound)', JSON.stringify([...rs, late]));
+  }
+  // (5) an account removed while a request waits behind a held fetch
+  {
+    const { Wg, eg } = await mk('rm', { n: 5 });
+    clock += 31e3;
+    let release; const hold = new Promise((r) => { release = r; });
+    let started; const entered = new Promise((r) => { started = r; });
+    let once = false;
+    Wg.beforeHistory = async (id) => { if (id === 'c0001' && !once) { once = true; started(); await hold; } };
+    const first = eg.refresh('atk', 'c0001');
+    await entered;                                        // the drain is inside history(c0001)
+    const second = eg.refresh('atk', 'c0002');            // waits in the set (drainAfter)
+    const removed = await eg.remove('atk');
+    release();
+    const [r1, r2] = await Promise.all([first, second]);
+    const q = eg.refreshQueueOf('atk');
+    eg.stop();
+    // the held fetch's own waiter hears it too: its account is gone, an `ok` for a removed account would be a lie
+    ok(removed.ok && r2.ok === false && r2.code === 'account-changed' && /removed/.test(r2.error) && r1.ok === false && r1.code === 'account-changed' && q.waiters === 0, 'an account removed while a request waited: the waiter in the set AND the one the held fetch holds hear `account-changed` (removed) by name, nothing is left', JSON.stringify({ removed, r1, r2, q }));
+  }
+  // (6) THE BUDGET CUT MID-PASS (r6 verify — ⑥f's `budget` state trips the TOP gate, so two of the loop's budget lines never ran under it): fifteen owner requests behind a held first fetch on a 10/min budget — nine fetched, the rest refused vendor-budget BY NAME by the cut sweep (never `0 new`); three more filed while the 10th fetch (the minute's last) is held — refused by the drain's own budget line, no call
+  const budgetCut = async (ENGx, label) => {
+    const Wb = makeWorld(clock, { n: 40, hot: 20, warm: 0 });
+    const kb = worldModule('atk', Wb, { budgetDefault: 100000, budgetSettingKey: 'channels.budgetCutTestPerMin' });
+    const dirB = path.join(ROOT, `atk-cut-${label}`);
+    seedAccounts(dirB, [['atk', 'atk']]);
+    const SB = { 'channels.budgetCutTestPerMin': 100000 };
+    const regB = CH.createChannelRegistry(); regB.register(kb);
+    const eb = ENGx.create({ dataDir: dirB, registry: regB, env: {}, now, broadcast: () => {}, serverSetting: (k) => SB[k], liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(eb, 'atk');
+    const b0 = [...Wb.calls.history.values()].reduce((x, v) => x + v, 0);   // the ingest's own calls
+    clock += 61e3;                                       // a new minute
+    SB['channels.budgetCutTestPerMin'] = 10;
+    Wb.delayMs = 5;
+    let n = 0, rel1 = null, rel10 = null, st1 = null, st10 = null;
+    const in1 = new Promise((r) => { st1 = r; }), in10 = new Promise((r) => { st10 = r; });
+    const h1 = new Promise((r) => { rel1 = r; }), h10 = new Promise((r) => { rel10 = r; });
+    Wb.beforeHistory = async () => { n++; if (n === 1) { st1(); await h1; } if (n === 10) { st10(); await h10; } };
+    const keys = Array.from({ length: 15 }, (_, i) => `c00${20 + i}`);   // cold: not due, the requests are the pass's whole queue
+    const first = eb.refresh('atk', keys[0]);
+    await in1;
+    const rest = keys.slice(1).map((k) => eb.refresh('atk', k));
+    rel1();
+    await in10;                                          // inside the 10th fetch: the minute is spent
+    const late = ['c0035', 'c0036', 'c0037'].map((k) => eb.refresh('atk', k));
+    rel10();
+    const a = await Promise.all([first, ...rest]);
+    const l = await Promise.all(late);
+    await eb.settleWakes();
+    const calls = [...Wb.calls.history.values()].reduce((x, v) => x + v, 0) - b0;   // this minute's calls
+    const q = eb.refreshQueueOf('atk');
+    eb.stop();
+    return { a, l, calls, q };
+  };
+  {
+    const { a, l, calls, q } = await budgetCut(ENG, 'real');
+    const okN = a.filter((x) => x.ok && !x.pending).length, cut = a.filter((x) => x.code === 'vendor-budget');
+    ok(calls === 10 && okN === 10 && cut.length === 5 && cut.every((x) => x.retryAfterSec > 0 && /is spent/.test(x.error)), `fifteen requests on a 10/min budget: exactly 10 calls, 10 ok, 5 refused vendor-budget by the cut sweep with the wait (${calls} calls, ${okN} ok, ${cut.length} refused)`, JSON.stringify({ calls, codes: a.map((x) => x.code || 'ok') }));
+    ok(l.every((x) => x.code === 'vendor-budget' && x.retryAfterSec > 0) && q.waiters === 0, `three requests filed once the minute was spent, mid-pass: refused by the drain's own budget line, no call (${l.map((x) => x.code).join(', ')})`, JSON.stringify(l));
+  }
+  // (7) A REFUSAL IS HEARD WHEN IT IS JUDGED (r6 verify, major): behind a 45-row timer pass (60 ms a fetch ≈ 2.7 s) an agent's floor-refused request is answered at the FIRST boundary — within one fetch — never at the pass's end (where the agent's 15 s race had turned it into `pending`: "refresh started — still running" for a request that was refused and never fetched)
+  const lateRefusal = async (ENGx, label) => {
+    const Wl = makeWorld(clock, { n: 50, hot: 45, warm: 0 });
+    const kl = worldModule('atk', Wl, { budgetDefault: 100000 });
+    const dirL = path.join(ROOT, `atk-late-${label}`);
+    seedAccounts(dirL, [['atk', 'atk']]);
+    const SL = { 'channels.agentRefreshFloorSec': 900 };
+    const regL = CH.createChannelRegistry(); regL.register(kl);
+    const el = ENGx.create({ dataDir: dirL, registry: regL, env: {}, now, broadcast: () => {}, serverSetting: (k) => SL[k], liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(el, 'atk');
+    await el.setScopeAssignment('atk', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+    clock += 31e3;                                       // the 45 hot rows due; c0045.. polled 31 s ago, inside the 900 s floor
+    Wl.delayMs = 60;
+    let started; const entered = new Promise((r) => { started = r; }); let once = false;
+    Wl.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); } };
+    const t0 = Date.now();
+    const timerPass = el.pass('atk');
+    await entered;
+    const tA = Date.now();
+    const a = await el.agentRefresh(X6F, 'atk', 'c0047');
+    const heardMs = Date.now() - tA;
+    await timerPass;
+    const passMs = Date.now() - t0;
+    el.stop();
+    return { a, heardMs, passMs, calls47: Wl.calls.history.get('c0047') || 0 };
+  };
+  {
+    const { a, heardMs, passMs, calls47 } = await lateRefusal(ENG, 'real');
+    ok(a.code === 'refresh-floor' && !a.pending && heardMs < 1000 && passMs >= 2000 && calls47 === 1, `an agent's floor-refused request behind a ${passMs} ms timer pass is heard at the first boundary — refresh-floor after ${heardMs} ms, no call of its key (${calls47 - 1} extra)`, JSON.stringify({ a: { ok: a.ok, pending: a.pending, code: a.code }, heardMs, passMs }));
+  }
+  // (8) AN `ok` IS HEARD AT ITS FETCH (r7 verify — r6 held it for the pass's end on purpose, so a TRUE answer behind a long timer pass was heard as `pending` at 15 / 30 s): the owner's request for a NOT-due key filed inside the first fetch of a 45-row timer pass (40 ms a fetch ≈ 1.8 s) is fetched at the next boundary and answered THERE — within the in-flight fetch + its own — with its one new message, while the pass runs on for its due rows
+  const lateOk = async (ENGx, label, events = null) => {
+    const Wl = makeWorld(clock, { n: 50, hot: 45, warm: 0 });
+    const kl = worldModule('atk', Wl, { budgetDefault: 100000 });
+    const dirL = path.join(ROOT, `atk-lateok-${label}`);
+    seedAccounts(dirL, [['atk', 'atk']]);
+    const regL = CH.createChannelRegistry(); regL.register(kl);
+    const el = ENGx.create({ dataDir: dirL, registry: regL, env: {}, now, broadcast: events ? (m) => events.push({ at: Date.now(), m }) : () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(el, 'atk');
+    if (events) events.length = 0;                       // the ingest's own broadcasts are not this leg's
+    clock += 31e3;                                       // the 45 hot rows due; c0045.. cold, not due
+    Wl.delayMs = 40;
+    let started; const entered = new Promise((r) => { started = r; }); let once = false;
+    Wl.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); } };
+    Wl.convs.get('c0047').recs.push({ vendorId: 'c0047-news', at: clock, author: { id: 'u-0', name: 'Ada' }, text: 'news', attachments: [] });
+    const logAt = Wl.log.length;   // this pass's calls start here (the ingest's are before)
+    const t0 = Date.now();
+    const timerPass = el.pass('atk');
+    await entered;
+    const tA = Date.now();
+    const a = await el.refresh('atk', 'c0047');
+    const tHeard = Date.now();
+    const heardMs = tHeard - tA;
+    const pos = Wl.log.slice(logAt).findIndex((l) => l.id === 'c0047');
+    await timerPass;
+    const tEnd = Date.now();
+    const passMs = tEnd - t0;
+    el.stop();
+    const named = events ? events.find((x) => x.m && x.m.type === 'channels-updated' && (x.m.changedKeys || []).includes('atk/c0047')) : null;
+    return { a, heardMs, passMs, pos, calls: Wl.log.length - logAt, bcastBeforeAnswerMs: named ? tHeard - named.at : null, bcastBeforeEndMs: named ? tEnd - named.at : null };
+  };
+  {
+    const { a, heardMs, passMs, pos, calls } = await lateOk(ENG, 'real');
+    ok(a.ok && !a.pending && a.appended === 1 && heardMs < 400 && passMs >= 1500 && pos >= 1 && pos <= 2, `the owner's request behind a ${passMs} ms timer pass is answered ok (1 new) at ITS fetch — heard after ${heardMs} ms (the in-flight fetch + its own; fetched at position ${pos} of ${calls}), never at the pass's end`, JSON.stringify({ a: { ok: a.ok, pending: a.pending, appended: a.appended }, heardMs, passMs, pos }));
+  }
+  // (8b) THE BROADCAST RIDES THE ANSWER (r8 verify, medium — fixed r9): the `ok` landed at its fetch while the digest broadcast naming the key waited for the pass's end, so the panel's Refresh toast said "1 new" and the window repainted a whole pass later. The driver now broadcasts a requested key with news AT its fetch, before the answer
+  {
+    const events = [];
+    const r = await lateOk(ENG, 'bcast', events);
+    ok(r.a.ok && r.a.appended === 1 && r.bcastBeforeAnswerMs !== null && r.bcastBeforeAnswerMs >= 0 && r.bcastBeforeEndMs >= 1000, `(8b) the broadcast naming the requested key goes out at its fetch — ${r.bcastBeforeAnswerMs} ms BEFORE the answer is heard and ${r.bcastBeforeEndMs} ms before the ${r.passMs} ms pass ends (the window repaints with the toast)`, JSON.stringify(r));
+  }
+  // (9) THE DUE LIST UNDER A REQUEST STREAM (r7 verify — the reason r6 held the ok): with an ok delivered at its fetch a lane that loops `await refresh()` re-files INSIDE the pass it rides; the timer's turn is now taken at every boundary and requests INTERLEAVE with due rows, so (a) a saturating 10-lane storm for 2.5 s serves every due row DURING the storm (leg (1) above reads it), and (b) a 25 ms trickle for 3 s — heavier than the vendor can carry beside the due list — still serves the due rows at their cadence (re-due half-way) with every request answered, none `pending`, its median wait a fetch or two (the tail waits, honestly: the stream is oversubscribed)
+  const trickle = async (ENGx, label, { ms = 3000, every = 25, redueAt = 1500 } = {}) => {
+    const Wt = makeWorld(clock, { n: 45, hot: 45, warm: 0 });
+    const kt = worldModule('atk', Wt, { budgetDefault: 100000 });
+    const dirT = path.join(ROOT, `atk-trickle-${label}`);
+    seedAccounts(dirT, [['atk', 'atk']]);
+    const regT = CH.createChannelRegistry(); regT.register(kt);
+    const et = ENGx.create({ dataDir: dirT, registry: regT, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(et, 'atk');
+    clock += 31e3; Wt.delayMs = 20;
+    const due = Array.from({ length: 35 }, (_, i) => `c00${10 + i}`);
+    const before = new Map(Wt.calls.history);
+    const dueFetches = () => due.reduce((n, id) => n + (Wt.calls.history.get(id) || 0) - (before.get(id) || 0), 0);
+    const ps = [], waits = []; let k = 0;
+    const t0 = Date.now();
+    const filer = setInterval(() => { const st = Date.now(); ps.push(et.refresh('atk', `c000${k++ % 10}`).then((x) => { waits.push(Date.now() - st); return x; })); }, every);
+    const tk = setInterval(() => { et.tick(); }, 100);
+    let redone = false; const rd = setInterval(() => { if (!redone && Date.now() - t0 >= redueAt) { redone = true; clock += 31e3; } }, 50);   // half-way: every due row is due AGAIN (a second epoch — 70 due fetches in all)
+    await sleep(ms); clearInterval(filer); clearInterval(tk); clearInterval(rd);
+    const during = dueFetches();
+    const as = await Promise.all(ps); await et.idle('atk');
+    waits.sort((x, y) => x - y);
+    et.stop();
+    return { filed: ps.length, during, pending: as.filter((x) => x.pending).length, notOk: as.filter((x) => !x.ok).length, p50: waits[Math.floor(waits.length * 0.5)], p95: waits[Math.floor(waits.length * 0.95)] };
+  };
+  {
+    const r = await trickle(ENG, 'real');
+    ok(r.filed >= 80 && r.during >= 55 && r.pending === 0 && r.notOk === 0 && r.p50 < 300, `a 25 ms owner trickle for 3 s (${r.filed} requests, more than the vendor carries beside the due list): the due rows still got ${r.during} of their 70 due fetches (two epochs of 35) DURING the stream, every request answered (0 pending, 0 refused), median wait ${r.p50} ms (p95 ${r.p95} ms — the oversubscribed stream's own backlog)`, JSON.stringify(r));
+  }
+  // (10) ONE PASS QUEUED PER ACCOUNT (r7 verify, B3 — medium): a timer / forced pass asked while another is in flight runs after it (r6); a SECOND such ask while one is already queued coalesced into nothing — each `.then(after)` ran its own pass, so three forced asks behind one held pass (three Re-authorize presses, three option saves) ran three full forced ingests (discovery + every row, three times; measured). Now one pass is queued, `force` sticky, every asker answered by it
+  const queuedPasses = async (ENGx, label) => {
+    const Wq = makeWorld(clock, { n: 20, hot: 20, warm: 0 });
+    const kq = worldModule('atk', Wq, { budgetDefault: 100000 });
+    const dirQ = path.join(ROOT, `atk-queued-${label}`);
+    seedAccounts(dirQ, [['atk', 'atk']]);
+    const regQ = CH.createChannelRegistry(); regQ.register(kq);
+    const eq = ENGx.create({ dataDir: dirQ, registry: regQ, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+    await ingestAll(eq, 'atk');
+    clock += 31e3; Wq.delayMs = 10;
+    let release; const hold = new Promise((r) => { release = r; }); let started; const entered = new Promise((r) => { started = r; }); let once = false;
+    Wq.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); await hold; } };
+    const list0 = Wq.calls.list, hist0 = historyCalls(Wq);
+    const tp = eq.pass('atk'); await entered;                       // the timer pass is inside its first fetch
+    const asks = [eq.pass('atk', { force: true }), eq.pass('atk'), eq.pass('atk', { force: true }), eq.pass('atk', { force: true })];
+    await sleep(5);
+    release();
+    const rs = await Promise.all([tp, ...asks]);
+    await eq.idle('atk');
+    eq.stop();
+    return { forced: Wq.calls.list - list0, fetches: historyCalls(Wq) - hist0, allOk: rs.every((r) => r.ok) };   // (`pass` is an async function: each ask gets its own wrapper of the ONE queued promise — identity is not the pin, the counts are)
+  };
+  {
+    const r = await queuedPasses(ENG, 'real');
+    ok(r.forced === 1 && r.fetches === 40 && r.allOk, `three forced asks and a timer ask behind one held pass run ONE forced pass after it (${r.forced} discovery, ${r.fetches} fetches = the held pass's 20 + one forced pass's 20), every asker answered ok by it`, JSON.stringify(r));
+  }
+  // (11) THE FRONT RUN — FIFO ACROSS BOUNDARIES, HUMANS FIRST, A RE-REQUEST RIDES (r8 verify, major): r7's drain spliced every boundary's new head at `at` (ahead of the requests drained at EARLIER boundaries) and promoted riders there too, its rider lookup skipped a key this pass had already fetched (`!done.has`), and r7's pass never ends under a stream (takeTimerTurn) — so the earliest waiter of every key was pushed back by each later boundary until the stream stopped (measured: a 5-key 25 ms trickle for 10 s ⇒ 85 of 398 waiters past 2 s, max 11.8 s, 395 vendor calls for 398 requests; the owner's ONE press under a 4-lane stream heard `pending` at 30 s; the owner's rider behind 180 agent riders fetched at position 181). Now the run of requested items at the front is FIFO across boundaries, a re-request of any key rides its pending item, and the run is ordered humans (the owner's press, a window's open) before agents
+  const frontRun = async (ENGx, label, only = 'abc') => {
+    const out = {};
+    if (only.includes('a')) { // (a) one key, a new request every 15 ms for 1.5 s (faster than the 20 ms fetch) while the due list keeps the pass alive: every request heard within a round, the calls coalesced
+      const Wa = makeWorld(clock, { n: 45, hot: 45, warm: 0 });
+      const ka = worldModule('atk', Wa, { budgetDefault: 100000 });
+      const dirA = path.join(ROOT, `atk-run-a-${label}`);
+      seedAccounts(dirA, [['atk', 'atk']]);
+      const regA = CH.createChannelRegistry(); regA.register(ka);
+      const ea = ENGx.create({ dataDir: dirA, registry: regA, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ea, 'atk');
+      clock += 31e3; Wa.delayMs = 20;
+      const x0 = Wa.calls.history.get('c0044') || 0;
+      const ps = [];
+      const filer = setInterval(() => { const st = Date.now(); ps.push(ea.refresh('atk', 'c0044').then((r) => ({ wait: Date.now() - st, ok: r.ok && !r.pending }))); }, 15);
+      const tk = setInterval(() => ea.tick(), 100);
+      const rd = setInterval(() => { clock += 31e3; }, 500);
+      await sleep(1500); clearInterval(filer); clearInterval(tk); clearInterval(rd);
+      const rs = await Promise.all(ps); await ea.idle('atk');
+      ea.stop();
+      out.a = { requests: ps.length, calls: (Wa.calls.history.get('c0044') || 0) - x0, maxWait: Math.max(...rs.map((r) => r.wait)), allOk: rs.every((r) => r.ok) };
+    }
+    if (only.includes('b')) { // (b) the owner's ONE press on its own key under a 4-lane owner-origin stream of other keys (four windows re-filing the instant each answers) for 1.5 s; the press is filed from the continuation of whichever lane receives the stream's 5th answer — just before that lane re-files — and awaited after the lanes stop (r9: a 200 ms timer landed in a due-row fetch half the time, and then ANY newest-first order serves the press at once — the LIFO control was a coin flip; the claim is unchanged)
+      const Wb = makeWorld(clock, { n: 50, hot: 40, warm: 0 });   // c0040.. not due
+      const kb = worldModule('atk', Wb, { budgetDefault: 100000 });
+      const dirB = path.join(ROOT, `atk-run-b-${label}`);
+      seedAccounts(dirB, [['atk', 'atk']]);
+      const regB = CH.createChannelRegistry(); regB.register(kb);
+      const ebb = ENGx.create({ dataDir: dirB, registry: regB, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ebb, 'atk');
+      clock += 31e3; Wb.delayMs = 20;
+      let stop = false, filed = 0, press = null;
+      const lane = async (ks) => {
+        let i = 0;
+        while (!stop) {
+          await ebb.refresh('atk', ks[i++ % ks.length]); filed++;
+          if (filed === 5 && !press) { const tP = Date.now(); press = ebb.refresh('atk', 'c0049').then((r) => ({ wait: Date.now() - tP, ok: r.ok && !r.pending })); }
+        }
+      };
+      const lanes = [lane(['c0040', 'c0041']), lane(['c0042', 'c0043']), lane(['c0044', 'c0045']), lane(['c0046', 'c0047'])];
+      const tk = setInterval(() => ebb.tick(), 100);
+      const rd = setInterval(() => { clock += 31e3; }, 500);
+      await sleep(1500); stop = true; clearInterval(tk); clearInterval(rd);
+      await Promise.all(lanes); const pr = press ? await press : { wait: null, ok: false }; await ebb.idle('atk');
+      ebb.stop();
+      out.b = { filed, ...pr };
+    }
+    if (only.includes('c')) { // (c) the owner's press on a DUE row filed behind 40 agent requests on 40 other due rows (riders all) while the timer pass is inside its first fetch: the owner's rider is fetched FIRST
+      const Wc = makeWorld(clock, { n: 60, hot: 60, warm: 0 });
+      const kc = worldModule('atk', Wc, { budgetDefault: 100000 });
+      const dirC = path.join(ROOT, `atk-run-c-${label}`);
+      seedAccounts(dirC, [['atk', 'atk']]);
+      const regC = CH.createChannelRegistry(); regC.register(kc);
+      const ec = ENGx.create({ dataDir: dirC, registry: regC, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ec, 'atk');
+      await ec.setScopeAssignment('atk', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+      clock += 31e3; Wc.delayMs = 20;
+      let release; const hold = new Promise((r) => { release = r; }); let started; const entered = new Promise((r) => { started = r; }); let once = false;
+      Wc.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); await hold; } };
+      const logAt = Wc.log.length;
+      const tp = ec.pass('atk'); await entered;
+      const agents = Array.from({ length: 40 }, (_, i) => ec.agentRefresh(X6F, 'atk', `c00${String(i + 1).padStart(2, '0')}`));
+      await sleep(5);
+      const tO = Date.now();
+      const press = ec.refresh('atk', 'c0059').then((r) => ({ wait: Date.now() - tO, ok: r.ok && !r.pending }));
+      release();
+      const pr = await press; const ra = await Promise.all(agents); await tp;
+      const calls = Wc.log.slice(logAt).map((l) => l.id);
+      ec.stop();
+      out.c = { ...pr, pos: calls.indexOf('c0059'), agentsOk: ra.every((r) => r.ok && !r.pending), calls: calls.length };
+    }
+    return out;
+  };
+  {
+    const r = await frontRun(ENG, 'real');
+    ok(r.a.allOk && r.a.requests >= 60 && r.a.maxWait < 500 && r.a.calls <= r.a.requests * 0.6, `(a) ${r.a.requests} requests on ONE key in 1.5 s, every one heard within a round (max ${r.a.maxWait} ms), ${r.a.calls} vendor calls (a re-request rides the pending item — coalesced)`, JSON.stringify(r.a));
+    ok(r.b.ok && r.b.filed >= 20 && r.b.wait < 500, `(b) the owner's one press on its own key under a 4-lane stream of other keys (${r.b.filed} requests) is heard after ${r.b.wait} ms — within a round, never when the stream stops`, JSON.stringify(r.b));
+    ok(r.c.ok && r.c.agentsOk && r.c.pos === 1 && r.c.calls === 60, `(c) the owner's press on a due row behind 40 agent riders is fetched at position ${r.c.pos} (humans first; every agent still answered ok, ${r.c.calls} calls = the pass's 60 rows once)`, JSON.stringify(r.c));
+  }
+  // CONTROLS for (3b) / (6) / (7) / (8) / (9) / (10): the cap without the reserve; the two budget lines answering `ok, 0 new`; the r5 drain that RECORDS a refusal for the pass's end; r6's answer that holds the ok for the pass's end; a loop fetching one over the budget; the loop without the interleave
+  {
+    const M6h = mutantCopies('chan-agg-r6', REPO);
+    // r9: each control patches ONE line of the PURE drain (the rule it protects) or of the engine's driver (a delivery seam)
+    const DELIVER_LINE = '      const deliver = (list, outcome) => { for (const id of list) { const w = e.waiters.get(id); if (w && w.outcome === undefined) { w.outcome = outcome; w.resolve(outcome); } } };';
+    const CUT_WORDS = "      case 'cut': return budgetRefusal(rec, e);   // THE CUT: every accepted waiter, by name — never `0 new`";
+    const BUDGET_WORDS = "      case 'budget': return budgetRefusal(rec, e);   // THE VENDOR BUDGET";
+    const QUEUED_LINES = "      const q = Drain.queueAsk(e.after && e.after.ask, { force, origin });\n      if (q.joined) { e.after.ask = q.queued; return e.after.p; }\n      const queued = { ask: q.queued, p: null };\n      const after = () => { e.after = null; return stopped ? { ok: false, why: 'stopped' } : pass(adapterId, queued.ask); };\n      queued.p = e.passing.then(after, after);\n      e.after = queued;\n      return queued.p;\n";
+    const W = {
+      noReserve: closedWorld(M6h, 'no-reserve', { drain: [[DRAIN_LINES.cap, '  const cap = REFRESH_QUEUE_CAP;']] }),
+      sweepOk: closedWorld(M6h, 'sweep-ok', { engine: [[CUT_WORDS, "      case 'cut': return { ok: true, appended: 0, polledAt: null };"]] }),
+      drainOk: closedWorld(M6h, 'drain-ok', { engine: [[BUDGET_WORDS, "      case 'budget': return { ok: true, appended: 0, polledAt: null };"]] }),
+      recordOnly: closedWorld(M6h, 'record-only', { engine: [[DELIVER_LINE, '      const deliver = (list, outcome) => { for (const id of list) { const w = e.waiters.get(id); if (w && w.outcome === undefined) { w.outcome = outcome; } } };']] }),
+      okForEnd: closedWorld(M6h, 'ok-for-end', { engine: [[DELIVER_LINE, '      const deliver = (list, outcome) => { for (const id of list) { const w = e.waiters.get(id); if (w && w.outcome === undefined) { w.outcome = outcome; if (!outcome.ok) w.resolve(outcome); } } };']] }),   // r6's answer: a refusal at once, an ok at the pass's end
+      oneOver: closedWorld(M6h, 'one-over', { drain: [[DRAIN_LINES.cut, '  if (!(s.budget.remainingUnits > -1)) {\n    if (seen.length)']] }),   // B4 (r7): a loop that fetches ONE over the budget before it cuts
+      noInterleave: closedWorld(M6h, 'no-interleave', { drain: [[DRAIN_LINES.interleave, '']] }),
+      perAsk: closedWorld(M6h, 'per-ask', { engine: [[QUEUED_LINES, "      const after = () => (stopped ? { ok: false, why: 'stopped' } : pass(adapterId, { force, origin }));\n      return e.passing.then(after, after);\n"]] }),
+      // r8, split by the rule each shape broke (r7's drain spliced every boundary's head at `at` AND skipped a fetched key's rider AND filed riders behind the agents' — three rules, three copies):
+      noRide: closedWorld(M6h, 'no-ride', { drain: [[DRAIN_LINES.slot, 'function slotOf(r) { return r.id; }']] }),
+      lifo: closedWorld(M6h, 'lifo', { drain: [[DRAIN_LINES.rank, 'const byRank = (a, b) => (Number(b.human) - Number(a.human)) || (b.minSeq - a.minSeq);']] }),
+      ownerLast: closedWorld(M6h, 'owner-last', { drain: [[DRAIN_LINES.rank, 'const byRank = (a, b) => (a.minSeq - b.minSeq);']] }),
+    };
+    const bad = Object.entries(W).filter(([, w]) => !w.setup);
+    ok(bad.length === 0, 'CONTROL setup: the cap without the owner\'s reserve, the cut\'s and the judgement\'s budget words answering `ok`, the r5 record-for-the-end delivery, r6\'s ok-for-the-end delivery, a cut one over the budget, the drain without the interleave, r6\'s per-ask queue and r7\'s drain as three rule copies (no ride / LIFO / owner last) are reconstructed', bad.map(([k, w]) => `${k}: ${w.missing}`).join(' | '));
+    // (3b) control: the owner's press is refused by the agent's storm
+    {
+      const ENGn = W.noReserve.mod;
+      const Wn = makeWorld(clock, { n: 10, hot: 10, warm: 0 });
+      const kn = worldModule('atk', Wn, { budgetDefault: 100000 });
+      const dirN = path.join(ROOT, 'atk-ctl-reserve');
+      seedAccounts(dirN, [['atk', 'atk']]);
+      const regN = CH.createChannelRegistry(); regN.register(kn);
+      const en = ENGn.create({ dataDir: dirN, registry: regN, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(en, 'atk');
+      await en.setScopeAssignment('atk', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
+      clock += 31e3;
+      let release; const hold = new Promise((r) => { release = r; });
+      let started; const entered = new Promise((r) => { started = r; }); let once = false;
+      Wn.beforeHistory = async (id) => { if (id === 'c0001' && !once) { once = true; started(); await hold; } };
+      const held = en.refresh('atk', 'c0001');
+      await entered;
+      const agents = Array.from({ length: ENG.REFRESH_QUEUE_CAP }, (_, i) => en.agentRefresh(X6F, 'atk', `c000${2 + (i % 5)}`));
+      await sleep(5);
+      const owner = await en.refresh('atk', 'c0008');
+      release();
+      await Promise.all([held, ...agents]);
+      en.stop();
+      ok(owner.code === 'refresh-queue-full', `CONTROL: without the reserve the same agent storm refuses the OWNER's press (${owner.code}) — the leg above would go red`);
+    }
+    // (6) controls: each budget line answering `ok` is a lie the leg catches
+    {
+      const { a, l } = await budgetCut(W.sweepOk.mod, 'ctl-sweep');
+      ok(a.filter((x) => x.code === 'vendor-budget').length === 0 && a.filter((x) => x.ok).length === 15, `CONTROL: with the cut sweep answering ok the five cut requests hear "0 new" for a fetch never made (${a.filter((x) => x.ok).length} ok) — the leg above would go red`);
+      const r2 = await budgetCut(W.drainOk.mod, 'ctl-drain');
+      ok(r2.l.every((x) => x.ok) && r2.calls === 10, `CONTROL: with the drain's budget line answering ok the three late requests hear "0 new" with no call (${r2.l.filter((x) => x.ok).length} ok, ${r2.calls} calls) — the leg above would go red`);
+      const r3 = await budgetCut(W.oneOver.mod, 'ctl-over');
+      ok(r3.calls > 10, `CONTROL (B4, r7): a loop that fetches one over the budget before cutting makes ${r3.calls} calls on the 10/min minute — the leg above's "exactly 10" would go red`);
+    }
+    // (7) control: the r5 drain records the refusal for the pass's end — heard only when the pass is over
+    {
+      const { a, heardMs, passMs } = await lateRefusal(W.recordOnly.mod, 'ctl');
+      ok(a.code === 'refresh-floor' && heardMs >= 2000 && heardMs >= passMs - 200, `CONTROL: on the record-for-the-end drain the same refusal is heard only at the pass's end (${heardMs} ms of a ${passMs} ms pass) — the leg above would go red`, JSON.stringify({ a: a.code, heardMs, passMs }));
+    }
+    // (8) control: r6's answer (a refusal at once, the ok held for the pass's end) — the true answer is heard only when the pass is over
+    {
+      const { a, heardMs, passMs } = await lateOk(W.okForEnd.mod, 'ctl');
+      ok(a.ok && a.appended === 1 && heardMs >= 1500 && heardMs >= passMs - 200, `CONTROL: on r6's ok-for-the-end answer the same true answer is heard only at the pass's end (${heardMs} ms of a ${passMs} ms pass) — the leg above would go red`, JSON.stringify({ a: a.code, heardMs, passMs }));
+    }
+    // (8b) control: the driver without the at-fetch broadcast — the key is named only by the pass's end broadcast
+    {
+      const EARLY = "          if (act.waiters.length) { notify([key], { full: false }); early.add(key); }   // the broadcast naming the key goes out BEFORE the answer: the window repaints with the toast, not a pass later\n";
+      const cwLate = closedWorld(M6h, 'bcast-at-end', { engine: [[EARLY, '']] });
+      ok(cwLate.setup, 'CONTROL setup: the driver without the at-fetch broadcast (r8\'s pass-end-only notify) is reconstructed', cwLate.missing);
+      const events = [];
+      const r = await lateOk(cwLate.mod, 'ctl-bcast', events);
+      ok(r.bcastBeforeAnswerMs !== null && r.bcastBeforeAnswerMs < 0 && r.bcastBeforeEndMs < 200, `CONTROL: without it the broadcast naming the key lands ${-r.bcastBeforeAnswerMs} ms AFTER the answer, at the pass's end — leg (8b) would go red`, JSON.stringify(r));
+    }
+    // (9) control: the loop without the interleave — an ok at its fetch lets the storm's re-files sit at the head at every boundary, the due rows behind them for the storm's whole duration; the trickle serves them only in its gaps
+    {
+      const ENGi = W.noInterleave.mod;   // (the drain without the interleave: an ok at its fetch, the timer's turn at every step, requests always ahead)
+      const Wi = makeWorld(clock, { n: 45, hot: 45, warm: 0 });
+      const ki = worldModule('atk', Wi, { budgetDefault: 100000 });
+      const dirI = path.join(ROOT, 'atk-ctl-interleave');
+      seedAccounts(dirI, [['atk', 'atk']]);
+      const regI = CH.createChannelRegistry(); regI.register(ki);
+      const ei = ENGi.create({ dataDir: dirI, registry: regI, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ei, 'atk');
+      clock += 31e3; Wi.delayMs = 20;
+      let stop = false, filed = 0;
+      const lanes = Array.from({ length: 10 }, (_, k) => (async () => { while (!stop) { await ei.refresh('atk', `c000${k}`); filed++; } })());
+      const dueRows = Array.from({ length: 35 }, (_, i) => `c00${10 + i}`);
+      const before = new Map(Wi.calls.history);
+      const tick = setInterval(() => { ei.tick(); }, 100);
+      await sleep(2500);
+      const during = dueRows.filter((id) => (Wi.calls.history.get(id) || 0) > (before.get(id) || 0)).length;
+      stop = true; clearInterval(tick);
+      await Promise.all(lanes); await ei.idle('atk');
+      const total = dueRows.filter((id) => (Wi.calls.history.get(id) || 0) > (before.get(id) || 0)).length;
+      ei.stop();
+      ok(filed >= 20 && during <= 2 && total === 35, `CONTROL: without the interleave the same 2.5 s storm (${filed} refreshes) serves ${during}/35 due rows DURING it (all ${total} only once it stops) — leg (1)'s during count would go red`, JSON.stringify({ filed, during, total }));
+      const rt = await trickle(ENGi, 'ctl');
+      ok(rt.during <= 40 && rt.pending === 0, `CONTROL: without the interleave the same trickle serves the due rows only in its gaps — ${rt.during} of 70 due fetches (the leg above wants ≥ 55)`, JSON.stringify(rt));
+    }
+    // (10) control: r6's queued pass — every ask its own `.then(after)`, N asks = N passes
+    {
+      const rc = await queuedPasses(W.perAsk.mod, 'ctl');
+      ok(rc.forced === 3 && rc.fetches >= 80, `CONTROL: on r6's per-ask queue the same four asks run ${rc.forced} forced passes and ${rc.fetches} fetches — the leg above would go red`, JSON.stringify(rc));
+    }
+    // (11) controls: r7's drain, one rule per copy — without the rider rule the one-key stream no longer coalesces (a), LIFO keeps the owner's one press behind a stream until it stops (b), without humans-first the owner's rider is fetched behind the agents' (c)
+    {
+      const ra = await frontRun(W.noRide.mod, 'ctl-ride', 'a');
+      ok(ra.a.calls > ra.a.requests * 0.6, `CONTROL (no ride): the one-key stream makes ${ra.a.calls} calls for ${ra.a.requests} requests (max wait ${ra.a.maxWait} ms) — leg (a)'s coalescing would go red`, JSON.stringify(ra.a));
+      const rb = await frontRun(W.lifo.mod, 'ctl-lifo', 'b');
+      ok(rb.b.wait >= 1000, `CONTROL (LIFO): the owner's one press under the 4-lane stream is heard after ${rb.b.wait} ms — leg (b) would go red`, JSON.stringify(rb.b));
+      const rcc = await frontRun(W.ownerLast.mod, 'ctl-owner-last', 'c');
+      ok(rcc.c.pos >= 30, `CONTROL (owner last): the owner's rider is fetched at position ${rcc.c.pos} behind 40 agent riders — leg (c) would go red`, JSON.stringify(rcc.c));
+    }
+    for (const r2 of copiesCensus(M6h.files, M6h.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  }
+  // CONTROL: the Part-1 drain (drained ONCE before the loop; the tick skipping a busy account) — both starvations return
+  {
+    const M6g = mutantCopies('chan-agg-attack', REPO);
+    // r9: the drain-once half is the PURE drain judging requests only at a pass's first step (`seen`); the tick's half is still the engine's TURN line
+    const TURN = "      if (e.passing) { e.timerDue = true; continue; }   // r5 verify: busy while due — the pass in flight (or the next drain) does the timer's work, a request storm cannot starve the due list\n";
+    const cwOnce = closedWorld(M6g, 'drain-once', { drain: [[DRAIN_LINES.seen, '  const seen = p.calls === 0 ? s.requests : s.requests.filter((r) => r.taken);   // every waiter present']], engine: [[TURN, '      if (e.passing) continue;\n']] });
+    ok(cwOnce.setup, 'CONTROL setup: the drain-once loop with a tick that skips a busy account (the r5 Part-1 shape) is reconstructed', cwOnce.missing);
+    const ENGc = cwOnce.mod;
+    // (1) the storm on the control: the timer's due rows are never fetched
+    {
+      const Wc = makeWorld(clock, { n: 45, hot: 45, warm: 0 });
+      const kc = worldModule('atk', Wc, { budgetDefault: 100000 });
+      const dirC = path.join(ROOT, 'atk-ctl-storm');
+      seedAccounts(dirC, [['atk', 'atk']]);
+      const regC = CH.createChannelRegistry(); regC.register(kc);
+      const ec = ENGc.create({ dataDir: dirC, registry: regC, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ec, 'atk');
+      clock += 31e3;
+      Wc.delayMs = 20;
+      let stop = false, filed = 0;
+      const storm = async (k) => { while (!stop) { await ec.refresh('atk', `c000${k}`); filed++; } };
+      const lanes = Array.from({ length: 10 }, (_, k) => storm(k));
+      const before = new Map(Wc.calls.history);
+      let ticks = 0;
+      const tick = setInterval(() => { ec.tick(); ticks++; }, 100);
+      await sleep(600);
+      stop = true; clearInterval(tick);
+      await Promise.all(lanes); await ec.settleWakes();
+      const dueRows = Array.from({ length: 35 }, (_, i) => `c00${10 + i}`);
+      const fetchedByTimer = dueRows.filter((id) => (Wc.calls.history.get(id) || 0) > (before.get(id) || 0)).length;
+      ec.stop();
+      ok(filed >= 20 && ticks >= 4 && fetchedByTimer === 0, `CONTROL: on the drain-once loop the same storm (${filed} refreshes, ${ticks} ticks) starves the timer — ${fetchedByTimer}/35 due rows fetched — the leg above would go red`);
+    }
+    // (2) the long pass on the control: the request is fetched after every due row
+    {
+      const Wc = makeWorld(clock, { n: 45, hot: 40, warm: 0 });
+      const kc = worldModule('atk', Wc, { budgetDefault: 100000 });
+      const dirC = path.join(ROOT, 'atk-ctl-long');
+      seedAccounts(dirC, [['atk', 'atk']]);
+      const regC = CH.createChannelRegistry(); regC.register(kc);
+      const ec = ENGc.create({ dataDir: dirC, registry: regC, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => SESS, deliver: null, log: quiet });
+      await ingestAll(ec, 'atk');
+      clock += 31e3;
+      Wc.delayMs = 20;
+      let started; const entered = new Promise((r) => { started = r; }); let once = false;
+      Wc.beforeHistory = async (id) => { if (id === 'c0000' && !once) { once = true; started(); } };
+      const logAt = Wc.log.length;
+      const timerPass = ec.pass('atk');
+      await entered;
+      const r = await ec.refresh('atk', 'c0040');
+      await timerPass; await ec.settleWakes();
+      const calls = Wc.log.slice(logAt).map((l) => l.id);
+      const pos = calls.indexOf('c0040');
+      ec.stop();
+      ok(r.ok && pos === 40, `CONTROL: on the drain-once loop the request behind the 40-row pass is fetched only after every due row (position ${pos}) — the leg above would go red`, JSON.stringify({ r, pos }));
+    }
+    for (const r2 of copiesCensus(M6g.files, M6g.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  }
+}
+
+// ═══ ⑦ history on open + scroll-up ═════════════════════════════════════════
+console.log('⑦ history on demand');
+{
+  const wBefore = delivered.length;
+  clock += 40e3;
+  const w1 = await eng.watch('many', 'c0006');
+  ok(w1.ok && w1.fetched, 'opening a window on a stale conversation fetches it at once');
+  ok(eng.cadenceOf('many', 'c0006').tier === 'hot', 'an OPEN window makes its conversation hot (30 s)');
+  let page = eng.store.readTail('many', 'c0006', { limit: 50 });
+  let total = page.length, rounds = 0, last = null;
+  while (rounds++ < 5) {
+    const oldest = eng.store.readTail('many', 'c0006', { limit: 1000 })[0];
+    last = await eng.loadOlder('many', 'c0006', { before: oldest.at, beforeId: oldest.vendorId, limit: 50 });
+    if (!last.ok || last.exhausted) break;
+  }
+  const all = eng.store.readTail('many', 'c0006', { limit: 1000 });
+  ok(all.length === 120 && last && last.exhausted, `scrolling up fetches OLDER pages until the vendor has none (${all.length}/120, exhausted=${last && last.exhausted})`);
+  const sorted = all.every((r, i) => i === 0 || (all[i - 1].at < r.at || (all[i - 1].at === r.at && all[i - 1].vendorId < r.vendorId)));
+  const raw = fs.readFileSync(eng.store.logPath('many', 'c0006'), 'utf-8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  ok(sorted && raw.every((r, i) => i === 0 || raw[i - 1].at <= r.at), 'the backfill was PREPENDED in order (the log file itself is sorted)');
+  ok(new Set(raw.map((r) => r.vendorId)).size === raw.length, '…with no duplicate');
+  ok(delivered.length === wBefore, 'backfill never enters the wake funnel (the account is assigned, nobody was woken)');
+  const noOlder = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
+  ok(noOlder.ok && noOlder.records.length === 0 && noOlder.exhausted, 'asking before the dawn of time answers exhausted, honestly');
+}
+
+// ═══ ⑧ attachments through the ROUTE ═══════════════════════════════════════
+console.log('⑧ attachments: nosniff, sandbox, attachment unless a raster image inline, 0600, LRU');
+{
+  const express = require('express');
+  const app = express();
+  app.use(express.json());
+  routes.setup({ getEngine: () => eng });
+  app.use(routes.router);
+  const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const rec = eng.store.readTail('many', 'c0001', { limit: 50 }).find((r) => r.attachments && r.attachments.length);
+  ok(rec && rec.attachments.length === 3, 'the fixture record carries three attachments');
+  const get = (id, q = '') => fetch(`${base}/api/channels/many/c0001/attachment/${encodeURIComponent(id)}?msg=${encodeURIComponent(rec.vendorId)}${q}`);
+  const img = await get('c0001-img', '&inline=1');
+  const imgBytes = Buffer.from(await img.arrayBuffer());
+  ok(img.status === 200 && img.headers.get('content-type') === 'image/png' && /^inline/.test(img.headers.get('content-disposition')) && imgBytes.slice(1, 4).toString() === 'PNG', 'a PNG asked inline is served inline as image/png (the thumbnail)');
+  ok(img.headers.get('x-content-type-options') === 'nosniff' && /default-src 'none'; sandbox/.test(img.headers.get('content-security-policy') || ''), 'nosniff + a sandbox CSP on every attachment');
+  const txt = await get('c0001-doc', '&inline=1');
+  ok(txt.status === 200 && txt.headers.get('content-type') === 'application/octet-stream' && /^attachment/.test(txt.headers.get('content-disposition')) && /notes\.txt/.test(txt.headers.get('content-disposition')), 'a text file is ALWAYS a download (octet-stream, attachment) even when asked inline');
+  const svg = await get('c0001-svg', '&inline=1');
+  ok(svg.status === 200 && svg.headers.get('content-type') === 'application/octet-stream' && /^attachment/.test(svg.headers.get('content-disposition')), 'an SVG is never inline (it is script) — a download');
+  const calls0 = W.calls.attach;
+  await get('c0001-img', '&inline=1');
+  ok(W.calls.attach === calls0, 'a second request is served from the cache (no vendor call)');
+  const dir = path.join(dirMain, 'channels', 'attachments', 'many', 'c0001');
+  const files = fs.readdirSync(dir);
+  ok(files.length === 6 && files.every((f) => (fs.statSync(path.join(dir, f)).mode & 0o777) === 0o600), 'every cached file and its meta are mode 0600', files.map((f) => (fs.statSync(path.join(dir, f)).mode & 0o777).toString(8)).join());
+  // CONCURRENT first fetches of ONE attachment (the blob is written async): each write has its own temp
+  // file, every answer is whole, nothing half-written is left behind
+  {
+    const h = require('crypto').createHash('sha1').update('c0001-svg').digest('hex');
+    for (const f of [h, h + '.json']) fs.unlinkSync(path.join(dir, f));
+    const rs = await Promise.all([1, 2, 3].map(() => get('c0001-svg').then(async (r) => ({ status: r.status, body: Buffer.from(await r.arrayBuffer()).toString('hex') }))));
+    const left0 = fs.readdirSync(dir);
+    ok(rs.every((r) => r.status === 200 && r.body === rs[0].body && r.body.length > 0) && !left0.some((f) => /\.tmp-/.test(f)) && left0.includes(h) && (fs.statSync(path.join(dir, h)).mode & 0o777) === 0o600,
+      'three CONCURRENT first fetches of one attachment all answer the same whole bytes, and no temp file is left (0600 kept)', JSON.stringify({ statuses: rs.map((r) => r.status), left: left0.length }));
+  }
+  const forged = await fetch(`${base}/api/channels/many/c0001/attachment/img_not_ours?msg=${encodeURIComponent(rec.vendorId)}`);
+  ok(forged.status === 404, 'an id no record of this conversation names is refused (not a proxy for arbitrary vendor keys)');
+  // THE BUDGET: 64 MB (the setting's floor) with 25 MB images ⇒ the third evicts the least-recently-used
+  SET['channels.attachmentBudgetMB'] = 64;
+  W.bigAttachments = 25 * 1024 * 1024;
+  for (const i of [10, 11, 12]) W.convs.get(`c00${i}`).recs.push({ vendorId: `c00${i}-big`, at: clock + i, author: { id: 'u-1', name: 'Brook' }, text: 'a big picture', attachments: [{ id: `big-${i}`, name: `big-${i}.png`, mime: 'image/png' }] });
+  clock += 31e3;
+  for (const i of [10, 11, 12]) await eng.refresh('many', `c00${i}`);
+  const big = async (i) => { const res = await fetch(`${base}/api/channels/many/c00${i}/attachment/big-${i}?msg=c00${i}-big`); await res.arrayBuffer(); return res.status; };
+  const s10 = await big(10); clock += 1000;
+  const s11 = await big(11); clock += 1000;
+  ok(s10 === 200 && s11 === 200, 'two 25 MB attachments fit under 64 MB');
+  await get('c0001-img', '&inline=1'); clock += 1000;   // touch the small image
+  const touchedBig11 = await big(11); clock += 1000;    // …and big-11 again: big-10 is now the least recently used
+  ok(await big(12) === 200, 'the third 25 MB attachment is admitted…');
+  const left = (i) => { const d0 = path.join(dirMain, 'channels', 'attachments', 'many', `c${String(i).padStart(4, '0')}`); return fs.existsSync(d0) ? fs.readdirSync(d0).length : 0; };
+  ok(touchedBig11 === 200 && left(10) === 0 && left(11) === 2 && left(12) === 2 && left(1) >= 2, '…by EVICTING the least-recently-used one (big-10), never the touched ones', JSON.stringify([left(10), left(11), left(12)]));
+  const usage = eng.store.attachmentUsage('many');
+  ok(usage.bytes <= 64 * 1024 * 1024, `the account's cache is under its budget (${Math.round(usage.bytes / 1048576)} MB of 64)`);
+  delete SET['channels.attachmentBudgetMB'];
+  W.bigAttachments = 0;
+  // the search route: async, over the account's logs
+  const sr = await (await fetch(`${base}/api/channels/search?adapter=many&q=${encodeURIComponent('fresh news')}`)).json();
+  ok(sr.ok && sr.results.length === 1 && sr.results[0].convId === 'c0002' && sr.results[0].title === 'Room 2', 'search finds a message across the account\'s logs, named by its conversation', JSON.stringify(sr.results && sr.results[0] && { convId: sr.results[0].convId, title: sr.results[0].title }));
+  const sr2 = await (await fetch(`${base}/api/channels/search?adapter=many%3A0000abcd&q=${encodeURIComponent('fresh news')}`)).json();
+  ok(sr2.ok && sr2.results.length === 0, '…and never in another account');
+  // the reader routes
+  const ov = await (await fetch(`${base}/api/channels/many/c0300/refresh`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ every: 300 }) })).json();
+  ok(ov.ok && ov.refresh.every === 300, 'PUT …/refresh sets the override');
+  const full = await (await fetch(`${base}/api/channels/many/c0300`)).json();
+  ok(full.conversation && full.conversation.refresh.every === 300 && full.conversation.reach && full.conversation.inherits && full.conversation.inherits.account && full.conversation.attachments === 'fetch', 'GET one conversation = the FULL view (reach, inherited grains, capabilities)');
+  server.close();
+}
+
+// ═══ ⑨ three grains ════════════════════════════════════════════════════════
+console.log('⑨ assignment grains reach exactly their sets; ledgers per assignment; the scope digest');
+{
+  const A = { kind: 'agent', id: 'agent-A', groups: [] }, B = { kind: 'agent', id: 'agent-B', groups: [] }, C = { kind: 'agent', id: 'agent-C', groups: [] };
+  const pat = await eng.setScopeAssignment('many', { kind: 'pattern' }, { principal: { kind: 'agent', id: 'agent-B', name: 'Beta' }, mode: 'all', notify: 'digest', digestMinutes: 30, pattern: { match: 'any', rules: [{ kind: 'title', value: 'gpu on-call' }] } });
+  ok(pat.ok && pat.assignment.scope.kind === 'pattern' && pat.assignment.patternLabel, 'a PATTERN assignment (title contains "gpu on-call") is saved', JSON.stringify(pat.error || ''));
+  const conv = await eng.setAssignment('many', 'c0001', { principal: { kind: 'agent', id: 'agent-C', name: 'Gamma' }, mode: 'all' });
+  ok(conv.ok, 'a CONVERSATION assignment on c0001 is saved');
+  const gpu = Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'many' && /GPU on-call/.test(e.title)).map((e) => e.key).sort();
+  const listA = eng.listFor(A).conversations.filter((c) => c.adapterId === 'many');
+  const listB = eng.listFor(B).conversations.map((c) => c.key).sort();
+  const listC = eng.listFor(C).conversations.map((c) => c.key);
+  ok(listA.length === 873, 'the ACCOUNT grant makes all 873 visible to Alpha', String(listA.length));
+  ok(eng.listFor(A).conversations.every((c) => c.adapterId === 'many'), '…and nothing of the other account of the same kind');
+  ok(JSON.stringify(listB) === JSON.stringify(gpu) && gpu.length === 18, `the PATTERN reaches EXACTLY its ${gpu.length} matching conversations for Beta`, JSON.stringify(listB.slice(0, 3)));
+  ok(listC.length === 1 && listC[0] === 'many/c0001', 'the CONVERSATION grant reaches exactly c0001 for Gamma');
+  ok(eng.effectiveFor('many', 'c0001').source === 'conversation' && eng.effectiveFor('many', 'c0007').source === 'pattern' && eng.effectiveFor('many', 'c0100').source === 'account', 'effective: conversation > pattern > account');
+  const byA = eng.listFor(A).conversations.find((c) => c.id === 'c0100');
+  ok(byA.assigned === true && byA.assignedVia === 'account', 'Alpha\'s list says WHY a row is its (account)');
+  // a NEW matching conversation inherits within one pass
+  W.add('c9999', { title: 'GPU on-call — new', lastAgo: 0, count: 1 });
+  clock += 1000;
+  await eng.pass('many', { force: true });
+  ok(eng.effectiveFor('many', 'c9999') && eng.effectiveFor('many', 'c9999').source === 'pattern' && eng.listFor(B).conversations.some((c) => c.id === 'c9999'), 'a conversation that appears later inherits the pattern in the SAME pass it is discovered');
+  // WAKES COUNT AGAINST ONE LEDGER PER ASSIGNMENT (account, cap 3)
+  const already = eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === 'many')).assignment.stats.wakes24h;
+  await eng.setScopeAssignment('many', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'wake', dailyWakeCap: already + 3 });
+  const d0 = delivered.length;
+  const targets = ['c0100', 'c0101', 'c0102', 'c0103', 'c0104'];
+  for (const id of targets) W.convs.get(id).recs.push({ vendorId: `${id}-news`, at: clock + 500, author: { id: 'u-1', name: 'Brook' }, text: `news in ${id}`, attachments: [] });
+  clock += 1000;
+  for (const id of targets) await eng.refresh('many', id);
+  await eng.settleWakes();
+  const woke = delivered.slice(d0).filter((d) => d.cid === 'agent-A');
+  ok(woke.length === 3, `an account assignment with ${already} wakes already spent and a daily cap of ${already + 3} wakes 3 more times across 5 conversations (${woke.length}) — ONE ledger for the whole account, not one per conversation`);
+  ok(woke.every((d) => /\(you are assigned the whole account\)/.test(d.text) && d.opts.spendReason === 'channel-message'), 'each inherited wake says why it is here and rides the spend authorizer\'s reason');
+  const acct = eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === 'many')).assignment;
+  ok(acct && acct.stats.wakes24h === already + 3, 'the account assignment\'s own ledger holds them', JSON.stringify(acct && acct.stats));
+  const heldRow = eng.conversationView('many', targets[4]);
+  ok(heldRow.stats.pending >= 1 && new RegExp(`daily wake cap reached \\(${already + 3} of ${already + 3} in 24 h\\)`).test((heldRow.stats.lastRefusal || {}).why || ''), 'the capped hits are HELD on their conversation, with the named refusal', JSON.stringify(heldRow.stats.lastRefusal));
+  // THE SCOPE DIGEST: the pattern (notify digest) delivers ONE block for all its conversations
+  const d1 = delivered.length;
+  for (const id of ['c0007', 'c0057', 'c0107']) W.convs.get(id).recs.push({ vendorId: `${id}-gpu`, at: clock + 700, author: { id: 'u-2', name: 'Cass' }, text: `GPU alert in ${id}`, attachments: [] });
+  clock += 1000;
+  for (const id of ['c0007', 'c0057', 'c0107']) await eng.refresh('many', id);
+  await eng.settleWakes();
+  ok(delivered.length === d1, 'a digest assignment does not wake per message');
+  const fl = await eng.flushScope('many', 'pattern', pat.assignment.id);
+  await eng.settleWakes();
+  const dg = delivered.slice(d1);
+  ok(fl.ok && dg.length === 1 && dg[0].cid === 'agent-B' && /### Channel digest — many · 3 conversations, 3 messages/.test(dg[0].text), 'the window delivers ONE block listing the 3 conversations', dg[0] && dg[0].text.split('\n')[0]);
+  ok(['c0007', 'c0057', 'c0107'].every((id) => !(eng.store.index.live()[`many/${id}`].pending || []).length), '…and clears exactly those pending hits');
+  // un-assigning the account removes ONLY its grant: Alpha keeps nothing, Beta keeps its pattern set
+  await eng.setScopeAssignment('many', { kind: 'account' }, null);
+  ok(eng.listFor(A).conversations.length === 0 && eng.listFor(B).conversations.length === gpu.length + 1, 'un-assigning the account removes exactly its reach; the pattern\'s stands');
+}
+
+// AN INHERITED GRAIN'S DAILY CAP HOLDS UNDER A BURST (lane R2 verify,
+// critical): the grain's ledger was read BEFORE the ladder's await and
+// written AFTER it, and wakes were serialized per CONVERSATION only — so a
+// pass that brought news to 100 conversations under one account (or pattern)
+// assignment with a cap of 5 started 100 billed turns whenever the ladder
+// took longer than a couple of milliseconds (the real one always does).
+console.log('⑨b one pass, 100 fresh conversations, a slow ladder: an inherited grain wakes exactly its cap');
+async function capRace(ENGmod, label, grain) {
+  const Wc = makeWorld(clock, { n: 100, hot: 0, warm: 0 });
+  const kc = worldModule('race', Wc);
+  const dirC = path.join(ROOT, `race-${label}`);
+  seedAccounts(dirC, [['race', 'race']]);
+  const got = [];
+  const slow = { async deliverToConversation(cid, text, opts) { await sleep(20); got.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor() {} };
+  const registry = CH.createChannelRegistry(); registry.register(kc);
+  const ec = ENGmod.create({ dataDir: dirC, registry, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-X', name: 'Xi', groups: [] }], deliver: slow, log: quiet });
+  await ingestAll(ec, 'race');
+  const principal = { kind: 'agent', id: 'agent-X', name: 'Xi' };
+  const saved = grain === 'account'
+    ? await ec.setScopeAssignment('race', { kind: 'account' }, { principal, mode: 'all', notify: 'wake', dailyWakeCap: 5 })
+    : await ec.setScopeAssignment('race', { kind: 'pattern' }, { principal, mode: 'all', notify: 'wake', dailyWakeCap: 5, pattern: { match: 'any', rules: [{ kind: 'title', value: 'room' }] } });
+  const inScope = Object.values(ec.store.index.live()).filter((e) => e.adapterId === 'race' && ec.effectiveFor('race', e.id)).map((e) => e.id);
+  for (const id of inScope) Wc.convs.get(id).recs.push({ vendorId: `${id}-news`, at: clock + 500, author: { id: 'u-1', name: 'Brook' }, text: `news in ${id}`, attachments: [] });
+  clock += 1000;
+  await ec.pass('race', { force: true });          // ONE pass brings news to every one of them
+  await ec.settleWakes();
+  const rec = ec.adapterRecords().adapters.find((r) => r.id === 'race');
+  const view = ec.adapterView(rec);
+  const a = grain === 'account' ? view.assignment : (view.patterns || [])[0];
+  const held = inScope.filter((id) => { const v = ec.conversationView('race', id); return v && v.stats && v.stats.pending >= 1 && /daily wake cap reached \(5 of 5 in 24 h\)/.test((v.stats.lastRefusal || {}).why || ''); });
+  ec.stop();
+  return { ok: !!(saved && saved.ok), n: inScope.length, woke: got.length, wakes24h: a && a.stats ? a.stats.wakes24h : null, held: held.length };
+}
+{
+  for (const grain of ['account', 'pattern']) {
+    const r = await capRace(ENG, grain, grain);
+    ok(r.ok && r.n >= 98, `FIXTURE: the ${grain} grain covers ${r.n} conversations, cap 5, a 20 ms ladder`);
+    ok(r.woke === 5 && r.wakes24h === 5, `the ${grain} grain woke EXACTLY its cap (${r.woke} deliveries, ledger ${r.wakes24h}) — not one per conversation of the burst`);
+    ok(r.held === r.n - 5, `…and the other ${r.n - 5} conversations are HELD with the named refusal "daily wake cap reached (5 of 5 in 24 h)" (${r.held})`);
+  }
+  // CONTROL: the pre-fix wake — a grain's wake NOT queued on its scope — breaks the cap
+  const M9 = mutantCopies('chan-agg-race', REPO);
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const unscoped = esrc.replace('    return sk ? serialWake(`scope:${sk}`, fn) : fn();', '    return fn();');
+  ok(unscoped !== esrc, 'CONTROL setup: the pre-fix (per-conversation only) wake is reconstructed from the shipped bytes');
+  const E9 = M9.load('src/server/channels-engine.js', unscoped, 'unscoped');
+  const rc = await capRace(E9, 'ctl', 'account');
+  ok(rc.woke > 5, `CONTROL: without the scope queue the same burst wakes ${rc.woke} times past a cap of 5 — the legs above would go red`);
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
+}
+
+// ═══ ⑩ restart + migration ═══════════════════════════════════════════════
+console.log('⑩ a restart keeps everything; the migration turns tracked into hot');
+{
+  const snapshot = (e) => ({ override: e.store.index.live()['many/c0500'].refresh, patterns: Object.keys(e.store.index.table('patternAssignments') || {}).length, conv: !!e.store.index.live()['many/c0001'].assignment, anchors: Object.values(e.store.index.live()).filter((x) => x.anchor).length, linkedAt: e.adapterRecords().adapters.find((r) => r.id === 'many').linkedAt });
+  const s1 = snapshot(eng);
+  eng.stop();
+  ({ eng, events } = mkEngine('main', { kinds: [kindMany], settings: SET, now, deliver, sessions: SESS, dataDir: dirMain }));
+  const s2 = snapshot(eng);
+  ok(JSON.stringify(s1) === JSON.stringify(s2), 'overrides, pattern assignments, conversation assignments, anchors and linkedAt survive a restart', JSON.stringify([s1, s2]));
+  ok(eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 19, '…and the pattern reach answers the same after it');
+  eng.stop();
+  // the migration over a pre-2026-09-26 index
+  const dirM = path.join(ROOT, 'migrate');
+  seedAccounts(dirM, [['many', 'many']]);
+  const ix = { v: 1, updatedAt: 0, conversations: {
+    'many/t1': { key: 'many/t1', id: 't1', adapterId: 'many', title: 'tracked + anchored', tracked: true, anchor: 'x', readAt: 5, unread: 2, lane: {} },
+    'many/t2': { key: 'many/t2', id: 't2', adapterId: 'many', title: 'untracked, never ingested', tracked: false, anchor: null, readAt: 0, unread: 0, lane: {} },
+    'many/t3': { key: 'many/t3', id: 't3', adapterId: 'many', title: 'tracked, assigned', tracked: true, anchor: 'y', readAt: 9, assignment: { principal: { kind: 'agent', id: 'agent-A' }, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 40 }, lane: {} },
+  } };
+  fs.writeFileSync(path.join(dirM, 'channels', 'index.json'), JSON.stringify(ix));
+  const { eng: em } = mkEngine('migrate', { kinds: [kindMany], now, dataDir: dirM });
+  const rep = em.migrateAggregated();
+  await rep.write;
+  const live = em.store.index.live();
+  ok(rep.hot.sort().join() === 'many/t1,many/t3' && live['many/t1'].refresh.every === 30 && live['many/t1'].refresh.by === 'migration', 'tracked ⇒ hot: every tracked conversation gets refresh.every = 30 (by migration)', JSON.stringify(rep));
+  ok(Object.values(live).every((e) => !('tracked' in e)), 'the `tracked` field is gone everywhere');
+  ok(live['many/t2'].readAt === clock && live['many/t1'].readAt === 5, 'a never-ingested conversation\'s backlog is read (readAt stamped); an ingested one keeps its mark');
+  ok(!!live['many/t3'].assignment && live['many/t3'].assignment.principal.id === 'agent-A', 'assignments are kept');
+  ok(em.adapterRecords().adapters[0].linkedAt === clock, 'the account is stamped linkedAt');
+  const again = em.migrateAggregated(); await again.write;
+  ok(again.hot.length === 0 && again.readStamped === 0 && again.cleared === 0 && again.linked.length === 0, 'a second run changes nothing (idempotent)');
+  const src = fs.readFileSync(path.join(REPO, 'src/server/migrations.js'), 'utf-8');
+  ok(/id: '2026-09-channels-aggregated-im'/.test(src) && /migrateAggregated\(\)/.test(src), 'the migration is REGISTERED in src/server/migrations.js through the engine\'s serialized door');
+  em.stop();
+}
+
+// ═══ ⑪ negative controls ═══════════════════════════════════════════════════
+console.log('⑪ controls: the old discovery bound, a scheduler that polls everything');
+{
+  const M = mutantCopies('chan-agg', REPO);
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  // (a) the pre-fix discovery: every pass restarts the cursor, 5 pages at most
+  const discOld = esrc.replace('const DISCOVERY_MAX_PAGES = 200;', 'const DISCOVERY_MAX_PAGES = 5;').replace('    if (!d.cursor) d.startedAt = now();', '    d.cursor = null; d.startedAt = now();');
+  ok(discOld !== esrc && discOld.includes('DISCOVERY_MAX_PAGES = 5'), 'CONTROL setup: the pre-fix discovery is reconstructed from the shipped bytes');
+  const E1 = M.load('src/server/channels-engine.js', discOld, 'disc5');
+  const Wc = makeWorld(clock, { n: 873 });
+  const dirC = path.join(ROOT, 'ctl-disc');
+  seedAccounts(dirC, [['many', 'many']]);
+  const regC = CH.createChannelRegistry(); regC.register(worldModule('many', Wc));
+  const ec = E1.create({ dataDir: dirC, registry: regC, env: {}, now, broadcast: () => {}, log: quiet });
+  for (let i = 0; i < 3; i++) await ec.pass('many', { force: true });
+  const seen = Object.values(ec.store.index.live()).length;
+  ok(seen === 500, `CONTROL: the old bound discovers only 500 of 873 however many passes run (${seen}) — the leg above would go red`);
+  ec.stop();
+  // (b) a scheduler that makes EVERY conversation due each pass
+  const allDue = esrc.replace('      if (all || named) { out.push(', '      if (true) { out.push(');
+  ok(allDue !== esrc, 'CONTROL setup: a poll-everything scheduler is reconstructed');
+  const E2 = M.load('src/server/channels-engine.js', allDue, 'alldue');
+  const Wd = makeWorld(clock, { n: 300, hot: 20, warm: 30 });
+  const dirD = path.join(ROOT, 'ctl-due');
+  seedAccounts(dirD, [['many', 'many']]);
+  const regD = CH.createChannelRegistry(); regD.register(worldModule('many', Wd));
+  const ed = E2.create({ dataDir: dirD, registry: regD, env: {}, now, broadcast: () => {}, log: quiet });
+  await ed.pass('many', { force: true });
+  const b0 = historyCalls(Wd);
+  clock += 31e3;
+  await ed.pass('many');
+  const polled = historyCalls(Wd) - b0;
+  ok(polled === 300, `CONTROL: a poll-everything scheduler sends ${polled} requests at +31 s where the real one sends 20 — the arithmetic leg would go red`);
+  ed.stop();
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(r.pass, r.name, r.detail);
+}
+
+console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

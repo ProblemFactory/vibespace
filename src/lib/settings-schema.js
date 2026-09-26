@@ -786,6 +786,77 @@ const SETTINGS_SCHEMA = {
     description: t('Polling batches a minute of messages into ONE wake by nature; a push lane delivers them one by one, so a burst of 30 would become 30 billed turns. While a push lane carries messages, matched hits are gathered for this many seconds and delivered as one wake that lists them all. 0 = wake per message. Poll and scan lanes are already batches and never wait.'),
     category: t('Channels'), liveApply: true,
   },
+  // ── Channels: THE AGGREGATED IM's time and capacity numbers (owner ruling
+  //    2026-09-26: "all of these time and capacity parameters should be
+  //    configurable"; design §6.2 / §6.5). Every one is read LIVE by the
+  //    channels engine through serverSetting — a change applies at the next
+  //    tick, no restart. The engine keeps the same defaults beside its reads.
+  'channels.pollHotSec': {
+    type: 'number', default: 30, min: 10, max: 300, step: 5,
+    label: t('Refresh a busy conversation every (seconds)'),
+    description: t('A conversation open in a window, or with a message in the last hour, is "hot" and fetched this often. The vendor\'s own minimum still applies (Gmail: 30 s). Push, when it carries messages, makes polling a slow safety net instead.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.pollWarmSec': {
+    type: 'number', default: 300, min: 30, max: 900, step: 30,
+    label: t('Refresh a recent conversation every (seconds)'),
+    description: t('A conversation with a message in the last day ("warm") is fetched this often.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.pollColdSec': {
+    type: 'number', default: 900, min: 60, max: 900, step: 60,
+    label: t('Refresh every other conversation every (seconds, at most 900)'),
+    description: t('Every other conversation ("cold") is fetched this often — never less often than every 15 minutes. This is also how often the conversation list itself is re-read and the safety-net cadence while push carries messages.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.hotRecentMinutes': {
+    type: 'number', default: 60, min: 5, max: 1440, step: 5,
+    label: t('A conversation is busy for this long after a message (minutes)'),
+    description: t('How recent the last message must be for a conversation to count as busy (hot).'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.warmRecentHours': {
+    type: 'number', default: 24, min: 1, max: 168, step: 1,
+    label: t('A conversation is recent for this long after a message (hours)'),
+    description: t('How recent the last message must be for a conversation to count as recent (warm).'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.agentRefreshFloorSec': {
+    type: 'number', default: 20, min: 5, max: 900, step: 5,
+    label: t('An agent may refresh a conversation at most every (seconds)'),
+    description: t('"vibespace-channels refresh" is refused, with the wait, when the conversation was fetched less than this long ago — an agent cannot turn itself into a polling loop. Every refresh counts against the account\'s vendor budget.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.agentBudgetSharePct': {
+    type: 'number', default: 25, min: 5, max: 100, step: 5,
+    label: t('Agent refreshes may use at most (% of an account\'s vendor budget per minute)'),
+    description: t('Every "vibespace-channels refresh" counts against the account\'s vendor budget. Agents together may spend at most this share of each minute, so the conversations you watch keep their refresh cadence; past it an agent\'s refresh is refused with the wait. 100 = no separate limit.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.historyPageSize': {
+    type: 'number', default: 50, min: 10, max: 200, step: 10,
+    label: t('Messages per history page'),
+    description: t('A new conversation is fetched one page deep; older pages load when you scroll up in its window. Lark serves at most 50 per request.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.attachmentBudgetMB': {
+    type: 'number', default: 5120, min: 64, max: 102400, step: 64,
+    label: t('Attachment cache per account (MB)'),
+    description: t('Attachments and images are downloaded when you open them and kept per account up to this size; the least recently opened ones are removed first. They are never executed.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.budgetLarkPerMin': {
+    type: 'number', default: 60, min: 5, max: 1000, step: 5,
+    label: t('Lark: requests per minute per account'),
+    description: t('Lark allows 1000 requests a minute per API for the whole app across every instance and user that shares it. When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.budgetGmailPerMin': {
+    type: 'number', default: 3000, min: 100, max: 6000, step: 100,
+    label: t('Gmail: quota units per minute per account'),
+    description: t('Gmail allows 6000 quota units a minute per user (a thread read costs 40, a change check 2). When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
+    category: t('Channels'), liveApply: true,
+  },
   // ── Channels outbox GUARDS (design §9.1, decision 9, P3): they stack on
   //    the channel policy and can only TIGHTEN it. Audit is always on and is
   //    not a setting. Off-hours needs a time zone; without one that guard is
@@ -1197,5 +1268,18 @@ export function orderedCategories(cats = SETTINGS_CATEGORIES) {
   return out;
 }
 export function settingsGroups() { return SETTINGS_GROUPS.map((g) => ({ id: g.id, label: g.label })); }
+
+/** A number typed into a schema row, CLAMPED to the row's own bounds
+ *  (2026-09-26, lane R2 verify: the Settings window stored 1800 for a
+ *  "at most 900" row while the engine silently ran 900). `{value, bound}` —
+ *  `bound` is 'max' | 'min' when the value was moved (the input then says
+ *  so), null when it was in range. PURE: the input and the suites share it. */
+export function clampToSchema(schema, num) {
+  const n = Number(num);
+  if (!schema || !Number.isFinite(n)) return { value: n, bound: null };
+  if (schema.max !== undefined && n > schema.max) return { value: schema.max, bound: 'max' };
+  if (schema.min !== undefined && n < schema.min) return { value: schema.min, bound: 'min' };
+  return { value: n, bound: null };
+}
 
 export { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, SETTINGS_GROUPS };

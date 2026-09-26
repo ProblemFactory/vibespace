@@ -1,5 +1,5 @@
-import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups } from './settings-schema.js';
-import { showConfirmDialog, fetchJson } from './utils.js';
+import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, harnessSectionFor, harnessFileRel, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema } from './settings-schema.js';
+import { showConfirmDialog, fetchJson, showToast } from './utils.js';
 import { receiptLine, offLine, applyHead } from './cli-config-chips.js';
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
@@ -360,7 +360,16 @@ class SettingsUI {
         // Empty/invalid input must not store NaN (it persisted as null and
         // broke numeric consumers like taskbar sizing) — revert to default
         const num = parseFloat(input.value);
-        if (Number.isFinite(num)) this.settings.set(path, num);
+        if (Number.isFinite(num)) {
+          // OUT OF RANGE IS SAID, never stored as typed (lane R2 verify,
+          // 2026-09-26): the row's own bounds, written back into the field
+          const c = clampToSchema(schema, num);
+          this.settings.set(path, c.value);
+          if (c.bound) {
+            input.value = c.value;
+            showToast(c.bound === 'max' ? t('{label}: kept at the maximum, {value}', { label: schema.label || path, value: c.value }) : t('{label}: raised to the minimum, {value}', { label: schema.label || path, value: c.value }));
+          }
+        }
         else { this.settings.set(path, schema.default); input.value = schema.default; }
         row.classList.toggle('modified', this.settings.isModified(path));
       };

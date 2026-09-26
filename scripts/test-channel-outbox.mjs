@@ -146,7 +146,7 @@ const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['g1'], ms
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 async function prime(eng) {
   await eng.pass(A, { force: true });
-  await eng.setTracked(A, C, true);
+  await eng.refresh(A, C);
   await eng.pass(A, { force: true });
   await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
 }
@@ -207,7 +207,7 @@ async function prime(eng) {
 {
   const { eng } = mkEngine({ name: 'readonly' });
   await eng.pass(A, { force: true });
-  await eng.setTracked(A, 'fake-poll-announce', true);
+  await eng.refresh(A, 'fake-poll-announce');
   await eng.pass(A, { force: true });
   await eng.setReach(A, 'fake-poll-announce', { principal: { kind: 'agent', id: 'agent-1' }, level: 'visible' });
   const r = await eng.propose(AGENT, A, 'fake-poll-announce', { text: 'hello' });

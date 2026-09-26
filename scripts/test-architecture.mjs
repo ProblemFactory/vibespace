@@ -136,6 +136,14 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   //     the uniform not-found. Imports only msg-acl (PURE → PURE) for the
   //     ladder shape + the ONE crosswalk the built-in Agents adapter uses.
   'src/channel-policy.js', 'src/channel-acl.js',
+  //   channel-drain — THE DRAIN'S SCHEDULING DECISION (lane R2 verify r9): the
+  //     refresh / drain step function over a snapshot (`next` names the one next
+  //     action, `apply` returns the next snapshot) — every "what next, who is
+  //     answered, when does the pass end" of the channels engine, which only
+  //     drives it. Imports nothing, reads no clock: seven rounds of an
+  //     async-interleaved imperative scheduler each grew an ordering bug; a pure
+  //     step function is pinned by a seeded invariant walk (test-channel-drain).
+  'src/channel-drain.js',
   // INTEGRATIONS & KEYS (docs/design-communication-panel.zh.md §14.2, P0b): the
   // ONE table of integration rows — fields, cluster env names, setup blocks
   // (Lark's callback URL is defined HERE and only here), test declarations,

@@ -139,7 +139,7 @@ function pushDemotionVerdict(push, now) {
  *  the resolved lane), words out, `t()` injected because the digest is
  *  broadcast to every client while the language is per device. Says the
  *  lane's STATE and, when demoted, the REASON with its numbers. */
-function pushLaneText(push, lane, { t = defaultT, now = null } = {}) {
+function pushLaneText(push, lane, { t = defaultT, now = null, coldSeconds = COLD_MAX_SEC } = {}) {
   const p = push || {};
   const l = lane || {};
   const pct = (r) => (Math.round(Number(r) * 1000) / 10).toString();
@@ -148,9 +148,15 @@ function pushLaneText(push, lane, { t = defaultT, now = null } = {}) {
     const d = p.demoted || {};
     return t('push is not exclusive here — fell back to cursor kicks, polling returned to the fast cadence ({missed} of {total} records, {pct}%, were first seen by the reconciliation poll)', { missed: d.missed || 0, total: d.total || 0, pct: pct(d.rate || 0) });
   }
-  if (p.state === 'unavailable') return t('push unavailable: {why}', { why: p.lastStateWhy || t('unknown') });
+  if (p.state === 'unavailable') {
+    // THE REMEDY BY CODE (2026-09-26): the lane's own `why` is an English
+    // sentence for the log; the card says what to DO in the device's words.
+    // A code this table does not know falls back to the lane's words.
+    const text = pushUnavailableText(p.lastStateCode, { t });
+    return text || t('push unavailable: {why}', { why: p.lastStateWhy || t('unknown') });
+  }
   if (!p.state) return t('push not started');
-  if (l.via === 'push' && l.live && l.carryContent) return t('push live — carrying messages (declared exclusive); the poll reconciles every 15 min');
+  if (l.via === 'push' && l.live && l.carryContent) return t('push live — carrying messages (declared exclusive); polling reconciles every {age} as a safety net', { age: humanAge(coldSeconds) });
   if (l.via === 'push' && l.live) return p.claimedExclusive === 'shared' ? t('push live — cursor kicks only (declared shared)') : t('push live — cursor kicks only (exclusivity not declared)');
   // Connected but silent past the heartbeat window: the resolver reads it as
   // dead (positive evidence only) and polling is back at the fast cadence.
@@ -159,6 +165,23 @@ function pushLaneText(push, lane, { t = defaultT, now = null } = {}) {
     return age ? t('push silent for {age} — polling at the fast cadence until it speaks', { age }) : t('push silent — polling at the fast cadence until it speaks');
   }
   return t('push {state} — polling at the fast cadence', { state: p.state });
+}
+
+/** A push lane parked `unavailable`, in words, BY ITS CODE (the lanes'
+ *  permanent codes: src/channels/live/lark.js + live/gmail.js). */
+function pushUnavailableText(code, { t = defaultT } = {}) {
+  switch (String(code || '')) {
+    case 'sdk-not-installed': return t('Real-time push is off: the official Lark SDK is not installed on this instance — run `npm install @larksuiteoapi/node-sdk` in the VibeSpace folder and restart; enable the event subscription (long-connection mode), grant `im:message.group_msg` and add the bot to the chats you want pushed. Until then messages are polled (every 30 s – 15 min).');
+    case 'needs-credentials': return t('Real-time push is off: this account has no usable app credential — fix the client in Edit. Until then messages are polled.');
+    case 'push-not-configured': return t('Push is on but not configured: set the Pub/Sub topic and subscription options in Edit, then re-authorize. Until then messages are polled.');
+    case 'push-misconfigured': return t('Push is misconfigured: the Pub/Sub topic or subscription option is not a valid resource name — fix it in Edit. Until then messages are polled.');
+    case 'scope-missing': return t('Push needs the Pub/Sub permission: re-authorize this account (the consent now asks for it). Until then messages are polled.');
+    case 'watch-refused': return t('Gmail refused the push watch: grant gmail-api-push@system.gserviceaccount.com the Publisher role on the topic. Until then messages are polled.');
+    case 'pubsub-forbidden': return t('The Pub/Sub subscription refused this account: grant it the Subscriber role on the subscription. Until then messages are polled.');
+    case 'subscription-not-found': return t('The Pub/Sub subscription does not exist: create it (a pull subscription of the topic) or fix the option in Edit. Until then messages are polled.');
+    case 'watch-renew-failed': return t('The push watch could not be renewed three times — push stopped; re-save the Push settings to retry. Until then messages are polled.');
+    default: return '';
+  }
 }
 
 /** A number, or `null` for ANYTHING that is not one. `Number(null)` is 0 and
@@ -475,29 +498,22 @@ function identityWarningText(warn, { t = defaultT } = {}) {
  * `within`+`seconds:null`) and a renderer that cannot tell them apart is back
  * to inventing the difference.
  *
- * A ROW NOTHING WILL EVER FETCH SAYS SO (r3). Every discovered conversation is
- * UNTRACKED by default (§5 invariant 6: nothing is ingested until the user
- * tracks it — and untracked is all P0a ever shows until someone clicks), and a
- * disabled adapter's rows are refused by the tick and the pass alike. The
- * claim used to fall through to the declared poll cadence for both, so a row
- * that would never be fetched said "within 5m" — a promise about a fetch that
- * would not happen, on the ONE surface this feature calls its honesty
- * contract. Both facts are in the caller's hands at digest time
- * (`entry.tracked`, the adapter row's `enabled`), so they are INPUTS here: the
- * answer is the lane's own `off` vocabulary, which the scan lane already had
- * for "no source" and which `freshnessText` now renders as "not polling" for
- * every other lane. `why` names the silencing fact — contract, not prose —
- * and `tracked` is read STRICTLY (`=== true`): a fixture that forgets the flag
- * models an untracked row, because that is what the store mints.
+ * A ROW NOTHING WILL FETCH SAYS SO (r3). A disabled adapter's rows are
+ * refused by the tick and the pass alike, so they answer the lane's own `off`
+ * vocabulary ("not polling") — `why` names the silencing fact. Since
+ * 2026-09-26 (a linked account is an aggregated IM) there is NO `tracked`
+ * gate: every conversation is fetched, at the cadence `cadenceFor()` resolves
+ * for it — so the claim IS that cadence (hot / warm / cold by activity, or
+ * the owner's override), and a PAUSED override says `paused` rather than an
+ * age it will not keep. A stale `tracked` flag on an entry is ignored.
  */
-function freshnessClaim(caps, laneOrScan, entry, now, { enabled = true } = {}) {
+function freshnessClaim(caps, laneOrScan, entry, now, { enabled = true, cadence = null, tiers = null, watched = false } = {}) {
   const c = caps || {};
   const l = laneOrScan || {};
   const lane = (entry && entry.lane) || {};
   const off = (why) => ({ kind: l.via === 'scan' ? 'scanned' : 'within', state: 'off', seconds: null, why });
 
   if (!enabled) return off('adapter-disabled');
-  if (!(entry && entry.tracked === true)) return off('untracked');
 
   if (l.via === 'scan') {
     const secs = ageS(lane.lastScanAt, now);
@@ -509,21 +525,99 @@ function freshnessClaim(caps, laneOrScan, entry, now, { enabled = true } = {}) {
     return { kind: 'live', state: 'live', seconds: ageS(lane.lastPushAt, now) };
   }
   // Everything else — poll, a kick-mode push lane, a demoted or dead one — is
-  // carried by polling, so the claim is the POLL cadence for this row's own
-  // heat, not the lane the adapter declared.
-  if (l.pollCadence === 'reconcile') return { kind: 'within', state: 'reconciling', seconds: null };
-  const hot = !!(entry && (entry.hot || entry.assignment));
-  const pi = c.pollInterval || {};
-  const secs = num(hot ? pi.hot : pi.cold);
-  if (secs === null) return { kind: 'within', state: 'unknown', seconds: null };
-  return { kind: 'within', state: 'bound', seconds: secs };
+  // carried by polling, so the claim is the row's RESOLVED cadence
+  // (`cadenceFor`: the owner's override, else its activity tier, the push
+  // safety net folded in), never the lane the adapter declared.
+  const cad = cadence || cadenceFor(c, l, entry, now, { tiers, watched });
+  if (cad.paused) return { kind: 'within', state: 'paused', seconds: null };
+  if (cad.seconds === null || cad.seconds === undefined) return { kind: 'within', state: 'unknown', seconds: null };
+  return { kind: 'within', state: 'bound', seconds: cad.seconds, tier: cad.tier || null, source: cad.source };
+}
+
+// ── THE CADENCE A CONVERSATION IS POLLED AT (2026-09-26) ──────────────────
+/** The design's defaults (§6.2); every one is a SETTING the engine hands in
+ *  (`channels.pollHotSec` / `pollWarmSec` / `pollColdSec` /
+ *  `hotRecentMinutes` / `warmRecentHours`). */
+const TIER_DEFAULTS = Object.freeze({ hotSec: 30, warmSec: 300, coldSec: 900, hotRecentMinutes: 60, warmRecentHours: 24 });
+/** The owner's ceiling: "30 minutes is too long — 15 at most". No setting and
+ *  no override may push a conversation past it. */
+const COLD_MAX_SEC = 900;
+/** The owner's per-conversation override choices ("Refresh every ▸"). */
+const REFRESH_CHOICES = Object.freeze([30, 60, 300, 900, 'paused']);
+const validRefresh = (v) => REFRESH_CHOICES.includes(v);
+
+/** hot | warm | cold for ONE entry: open in a window (`watched`) or a message
+ *  inside the hot window ⇒ hot; inside the warm window ⇒ warm; else cold. */
+function pollTier(entry, now, { tiers = null, watched = false } = {}) {
+  const T = { ...TIER_DEFAULTS, ...(tiers || {}) };
+  if (watched) return 'hot';
+  const last = num(entry && entry.lastAt);
+  if (last === null) return 'cold';
+  const age = Number(now) - last;
+  if (age <= Number(T.hotRecentMinutes) * 60e3) return 'hot';
+  if (age <= Number(T.warmRecentHours) * 3600e3) return 'warm';
+  return 'cold';
+}
+/**
+ * THE ONE CADENCE RESOLVER — the scheduler's due time and the freshness chip
+ * both read it, so the chip cannot claim a number the tick does not keep.
+ *   override (`entry.refresh.every`: 30 | 60 | 300 | 900 | 'paused') >
+ *   the push safety net (push live AND carrying content ⇒ the cold tier) >
+ *   the activity tier;
+ * then clamped to [the adapter's `pollInterval.floor`, COLD_MAX_SEC].
+ * → `{seconds|null, tier, source:'override'|'push-safety'|'tier', paused}`.
+ */
+function cadenceFor(caps, laneOrScan, entry, now, { tiers = null, watched = false } = {}) {
+  const T = { ...TIER_DEFAULTS, ...(tiers || {}) };
+  const floor = Math.max(1, num(caps && caps.pollInterval && caps.pollInterval.floor) || 1);
+  const clamp = (v) => Math.min(COLD_MAX_SEC, Math.max(floor, Math.round(Number(v))));
+  const tier = pollTier(entry, now, { tiers: T, watched });
+  const ov = entry && entry.refresh && typeof entry.refresh === 'object' ? entry.refresh.every : null;
+  if (ov === 'paused') return { seconds: null, tier, source: 'override', paused: true };
+  if (validRefresh(ov)) return { seconds: clamp(ov), tier, source: 'override', paused: false };
+  const l = laneOrScan || {};
+  const cold = clamp(T.coldSec);
+  if (l.pollCadence === 'reconcile') return { seconds: cold, tier, source: 'push-safety', paused: false };
+  const secs = tier === 'hot' ? T.hotSec : tier === 'warm' ? T.warmSec : T.coldSec;
+  return { seconds: clamp(secs), tier, source: 'tier', paused: false };
+}
+
+/** THE VENDOR BUDGET SENTENCE (§6.2) — `{unit, limit, exhausted, waiting,
+ *  resetInSeconds}` from the account row; empty while the budget holds. */
+function budgetText(budget, { t = defaultT } = {}) {
+  const b = budget || {};
+  if (!b.exhausted) return '';
+  const unit = b.unit === 'quota-unit' ? t('quota units') : t('requests');
+  const args = { n: b.limit, unit, k: Number(b.waiting) || 0, s: Math.max(0, Math.round(Number(b.resetInSeconds) || 0)) };
+  // WHO SPENT IT (2026-09-26, lane R2 verify): an agent's refreshes count
+  // against the same minute — the card names them when they took a part
+  const byAgents = Math.round(Number(b.spentBy && b.spentBy.agent) || 0);
+  if (byAgents > 0) return t('Vendor budget reached — {n} {unit}/min for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s', { ...args, a: byAgents });
+  return t('Vendor budget reached — {n} {unit}/min for this account; {k} conversations waiting, next refresh in {s} s', args);
+}
+
+/** The account's PASS STATE as the card says it (2026-09-26, lane R2
+ *  verify): `lastOkAt` = the last GOOD pass (a failed pass stamps `lastPass`
+ *  too, and the card printed it as "last sync" while nothing was fetched),
+ *  and — from the FIRST failure, not the third — `note` naming the code and
+ *  when the next attempt runs (`backoffUntil`, the engine's in-memory
+ *  back-off). `{lastOkAt, note}`; `note` is '' while the last pass was good. */
+function passStateText(account, { t = defaultT, now = Date.now() } = {}) {
+  const a = account || {};
+  const lp = a.lastPass || null;
+  const lastOkAt = Number(a.lastOkAt) > 0 ? Number(a.lastOkAt) : null;
+  if (!lp || lp.ok !== false) return { lastOkAt, note: '' };
+  const code = errorCodeText(lp.code || 'failed', { t });
+  const until = Number(a.backoffUntil) || 0;
+  const s = until > now ? Math.max(1, Math.ceil((until - now) / 1000)) : 0;
+  return { lastOkAt, note: s ? t('{code} — retrying in {s} s', { code, s }) : t('{code} — retrying at the next pass', { code }) };
 }
 
 /** The sentence for a `freshnessClaim`. ONE producer per string, and the
  *  `t()` literals live here so the extractor finds them — but it is called
  *  from the CLIENT, which is the only place that knows the language. A claim
  *  whose `state` we do not recognise says so; it never guesses a number. */
-function freshnessText(claim, { t = defaultT } = {}) {
+function freshnessText(claim, { t = defaultT, short = false } = {}) {
   const f = claim || {};
   const age = () => humanAge(f.seconds);
   switch (f.state) {
@@ -533,9 +627,12 @@ function freshnessText(claim, { t = defaultT } = {}) {
     // kind picks the verb and the state picks the sentence.
     case 'off': return f.kind === 'scanned' ? t('not scanning') : t('not polling');
     case 'never': return t('not scanned yet');
-    case 'aged': return t('scanned {age} ago', { age: age() });
+    // `short`: the row PILL (at most ~82 px in a 188 px panel) says "19s ago";
+    // the sentence stays whole in the pill's tooltip and everywhere else
+    case 'aged': return short ? t('{age} ago', { age: age() }) : t('scanned {age} ago', { age: age() });
     case 'live': return t('live');
     case 'reconciling': return t('reconciling');
+    case 'paused': return t('refresh paused');
     case 'unknown': return t('polling');
     case 'bound': return t('within {age}', { age: age() });
     default: return t('unknown');
@@ -658,6 +755,8 @@ module.exports = {
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
+  // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
+  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, passStateText, pushUnavailableText,
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
 };

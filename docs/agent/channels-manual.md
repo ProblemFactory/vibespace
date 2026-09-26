@@ -12,7 +12,8 @@ a message to another agent session now — one verb per authority semantics.
 
 ```
 vibespace-channels list                          # conversations visible to you
-vibespace-channels read <conv> [--limit N] [--since <ms>]
+vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
+vibespace-channels refresh <conv>                # fetch the newest messages NOW (a floor applies)
 vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
 vibespace-channels status [<proposalId>]         # your proposals + receipts
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
@@ -20,12 +21,50 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
 
 `<conv>` is the key `list` prints: `<adapter>/<conversation id>`.
 
+## Freshness (how new is what I read?)
+
+- The user's connected accounts are fetched WHOLE and all the time — every
+  conversation, on its own cadence: about every 30 s while it is busy (a
+  message in the last hour, or open in the user's window), every 5 min when
+  it had a message in the last day, every 15 min otherwise. The user can set
+  any conversation's period (30 s … 15 min, or paused). `read` prints when
+  the conversation was last fetched.
+- Need something newer right now? `vibespace-channels refresh <conv>` (or
+  `read <conv> --fresh`) asks the channel immediately. It is NOT a polling
+  tool: a conversation fetched in the last 20 s (the user's setting) is
+  refused with the wait (`refresh-floor`, exit 4) — read what is there —
+  and every refresh spends the account's per-minute vendor budget, which is
+  refused by name when it is spent (`vendor-budget`, exit 4). Agents together
+  may use only a share of each minute (25 % by default, the user's setting)
+  so the user's own conversations keep refreshing — past it the refusal is
+  the same `vendor-budget`, naming the share and the wait. While the vendor
+  is rate-limiting the account (a 429 put it into a back-off), `refresh` is
+  refused with the wait (`backoff`, exit 4) and makes no call — the account
+  retries by itself. Your refresh is a request the account's own fetch loop
+  judges: many refreshes of one conversation at once are ONE fetch, and more
+  than 180 waiting on an account is refused (`refresh-queue-full`, exit 4;
+  the last 20 slots are the user's own) — read what is there instead. Every
+  answer comes the moment it exists: a refusal when it is judged, `refreshed`
+  when YOUR conversation's fetch lands (never at the end of the account's
+  whole poll); "still running" means the fetch itself has not happened
+  within 15 s (a slow vendor) — read in a moment. Never loop on
+  refresh; if you need to react to new messages, ask the user to assign the
+  conversation to you (you are woken when they arrive).
+- Attachments are listed under each message (name, type, size). Images and
+  files are fetched only when the user opens them in the panel.
+
 ## Reach (what can I see?)
 
-- Everything is HIDDEN by default. The user grants reach per conversation
-  (a hand-written grant, an assignment that names you or your Task Group,
-  or by approving one of your requests). Assigning you a conversation
-  implies you can see it.
+- Everything is HIDDEN by default. The user grants reach at three grains:
+  a whole ACCOUNT, the conversations matching a RULE (a title keyword, a
+  person, an address or domain, a kind), or ONE conversation — by assigning
+  it to you or your Task Group, by a hand-written grant, or by approving one
+  of your requests. Assigning you something implies you can see it.
+- `list` says why a row is yours: `assigned to you` (that conversation),
+  `… via the whole account`, or `… via the rule`. An inherited assignment's
+  wake block says so in its head ("you are assigned the whole account" /
+  "by a rule: …"); a digest for a whole account or rule lists several
+  conversations in ONE block.
 - A row marked `requestable` is one you may ASK for: `vibespace-channels
   request <conv> "why"` files ONE item in the user's For-you inbox with your
   reason; approval grants YOU visibility on that ONE conversation and

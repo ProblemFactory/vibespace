@@ -1181,6 +1181,59 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const M = require('../src/desktop-apps.js');
     ok(M.newRecord({ id: 'da-n', label: 'n', exec: '/x', source: 'adhoc', backend: 'xpra', now: 1 }).hostId === 'local', 'a NEW record is born with hostId: local (M.newRecord)');
   }
+  // ── 2026-09-channels-aggregated-im (lane R2 verify, 2026-09-26) ──
+  // The runner is SYNCHRONOUS and the engine's edits land through the index's
+  // promise chain: the report used to be filled INSIDE that chain, so the
+  // boot line always said zeros, and a BLOCKED index (a corrupt file that
+  // could not be set aside) was recorded as a success while every edit was
+  // refused. The counts are now computed synchronously from the live index and
+  // equal the rows the queued write changes; a blocked index FAILS the run.
+  {
+    const ENG = require('../src/server/channels-engine.js');
+    const quiet = { log() {}, warn() {}, error() {} };
+    const ID = '2026-09-channels-aggregated-im';
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const seed = (d, index) => {
+      fs.mkdirSync(path.join(d, 'channels'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'fake-poll', kind: 'fake-poll', label: 'Fake', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null }] }));
+      fs.writeFileSync(path.join(d, 'channels', 'index.json'), typeof index === 'string' ? index : JSON.stringify(index));
+    };
+    const twoRows = { v: 1, updatedAt: 0, conversations: {
+      'fake-poll/t1': { key: 'fake-poll/t1', id: 't1', adapterId: 'fake-poll', title: 'tracked, anchored', tracked: true, anchor: 'x', readAt: 5, lane: {} },
+      'fake-poll/t2': { key: 'fake-poll/t2', id: 't2', adapterId: 'fake-poll', title: 'already migrated', anchor: 'y', readAt: 3, lane: {} },
+    } };
+    // (a) the logged counts ARE the rows changed
+    const rA = path.join(tmp, 'agg-a'); const dA = path.join(rA, 'data');
+    seed(dA, twoRows);
+    const eA = ENG.create({ dataDir: dA, env: {}, log: quiet });
+    const lines = [];
+    const origLog = console.log;
+    console.log = (...a) => { lines.push(a.join(' ')); };
+    let resA;
+    try { resA = runOnly(create({ rootDir: rA, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eA }), rA).find((x) => x.id === ID); }
+    finally { console.log = origLog; }
+    const line = lines.find((l) => /\[migrate\] channels-aggregated-im:/.test(l)) || '';
+    let counts = null; try { counts = JSON.parse(line.slice(line.indexOf('{'))); } catch { }
+    ok(resA && resA.status === 'ran' && counts && counts.hot === 1 && counts.cleared === 1 && counts.readStamped === 0 && Array.isArray(counts.linked) && counts.linked.length === 0, 'the boot line reports the rows the migration changes (hot 1, cleared 1) — not the zeros of a report filled a microtask later', line);
+    ok(resA && resA.report && resA.report.hot === 1 && resA.report.cleared === 1, 'the same counts ride the ledger\'s report row', JSON.stringify(resA && resA.report));
+    await eA.store.index.update(() => { });   // the write queued by the run lands ahead of anything after it
+    const lA = eA.store.index.live();
+    ok(lA['fake-poll/t1'].refresh && lA['fake-poll/t1'].refresh.every === 30 && !('tracked' in lA['fake-poll/t1']) && !lA['fake-poll/t2'].refresh && lA['fake-poll/t2'].readAt === 3, 'the edits that landed are exactly the counted ones (t1 hot + cleared, t2 untouched)');
+    eA.stop();
+    // (b) a BLOCKED index: the run FAILS by name and the ledger does not record it
+    const rB = path.join(tmp, 'agg-b'); const dB = path.join(rB, 'data');
+    seed(dB, '{ this is not json');
+    for (const sub of ['msgs', 'archive']) fs.mkdirSync(path.join(dB, 'channels', sub), { recursive: true });   // what the store creates at boot
+    fs.chmodSync(path.join(dB, 'channels'), 0o500);          // the corrupt file cannot be set aside ⇒ the index is blocked
+    let resB = null, eB = null;
+    try {
+      eB = ENG.create({ dataDir: dB, env: {}, log: quiet });
+      resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
+    } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
+    const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
+    ok(resB && resB.status === 'failed' && /blocked|refus/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    if (eB) eB.stop();
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

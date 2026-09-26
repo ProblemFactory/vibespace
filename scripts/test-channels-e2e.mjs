@@ -7,8 +7,10 @@
 //   ① a fake-adapter conversation APPEARS IN THE PANEL (with its freshness chip)
 //   ② it OPENS AS A WINDOW
 //   ③ it SURVIVES ONE RESTART (SIGKILL the server, reboot, reload — the window
-//      comes back from its openSpec and the tracked/unread state from disk)
-//   ④ it SYNCS BETWEEN TWO CLIENTS (one tracks, the other repaints)
+//      comes back from its openSpec and the refresh override / unread state from disk)
+//   ④ it SYNCS BETWEEN TWO CLIENTS (one sets a refresh override, the other repaints)
+//   (2026-09-26: a linked account is an AGGREGATED IM — there is no track step;
+//    every discovered conversation is fetched on its own cadence)
 //   ⑤ two simultaneous passes each advance their own cursor (asserted through
 //      the REAL routes against the REAL store, not a unit fixture)
 //   ⑥ A READ-ONLY CONVERSATION RENDERS NO SEND CONTROL AT ALL
@@ -140,8 +142,7 @@ const OPEN_PANEL = `(async () => {
         conv: r.dataset.conv,
         title: r.querySelector('.chan-row-title').textContent,
         chip: r.querySelector('.chan-chip') ? r.querySelector('.chan-chip').textContent : null,
-        tracked: r.classList.contains('chan-tracked'),
-        untracked: r.querySelector('.chan-untracked') ? r.querySelector('.chan-untracked').textContent : null,
+        paused: /paused/.test(r.querySelector('.chan-chip') ? r.querySelector('.chan-chip').textContent : ''),
         unread: r.querySelector('.chan-unread') ? r.querySelector('.chan-unread').textContent : null,
       })),
       sections: [...document.querySelectorAll('.rail-panel-channels .chan-sec-head b')].map((b) => b.textContent),
@@ -154,16 +155,13 @@ const panel = await p1.evaljs(OPEN_PANEL);
 ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
 ok(panel.sections.length === 4 && ['fake-poll', 'fake-push', 'fake-scan', 'Agents'].every((s) => panel.sections.includes(s)), 'the three fake adapters AND the built-in Agents adapter (P3, seeded whenever the wiring names live sessions) are sections', JSON.stringify(panel.sections));
 ok(panel.rows.length >= 6, `EXIT ①: fake-adapter conversations APPEAR IN THE PANEL (${panel.rows.length} rows)`, JSON.stringify(panel.rows.slice(0, 2)));
-// NOTHING IS TRACKED YET, so nothing is fetched — and the rows SAY so: an
-// untracked row carries NO freshness pill (design §4.3 — there is no evidence
-// to claim; r3's "not polling" pill was the one that truncated to "…polling"
-// in ja at the default rail, verifier r4), its line-2 text is the claim.
-ok(panel.rows.every((r) => !r.tracked), 'FIXTURE: on a fresh instance no row is tracked (untracked is the default state of every discovered conversation)');
-ok(panel.rows.every((r) => !r.chip && r.untracked === 'not tracked'), 'an UNTRACKED row carries NO freshness pill — its "not tracked" text is the claim; a pill would promise a fetch nothing will make', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip, r.untracked])));
+// EVERY ROW IS FETCHED (2026-09-26, the aggregated IM) — so every row claims
+// its cadence with ONE freshness pill, and no row says "not tracked".
+ok(panel.rows.every((r) => r.chip && r.chip.length > 0), 'every discovered row carries its freshness pill — every conversation is fetched on its own cadence', JSON.stringify(panel.rows.map((r) => [r.conv, r.chip])));
 {
   const wire = await (await fetch(`http://127.0.0.1:${PORT}/api/channels`)).json();
-  const off = (wire.conversations || []).filter((c) => !c.tracked).map((c) => c.freshness && c.freshness.state);
-  ok(off.length >= 6 && off.every((x) => x === 'off'), 'the WIRE still carries the untracked claim as structure (`freshness.state === "off"`) — the panel chooses not to draw it', JSON.stringify(off));
+  const states = (wire.conversations || []).filter((c) => c.adapterId !== 'agents').map((c) => c.freshness && c.freshness.state);
+  ok(states.length >= 6 && states.every((x) => x && x !== 'off') && (wire.conversations || []).every((c) => !('tracked' in c)), 'the WIRE carries every row\'s cadence claim (none `off`) and no tracked flag', JSON.stringify(states));
 }
 
 // ── ② the conversation opens as a WINDOW ──
@@ -195,16 +193,12 @@ const again = await p1.evaljs(`(() => { const a = window.app.openChannel('fake-p
 ok(again.same && again.n === 1, 'opening the SAME conversation twice focuses the one window (singleton per CONVERSATION, not per kind)', JSON.stringify(again));
 
 // ── ⑥ the read-only conversation renders NO send control AT ALL ──
-await p1.evaljs(`fetch('/api/channels/fake-poll/fake-poll-announce/track', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"tracked":true}' }).then(r=>r.json())`);
-await sleep(1500);
 const ro = await p1.evaljs(OPEN_WIN('fake-poll', 'fake-poll-announce'));
 ok(ro.composer === 0, 'EXIT ⑥: a READ-ONLY conversation renders NO send control at all', JSON.stringify(ro));
 ok(ro.readonly && /read-only/i.test(ro.readonly), '…and it SAYS why, with the adapter\'s own reason (an absent control with no explanation is the silent failure this forbids)', ro.readonly);
 
 // POSITIVE CONTROL: the sendable one DOES draw a composer — an assertion that
 // nothing is drawn proves nothing unless something is drawn elsewhere.
-await p1.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/track', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"tracked":true}' }).then(r=>r.json())`);
-await sleep(1500);
 const send = await p1.evaljs(`(async () => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops');
   // Wait for BOTH halves: the composer appears as soon as convCaps resolves,
@@ -216,21 +210,20 @@ const send = await p1.evaljs(`(async () => {
   return { composer: w.content.querySelectorAll('[data-channel-send]').length, msgs: w.content.querySelectorAll('.chanmsg').length, note: w.content.querySelector('.chanwin-note')?.textContent || null };
 })()`);
 ok(send.composer === 1, 'POSITIVE CONTROL: the SENDABLE conversation does draw one (the read-only zero is a decision, not an empty window)', JSON.stringify(send));
-ok(send.msgs > 0, 'a tracked conversation renders its ingested messages', JSON.stringify(send));
+ok(send.msgs > 0, 'the conversation renders its ingested messages (no track step)', JSON.stringify(send));
 ok(send.note && /sent at once, as you/i.test(send.note) && /outbox/i.test(send.note), 'the composer SAYS what a Send does here: out at once, as you — the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', send.note);
-// …and NOW a poll-lane row says how long its evidence may be: the chip moved
-// from "not polling" to "within …" the moment tracking made the fetch real.
+// a poll-lane row says how long its evidence may be — its OWN cadence
 const tracked1 = await p1.evaljs(OPEN_PANEL);
 const opsRow = tracked1.ok && tracked1.rows.find((r) => r.conv === 'fake-poll/fake-poll-ops');
-ok(opsRow && opsRow.tracked && /^within /.test(opsRow.chip), 'a TRACKED poll-lane row says how long its evidence may be ("within …", never a bare "Updated N min ago")', JSON.stringify(opsRow));
-ok(tracked1.rows.filter((r) => !r.tracked).every((r) => r.chip === null && r.untracked === 'not tracked'), '…while the still-untracked rows carry no pill and say "not tracked" (nothing is fetched)', JSON.stringify(tracked1.rows.map((r) => [r.conv, r.tracked, r.chip, r.untracked])));
+ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its evidence may be ("within …", never a bare "Updated N min ago")', JSON.stringify(opsRow));
 
 // ── ⑤ two simultaneous passes each advance their own cursor (real routes) ──
 {
   const before = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8'));
+  // two simultaneous REFRESHES (2026-09-26: the owner's "Refresh now"; there is no track step)
   await Promise.all([
-    fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/fake-push-ops/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"tracked":true}' }),
-    fetch(`http://127.0.0.1:${PORT}/api/channels/fake-scan/fake-scan-ops/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{"tracked":true}' }),
+    fetch(`http://127.0.0.1:${PORT}/api/channels/fake-push/fake-push-ops/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
+    fetch(`http://127.0.0.1:${PORT}/api/channels/fake-scan/fake-scan-ops/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   ]);
   await sleep(2500);
   const ix = JSON.parse(fs.readFileSync(path.join(wt, 'data/channels/index.json'), 'utf-8')).conversations;
@@ -250,20 +243,20 @@ ok(tracked1.rows.filter((r) => !r.tracked).every((r) => r.chip === null && r.unt
   const scanRec = adapters.find((a) => a.id === 'fake-scan');
   ok(scanRec.scan && scanRec.scan.hostFacts && scanRec.scan.hostFacts.platform, 'the scan pass PRODUCED `scan.hostFacts` on the adapter row (the field had no producer before)', JSON.stringify(scanRec.scan));
   ok(scanRow.lane.via === 'scan' && scanRow.lane.source !== null && scanRow.freshness.state === 'aged',
-    `the tracked scan row's lane has a SOURCE (${scanRow.lane.source}) and its chip says "scanned … ago" — the same answer the ingest was gated on`, JSON.stringify({ lane: scanRow.lane, freshness: scanRow.freshness }));
+    `the scan row's lane has a SOURCE (${scanRow.lane.source}) and its chip says "scanned … ago" — the same answer the ingest was gated on`, JSON.stringify({ lane: scanRow.lane, freshness: scanRow.freshness }));
 }
 
 // ── ④ two clients, one list ──
 const p2 = await newPage();
 ok(await p2.load(), 'page 2 loaded the app');
 const p2rows = await p2.evaljs(OPEN_PANEL);
-ok(p2rows.ok && p2rows.rows.filter((r) => r.tracked).length === 4, 'EXIT ④(a): the second client sees the SAME tracked state', JSON.stringify(p2rows.rows.map((r) => [r.conv, r.tracked])));
-// Now UNtrack from page 1 and watch page 2 repaint off the broadcast — never a poll.
-await p1.evaljs(`fetch('/api/channels/fake-scan/fake-scan-ops/track', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{"tracked":false}' }).then(r=>r.json())`);
+ok(p2rows.ok && p2rows.rows.length === panel.rows.length && p2rows.rows.every((r) => r.chip), 'EXIT ④(a): the second client sees the SAME rows with their chips', JSON.stringify(p2rows.rows.map((r) => [r.conv, r.chip])));
+// Now PAUSE a conversation from page 1 and watch page 2 repaint off the broadcast — never a poll.
+await p1.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/refresh', { method:'PUT', headers:{'Content-Type':'application/json'}, body:'{"every":"paused"}' }).then(r=>r.json())`);
 const synced = await p2.evaljs(`(async () => {
   for (let i = 0; i < 40; i++) {
-    const row = [...document.querySelectorAll('.rail-panel-channels .chan-row')].find((r) => r.dataset.conv === 'fake-scan/fake-scan-ops');
-    if (row && !row.classList.contains('chan-tracked')) return { ok: true, after: i * 250 };
+    const row = [...document.querySelectorAll('.rail-panel-channels .chan-row')].find((r) => r.dataset.conv === 'fake-poll/fake-poll-ops');
+    if (row && /paused/.test(row.querySelector('.chan-chip') ? row.querySelector('.chan-chip').textContent : '')) return { ok: true, after: i * 250 };
     await new Promise((r) => setTimeout(r, 250));
   }
   return { ok: false };
@@ -594,9 +587,9 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   })()`);
   ok(back.n >= 1 && back.convs.includes('fake-poll-ops'), 'EXIT ③: the conversation window came back from its openSpec after a SIGKILL + reboot', JSON.stringify(back));
   ok(back.opsMsgs > 0, '…and it re-read its messages from the store that survived with it', JSON.stringify(back));
-  const state = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>({tracked:d.conversations.filter(c=>c.tracked).map(c=>c.id).sort(), unreadTotal:d.unreadTotal}))`);
-  ok(JSON.stringify(state.tracked) === JSON.stringify(['fake-poll-announce', 'fake-poll-ops', 'fake-push-ops']),
-    '…and the tracked set survived too (the index is atomic + flushed on exit)', JSON.stringify(state));
+  const state = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>({paused:d.conversations.filter(c=>c.refresh && c.refresh.every==='paused').map(c=>c.id).sort(), unreadTotal:d.unreadTotal}))`);
+  ok(JSON.stringify(state.paused) === JSON.stringify(['fake-poll-ops']),
+    '…and the refresh override survived too (the index is atomic + flushed on exit)', JSON.stringify(state));
   const ob = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/outbox`)).json();
   ok(Array.isArray(ob.proposals) && ob.proposals.some((p) => p.state === 'sent') && ob.proposals.some((p) => p.state === 'rejected'),
     'EXIT P3 ⑦: the outbox (a sent and a rejected proposal) survived the SIGKILL + reboot — outbox.json is written atomically', JSON.stringify((ob.proposals || []).map((p) => [p.id, p.state])));
@@ -695,7 +688,8 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
 // English-only to a zh/ja UI — and the build's i18n scan could not see them,
 // because they left the server as data rather than as a `t()` literal.
 {
-  const wire = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(d=>JSON.stringify({fresh:d.conversations[0]&&d.conversations[0].freshness, warn:d.conversations[0]&&d.conversations[0].identityWarning}))`);
+  // 2026-09-26: the identity warning rides the conversation's FULL view (the digest row is slim)
+  const wire = await p1.evaljs(`fetch('/api/channels').then(r=>r.json()).then(async (d) => { const c = d.conversations[0]; const full = c ? await fetch('/api/channels/' + encodeURIComponent(c.adapterId) + '/' + encodeURIComponent(c.id)).then((r) => r.json()) : null; return JSON.stringify({fresh:c&&c.freshness, warn:full&&(full.identityWarning || (full.conversation && full.conversation.identityWarning))}); })`);
   const w = JSON.parse(wire);
   ok(w.fresh && w.fresh.state && !('text' in w.fresh), 'the WIRE carries {kind,state,seconds} and no sentence', wire);
   ok(w.warn && !('text' in w.warn), '…and the identity warning carries {level,marking,verbatim} only', wire);
@@ -709,13 +703,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const sb = window.app.sidebar;
     sb._railGo('channels');
     for (let i = 0; i < 80; i++) {
-      const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row.chan-tracked')];
+      const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
       if (rows.length) return rows.map((r) => r.querySelector('.chan-chip') ? r.querySelector('.chan-chip').textContent : null);
       await new Promise((r) => setTimeout(r, 250));
     }
     return null;
   })()`);
-  ok(Array.isArray(chips) && chips.length && chips.every(Boolean), 'every TRACKED row still carries a chip in zh', JSON.stringify(chips));
+  ok(Array.isArray(chips) && chips.length && chips.every(Boolean), 'every row still carries a chip in zh', JSON.stringify(chips));
   ok(chips.some((x) => /[一-鿿]/.test(x)),
     'THE CHIP IS TRANSLATED — the honesty contract of this whole feature now speaks the reader\'s language', JSON.stringify(chips));
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
@@ -736,22 +730,22 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   const grid = await p1.evaljs(`(async () => {
     for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
     const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
-    const trackedRows = rows.filter((r) => r.classList.contains('chan-tracked')).length;
+    const trackedRows = rows.length;   // 2026-09-26: every row is fetched, every row claims its cadence
     const R = (el) => el.getBoundingClientRect();
     const visible = (el) => el && R(el).width > 0;
     const pills = rows.map((r) => r.querySelector('.chan-row-line .chan-chip')).filter(visible).map((e) => Math.round(R(e).right));
     // the VISIBLE needs-you badge of each row (the narrow-rail container query swaps the pair for one pill)
-    const badges = rows.map((r) => [...r.querySelectorAll('.chan-row-sub .chan-unread, .chan-row-sub .chan-awaiting, .chan-row-sub .chan-untracked, .chan-row-sub .chan-row-needs')].filter(visible).pop()).filter(Boolean).map((e) => Math.round(R(e).right));
+    const badges = rows.map((r) => [...r.querySelectorAll('.chan-row-sub .chan-unread, .chan-row-sub .chan-awaiting, .chan-row-sub .chan-row-needs')].filter(visible).pop()).filter(Boolean).map((e) => Math.round(R(e).right));
     const titles = rows.map((r) => Math.round(R(r.querySelector('.chan-row-title')).left));
-    const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [r.classList.contains('chan-tracked'), [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting, .chan-untracked')].length]; });
+    const lineOne = rows.map((r) => { const l = r.querySelector('.chan-row-line'); return [true, [...l.querySelectorAll('.chan-chip, .chan-unread, .chan-awaiting')].length]; });
     const spread = (xs) => xs.length ? Math.max(...xs) - Math.min(...xs) : 0;
     const panel = document.querySelector('.rail-panel-channels');
     const geo = { panel: panel && [Math.round(R(panel).left), Math.round(R(panel).width), panel.scrollWidth, panel.clientWidth], list: (() => { const l = window.app.sidebar.listEl; return l && [Math.round(R(l).left), Math.round(R(l).width), l.scrollLeft, l.scrollWidth, l.clientWidth]; })(), wide: [...panel.querySelectorAll('*')].filter((e) => R(e).right > R(panel).right + 1).slice(0, 6).map((e) => e.className + ':' + Math.round(R(e).width)) };
     return { rows: rows.length, trackedRows, pills, badges, titles, lineOne, pillSpread: spread(pills), badgeSpread: spread(badges), titleSpread: spread(titles), geo };
   })()`);
-  ok(grid.rows >= 4 && grid.trackedRows >= 2 && grid.pills.length === grid.trackedRows && grid.pillSpread <= 1, `(a) every TRACKED row's freshness pill sits on the same right edge (±1px over ${grid.trackedRows} of ${grid.rows} rows: spread ${grid.pillSpread})`, JSON.stringify(grid));
+  ok(grid.rows >= 4 && grid.pills.length === grid.rows && grid.pillSpread <= 1, `(a) every row's freshness pill sits on the same right edge (±1px over ${grid.rows} rows: spread ${grid.pillSpread})`, JSON.stringify(grid));
   ok(grid.badgeSpread <= 1 && grid.titleSpread <= 1, `(a) the line-2 badges share a right edge and the titles a left edge (spreads ${grid.badgeSpread} / ${grid.titleSpread})`, JSON.stringify(grid));
-  ok(grid.lineOne.every(([tracked, n]) => n === (tracked ? 1 : 0)), '(a) line 1 carries exactly ONE pill on a tracked row and NONE on an untracked one — the freshness claim; unread / awaiting / untracked live on line 2', JSON.stringify(grid.lineOne));
+  ok(grid.lineOne.every(([, n]) => n === 1), '(a) line 1 carries exactly ONE pill on every row — the freshness claim; unread / awaiting live on line 2', JSON.stringify(grid.lineOne));
   // the badge PAIR is the default; the ONE-pill collapse belongs to the narrow rail only. The rows
   // are inline-size containers themselves, so an unnamed @container query used to resolve against
   // the 166px row and collapse the pair at the 260px default (round 3) — pinned at both widths.
@@ -851,11 +845,11 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   })()`);
   ok(armed.scrollSet >= 30 && armed.folded === 1, `FIXTURE: the list scrolls (${armed.scrollSet}px of ${armed.scrollable}) and one section is folded`, JSON.stringify(armed));
   const act = async (method, p, body) => (await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) })).status;
-  await act('POST', '/api/channels/fake-poll/fake-poll-announce/track', { tracked: true }); await sleep(900);
+  await act('PUT', '/api/channels/fake-poll/fake-poll-announce/refresh', { every: 60 }); await sleep(900);
   await act('POST', '/api/channels/fake-poll/fake-poll-ops/read', {}); await sleep(900);
   await act('PUT', '/api/channels/adapters/fake-scan', { enabled: false }); await sleep(900);
   await act('PUT', '/api/channels/adapters/fake-scan', { enabled: true }); await sleep(900);
-  await act('POST', '/api/channels/fake-poll/fake-poll-announce/track', { tracked: false }); await sleep(1500);
+  await act('PUT', '/api/channels/fake-poll/fake-poll-announce/refresh', { every: null }); await sleep(1500);
   const m = await p1.evaljs(`(() => { const m = window.__d12; m.unpatch(); const sb = window.app.sidebar; return { panelRemoved: m.panelRemoved, panelAdded: m.panelAdded, fetches: m.fetches, broadcasts: m.broadcasts, samples: m.samples, scrollNow: sb.listEl.scrollTop, scrollSet: m.scrollSet, foldedAfter: document.querySelectorAll('.rail-panel-channels .chan-sec.chan-collapsed').length, rows: document.querySelectorAll('.rail-panel-channels .chan-row').length }; })()`);
   ok(m.broadcasts >= 4, `FIXTURE: the five route actions reached the page as broadcasts (${m.broadcasts})`, JSON.stringify(m));
   ok(m.panelRemoved === 0 && m.panelAdded === 0, `D12: across ${m.broadcasts} broadcasts the panel is NEVER torn down and rebuilt (removed ${m.panelRemoved}, added ${m.panelAdded} — it was 7/7 for 7)`, JSON.stringify(m));
@@ -935,22 +929,20 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
 
 // ── ⑯ THE FRESHNESS PILL FITS (verifier r4): at the 260px default rail, in
 //    en, zh AND ja, no pill is truncated (the ellipsis once ate ja's negation —
-//    ポーリングしていま… read as "polling" when the truth was "not polling"),
-//    and no untracked row carries one ──
+//    ポーリングしていま… read as "polling" when the truth was "not polling");
+//    2026-09-26: every row is fetched, so every row carries one ──
 {
   const PILLS = `(async () => {
     const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
     for (let i = 0; i < 80; i++) { if (document.querySelectorAll('.rail-panel-channels .chan-row').length >= 4) break; await new Promise((r) => setTimeout(r, 250)); }
     const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
-    return { width: document.querySelector('.rail-panel-channels').getBoundingClientRect().width, rows: rows.map((r) => { const c = r.querySelector('.chan-row-line .chan-chip'); return { tracked: r.classList.contains('chan-tracked'), chip: c ? c.textContent : null, fits: c ? c.scrollWidth <= c.clientWidth : null, w: c ? c.getBoundingClientRect().width : 0 }; }) };
+    return { width: document.querySelector('.rail-panel-channels').getBoundingClientRect().width, rows: rows.map((r) => { const c = r.querySelector('.chan-row-line .chan-chip'); return { chip: c ? c.textContent : null, fits: c ? c.scrollWidth <= c.clientWidth : null, w: c ? c.getBoundingClientRect().width : 0 }; }) };
   })()`;
   for (const lang of ['zh', 'ja', 'en']) {
     await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
     ok(await p1.load(), `page 1 reloaded in ${lang}`);
     const r = await p1.evaljs(PILLS);
-    const tracked = r.rows.filter((x) => x.tracked), untracked = r.rows.filter((x) => !x.tracked);
-    ok(tracked.length >= 2 && tracked.every((x) => x.chip && x.fits === true), `${lang}: at the ${Math.round(r.width)}px panel every tracked row's pill is drawn whole (no ellipsis)`, JSON.stringify(r.rows));
-    ok(untracked.length >= 1 && untracked.every((x) => x.chip === null), `${lang}: no untracked row carries a freshness pill`, JSON.stringify(untracked));
+    ok(r.rows.length >= 4 && r.rows.every((x) => x.chip && x.fits === true), `${lang}: at the ${Math.round(r.width)}px panel every row's pill is drawn whole (no ellipsis)`, JSON.stringify(r.rows));
   }
 }
 

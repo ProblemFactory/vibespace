@@ -17,6 +17,11 @@
  *     <file>.corrupt-<ts>            a JSON store that could not be read at boot, SET ASIDE with its
  *                                    bytes intact (r2) — never unlinked, never overwritten
  *     audit.ndjson                   APPEND-ONLY, rolled by DATE into archive/
+ *     attachments/<adapterId>/<convId>/<sha1>  an attachment fetched ON DEMAND (2026-09-26,
+ *                                    the aggregated IM): 0600, never executed, beside its
+ *                                    `<sha1>.json` meta; attachments/<adapterId>/lru.json = the
+ *                                    ACCOUNT's LRU ledger, evicted down to the budget the
+ *                                    caller hands in (`channels.attachmentBudgetMB`)
  *     archive/                       archive-never-destroy
  *
  * THE INVARIANTS, each with its reason:
@@ -131,6 +136,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 /** Decision 14: 90 days or 5,000 records, whichever is SMALLER, floor 7 days. */
 const RETENTION_DAYS = 90;
@@ -280,6 +286,19 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
    * policy are all PURE and take their inputs as arguments.
    */
   function snapshot() { return JSON.parse(JSON.stringify(ix)); }
+  /** ONE entry, cloned (2026-09-26): the per-conversation read of a pass.
+   *  `snapshot()` deep-clones the WHOLE index — measured 2.8 ms at 873
+   *  entries, i.e. ~2.5 s of main thread per pass when a pass asked it once
+   *  per conversation. Same rule as a snapshot: compute from it, apply inside
+   *  `update()`. */
+  function peek(key) { const e = ix.conversations[key]; return e ? JSON.parse(JSON.stringify(e)) : null; }
+  /** The LIVE conversations map, for READ-ONLY iteration on the render and
+   *  scheduling paths (the digest, the tick's due scan). Never mutate it
+   *  outside `update()` — the one-door rule (§5.1) is unchanged. */
+  function liveConversations() { return ix.conversations; }
+  /** The LIVE top-level table `name` (accountAssignments / patternAssignments
+   *  / accountGrants / filters / rotations), READ-ONLY outside `update()`. */
+  function liveTable(name) { return ix[name]; }
 
   /**
    * The live entry, created on first touch. ONLY call inside `update()`.
@@ -572,6 +591,172 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
   }
   function recAt(line) { try { const n = Number(JSON.parse(line).at); return Number.isFinite(n) ? n : 0; } catch { return 0; } }
 
+  /**
+   * BACKFILL (2026-09-26, history on demand): records OLDER than the log's
+   * oldest, fetched when the window scrolls past the local start. Appending
+   * them at the end would file them out of `(at, vendorId)` order — the one
+   * shape `readTail`'s backward walk cannot page past a 2 MiB window — so the
+   * log is REWRITTEN once (temp + rename, the `trim` shape) with the new
+   * records merged in order. Dedup as always; the dedup set learns them only
+   * after the rename (invariant 2). Bounded by retention, so the rewrite is
+   * a few MB at most. Returns `{appended, duplicates}`.
+   */
+  function prependRecords(adapterId, convId, records) {
+    const list = Array.isArray(records) ? records : [];
+    const set = dedupSet(adapterId, convId);
+    const inBatch = new Set();
+    const fresh = [];
+    let duplicates = 0;
+    for (const r of list) {
+      if (!r || !r.vendorId) continue;
+      if (set.has(r.vendorId) || inBatch.has(r.vendorId)) { duplicates++; continue; }
+      inBatch.add(r.vendorId);
+      fresh.push(r);
+    }
+    if (!fresh.length) return { appended: 0, duplicates };
+    const fp = logPath(adapterId, convId);
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    let lines = [];
+    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    const parsed = [];
+    for (const l of lines) { try { parsed.push(JSON.parse(l)); } catch { /* an unparseable line stays unparseable: dropped from the rewrite like readTail skips it */ } }
+    const merged = parsed.concat(fresh).sort(cmpRecord);
+    const tmp = `${fp}.tmp-${process.pid}`;
+    fs.writeFileSync(tmp, merged.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.renameSync(tmp, fp);
+    for (const r of fresh) rememberVendorId(set, r.vendorId);
+    return { appended: fresh.length, duplicates };
+  }
+  /** The oldest stored record of a conversation (the backfill boundary). */
+  function oldestRecord(adapterId, convId) {
+    const fp = logPath(adapterId, convId);
+    let fd;
+    try { fd = fs.openSync(fp, 'r'); } catch { return null; }
+    try {
+      const size = fs.fstatSync(fd).size;
+      const buf = Buffer.allocUnsafe(Math.min(size, 64 * 1024));
+      fs.readSync(fd, buf, 0, buf.length, 0);
+      for (const line of buf.toString('utf-8').split('\n')) { if (!line) continue; try { return JSON.parse(line); } catch { continue; } }
+      return null;
+    } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
+  }
+
+  /**
+   * SEARCH ONE ACCOUNT'S LOGS (2026-09-26): async, chunked by file, with a
+   * BYTE cap and a result cap — never a synchronous read of a mailbox's
+   * worth of NDJSON on the event loop. A line is parsed only when its raw
+   * bytes already contain the query (lower-cased), then the record's text /
+   * author is checked for real. Newest first; `truncated` when a cap was hit.
+   */
+  async function search(adapterId, q, { limit = 100, maxBytes = 64 * 1024 * 1024, convIds = null } = {}) {
+    const needle = String(q || '').trim().toLowerCase();
+    if (!needle) return { results: [], scannedBytes: 0, truncated: false, files: 0 };
+    const dir = path.join(msgsDir, safeSeg(adapterId));
+    let names = [];
+    try { names = await fs.promises.readdir(dir); } catch { return { results: [], scannedBytes: 0, truncated: false, files: 0 }; }
+    names = names.filter((n) => n.endsWith('.ndjson'));
+    const wanted = convIds ? new Set([...convIds].map((c) => `${safeSeg(c)}.ndjson`)) : null;
+    let scanned = 0, truncated = false, files = 0;
+    const hits = [];
+    for (const n of names) {
+      if (wanted && !wanted.has(n)) continue;
+      const fp = path.join(dir, n);
+      let st; try { st = await fs.promises.stat(fp); } catch { continue; }
+      if (scanned + st.size > maxBytes) { truncated = true; break; }
+      let text; try { text = await fs.promises.readFile(fp, 'utf-8'); } catch { continue; }
+      scanned += st.size; files++;
+      for (const line of text.split('\n')) {
+        if (!line || !line.toLowerCase().includes(needle)) continue;
+        let r; try { r = JSON.parse(line); } catch { continue; }
+        const hay = `${r.text || ''}\n${(r.author && (r.author.name || '')) || ''}\n${(r.attachments || []).map((a) => a && a.name).join(' ')}`.toLowerCase();
+        if (hay.includes(needle)) hits.push(r);
+      }
+      if (hits.length > limit * 4) { hits.sort((a, b) => cmpRecord(b, a)); hits.length = limit * 2; }
+    }
+    hits.sort((a, b) => cmpRecord(b, a));
+    if (hits.length > limit) truncated = true;
+    return { results: hits.slice(0, limit), scannedBytes: scanned, truncated, files };
+  }
+
+  // ── ATTACHMENTS, fetched on demand, LRU per ACCOUNT (2026-09-26) ─────────
+  const attRoot = path.join(dir, 'attachments');
+  const attHash = (id) => crypto.createHash('sha1').update(String(id)).digest('hex');
+  const attDir = (adapterId, convId) => path.join(attRoot, safeSeg(adapterId), safeSeg(convId));
+  const lruFile = (adapterId) => path.join(attRoot, safeSeg(adapterId), 'lru.json');
+  const lruCache = new Map();   // adapterId -> ledger (read once, written atomically)
+  function lruOf(adapterId) {
+    let l = lruCache.get(adapterId);
+    if (l) return l;
+    try { l = JSON.parse(fs.readFileSync(lruFile(adapterId), 'utf-8')); } catch { l = null; }
+    if (!l || typeof l !== 'object' || !l.items || typeof l.items !== 'object') l = { v: 1, items: {} };
+    lruCache.set(adapterId, l);
+    return l;
+  }
+  function lruSave(adapterId) {
+    fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
+    writeJsonAtomic(lruFile(adapterId), lruOf(adapterId), { mode: 0o600 });
+  }
+  /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
+  function attachmentGet(adapterId, convId, attId) {
+    const d = attDir(adapterId, convId);
+    const h = attHash(attId);
+    const file = path.join(d, h);
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(file + '.json', 'utf-8')); } catch { return null; }
+    try { fs.statSync(file); } catch { return null; }
+    const l = lruOf(adapterId);
+    const k = `${safeSeg(convId)}/${h}`;
+    if (l.items[k]) { l.items[k].usedAt = now(); try { lruSave(adapterId); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }
+    return { file, meta };
+  }
+  /** Store ONE attachment (0600, beside its meta) and evict the account's
+   *  least-recently-used files down to `budgetBytes` — never the one just
+   *  written. Returns (a Promise of) `{file, meta, evicted:[keys], totalBytes}`.
+   *  The BLOB is written and the evicted files unlinked asynchronously — an
+   *  attachment may be 100 MB and data/ may sit on a slow mount (the
+   *  never-block-the-event-loop law); the meta + ledger stay the store's small
+   *  atomic writes. The temp name is unique per call, so two concurrent
+   *  fetches of the same attachment never write into one temp file. */
+  let attSeq = 0;
+  async function attachmentPut(adapterId, convId, attId, { data, name = null, mime = null } = {}, { budgetBytes = 5120 * 1024 * 1024 } = {}) {
+    const buf = Buffer.isBuffer(data) ? data : Buffer.from(data || '');
+    const d = attDir(adapterId, convId);
+    await fs.promises.mkdir(d, { recursive: true, mode: 0o700 });
+    const h = attHash(attId);
+    const file = path.join(d, h);
+    const tmp = `${file}.tmp-${process.pid}-${++attSeq}`;
+    await fs.promises.writeFile(tmp, buf, { mode: 0o600 });
+    try { await fs.promises.chmod(tmp, 0o600); } catch {}
+    await fs.promises.rename(tmp, file);
+    const meta = { id: String(attId), name: name ? String(name).slice(0, 256) : null, mime: mime ? String(mime).slice(0, 128) : null, bytes: buf.length, at: now() };
+    writeJsonAtomic(file + '.json', meta, { mode: 0o600 });
+    const l = lruOf(adapterId);
+    const key = `${safeSeg(convId)}/${h}`;
+    l.items[key] = { bytes: buf.length, usedAt: now() };
+    const evicted = [];
+    let total = Object.values(l.items).reduce((n, x) => n + (Number(x && x.bytes) || 0), 0);
+    if (total > budgetBytes) {
+      const order = Object.entries(l.items).filter(([k]) => k !== key).sort((a, b) => (Number(a[1].usedAt) || 0) - (Number(b[1].usedAt) || 0));
+      for (const [k, x] of order) {
+        if (total <= budgetBytes) break;
+        const f = path.join(attRoot, safeSeg(adapterId), k);
+        try { await fs.promises.unlink(f); } catch {}
+        try { await fs.promises.unlink(f + '.json'); } catch {}
+        total -= Number(x.bytes) || 0;
+        delete l.items[k];
+        evicted.push(k);
+      }
+    }
+    lruSave(adapterId);
+    return { file, meta, evicted, totalBytes: total };
+  }
+  /** The account's cache footprint (the card may say it). */
+  function attachmentUsage(adapterId) {
+    const l = lruOf(adapterId);
+    const items = Object.values(l.items);
+    return { files: items.length, bytes: items.reduce((n, x) => n + (Number(x && x.bytes) || 0), 0) };
+  }
+
   // ── the audit log: append-only, rolled by DATE, ARCHIVED never deleted ──
   // WHICH DAY THE OPEN FILE BELONGS TO IS READ FROM ITS OWN LAST LINE, never
   // from mtime: mtime is a fact about the filesystem (a backup, an rsync or a
@@ -724,13 +909,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
 
   return {
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, logPath,
-    index: { update, snapshot, entry, flush, isDirty: () => dirty },
-    adapters: { update: adaptersUpdate, live: () => ad },
+    // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
+    index: { update, snapshot, peek, live: liveConversations, table: liveTable, entry, flush, isDirty: () => dirty, blocked: () => ixBlocked || null },
+    adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
     pace: { live: () => pc, set: paceSet, flush: paceFlush },
     quarantined,
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
+    // 2026-09-26 (the aggregated IM): backfill, search, attachments
+    prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage,
   };
 }
 

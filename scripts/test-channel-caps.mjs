@@ -147,10 +147,13 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
 }
 
 // ── ⑥ freshnessClaim reads the clock it is HANDED ──
-// Every entry here is TRACKED: since r3 the claim reads `entry.tracked`
-// strictly, because an untracked row is one nothing will ever fetch.
+// Since 2026-09-26 (a linked account is an aggregated IM) there is no
+// `tracked` gate: every conversation of an account is fetched, so the claim
+// is the RESOLVED cadence of the row (`cadenceFor`) — hot / warm / cold by
+// activity, or the owner's override — and `tracked` is ignored if a stale
+// entry still carries it.
 {
-  const entry = { tracked: true, hot: true, lane: { lastScanAt: NOW - 240e3, lastPushAt: NOW - 2000 } };
+  const entry = { lastAt: NOW - 60e3, lane: { lastScanAt: NOW - 240e3, lastPushAt: NOW - 2000 } };
   const a = C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW }, NOW), entry, NOW);
   const b = C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW + 600e3 }, NOW + 600e3), entry, NOW + 600e3);
   ok(a.kind === 'scanned' && a.seconds === 240 && b.seconds === 840,
@@ -161,182 +164,88 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(livePush.kind === 'live', 'a live, content-carrying push lane says "live"');
   const demoted = C.freshnessClaim(pushCaps, C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive', demotedAt: NOW }), entry, NOW), entry, NOW);
   ok(demoted.kind === 'within' && demoted.seconds === 30,
-    'NEGATIVE CONTROL: a DEMOTED push lane draws the POLL cadence it is really on, not the lane it declared (an `active` a lane lies about is worse than no lane)');
-  const cold = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { tracked: true, hot: false, lane: {} }, NOW);
-  ok(cold.seconds === 300, 'a cold row draws the COLD cadence — the hot/cold fact comes from the entry, not from a guess');
+    'NEGATIVE CONTROL: a DEMOTED push lane draws the POLL cadence it is really on (a hot row: 30 s), not the lane it declared', JSON.stringify(demoted));
+  const cold = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { lastAt: NOW - 30 * 86400e3, lane: {} }, NOW);
+  ok(cold.seconds === 900, 'a cold row (no message for a month) draws the COLD tier — 15 min, the owner\'s maximum', JSON.stringify(cold));
+  const legacyUntracked = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { tracked: false, lastAt: NOW - 60e3, lane: {} }, NOW);
+  ok(legacyUntracked.state === 'bound' && legacyUntracked.seconds === 30, 'a stale `tracked:false` on an entry gates NOTHING any more (every conversation is fetched)', JSON.stringify(legacyUntracked));
   const noSource = C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: false, at: NOW }, NOW), entry, NOW);
   ok(noSource.seconds === null && /not scanning/.test(C.freshnessText(noSource)), 'a scan lane with no source says so rather than printing an age for a lane that is not running');
+  const paused = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { lastAt: NOW - 60e3, refresh: { every: 'paused' }, lane: {} }, NOW);
+  ok(paused.state === 'paused' && /paused/.test(C.freshnessText(paused)), 'a PAUSED override says so, never an age it will not keep', JSON.stringify(paused));
+  const off = C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), entry, NOW, { enabled: false });
+  ok(off.state === 'off' && /not polling/.test(C.freshnessText(off)), 'a DISABLED account\'s rows say "not polling"');
 }
 
 // ── ⑥b THE CLAIM IS STRUCTURE; THE SENTENCE IS THE CLIENT'S (r2) ──
-// `freshnessClaim` used to compose the words, and the ingest engine called it
-// with no translator — so the freshness chip, the string this feature calls
-// its honesty contract, shipped ENGLISH-ONLY to a zh/ja UI. The build's
-// i18n scan could not see those keys either: they left the server as DATA.
 {
-  const entry = { tracked: true, hot: true, lane: { lastScanAt: NOW - 240e3, lastPushAt: NOW - 2000 } };
+  const entry = { lastAt: NOW - 60e3, lane: { lastScanAt: NOW - 240e3, lastPushAt: NOW - 2000 } };
   const claims = [
     C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: false, at: NOW }, NOW), entry, NOW),
-    C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW }, NOW), { tracked: true, lane: {} }, NOW),
+    C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW }, NOW), { lane: {} }, NOW),
     C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW }, NOW), entry, NOW),
     C.freshnessClaim(pushCaps, C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), entry, NOW), entry, NOW),
-    C.freshnessClaim(pushCaps, C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), entry, NOW), entry, NOW),
-    C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { tracked: true, hot: false, lane: {} }, NOW),
-    C.freshnessClaim({ receive: 'poll' }, C.laneState({ receive: 'poll' }, {}, {}, NOW), { tracked: true, lane: {} }, NOW),
+    C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { lane: {} }, NOW),
+    C.freshnessClaim(pollCaps, C.laneState(pollCaps, {}, {}, NOW), { refresh: { every: 'paused' }, lane: {} }, NOW),
   ];
   ok(claims.every((c) => !('text' in c)),
     'NO claim carries a composed sentence — the resolver answers {kind, state, seconds} and nothing else', JSON.stringify(claims[0]));
   const states = claims.map((c) => c.state);
-  ok(states.includes('off') && states.includes('never') && states.includes('aged') && states.includes('live') && states.includes('bound') && states.includes('unknown'),
-    '`state` NAMES which sentence — `kind` alone collapses "not scanning" with "not scanned yet" and "reconciling" with "polling"', states.join(','));
-  // reconciling needs an exclusive push lane read as the POLL cadence
-  const reconciling = C.freshnessClaim(pushCaps, { via: 'push', live: true, carryContent: false, pollCadence: 'reconcile' }, entry, NOW);
-  ok(reconciling.state === 'reconciling' && reconciling.kind === 'within', 'a reconciling lane has its own state', JSON.stringify(reconciling));
-
-  const T = (str, params) => 'ZH<' + (params ? String(str).replace(/\{(\w+)\}/g, (m, k) => (k in params ? String(params[k]) : m)) : str) + '>';
-  ok(claims.every((c) => C.freshnessText(c, { t: T }).startsWith('ZH<')),
-    'EVERY sentence goes through the injected translator — that is the whole point of the split', claims.map((c) => C.freshnessText(c, { t: T })).join(' | '));
-  ok(C.freshnessText({ kind: 'within', state: 'no-such-state' }) === 'unknown',
-    'a state this renderer does not recognise says so rather than inventing a number');
-  ok(C.freshnessText(null) === 'unknown', 'and so does no claim at all');
-}
-
-// ── ⑥e A ROW NOTHING WILL EVER FETCH SAYS SO (r3) ──
-// Every discovered conversation is UNTRACKED by default (§5 invariant 6) and
-// a disabled adapter's rows are refused by the tick and the pass alike — yet
-// the claim fell through to the declared poll cadence for both, so a row that
-// would never be fetched said "within 5m" on the ONE surface this feature
-// calls its honesty contract. The scan lane already had the vocabulary
-// (`state:'off'` → "not scanning"); poll/push now share it ("not polling").
-{
-  const lanePoll = C.laneState(pollCaps, {}, {}, NOW);
-  const lanePush = C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), {}, NOW);
-  const laneScan = C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: true, grant: 'granted', storePath: '/x', at: NOW }, NOW);
-  const tracked = { tracked: true, lane: { lastScanAt: NOW - 60e3, lastPushAt: NOW - 1000 } };
-  const untracked = { tracked: false, lane: { lastScanAt: NOW - 60e3, lastPushAt: NOW - 1000 } };
-
-  // POSITIVE CONTROLS first — a rule that always answers `off` is the same defect.
-  ok(C.freshnessClaim(pollCaps, lanePoll, tracked, NOW).state === 'bound', 'POSITIVE CONTROL: a TRACKED poll row on an ENABLED adapter still claims its cadence');
-  ok(C.freshnessClaim(pushCaps, lanePush, tracked, NOW).state === 'live', 'POSITIVE CONTROL: a tracked live push row still says live');
-  ok(C.freshnessClaim(scanCaps, laneScan, tracked, NOW).state === 'aged', 'POSITIVE CONTROL: a tracked scanned row still says its age');
-
-  const u1 = C.freshnessClaim(pollCaps, lanePoll, untracked, NOW);
-  ok(u1.kind === 'within' && u1.state === 'off' && u1.seconds === null && u1.why === 'untracked',
-    'an UNTRACKED poll row is `off` and names why — nothing is fetched for it, so "within 5m" was a promise about a fetch that would never happen', JSON.stringify(u1));
-  ok(C.freshnessText(u1) === 'not polling', 'and the sentence is "not polling" — the poll/push lanes\' spelling of the scan lane\'s "not scanning"', C.freshnessText(u1));
-  const u2 = C.freshnessClaim(pushCaps, lanePush, untracked, NOW);
-  ok(u2.state === 'off' && u2.kind === 'within' && u2.why === 'untracked', 'an untracked row on a LIVE push lane is off too — the lane is live, this row is not ingested (§5 invariant 6)', JSON.stringify(u2));
-  const u3 = C.freshnessClaim(scanCaps, laneScan, untracked, NOW);
-  ok(u3.state === 'off' && u3.kind === 'scanned' && C.freshnessText(u3) === 'not scanning', 'an untracked scan row keeps the scan lane\'s own words', JSON.stringify(u3));
-
-  const d1 = C.freshnessClaim(pollCaps, lanePoll, tracked, NOW, { enabled: false });
-  ok(d1.state === 'off' && d1.why === 'adapter-disabled', 'a row on a DISABLED adapter is off with its own reason, tracked or not', JSON.stringify(d1));
-  ok(C.freshnessClaim(pollCaps, lanePoll, untracked, NOW, { enabled: false }).why === 'adapter-disabled', 'the adapter\'s silence outranks the row\'s (the widest fact wins)');
-  ok(C.freshnessClaim(pollCaps, lanePoll, { hot: true, lane: {} }, NOW).why === 'untracked',
-    '`tracked` is read STRICTLY: an entry without the flag models an untracked row (that is what the store mints), never a tracked one by omission');
-  ok(C.freshnessClaim(scanCaps, C.scanState(scanCaps, {}, { platform: 'darwin', clientInstalled: false, at: NOW }, NOW), tracked, NOW).why === 'client-not-installed',
-    'a tracked scan row with no source still carries the RESOLVER\'s reason (the r2 `off` answer, now with its why)');
-  ok(['off', 'never', 'aged', 'live', 'reconciling', 'unknown', 'bound'].every((s) => C.freshnessText({ kind: 'within', state: s }) !== ''), 'every state still renders a sentence');
-}
-
-// ⑥e NEGATIVE CONTROL — the shipped module minus its two gates (the r2
-// shape) must claim "within 5m" on an untracked row and on a disabled
-// adapter. The module imports nothing, so the copy lives in a scratch dir.
-{
-  const fsx = require('node:fs');
-  const os = require('node:os');
-  const src = fsx.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
-  const PRE = src.replace("  if (!enabled) return off('adapter-disabled');\n  if (!(entry && entry.tracked === true)) return off('untracked');\n", '');
-  ok(PRE !== src, 'NEGATIVE CONTROL setup: the ungated r2 claim was reconstructed from the shipped bytes');
-  const dir = fsx.mkdtempSync(path.join(os.tmpdir(), 'vs-chan-caps-pre-'));
-  const pf = path.join(dir, 'channel-caps.prefix.js');
-  fsx.writeFileSync(pf, PRE);
-  try {
-    const P = require(pf);
-    const lanePoll = P.laneState(pollCaps, {}, {}, NOW);
-    const u = P.freshnessClaim(pollCaps, lanePoll, { tracked: false, lane: {} }, NOW);
-    ok(u.state === 'bound' && u.seconds === 300, 'NEGATIVE CONTROL: the r2 claim says "within 5m" on a row nothing will ever fetch', JSON.stringify(u));
-    ok(P.freshnessClaim(pollCaps, lanePoll, { tracked: true, lane: {} }, NOW, { enabled: false }).state === 'bound', 'NEGATIVE CONTROL: …and on a DISABLED adapter');
-  } finally { fsx.rmSync(dir, { recursive: true, force: true }); }
-}
-
-// ── ⑥c THE NINE SENTENCES HAVE zh + ja ENTRIES ──
-// They are produced HERE (the extractor walks src/), but they used to be
-// composed server-side and shipped as data, which is why they were missing.
-{
-  const fsx = require('node:fs');
-  const zh = fsx.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8');
-  const ja = fsx.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
-  const src = fsx.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
-  const keys = [...new Set([...src.matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)].map((m) => m[1]))];
-  const missing = keys.filter((k) => !zh.includes(`"${k}"`) || !ja.includes(`"${k}"`));
-  ok(keys.length >= 20, 'the census found this module\'s human-visible strings (the nine freshness sentences + the push row\'s)', String(keys.length));
-  ok(!missing.length, 'every sentence this PURE module composes has a zh AND a ja entry', JSON.stringify(missing));
-}
-
-// ── ⑥d authState: 'connected' is a RESOLUTION, never an assertion (r2) ──
-// The digest used to publish `rec.auth?.expiresAt ? 'connected' : 'connected'`
-// — a ternary whose two branches are the same string — so an expired or
-// never-authenticated adapter was announced to the panel as connected.
-{
-  const A = (auth, lastPass) => C.authState({ auth, lastPass }, NOW);
-  ok(A({ tokenEnc: null, expiresAt: null, scopes: [] }).state === 'unknown',
-    'an adapter that has never authenticated is `unknown`, never `connected` (the P0a fakes talk to nothing, and saying so is the point)');
-  ok(A({ tokenEnc: 'x', expiresAt: NOW + 60e3 }).state === 'connected', 'a live token is connected');
-  ok(A({ tokenEnc: 'x', expiresAt: NOW - 1 }).state === 'expired', 'a PASSED expiry is expired — a claim about the future is believed only once it has arrived');
-  ok(A({ tokenEnc: 'x', expiresAt: NOW + 7 * 86400e3 }, { at: NOW, ok: false, code: 'auth-expired' }).state === 'expired',
-    'THE LAST PASS OUTRANKS THE STAMP: a revoked or rotated credential carries a perfectly future expiry, and the vendor refusing us is measured evidence');
-  ok(A({ tokenEnc: 'x', expiresAt: NOW + 60e3 }, { at: NOW, ok: false, code: 'transport' }).state === 'connected',
-    'NEGATIVE CONTROL: a NON-auth failure says nothing about the credential');
-  ok(A({ tokenEnc: null, expiresAt: null, scopes: ['fake'] }).state === 'connected',
-    'scopes alone count as a credential — "we hold something" is the question, not "which field holds it"');
-  ok(A({ expiresAt: NOW - 1 }).why === 'token-expired' && A({}).why === 'never-authenticated', 'every answer NAMES its reason');
-}
-
-// ── ⑧ THE EXCLUSIVITY MEASUREMENT (P1b, §6.4 / decision 18) ──
-// Arithmetic only: the engine decides WHEN a sample is taken (only while push
-// carries content) — this module decides what the samples say.
-{
-  const T = C.PUSH_MISS_THRESHOLD, N = C.PUSH_MISS_MIN_SAMPLES;
-  let s = [];
-  for (let i = 0; i < 10; i++) s = C.pushSamplesAdd(s, { at: NOW + i, n: 1, p: 0 });
-  ok(C.pushMissRate(s, NOW + 10).total === 10 && C.pushMissRate(s, NOW + 10).enough === false, `fewer than ${N} judged records is not enough to say anything`);
-  s = C.pushSamplesAdd(s, { at: NOW + 11, n: 30, p: 1 });
-  const m = C.pushMissRate(s, NOW + 12);
-  ok(m.total === 40 && m.missed === 1 && m.enough && m.rate === 1 / 40 && C.pushDemotionVerdict({ samples: s }, NOW + 12).demote === (1 / 40 > T), 'the rate is missed/judged over the window, and the verdict follows the threshold');
-  s = C.pushSamplesAdd(s, { at: NOW + 13, n: 10, p: 10 });
-  ok(C.pushDemotionVerdict({ samples: s }, NOW + 14).demote === true, 'past the threshold with enough samples ⇒ demote');
-  ok(C.pushDemotionVerdict({ samples: s, demotedAt: NOW }, NOW + 14).demote === false, 'NEVER for a lane already demoted — the counters are not the trigger that clears one either');
-  ok(C.pushSamplesAdd(s, { at: NOW, n: 0, p: 0 }).length === s.length && C.pushSamplesAdd(s, { at: NOW + 20, n: 2, p: 5 }).some((b) => b.n === 2 && b.p === 2), 'an empty batch adds nothing; missed is clamped to judged');
-  // THE ROLLING WINDOW (r4): the last 24 h OR the last PUSH_MISS_MIN_KEEP records, whichever is LARGER
-  let w = [];
-  for (let i = 0; i < 300; i++) w = C.pushSamplesAdd(w, { at: NOW - 3 * 86400e3 + i, n: 1, p: 1 });     // 300 old misses
-  const old = C.pushMissRate(w, NOW);
-  ok(old.total === C.PUSH_MISS_MIN_KEEP && old.rate === 1, `older than 24 h, the window still keeps the last ${C.PUSH_MISS_MIN_KEEP} records (a lane with little traffic is judged on records, not on a clock)`);
-  for (let i = 0; i < 500; i++) w = C.pushSamplesAdd(w, { at: NOW - 3600e3 + i, n: 1, p: 0 });          // 500 fresh hits
-  const fresh = C.pushMissRate(w, NOW);
-  ok(fresh.total === 500 && fresh.missed === 0, 'once 24 h holds more than the floor, the window is the 24 h alone — the 300 old misses fall out (a lifetime ratio would pin a lane above the line for ever)');
-  // pushWindow sorts and ignores junk
-  ok(C.pushWindow([{ at: 'x', n: 1 }, null, { at: NOW, n: 0 }, { at: NOW - 1, n: 2, p: 1 }], NOW).length === 1, 'pushWindow keeps only well-formed batches with records');
-}
-
-// ── ⑨ THE ADAPTER ROW'S PUSH SENTENCE + the opt-in switch (P1b) ──
-{
-  const rec2 = (push, lane) => [push, lane];
-  const live = { via: 'push', live: true, carryContent: true, why: 'exclusive' };
-  const kick = { via: 'push', live: true, carryContent: false, why: 'kick-unknown' };
-  const dead = { via: 'poll', live: false, carryContent: false, why: 'push-dead' };
-  ok(/carrying messages/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'exclusive' }, live)), 'live + exclusive ⇒ "carrying messages"');
-  ok(/exclusivity not declared/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'unknown' }, kick)) && /declared shared/.test(C.pushLaneText({ state: 'live', claimedExclusive: 'shared' }, { ...kick, why: 'kick-shared' })), 'a kick-mode lane names WHY it only kicks');
-  const dem = C.pushLaneText({ state: 'live', demotedAt: NOW, demoted: { missed: 12, total: 40, rate: 0.3 } }, dead);
-  ok(/not exclusive here/.test(dem) && /12 of 40 records, 30%/.test(dem) && /fast cadence/.test(dem), `a demoted lane says the reason WITH its numbers: "${dem}"`);
-  ok(/silent for 2m/.test(C.pushLaneText({ state: 'live', lastEventAt: NOW - 120e3 }, dead, { now: NOW })), 'connected but silent past the window: "silent for <age>"');
-  ok(/unavailable: no SDK/.test(C.pushLaneText({ state: 'unavailable', lastStateWhy: 'no SDK' }, dead)) && /not started/.test(C.pushLaneText({ state: null }, dead)) && /^push off$/.test(C.pushLaneText({ enabled: false }, dead)) && /turn it on/.test(C.pushLaneText({ enabled: false, optIn: true }, dead)), 'unavailable / not started / off / off-but-available each have their own sentence');
-  // the OPT-IN switch through the ONE resolver (decision 20)
-  const optCaps = { ...pushCaps, pushOptIn: true };
-  ok(C.laneState(optCaps, rec({ claimedExclusive: 'exclusive', enabled: undefined }), {}, NOW).via === 'poll' && C.laneState(optCaps, rec({ claimedExclusive: 'exclusive' }), {}, NOW).via === 'push',
-    'an opt-in push lane is the POLL lane until the record says enabled:true; a plain push lane is on unless switched off');
+  ok(states.includes('off') && states.includes('never') && states.includes('aged') && states.includes('live') && states.includes('bound') && states.includes('paused'),
+    'every state a row can be in is produced by the table', JSON.stringify(states));
   ok(C.PUSH_CLAIMS.join() === 'exclusive,shared,unknown', 'the three claims are a closed set');
+}
+
+// ── ⑧ THE CADENCE A ROW IS POLLED AT (2026-09-26: per conversation) ──
+// override > tier, clamped to [the adapter's floor, the cold tier]; hot = open
+// in a window or a message in the last hour; warm = the last day; the push
+// safety net drops every row to the cold tier while push carries content.
+{
+  const T = { hotSec: 30, warmSec: 300, coldSec: 900, hotRecentMinutes: 60, warmRecentHours: 24 };
+  const poll = C.laneState(pollCaps, {}, {}, NOW);
+  const cad = (entry, opts = {}) => C.cadenceFor(opts.caps || pollCaps, opts.lane || poll, entry, NOW, { tiers: T, watched: !!opts.watched });
+  const table = [
+    ['a message 10 min ago ⇒ hot', { lastAt: NOW - 10 * 60e3 }, {}, { tier: 'hot', seconds: 30, source: 'tier' }],
+    ['open in a window, no message for a month ⇒ hot', { lastAt: NOW - 30 * 86400e3 }, { watched: true }, { tier: 'hot', seconds: 30, source: 'tier' }],
+    ['a message 3 h ago ⇒ warm', { lastAt: NOW - 3 * 3600e3 }, {}, { tier: 'warm', seconds: 300, source: 'tier' }],
+    ['a message 3 days ago ⇒ cold', { lastAt: NOW - 3 * 86400e3 }, {}, { tier: 'cold', seconds: 900, source: 'tier' }],
+    ['never a message ⇒ cold', {}, {}, { tier: 'cold', seconds: 900, source: 'tier' }],
+    ['override 60 s beats a cold tier', { lastAt: null, refresh: { every: 60 } }, {}, { seconds: 60, source: 'override' }],
+    ['override 900 s beats a hot tier', { lastAt: NOW - 60e3, refresh: { every: 900 } }, {}, { seconds: 900, source: 'override' }],
+    ['override paused ⇒ no timer fetch at all', { lastAt: NOW - 60e3, refresh: { every: 'paused' } }, {}, { seconds: null, source: 'override', paused: true }],
+    ['push carrying content ⇒ the cold safety net for a hot row', { lastAt: NOW - 60e3 }, { caps: pushCaps, lane: C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), {}, NOW) }, { seconds: 900, source: 'push-safety' }],
+    ['…but the owner\'s override still wins over the safety net', { lastAt: NOW - 60e3, refresh: { every: 30 } }, { caps: pushCaps, lane: C.laneState(pushCaps, rec({ claimedExclusive: 'exclusive' }), {}, NOW) }, { seconds: 30, source: 'override' }],
+    ['a kick-only push lane keeps the tiers (push cannot guarantee completeness)', { lastAt: NOW - 60e3 }, { caps: pushCaps, lane: C.laneState(pushCaps, rec({}), {}, NOW) }, { seconds: 30, source: 'tier' }],
+  ];
+  for (const [label, entry, opts, want] of table) {
+    const got = cad(entry, opts);
+    ok(Object.entries(want).every(([k, v]) => got[k] === v), label, JSON.stringify(got));
+  }
+  const floor = C.cadenceFor({ ...pollCaps, pollInterval: { floor: 45 } }, poll, { lastAt: NOW - 60e3 }, NOW, { tiers: T });
+  ok(floor.seconds === 45, 'the vendor floor clamps a faster tier (Gmail\'s floor is 30, a hot 10 s setting cannot go below it)', JSON.stringify(floor));
+  const capped = C.cadenceFor(pollCaps, poll, {}, NOW, { tiers: { ...T, coldSec: 3600 } });
+  ok(capped.seconds === C.COLD_MAX_SEC && C.COLD_MAX_SEC === 900, 'a cold setting above 15 min is clamped to 900 (the owner: "15 minutes at most")', JSON.stringify(capped));
+  ok(C.REFRESH_CHOICES.join() === '30,60,300,900,paused', 'the override choices are a closed set', String(C.REFRESH_CHOICES));
+  ok(C.validRefresh(60) && C.validRefresh('paused') && !C.validRefresh(45) && !C.validRefresh('fast'), 'validRefresh accepts only the declared choices');
+  const dflt = C.cadenceFor(pollCaps, poll, { lastAt: NOW - 60e3 }, NOW);
+  ok(dflt.seconds === 30 && dflt.tier === 'hot', 'with no tiers handed in, the design defaults apply (hot 30 / warm 300 / cold 900)', JSON.stringify(dflt));
+}
+
+// ── ⑨ THE CARD'S SENTENCES FOR PUSH AND THE BUDGET (2026-09-26) ──
+{
+  const t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (k in p ? String(p[k]) : m)) : String(s));
+  const sdk = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed …' }, { via: 'poll' }, { t });
+  ok(/npm install @larksuiteoapi\/node-sdk/.test(sdk) && /restart/.test(sdk) && /im:message\.group_msg/.test(sdk) && /polled|polling/.test(sdk), 'the SDK-missing push lane says the exact remedy (install, restart, the event subscription, the scope) and that polling carries it meanwhile', sdk);
+  const g = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'push-not-configured' }, { via: 'poll' }, { t });
+  ok(/topic/i.test(g) && /subscription/i.test(g), 'a Gmail push without its Pub/Sub options says which two options', g);
+  const unknownCode = C.pushLaneText({ enabled: true, state: 'unavailable', lastStateCode: 'something-new', lastStateWhy: 'vendor words' }, { via: 'poll' }, { t });
+  ok(/vendor words/.test(unknownCode), 'an unknown code falls back to the lane\'s own words (a new code is a new row, never silence)', unknownCode);
+  const live = C.pushLaneText({ enabled: true, state: 'live', claimedExclusive: 'exclusive' }, { via: 'push', live: true, carryContent: true }, { t, coldSeconds: 900 });
+  ok(/15 min|15m/.test(live), 'a live content lane names the safety-net cadence', live);
+  const b = C.budgetText({ unit: 'request', limit: 60, exhausted: true, waiting: 37, resetInSeconds: 23 }, { t });
+  ok(/60/.test(b) && /37/.test(b) && /23/.test(b) && /request/.test(b), 'the budget sentence names the cap, the queue and the wait', b);
+  ok(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: false }, { t }) === '', 'a budget that is not exhausted says nothing');
+  ok(/quota unit/.test(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 1, resetInSeconds: 5 }, { t })), 'Gmail\'s budget is worded in quota units');
 }
 
 // ── ⑦ the module is PURE ──

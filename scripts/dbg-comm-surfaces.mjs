@@ -228,10 +228,10 @@ const MEASURE = `(function (rootSel, probes) {
   return { rect: R(root), scroll: { w: root.scrollWidth, h: root.scrollHeight, cw: root.clientWidth, ch: root.clientHeight }, els, texts, attrs, viewport: { w: innerWidth, h: innerHeight }, theme: document.documentElement.getAttribute('data-theme'), lang: localStorage.getItem('vibespace.lang') };
 })`;
 const PROBES = JSON.stringify([
-  '.chan-head', '.chan-summary', '.chan-outbox-btn', '.chan-sec', '.chan-sec-head', '.chan-sec-head b', '.chan-sec-state', '.chan-adapter-ctl', '.chan-auth', '.chan-eta', '.chan-auth-err', '.chan-push', '.chan-actions', '.chan-btn', '.chan-row', '.chan-row-title', '.chan-row-sub', '.chan-row-assign', '.chan-chip', '.chan-unread', '.chan-untracked', '.chan-awaiting', '.chan-empty', '.chan-connect', '.chan-connect-row', '.chan-connect-row b', '.chan-connect-note', '.chan-identity-observed', '.chan-bar', '.chan-outbox-count', '.chan-sec-name', '.chan-sec-count', '.chan-sec-more', '.chan-dot', '.chan-sec-note', '.chan-sec-verb', '.chan-rows', '.chan-row-who', '.chan-row-needs', '.chan-connect-btn', '.chan-connect-label', '.chan-sec-chev', '.chan-sec-kind',
+  '.chan-head', '.chan-summary', '.chan-outbox-btn', '.chan-sec', '.chan-sec-head', '.chan-sec-head b', '.chan-sec-state', '.chan-adapter-ctl', '.chan-auth', '.chan-eta', '.chan-auth-err', '.chan-push', '.chan-actions', '.chan-btn', '.chan-row', '.chan-row-title', '.chan-row-sub', '.chan-row-assign', '.chan-chip', '.chan-unread', '.chan-awaiting', '.chan-empty', '.chan-connect', '.chan-connect-row', '.chan-connect-row b', '.chan-connect-note', '.chan-identity-observed', '.chan-bar', '.chan-outbox-count', '.chan-sec-name', '.chan-sec-count', '.chan-sec-more', '.chan-dot', '.chan-sec-note', '.chan-sec-verb', '.chan-rows', '.chan-row-who', '.chan-row-needs', '.chan-connect-btn', '.chan-connect-label', '.chan-sec-chev', '.chan-sec-kind',
   '.chanwin-bar', '.chanwin-bar b', '.chanwin-meta', '.chanwin-assign', '.chanwin-title-row', '.chanwin-title-row .icon-btn', '.chan-assign-chip', '.chanmsg-day', '.chanmsg-cont', '.chanwin-list', '.chanmsg', '.chanmsg-head', '.chanmsg-head b', '.chanmsg-at', '.chanmsg-syn', '.chanmsg-body', '.chanwin-foot', '.chanwin-composer', '.chanwin-composer textarea', '.chanwin-composer-row', '.chanwin-note', '.chanwin-warn', '.chanwin-readonly', '.chanwin-empty', '.chanwin-outbox', '.chanwin-outbox-head',
   '.chan-prop', '.chan-prop-head', '.chan-prop-state', '.chan-prop-who', '.chan-prop-when', '.chan-prop-where', '.chan-prop-why', '.chan-prop-text', '.chan-prop-policy', '.chan-prop-identity', '.chan-prop-idwarn', '.chan-prop-reason', '.chan-prop-actions', '.chan-prop-reconcile', '.chan-prop-ttl', '.chan-prop-receipt', '.chan-prop-rejectbox', '.chan-prop-edit', '.chan-outbox-list', '.chan-prop-meta', '.chan-prop-foot', '.chan-seg', '.chan-seg .jobs-btn', '.chan-outbox-sec',
-  '.dialog', '.dialog-header', '.dialog-header h3', '.dialog-close', '.dialog-body', '.chan-flow-intro', '.chan-flow-note', '.chan-flow-refusal', '.chan-flow-label', '.chan-flow-input', '.chan-flow-actions', '.chan-flow-status', '.chan-opt', '.chan-opt-label', '.chan-opt-input', '.chan-opt-help', '.chan-af-rules', '.chan-af-row', '.chan-af-rule', '.chan-af-kind', '.chan-af-inline', '.chan-track-list', '.chan-track-item', '.chan-track-title', '.chan-track-sub', '.chan-reach-row', '.chan-reach-who', '.chan-reach-origin', '.chan-reach-add', '.chan-opt-check', '.chan-steps', '.chan-step', '.chan-flow-primary', '.chan-flow-primary .mounts-btn', '.chan-flow-wait', '.chan-flow-paste', '.chan-af-grid', '.chan-af-field', '.chan-af-stat', '.chan-af-stat-hint', '.chan-af-add', '.chan-af-rm', '.chan-reach-list', '.chan-reach-level', '.chan-reach-rm', '.dialog-check-row', '.mounts-btn', '.mounts-btn-primary', '.icon-btn', '.chan-ic',
+  '.dialog', '.dialog-header', '.dialog-header h3', '.dialog-close', '.dialog-body', '.chan-flow-intro', '.chan-flow-note', '.chan-flow-refusal', '.chan-flow-label', '.chan-flow-input', '.chan-flow-actions', '.chan-flow-status', '.chan-opt', '.chan-opt-label', '.chan-opt-input', '.chan-opt-help', '.chan-af-rules', '.chan-af-row', '.chan-af-rule', '.chan-af-kind', '.chan-af-inline', '.chan-search-row', '.chan-search-results', '.chan-search-hit', '.chan-search-head', '.chan-search-text', '.chan-reach-row', '.chan-reach-who', '.chan-reach-origin', '.chan-reach-add', '.chan-opt-check', '.chan-steps', '.chan-step', '.chan-flow-primary', '.chan-flow-primary .mounts-btn', '.chan-flow-wait', '.chan-flow-paste', '.chan-af-grid', '.chan-af-field', '.chan-af-stat', '.chan-af-stat-hint', '.chan-af-add', '.chan-af-rm', '.chan-reach-list', '.chan-reach-level', '.chan-reach-rm', '.dialog-check-row', '.mounts-btn', '.mounts-btn-primary', '.icon-btn', '.chan-ic',
   '.integ-win', '.jobs-toolbar', '.jobs-summary', '.integ-body', '.integ-card', '.plugin-head', '.plugin-name', '.plugin-name > span', '.integ-chip', '.integ-why', '.integ-setup', '.integ-setup-title', '.integ-cb-row', '.integ-cb-url', '.integ-copy', '.integ-prereq', '.integ-choice', '.integ-radio', '.integ-fields', '.integ-field', '.plugin-cfg-label', '.integ-mask', '.integ-plain', '.integ-replace', '.integ-missing', '.integ-help', '.integ-actions', '.integ-test', '.integ-clear', '.integ-test-result', '.integ-verdict', '.integ-test-error', '.integ-caveat', '.integ-used', '.plugin-cfg-warn', '.plugin-detail',
   '#sidebar', '#sidebar-rail', '.rail-panel', '#sidebar-header', '.sidebar-title', '.rail-item[data-rail="channels"]', '.rail-badge',
   '.jobs-rail-bar', '.jobs-sec-head', '.jobs-card', '.mounts-panel', '.context-menu', '.context-menu-item', '.global-toast', '.global-toast-body',
@@ -395,28 +395,26 @@ async function pass({ lang, viewport, theme }) {
     if (await openPanel(page, 'jobs')) await capture(page, tag, 'house-01-jobs-panel', '#sidebar');
     if (await openPanel(page, 'mounts')) await capture(page, tag, 'house-02-remote-panel', '#sidebar');
     await openPanel(page);
-    // ── PANEL: fresh (nothing tracked; Connect block = lark cluster / gmail none) ──
+    // ── PANEL: fresh (the first discovery pass; Connect block = lark cluster / gmail none) ──
     await capture(page, tag, 'panel-01-fresh', '#sidebar');
     await capture(page, tag, 'panel-01b-connect-block', '.rail-panel-channels .chan-connect', { pad: 4 });
   }
-  // TRACK four conversations (the three lanes + the read-only mailbox) → chips.
-  // The track route answers 404 for a conversation the engine's first
-  // discovery pass has not listed yet, so wait for the listing first (the
-  // desktop pass waited on the panel rows; the mobile pass has no panel).
+  // 2026-09-26 (aggregated IM): every conversation of a linked account is
+  // listed AND fetched — there is no track step. Wait for the discovery pass
+  // to list them all (the mobile pass has no panel), then give ONE row a
+  // refresh override so its chip shows the user's own cadence.
   for (let i = 0; i < 80; i++) { const d = (await api('GET', '/api/channels')).json; if (d && (d.conversations || []).length >= 6) break; await sleep(250); }
-  for (const [a, c] of [['fake-poll', 'fake-poll-ops'], ['fake-poll', 'fake-poll-announce'], ['fake-push', 'fake-push-ops'], ['fake-scan', 'fake-scan-ops']]) {
-    const r = await api('POST', `/api/channels/${a}/${c}/track`, { tracked: true });
-    if (r.status !== 200) log('track', a, c, 'HTTP', r.status, r.text.slice(0, 120));
-  }
+  { const r = await api('PUT', '/api/channels/fake-poll/fake-poll-announce/refresh', { every: 60 });
+    if (r.status !== 200) log('refresh override', 'HTTP', r.status, r.text.slice(0, 120)); }
   await sleep(3000);
   if (hasPanel) {
     await tagSections(page);
-    await capture(page, tag, 'panel-02-tracked', '#sidebar');
+    await capture(page, tag, 'panel-02-rows', '#sidebar');
     await capture(page, tag, 'panel-02b-section-poll', SEC('fake-poll'), { pad: 4 });
     await capture(page, tag, 'panel-02c-section-push', SEC('fake-push'), { pad: 4 });
     await capture(page, tag, 'panel-02d-section-scan', SEC('fake-scan'), { pad: 4 });
     await capture(page, tag, 'panel-02e-section-agents', SEC('agents'), { pad: 4 });
-    // the row menu (a contribution) on a tracked row
+    // the row menu (a contribution) on a row — Mark read / Refresh now / Refresh every ▸
     await page.evaljs(`(() => { const r = document.querySelector('.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-ops"]'); if (!r) return 0; const b = r.getBoundingClientRect(); r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.x + 40, clientY: b.y + 10 })); return 1; })()`);
     await sleep(250);
     await capture(page, tag, 'panel-02f-row-menu', '.context-menu', { pad: 4 });
@@ -506,11 +504,18 @@ async function pass({ lang, viewport, theme }) {
     await sleep(300);
     await capture(page, tag, 'wizard-07-remove-refused', '#chan-remove-refused .dialog', { pad: 8 });
     await closeDialogs(page);
-    // TRACK PICKER / OPTIONS / PUSH dialogs
-    await clickMenu(page, lang, SEC('fake-poll'), 'Track…');
-    await waitFor(page, `!!document.querySelector('#chan-track-dialog .chan-track-item')`, 20);
+    // SEARCH / RULE GRAIN / OPTIONS / PUSH dialogs (2026-09-26: the Track… picker is gone)
+    await clickMenu(page, lang, SEC('fake-poll'), 'Search messages…');
+    await waitFor(page, `!!document.querySelector('#chan-search-dialog .chan-opt-input')`, 20);
+    await page.evaljs(`(() => { const d = document.querySelector('#chan-search-dialog'); const i = d.querySelector('.chan-opt-input'); i.value = 'staging'; const b = d.querySelector('.mounts-btn-primary'); if (b) b.click(); return 1; })()`);
+    await waitFor(page, `!!document.querySelector('#chan-search-dialog .chan-search-hit') || /\d/.test((document.querySelector('#chan-search-dialog .chan-flow-status') || {}).textContent || '')`, 40);
     await sleep(300);
-    await capture(page, tag, 'dialog-track', '#chan-track-dialog .dialog', { pad: 8 });
+    await capture(page, tag, 'dialog-search', '#chan-search-dialog .dialog', { pad: 8 });
+    await closeDialogs(page);
+    await clickMenu(page, lang, SEC('fake-poll'), 'Conversations matching a rule…');
+    await waitFor(page, `!!document.querySelector('#chan-scope-assign-dialog .chan-af-rule')`, 20);
+    await sleep(600);
+    await capture(page, tag, 'dialog-scope-assign', '#chan-scope-assign-dialog .dialog', { pad: 8 });
     await closeDialogs(page);
     await clickMenu(page, lang, SEC('lark'), 'Options');
     await waitFor(page, `!!document.querySelector('#chan-options-dialog .chan-opt-input')`, 20);
@@ -529,9 +534,9 @@ async function pass({ lang, viewport, theme }) {
     await closeDialogs(page);
   }
 
-  // ── WINDOWS: tracked+sendable / read-only adapter / read-only mailbox / untracked ──
+  // ── WINDOWS: sendable / read-only adapter / read-only mailbox / a scanned room ──
   await openWin(page, 'fake-poll', 'fake-poll-ops', { composer: true });
-  await capture(page, tag, 'win-01-tracked-sendable', '[data-shot="win"]');
+  await capture(page, tag, 'win-01-sendable', '[data-shot="win"]');
   await openWin(page, 'fake-push', 'fake-push-ops');
   await waitFor(page, `(() => { const w = ${WIN('fake-push-ops')}; return !!(w && w.content.querySelector('.chanwin-readonly')); })()`, 40);
   await sleep(300);
@@ -543,9 +548,9 @@ async function pass({ lang, viewport, theme }) {
   await capture(page, tag, 'win-02b-readonly-mailbox', '[data-shot="win"]');
   await closeWin(page, 'fake-poll-announce');
   await openWin(page, 'fake-scan', 'fake-scan-announce');
-  await waitFor(page, `(() => { const w = ${WIN('fake-scan-announce')}; return !!(w && w.content.querySelector('.chanwin-empty')); })()`, 40);
+  await waitFor(page, `(() => { const w = ${WIN('fake-scan-announce')}; return !!(w && w.content.querySelector('.chanwin-empty, .chanmsg')); })()`, 40);
   await sleep(300);
-  await capture(page, tag, 'win-03-untracked', '[data-shot="win"]');
+  await capture(page, tag, 'win-03-scan', '[data-shot="win"]');
   await closeWin(page, 'fake-scan-announce');
 
   // ── CARDS: awaiting → sent · failed · unknown · rejected · a second awaiting ──

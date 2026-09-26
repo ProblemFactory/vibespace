@@ -515,7 +515,8 @@ freshnessClaim(caps, laneOrScan, convEntry, now)        // r6: 加宽了, 见下
   返回带类型的 `send-not-available` 加上 `caps` 自己说的理由, 而 outbox **根本不为它创
   建 proposal**。一条永远发不出去的 proposal, 会让用户去批准一件随后必然失败的事。
 - **`convCaps` 是一份带 TTL 的缓存, 不是一份存下来的事实**(r4)。TTL 默认 **6 小时**,
-  刷新触发点恰好三个: ①用户把一个会话标成 tracked 时; ②TTL 过期之后面板的第一次渲染;
+  刷新触发点恰好三个: ①会话窗口被打开时 (2026-09-26 之前是"标成 tracked 时", 那一步已经没有了);
+  ②TTL 过期之后面板的第一次渲染;
   ③**审批的那一刻、发送之前, 无条件刷一次** —— 那是唯一一个"判断错了要付出一条真消息"
   的时刻。过了 TTL 的条目解析成 `read:'unknown'` / `sendAs: []` / `why:'stale'`, 而
   `offers()` 现有的规则(`unknown` ⇒ 不提供 + 说出理由)已经把这个降级渲染好了, 所以它
@@ -631,8 +632,10 @@ data/channels/
                                                                           // the don't-re-prompt rule
   index.json                    atomic JSON, ONE in-process owner (§5.1). Per conversation:
                                 id, adapterId, vendorId, title, kind (dm|group|thread),
-                                participants summary, lastAt, unread, tracked, anchor,
-                                assignment, filterId, policy, pendingTodoId, reachEntries[],
+                                participants summary, authors[] (≤30, 规则匹配用), lastAt,
+                                unread, anchor, refresh {every: 30|60|300|900|'paused', by, at}
+                                (owner 的刷新周期覆盖, 2026-09-26), assignment, filterId, policy,
+                                pendingTodoId, reachEntries[],
                                 stats {hits7d, msgs7d},
                                 convCaps {read, sendAs[], why, at}        // §4: cached WITH its age,
                                                                          //     TTL 6 h, then 'stale'
@@ -641,7 +644,13 @@ data/channels/
   msgs/<adapterId>/<convId>.ndjson   APPEND-ONLY message log, one ChannelRecord per line
   outbox.json                   atomic JSON. Proposals + their state machine (§9)
   audit.ndjson                  APPEND-ONLY. Every outbound attempt and every ACL change
-  files/<adapterId>/<convId>/   downloaded attachments (explicit action only)
+  attachments/<adapterId>/<convId>/<sha1(id)>   按需下载的附件 (0600, 绝不执行, 只经我们自己的
+                                路由出去); attachments/<adapterId>/lru.json 是每个账号的 LRU 账本,
+                                上限 `channels.attachmentBudgetMB` (默认 5120 = 5 GB/账号)
+  index.json 顶层另有三张按账号的表 (2026-09-26, 三粒度指派 §7.3):
+                                accountAssignments{<adapterId>: assignment+stats},
+                                patternAssignments{<id>: {adapterId, pattern, …assignment, stats}},
+                                accountGrants[] (scope:{kind:'adapter'} 的授权行)
   .channels-key                 0600 instance-local key for token encryption
 ```
 
@@ -675,11 +684,21 @@ data/channels/
 5. **保留策略按会话设, 并被两重界住**: 最后 N 条记录或 M 天, 取更小者, 并有一个 **7 天
    的地板**, 因为估计器是定义在最近 7 天之上的。裁剪要流式写到临时文件再 rename ——
    绝不就地改。
-6. **`tracked` 是 opt-in 的。** 一个 adapter 能*看见*的东西远比 panel 该列出来的多: 一个
-   被授权的 Lark 用户例行地就是几十个聊天的成员(在一个真实账号上实测: 大约五十个), 而
-   一个邮箱是无界的。在用户把一个会话标记为 tracked 之前(或者对 Gmail 而言, 它匹配上了
-   一条包含查询), 什么都不摄入。这是一个隐私决定, 一个成本决定, 也是让这个 panel 保持是
-   一个 panel 而不是一个邮件客户端的那件事。
+6. **一个连上的账号就是一个聚合 IM (owner 2026-09-26 定案, 取代原来的 "`tracked` 是
+   opt-in")。** 原文: "只要 link 上去了, 这就相当于一个整合了各种 IM 的聚合 IM, 我自己可以在
+   里面看消息, 下载附件, 看图片啥的, 只是我同时可以分配整个账号, 或者某个 channel/聊天/符合
+   pattern 的聊天等给特定 agent 来查看和操作"; 对旧交互的评价是 "太受限了, 没有实用价值"。
+   于是: 账号包含范围之内 (Gmail 默认 INBOX, 可改成全部邮件或指定标签; Lark 是 `im/v1/chats`
+   列出来的全部群) 的**每一个**会话都被列出、被摄入, owner 能读全部消息、下载附件、看图片、
+   搜索、标已读 —— **没有"跟踪"这一步**。`tracked` 这个字段被迁移删除
+   (`2026-09-channels-aggregated-im`: 原来 tracked 的会话得到 `refresh.every = 30`, 即
+   "tracked ⇒ hot"; assignment 原样保留)。原不变量的两个理由没有消失, 而是换了归属:
+   **隐私归 agent 侧** —— agent 默认什么都看不见, 只有被指派 (账号 / 会话 / 规则三粒度, §7.3)
+   或被授权 (§8) 的会话才出现在它面前 (reach 法);
+   **成本归调度器** —— 推送优先 (§6.5), 轮询按活跃度分档 (热 30 s / 温 5 min / 冷 15 min,
+   §6.2), 一切以 vendor 自己的计量单位记在每个账号的请求预算上, 预算用尽就退避并在账号卡片上
+   说出来。未读数只计**连上之后**到达的消息 (连上之前的积压算已读, 账号记录上的 `linkedAt`
+   是分界), 否则一个新连上的 800 线程邮箱第一屏就是四万条"未读"。
 7. **派生值绝不变成存下来的事实。** `unread`、`hits7d` 与 `msgs7d` 都是从日志与已读标记
    重新算出来的; 它们为了渲染速度被缓存在索引里, 并且永远可以重新推导。quota-model 的
    那些事故(一个存下来的 `state` 活得比它所描述的那次读数还久)就是这句话写在这里的
@@ -763,40 +782,72 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 `store.append` 之后的一切都是 PURE 的, 除了末尾那两次 ORCH 调用。这是刻意的: 与钱相关的
 那条判定链, 不需要一台服务器就能做单元测试。
 
-### 6.2 调度器
+### 6.2 调度器 (2026-09-26 重写: 每个会话自己的到期时刻)
 
-每个 adapter 一个循环, 绝不是每个会话一个循环。每一 tick:
+每个**账号**一个循环 (单飞, §5.1 的序列化门不变), 但**到期是按会话算的**: 每 5 s 一 tick,
+一个账号只要有任何一个会话到期就跑一趟 pass, 这一趟只摄入**到期的**会话, 按"逾期最久的先"排,
+预算用完就停 —— 剩下的仍是到期状态, 下一分钟接着来, 绝不会因为插入顺序永远排不上 (旧实现
+按索引插入顺序遍历、预算一断就 `break`, 873 个会话跑 200 分钟只有 15 个拿到 anchor —— 实测)。
 
-- 花掉一份**请求预算**(默认 20/min/adapter, 是一个设置)在: 每一个*热*会话(被 assign 了
-  的, 或者此刻正开在某个客户端窗口里的)按快节奏(30 s), 然后是*被 tracked 但冷*的那些按
-  慢节奏(5 min)轮转 —— 但这两个数字**先经过 `laneState(…).pollCadence`**(§4):
-  `'reconcile'` 时整个 adapter 掉到 15 分钟的对账节奏, `'fast'` 时就是上面这两个数。
-  调度器**从不自己去读**声明、`push.state` 或 `caps.receive`(r4);
-- 加抖动, 并在 `rate-limited` / `transport` 时按 adapter 指数退避, 干净的一趟后复位;
-- 在 `auth-expired` 时**整个停下来**并把它说出去 —— 一个继续猛敲一份过期凭据的循环, 正是
-  一个集成在 vendor 那边被限流的方式;
-- 绝不与**它自己**重叠(每个 adapter 单飞), 也绝不占住循环: fs 写是异步的, 每个请求都有超
-  时。每个 adapter 单飞**不是** adapter 之间的互斥 —— 各趟 pass 按设计就是并发的 —— 所以
-  每一次索引改动都走 §5.1 那扇唯一的序列化门, 而且一趟 pass 绝不跨 `await` 携带一份陈旧
-  快照。
+**节奏 = 覆盖 > 档位, 再夹在 [adapter 的 floor, 冷档] 之间**:
 
-成本是这份设计欠读者的一道算术: 五十个被 tracked 的 Lark 聊天, 一个热的都没有, 5 分钟节奏
-⇒ ~10 请求/分钟。一个热的、被 assign 的聊天 ⇒ +2/分钟。一个 Gmail 账号在什么都没变时是每
-tick **一个** `history.list` 请求。这个数字之所以重要, 是因为**推送打开之后轮询并不会消
-失**: 它降到一个慢得多的**对账节奏**(默认 15 分钟, 一个设置), 从"延迟机制"变成"完备性机
-制"。§6.4 说清楚为什么那不是保守, 而是这条推送通道自己的语义决定的 —— 而"此刻到底是哪一
-种节奏"由 `laneState` 一处回答, 于是一条被降级或者死掉的推送通道会**立刻**把快节奏还回来,
-不需要任何别的地方再判定一次。
+| 来源 | 条件 | 节奏 (设置, 默认值) |
+|---|---|---|
+| owner 覆盖 | `refresh.every` = 30 / 60 / 300 / 900 s 或 `paused` (行菜单 / 会话窗口的「刷新周期 ▸」, 持久化, 广播) | 覆盖值; `paused` = 计时器不再抓 (打开窗口、agent 主动刷新仍可以) |
+| 热 | 此刻开在某个客户端窗口里 (`/watch` 心跳, 90 s 过期), 或最近 `channels.hotRecentMinutes` (60) 分钟内有消息 | `channels.pollHotSec` 30 |
+| 温 | 最近 `channels.warmRecentHours` (24) 小时内有消息 | `channels.pollWarmSec` 300 |
+| 冷 | 其余 | `channels.pollColdSec` 900 (**上限就是 900**: owner "最长 15 分钟") |
+| 推送兜底 | 这个账号的推送通道 live 且携带内容 (`laneState().pollCadence === 'reconcile'`) | 全部会话降到冷档节奏 (安全网), 覆盖仍然生效 |
+
+**发现 (listConversations)** 按冷档节奏走 (以及连上、改选项之后立刻一次), **把游标走到底**:
+旧的 `DISCOVERY_PAGES = 5` 让第 501 个会话永远不出现; 现在一趟被预算截断时游标记在内存里,
+下一趟接着走, 走完才从头开始。
+
+**预算按 vendor 自己的单位计, 按账号计, 每分钟一窗**: adapter 在 `caps.budget` 里声明单位与
+设置键 (引擎从不点名 adapter id), 每一次真正发出去的 vendor 请求经 `deps.meter(units)` 记账
+—— 不发请求 (Gmail 的线程没变) 就不花钱。
+
+| vendor | 单位 | 设置 (默认) | 依据 |
+|---|---|---|---|
+| Lark | 请求 | `channels.budgetLarkPerMin` 60 | 每个 API 每应用每租户 1000 次/分 (集群共用一个池), 60 = 6 % |
+| Gmail | 配额单位 | `channels.budgetGmailPerMin` 3000 | 每用户每项目 6000 单位/分; history.list 2, threads.list 10, threads.get 40, attachments.get 20, drafts.send 100, watch 100 |
+
+预算用尽 = 这一趟停下、到期的会话等下一窗, 账号卡片上说
+"已到 {n} {单位}/分钟 的预算 —— {k} 个会话在排队, 下一次刷新在 {s} 秒后"; vendor 自己的
+429 仍走原来的指数退避 (30 s → 15 min)。`auth-expired` 整个停下并说出去 (不变)。
+
+**算术** (这份设计欠读者的):
+
+- Lark 55 个群, 一次轮询 = 一个 `im/v1/messages` (安静的群最新一页就含 anchor)。全冷 3.7 请求/分,
+  全温 11, 全热 110 (超预算 ⇒ 退避并说出来); 典型 5 热 / 15 温 / 35 冷 ≈ 10 + 3 + 2.3 + 发现
+  0.07 + 成员名 0.15 ≈ **15.6 请求/分**。首次摄入每个会话只取最新一页
+  (`channels.historyPageSize` 50), 更早的历史在打开窗口往上翻时按需取 (§6.5), 于是 55 个群的
+  首轮是 55 个请求而不是 220。
+- Gmail: 档位驱动的是**邮箱级**的 `history.list` 节奏 (最热那个线程的节奏, 适配器里 20 s
+  memo), 从不是逐线程的 `threads.get`: 热 2 × 2 = 4 单位/分, 冷 0.13 单位/分; 再加上
+  `history.list` 点名的每个线程 40 单位 —— 被点名的线程通过 `changed` 提示**立刻到期**,
+  所以一个冷线程的新邮件也不等 15 分钟。发现: 247 线程 30 单位 / 573 线程 60 单位每趟。首轮
+  逐线程 walk: 247 × 40 = 9 880, 573 × 40 = 22 920 单位 —— 在 3000/分 的预算下自动摊成
+  3.3 / 7.6 分钟。邮箱游标 (`historyId`) 与尚未取的 `changed` 集合持久化在账号的
+  `state` 里 (绝不是只在内存 —— 旧实现每次重启都把每个线程重新 walk 一遍)。如果逐线程轮询:
+  573 线程冷档就是 1528 单位/分、温档 4584 (每用户上限的 76 %) —— 这正是不这样做的原因。
+
+绝不与**它自己**重叠, 也绝不占住循环: fs 写是异步的, 每个请求都有超时; 一趟 pass 绝不跨
+`await` 携带一份陈旧快照 (引擎按会话取单条 `peek`, 不再为每个会话深拷贝整份索引 —— 873 个
+会话时每趟省掉约 2.5 s 主线程)。未读数按追加增量维护, 标已读时从日志重算 (仍是可重新推导的
+派生值)。广播只带**变化了的会话** (`partial`), 整份 digest 只在结构变化时发。
 
 ### 6.3 各 adapter 的摄入
 
-**Lark(user token)。** 用 `im/v1/chats` 做发现(分页), 然后对每个被 tracked 的聊天用
+**Lark(user token)。** 用 `im/v1/chats` 做发现(分页, 走到底; 注意它**不含单聊**, 而且条目里
+没有最后消息时间), 然后对每个到期的聊天 (§6.2) 用
 `im/v1/messages?container_id=<chat>`, 最新在前, 用 **`next_page_token`** 翻页 —— 这个字段
 *不叫* `page_token`, 而只读第一页是一种有案可查的静默丢消息的方式。翻到已存的 anchor 为止;
 在一个爆发日里那意味着好几页, 而这正是全部要点。从运维笔记里带过来的一批已知 vendor 限制,
 adapter 一律**容忍**它们而不是假设它们不存在: 批量枚举 DM 不可靠(DM 靠搜索或靠用户自己挑
-出来加进去); `im search` 把多词查询当短语处理; 它的时间窗参数并不能可靠地过滤; 图片是对一
-个按消息的资源端点发起的第二次被授权的抓取, 所以 v1 只把它们记成附件元数据。
+出来加进去); `im search` 把多词查询当短语处理; 它的时间窗参数并不能可靠地过滤; 图片与文件是
+对 `messages/:message_id/resources/:key?type=image|file` 的第二次被授权的抓取 —— 2026-09-26
+起按需做 (§6.5 附件), 表情包、合并转发与卡片 vendor 不给。
 
 **Gmail(user token)。** 每 tick 一次
 `history.list?startHistoryId=…&historyTypes=messageAdded` —— 什么都没变时就是一次便宜的请
@@ -952,6 +1003,60 @@ encrypt key; VibeSpace 有 `instance-url`/frp 是可以暴露一个的, 但为�
 口与"每条通道同样多次唤醒"的那条腿在 **P2**(它要用到唤醒路径)。Gmail 的 Pub/Sub pull 在
 P1 落一个开关后面, 默认关。
 
+### 6.5 推送优先, 轮询兜底 —— 以及读者面 (2026-09-26, owner 定案)
+
+owner 原话: "抓取这个如果 API 允许 callback 之类的不主动 polling 更好, 如果一定要 polling 那就
+按照你说的频率。可能 30 分钟太久了, 最长 15 分钟吧。然后允许随时 override 某个会话的刷新周期。
+也应该允许 agent 主动获取最新消息。还有每个账号的缓存上限改为 5GB, 另外这些所有的时间容量之类
+的参数都应该支持配置。"
+
+**推送能做到什么, 如实说** (飞书文档 2026-09-26 读):
+
+- Lark 的 `im.message.receive_v1` 只投给**机器人**: 单聊只有发给机器人的; 群里默认只有 @机器人,
+  要收全群消息须授予 `im:message.group_msg` 且机器人在群里; 用户与用户之间的单聊**永远不投**;
+  投递是集群模式 (同一应用多个客户端随机一个), 所以集群共用的应用只能是 `shared` ⇒ 只踢游标。
+  对"聚合 IM"而言, 推送最多替机器人所在的群**踢一下**, 其余全靠轮询 —— 这就是为什么轮询档位
+  是主干而不是退路的退路。
+- 长连接要官方 SDK `@larksuiteoapi/node-sdk`; 没装时通道以 `sdk-not-installed` 停在
+  `unavailable`, 卡片上**逐字**给出补救: "实时推送未开启: 本实例没有安装飞书官方 SDK —— 在
+  VibeSpace 目录里运行 `npm install @larksuiteoapi/node-sdk` 然后重启; 在控制台开启事件订阅
+  (长连接模式)、授予 `im:message.group_msg`、把机器人拉进要推送的群。在那之前消息靠轮询
+  (30 秒 – 15 分钟)"。
+- Gmail 推送要 Cloud Pub/Sub (topic + 本实例自己的 pull 订阅 + IAM 授权 + `pubsub` scope),
+  默认关; 没配就轮询 —— 卡片说 "推送关闭 (在 推送… 里开启)"。
+- 推送 live 且携带内容时, 这个账号的轮询降到冷档节奏 (安全网, §6.2 表的最后一行), 卡片说
+  "推送在线 —— 轮询每 15 分钟对账一次"。推送踢游标时 (Lark 的事件带 `chat_id`) **只让那个会话
+  立刻到期**; Gmail 的通知不带会话 (convId null) ⇒ 让这个账号的 `history.list` 立刻跑一次,
+  它点名的线程立刻到期。**摄入不再有 `untracked` 这一道闸** —— 一个推送来的会话即便此前从没被
+  发现, 也照样落进日志 (发现随后补上它的标题)。
+
+**agent 主动刷新** (`vibespace-channels refresh <conv>` / `read --fresh` →
+`POST /api/agent/channels/:adapterId/:convId/refresh`): reach 先查 (看不见 = 统一的 not-found),
+然后是**每会话地板** `channels.agentRefreshFloorSec` (默认 20 s, 相对这个会话上一次被抓的时刻,
+不论谁抓的), 然后是账号预算; 拒绝**点名数字**: "这个会话 8 秒前刚刷新过 (地板 20 秒) —— 现在就
+读, 或 12 秒后再刷新" / "这个账号本分钟的 vendor 预算 (60 请求/分) 已用完 —— 23 秒后再试"。
+一次刷新计入 vendor 预算, 并把结果 (新增几条) 答回去。
+
+**历史按需** —— 首次摄入只取最新一页; 打开窗口 (`/watch`) 让会话变热并在它过期时立刻抓一次;
+往上翻到本地日志的尽头时 `POST …/older` 请 adapter 取更早的一页 (Lark: `end_time` = 本地最早一条,
+倒序分页; Gmail: 线程第一次 walk 就是整条, 没有"更早"; 能力行 `caps.olderHistory` 声明),
+取回的记录**前插**进日志 (重写一次, 保持 `(at, vendorId)` 有序, 去重照旧), 绝不进唤醒漏斗
+(补历史不是新消息), 并诚实地答 `exhausted` (vendor 说没有更早的了) / `truncated`
+(保留期会把它裁掉)。
+
+**附件与图片** —— `GET /api/channels/:adapterId/:convId/attachment/:id?msg=<vendorId>`:
+先查缓存, 没有就经 adapter 的 `fetchAttachment` 取 (计入预算), 写进
+`data/channels/attachments/<adapterId>/<convId>/`, 0600, 每账号 LRU, 上限
+`channels.attachmentBudgetMB` (默认 5120); 响应永远带 `X-Content-Type-Options: nosniff` 与
+`Content-Security-Policy: default-src 'none'; sandbox`, 非图片一律
+`Content-Disposition: attachment` (绝不执行、绝不在我们的源里渲染), 只有 png / jpeg / gif / webp
+可以 `?inline=1` 内联 (svg 永远不内联 —— 它是脚本)。窗口里图片是缩略图 (经 `img.src` 指向这条
+路由, 点开走 `showImageOverlay`), 其它附件是一枚 chip (名字、大小、下载)。Lark 的富文本里的图片
+与视频现在也记成附件 (`image_key` / `file_key`); Gmail 没有文件名的内联图片 (`cid:`) 也记。
+
+**搜索** —— `GET /api/channels/search?adapter=<id>&q=…`: 读本地日志, 异步分块读、有字节上限
+(一次最多扫 64 MB / 结果最多 100 条), 结果按时间倒序, 超出上限就说 `truncated`, 绝不占住事件循环。
+
 ---
 
 ## 7. Assign、过滤, 以及叫醒一个人的成本
@@ -1014,6 +1119,36 @@ assignment = { principal: { kind:'agent'|'group', id },
   了 A 对 C 的 `visible` 的用户, 会因为一个不相干的动作而被静默地撤销那条授权 —— 这是一次
   被夹带进一个明文写着(§8)只许放宽的模型里的**收窄**操作。
 
+**三个粒度, 一个编辑器 (2026-09-26, owner: "分配整个账号, 或者某个 channel/聊天/符合 pattern
+的聊天等给特定 agent")。** 同一条记录 `{principal, mode all|filtered, filterId, notify
+wake|digest, authority draft|send, dailyWakeCap, scope:{kind, id}}`, 三种作用域:
+
+| 粒度 | 存在哪 | 入口 |
+|---|---|---|
+| `account` —— 整个账号 | `index.accountAssignments[adapterId]` (每账号一条) | 账号卡片 ⋯ 「交给一个 agent…」 |
+| `pattern` —— 符合规则的会话 (现在的与以后的) | `index.patternAssignments[id]` (每账号多条, 按创建顺序) | 账号卡片 ⋯ 「符合规则的会话…」 |
+| `conversation` —— 一个会话 | 会话条目上的 `assignment` (不变) | 行菜单「Assign & filter…」 |
+
+**生效的只有一条**: `effectiveAssignment(会话) = 会话 > 规则 (按创建顺序第一个命中的) > 账号`
+(PURE, `src/channel-filter.js`)。规则是**会话级**谓词 (与 §7.1 的消息级规则是两个封闭集合):
+`participant` (参与者或发言人名字含 X —— 也就是"某人所在的群")、`title` (标题含关键词)、
+`from-address` (发言人地址 / id, `@domain` 匹配整个域)、`kind` (`dm` | `group` | `thread`),
+`match: any | every`。一个新出现的会话在它被发现的**同一趟**就继承 —— 因为判定发生在读取时,
+没有要追赶的存量。
+
+**节奏账本按指派记, 不按会话记**: 一个账号级指派跨 800 个线程, 如果每个会话一本 40/天 的账本,
+那就是 32 000 次唤醒/天; 所以继承来的指派的 `stats.wakes` 挂在指派记录上, `paceVerdict` 读它。
+`digest` 模式下, 继承来的指派**每个窗口只投一次**, 把窗口里这个作用域所有会话的命中合成一个块
+(`renderScopeDigestBlock`, 仍在 §7.5 的字节预算里)。保存之前编辑器给出**诚实的估计**: 对作用域
+里命中的会话的日志做有上限的读 (`sampled` / 覆盖多少个会话), 再按 notify 与每日上限折成
+"每天大约唤醒 N 次"。
+
+**reach 跟着指派走, 且只删自己那一行**: 账号级指派写一条 `scope:{kind:'adapter', id}` 的
+`origin:'assignment'` 授权到 `index.accountGrants`; 规则级指派**不写行**, 它的授权在读取时
+按当前的规则重新算 (`patternGrantsFor(会话)`), 于是取消指派或改规则立刻生效、没有要清理的残行;
+会话级照旧。卡片与行上的 chip: 账号卡片「已交给 <名字> · 全部|过滤 · 唤醒|摘要」, 继承来的行
+淡色标注「(账号)」/「(规则)」。
+
 ### 7.4 那次唤醒, 以及谁为它付钱
 
 一条匹配上的消息叫醒一个 agent, 就是一个没人打字的 turn。所以它走既有的那条路, 旁边什么都
@@ -1064,6 +1199,14 @@ Reply with: vibespace-channels reply <convId> "…"   (this PROPOSES; the user a
 造出一个 frame。这是 XSS 规则的 prompt-injection 孪生, 而它属于那个 PURE 渲染器 —— 在那里
 它能被单测证明。
 
+继承来的指派 (账号 / 规则, §7.3) 的块头说出**它为什么在这里**:
+`### Channel message — Lark · <title> (you are assigned the whole account)` /
+`(… a rule: <规则摘要>)`; 摘要模式的块是
+`### Channel digest — Lark · N conversations, M messages in the last 30 min`, 每个会话一小节
+(标题 + 最多 3 条), 超出预算就写 "(K more conversations elided — vibespace-channels list)"。
+agent 读取时如果想要比推送/轮询更新的内容, 用 `vibespace-channels refresh <conv>` (§6.5 的地板与
+预算照样管它)。
+
 ---
 
 ## 8. 可见性(AgentReach)
@@ -1083,6 +1226,11 @@ grant  : { principal:{kind:'agent'|'group', id},
 effective(principalCtx, scope, grants) -> { level, via:'group'|'agent'|'default', grantId }
 ```
 
+- **作用域三种 (2026-09-26)**: `conversation` (条目上的 `reachEntries`)、`adapter` —— **就是账号**
+  (adapterId 是账号 id: 一个 kind 的第一个账号是 `<kind>`, 之后是 `<kind>:<8 hex>`, 两个 Gmail
+  账号永远不混) —— 存在 `index.accountGrants`, 以及规则指派在读取时推出来的会话行
+  (`origin:'assignment'`, 带 `pattern` id, 不落盘)。`reachFor` / `listFor` / `readFor` 把三处
+  合起来求 MAX; `referencesOf` 把账号级授权与账号 / 规则指派都算作"还在指向这个账号"。
 - **一切默认 `hidden`。** 不存在"从平台继承"这回事 —— 平台自己的 ACL 说的是*用户*可以看
   什么, 从来不是一个 *agent* 可以看什么。
 - 一个单独的 agent **继承它所在的组, 并且可以被单独放宽**; 生效等级是所有适用授权上的

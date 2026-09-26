@@ -4,7 +4,7 @@
 //
 // The sidebar rail's `channels` panel: a bar (summary + the Outbox button
 // carrying the awaiting count), one collapsible `folder-header` section per
-// adapter (chevron · kind glyph · name · a 6px STATE DOT · tracked/total · ⋯),
+// adapter (chevron · kind glyph · name · a 6px STATE DOT · conversations · ⋯),
 // a status line ONLY when the adapter has something to say beyond
 // "connected" (not connected / needs re-authorization / a re-authorization
 // due within 7 days / disabled / failing / a withdrawn push claim), and the
@@ -14,16 +14,14 @@
 // Every adapter VERB lives in the ⋯ menu (a `channel-adapter` contribution
 // menu) — the a1 audit measured the verbs at 47–59 % of the panel's height.
 //
-// ON EVERY TRACKED ROW A FRESHNESS CHIP. That chip is not decoration — it is
-// this feature's honesty contract. A row says how long ago its evidence was
-// gathered ("live" / "within 30s" / "scanned 4m ago" / "not polling"),
-// because that is the one number a user needs before handing something to a
-// lane. An UNTRACKED row carries no pill at all (design §4.3): nothing is
-// fetched for it, so there is no evidence to claim, and its line-2 `not
-// tracked` text already says so — a pill there was the one that truncated
-// (ja's ポーリングしていません lost its negation to the ellipsis at the
-// default rail: "…polling" when the truth was "not polling"). The CLAIM
-// comes from the server's `freshnessClaim`, which resolves
+// ON EVERY ROW A FRESHNESS CHIP. That chip is not decoration — it is this
+// feature's honesty contract. A row says how often its evidence is gathered
+// ("live" / "within 30s" / "scanned 4m ago" / "refresh paused"), because
+// that is the one number a user needs before handing something to a lane.
+// Since 2026-09-26 a linked account is an AGGREGATED IM: there is no track
+// step, every conversation is fetched on its own cadence (hot / warm / cold
+// by activity, or the owner's "Refresh every ▸" override), and the chip IS
+// that cadence. The CLAIM comes from the server's `freshnessClaim`, which resolves
 // from the lane ACTUALLY carrying the row (`laneState` / `scanState`) — never
 // from the adapter's static declaration, so a demoted or dead push lane draws
 // the poll cadence it is really on (the `opencode-events` round-4 lesson: a
@@ -67,7 +65,7 @@ import { routeErrorText, groupErrorText } from './channel-words.js';
 import { groupListRows, foldsFrom, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // P2: the Assign & filter editor and the one-line summary a row draws.
-import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
+import { showAssignFilterDialog, showScopeAssignDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog } from './channel-reach-editor.js';
 import './channel-outbox.js';
@@ -84,8 +82,8 @@ function chip(freshness) {
   const el = document.createElement('span');
   const f = freshness || {};
   el.className = 'chan-chip' + (f.kind === 'live' ? ' chan-chip-live' : (f.state === 'off' || f.state === 'never') ? ' chan-chip-off' : '');
-  el.textContent = chanCaps.freshnessText(f, { t }) || t('unknown');
-  el.title = t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.');
+  el.textContent = chanCaps.freshnessText(f, { t, short: true }) || t('unknown');
+  el.title = `${chanCaps.freshnessText(f, { t }) || t('unknown')} — ${t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.')}`;
   return el;
 }
 
@@ -109,7 +107,7 @@ async function api(pathname, init) {
 function rowMenuCtx(app, conv) { return { app, conv }; }
 
 // ── P1a: the adapter's own controls (design §10.1, §13, §14.5) ────────────
-// The account card, the tracked picker, options, push. Every control reads a
+// The account card, the search, options, push. Every control reads a
 // FACT the digest carries (`kinds[]`, `adapter.auth`, `adapter.credential`,
 // `adapter.flow`, `adapter.presets`, `adapter.optionsSchema`) — nothing here
 // branches on an adapter's kind (the contract suite's census), and every
@@ -150,25 +148,25 @@ function kindGlyph(a, convs) {
 // built-in watcher or a scan-only fixture) is drawn in the storage row's
 // grammar, credential-first: the login IS the card — its dot, its client
 // chip, a HEALTH line in the storage detail-line grammar (`[Gmail] Connected
-// · <filter> · last poll <ago> · push: <claim>`), and, when the sign-in died,
+// · Inbox · polling · N conversations · M unread · last sync <ago>`), and, when the sign-in died,
 // the storage `.mounts-errline` with the mounts' auth-death sentence
 // VERBATIM + the channel's why code in brackets (D8) and the primary
-// `Re-authorize {provider}…` button. Its CHILDREN are the conversations it
-// tracks, as ↳ rows (the storage child-row grammar); an account tracking
-// nothing says so in the credential-only row's register + Track…. Every
+// `Re-authorize {provider}…` button. Its CHILDREN are ALL its conversations,
+// as ↳ rows (the storage child-row grammar; 2026-09-26: an aggregated IM, no
+// Track… step, the newest first and the rest behind "Show all"). Every
 // dialog is the storage dialog component (channel-account-dialogs.js).
 // Nothing here branches on a kind: the facts are the digest's.
 
 /** The card's dot (§8.1 #1): connected → ok, the sign-in died → bad, no
  *  usable client → warn, never signed in / disabled → idle; a consent in
- *  flight → attn; a connected account failing its passes → warn; a
- *  connected account TRACKING NOTHING → idle (the mockup's "login only":
- *  nothing is fetched, so there is no health to claim). */
-function accountDot(a, trackedN = 1) {
+ *  flight → attn; a connected account failing its passes → warn. (Since
+ *  2026-09-26 there is no "login only" state: a connected account fetches
+ *  every conversation.) */
+function accountDot(a) {
   const auth = a.auth || { state: 'unknown' };
   if (a.enabled === false) return 'idle';
   if (a.flow && a.flow.running) return 'attn';
-  if (auth.state === 'connected') return a.consecutiveFailures >= 3 ? 'warn' : trackedN > 0 ? 'ok' : 'idle';
+  if (auth.state === 'connected') return a.consecutiveFailures >= 3 ? 'warn' : 'ok';
   if (auth.state === 'expired') return 'bad';
   if (auth.state === 'needs-credentials') return 'warn';
   return 'idle';
@@ -181,10 +179,6 @@ function agoText(ms, now = Date.now()) {
   if (s < 3600) return t('{n} min ago', { n: Math.round(s / 60) });
   if (s < 86400) return t('{n} h ago', { n: Math.round(s / 3600) });
   return t('{n} d ago', { n: Math.round(s / 86400) });
-}
-/** The push claim in words for the health line. */
-function claimWord(claim) {
-  return claim === 'exclusive' ? t('exclusive') : claim === 'shared' ? t('shared') : t('undeclared');
 }
 /** The HEALTH line (the storage row's detail line): `[type tag] words`. */
 function healthLine(a, text, { warn = false, verbs = [] } = {}) {
@@ -233,19 +227,39 @@ function accountLines(app, a, kinds) {
   if (a.flow && a.flow.running) {
     out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
   } else if (auth.state === 'connected') {
+    // THE AGGREGATED IM's health line (2026-09-26): connected · the mailbox
+    // scope (a declared choice's own words) · push or polling · N
+    // conversations · M unread · last sync
     const bits = [t('Connected')];
-    // the account's FILTER = its first declared free-text option (Gmail's include query); a choice (Lark's brand) is not a filter
     const f = (a.optionsSchema || [])[0];
-    if (f && !(Array.isArray(f.choices) && f.choices.length)) { const v = (a.options && a.options[f.key]) || f.default; if (v) bits.push(String(v)); }
-    if (a.lastPass && a.lastPass.at) bits.push(t('last poll {ago}', { ago: agoText(a.lastPass.at) }));
-    if (a.push && a.push.enabled) bits.push(t('push: {claim}', { claim: claimWord(a.push.claimedExclusive) }));
-    out.push(healthLine(a, bits.join(' · ')));
+    if (f && Array.isArray(f.choices) && f.choiceLabels) { const v = (a.options && a.options[f.key]) || f.default; if (v && f.choiceLabels[v]) bits.push(t(f.choiceLabels[v])); }
+    else if (f && !(Array.isArray(f.choices) && f.choices.length)) { const v = (a.options && a.options[f.key]) || f.default; if (v) bits.push(String(v)); }
+    const lane = a.lane || {};
+    bits.push(lane.via === 'push' && lane.live ? (lane.carryContent ? t('push') : t('push + polling')) : t('polling'));
+    const sc = a.scheduler || null;
+    if (sc) { bits.push(t('{n} conversations', { n: sc.conversations })); if (sc.unread) bits.push(t('{n} unread', { n: sc.unread })); }
+    // "last sync" = the last GOOD pass; a failure is said on its own line
+    // from the FIRST one, with the retry (lane R2 verify, 2026-09-26)
+    const ps = chanCaps.passStateText(a, { t, now: Date.now() });
+    if (ps.lastOkAt) bits.push(t('last sync {ago}', { ago: agoText(ps.lastOkAt) }));
+    const hl = healthLine(a, bits.join(' · '));
+    // a refresh token that is RE-ISSUED at every automatic refresh (Lark) needs
+    // no countdown while the instance runs — said here, on hover, once
+    if (auth.renews) hl.title = t('The sign-in renews itself while this instance runs — re-authorize only if the instance is off for more than {days} days.', { days: Math.round((Number(auth.renewWindowMs) || 7 * 86400e3) / 86400e3) });
+    out.push(hl);
+    const left = Number(auth.expiresAt) - Date.now();
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
-    if (eta && (Number(auth.expiresAt) - Date.now()) < REAUTH_SOON_MS) {
-      const n = noteLine('chan-sec-note', t('re-authorize in {eta}', { eta }), { warn: Number(auth.expiresAt) - Date.now() <= 0 });
+    // a sliding token shows its countdown only once renewals have STOPPED (<1 day left)
+    if (eta && left < (auth.renews ? 86400e3 : REAUTH_SOON_MS)) {
+      const n = noteLine('chan-sec-note', auth.renews ? t('renewals stopped — re-authorize in {eta}', { eta }) : t('re-authorize in {eta}', { eta }), { warn: left <= (auth.renews ? 86400e3 : 0) });
       const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
       out.push(n);
     }
+    // the VENDOR BUDGET, said with its numbers while it is spent (§6.2)
+    const bt = a.budget ? chanCaps.budgetText(a.budget, { t }) : '';
+    if (bt) out.push(noteLine('chan-sec-note', bt, { warn: true }));
+    // a failing pass BEFORE the third failure (the "For you" line below takes over from there)
+    if (ps.note && !(a.consecutiveFailures >= 3)) out.push(noteLine('chan-sec-note', ps.note, { warn: true }));
   } else if (auth.state === 'expired') {
     // D8: the mounts' auth-death sentence VERBATIM (its nouns the channel's), the channel's why CODE in brackets
     out.push(errLine(app, a, `${t('connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix')} (${auth.why || 'needs-reauth'})`, kinds));
@@ -259,64 +273,67 @@ function accountLines(app, a, kinds) {
   if (a.lastAuthError && !(a.flow && a.flow.running)) out.push(noteLine('chan-sec-note', t('Last connect failed: {error}', { error: a.lastAuthError }), { warn: true }));
   if (a.consecutiveFailures >= 3 && a.lastPass && auth.state === 'connected') {
     const s = t('{n} failed passes ({code})', { n: a.consecutiveFailures, code: chanCaps.errorCodeText((a.lastPass && a.lastPass.code) || 'failed', { t }) });
-    out.push(noteLine('chan-sec-note', s + (a.lastPass.error ? ` — ${a.lastPass.error}` : '') + (a.failureItem ? ` — ${t('a "For you" item was filed')}` : ''), { warn: true }));
+    const retry = a.lastPass.ok === false ? chanCaps.passStateText(a, { t, now: Date.now() }).note : '';
+    out.push(noteLine('chan-sec-note', s + (a.lastPass.error ? ` — ${a.lastPass.error}` : '') + (retry ? ` — ${retry}` : '') + (a.failureItem ? ` — ${t('a "For you" item was filed')}` : ''), { warn: true }));
   }
   if (a.push && (a.push.demotedAt || a.push.state === 'unavailable')) {
+    // the lane's CODE worded as its remedy (2026-09-26: e.g. the Lark SDK is
+    // not installed — the exact command, the console steps, "polled meanwhile")
     const n = noteLine('chan-sec-note', chanCaps.pushLaneText(a.push, a.lane, { t, now: Date.now() }), { warn: true });
     if (a.push.demotedAt) { const v = btn(t('Re-declare exclusive and retry'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push: { claimedExclusive: 'exclusive' } })); v.classList.add('chan-sec-verb'); n.appendChild(v); }
     out.push(n);
   }
   return out;
 }
-/** The ⋯ item "Open conversation window": the account's most recently active
- *  TRACKED conversation (else its most recent one). */
+/** The ⋯ item "Open conversation window": the account's most recently
+ *  active conversation. */
 function openConversationOf(app, convs) {
-  const list = (convs || []).slice().sort((x, y) => (Number(!!y.tracked) - Number(!!x.tracked)) || ((y.lastAt || 0) - (x.lastAt || 0)));
+  const list = (convs || []).filter((c) => !c.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
   if (list[0]) app.openChannel(list[0].adapterId, list[0].id);
 }
 
-
-/** The list of one adapter's conversations with a Track checkbox each — the
- *  house `dialog-check-row` grid (a1 O1: the generic `.dialog-body label`
- *  rule used to stack the box above the title). Shared by the Track picker
- *  and the wizard's third step. */
-function trackList(a, convs) {
+/** SEARCH ONE ACCOUNT's messages (2026-09-26, design §6.5): the server reads
+ *  the local logs asynchronously with a byte cap; a result opens its
+ *  conversation. Every string is vendor text ⇒ textContent only. */
+function showSearchDialog(app, a) {
+  const { body, close } = createModalShell({ id: 'chan-search-dialog', title: t('Search messages — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-search', escapeToClose: true });
+  const row = document.createElement('div');
+  row.className = 'chan-search-row';
+  const input = document.createElement('input');
+  input.type = 'search'; input.className = 'chan-opt-input'; input.placeholder = t('Words to find in this account\'s messages');
+  input.spellcheck = false;
+  const go = btn(t('Search'), null, 'mounts-btn-primary');
+  row.append(input, go);
+  const status = chanLine('chan-flow-status', '');
   const list = document.createElement('div');
-  list.className = 'chan-track-list';
-  if (!convs.length) { const e = chanLine('empty-hint empty-hint-inline', t('No conversations discovered yet.')); list.appendChild(e); }
-  for (const c of convs) {
-    const lab = document.createElement('label');
-    lab.className = 'dialog-check-row chan-track-item';
-    const cb = document.createElement('input');
-    cb.type = 'checkbox'; cb.checked = !!c.tracked;
-    cb.onchange = async () => {
-      cb.disabled = true;
-      const r = await post(`/api/channels/${encodeURIComponent(c.adapterId)}/${encodeURIComponent(c.id)}/track`, { tracked: cb.checked });
-      cb.disabled = false;
-      if (!r) cb.checked = !cb.checked;   // refused: the toast said why, the box says the truth
-    };
-    const title = document.createElement('span');
-    title.className = 'chan-track-title';
-    title.textContent = c.title || c.id;
-    const sub = document.createElement('span');
-    sub.className = 'chan-track-sub';
-    sub.textContent = c.participants || '';
-    lab.append(cb, title, sub);
-    list.appendChild(lab);
-  }
-  return list;
-}
-
-/** THE TRACKED PICKER: tracked is OPT-IN (§5 invariant 6) — nothing is fetched
- *  for a conversation until the user ticks it here or in the row menu. */
-function showTrackPicker(app, a, convs) {
-  const { body, close } = createModalShell({ id: 'chan-track-dialog', title: t('Track conversations — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-track', escapeToClose: true });
-  body.appendChild(chanLine('chan-flow-note', t('Nothing is fetched for a conversation until you track it.')));
-  body.appendChild(trackList(a, convs));
-  const actions = document.createElement('div');
-  actions.className = 'chan-flow-actions';
-  actions.appendChild(btn(t('Done'), close, 'mounts-btn-primary'));
-  body.appendChild(actions);
+  list.className = 'chan-search-results';
+  body.append(row, status, list);
+  const run = async () => {
+    const q = input.value.trim();
+    if (q.length < 2) { status.textContent = t('Type at least 2 characters.'); return; }
+    go.disabled = true; status.textContent = t('Searching…');
+    const r = await fetchJson(`/api/channels/search?adapter=${encodeURIComponent(a.id)}&q=${encodeURIComponent(q)}`);
+    go.disabled = false;
+    list.textContent = '';
+    if (!r || r.error) { status.textContent = routeErrorText(r); return; }
+    status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
+    for (const hit of r.results) {
+      const it = document.createElement('div');
+      it.className = 'chan-search-hit';
+      const head = document.createElement('div');
+      head.className = 'chan-search-head';
+      const ti = document.createElement('b'); ti.textContent = hit.title || hit.convId;
+      const who = document.createElement('span'); who.className = 'chan-search-who'; who.textContent = `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`;
+      head.append(ti, who);
+      const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = String(hit.record.text || '').slice(0, 300);
+      it.append(head, tx);
+      it.onclick = () => { close(); app.openChannel(a.id, hit.convId); };
+      list.appendChild(it);
+    }
+  };
+  go.onclick = run;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+  setTimeout(() => input.focus(), 30);
 }
 
 /** THE OPTIONS EDITOR: the adapter's DECLARED options only (a select for a
@@ -332,7 +349,8 @@ function showOptionsDialog(app, a) {
     let input;
     if (Array.isArray(o.choices) && o.choices.length) {
       input = document.createElement('select');
-      for (const ch of o.choices) { const opt = document.createElement('option'); opt.value = ch; opt.textContent = ch; input.appendChild(opt); }
+      // a declared choice's WORDS (`choiceLabels`, keys worded here — 2026-09-26)
+      for (const ch of o.choices) { const opt = document.createElement('option'); opt.value = ch; opt.textContent = o.choiceLabels && o.choiceLabels[ch] ? t(o.choiceLabels[ch]) : ch; input.appendChild(opt); }
       input.value = (a.options && a.options[o.key]) || o.default || o.choices[0];
     } else {
       input = document.createElement('input');
@@ -344,14 +362,20 @@ function showOptionsDialog(app, a) {
     wrap.append(lab, input);
     if (o.help) wrap.appendChild(chanLine('chan-opt-help', t(o.help)));
     body.appendChild(wrap);
-    fields.push([o.key, input]);
+    fields.push([o.key, input, o, wrap]);
   }
+  // an option USED only for certain values of a sibling (`usedWhen`) is shown
+  // only then and restored to its default when hidden (never a stale value)
+  const inUse = (o) => !o.usedWhen || Object.entries(o.usedWhen).every(([k, allowed]) => { const f = fields.find((x) => x[0] === k); return f && (Array.isArray(allowed) ? allowed : [allowed]).includes(f[1].value); });
+  const sync = () => { for (const [, , o, wrap] of fields) wrap.style.display = inUse(o) ? '' : 'none'; };
+  for (const [, input] of fields) input.addEventListener('change', sync);
+  sync();
   const actions = document.createElement('div');
   actions.className = 'chan-flow-actions';
   const status = chanLine('chan-flow-status', '');
   const save = btn(t('Save'), async () => {
     const options = {};
-    for (const [k, input] of fields) options[k] = input.value;
+    for (const [k, input, o] of fields) options[k] = inUse(o) ? input.value : '';
     save.disabled = true;
     const r = await put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { options });
     save.disabled = false;
@@ -451,9 +475,10 @@ function adapterNotes(app, a) {
   if (a.enabled === false) {
     line(t('disabled'), { verbs: [btn(t('Enable'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { enabled: true }))] });
   } else if (auth.state === 'connected') {
-    // the built-in row's login IS this instance (`auth.self`), never a named user
+    // the built-in row's login IS this instance (`auth.self`), never a named user;
+    // a sliding token (`renews`) counts down only once renewals have stopped
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
-    const soon = auth.expiresAt && (Number(auth.expiresAt) - Date.now()) < REAUTH_SOON_MS;
+    const soon = auth.expiresAt && (Number(auth.expiresAt) - Date.now()) < (auth.renews ? 86400e3 : REAUTH_SOON_MS);
     if (soon && eta) {
       const who = auth.self ? t('connected — this instance') : auth.user ? t('connected as {user}', { user: auth.user }) : t('connected');
       line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0 });
@@ -503,18 +528,20 @@ function dotTitle(a) {
  *  row. ctx = { app, adapter, convs, kinds }.
  *
  *  AN ACCOUNT'S ⋯ FOLLOWS THE STORAGE ROW'S ACTION ORDER (r4 §8.1 #6, D6):
- *  Open conversation window (= Browse) → Track… (= ＋ submount) → Options →
- *  Push… ‖ Re-authorize / Connect → Duplicate… → Disconnect → Remove… ‖
- *  Disable. `Remove…` also lives in the Edit dialog (the mount's home for
- *  it); the sender-line switch of an account lives in Edit too. A SOURCE (not
- *  connectable — the built-in watcher, a fixture) keeps Track / Options /
- *  Push / its sender-line row / Disable. */
+ *  Open conversation window (= Browse) → Search messages… → Hand to an
+ *  agent… / Conversations matching a rule… (2026-09-26: the account and
+ *  pattern grains — there is no Track… any more, every conversation is
+ *  fetched) → Options → Push… ‖ Re-authorize / Connect → Duplicate… →
+ *  Disconnect → Remove… ‖ Disable. */
 export function registerChannelAdapterMenu() {
   const M = 'channel-adapter';
   const A = (c) => c.adapter;
   const acct = (c) => !!A(c).connectable;
   registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && (c.convs || []).length > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
-  registerMenuItem({ menu: M, group: '1_rows', order: 10, label: () => t('Track…'), run: (c) => showTrackPicker(c.app, A(c), c.convs || []) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && (c.convs || []).length > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
+  // 2026-09-26 (design §7.3): the ACCOUNT and PATTERN grains, the same editor as a conversation's
+  registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: (c) => (A(c).assignment ? t('Handed to an agent — edit…') : t('Hand to an agent…')), run: (c) => showScopeAssignDialog(c.app, A(c), { kind: 'account' }) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showScopeAssignDialog(c.app, A(c), { kind: 'pattern' }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
@@ -554,6 +581,21 @@ export function registerChannelAdapterMenu() {
   registerMenuItem({ menu: M, group: '4_state', order: 10, label: (c) => (A(c).enabled === false ? t('Enable') : t('Disable')), run: (c) => put(`/api/channels/adapters/${encodeURIComponent(A(c).id)}`, { enabled: A(c).enabled === false }) });
 }
 
+/** THE OVERRIDE CHOICES (2026-09-26): Automatic (the activity tier) and the
+ *  owner's five — the current one checked; a pick PUTs and the broadcast
+ *  repaints every client. */
+function refreshChoices(conv) {
+  const cur = conv && conv.refresh ? conv.refresh.every : null;
+  const put1 = (every) => api(`/api/channels/${encodeURIComponent(conv.adapterId)}/${encodeURIComponent(conv.id)}/refresh`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ every }) });
+  const tierWord = conv && conv.cadence && conv.cadence.tier ? (conv.cadence.tier === 'hot' ? t('busy') : conv.cadence.tier === 'warm' ? t('recent') : t('quiet')) : '';
+  const rows = [
+    [null, cur === null && conv && conv.cadence && conv.cadence.source !== 'override' ? t('Automatic ({tier}, every {age})', { tier: tierWord, age: chanCaps.humanAge(conv.cadence.seconds) }) : t('Automatic (by activity)')],
+    [30, t('Every 30 seconds')], [60, t('Every minute')], [300, t('Every 5 minutes')], [900, t('Every 15 minutes')], ['paused', t('Paused')],
+  ];
+  // the checked row wears the menu's own check (a CSS glyph, the sender-line row's) — never a text symbol
+  return rows.map(([v, label]) => ({ label, labelHtml: `<span class="chan-menu-check${cur === v ? ' chan-menu-check-on' : ''}" data-refresh-choice="${escHtml(String(v))}">${cur === v ? UI_ICONS.check : ''}</span>${escHtml(label)}`, action: () => put1(v) }));
+}
+
 /** The `channel-row` menu. P0a contributes only the verbs that DO something;
  *  assign / filter / reach belong to later phases and a menu row that opens
  *  nothing is the declared-but-inert slot this design argues against. */
@@ -567,33 +609,38 @@ export function registerChannelsMenus() {
   registerMenuItem({
     menu: M, group: '2_state', order: 0, separator: true,
   });
+  // 2026-09-26: no Track / Stop tracking — every conversation of a linked
+  // account is fetched; the owner decides HOW OFTEN (the override below)
   registerMenuItem({
     menu: M, group: '2_state', order: 10,
-    when: (c) => !c.conv.tracked,
-    label: () => t('Track this conversation'),
-    run: (c) => api(`/api/channels/${encodeURIComponent(c.conv.adapterId)}/${encodeURIComponent(c.conv.id)}/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracked: true }) }),
-  });
-  registerMenuItem({
-    menu: M, group: '2_state', order: 20,
-    when: (c) => !!c.conv.tracked,
-    label: () => t('Stop tracking'),
-    run: (c) => api(`/api/channels/${encodeURIComponent(c.conv.adapterId)}/${encodeURIComponent(c.conv.id)}/track`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracked: false }) }),
-  });
-  registerMenuItem({
-    menu: M, group: '2_state', order: 30,
-    when: (c) => !!c.conv.tracked && c.conv.unread > 0,
+    when: (c) => c.conv.unread > 0,
     label: () => t('Mark read'),
     run: (c) => api(`/api/channels/${encodeURIComponent(c.conv.adapterId)}/${encodeURIComponent(c.conv.id)}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }),
   });
-  // P2: assign + filter (design §7). Only a TRACKED conversation can wake
-  // anybody — nothing is fetched for an untracked one (§5 invariant 6).
+  registerMenuItem({
+    menu: M, group: '2_state', order: 20,
+    label: () => t('Refresh now'),
+    run: async (c) => {
+      const r = await api(`/api/channels/${encodeURIComponent(c.conv.adapterId)}/${encodeURIComponent(c.conv.id)}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      // r5: a refresh the loop has not answered within its bound says so (the window updates when it lands) — never 'Up to date'
+      if (r) showToast(r.pending ? t('Refresh still running — the conversation updates when it lands') : r.appended ? t('{n} new message(s)', { n: r.appended }) : t('Up to date'));
+    },
+  });
+  // THE OWNER'S OVERRIDE ("Refresh every ▸", design §6.2): persisted, broadcast,
+  // the checked row is the conversation's current choice
+  registerMenuItem({
+    menu: M, group: '2_state', order: 30,
+    label: () => t('Refresh every'),
+    children: (c) => refreshChoices(c.conv),
+  });
+  // P2: assign + filter (design §7) — the CONVERSATION grain; the account
+  // and pattern grains live on the account card's ⋯ (§7.3, 2026-09-26)
   registerMenuItem({
     menu: M, group: '3_assign', order: 10, separator: true,
   });
   registerMenuItem({
     menu: M, group: '3_assign', order: 20,
-    when: (c) => !!c.conv.tracked,
-    label: (c) => (c.conv.assignment ? t('Assign & filter…') : t('Assign to an agent…')),
+    label: (c) => (c.conv.assignment && c.conv.assignment.source === 'conversation' ? t('Assign & filter…') : t('Assign to an agent…')),
     run: (c) => showAssignFilterDialog(c.app, c.conv),
   });
   // P3: who may see this conversation (with each grant's origin) + its
@@ -630,6 +677,14 @@ const COLLAPSED = new Set();
 const EXPANDED = new Set();
 /** The archived-groups fold (per page session — a list the user asked to see). */
 let ARCHIVED_OPEN = false;
+/** THE LONG LISTS (2026-09-26: an account is an aggregated IM — 873
+ *  conversations is a real account): the first screen and each account card
+ *  draw the newest rows first and the rest behind "Show all" (per page
+ *  session, like the folds). */
+const FIRST_SCREEN_ROWS = 60;
+const ACCOUNT_ROWS = 30;
+let FIRST_ALL = false;
+const ACCOUNT_ALL = new Set();
 
 // ── THE SECONDARY SECTIONS' FOLDS (g3): persisted in user state
 // (`channelsPanelFolds`, PATCH merge-only, the jobsPanelFolds pattern) —
@@ -680,12 +735,14 @@ function groupMenu(app, g) {
 
 /**
  * Render the rail panel into `c`. THE FIRST SCREEN IS THE GROUP LIST (design
- * §22, the owner's IM model): every agent group and every TRACKED conversation
- * of a connected account in ONE list sorted by last activity — row = glyph +
- * name + time / source chip + last line + unread. The accounts (connect,
- * re-authorize, the per-account conversation rows with Track / Assign /
- * Reach) and the MESSAGE WATCHER (the built-in agents-as-sources section) are
- * SECONDARY sections below, each folded by the user and the fold persisted.
+ * §22, the owner's IM model): every agent group and every conversation of a
+ * connected account (2026-09-26: an aggregated IM — there is no track step)
+ * in ONE list sorted by last activity — row = glyph + name + time / source
+ * chip + last line + unread. The accounts (connect, re-authorize, search,
+ * the account / pattern grains, the per-account conversation rows with
+ * Refresh every / Assign / Reach) and the MESSAGE WATCHER (the built-in
+ * agents-as-sources section) are SECONDARY sections below, each folded by
+ * the user and the fold persisted.
  *
  * Renders ONCE per tab entry (the rail's renders-once guard) and repaints IN
  * PLACE from the two broadcasts — `channels-updated` carries the recomputed
@@ -804,9 +861,11 @@ export function renderChannelsPanel(app, c) {
     const list = document.createElement('div');
     list.className = 'chan-groups';
     if (!rows.length) {
-      list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). A conversation you track in an account below appears here as well.')));
+      list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
     }
-    for (const r of rows) list.appendChild(groupRow(r));
+    const shown = FIRST_ALL ? rows : rows.slice(0, FIRST_SCREEN_ROWS);
+    for (const r of shown) list.appendChild(groupRow(r));
+    if (rows.length > shown.length) list.appendChild(moreToggle(t('Show all {n} conversations', { n: rows.length }), () => { FIRST_ALL = true; draw(); }));
     if (archived.length) {
       const tog = document.createElement('div');
       tog.className = 'chan-archived-toggle' + (ARCHIVED_OPEN ? ' chan-archived-open' : '');
@@ -853,13 +912,13 @@ export function renderChannelsPanel(app, c) {
     // ── SECONDARY: the message watcher (agents as SOURCES: track / assign / filter) ──
     if (watcher.length) {
       into.appendChild(part('watcher', t('Message watcher'), '', (b) => {
-        b.appendChild(chanLine('chan-part-note', t('Follow a live agent session as a source: track it, then assign or filter it for another agent. To talk WITH agents, use a group.')));
+        b.appendChild(chanLine('chan-part-note', t('Follow a live agent session as a source: assign or filter it for another agent. To talk WITH agents, use a group.')));
         for (const a of watcher) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
       }));
     }
   }
 
-  /** ONE row of the first screen: an agent group or a tracked conversation. */
+  /** ONE row of the first screen: an agent group or a conversation of a linked account. */
   function groupRow(r) {
     const el = document.createElement('div');
     el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '');
@@ -909,14 +968,14 @@ export function renderChannelsPanel(app, c) {
   }
 
   /** THE ACCOUNT CARD (r4 §2.5 / §8.1 #1, the mockup `account-card`): head =
-   *  chevron · type glyph · name · client chip · dot · tracked/total · ✎ · ⋯;
-   *  under it the health line OR the error line + Re-authorize button; then
-   *  the TRACKED conversations as ↳ rows (the storage child-row grammar — an
-   *  untracked conversation is picked with Track…, not listed); an account
-   *  tracking nothing says so in the credential-only row's register. */
+   *  chevron · type glyph · name · client chip · dot · conversations · ✎ · ⋯;
+   *  under it the health line OR the error line + Re-authorize button, the
+   *  account / pattern grains (2026-09-26, §7.3: "Handed to <name> · all ·
+   *  wake", each rule on its own line), then EVERY conversation as ↳ rows
+   *  (newest first, the rest behind "Show all"). */
   function accountCard(a, mine, siblings, ordinal) {
     const kinds = (digest && digest.kinds) || [];
-    const tracked = mine.filter((x) => x.tracked);
+    const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
     const sec = document.createElement('div');
     sec.dataset.adapter = a.id;
     const folded = EXPANDED.has(a.id) ? false : COLLAPSED.has(a.id);
@@ -941,15 +1000,16 @@ export function renderChannelsPanel(app, c) {
       h.appendChild(cc);
     }
     const dot = document.createElement('span');
-    const dotState = accountDot(a, tracked.length);
+    const dotState = accountDot(a);
     dot.className = 'chan-dot chan-dot-' + dotState;
     dot.dataset.state = dotState;
     dot.title = dotTitle(a);
     h.appendChild(dot);
     const cnt = document.createElement('span');
     cnt.className = 'chan-sec-count';
-    cnt.textContent = `${tracked.length}/${mine.length}`;
-    cnt.title = t('{k} tracked of {n}', { k: tracked.length, n: mine.length });
+    const unreadN = listed.reduce((n, x) => n + (Number(x.unread) || 0), 0);
+    cnt.textContent = String(listed.length);
+    cnt.title = unreadN ? t('{n} conversations · {k} unread', { n: listed.length, k: unreadN }) : t('{n} conversations', { n: listed.length });
     h.appendChild(cnt);
     const edit = document.createElement('button');
     edit.type = 'button';
@@ -975,24 +1035,53 @@ export function renderChannelsPanel(app, c) {
     h.oncontextmenu = (ev) => { ev.preventDefault(); openMenu(ev.clientX, ev.clientY); };
     sec.appendChild(h);
     for (const n of accountLines(app, a, kinds)) sec.appendChild(n);
+    // THE ACCOUNT AND PATTERN GRAINS (§7.3): one line each, the editor on click
+    for (const n of grainLines(a)) sec.appendChild(n);
     const rows = document.createElement('div');
     rows.className = 'chan-rows';
-    for (const conv of tracked) rows.appendChild(row(conv, { child: true }));
+    const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
+    for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv, { child: true }));
+    if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
+    if (!listed.length && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
     sec.appendChild(rows);
-    // the credential-only row's register (§8.1 #1): signed in, tracking nothing
-    if (!tracked.length && a.enabled !== false && (a.auth || {}).state === 'connected') {
-      const n = document.createElement('div');
-      n.className = 'chan-sec-note chan-sec-empty';
-      n.appendChild(icon('connect', 11));
-      const s2 = document.createElement('span');
-      s2.textContent = t('Login only — no conversation tracked yet; nothing is fetched until you track one. Use Track… to pick conversations under this account.');
-      n.appendChild(s2);
-      const tb = btn(t('Track…'), () => showTrackPicker(app, a, mine));
-      tb.classList.add('chan-sec-verb');
-      n.appendChild(tb);
-      sec.appendChild(n);
-    }
     return sec;
+  }
+  /** "Show all N" — a quiet text button under a capped list. */
+  function moreToggle(label, onClick) {
+    const b = btn(label, onClick, 'chan-more-btn');
+    b.dataset.showAll = '1';
+    return b;
+  }
+  /** The account card's grain lines: "Handed to <name> · all · wake" for the
+   *  whole account, and one line per rule ("Rule: title contains … → <name>"). */
+  function grainLines(a) {
+    const out = [];
+    const say = (g) => [g.principal.name || g.principal.id, g.mode === 'filtered' ? t('filtered') : t('all messages'), g.notify === 'digest' ? t('digest every {m} min', { m: g.digestMinutes }) : t('wake')].join(' · ');
+    if (a.assignment) {
+      const l = document.createElement('div');
+      l.className = 'chan-row-assign chan-grain-line';
+      l.dataset.grain = 'account';
+      l.appendChild(icon('filter', 10));
+      const tx = document.createElement('span');
+      tx.textContent = t('Handed to {who}', { who: say(a.assignment) });
+      l.appendChild(tx);
+      l.title = t('The whole account is handed to this agent — every conversation without an assignment of its own wakes it. Click to edit.');
+      l.onclick = () => showScopeAssignDialog(app, a, { kind: 'account' });
+      out.push(l);
+    }
+    for (const pa of a.patterns || []) {
+      const l = document.createElement('div');
+      l.className = 'chan-row-assign chan-grain-line';
+      l.dataset.grain = 'pattern';
+      l.appendChild(icon('filter', 10));
+      const tx = document.createElement('span');
+      tx.textContent = t('Rule: {rule} → {who}', { rule: pa.patternLabel || '', who: say(pa) });
+      l.appendChild(tx);
+      l.title = t('Conversations matching this rule — now and later — wake this agent. Click to edit.');
+      l.onclick = () => showScopeAssignDialog(app, a, { kind: 'pattern', id: pa.id });
+      out.push(l);
+    }
+    return out;
   }
 
   /** One ADAPTER section: an ACCOUNT (connectable) is the credential-first
@@ -1003,12 +1092,12 @@ export function renderChannelsPanel(app, c) {
     const sec = document.createElement('div');
     sec.dataset.adapter = a.id;
     // The built-in Agents adapter lists every live session on this instance —
-    // a list the sidebar already shows. Until one of them is tracked it is
+    // a list the sidebar already shows. Until one of them is assigned it is
     // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
-    // caption says what tracking means; an explicit open/close survives repaints.
+    // caption says what assigning does; an explicit open/close survives repaints.
     const builtinAgents = !!a.builtin;
-    const nothingTracked = mine.length > 0 && !mine.some((x) => x.tracked);
-    const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingTracked));
+    const nothingAssigned = mine.length > 0 && !mine.some((x) => x.assignment);
+    const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingAssigned));
     sec.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
     const h = document.createElement('div');
     h.className = 'chan-sec-head folder-header';
@@ -1028,8 +1117,8 @@ export function renderChannelsPanel(app, c) {
     h.appendChild(dot);
     const cnt = document.createElement('span');
     cnt.className = 'chan-sec-count';
-    cnt.textContent = `${mine.filter((x) => x.tracked).length}/${mine.length}`;
-    cnt.title = t('{k} tracked of {n}', { k: mine.filter((x) => x.tracked).length, n: mine.length });
+    cnt.textContent = String(mine.length);
+    cnt.title = t('{n} conversations', { n: mine.length });
     h.appendChild(cnt);
     const more = document.createElement('button');
     more.type = 'button';
@@ -1049,29 +1138,34 @@ export function renderChannelsPanel(app, c) {
     if (builtinAgents) {
       const note = document.createElement('div');
       note.className = 'chan-sec-note';
-      note.textContent = nothingTracked
-        ? t('Your live agent sessions on this instance — the same list as the sidebar. Track one to follow its messages here; an untracked row fetches nothing.')
-        : t('Your live agent sessions on this instance. Tracked ones are followed here; an untracked row fetches nothing.');
+      note.textContent = nothingAssigned
+        ? t('Your live agent sessions on this instance — the same list as the sidebar. Assign one to another agent to have its messages followed.')
+        : t('Your live agent sessions on this instance. Assigned ones wake the agent they are handed to.');
       sec.appendChild(note);
     }
     // the status line(s) — only when there is something to say (a1 D1/D6)
     for (const n of adapterNotes(app, a)) sec.appendChild(n);
+    // a SOURCE that is not built in takes the account and pattern grains too (§7.3)
+    if (!builtinAgents) for (const n of grainLines(a)) sec.appendChild(n);
     const rows = document.createElement('div');
     rows.className = 'chan-rows';
-    if (!mine.length) {
+    const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
+    if (!listed.length) {
       const e = document.createElement('div');
       e.className = 'empty-hint empty-hint-inline chan-sec-empty';
       e.textContent = t('No conversations discovered yet.');
       rows.appendChild(e);
     }
-    for (const conv of mine) rows.appendChild(row(conv));
+    const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
+    for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv));
+    if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
     sec.appendChild(rows);
     return sec;
   }
 
   function row(conv, { child = false } = {}) {
     const el = document.createElement('div');
-    el.className = 'chan-row session-item-card' + (conv.tracked ? ' chan-tracked' : '') + (child ? ' chan-row-tracked' : '');
+    el.className = 'chan-row session-item-card' + (child ? ' chan-row-child' : '') + (conv.unread ? ' chan-row-unread' : '');
     el.dataset.conv = `${conv.adapterId}/${conv.id}`;
     // line 1: the title + ONE freshness pill (the honesty contract)
     const line = document.createElement('div');
@@ -1081,14 +1175,13 @@ export function renderChannelsPanel(app, c) {
     title.textContent = conv.title || conv.id;
     // the 172px default rail truncates a long title; the tooltip keeps it readable — and
     // carries the freshness sentence, which the ≤180px container hides as a pill
-    const fresh = conv.tracked ? (chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown')) : '';
-    title.title = fresh ? `${conv.title || conv.id} — ${fresh}` : (conv.title || conv.id);
-    // an account's tracked conversation is its CHILD row: the storage child-row arrow
+    const fresh = chanCaps.freshnessText(conv.freshness || {}, { t }) || t('unknown');
+    title.title = `${conv.title || conv.id} — ${fresh}`;
+    // an account's conversation is its CHILD row: the storage child-row arrow
     if (child) { const ar = document.createElement('span'); ar.className = 'mounts-child-arrow'; ar.textContent = '↳'; line.appendChild(ar); }
     line.appendChild(title);
-    // the ONE freshness pill, on a TRACKED row only (§4.3: an untracked row has
-    // no evidence to claim; its `not tracked` text is the claim)
-    if (conv.tracked) line.appendChild(chip(conv.freshness));
+    // the ONE freshness pill — every row is fetched (2026-09-26), so every row has its claim
+    line.appendChild(chip(conv.freshness));
     el.appendChild(line);
     // line 2: participants + the needs-you badges (right)
     const sub = document.createElement('div');
@@ -1097,15 +1190,8 @@ export function renderChannelsPanel(app, c) {
     who.className = 'chan-row-who';
     who.textContent = conv.participants || '';
     sub.appendChild(who);
-    const awaiting = conv.tracked && conv.outbox && conv.outbox.awaiting ? Number(conv.outbox.awaiting) : 0;
-    const unread = conv.tracked && conv.unread ? Number(conv.unread) : 0;
-    if (!conv.tracked) {
-      const u = document.createElement('span');
-      u.className = 'chan-untracked';
-      u.textContent = t('not tracked');
-      u.title = t('Nothing is fetched for this conversation until you track it.');
-      sub.appendChild(u);
-    }
+    const awaiting = conv.outbox && conv.outbox.awaiting ? Number(conv.outbox.awaiting) : 0;
+    const unread = conv.unread ? Number(conv.unread) : 0;
     // P3: proposals awaiting approval on this row — the badge the pointer
     // degrades to when the inbox refuses the item (§9.2).
     if (awaiting) {
@@ -1134,18 +1220,20 @@ export function renderChannelsPanel(app, c) {
       sub.appendChild(needs);
     }
     el.appendChild(sub);
-    // line 3 (P2): the assignment as it READS (authority clamped) + the
-    // measurement beside it; a held/stashed last wake says so in amber.
+    // line 3 (P2): the assignment IN EFFECT (§7.3: its own, or inherited from
+    // the account / a rule — dim, labelled), authority clamped; a held/stashed
+    // last wake says so in amber.
     if (conv.assignment) {
       const asg = document.createElement('div');
-      const held = !!(conv.stats && conv.stats.lastWake && conv.stats.lastWake.ok === false);
-      asg.className = 'chan-row-assign' + (held ? ' chan-warn' : '');
+      const held = !!conv.held;
+      const inherited = conv.assignment.source && conv.assignment.source !== 'conversation';
+      asg.className = 'chan-row-assign' + (held ? ' chan-warn' : '') + (inherited ? ' chan-row-inherited' : '');
+      asg.dataset.grain = conv.assignment.source || 'conversation';
       asg.appendChild(icon('filter', 10));   // the glyph is an SVG (§17) — the sentence used to start with a '→'
       const asgText = document.createElement('span');
       asgText.textContent = assignmentSummary(conv) + (held ? ' · ' + t('last wake held') : '');
       asg.appendChild(asgText);
-      // the held wake's `refused` is a CODE (worded); its `why` is the ladder's own sentence (the fallback)
-      asg.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(conv.stats.lastWake.refused, { t }) || conv.stats.lastWake.why || '' }) : assignmentSummary(conv);
+      asg.title = held ? t('Last wake was held or stashed — open the conversation\'s Assign & filter for the reason') : assignmentSummary(conv);
       el.appendChild(asg);
     }
     el.onclick = () => app.openChannel(conv.adapterId, conv.id);
@@ -1186,13 +1274,34 @@ export function renderChannelsPanel(app, c) {
       return;
     }
     if (msg.type !== 'channels-updated') return;
-    if (msg.digest) { digest = msg.digest; if (groups !== null) draw(); } else refresh().catch(() => {});
+    if (msg.digest) { digest = mergeDigest(digest, msg.digest); if (groups !== null) draw(); } else refresh().catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
+  // A BROADCAST SENT WHILE THE SOCKET WAS DOWN NEVER ARRIVES (lane R2 verify
+  // r3, the desktop-app-prefs / For-you rule): a partial digest missed during
+  // a reconnect left a row's unread / freshness / held-hits stale until the
+  // next WHOLE digest (an account-level change — passes are partial). Re-read
+  // on every reconnect; the first paint is refresh()'s own (`digest === null`).
+  const onState = (up) => { if (up && digest !== null && c.isConnected) refresh().catch(() => {}); };
+  app.ws.onStateChange?.(onState);
   const foldListener = { c, draw };
   FOLD_LISTENERS.add(foldListener);
   refresh().catch(() => {});
-  return () => { FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} };
+  return () => { FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} try { app.ws.offStateChange?.(onState); } catch {} };
+}
+
+/** A PARTIAL broadcast (2026-09-26: an account of 873 conversations made the
+ *  whole digest ~1 MB) carries the adapters, the totals and ONLY the rows
+ *  that changed: those rows replace theirs by key; a whole digest replaces
+ *  everything. Exported for the suite. */
+export function mergeDigest(prev, next) {
+  if (!next) return prev;
+  if (!next.partial || !prev) return next;
+  const byKey = new Map((prev.conversations || []).map((c) => [c.key, c]));
+  for (const c of next.conversations || []) byKey.set(c.key, c);
+  const adapterIds = new Set((next.adapters || []).map((a) => a.id));
+  const conversations = [...byKey.values()].filter((c) => adapterIds.has(c.adapterId)).sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  return { ...prev, ...next, conversations, partial: false };
 }
 
 /** Focus the rail's Channels panel (the ⚙ row and any deep link) — or, where

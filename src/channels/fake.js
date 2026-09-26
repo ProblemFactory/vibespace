@@ -72,12 +72,36 @@ const LINES = [
   'thanks — merged',
 ];
 
-/** The conversations this adapter shows, per kind. Deterministic. */
-function worldFor(kind, { now = Date.now(), days = 1 } = {}) {
+/** A tiny valid PNG (8×8, one colour per room) — what an image attachment
+ *  of the fake world FETCHES (2026-09-26: the aggregated IM's image
+ *  thumbnails are driven end to end through our own route). */
+function fixturePng(seed) {
+  const zlib = require('zlib');
+  const r = rng(`png:${seed}`);
+  const [R, G, B] = [Math.floor(r() * 200) + 30, Math.floor(r() * 200) + 30, Math.floor(r() * 200) + 30];
+  const w = 8, h = 8;
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = R; raw[o + 1] = G; raw[o + 2] = B; } }
+  const crcTable = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = crcTable[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type, 'ascii'), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2; ihdr[10] = 0; ihdr[11] = 0; ihdr[12] = 0;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** The conversations this adapter shows, per kind. Deterministic.
+ *  `convs` (2026-09-26, the NAMED seam `VIBESPACE_CHANNELS_FAKE_CONVS=<n>`,
+ *  read by `create()` below and nowhere else) adds n synthetic rooms after
+ *  the two base ones — every third record of a synthetic room carries an
+ *  attachment (an image or a text file), so the reader surface (thumbnails,
+ *  downloads) has something real to fetch; the base rooms are unchanged. */
+function worldFor(kind, { now = Date.now(), days = 1, convs: extra = 0 } = {}) {
   const convs = [
     { id: `${kind}-ops`, title: 'Ops room', kind: 'group', participants: 'Ada, Brook, Cass', readable: true, sendable: true },
     { id: `${kind}-announce`, title: 'Announcements', kind: 'group', participants: 'Ada', readable: true, sendable: false, why: 'read-only-mailbox' },
   ];
+  const n = Math.max(0, Math.min(5000, Math.floor(Number(extra) || 0)));
+  for (let i = 1; i <= n; i++) convs.push({ id: `${kind}-room-${i}`, title: `Room ${i}`, kind: i % 5 === 0 ? 'dm' : 'group', participants: 'Ada, Cass', readable: true, sendable: true, synthetic: true });
   const out = new Map();
   for (const c of convs) {
     const r = rng(`${kind}:${c.id}`);
@@ -98,7 +122,9 @@ function worldFor(kind, { now = Date.now(), days = 1 } = {}) {
       // span + span/(count+1) past the boundary, i.e. past any `now` inside it.
       const base = Math.floor(now / span) * span;
       const at = base + Math.floor((i + 1) * ((2 * span) / (count + 1)));
-      records.push({ vendorId: `${c.id}-m${i}`, at, author: who, text: LINES[Math.floor(r() * LINES.length)] });
+      const m = { vendorId: `${c.id}-m${i}`, at, author: who, text: LINES[Math.floor(r() * LINES.length)] };
+      if (c.synthetic && i % 3 === 0) m.attachments = [i % 2 === 0 ? { id: `${c.id}-img${i}`, name: `photo-${i}.png`, bytes: null, mime: 'image/png' } : { id: `${c.id}-file${i}`, name: `notes-${i}.txt`, bytes: null, mime: 'text/plain' }];
+      records.push(m);
     }
     records.sort((a, b) => a.at - b.at);
     out.set(c.id, { meta: c, records });
@@ -116,7 +142,7 @@ function toRecord(adapterId, convId, m, { synthetic = false } = {}) {
     at: m.at,
     author: { id: m.author.id, name: m.author.name, isSelf: false, isBot: false },
     text: m.text,
-    mentions: [], attachments: [], replyTo: null, threadKey: convId,
+    mentions: [], attachments: Array.isArray(m.attachments) ? m.attachments : [], replyTo: null, threadKey: convId,
     raw: synthetic ? { synthetic: true, source: 'ui' } : { synthetic: false, source: 'store' },
   });
 }
@@ -145,14 +171,22 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     threading: 'thread-id',
     editSent: false,
     readReceipts: false,
-    attachments: 'metadata',
+    // 2026-09-26 (the aggregated IM): a fake attachment is FETCHED (a fixture
+    // PNG / a text body), history pages back past the local log, and every
+    // call is metered one request against a generous fixture budget
+    attachments: receive === 'scan' ? 'metadata' : 'fetch',
+    olderHistory: receive === 'scan' ? 'none' : 'page',
+    budget: { unit: 'request', default: 600, settingKey: null, metered: true },
   };
 
   function create(record = {}, deps = {}) {
     const adapterId = record.id || kind;
     const clock = deps.now || now;
+    // the NAMED seam, read HERE only: how many synthetic rooms to add
+    const extraConvs = Number((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_CONVS) || 0;
     let world = null;
-    const getWorld = () => (world || (world = worldFor(kind, { now: clock() })));
+    const getWorld = () => (world || (world = worldFor(kind, { now: clock(), convs: extraConvs })));
+    const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
     // THE SCAN SOURCE ARRIVES AS `opts.source` ON EVERY history() CALL — the
     // engine resolves it with `scanState()` and hands it down, and the registry
     // refuses a scan-adapter page that carries none. This module used to keep
@@ -189,6 +223,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       },
 
       async listConversations() {
+        meter(1);
         const list = [...getWorld().values()].map((c) => makeConversation({
           id: c.meta.id, vendorId: c.meta.id, title: c.meta.title, kind: c.meta.kind,
           participants: c.meta.participants, lastAt: c.records.length ? c.records[c.records.length - 1].at : null,
@@ -199,6 +234,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
       /** Per-conversation, three-valued, and NEVER wider than `caps` (the
        *  registry enforces that too — this one narrows honestly). */
       async convCaps(convId) {
+        meter(1);
         const c = getWorld().get(convId);
         if (!c) return { read: 'no', sendAs: [], why: 'not-a-member', at: clock() };
         if (!c.meta.sendable) return { read: 'yes', sendAs: [], why: c.meta.why || 'read-only-mailbox', at: clock() };
@@ -210,7 +246,8 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
        * `limit` and saying HONESTLY whether it got there. It advances nothing:
        * the cursor belongs to the store.
        */
-      async history(convId, { anchor = null, limit = 50, source = null } = {}) {
+      async history(convId, { anchor = null, limit = 50, source = null, initialMax = null } = {}) {
+        meter(1);
         const c = getWorld().get(convId);
         if (!c) return { records: [], anchor: null, reachedAnchor: true, complete: true };
         // `source` is the RESOLVED one the engine handed down (see above).
@@ -220,6 +257,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         if (anchor) {
           const at = all.findIndex((r) => r.vendorId === anchor);
           idx = at >= 0 ? at + 1 : 0;
+        } else if (Number(initialMax) > 0 && receive !== 'scan') {
+          // a FIRST ingest takes the newest page only; `older()` has the rest
+          idx = Math.max(0, all.length - Number(initialMax));
         }
         const anchorFound = !anchor || idx > 0;
         const pending = all.slice(idx);
@@ -236,6 +276,29 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
           reachedAnchor: anchorFound && drained,
           complete: anchorFound && drained,
         };
+      },
+
+      /** HISTORY ON DEMAND: the newest `limit` records strictly before
+       *  `before` ({at, vendorId}); `exhausted` once nothing older is left. */
+      older: receive === 'scan' ? undefined : async (convId, { before = null, limit = 50 } = {}) => {
+        meter(1);
+        const c = getWorld().get(convId);
+        if (!c) return { records: [], exhausted: true };
+        const all = c.records.map((m) => toRecord(adapterId, convId, m));
+        const olderThan = before ? all.filter((r) => r.at < Number(before.at) || (r.at === Number(before.at) && before.vendorId && r.vendorId < before.vendorId)) : all;
+        const page = olderThan.slice(-Math.max(1, Number(limit) || 50));
+        return { records: page, exhausted: page.length === olderThan.length };
+      },
+      /** ONE attachment's bytes: a fixture PNG for an image, a text body
+       *  otherwise — only for an id a record of this conversation names. */
+      fetchAttachment: receive === 'scan' ? undefined : async (convId, { messageId, attachmentId } = {}) => {
+        meter(1);
+        const c = getWorld().get(convId);
+        const m = c && c.records.find((x) => x.vendorId === messageId);
+        const a = m && Array.isArray(m.attachments) ? m.attachments.find((x) => x.id === attachmentId) : null;
+        if (!a) { const { ChannelError } = require('./index.js'); throw new ChannelError('not-found', `fake: no attachment ${attachmentId} on ${messageId}`, { retryable: false }); }
+        if (/^image\//.test(a.mime || '')) return { data: fixturePng(a.id), mime: 'image/png', name: a.name };
+        return { data: Buffer.from(`fixture attachment ${a.id} of ${messageId}\n`, 'utf-8'), mime: 'text/plain', name: a.name };
       },
 
       // ── receive:'push' — a REAL live lane (a timer, not a promise) ────────
@@ -324,4 +387,4 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, region: (r.values && r.values.region) || null } };
 }
 
-module.exports = { makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'] };
+module.exports = { makeFakeAdapter, fakePoll, fakePush, fakeScan, worldFor, syntheticKey, toRecord, integrationTest, fixturePng, FAKE_KINDS: ['fake-poll', 'fake-push', 'fake-scan'] };

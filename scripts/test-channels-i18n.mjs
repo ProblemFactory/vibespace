@@ -7,7 +7,7 @@
 // the Channels rail panel, the conversation window, the composer + inline
 // approval cards + the Outbox window, the Assign & filter editor, the Reach &
 // policy editor, the account dialogs (r4: connect type-first incl. a custom Lark client, re-authorize with the port-busy notice, edit, duplicate, remove refused), the
-// Options / Push / Track dialogs, and ⚙ → Integrations — renders ZERO visible
+// Options / Push / Search / rule-grain dialogs, and ⚙ → Integrations — renders ZERO visible
 // text nodes (and title/placeholder attributes) whose letters are Latin-only,
 // except a PRINTED allowlist: proper nouns (Lark, 飞书's Latin twin, Gmail,
 // Pub/Sub, OAuth, Google, VibeSpace, the CLI names), URLs / emails / ids /
@@ -79,7 +79,8 @@ export const ALLOWED_PATTERNS = [
 // of these classes (or a tag under one): a conversation's title / participants,
 // a message body, the user's typed proposal, a callback URL, a masked key…
 export const DATA_PATH_CLASSES = [
-  'chan-row-title', 'chan-row-sub', 'chan-track-title', 'chan-track-sub',
+  'chan-row-title', 'chan-row-sub',
+  'chan-search-head', 'chan-search-text',   // a search hit's conversation title / author / message text
   'chanwin-bar', 'chanmsg-head', 'chanmsg-body', 'chan-prop-text', 'chan-prop-link', 'chan-prop-orig', 'chan-prop-honesty-line',
   'chan-prop-edit', 'chan-prop-rejectbox',
   'integ-cb-url', 'integ-mask', 'integ-plain', 'chan-flow-input', 'chan-opt-input', 'chan-af-rule',
@@ -131,8 +132,8 @@ export function census(leaks) {
 
 // The eight surfaces, by the driver's shot-name stems (each must have been shot in each language).
 export const SURFACES = [
-  ['panel', /^panel-02-tracked$/],
-  ['window', /^win-01-tracked-sendable$/],
+  ['panel', /^panel-02-rows$/],
+  ['window', /^win-01-sendable$/],
   ['outbox', /^outbox-window$/],
   ['assign-filter', /^dialog-assign-filter$/],
   ['reach', /^dialog-reach$/],
@@ -144,7 +145,10 @@ export const SURFACES = [
   ['edit', /^wizard-05-edit$/],
   ['duplicate', /^wizard-06-duplicate$/],
   ['remove refused', /^wizard-07-remove-refused$/],
-  ['options/push/track', /^dialog-(options-lark|push|track)$/],
+  ['options/push', /^dialog-(options-lark|push)$/],
+  // 2026-09-26 (aggregated IM): the Track… picker is gone; search + the rule grain are new surfaces
+  ['search', /^dialog-search$/],
+  ['rule grain', /^dialog-scope-assign$/],
   ['integrations', /^integ-01-window$/],
 ];
 
@@ -157,7 +161,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const planted = census([{ text: 'Nothing is fetched yet', paths: ['div.chan-empty < div.chan-list'], surfaces: ['panel-01-fresh'] }]);
   ok(planted.violations.length === 1 && /latin:/.test(planted.violations[0].why), 'NEGATIVE CONTROL: one planted English literal on a chrome path is a violation', JSON.stringify(planted));
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
-  const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-tracked'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-tracked'] }]);
+  const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-rows'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-rows'] }]);
   ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
   console.log('  … allowed words: ' + ALLOWED_WORDS.join(', '));
   console.log('  … allowed patterns: ' + ALLOWED_PATTERNS.map((r) => r.source).join('  |  '));

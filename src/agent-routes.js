@@ -1397,7 +1397,8 @@ const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'send-not-available' ? 409 : code === 'rate-floor' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : 500;
+  const status = code === 'not-found' ? 404 : code === 'send-not-available' || code === 'account-changed' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : code === 'stopped' ? 503 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503
+  if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
 app.get('/api/agent/channels/list', (req, res) => {
@@ -1420,6 +1421,20 @@ app.get('/api/agent/channels/read', (req, res) => {
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>, as vibespace-channels list prints it)', code: 'bad-request' });
   const since = req.query.since !== undefined && req.query.since !== '' ? Number(req.query.since) : null;
   chanAnswer(res, eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null }));
+});
+// THE AGENT'S OWN REFRESH (2026-09-26, design §6.5): reach first (invisible =
+// the uniform not-found), then the per-conversation floor
+// (`channels.agentRefreshFloorSec`), then the account's vendor budget — every
+// refusal names its number and the wait (429 + Retry-After).
+app.post('/api/agent/channels/:adapterId/:convId/refresh', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.agentRefresh !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  try { chanAnswer(res, await eng.agentRefresh(channelPrincipal(s, id), String(req.params.adapterId), String(req.params.convId))); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/agent/channels/reply', async (req, res) => {
   const hit = agentSession(req, res);

@@ -96,19 +96,25 @@ export function estimateParts(e, atSet, stats) {
   return { stat: t('~{n}/day would wake (of ~{m}/day)', { n: e.matchedPerDay, m: e.totalPerDay }), hint: hints.join(' · ') };
 }
 
-/**
- * Open the editor for one conversation summary `conv` (a digest row). Saves
- * the filter first (when filtered), then the assignment; unassign is its own
- * button. Re-renders nothing itself — the engine's broadcast repaints the
- * panel and the window.
- */
-export function showAssignFilterDialog(app, conv) {
-  const base = `/api/channels/${encodeURIComponent(conv.adapterId)}/${encodeURIComponent(conv.id)}`;
-  const { body, close } = createModalShell({ id: 'chan-assign-dialog', title: t('Assign & filter — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-assign', escapeToClose: true });
-  const a = conv.assignment || null;
-  const f = conv.filter || null;
-  const caps = conv.authorityCaps || { offersSend: false, sendWhy: 'unknown', policyRequiresReview: true };
+/** The pattern rule labels (a CONVERSATION pattern, §7.3 — a closed set
+ *  apart from the message rules above). */
+const PATTERN_LABELS = () => ({
+  'title': t('title contains'),
+  'participant': t('includes the person'),
+  'from-address': t('a message from (address or @domain)'),
+  'kind': t('conversation kind is'),
+});
+const KIND_WORDS = () => ({ dm: t('direct message'), group: t('group'), thread: t('mail thread') });
 
+/**
+ * THE ONE FORM, used by all three grains (§7.3, 2026-09-26): WHO / WHAT /
+ * HOW / AUTHORITY / PACING (+ receipts), the rule rows of a filtered
+ * assignment, the live estimate line. `estimate(filter, form)` answers
+ * `{stat, hint}` (the conversation reads its stored log; a scope reads its
+ * conversations' logs server-side — the corpus never reaches the browser).
+ * Returns `{ read(), reestimate, whoSel }`.
+ */
+function assignForm(app, body, { a = null, f = null, caps = { offersSend: false, sendWhy: 'unknown', policyRequiresReview: true }, estimate, latencyNote = null, stats = null, scope = 'conversation' } = {}) {
   // ── WHO ──
   const live = (app.sidebar && app.sidebar._webuiSessions) || [];
   const groups = (app.sidebar && app.sidebar._tasks) || [];
@@ -140,6 +146,7 @@ export function showAssignFilterDialog(app, conv) {
   const digestMin = numberInput(a ? a.digestMinutes : F.DEFAULT_DIGEST_MINUTES, { min: F.MIN_DIGEST_MINUTES, max: F.MAX_DIGEST_MINUTES, step: 5 });
   digestRow.appendChild(digestMin);
   body.appendChild(digestRow);
+  if (scope !== 'conversation') body.appendChild(noteEl(t('One digest per window for ALL the conversations this covers — never one per conversation.')));
 
   // ── THE FILTER: rule rows with their own kind selector, add under the list ──
   const rulesBox = el('div', 'chan-af-rules');
@@ -158,7 +165,7 @@ export function showAssignFilterDialog(app, conv) {
   const rules = (f && Array.isArray(f.rules) ? f.rules : []).map((r) => ({ ...r }));
   // a validator refusal in the device's words — its `code` (+ the rule kind, named
   // the way the row names it); the English `error` is the route's contract (a3 i18n)
-  const problemWords = (v) => F.filterProblemText(v, { t, ruleLabel: (k) => RULE_LABELS()[k] || k });
+  const problemWords = (v) => F.filterProblemText(v, { t, ruleLabel: (k) => RULE_LABELS()[k] || PATTERN_LABELS()[k] || k });
   function ruleRow(rule, idx) {
     const row = el('div', 'chan-af-rule');
     const kindSel = selectBox(F.RULE_KINDS.map((k) => ({ value: k, label: RULE_LABELS()[k] || k })), rule.kind);
@@ -196,9 +203,6 @@ export function showAssignFilterDialog(app, conv) {
   modeSel.onchange = () => { syncMode(); reestimate(); };
   matchSel.onchange = () => reestimate();
   syncMode();
-  const syncNotify = () => { digestRow.style.display = notifySel.value === 'digest' ? '' : 'none'; };
-  notifySel.onchange = syncNotify;
-  syncNotify();
 
   // ── ESTIMATE (live) as ONE stat line + MEASUREMENT (after the fact) as its hint ──
   const est = el('div', 'chan-af-stat chan-flow-status', t('Estimating…'));
@@ -210,24 +214,26 @@ export function showAssignFilterDialog(app, conv) {
     if (modeSel.value !== 'filtered') return null;
     return { match: matchSel.value, rules: rules.map((r) => ({ ...r })) };
   }
+  const capInpRef = { el: null };
   function reestimate() {
     if (estTimer) clearTimeout(estTimer);
     estTimer = setTimeout(async () => {
       estTimer = null;
       const filter = currentFilter();
       if (filter) { const v = F.validateFilter(filter); if (!v.ok) { est.className = 'chan-af-stat chan-flow-status chan-warn'; est.textContent = t('Filter is incomplete: {why}', { why: problemWords(v) }); estHint.textContent = ''; lastEstimate = null; return; } }
-      const r = await fetchJson(`${base}/estimate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filter }) });
+      const r = await estimate(filter, { notify: notifySel.value, digestMinutes: Number(digestMin.value), dailyWakeCap: capInpRef.el ? Number(capInpRef.el.value) : F.DEFAULT_DAILY_WAKE_CAP });
       if (!r || r.error) { est.className = 'chan-af-stat chan-flow-status chan-warn'; est.textContent = (r && r.error) || t('Estimate failed'); estHint.textContent = ''; lastEstimate = null; return; }
       lastEstimate = r.estimate;
-      const parts = estimateParts(r.estimate, a && a.estimateAtSet, conv.stats);
       est.className = 'chan-af-stat chan-flow-status';
-      est.textContent = parts.stat;
-      estHint.textContent = parts.hint;
+      est.textContent = r.stat;
+      estHint.textContent = r.hint || '';
     }, 250);
   }
-  reestimate();
-  // the honest per-lane latency claim
-  body.appendChild(noteEl(wakeLatencyText(conv.wakeLatency)));
+  notifySel.onchange = () => { syncNotify(); reestimate(); };
+  const syncNotify = () => { digestRow.style.display = notifySel.value === 'digest' ? '' : 'none'; };
+  syncNotify();
+  digestMin.oninput = () => reestimate();
+  if (latencyNote) body.appendChild(noteEl(latencyNote));
 
   // ── AUTHORITY + PACING on one grid ──
   const grid2 = el('div', 'chan-af-grid');
@@ -241,20 +247,22 @@ export function showAssignFilterDialog(app, conv) {
     a && a.authority === 'send' && !cap ? 'send' : 'draft');
   grid2.appendChild(field(t('Authority'), authSel));
   const capInp = numberInput(a ? a.dailyWakeCap : F.DEFAULT_DAILY_WAKE_CAP, { min: 0, max: F.MAX_DAILY_WAKE_CAP, step: 1 });
-  grid2.appendChild(field(t('Wakes per day (at most)'), capInp));
+  capInpRef.el = capInp;
+  capInp.oninput = () => reestimate();
+  grid2.appendChild(field(scope === 'conversation' ? t('Wakes per day (at most)') : t('Wakes per day (at most, for all of them together)'), capInp));
   body.appendChild(grid2);
   if (cap) body.appendChild(noteEl(t('Direct send is not offered here: {why}', { why: capWords(cap) })));
   if (a && a.authorityClamped) body.appendChild(noteEl(t('The stored authority is "send" but it reads as draft: {why}', { why: a.authorityWhyCap ? capWords(a.authorityWhyCap) : a.authorityWhy }), true));
   body.appendChild(noteEl(t('Pacing only — the account budget is the money bound.')));
-  if (conv.stats && conv.stats.lastWake) {
-    const lw = conv.stats.lastWake;
+  if (stats && stats.lastWake) {
+    const lw = stats.lastWake;
     // the lane and the `refused` code are worded; the rule whys carry the
     // user's own rule values and stay verbatim (a3 i18n)
     body.appendChild(noteEl(lw.ok
       ? t('Last wake: {n} message(s) delivered via {lane} — {why}', { n: lw.n, lane: chanCaps.deliveryLaneText(lw.lane || 'message', { t }), why: lw.whys ? lw.whys.join(', ') : '' })
       : t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(lw.refused, { t }) || lw.why || '' }), !lw.ok));
   }
-  if (conv.stats && conv.stats.pending) body.appendChild(noteEl(t('{n} matched message(s) are waiting for the next window or turn', { n: conv.stats.pending })));
+  if (stats && stats.pending) body.appendChild(noteEl(t('{n} matched message(s) are waiting for the next window or turn', { n: stats.pending })));
 
   // ── RECEIPTS (P3, decision 8): the outbox receipt never wakes the agent
   //    by default — it rides the next turn. Opting in is a billed turn per
@@ -263,6 +271,53 @@ export function showAssignFilterDialog(app, conv) {
   const rwInp = el('input'); rwInp.type = 'checkbox'; rwInp.checked = !!(a && a.receiptWake);
   rwRow.append(rwInp, el('span', '', t('Wake the agent with each outbox receipt')), el('span', 'dialog-check-hint', t('A billed turn per approval; off = the receipt rides its next turn.')));
   body.appendChild(rwRow);
+  reestimate();
+
+  function read() {
+    const w = who.find((x) => x.value === whoSel.value);
+    if (!w || !w.kind) return { error: t('Pick an agent or a group to wake.') };
+    const filter = currentFilter();
+    if (modeSel.value === 'filtered') { const v = F.validateFilter(filter); if (!v.ok) return { error: t('Filter is incomplete: {why}', { why: problemWords(v) }) }; }
+    return { w, filter, lastEstimate, assignment: { principal: { kind: w.kind, id: w.id, name: w.name }, mode: modeSel.value, notify: notifySel.value, digestMinutes: Number(digestMin.value), authority: authSel.value, dailyWakeCap: Number(capInp.value), receiptWake: !!rwInp.checked } };
+  }
+  return { read, reestimate, whoSel };
+}
+
+/** The honest estimate as the form's ONE stat line (a conversation's). */
+function statFor(e, atSet, stats) { return estimateParts(e, atSet, stats); }
+
+/**
+ * Open the editor for ONE conversation (the conversation grain). `conv` may
+ * be a slim list row: the FULL view is fetched first (the list no longer
+ * carries the filter, the caps, the latency or the measurement). Saves the
+ * filter first (when filtered), then the assignment; unassign is its own
+ * button. When the conversation has no assignment of its own, the grain it
+ * INHERITS (the account's, a rule's) is said at the top.
+ */
+export async function showAssignFilterDialog(app, conv0) {
+  const base = `/api/channels/${encodeURIComponent(conv0.adapterId)}/${encodeURIComponent(conv0.id)}`;
+  const full = await fetchJson(base);
+  if (!full || full.error) { showToast(routeErrorText(full), { type: 'error' }); return; }
+  const conv = full.conversation;
+  const { body, close } = createModalShell({ id: 'chan-assign-dialog', title: t('Assign & filter — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-assign', escapeToClose: true });
+  const a = conv.ownAssignment || null;
+  const f = conv.filter || null;
+  if (!a && conv.assignment && conv.assignment.source !== 'conversation') {
+    const g = conv.assignment;
+    body.appendChild(noteEl(g.source === 'account'
+      ? t('Now this conversation follows the account\'s assignment ({who}). An assignment saved here takes over for this conversation only.', { who: g.principal.name || g.principal.id })
+      : t('Now this conversation follows a rule ({rule} → {who}). An assignment saved here takes over for this conversation only.', { rule: g.patternLabel || '', who: g.principal.name || g.principal.id })));
+  }
+  const form = assignForm(app, body, {
+    a, f, caps: conv.authorityCaps || undefined, stats: conv.stats, scope: 'conversation',
+    latencyNote: wakeLatencyText(conv.wakeLatency),
+    estimate: async (filter) => {
+      const r = await fetchJson(`${base}/estimate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filter }) });
+      if (!r || r.error) return { error: (r && r.error) || t('Estimate failed') };
+      const parts = statFor(r.estimate, a && a.estimateAtSet, conv.stats);
+      return { estimate: r.estimate, stat: parts.stat, hint: parts.hint };
+    },
+  });
 
   // ── ACTIONS: Unassign left, Cancel + Save (primary) right ──
   const actions = el('div', 'chan-flow-actions');
@@ -275,23 +330,19 @@ export function showAssignFilterDialog(app, conv) {
   actions.appendChild(btn(t('Cancel'), close));
   const save = btn(t('Save'), null, 'mounts-btn-primary');
   save.onclick = async () => {
-    const w = who.find((x) => x.value === whoSel.value);
-    if (!w || !w.kind) { showToast(t('Pick an agent or a group to wake.'), { type: 'error' }); return; }
+    const v = form.read();
+    if (v.error) { showToast(v.error, { type: 'error' }); return; }
     save.disabled = true;
     try {
       let filterId = null;
-      const filter = currentFilter();
-      if (modeSel.value === 'filtered') {
-        const v = F.validateFilter(filter);
-        if (!v.ok) { showToast(t('Filter is incomplete: {why}', { why: problemWords(v) }), { type: 'error' }); return; }
-        const fr = await api(`${base}/filter`, { filter, estimate: lastEstimate });
+      if (v.assignment.mode === 'filtered') {
+        const fr = await api(`${base}/filter`, { filter: v.filter, estimate: v.lastEstimate });
         if (!fr) return;
         filterId = fr.filter && fr.filter.id;
       }
-      const assignment = { principal: { kind: w.kind, id: w.id, name: w.name }, mode: modeSel.value, filterId, notify: notifySel.value, digestMinutes: Number(digestMin.value), authority: authSel.value, dailyWakeCap: Number(capInp.value), receiptWake: !!rwInp.checked };
-      const ar = await api(`${base}/assignment`, { assignment, estimateAtSet: lastEstimate });
+      const ar = await api(`${base}/assignment`, { assignment: { ...v.assignment, filterId }, estimateAtSet: v.lastEstimate });
       if (!ar) return;
-      showToast(t('Assigned: {name} wakes on this conversation', { name: w.name || w.id }));
+      showToast(t('Assigned: {name} wakes on this conversation', { name: v.w.name || v.w.id }));
       close();
     } finally { save.disabled = false; }
   };
@@ -299,7 +350,122 @@ export function showAssignFilterDialog(app, conv) {
   body.appendChild(actions);
 }
 
-/** The one-line summary the panel row and the window bar draw. */
+/**
+ * THE ACCOUNT AND PATTERN GRAINS (2026-09-26, design §7.3) — the SAME form.
+ * `scope.kind === 'account'`: the whole account (one per account).
+ * `scope.kind === 'pattern'`: the conversations matching a rule over their
+ * facts (title / a person / an address / the kind), now and later; `scope.id`
+ * edits an existing rule. The estimate covers every conversation the grain
+ * would own and folds notify + the daily cap into "about N wakes a day".
+ */
+export function showScopeAssignDialog(app, adapter, scope = { kind: 'account' }) {
+  const kind = scope.kind === 'pattern' ? 'pattern' : 'account';
+  const existing = kind === 'account' ? (adapter.assignment || null) : ((adapter.patterns || []).find((p) => p.id === scope.id) || null);
+  const title = kind === 'account' ? t('Hand the whole account to an agent — {label}', { label: adapter.label || adapter.id }) : t('Conversations matching a rule — {label}', { label: adapter.label || adapter.id });
+  const { body, close } = createModalShell({ id: 'chan-scope-assign-dialog', title, dialogClass: 'chan-dialog chan-assign', escapeToClose: true });
+  body.appendChild(noteEl(kind === 'account'
+    ? t('Every conversation of this account — now and later — wakes this agent, except one that has an assignment of its own or matches a rule. The agent can read all of them.')
+    : t('Every conversation that matches the rule — now and later — wakes this agent, unless it has an assignment of its own. The agent can read exactly those.')));
+  // THE PATTERN (conversation facts, a closed set) — only for the pattern grain
+  const pat = existing && existing.pattern ? { match: existing.pattern.match, rules: existing.pattern.rules.map((r) => ({ ...r })) } : { match: 'any', rules: [{ kind: 'title', value: '' }] };
+  let reest = () => {};
+  if (kind === 'pattern') {
+    const box = el('div', 'chan-af-rules chan-pat-rules');
+    const mrow = el('div', 'chan-af-row');
+    mrow.appendChild(el('span', 'chan-af-inline', t('Conversations where')));
+    const msel = selectBox([{ value: 'any', label: t('any rule holds') }, { value: 'every', label: t('every rule holds') }], pat.match);
+    msel.onchange = () => { pat.match = msel.value; reest(); };
+    mrow.appendChild(msel);
+    box.appendChild(mrow);
+    const plist = el('div', 'chan-af-list');
+    box.appendChild(plist);
+    const padd = btn(t('Add rule'), null, 'chan-af-add');
+    padd.prepend(icon('plus', 11));
+    box.appendChild(padd);
+    const draw = () => {
+      plist.textContent = '';
+      pat.rules.forEach((r, idx) => {
+        const row = el('div', 'chan-af-rule');
+        const ks = selectBox(F.CONV_RULE_KINDS.map((k) => ({ value: k, label: PATTERN_LABELS()[k] || k })), r.kind);
+        ks.onchange = () => { pat.rules[idx] = { kind: ks.value, value: ks.value === 'kind' ? 'group' : '' }; draw(); reest(); };
+        row.appendChild(ks);
+        const fields = el('span', 'chan-af-fields');
+        if (r.kind === 'kind') {
+          const vs = selectBox(F.CONV_KINDS.map((k) => ({ value: k, label: KIND_WORDS()[k] || k })), r.value || 'group');
+          vs.onchange = () => { r.value = vs.value; reest(); };
+          fields.appendChild(vs);
+        } else {
+          const inp = textInput(r.value, r.kind === 'from-address' ? 'name@example.com / @example.com' : t('text'));
+          inp.oninput = () => { r.value = inp.value; reest(); };
+          fields.appendChild(inp);
+        }
+        row.appendChild(fields);
+        const rm = document.createElement('button');
+        rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove');
+        rm.appendChild(icon('close', 12));
+        rm.onclick = () => { pat.rules.splice(idx, 1); draw(); reest(); };
+        row.appendChild(rm);
+        plist.appendChild(row);
+      });
+    };
+    padd.onclick = () => { pat.rules.push({ kind: 'title', value: '' }); draw(); reest(); };
+    draw();
+    body.appendChild(field(t('Which conversations'), box));
+  }
+  const patternWords = (v) => F.filterProblemText(v, { t, ruleLabel: (k) => PATTERN_LABELS()[k] || k });
+  const form = assignForm(app, body, {
+    a: existing, f: existing && existing.filter ? existing.filter : null, scope: kind,
+    caps: { offersSend: (adapter.sendAs || []).length > 0, sendWhy: (adapter.sendAs || []).length ? null : 'read-only-adapter', policyRequiresReview: true },
+    estimate: async (filter, how) => {
+      if (kind === 'pattern') { const pv = F.validatePattern(pat); if (!pv.ok) return { error: t('The rule is incomplete: {why}', { why: patternWords(pv) }) }; }
+      const r = await fetchJson(`/api/channels/adapters/${encodeURIComponent(adapter.id)}/estimate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scope: { kind }, pattern: kind === 'pattern' ? pat : undefined, filter, ...how }) });
+      if (!r || r.error) return { error: (r && r.error) || t('Estimate failed') };
+      const e = r.estimate;
+      const hints = [t('over {n} conversations', { n: e.conversations })];
+      if (e.sampled) hints.push(t('sampled — {k} of them read, the newest records only', { k: e.covered }));
+      if (e.truncated) hints.push(t('only {d} days of history are stored — the rate is over that span', { d: e.windowDays }));
+      return { estimate: { ...e, conversations: e.conversations }, stat: t('about {n} wakes a day (~{m} matching messages a day)', { n: Math.round(r.expectedWakesPerDay * 10) / 10, m: e.matchedPerDay }), hint: hints.join(' · ') };
+    },
+  });
+  reest = () => form.reestimate();
+  const actions = el('div', 'chan-flow-actions');
+  const base = kind === 'account' ? `/api/channels/adapters/${encodeURIComponent(adapter.id)}/assignment` : `/api/channels/adapters/${encodeURIComponent(adapter.id)}/patterns`;
+  if (existing) {
+    const un = btn(kind === 'account' ? t('Stop handing the account') : t('Remove the rule'), null);
+    un.onclick = async () => {
+      un.disabled = true;
+      const r = kind === 'account' ? await api(base, { assignment: null }) : await api(`${base}/${encodeURIComponent(existing.id)}`, {}, 'DELETE');
+      un.disabled = false;
+      if (r) { showToast(t('Unassigned')); close(); }
+    };
+    actions.appendChild(un);
+    actions.appendChild(el('span', 'chan-sp'));
+  }
+  actions.appendChild(btn(t('Cancel'), close));
+  const save = btn(t('Save'), null, 'mounts-btn-primary');
+  save.onclick = async () => {
+    const v = form.read();
+    if (v.error) { showToast(v.error, { type: 'error' }); return; }
+    if (kind === 'pattern') { const pv = F.validatePattern(pat); if (!pv.ok) { showToast(t('The rule is incomplete: {why}', { why: patternWords(pv) }), { type: 'error' }); return; } }
+    save.disabled = true;
+    try {
+      const assignment = { ...v.assignment, ...(v.assignment.mode === 'filtered' ? { filter: v.filter } : {}), ...(kind === 'pattern' ? { pattern: pat } : {}) };
+      const r = kind === 'account'
+        ? await api(base, { assignment, estimateAtSet: v.lastEstimate })
+        : existing ? await api(`${base}/${encodeURIComponent(existing.id)}`, { assignment, estimateAtSet: v.lastEstimate })
+          : await api(base, { assignment, estimateAtSet: v.lastEstimate }, 'POST');
+      if (!r) return;
+      showToast(kind === 'account' ? t('The account is handed to {name}', { name: v.w.name || v.w.id }) : t('The rule is saved: matching conversations wake {name}', { name: v.w.name || v.w.id }));
+      close();
+    } finally { save.disabled = false; }
+  };
+  actions.appendChild(save);
+  body.appendChild(actions);
+}
+
+/** The one-line summary the panel row and the window bar draw — the
+ *  assignment IN EFFECT; an inherited one says where from (2026-09-26:
+ *  "(account)" / "(rule)"). */
 export function assignmentSummary(conv) {
   const a = conv && conv.assignment;
   if (!a) return '';
@@ -307,7 +473,9 @@ export function assignmentSummary(conv) {
   const what = a.mode === 'filtered' ? t('filtered') : t('all messages');
   const how = a.notify === 'digest' ? t('digest every {m} min', { m: a.digestMinutes }) : t('wake');
   const s = conv.stats || {};
-  const measured = s.hits7d !== undefined ? t('{n} hits / 7d', { n: s.hits7d }) : '';
+  const hits = a.hits7d !== undefined ? a.hits7d : s.hits7d;
+  const measured = hits !== undefined ? t('{n} hits / 7d', { n: hits }) : '';
+  const from = a.source === 'account' ? t('(account)') : a.source === 'pattern' ? t('(rule)') : '';
   // no leading '→': the row and the chip prepend an SVG glyph (§17 — never a text symbol)
-  return [who, what, how, a.authority === 'send' ? t('may send') : t('drafts'), measured].filter(Boolean).join(' · ');
+  return [who, what, how, a.authority === 'send' ? t('may send') : t('drafts'), measured, from].filter(Boolean).join(' · ');
 }

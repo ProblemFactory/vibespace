@@ -163,28 +163,50 @@ function switchesClient(a, vals, sfx = '', presets) {
   if (next === 'custom') return String(vals[`cid${sfx}`] || '') !== String((a.customClient && a.customClient.appId) || '');
   return false;
 }
-/** The type's DECLARED options as fields (`only` = the first N: the filter). */
+/** An option the adapter declares as used only for certain values of a
+ *  sibling (`usedWhen: {scope: ['query']}` — Gmail's query under the
+ *  "A search query" mailbox): shown only then, and restored to its default
+ *  when hidden (2026-09-26), so a stale value never outranks the choice. */
+export function optionInUse(o, vals, sfx = '') {
+  const w = o && o.usedWhen && typeof o.usedWhen === 'object' ? o.usedWhen : null;
+  if (!w) return true;
+  return Object.entries(w).every(([k, allowed]) => (Array.isArray(allowed) ? allowed : [allowed]).includes(vals[`opt${sfx}:${k}`]));
+}
+/** `only` = the first N options (the FILTER the connect and re-authorize
+ *  dialogs show); `only: 1` also brings along every option that is USED
+ *  only for a value of that first one (Gmail's labels / query under its
+ *  mailbox scope), so choosing "These labels" at connect can name them. */
+function sliceOptions(schema, only) {
+  const list = schema || [];
+  if (only == null) return list;
+  if (only === 1 && list[0]) return list.filter((o, i) => i === 0 || (o.usedWhen && Object.prototype.hasOwnProperty.call(o.usedWhen, list[0].key)));
+  return list.slice(0, only);
+}
+/** The type's DECLARED options as fields (`only` = the first N: the filter).
+ *  A `choices` option's words are its declared `choiceLabels` (keys, worded
+ *  here — 2026-09-26: Gmail's mailbox scope), never the raw value. */
 function optionFieldSpecs(schema, { sfx = '', when = null, values = {}, only = null } = {}) {
-  return (schema || []).slice(0, only == null ? undefined : only).map((o) => ({
+  return sliceOptions(schema, only).map((o) => ({
     key: `opt${sfx}:${o.key}`, label: o.label ? tr(o.label) : o.key,
     type: Array.isArray(o.choices) && o.choices.length ? 'select' : 'text',
-    options: Array.isArray(o.choices) ? o.choices.map((c) => [c, c]) : undefined,
+    options: Array.isArray(o.choices) ? o.choices.map((c) => [c, o.choiceLabels && o.choiceLabels[c] ? tr(o.choiceLabels[c]) : c]) : undefined,
     placeholder: o.placeholder || String(o.default || ''),
     value: values && values[o.key] !== undefined ? String(values[o.key]) : String(o.default || ''),
-    when: when || undefined, hint: o.help ? tr(o.help) : undefined,
+    when: (when || o.usedWhen) ? ((vals) => (!when || when(vals)) && optionInUse(o, vals, sfx)) : undefined, hint: o.help ? tr(o.help) : undefined,
   }));
 }
 function optionValues(vals, schema, sfx = '', only = null) {
   const out = {};
-  for (const o of (schema || []).slice(0, only == null ? undefined : only)) { const v = vals[`opt${sfx}:${o.key}`]; if (v !== undefined) out[o.key] = v; }
+  for (const o of sliceOptions(schema, only)) { const v = vals[`opt${sfx}:${o.key}`]; if (v !== undefined) out[o.key] = optionInUse(o, vals, sfx) ? v : ''; }
   return out;
 }
 function changedOptions(vals, schema, current = {}, only = null) {
   const out = {};
-  for (const o of (schema || []).slice(0, only == null ? undefined : only)) {
-    const v = vals[`opt:${o.key}`];
+  for (const o of sliceOptions(schema, only)) {
+    // a field hidden by its sibling's value is RESTORED to its default ('')
+    const v = vals[`opt:${o.key}`] === undefined ? undefined : (optionInUse(o, vals) ? vals[`opt:${o.key}`] : String(o.default || ''));
     const was = current[o.key] !== undefined ? String(current[o.key]) : String(o.default || '');
-    if (v !== undefined && v !== was) out[o.key] = v;
+    if (v !== undefined && v !== was) out[o.key] = v === String(o.default || '') && !optionInUse(o, vals) ? '' : v;
   }
   return out;
 }
@@ -388,7 +410,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     ...clientFieldSpecs({ ...spec, presets }, { value: cur, custom, hint: tr('Copied from the original; you can change it.') }),
     ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, only: 1 }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
-    { key: 'copied', type: 'note', value: tr('Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), tracked conversations, assignments, reach grants, the message log — the copy signs in on its own.') },
+    { key: 'copied', type: 'note', value: tr('Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.') },
     { key: 'flow', label: tr('{provider} authorization', { provider: signin }), type: 'hidden', hint: tr('This copy needs its own sign-in — another account, or the same one authorized again.') },
   ];
   // THE COPY EXISTS FROM ITS FIRST SIGN-IN ATTEMPT (the server's duplicate =

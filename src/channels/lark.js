@@ -137,8 +137,19 @@ const caps = Object.freeze({
   threading: 'reply-to',
   editSent: false,
   readReceipts: false,
-  attachments: 'metadata',
+  // 2026-09-26 (the aggregated IM): images and files are fetched ON DEMAND
+  // through `messages/:message_id/resources/:key`, history pages back with
+  // `end_time`, and every request is metered against the account's budget —
+  // 1000/min per API per app per TENANT is the vendor's pool (a cluster app
+  // shares it), so the default is 60 (6 %), the setting names it
+  attachments: 'fetch',
+  olderHistory: 'page',
+  budget: { unit: 'request', default: 60, settingKey: 'channels.budgetLarkPerMin', metered: true },
 });
+/** The refresh token is valid for 7 days and RE-ISSUED at every automatic
+ *  refresh (`tokenFromExchange` slides `refreshExpiresAt`), so a running
+ *  instance never needs a re-authorization — only one off for longer. */
+const RENEW_WINDOW_MS = 7 * 24 * 3600e3;
 
 /** The vendor's `uuid` for an idempotency key: the key itself up to the cap,
  *  else a stable digest of it (the SAME key always maps to the SAME uuid). */
@@ -209,13 +220,25 @@ function textOf(item) {
     default: return `[${item.msg_type || 'message'}]`;
   }
 }
-/** Attachment METADATA only (caps.attachments === 'metadata'): images and
- *  files are a second authorized fetch against a per-message resource
- *  endpoint, which v1 does not make. */
+/** Attachments a message carries (2026-09-26: FETCHED on demand through
+ *  `fetchAttachment`): an image's `image_key`, a file / media / audio's
+ *  `file_key`, and — new — every image and video INSIDE a rich-text `post`
+ *  (`img.image_key`, `media.file_key`), which the text only named
+ *  "[image]". `mime` 'image/*' is what `type=image` is asked with. */
 function attachmentsOf(item) {
   const c = parseContent(item.body && item.body.content) || {};
   if (item.msg_type === 'image' && c.image_key) return [{ id: c.image_key, name: 'image', bytes: null, mime: 'image/*' }];
-  if ((item.msg_type === 'file' || item.msg_type === 'media' || item.msg_type === 'audio' || item.msg_type === 'folder') && c.file_key) return [{ id: c.file_key, name: c.file_name || item.msg_type, bytes: null, mime: null }];
+  if ((item.msg_type === 'file' || item.msg_type === 'media' || item.msg_type === 'audio' || item.msg_type === 'folder') && c.file_key) return [{ id: c.file_key, name: c.file_name || item.msg_type, bytes: null, mime: item.msg_type === 'media' ? 'video/*' : item.msg_type === 'audio' ? 'audio/*' : null }];
+  if (item.msg_type === 'post') {
+    const out = [];
+    const lines = Array.isArray(c.content) ? c.content : (c.zh_cn && Array.isArray(c.zh_cn.content) ? c.zh_cn.content : (c.en_us && Array.isArray(c.en_us.content) ? c.en_us.content : []));
+    for (const line of lines) for (const el of Array.isArray(line) ? line : []) {
+      if (!el || typeof el !== 'object') continue;
+      if (el.tag === 'img' && el.image_key) out.push({ id: String(el.image_key), name: 'image', bytes: null, mime: 'image/*' });
+      else if (el.tag === 'media' && el.file_key) out.push({ id: String(el.file_key), name: el.file_name || 'video', bytes: null, mime: 'video/*' });
+    }
+    return out;
+  }
   return [];
 }
 /** `mentions[]` in ORDINAL order: `@_user_1` is mentions[0] (design §4). */
@@ -298,6 +321,7 @@ function create(record = {}, deps = {}) {
   const brand = BRANDS.includes(record.brand) ? record.brand : (record.options && BRANDS.includes(record.options.brand) ? record.options.brand : 'feishu');
   const H = HOSTS[brand];
 
+  const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: one unit per request SENT
   const walks = new Map();      // convId -> { stopAt, pageToken, newest, at, count }
   const members = new Map();    // convId -> { names: Map, at }
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
@@ -339,6 +363,7 @@ function create(record = {}, deps = {}) {
     if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false });
     let d;
     try {
+      meter(1);
       d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {
         method: 'POST', what: 'lark token refresh',
         body: { grant_type: 'refresh_token', client_id: cred.values.appId, client_secret: cred.values.appSecret, refresh_token: token.refresh_token },
@@ -370,6 +395,7 @@ function create(record = {}, deps = {}) {
 
   const api = async (pathq, opts = {}) => {
     const at = await accessToken();
+    meter(1);
     return callJson(fetchFn, `${H.open}/open-apis${pathq}`, { ...opts, headers: { Authorization: `Bearer ${at}`, ...(opts.headers || {}) } });
   };
 
@@ -458,7 +484,7 @@ function create(record = {}, deps = {}) {
         const refreshExpiresAt = Number(token.refreshExpiresAt) || null;
         if (refreshExpiresAt && refreshExpiresAt <= now()) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-token-expired', credentialSource: cred.source, credentialKey };
         if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source, credentialKey };
-        return { state: 'connected', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.name || token.openId || null, brand };
+        return { state: 'connected', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.name || token.openId || null, brand, renews: true, renewWindowMs: RENEW_WINDOW_MS };
       },
       /** The FIXED-mode loopback flow (§12.4): the vendor consent URL is built
        *  with the REGISTERED redirect_uri; the exchange mints the user token
@@ -588,8 +614,11 @@ function create(record = {}, deps = {}) {
      * returned `anchor` is always the NEWEST id seen, so once the walk is
      * complete the store's cursor is where the next pass stops.
      */
-    async history(convId, { anchor = null, limit = 50 } = {}) {
+    async history(convId, { anchor = null, limit = 50, initialMax = null } = {}) {
       const size = Math.min(50, Math.max(1, Number(limit) || 50));
+      // a FIRST ingest takes `initialMax` (one page — 2026-09-26: older
+      // history is fetched on demand by `older()`), never more than the bound
+      const firstMax = Number(initialMax) > 0 ? Math.min(FIRST_INGEST_MAX, Number(initialMax)) : FIRST_INGEST_MAX;
       let w = walks.get(convId);
       const continuing = !!(w && w.newest && anchor === w.newest && now() - w.at < WALK_TTL_MS);
       if (!continuing) { w = { stopAt: anchor || null, pageToken: null, newest: null, at: now(), count: 0 }; walks.set(convId, w); }
@@ -618,13 +647,63 @@ function create(record = {}, deps = {}) {
       // has been offered to the log, so nothing was skipped and the dedup
       // absorbs the re-read; calling it incomplete would re-walk the whole
       // chat on every pass for ever. It is SAID, once per walk.
-      const exhausted = !next || w.count >= FIRST_INGEST_MAX;
+      const exhausted = !next || w.count >= (w.stopAt ? FIRST_INGEST_MAX : firstMax);
       const done = reached || exhausted;
       if (done) walks.delete(convId); else w.pageToken = next;
       if (done && w.stopAt && !reached) log.warn && log.warn(`[channels] lark: the stored anchor ${w.stopAt} of ${convId} is no longer served — walked ${w.count} records to ${!next ? "the vendor's last page" : `the ${FIRST_INGEST_MAX}-record bound`} and re-anchored on ${w.newest || w.stopAt}`);
       // Oldest-first within the batch (the store orders by (at, vendorId) anyway).
       const records = fresh.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId }));
       return { records, anchor: w.newest || w.stopAt || null, reachedAnchor: done, complete: done };
+    },
+
+    /**
+     * HISTORY ON DEMAND (2026-09-26): ONE page of messages strictly OLDER
+     * than `before` — `end_time` is the boundary in SECONDS (inclusive), so
+     * the boundary second's records come back too and are dropped here by
+     * `(at, vendorId)`; the store's dedup absorbs the rest. `exhausted` =
+     * the vendor's last page.
+     */
+    async older(convId, { before = null, limit = 50 } = {}) {
+      const size = Math.min(50, Math.max(1, Number(limit) || 50));
+      const p = new URLSearchParams({ container_id_type: 'chat', container_id: convId, sort_type: 'ByCreateTimeDesc', page_size: String(size) });
+      if (before && Number(before.at) > 0) p.set('end_time', String(Math.floor(Number(before.at) / 1000)));
+      const d = await api(`/im/v1/messages?${p}`, { what: 'lark older messages' });
+      const items = ((d.data && d.data.items) || []).filter((m) => m && m.message_id);
+      const b = before && Number(before.at) > 0 ? before : null;
+      const olderOnes = b ? items.filter((m) => { const at = Number(m.create_time) || 0; return at < Number(b.at) || (at === Number(b.at) && b.vendorId && String(m.message_id) < String(b.vendorId)); }) : items;
+      const names = olderOnes.length ? await namesFor(convId) : new Map();
+      const selfId = (readToken().token || {}).openId || null;
+      const records = olderOnes.reverse().map((m) => toRecord(adapterId, convId, m, { names, selfId }));
+      return { records: records.slice(-size), exhausted: !nextToken(d.data) && items.length < size };
+    },
+
+    /**
+     * ONE ATTACHMENT's bytes (2026-09-26): `GET messages/:message_id/
+     * resources/:key?type=image|file` with the user token — an image
+     * (including one inside a rich text) is `type=image`, every file / audio
+     * / video `type=file`. A JSON answer is the vendor's refusal, typed.
+     * Bounded at 100 MB (the vendor's own no-Range ceiling).
+     */
+    async fetchAttachment(convId, { messageId, attachmentId, mime = null } = {}) {
+      if (!messageId || !attachmentId) throw new ChannelError('not-found', 'lark: an attachment needs its message id and key', { retryable: false });
+      const at = await accessToken();
+      const type = /^image\//.test(String(mime || '')) ? 'image' : 'file';
+      meter(1);
+      let r;
+      try {
+        r = await fetchFn(`${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(messageId))}/resources/${encodeURIComponent(String(attachmentId))}?type=${type}`, { headers: { Authorization: `Bearer ${at}` }, signal: AbortSignal.timeout(60000) });
+      } catch (e) { throw new ChannelError('transport', `lark resource: ${(e && e.message) || e}`, { retryable: true }); }
+      const ct = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
+      if (!r.ok || /application\/json/.test(ct)) {
+        let body = null; try { body = await r.json(); } catch { body = null; }
+        throw typedFailure(r.status || 500, body, 'lark resource');
+      }
+      const len = Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0);
+      if (len > 100 * 1024 * 1024) throw new ChannelError('too-large', `lark resource: ${len} bytes is over the 100 MB bound`, { retryable: false });
+      const data = Buffer.from(await r.arrayBuffer());
+      const cd = String((r.headers && r.headers.get && r.headers.get('content-disposition')) || '');
+      const nm = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd);
+      return { data, mime: ct.split(';')[0].trim() || null, name: nm ? decodeURIComponent(nm[1]) : null };
     },
   };
 }
@@ -656,6 +735,6 @@ async function integrationTest({ resolved, signal } = {}, fetchFn = null) {
 const adapter = { kind: KIND, caps, create };
 module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS,
-  EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX,
+  EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes,
 };

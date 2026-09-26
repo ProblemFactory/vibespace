@@ -53,6 +53,19 @@ const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
 const ASSIGN_MODES = Object.freeze(['all', 'filtered']);
 const NOTIFY_MODES = Object.freeze(['wake', 'digest']);
 const AUTHORITIES = Object.freeze(['draft', 'send']);
+/** THE THREE ASSIGNMENT GRAINS (owner ruling 2026-09-26: a linked account is an
+ *  aggregated IM, and the owner hands the whole ACCOUNT, the conversations a
+ *  PATTERN matches, or ONE conversation to an agent). Exactly one is in
+ *  effect per conversation — `effectiveAssignment` below. */
+const ASSIGN_SCOPES = Object.freeze(['conversation', 'pattern', 'account']);
+/** The CONVERSATION-level rule set a pattern is made of — a closed set APART
+ *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
+ *  filter chooses messages inside them). `participant` covers "the chats X
+ *  is in" (the participants line or an author seen in the log), `from-address`
+ *  an author's address / id (`@domain` = the whole domain), `kind` dm | group
+ *  | thread, `title` a keyword in the title. */
+const CONV_RULE_KINDS = Object.freeze(['participant', 'title', 'from-address', 'kind']);
+const CONV_KINDS = Object.freeze(['dm', 'group', 'thread']);
 
 /** Defaults the model owns (the design's numbers, one home). */
 const DEFAULT_DIGEST_MINUTES = 30;
@@ -165,6 +178,7 @@ function filterProblemText(v, { t = (s, p) => (p ? String(s).replace(/\{(\w+)\}/
     case 'time-format': return t('the time window needs both times as HH:MM');
     case 'tz-range': return t('the time-zone offset must be within ±840 minutes');
     case 'no-rules': return t('add at least one rule');
+    case 'kind-value': return t('the rule "{kind}" is one of: direct message, group, mail thread', { kind });
     case 'too-many-rules': return t('a filter may hold at most {n} rules', { n: v.max || MAX_RULES });
     default: return String(v.error || v.code || '');
   }
@@ -324,9 +338,20 @@ function validateAssignment(input, caps = {}) {
   // default (it rides the next turn); an assignment may opt in — a billed
   // turn per approval, said out loud in the editor.
   const receiptWake = a.receiptWake === true;
+  // 2026-09-26: the GRAIN this assignment was written at (`{kind, id}` —
+  // conversation `<adapterId>/<convId>`, account `<adapterId>`, pattern `<id>`).
+  // Optional (a pre-grain conversation record has none); an unknown kind is refused.
+  let scope = null;
+  if (a.scope !== undefined && a.scope !== null) {
+    const sc = a.scope && typeof a.scope === 'object' ? a.scope : null;
+    if (!sc || !ASSIGN_SCOPES.includes(sc.kind)) return { ok: false, error: `scope.kind must be ${ASSIGN_SCOPES.join('|')}` };
+    const sid = str(sc.id).trim();
+    if (!sid) return { ok: false, error: 'scope.id is required' };
+    scope = { kind: sc.kind, id: sid.slice(0, 512) };
+  }
   return {
     ok: true,
-    assignment: { principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null }, mode, filterId, notify, digestMinutes, authority, dailyWakeCap, receiptWake },
+    assignment: { principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null }, mode, filterId, notify, digestMinutes, authority, dailyWakeCap, receiptWake, ...(scope ? { scope } : {}) },
   };
 }
 
@@ -411,6 +436,99 @@ function countSince(list, now, days = 7) {
   return n;
 }
 
+// ── conversation PATTERNS + the effective assignment (2026-09-26) ─────────
+
+/** One pattern rule, validated (a refusal names the field, `code` for the
+ *  client's words — the `filterProblemText` shape). */
+function validateConvRule(rule) {
+  const r = rule && typeof rule === 'object' ? rule : null;
+  if (!r) return refuse('bad-rule', 'a rule must be an object');
+  if (!CONV_RULE_KINDS.includes(r.kind)) return refuse('bad-kind', `pattern rule kind must be one of ${CONV_RULE_KINDS.join(', ')} (got ${JSON.stringify(r.kind)})`, { kind: r.kind });
+  const value = str(r.value).trim();
+  if (!value) return refuse('value-required', `a '${r.kind}' rule needs a value`, { kind: r.kind });
+  if (r.kind === 'kind' && !CONV_KINDS.includes(value)) return refuse('kind-value', `a 'kind' rule is one of ${CONV_KINDS.join(', ')}`, { kind: r.kind });
+  return { ok: true, rule: { kind: r.kind, value: value.slice(0, 200) } };
+}
+/** A PATTERN: `{match:'any'|'every', rules:[…]}` over conversation facts. An
+ *  empty pattern is refused — it would silently hand everything (or nothing)
+ *  to an agent, and a wake is money. */
+function validatePattern(pattern) {
+  const p = pattern && typeof pattern === 'object' ? pattern : null;
+  if (!p) return refuse('bad-pattern', 'a pattern must be an object');
+  const match = p.match === undefined ? 'any' : p.match;
+  if (!MATCH_MODES.includes(match)) return refuse('bad-match', `match must be ${MATCH_MODES.join('|')}`);
+  const list = Array.isArray(p.rules) ? p.rules : [];
+  if (!list.length) return refuse('no-rules', 'a pattern needs at least one rule');
+  if (list.length > MAX_RULES) return refuse('too-many-rules', `at most ${MAX_RULES} rules`);
+  const rules = [];
+  for (const r of list) { const v = validateConvRule(r); if (!v.ok) return v; rules.push(v.rule); }
+  return { ok: true, pattern: { match, rules } };
+}
+/** Does ONE pattern rule hold for these conversation FACTS
+ *  `{title, participants, kind, authors:[{id, name}]}`? → the why string or null. */
+function convRuleHit(rule, facts) {
+  const f = facts || {};
+  const v = lower(rule.value);
+  const authors = Array.isArray(f.authors) ? f.authors : [];
+  switch (rule.kind) {
+    case 'title': return lower(f.title).includes(v) ? `title contains "${rule.value}"` : null;
+    case 'participant': return (lower(f.participants).includes(v) || authors.some((a) => lower(a && a.name).includes(v))) ? `participant "${rule.value}"` : null;
+    case 'from-address': {
+      const hit = v.startsWith('@') ? authors.some((a) => lower(a && a.id).endsWith(v)) : authors.some((a) => lower(a && a.id) === v || lower(a && a.id).includes(v));
+      return hit ? `from ${rule.value}` : null;
+    }
+    case 'kind': return lower(f.kind) === v ? `a ${rule.value} conversation` : null;
+    default: return null;
+  }
+}
+function matchConversation(pattern, facts) {
+  const p = pattern && Array.isArray(pattern.rules) ? pattern : null;
+  if (!p || !p.rules.length) return { hit: false, why: [] };
+  const why = [];
+  let all = true;
+  for (const r of p.rules) { const w = convRuleHit(r, facts); if (w) why.push(w); else all = false; }
+  const hit = p.match === 'every' ? all : why.length > 0;
+  return { hit, why: hit ? why : [] };
+}
+/** The chip / block line for a pattern: `title contains "gpu"; from @corp`. */
+function patternSummary(pattern) {
+  const p = pattern && Array.isArray(pattern.rules) ? pattern : { rules: [] };
+  const parts = p.rules.map((r) => (r.kind === 'title' ? `title contains "${r.value}"` : r.kind === 'participant' ? `with ${r.value}` : r.kind === 'from-address' ? `from ${r.value}` : r.kind === 'kind' ? `${r.value} conversations` : `${r.kind} ${r.value}`));
+  return parts.join(p.match === 'every' ? ' and ' : '; ');
+}
+/**
+ * THE ONE ANSWER: which assignment is in effect for a conversation.
+ * `{conversation, patterns, account}` are the three grains' records
+ * (`patterns` in any order — they are ranked by `createdAt`, then id);
+ * `facts` the conversation's own facts for the patterns. Returns
+ * `{assignment, source:'conversation'|'pattern'|'account', patternId, why[]}`
+ * or null. Exactly one wins; nothing combines.
+ */
+function effectiveAssignment({ conversation = null, patterns = [], account = null } = {}, facts = {}) {
+  /* PRECEDENCE: conversation > pattern > account */
+  if (conversation && conversation.principal) return { assignment: conversation, source: 'conversation', patternId: null, why: [] };
+  const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.principal && x.pattern)
+    .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
+  for (const pa of ranked) {
+    const m = matchConversation(pa.pattern, facts);
+    if (m.hit) return { assignment: pa, source: 'pattern', patternId: pa.id || null, why: m.why };
+  }
+  if (account && account.principal) return { assignment: account, source: 'account', patternId: null, why: [] };
+  return null;
+}
+/** What the editor shows BEFORE saving (§7.3): wakes per day at most, the
+ *  pacing cap and the digest windows folded in. `matchedPerDay` is the honest
+ *  estimate over the scope. */
+function expectedWakesPerDay({ notify = 'wake', digestMinutes = DEFAULT_DIGEST_MINUTES, matchedPerDay = 0, dailyWakeCap = DEFAULT_DAILY_WAKE_CAP } = {}) {
+  const cap = Number.isFinite(Number(dailyWakeCap)) ? Math.max(0, Number(dailyWakeCap)) : DEFAULT_DAILY_WAKE_CAP;
+  const matched = Math.max(0, Number(matchedPerDay) || 0);
+  if (notify === 'digest') {
+    const windows = (24 * 60) / Math.max(MIN_DIGEST_MINUTES, Number(digestMinutes) || DEFAULT_DIGEST_MINUTES);
+    return Math.min(cap, windows, matched > 0 ? windows : 0);
+  }
+  return Math.min(cap, matched);
+}
+
 // ── what the agent receives (§7.5) ─────────────────────────────────────────
 
 const bytes = (s) => Buffer.byteLength(String(s), 'utf8');
@@ -434,12 +552,12 @@ function safeInline(text, max) {
  * (`{n, seconds}`) says "N in this window" when the push lane's window
  * folded a burst (fence 12). Budgeted and frame-inert (see the header).
  */
-function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
+function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const shown = list.slice(-maxRecords);
   const dropped = list.length - shown.length + (Number(elided) || 0);
   const whys = [...new Set(shown.flatMap((h) => (Array.isArray(h.why) ? h.why : [])))];
-  const head = `### Channel message — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)}`;
+  const head = `### Channel message — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)}${inheritedNote(inherited)}`;
   const lines = [head];
   const meta = [];
   if (whys.length) meta.push(`matched: ${whys.map((w) => safeInline(w, 120)).join(', ')}`);
@@ -469,6 +587,50 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   return out;
 }
 
+/** Why an INHERITED assignment's block is in this agent's context (§7.5):
+ *  the head says the grain — the whole account, or the rule by its summary. */
+function inheritedNote(inherited) {
+  if (!inherited || !inherited.kind) return '';
+  if (inherited.kind === 'account') return ' (you are assigned the whole account)';
+  if (inherited.kind === 'pattern') return ` (you are assigned by a rule: ${safeInline(inherited.label || 'a pattern', 120)})`;
+  return '';
+}
+
+/**
+ * THE SCOPE DIGEST (2026-09-26): an inherited assignment in digest mode
+ * delivers ONCE per window — every conversation of its scope that had hits,
+ * one short section each (title + at most 3 records), inside the same byte
+ * budget; what does not fit is COUNTED, never silently dropped.
+ * `groups` = `[{title, convId, hits:[{record, why}], elided?}]`.
+ */
+function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0 } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
+  const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
+  const msgs = list.reduce((n, g) => n + g.hits.length + (Number(g.elided) || 0), 0);
+  const convs = list.length + (Number(elidedConversations) || 0);
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
+  const lines = [head];
+  if (scopeLabel) lines.push(`you are assigned ${safeInline(scopeLabel, 160)}`);
+  const tail = 'Read more: vibespace-channels read <conv>   ·   reply: vibespace-channels reply <conv> "…" (this PROPOSES)';
+  let out = lines.join('\n');
+  let shown = 0;
+  for (const g of list) {
+    const recs = g.hits.slice(-perConversation);
+    const more = g.hits.length - recs.length + (Number(g.elided) || 0);
+    const sec = [`#### ${safeInline(g.title || g.convId, 120)} — ${safeInline(g.convId, 200)}`]
+      .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.name || h.record.author.id)) || 'unknown', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
+    if (more > 0) sec.push(`(${more} more in this conversation)`);
+    const next = out + '\n' + sec.join('\n');
+    const rest = list.length - shown - 1 + (Number(elidedConversations) || 0);
+    const closing = (rest > 0 ? `\n(${rest} more conversations elided — vibespace-channels list)` : '') + '\n' + tail;
+    if (bytes(next + closing) > budget) break;
+    out = next;
+    shown++;
+  }
+  const rest = list.length - shown + (Number(elidedConversations) || 0);
+  if (rest > 0) out += `\n(${rest} more conversations elided — vibespace-channels list)`;
+  return out + '\n' + tail;
+}
+
 /** The digest: many hits, ONE turn. Same budget, same neutering. */
 function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES } = {}, opts = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
@@ -491,4 +653,6 @@ module.exports = {
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, matchRecord, estimate,
   validateAssignment, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
+  // 2026-09-26: the three grains + conversation patterns + the scope digest
+  ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, effectiveAssignment, expectedWakesPerDay, renderScopeDigestBlock,
 };

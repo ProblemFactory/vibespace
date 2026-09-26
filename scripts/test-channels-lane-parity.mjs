@@ -161,7 +161,7 @@ async function runLane(receive, { coalesceSeconds = 0.3, name = receive } = {}) 
   if (!ar.ok) throw new Error('setAssignment: ' + ar.error);
   const traffic = dayOfTraffic(kind);
   if (receive === 'push') {
-    await eng.setTracked(kind, CID, true);          // an empty first walk anchors nothing to carry
+    await eng.refresh(kind, CID);          // an empty first walk anchors nothing to carry
     await eng.settleWakes();
     await eng.setPush(kind, { claimedExclusive: 'exclusive' });
     await eng.syncPushLanes();
@@ -171,7 +171,7 @@ async function runLane(receive, { coalesceSeconds = 0.3, name = receive } = {}) 
     await sleep(coalesceSeconds * 1000 + 250);
   } else {
     world.records.push(...traffic);
-    await eng.setTracked(kind, CID, true);
+    await eng.refresh(kind, CID);
     await eng.pass(kind, { force: true });
   }
   await eng.settleWakes();

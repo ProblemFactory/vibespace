@@ -28,6 +28,48 @@ const calls = [];
 const VISIBLE = { key: 'fake-poll/ops', adapterId: 'fake-poll', adapter: 'fake-poll', id: 'ops', title: 'Ops room', kind: 'group', level: 'visible', tracked: true, unread: 2, lastAt: 1, canSend: true, sendWhy: null, sendAs: 'user', identityMarking: 'unknown', policy: 'review', assigned: true, authority: 'draft', awaiting: 0 };
 const READONLY = { ...VISIBLE, key: 'fake-poll/announce', id: 'announce', title: 'Announcements', canSend: false, sendWhy: 'read-only-mailbox', sendAs: null };
 const notFound = () => ({ ok: false, code: 'not-found', error: NOT_FOUND_TEXT });
+// ── r7: THE REFUSED-SET CENSUS ────────────────────────────────────────────
+// The CLI's `refresh` treats a closed set of codes as a REFUSAL (exit 4, "not
+// refreshed: <the engine's sentence> (retry in N s)") and everything else as
+// an error (exit 1). r6 found `account-changed` (409) and `stopped` (503)
+// missing from it — an agent read "error" for "retry in a moment". The set is
+// DERIVED here from the agent route's own STATUS table (src/agent-routes.js
+// `chanAnswer`): every code it answers with a retry-able status (429 / 409 /
+// 503) that the refresh path can produce must be in the CLI's list, and
+// nothing else may be — a code in one and not the other is red. The two
+// retry-able codes that belong to the REPLY verb alone (`send-not-available`,
+// `rate-floor`) are named as the exception and each is PROVEN reply-only:
+// the engine's request-set region never spells it, the reply path does.
+const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+const chanAnswerSrc = asrc.slice(asrc.indexOf('const chanAnswer = (res, r) => {'), asrc.indexOf('};', asrc.indexOf('const chanAnswer = (res, r) => {')));
+const statusExpr = /const status = ([^;]+);/.exec(chanAnswerSrc);
+const ROUTE_STATUS = new Map();   // code → status
+if (statusExpr) for (const part of statusExpr[1].split(' : ')) { const m = /^(.*)\?\s*(\d{3})\s*$/.exec(part.trim()); if (!m) continue; for (const c of m[1].matchAll(/code === '([^']+)'/g)) ROUTE_STATUS.set(c[1], Number(m[2])); }
+const RETRYABLE = new Set([429, 409, 503]);
+const REPLY_ONLY = ['send-not-available', 'rate-floor'];
+const routeRetryable = [...ROUTE_STATUS].filter(([, st]) => RETRYABLE.has(st)).map(([c]) => c);
+const expectedRefused = routeRetryable.filter((c) => !REPLY_ONLY.includes(c)).sort();
+const cliSrc = fs.readFileSync(CLI, 'utf-8');
+const cliSetM = /const REFRESH_REFUSED = \[([^\]]*)\]/.exec(cliSrc);
+const cliRefused = cliSetM ? [...cliSetM[1].matchAll(/'([^']+)'/g)].map((m) => m[1]).sort() : [];
+ok(ROUTE_STATUS.size >= 8 && routeRetryable.length >= 7, `CENSUS setup: the agent route's STATUS table parsed — ${ROUTE_STATUS.size} codes, ${routeRetryable.length} retry-able (429/409/503): ${routeRetryable.join(', ')}`);
+const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+const requestSetRegion = esrc.slice(esrc.indexOf('async function pass(adapterId'), esrc.indexOf('async function watch(adapterId'));
+ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the two retry-able codes excepted as reply-only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
+ok(cliRefused.length > 0 && JSON.stringify(cliRefused) === JSON.stringify(expectedRefused), `CENSUS: the CLI's REFRESH_REFUSED set == the route's retry-able refresh codes — [${cliRefused.join(', ')}]`, `cli [${cliRefused.join(', ')}] vs route [${expectedRefused.join(', ')}]`);
+const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+ok(cliRefused.every((c) => words.includes(`case '${c}'`)), 'CENSUS: every refused code has its own words in channel-words.js (the panel says it in the device\'s language)', cliRefused.filter((c) => !words.includes(`case '${c}'`)).join(', '));
+// one fixture per refused code: the route's status, the engine's own sentence (verbatim from the engine's refusal builders / the route), the wait where the engine gives one
+const REFUSAL_FIXTURES = {
+  'refresh-floor': { error: 'this conversation was refreshed 8 s ago (floor 20 s) — read it now, or refresh again in 12 s', retryAfterSec: 12 },
+  'refresh-queue-full': { error: '180 refreshes of Ops mail are already waiting — read what is there now, or try again in a moment', retryAfterSec: 1 },
+  'vendor-budget': { error: 'this account\'s vendor budget for this minute (60 requests/min) is spent — try again in 23 s', retryAfterSec: 23 },
+  'backoff': { error: 'the vendor refused this account\'s last fetch (rate-limited) — it is retried in 27 s; read what is there now', retryAfterSec: 27 },
+  'account-changed': { error: 'the account changed while the refresh waited (removed) — refresh again', retryAfterSec: 0 },
+  'stopped': { error: 'the channels engine is stopping — refresh again after the restart', retryAfterSec: 0 },
+};
+for (const c of Object.keys(REFUSAL_FIXTURES)) REFUSAL_FIXTURES[c].status = ROUTE_STATUS.get(c) || 500;
+ok(JSON.stringify(Object.keys(REFUSAL_FIXTURES).sort()) === JSON.stringify(expectedRefused), 'CENSUS: one fixture per refused code — a code added to the route without a fixture here is red', Object.keys(REFUSAL_FIXTURES).sort().join(', '));
 const server = http.createServer((req, res) => {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
@@ -40,7 +82,19 @@ const server = http.createServer((req, res) => {
     if (url.pathname === '/api/agent/channels/list') return send(200, { ok: true, conversations: [VISIBLE, READONLY] });
     if (url.pathname === '/api/agent/channels/read') {
       if (url.searchParams.get('conv') !== VISIBLE.key) return send(404, notFound());
-      return send(200, { ok: true, conversation: { key: VISIBLE.key, adapterId: 'fake-poll', id: 'ops', title: 'Ops room', tracked: true }, records: [{ at: 1, author: { name: 'Ada' }, text: 'the deploy finished', vendorId: 'm1' }] });
+      return send(200, { ok: true, conversation: { key: VISIBLE.key, adapterId: 'fake-poll', id: 'ops', title: 'Ops room', polledAt: 1000 }, records: [{ at: 1, author: { name: 'Ada' }, text: 'the deploy finished', vendorId: 'm1', attachments: [{ id: 'img_1', name: 'graph.png', mime: 'image/png', bytes: 1234 }] }] });
+    }
+    // 2026-09-26: the agent's refresh — floor / budget refusals are 429 with their number
+    const rf = /^\/api\/agent\/channels\/([^/]+)\/([^/]+)\/refresh$/.exec(url.pathname);
+    if (rf && req.method === 'POST') {
+      const conv = `${decodeURIComponent(rf[1])}/${decodeURIComponent(rf[2])}`;
+      if (conv === 'fake-poll/floored') return send(429, { ok: false, code: 'refresh-floor', error: 'this conversation was refreshed 8 s ago (floor 20 s) — read it now, or refresh again in 12 s', retryAfterSec: 12 });
+      if (conv === 'fake-poll/broke') return send(429, { ok: false, code: 'vendor-budget', error: 'this account\'s vendor budget for this minute (60 requests/min) is spent — try again in 23 s', retryAfterSec: 23 });
+      if (conv === 'fake-poll/slow') return send(200, { ok: true, pending: true, polledAt: 1000 });   // r7: the drain still running at the 15 s race — a started refresh, not a refusal
+      const rc = /^fake-poll\/refused-(.+)$/.exec(conv);   // r7: `refused-<code>` answers that code with the ROUTE's status and the engine's sentence
+      if (rc && REFUSAL_FIXTURES[rc[1]]) { const fx = REFUSAL_FIXTURES[rc[1]]; return send(fx.status, { ok: false, code: rc[1], error: fx.error, ...(fx.retryAfterSec ? { retryAfterSec: fx.retryAfterSec } : {}) }); }
+      if (conv !== VISIBLE.key) return send(404, notFound());
+      return send(200, { ok: true, appended: 3, polledAt: 2000 });
     }
     if (url.pathname === '/api/agent/channels/reply') {
       if (body.conv === READONLY.key) return send(409, { ok: false, code: 'send-not-available', error: 'sending is not available on this conversation (read-only-mailbox)', why: 'read-only-mailbox' });
@@ -80,6 +134,32 @@ ok(calls.filter((c) => c.path === '/api/agent/channels/list').length === 1 && ca
 
 const read = await run(['read', 'fake-poll/ops', '--limit', '5']);
 ok(read.code === 0 && /Ops room/.test(read.out) && /Ada: the deploy finished/.test(read.out) && calls.at(-1).query.conv === 'fake-poll/ops' && calls.at(-1).query.limit === '5', 'read prints the records and passes conv + limit', read.out);
+ok(!/not tracked/.test(read.out) && /attachment: graph\.png \(image\/png\), 1234 bytes/.test(read.out), 'read names each attachment and never says "not tracked" (2026-09-26: every conversation is fetched)', read.out);
+
+// ── 2026-09-26: the agent's refresh ─────────────────────────────────────
+calls.length = 0;
+const rfOk = await run(['refresh', 'fake-poll/ops']);
+ok(rfOk.code === 0 && /refreshed fake-poll\/ops: 3 new message\(s\)/.test(rfOk.out) && calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/agent/channels/fake-poll/ops/refresh', 'refresh POSTs ONE request to the conversation\'s refresh route and says how many arrived', rfOk.out);
+const rfFloor = await run(['refresh', 'fake-poll/floored']);
+ok(rfFloor.code === 4 && /not refreshed: .*floor 20 s/.test(rfFloor.out) && /retry in 12 s/.test(rfFloor.out), 'a refresh under the floor is REFUSED BY NAME with the wait (exit 4 — a refusal, not an error)', rfFloor.out);
+const rfBudget = await run(['refresh', 'fake-poll/broke']);
+ok(rfBudget.code === 4 && /60 requests\/min/.test(rfBudget.out) && /retry in 23 s/.test(rfBudget.out), 'a spent vendor budget is refused naming the budget', rfBudget.out);
+// r7: EVERY refused code through the CLI — exit 4, "not refreshed: <sentence>", the wait only where there is one; never exit 1
+for (const [code, fx] of Object.entries(REFUSAL_FIXTURES)) {
+  const r = await run(['refresh', `fake-poll/refused-${code}`]);
+  const want = `not refreshed: ${fx.error}${fx.retryAfterSec ? ` (retry in ${fx.retryAfterSec} s)` : ''}`;
+  ok(r.code === 4 && r.out.trim() === want && r.err === '', `${code} (${fx.status}) is a REFUSAL: exit 4, "${want.slice(0, 60)}…"`, JSON.stringify({ code: r.code, out: r.out, err: r.err }));
+}
+const rfPending = await run(['refresh', 'fake-poll/slow']);
+ok(rfPending.code === 0 && /refresh started for fake-poll\/slow — still running; read it in a moment/.test(rfPending.out), 'a refresh still running at the route\'s 15 s race is STARTED, not refused: exit 0, "still running"', rfPending.out);
+calls.length = 0;
+const freshChanged = await run(['read', 'fake-poll/refused-account-changed', '--fresh']);
+ok(freshChanged.code === 1 && /\(not refreshed: the account changed while the refresh waited/.test(freshChanged.out) && calls.map((c) => c.path).join() === '/api/agent/channels/fake-poll/refused-account-changed/refresh,/api/agent/channels/read', 'read --fresh on a refused refresh prints "(not refreshed: …)" and still READS (here: the stub\'s read answers not-found for that key, exit 1 from the read, never from the refusal)', JSON.stringify({ code: freshChanged.code, out: freshChanged.out, calls: calls.map((c) => c.path) }));
+const rfHidden = await run(['refresh', 'fake-poll/hidden-to-me']);
+ok(rfHidden.code === 1 && rfHidden.err.includes(NOT_FOUND_TEXT), 'refreshing an invisible conversation is the uniform not-found (reach first)');
+calls.length = 0;
+const fresh = await run(['read', 'fake-poll/ops', '--fresh']);
+ok(fresh.code === 0 && /\(refreshed: 3 new\)/.test(fresh.out) && calls.map((c) => c.path).join() === '/api/agent/channels/fake-poll/ops/refresh,/api/agent/channels/read', 'read --fresh refreshes FIRST, then reads', fresh.out);
 
 const hidden = await run(['read', 'fake-poll/hidden-to-me']);
 const nowhere = await run(['read', 'fake-poll/does-not-exist']);

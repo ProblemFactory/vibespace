@@ -69,6 +69,18 @@ export function routeErrorText(r, { fallback = null } = {}) {
     case 'wake-count-mismatch': return t('This send wakes an agent (a billed turn) but the request did not confirm it — reload the window and send again');
     case 'rate-floor': return t('Not sent: this agent was woken less than 30 s ago (sign-in is off, so your sends are paced) — send again in a moment');
     case 'key-unreadable': return t('The secret key file could not be read');
+    // r4 (lane R2 verify): a fetch the vendor refused — the owner's Refresh press during a 429 — says the code and the retry instant (the card's own words), never a bare "failed" that invites the next press
+    case 'rate-limited': case 'transport': case 'backoff': {
+      const what = chanCaps.errorCodeText(code === 'backoff' ? (r.lastCode || 'vendor-error') : code, { t });
+      const s = Number(r.retryAfterSec) || 0;
+      return s ? t('{code} — retrying in {s} s', { code: what, s }) : t('{code} — retrying at the next pass', { code: what });
+    }
+    // r5 (lane R2 verify — the refresh request set): the owner's Refresh press refused by the account's minute, the per-conversation floor (the agent's, never the owner's — worded for completeness), the request set's cap, an account that changed while the press waited, the engine stopping
+    case 'vendor-budget': return r.share ? t('Agent refreshes have used their share of this account\'s vendor budget for this minute — try again in {s} s', { s: Number(r.retryAfterSec) || 60 }) : t('This account\'s vendor budget for this minute is spent — try again in {s} s', { s: Number(r.retryAfterSec) || 60 });
+    case 'refresh-floor': return t('This conversation was refreshed a moment ago — refresh again in {s} s', { s: Number(r.retryAfterSec) || 1 });
+    case 'refresh-queue-full': return t('Too many refreshes of this account are waiting — try again in a moment');
+    case 'account-changed': return t('The account changed while the refresh waited — refresh again');
+    case 'stopped': return t('The server is restarting — refresh again in a moment');
     default: return fallback || raw || t('Request failed');
   }
 }

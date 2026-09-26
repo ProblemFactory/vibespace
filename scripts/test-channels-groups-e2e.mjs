@@ -27,7 +27,7 @@
 //      message is drawn as "You" at once
 //   ⑤ the @-autocomplete: "@be" offers beta, Enter inserts "@beta ", the
 //      preview names beta, the send wakes beta — the mention rule end to end
-//   ⑥ THE LIST ORDERS BY ACTIVITY: groups and a tracked fake conversation in
+//   ⑥ THE LIST ORDERS BY ACTIVITY: groups and a linked account's fake conversation in
 //      ONE list, newest first (the fake's records carry their own instants —
 //      the fixture includes future-dated ones, so it is placed by them, never
 //      by a guess); a second group (created later) is ahead of the first, a
@@ -275,7 +275,7 @@ ok(JSON.stringify(s2.pop) === '["beta"]' && s2.afterPick === '@beta ', 'the @-au
 ok(/Will wake .*beta/.test(s2.preview || '') && fB2.length === 2 && /You were @mentioned/.test(fB2[1].message.content), 'an @mention wakes the next-turn member (preview named it; its stub recorded the mention wake)', JSON.stringify(fB2.map((f) => f.message.content.slice(0, 60))));
 
 // ── ⑥ the list orders by ACTIVITY, repainted in place ──
-await api('POST', '/api/channels/fake-poll/fake-poll-ops/track', { tracked: true });
+// 2026-09-26 (aggregated IM): every conversation of a linked account is listed — no track step
 await sleep(1500);
 const second = await api('POST', '/api/channel-groups', { name: 'second lane', members: AGENTS.map((a) => a.cid), quiet: true });
 ok(second.status === 200 && second.body.ok && second.body.woke.length === 0, 'CONTROL: a QUIET create wakes nobody (woke 0)', JSON.stringify(second.body && second.body.woke));
@@ -285,7 +285,7 @@ const A2 = `groups/${second.body.group.id}`, A1 = `groups/${gid}`, CONV = 'fake-
 const sortedByActivity = (o) => o.every((x, i) => i === 0 || o[i - 1].at >= x.at);
 const idx = (o, k) => o.findIndex((x) => x.key === k);
 const o1 = await until(`(() => { const o = ${ORDER}; const k = o.map((x) => x.key); return k.includes('${A2}') && k.includes('${CONV}') ? o : null; })()`);
-ok(o1 && sortedByActivity(o1) && idx(o1, A2) < idx(o1, A1) && idx(o1, CONV) >= 0, 'THE LIST ORDERS BY ACTIVITY: groups and the tracked conversation in ONE list, newest first — the later group ahead of the earlier one (the fake conversation sits by its own records\' instants)', JSON.stringify(o1));
+ok(o1 && sortedByActivity(o1) && idx(o1, A2) < idx(o1, A1) && idx(o1, CONV) >= 0, 'THE LIST ORDERS BY ACTIVITY: groups and the account\'s conversation in ONE list, newest first — the later group ahead of the earlier one (the fake conversation sits by its own records\' instants)', JSON.stringify(o1));
 const bump = await api('POST', `/api/channel-groups/${gid}/post`, { text: 'bumping the first group', expectWakes: 1 });   // alpha is on always: the echo says 1 (r2 consent)
 ok(bump.status === 200 && bump.body && bump.body.ok, 'the owner\'s post with its consent echo (expectWakes = the always member) is accepted', JSON.stringify(bump));
 const noEcho = await api('POST', `/api/channel-groups/${gid}/post`, { text: 'no echo this time' });
