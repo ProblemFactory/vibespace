@@ -7,7 +7,14 @@ import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
 import { HIDE_REASONS, hiddenReasons } from './view-visibility.js';
+import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'; // THE TITLE WINS (lane G): the billing chip's form per title bar / tab
 import { displayedPanes } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
+
+/** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
+function setChipMode(chip, mode) {
+  for (const m of CHIP_MODES) chip.classList.toggle('wab-' + m, m === mode);
+  chip.dataset.mode = mode;
+}
 
 class WindowManager {
   constructor(workspace) {
@@ -1312,6 +1319,7 @@ class WindowManager {
         if (tabEl) tabEl.textContent = t;
       }
     }
+    this._fitChipsSoon(win); // a new title may need the room the billing chip holds (or give it back)
     this._notify();
   }
 
@@ -1334,6 +1342,7 @@ class WindowManager {
       if (el) el.replaceWith(fresh); else win.titleSpan.insertAdjacentElement('afterend', fresh);
     }
     if (win._tabChain && win._ownerBadgeKey !== key) this._renderTabBar(win._tabChain);
+    else if (win._ownerBadgeKey !== key) this._fitChipsSoon(win); // the title and the billing chip share what is left
     win._ownerBadgeKey = key;
   }
 
@@ -1363,11 +1372,12 @@ class WindowManager {
     if (!win) return;
     const el = win.titleBar.querySelector(':scope > .win-inbox-badge');
     const b = win._inboxBadge;
-    if (!b || win._tabChain) { el?.remove(); return; }
+    if (!b || win._tabChain) { if (el) { el.remove(); if (!win._tabChain) this._fitChipsSoon(win); } return; }
     const key = `${b.count}:${b.urgency}`;
     if (el && el.dataset.key === key) return;
     const fresh = this._inboxBadgeEl(win.id, b);
     if (el) el.replaceWith(fresh); else win.titleSpan.insertAdjacentElement('afterend', fresh);
+    this._fitChipsSoon(win); // the title and the billing chip share what is left
   }
 
   // Billing identity indicator in the TITLE BAR (mirrors the session card's
@@ -1393,6 +1403,9 @@ class WindowManager {
     }
     win._authBadgeKey = key;
     const KEY_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="8" r="3"/><path d="M8 8h6.5M12 8v2.5M14.5 8v2"/></svg>';
+    const POOL_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5c1.5 1 4 1 6 0s4.5-1 6 0M2 8.5c1.5 1 4 1 6 0s4.5-1 6 0M2 11.5c1.5 1 4 1 6 0s4.5-1 6 0"/></svg>';
+    // the subscription chip had no glyph (a name is its whole face) — its ICON form needs one: the sidebar card's crown
+    const CROWN_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12.5h11M3 12.5L2 4.5l3.2 2.6L8 3l2.8 4.1L14 4.5l-1 8z"/></svg>';
     // Standalone: SIBLING right after the title span (setTitle wipes
     // titleSpan's children via textContent — same reason the bell icon
     // re-inserts). Tab group: sibling of the tab's label inside the tab item.
@@ -1421,30 +1434,46 @@ class WindowManager {
       const hn = auth.hostName;
       const machineTip = hn ? t('"{name}"’s own CLI login', { name: hn }) : t("The machine's own CLI login");
       let tip;
-      const POOL_SVG = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.5c1.5 1 4 1 6 0s4.5-1 6 0M2 8.5c1.5 1 4 1 6 0s4.5-1 6 0M2 11.5c1.5 1 4 1 6 0s4.5-1 6 0"/></svg>';
+      // THE TITLE WINS (lane G, the owner 2026-09-25: "这个全部->UCI Max占据了绝大部分空间，都看不到窗口标题了"):
+      // the chip carries all three of its forms — full (every word), compact (the glyph + the member's
+      // SHORT name), icon (the glyph) — and CSS shows the one `_fitChip` picked for the room the title
+      // leaves (PURE src/lib/title-chips.js). The words any form drops lead the tooltip, and the
+      // click still opens the switcher that names them all.
+      const glyph = (svg) => `<span class="wab-glyph">${svg}</span>`;
+      let words;
       if (isPooled) {
         // Pooled pseudo-account: a distinct chip (never the API key), naming
         // the POOL + the real account it currently bills (inline if room, else
         // the tooltip carries it) — real report: pooled sessions read as API.
+        const poolName = auth.name || t('Pool');
+        words = chipWords({ name: poolName, target: auth.poolTarget || '' });
         const tgt = auth.poolTarget ? escHtml(auth.poolTarget) : '';
-        el.innerHTML = POOL_SVG + `<span class="wab-name">${escHtml(auth.name || t('Pool'))}</span>${tgt ? `<span class="wab-pool-tgt"> → ${tgt}</span>` : ''}`;
-        tip = t('Pooled account') + (auth.poolTarget ? ' · ' + t('currently billing {name}', { name: auth.poolTarget }) : ' · ' + t('no target')) + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '');
+        el.innerHTML = glyph(POOL_SVG) + `<span class="wab-name">${escHtml(poolName)}</span>${tgt ? `<span class="wab-pool-tgt"> → ${tgt}</span>` : ''}<span class="wab-short">${escHtml(words.short)}</span>`;
+        tip = words.full + ' · ' + t('Pooled account') + (auth.poolTarget ? '' : ' · ' + t('no target')) + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '');
       } else if (isApi) {
-        el.innerHTML = KEY_SVG + `<span class="wab-name">${escHtml(auth.name || (auth.source === 'api-console' ? 'Console' : 'API'))}</span>`;
+        const nm = auth.name || (auth.source === 'api-console' ? 'Console' : 'API');
+        words = chipWords({ name: nm });
+        el.innerHTML = glyph(KEY_SVG) + `<span class="wab-name">${escHtml(nm)}</span><span class="wab-short">${escHtml(words.short)}</span>`;
         tip = t('API billing (pay per use)') + ` — ${auth.source === 'api-console' ? t('Console login') : (auth.name ? auth.name + (auth.tail ? ' (…' + auth.tail + ')' : '') : (auth.detail || t('API key')))}${hn ? ' · ' + t('on "{name}"', { name: hn }) : ''}${auth.guessed ? ' · ' + t('estimated from the login state at spawn') : ''}`;
       } else if (isUnknown) {
-        el.innerHTML = KEY_SVG + '?';
+        words = { full: '', short: '' };
+        el.innerHTML = glyph(KEY_SVG) + '?';
         tip = t('Billing identity unknown (started before tracking)');
       } else {
         const label = auth.name || (hn ? t('CLI login') + ' @ ' + hn : t('CLI login'));
-        el.innerHTML = `<span class="wab-name">${escHtml(label)}</span>`;
-        tip = (auth.source === 'codex-subscription' ? t('ChatGPT account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '')
+        words = chipWords({ name: label });
+        el.innerHTML = glyph(CROWN_SVG) + `<span class="wab-name">${escHtml(label)}</span><span class="wab-short">${escHtml(words.short)}</span>`;
+        tip = words.full + ' · ' + (auth.source === 'codex-subscription' ? t('ChatGPT account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '')
           : auth.source === 'codex-cli' ? machineTip
           : auth.name ? t('Subscription account') + (hn ? ' · ' + t('on "{name}"', { name: hn }) : '') : machineTip)
           + (auth.guessed ? ' · ' + t('estimated from the login state at spawn') : '');
       }
       el.dataset.tip = tip + ' · ' + t('Click to switch billing');
+      // the new words need new measurements; the form it had is kept until the next frame decides (no flash of the full chip on every tab-bar rebuild)
+      el.dataset.words = (isPooled ? 'pooled' : isApi ? 'api' : isUnknown ? 'unknown' : 'sub') + '\n' + words.full + '\n' + words.short;
+      setChipMode(el, win._chipMode || 'full');
       el.onclick = (e) => { e.stopPropagation(); this.app?.showBillingSwitcher?.(id, el); };
+      this._fitChipsSoon(win);
     };
     if (win._tabChain) {
       // Grouped: the badge lives ONLY on this window's tab item. A leftover
@@ -1458,6 +1487,113 @@ class WindowManager {
     } else if (win.titleSpan.parentElement === win.titleBar) {
       applyAfter(win.titleSpan);
     }
+  }
+
+  // ── THE TITLE WINS (lane G, 2026-09-25) ─────────────────────────────────────
+  // The billing chip's FORM is decided per title bar (a standalone window) or
+  // per TAB (a grouped one) by the PURE rule src/lib/title-chips.js from
+  // measured widths, all in LAYOUT px (offsetWidth + a canvas text measure —
+  // never a viewport rect, so the UI scale never enters): the room the label
+  // and the chip share = the label's width + the chip's width as drawn now,
+  // less any overflow (the same number whatever form is showing ⇒ no
+  // oscillation). Re-decided in ONE frame per burst: on a new chip / words
+  // (setAuthBadge — the pool broadcast arrives through it), a new title
+  // (setTitle, setTitleMeta), a sibling badge placed or removed, and a resize
+  // of the host's title bar (ONE ResizeObserver for every bar; the tab strip
+  // lives inside the bar and only changes with it or with a re-render, which
+  // re-applies the chips). A bar not laid out (the ≤768 px phone layout hides
+  // title bars; a minimized window) keeps the form it has.
+
+  /** Re-decide the chip forms on `win`'s visible bar (its chain host's strip when grouped) in the next frame. */
+  _fitChipsSoon(win) {
+    if (!win || typeof requestAnimationFrame !== 'function') return;
+    const host = win._tabChain ? this.windows.get(win._tabChain.tabs[0]) : win;
+    if (!host || !host.titleBar?.querySelector('.win-auth-badge')) return; // a bar with no billing chip has nothing to decide (and is never observed)
+    this._observeChipBar(host);
+    (this._chipFitIds ||= new Set()).add(host.id);
+    if (this._chipFitRaf) return;
+    this._chipFitRaf = requestAnimationFrame(() => {
+      this._chipFitRaf = 0;
+      const ids = [...this._chipFitIds]; this._chipFitIds.clear();
+      for (const hid of ids) { const w = this.windows.get(hid); if (w) this._fitChipsOf(w); }
+    });
+  }
+
+  /** ONE ResizeObserver over every host title bar that carries a chip; unobserved when the window closes. */
+  _observeChipBar(host) {
+    if (typeof ResizeObserver !== 'function' || !host?.titleBar || host._chipObserved) return;
+    if (!this._chipRO) {
+      this._chipROHost = new WeakMap();
+      this._chipRO = new ResizeObserver((entries) => {
+        for (const en of entries) { const w = this.windows.get(this._chipROHost.get(en.target)); if (w) this._fitChipsSoon(w); }
+      });
+    }
+    host._chipObserved = true;
+    this._chipROHost.set(host.titleBar, host.id);
+    this._chipRO.observe(host.titleBar);
+    host._listenerCtl?.signal?.addEventListener('abort', () => { this._chipRO.unobserve(host.titleBar); host._chipObserved = false; }, { once: true });
+  }
+
+  /** Decide every chip on `win`'s host bar now: each TAB of a chain, else the standalone title bar. */
+  _fitChipsOf(win) {
+    const host = win._tabChain ? this.windows.get(win._tabChain.tabs[0]) : win;
+    if (!host) return;
+    if (host._tabChain) {
+      for (const tab of host.titleBar.querySelectorAll(':scope > .tab-bar-tabs > .tab-item')) {
+        const chip = tab.querySelector(':scope > .win-auth-badge');
+        if (chip) this._fitChip(tab, tab.querySelector(':scope > .tab-label'), chip, this.windows.get(tab.dataset.winId));
+      }
+    } else {
+      const chip = host.titleBar.querySelector(':scope > .win-auth-badge');
+      if (chip) this._fitChip(host.titleBar, host.titleSpan, chip, host);
+    }
+  }
+
+  /** One chip beside one label inside `box` (a .tab-item or a standalone .window-titlebar). */
+  _fitChip(box, label, chip, owner) {
+    if (!box || !label || !chip || !box.isConnected || !box.offsetWidth) return; // not laid out: keep the form it has
+    const w = this._chipWidths(chip, owner);
+    if (!w) return;
+    const deficit = Math.max(0, box.scrollWidth - box.clientWidth); // an overflowing box: the chip cannot have what is clipped
+    const availablePx = label.offsetWidth + chip.offsetWidth - deficit;
+    const tw = this._titleWidths(label);
+    const mode = chipMode({ availablePx, titlePx: tw.full, titleMinPx: tw.min, chipFullPx: w.full, chipCompactPx: w.compact });
+    if (chip.dataset.mode !== mode) setChipMode(chip, mode);
+    if (owner) owner._chipMode = mode;
+  }
+
+  /** The chip's natural width in each form (layout px), measured once per set of words and place
+   *  (a tab's chip is drawn smaller than a title bar's) — kept on the WINDOW, because a chain's tab
+   *  bar is rebuilt (and its chips re-created) on every identity sync. */
+  _chipWidths(chip, owner) {
+    const key = (chip.dataset.words || '') + '\n' + (chip.parentElement?.classList.contains('tab-item') ? 'tab' : 'bar');
+    const holder = owner || chip;
+    if (holder._chipFitW && holder._chipFitW.key === key) return holder._chipFitW;
+    const cur = chip.dataset.mode || 'full';
+    const out = { key };
+    for (const m of CHIP_MODES) { setChipMode(chip, m); out[m] = chip.offsetWidth; }
+    setChipMode(chip, cur);
+    if (!(out.full > 0)) return null; // not rendered yet — measured on a later pass
+    holder._chipFitW = out;
+    return out;
+  }
+
+  /** The title's natural width and the width that shows its first TITLE_MIN_CHARS characters + the
+   *  ellipsis (layout px, the label's own computed font; +2 px for the box's rounding). */
+  _titleWidths(label) {
+    const text = label.textContent || '';
+    const cs = getComputedStyle(label);
+    const font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    const c = label._fitT;
+    if (c && c.text === text && c.font === font) return c;
+    const ctx = (this._chipMeasureCtx ||= document.createElement('canvas').getContext('2d'));
+    if (!ctx) return { text, font, full: 0, min: 0 };
+    ctx.font = font;
+    const full = Math.ceil(ctx.measureText(text).width);
+    const minText = titleMinText(text);
+    const min = minText === text.replace(/\s+/g, ' ').trim() ? full : Math.ceil(ctx.measureText(minText).width) + 2; // a title that short shows whole
+    label._fitT = { text, font, full, min };
+    return label._fitT;
   }
 
   _applyTitleMeta(win) {
@@ -1509,6 +1645,7 @@ class WindowManager {
     win.titleMeta = nextMeta;
     this._applyTitleMeta(win);
     if (win._tabChain) this._renderTabBar(win._tabChain);
+    else this._fitChipsSoon(win); // the icon stack beside the title may have changed width
     this._notify();
   }
 

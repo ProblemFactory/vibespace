@@ -175,7 +175,7 @@ console.log('⑧ THE MINI INBOX (design-user-inbox-reply §3, chunk 3) — one s
   ok(/renderPanel\(\); renderMini\(\); scheduleBadges\(\);/.test(panel) && /patchLive\(\); scheduleBadges\(\);/.test(panel), 'wiring: every user-todos broadcast repaints the popover + badges; every active-sessions recounts the badges');
   ok(/setInboxBadge\(id, badge\) \{/.test(win) && /_placeInboxBadge\(win\) \{/.test(win), 'window.js owns setInboxBadge + the standalone placement');
   ok(/_inboxBadgeEl\(winId, badge\) \{/.test(tg) && /tab\.appendChild\(this\._inboxBadgeEl\(tabWinId, tabWin\._inboxBadge\)\)/.test(tg) && (tg.match(/this\._placeInboxBadge\(/g) || []).length >= 2, 'tab-group.js draws the badge on the tab and restores the standalone one on detach + ungroup');
-  ok(/num\.textContent = String\(n\)/.test(tg) && !/innerHTML = [^;]*badge\.count/.test(tg), 'the badge count is TEXT (textContent), never markup');
+  ok(/num\.textContent = (String\(n\)|inboxCountText\(n\))/.test(tg) && !/innerHTML = [^;]*badge\.count/.test(tg), 'the badge count is TEXT (textContent — since lane G through inboxCountText, capped at 99+), never markup');
   ok(/this\._syncInboxBadges\?\.\(\)/.test(appSrc), 'app.js recounts on every window change (a window opened / closed / re-tabbed gets its badge)');
 }
 

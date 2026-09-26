@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.369.179 — the billing badge yields to the window title (lane G)
+
+The owner, on a tab strip whose titles read "V.." and a six-letter stub beside a billing chip "≋ 全部 → UCI Max" and an inbox chip "⌸ 1": "这个全部->UCI Max占据了绝大部分空间，都看不到窗口标题了，你有什么好的解决方案吗？" The title wins now.
+
+- **Three forms, one rule.** A window's billing chip (on a tab, and on a standalone title bar when space is short) takes the widest form that leaves the title readable: **full** ("≋ 全部 → UCI Max") only when the whole title fits beside it; else **compact** — the pool's glyph + the member's short name ("≋ UCI Max", a long name cut at 8 characters: "Northwi…") — when at least 6 characters of the title still show; else **icon** (the glyph and its colour, so a pooled window stays recognisable). API chips shorten the same way; a subscription chip, which never had a glyph, shows a crown only as an icon.
+- **Nothing is lost.** The tooltip leads with the full words ("全部 → UCI Max · Pooled account · Click to switch billing"), and a click still opens the billing switcher, whose pool row names the pool and its member.
+- **It follows the room.** Re-decided in one frame when the window is resized (one ResizeObserver per title bar, released when the window closes), when the title or the pool's member changes, on a tab switch, and when the owner dots or the inbox chip appear or go. Measured in layout px, so the UI scale never enters; the decision never reads the form currently shown, so it cannot flicker between two.
+- **The inbox chip keeps its number** at its minimal width (never wider than "99+"; tighter padding on a tab).
+- The phone layout is unchanged (it has no title bars), and so is the sidebar card (it has room).
+- Gates: `scripts/test-title-chips.mjs` (fast — the rule's table at its exact boundaries, three patched-copy controls, the real `_fitChip` over a fake box with a label-only-room control, the wiring pins) and `scripts/test-title-chips-ui.mjs` (heavy, chrome — a pooled 3-tab chain at 640 px keeps every title readable: ≥ 6 characters beside a compact chip, ≥ 5 beside an icon — measured 7 under this box's Noto Sans and 6 under DejaVu Sans, the Actions runner's `system-ui`, which legs 1–5 also run under, the labels proven drawn in it; a 2-tab chain resized 1240 → 400 → 1240 px goes compact → icon → compact, one window at 1240 px shows every word; the control bundles an always-full rule and every title drops to ≤ 3 characters).
+
 ## 2.369.178 — desktop apps on paired machines: launch, stop, relaunch and watch a desktop app on another of your machines, and install xpra there from the dialog (lane C, docs/design-desktop-apps-seamless §3.5; owner D5–D8 2026-09-25)
 
 The owner, after testing the desktop apps: "以及你要思考下整个app功能对于remote host的适配程度，自动seamless setup能力等等。" — how well does the whole app feature fit remote hosts, and can the setup happen by itself. Until now a desktop app could only run on the machine VibeSpace itself runs on; every other machine was refused by name. Now it can run on any paired Linux machine that runs the VibeSpace agent (D5), and xpra can be installed there from the launch dialog (D6).

@@ -3412,6 +3412,19 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .win-auth-badge .wab-name { max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tab-item .win-auth-badge { margin-left: 3px; }
 .tab-item .win-auth-badge svg { width: 10px; height: 10px; }
+/* THE TITLE WINS (lane G, 2026-09-25 — the owner: "这个全部->UCI Max占据了绝大部分空间，都看不到窗口标题了"):
+   the chip holds all three of its forms and window.js (_fitChip, PURE src/lib/title-chips.js) puts ONE
+   class on it for the room the title leaves — full = every word, compact = the glyph + the member's short
+   name, icon = the glyph alone (its colour still says pool / API / subscription); the dropped words lead
+   the tooltip and the switcher its click opens. A subscription chip shows its crown only as an icon. */
+.win-auth-badge .wab-glyph { display: inline-flex; align-items: center; flex-shrink: 0; }
+.win-auth-badge.sub .wab-glyph { display: none; }
+.win-auth-badge .wab-short { display: none; white-space: nowrap; }
+.win-auth-badge.wab-compact .wab-name, .win-auth-badge.wab-compact .wab-pool-tgt,
+.win-auth-badge.wab-icon .wab-name, .win-auth-badge.wab-icon .wab-pool-tgt { display: none; }
+.win-auth-badge.wab-compact .wab-short { display: inline; }
+.win-auth-badge.sub.wab-icon .wab-glyph { display: inline-flex; }
+.win-auth-badge.wab-icon { padding: 0 3px; }
 /* Session Properties window */
 .session-props .session-detail-row { padding: 2px 0; display: flex; align-items: center; gap: 8px; }
 .session-props .session-detail-label { flex-shrink: 0; width: 72px; color: var(--text-dim); font-size: 10px; }
@@ -4721,7 +4734,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* THE MINI INBOX badge (design-user-inbox-reply §3): a small pill after the title
    (or on the tab) = this session's open For-you asks, coloured by the worst urgency */
 .win-inbox-badge {
-  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex-shrink: 0;
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex: none; white-space: nowrap; /* never wider than icon + number (lane G: the title wins) */
   height: 16px; padding: 0 5px; border-radius: 999px; border: 1px solid transparent; cursor: pointer;
   background: var(--accent); color: var(--accent-fg, #fff); font-family: inherit; font-size: 9px; font-weight: 700; line-height: 1;
 }
@@ -4731,7 +4744,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .win-inbox-badge:hover { filter: brightness(1.12); }
 .win-inbox-badge:focus-visible { outline: 1px solid var(--border-active); outline-offset: 1px; }
 .win-inbox-badge svg { width: 10px; height: 10px; display: block; }
-.tab-item .win-inbox-badge { margin-left: 3px; }
+.tab-item .win-inbox-badge { margin-left: 3px; padding: 0 4px; gap: 2px; } /* on a tab: the number at its minimal width — the title wins (lane G) */
 .ut-mini-popover {
   background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0,0,0,0.4); padding: 8px 10px; width: 340px; max-width: calc(100vw - 16px); max-height: 420px; overflow-y: auto; overflow-x: hidden;

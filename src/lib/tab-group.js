@@ -2,6 +2,7 @@ import { createAgentKindIcon } from './agent-meta.js';
 import { escHtml , uiScale, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
+import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
 import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColumns, pairFor, visualTabOrder, swappedPair, splitPartner, ownerColor, SPLIT_RATIO_DEFAULT } from './chain-layout.js';
 
@@ -535,7 +536,7 @@ const tabGroupMethods = {
     el.innerHTML = UI_ICONS.inbox;
     const num = document.createElement('span');
     num.className = 'win-inbox-n';
-    num.textContent = String(n);
+    num.textContent = inboxCountText(n); // the number stays, never wider than 99+ (the label says the real count)
     el.appendChild(num);
     const label = t('{n} items from this agent', { n });
     el.title = label;
@@ -737,6 +738,7 @@ const tabGroupMethods = {
     // the strip is in VISUAL order — mark by window id, never by strip index
     const tabs = hostWin.titleBar.querySelectorAll('.tab-item');
     tabs.forEach((t) => { t.classList.toggle('active', t.dataset.winId === targetId); t.classList.toggle('tab-split-focus', t.classList.contains('tab-pane') && t.dataset.winId === targetId); });
+    this._fitChipsSoon?.(hostWin); // the active tab's label is drawn bolder — its billing chip re-decides (lane G: the title wins)
     this.activeWindowId = chain.tabs[index];
     this.syncHiddenViews?.(); // the guest's content just flipped display (inc-mu6bfv1t-4drq)
     this._applyChainLayout(chain); // re-derives every pane's display (a split keeps its pair shown) and syncs again
