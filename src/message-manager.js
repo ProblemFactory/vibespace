@@ -380,7 +380,24 @@ class MessageManager {
    *  task_notification are live-only (the transcript never carries them, the
    *  stdout ring drops them within minutes), so without this a restart emptied
    *  every Workflow card's tree until the CLI's next throttled emission. */
-  replay(raw) { if (raw && typeof raw === 'object') this._processMessage(raw, false); }
+  // `at` (lane Q verify, 2026-09-26) = WHEN the server saw the record live (the
+  // stdout consumer's `cur.at`): a replayed task_started / task_progress stamps
+  // `taskInfo.aliveAt` with it, never with the replay's own clock — a record two
+  // days old replayed after a restart is two days old, and /api/workflow counts
+  // a tree as proof of life only while its newest record is fresh
+  // (src/workflow-disk.js treeAlive). Unknown `at` ⇒ no stamp (no evidence).
+  replay(raw, { at = null } = {}) {
+    if (!raw || typeof raw !== 'object') return;
+    this._replayAt = Number.isFinite(at) && at > 0 ? at : 0;
+    try { this._processMessage(raw, false); } finally { this._replayAt = null; }
+  }
+
+  /** The instant a task record says its task is alive: now on the live stream
+   *  (`emit`), the record's own arrival on a replay, and UNKNOWN (0 ⇒ no stamp)
+   *  in a history conversion — the rebuild converts the wrapper's surviving
+   *  stdout ring too, whose task records carry no arrival time and may be days
+   *  old (an idle session's ring is never overwritten). */
+  _taskRecordAt(emit) { return this._replayAt != null ? this._replayAt : (emit ? Date.now() : 0); }
 
   processLive(claudeMsg) {
     this._processMessage(claudeMsg, true);
@@ -929,24 +946,30 @@ class MessageManager {
       // the status bar hands a Workflow to the ⛭ chip — the EXISTING workflow display — not to
       // the generic background-task rows; owner: "没办法和已有的工作流展示方案接起来吗")
       this._bgTasks = set;
-      const live = new Set(set.map((t) => t.id));
-      // THE SET NAMES IT AGAIN ⇒ THE SOFT CLOSE WAS A TRANSIENT DROP (2.369.147,
-      // owner: a running Workflow card said 已完成 while the same run sat in the
-      // popup as an unclickable "reported by the harness" row): the CLI omits a
-      // member for a record or two around its own phase changes; a level close
-      // is a GUESS, and the set is stronger evidence than the guess — reopen.
-      for (const [tid, msgId] of this.taskMsgByTaskId) {
-        if (!live.has(String(tid))) continue;
+      // THE SET NAMES A CARD, NOT A KEY (lane Q verify, 2026-09-26): a Workflow
+      // card holds TWO keys in taskMsgByTaskId — the CLI's short task id (from
+      // task_started) and the wf_ run id its launch ack registered (2.369.122) —
+      // and the set names only the short one. Judged per KEY, the run-id key was
+      // "not named" and closed the very card the short key had just kept open:
+      // every level set soft-closed a running Workflow (the 2.369.147 已完成
+      // symptom) and /api/workflow stopped counting its tree. A card is named
+      // when ANY of its keys is.
+      const named = new Set();
+      for (const t of set) { const msgId = this.taskMsgByTaskId.get(t.id); if (msgId) named.add(msgId); }
+      for (const msgId of new Set(this.taskMsgByTaskId.values())) {
         const m = this.messageIndex.get(msgId);
-        if (m?.taskInfo && m.taskInfo.status === 'finished' && m.taskInfo.closedBy === 'level') {
-          m.taskInfo.status = 'running'; delete m.taskInfo.closedBy;
-          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
-        }
-      }
-      for (const [tid, msgId] of this.taskMsgByTaskId) {
-        if (live.has(String(tid))) continue;
-        const m = this.messageIndex.get(msgId);
-        if (m?.taskInfo && m.taskInfo.status === 'running' && m.taskInfo.backgrounded === true) {
+        if (!m?.taskInfo) continue;
+        if (named.has(msgId)) {
+          // THE SET NAMES IT AGAIN ⇒ THE SOFT CLOSE WAS A TRANSIENT DROP (2.369.147,
+          // owner: a running Workflow card said 已完成 while the same run sat in the
+          // popup as an unclickable "reported by the harness" row): the CLI omits a
+          // member for a record or two around its own phase changes; a level close
+          // is a GUESS, and the set is stronger evidence than the guess — reopen.
+          if (m.taskInfo.status === 'finished' && m.taskInfo.closedBy === 'level') {
+            m.taskInfo.status = 'running'; delete m.taskInfo.closedBy;
+            if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+          }
+        } else if (m.taskInfo.status === 'running' && m.taskInfo.backgrounded === true) {
           m.taskInfo.status = 'finished';
           m.taskInfo.closedBy = 'level';
           if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
@@ -1011,6 +1034,8 @@ class MessageManager {
         const next = { ...(prior || {}), id: raw.task_id, type: (prior && prior.type) || normalizeTaskType(raw.task_type), description: raw.description || (prior && prior.description) || '', status: 'running', backgrounded: raw.is_backgrounded === true || !!(prior && prior.backgrounded === true) };
         if (prior && prior.id != null && /^wf_/.test(String(prior.id)) && String(prior.id) !== String(raw.task_id) && !next.runId) next.runId = String(prior.id);
         delete next.closedBy;
+        // the task's own record says it is alive — WHEN (lane Q verify, 2026-09-26)
+        { const at = this._taskRecordAt(emit); if (at) next.aliveAt = at; }
         existing.taskInfo = next;
         this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
         if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
@@ -1019,6 +1044,11 @@ class MessageManager {
         if (existing.taskInfo) {
           // progress IS liveness: a card the level set closed softly is running (2.369.147)
           if (existing.taskInfo.status === 'finished' && existing.taskInfo.closedBy === 'level') { existing.taskInfo.status = 'running'; delete existing.taskInfo.closedBy; }
+          // …and WHEN it was alive (lane Q verify, 2026-09-26): /api/workflow counts
+          // the tree as proof of life only while this is fresh (src/workflow-disk.js
+          // treeAlive) — a replayed record keeps its own arrival time, so a run that
+          // stalled days ago is not "running" again after every restart
+          { const at = this._taskRecordAt(emit); if (at) existing.taskInfo.aliveAt = at; }
           if (raw.description) existing.taskInfo.description = raw.description;
           if (raw.last_tool_name) existing.taskInfo.lastTool = raw.last_tool_name;
           // `summary` = the run's meta.description (a Workflow) — the NAME the

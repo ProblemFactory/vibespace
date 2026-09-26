@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -63,15 +64,71 @@ console.log('§2 the normalizer exposes the live task by its run id');
   ok('the short task id still resolves (the CLI\'s own key for task_progress/notification)', mm.taskInfoById('wu93ghxi2') === ti);
   ok('an unknown run id answers null', mm.taskInfoById('wf_nope') === null && mm.taskInfoById(undefined) === null);
 }
+{
+  // THE SET NAMES A CARD, NOT A KEY (lane Q verify, 2026-09-26): the real order above leaves the
+  // card with TWO keys (the short task id + the wf_ run id the ack registered); the CLI's
+  // background_tasks_changed names only the SHORT one. Judged per key, the run-id key was "not
+  // named" and soft-closed the card the short key kept open — every level set closed a running
+  // Workflow and /api/workflow stopped counting its tree (a live run read Stalled after 10 quiet min).
+  const judge = (MM) => {
+    const mm = MM ? new MM('test-wf-levelset') : createMessageManager('claude', 'test-wf-levelset');
+    mm.processLive({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_wf_ls', name: 'Workflow', input: { script: 'export const meta = {}' } }] } });
+    mm.processLive({ type: 'system', subtype: 'task_started', task_id: 'wu9ls1', tool_use_id: 'toolu_wf_ls', task_type: 'local_workflow', description: 'audit', is_backgrounded: true });
+    mm.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wf_ls', content: 'Workflow "audit" started in the background.\nRun ID: wf_ls1\nUse /workflows to watch.' }] } });
+    mm.processLive({ type: 'system', subtype: 'task_progress', task_id: 'wu9ls1', tool_use_id: 'toolu_wf_ls', description: 'audit', workflow_progress: [{ type: 'workflow_phase', index: 0, title: 'Scan' }, { type: 'workflow_agent', index: 0, label: 'scan:a', phaseIndex: 0, agentId: 'aaa111', state: 'running' }] });
+    mm.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'wu9ls1', task_type: 'local_workflow', description: 'audit' }] });
+    const named = { ...mm.taskInfoById('wf_ls1') };
+    mm.processLive({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+    const dropped = { ...mm.taskInfoById('wf_ls1') };
+    return { named, dropped };
+  };
+  const real = judge(null);
+  ok('a level set naming ONLY the short task id keeps the Workflow card running (resolved by either key) — the run-id key is the SAME card, never "not named"', real.named.status === 'running' && real.named.closedBy === undefined && real.named.runId === 'wf_ls1', real.named);
+  ok('…a set that names neither key still soft-closes it (finished, closedBy level) — the rule is per CARD, not disabled', real.dropped.status === 'finished' && real.dropped.closedBy === 'level', real.dropped);
+  // NEGATIVE CONTROL: the pre-fix per-KEY loops, spelled verbatim, in a patched copy of the normalizer
+  const M = mutantCopies('workflow-live-view', REPO);
+  const src = read('src/message-manager.js');
+  const from = src.indexOf('      // THE SET NAMES A CARD, NOT A KEY'), to = src.indexOf("      if (emit) this._emit({ op: 'meta', subtype: 'background-tasks'");
+  const PRE = `      const live = new Set(set.map((t) => t.id));
+      for (const [tid, msgId] of this.taskMsgByTaskId) {
+        if (!live.has(String(tid))) continue;
+        const m = this.messageIndex.get(msgId);
+        if (m?.taskInfo && m.taskInfo.status === 'finished' && m.taskInfo.closedBy === 'level') {
+          m.taskInfo.status = 'running'; delete m.taskInfo.closedBy;
+          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+        }
+      }
+      for (const [tid, msgId] of this.taskMsgByTaskId) {
+        if (live.has(String(tid))) continue;
+        const m = this.messageIndex.get(msgId);
+        if (m?.taskInfo && m.taskInfo.status === 'running' && m.taskInfo.backgrounded === true) {
+          m.taskInfo.status = 'finished';
+          m.taskInfo.closedBy = 'level';
+          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+        }
+      }
+`;
+  ok('the control applies (the per-card section is found)', from > 0 && to > from);
+  const pre = M.load('src/message-manager.js', src.slice(0, from) + PRE + src.slice(to), 'perkey');
+  const ctl = judge(pre.MessageManager);
+  ok(`CONTROL: the pre-fix per-KEY loops close the card through its run-id key (status ${ctl.named.status}, closedBy ${ctl.named.closedBy}) — the leg sees the defect`, ctl.named.status === 'finished' && ctl.named.closedBy === 'level', ctl.named);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(r.name, r.pass, r.detail);
+}
 
 console.log('§3 wiring pins (the 2.355.0 lesson)');
 {
   const route = read('src/routes/sessions.js');
-  const liveSites = (route.match(/(?:readLiveWorkflow\(runDir, runId\)|liveWorkflowFromParts\(liveParts\))/g) || []).length;
-  const wrapped = (route.match(/withLiveTree\((?:readLiveWorkflow\(runDir, runId\)|liveWorkflowFromParts\(liveParts\)), runId\)/g) || []).length;
-  ok(`every live-view return of /api/workflow is wrapped with the tree (${wrapped} of ${liveSites} sites; the definition inside readLiveWorkflow is not a return)`, liveSites >= 4 && wrapped === liveSites - 1 && /require\('\.\.\/workflow-live'\)/.test(route) && /n\.taskInfoById\(runId\)/.test(route));
+  // 2026-09-26: every live return goes through ONE seam, liveView — parseRunDir
+  // (src/workflow-disk.js) over the run dir's parts, the tree merged over it.
+  // The old skeleton helpers are gone; a return that builds its own view is a miss.
+  const body = route.slice(route.indexOf("router.get('/api/workflow'"), route.indexOf("router.post('/api/session-rescue'"));
+  const liveReturns = (body.match(/return res\.json\(liveView\(/g) || []).length;
+  const seam = route.slice(route.indexOf('function liveView('), route.indexOf('function readRunDirParts('));
+  ok(`every live-view return of /api/workflow goes through liveView (${liveReturns} sites: local no-snapshot + resumed, remote no-snapshot + resumed); parseRunDir is called ONLY inside it and the tree is merged there`,
+    liveReturns === 4 && (route.match(/parseRunDir\(/g) || []).length === 1 && /parseRunDir\(/.test(seam) && /mergeLiveWorkflow\(view, ti\.workflow/.test(seam)
+    && !/liveWorkflowFromParts|readLiveWorkflow|withLiveTree/.test(route) && /require\('\.\.\/workflow-live'\)/.test(route) && /n\.taskInfoById\(runId\)/.test(route), { liveReturns });
   const win = read('src/lib/workflow-detail.js');
-  ok('the window renders the tree: liveTree note, live tokens/tool calls, the last-tool chip, View Log disabled for a transcript not on disk yet', /wf\.liveTree\s*\?/.test(win) && /wf\.liveTree && wf\.totalTokens/.test(win) && /workflow-agent-tool/.test(win) && /ag\.onDisk === false/.test(win) && /escHtml\(ag\.lastToolName\)/.test(win));
+  ok('the window renders the tree: liveTree note (the PURE liveNoteKind picks it, the stall first — lane Q verify), live tokens/tool calls, the last-tool chip, View Log disabled for a transcript not on disk yet', /noteKind === 'tree'\s*\?/.test(win) && /const noteKind = liveNoteKind\(wf\)/.test(win) && /wf\.liveTree && wf\.totalTokens/.test(win) && /workflow-agent-tool/.test(win) && /ag\.onDisk === false/.test(win) && /escHtml\(ag\.lastToolName\)/.test(win));
   ok('the chip is styled with theme vars', /\.workflow-agent-tool \{[^}]*var\(--text-dim\)/.test(read('public/style.css')));
   ok('the CLAUDE.md head no longer calls live progress unreadable', !/live progress is TUI-only, unreadable/.test(read('CLAUDE.md')));
 }

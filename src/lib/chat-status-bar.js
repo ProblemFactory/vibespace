@@ -17,6 +17,11 @@ const DESIGN_PANEL_W = { minWidth: 300, maxWidth: 440 };
 const GOAL_PANEL_W = { minWidth: 240, maxWidth: 400 };
 const GOAL_SET_PANEL_W = { minWidth: 280, maxWidth: 420 };
 
+/** A STALLED Workflow run (src/workflow-disk.js) stays tracked and is re-asked on
+ *  the View Workflow window's slow cadence (lane Q verify, 2026-09-26) — the
+ *  card follows the run back to Running within one period of its next write. */
+const WF_STALLED_POLL_MS = 15000;
+
 /**
  * ChatStatusBar — status bar for chat mode sessions.
  * Shows model, permission mode, background tasks, context usage, cache ratio, cost.
@@ -32,7 +37,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null }) {
     this._ws = ws;
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
@@ -70,6 +75,9 @@ export class ChatStatusBar {
     this._startReview = startReview || (() => {});
     this._onOpenWorkflow = onOpenWorkflow || null;
     this._getWorkflowIds = getWorkflowIds || (() => ({}));
+    // the server's verdict on a tracked run → the view, so the Workflow CARD's
+    // chip says what the window says (a stalled run is never "running")
+    this._onWorkflowVerdict = onWorkflowVerdict;
 
     // Status state
     this._statusModel = '';
@@ -277,12 +285,26 @@ export class ChatStatusBar {
       this._wfTimer = null;
       if (this._disposed || !this._workflows?.size) return;
       const ids = this._getWorkflowIds() || {};
+      const now = Date.now();
       for (const [runId, wf] of [...this._workflows]) {
+        // a STALLED run is re-asked on the window's slow cadence (15 s), not every tick
+        if (wf.stalled && now - (wf.checkedAt || 0) < WF_STALLED_POLL_MS - 1000) continue; // (a timer's jitter never skips a whole period)
+        wf.checkedAt = now;
         try {
           const r = await fetch(`/api/workflow?runId=${encodeURIComponent(runId)}&claudeSessionId=${encodeURIComponent(ids.claudeId || '')}&cwd=${encodeURIComponent(ids.cwd || '')}${ids.host ? `&host=${encodeURIComponent(ids.host)}` : ''}`);
           if (r.status === 404) { this._workflows.delete(runId); continue; }
           const d = await r.json().catch(() => null);
+          // a STALLED run (src/workflow-disk.js: no result, no snapshot, nothing
+          // written for 10 min) leaves the running chip, and its verdict goes to
+          // the card; any other answer clears it
+          if (d) { try { this._onWorkflowVerdict?.(runId, d.status === 'stalled' ? { status: 'stalled', stall: d.stall || null } : null); } catch { /* the view is going away */ } }
+          // …but it STAYS TRACKED (lane Q verify, 2026-09-26): a stalled run can
+          // write again (a quiet stretch ended, a resume under the same runId) —
+          // dropped, its card kept "Stalled" while the window said Running. Only a
+          // terminal answer or a 404 lets go of a run.
+          if (d && d.status === 'stalled') { wf.stalled = true; continue; }
           if (!d || (d.status && d.status !== 'running')) { this._workflows.delete(runId); continue; }
+          wf.stalled = false;
           wf.agents = d.agentCount || 0;
           wf.done = d.doneCount || 0;
           // the live skeleton says 'Workflow' when no persisted script names the
@@ -293,10 +315,14 @@ export class ChatStatusBar {
         } catch { /* transient — keep the chip */ }
       }
       this.render();
-      if (this._workflows.size) this._wfTimer = setTimeout(tick, 8000);
+      if (this._workflows.size) this._wfTimer = setTimeout(tick, [...this._workflows.values()].some((w) => !w.stalled) ? 8000 : WF_STALLED_POLL_MS);
     };
     this._wfTimer = setTimeout(tick, 1200);
   }
+
+  /** The tracked runs the ⛭ chip shows — a stalled run is tracked (re-asked)
+   *  but never drawn as running (lane Q verify, 2026-09-26). */
+  _runningWorkflows() { return [...(this._workflows?.values() || [])].filter((w) => !w.stalled); }
 
   setTasks(tasks) {
     const next = new Map();
@@ -767,8 +793,8 @@ export class ChatStatusBar {
     // Running dynamic workflows — one chip; MULTIPLE collapse into a count
     // chip with a dropdown, like the tasks chip (owner: 多个workflow在运行
     // 也应该像tasks那样收起来).
-    if (this._workflows?.size) {
-      const wfs = [...this._workflows.values()];
+    const wfs = this._runningWorkflows();
+    if (wfs.length) {
       if (wfs.length === 1) {
         const wf = wfs[0];
         const prog = wf.probed && wf.agents ? ` ${wf.done}/${wf.agents}` : '';
@@ -1071,11 +1097,11 @@ export class ChatStatusBar {
 
     // Collapsed multi-workflow chip → dropdown, one row per run
     const wfMulti = e.target.closest('.chat-status-wf-multi');
-    if (wfMulti && this._workflows?.size) {
+    if (wfMulti && this._runningWorkflows().length) {
       e.stopPropagation();
       const dropdown = showDropdown(wfMulti);
       if (!dropdown) return;
-      for (const wf of this._workflows.values()) {
+      for (const wf of this._runningWorkflows()) {
         const item = document.createElement('div');
         item.className = 'chat-status-dropdown-item chat-task-detail';
         const prog = wf.probed && wf.agents ? ` <span class="chat-status-dim">${wf.done}/${wf.agents}</span>` : '';

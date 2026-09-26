@@ -53,7 +53,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   ok(/\{ id: 'btn-browser',\s+label: 'Web view button',\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js')), "customize mode names the element 'Web view button'");
   ok(/check\(t\('Web view button'\), s\.get\('toolbar\.showBrowserButton'\)\)/.test(read('src/lib/app.js')), "the toolbar context menu's toggle reads 'Web view button'");
   const dl = read('src/lib/desktop-app-launcher.js');
-  ok(/you drive with your mouse and keyboard — the agent cannot reach it\./.test(dl), "Apps dialog intro says who operates it: you, with mouse and keyboard; the agent cannot reach it");
+  ok(/you drive with your mouse and keyboard — agents cannot see it unless you share it\./.test(dl), "Apps dialog intro says who operates it: you, with mouse and keyboard; agents cannot see it unless you share it (desktop lane E, D1)");
   ok(/escHtml\(row\.browser && !isLaunching && !unavailable \? `\$\{t\('Browser app'\)\} · \$\{sub\}` : sub\)/.test(dl), "Apps catalog card: 'Browser app ·' sub-label gated on row.browser (a startable browser row — a dimmed one keeps only its short reason, the B-bfe6 Browsers section's layout)");
   ok(!/Settings → Browser'/.test(dl) && dl.split("t('Off — turn it on in Settings → Agent browser')").length - 1 === 3, "Apps dialog's desktop-consent pointer names Settings → Agent browser (three sites)");
   const tv = read('src/lib/browser-trace-view.js');
@@ -98,8 +98,9 @@ const ja = (await import('../src/lib/i18n-ja.js')).default;
   }
   ok(!missing.length, `every new key (${Object.keys(WANT).length}) is in BOTH dictionaries`, missing.join(' | '));
   ok(!wrong.length, 'the tabled names carry the tabled words (faces §5.2 / D10)', wrong.join(' | '));
-  const intro = Object.keys(zh).find((k) => k.startsWith('Opens a graphical program from this machine'));
-  ok(intro && /the agent cannot reach it/.test(intro) && ja[intro] && /agent/i.test(intro) && /Agent 够不到|agent 够不到|够不到/.test(zh[intro]) && /エージェント/.test(ja[intro]), "the Apps dialog's intro (who operates it) is translated in both, saying the agent cannot reach it");
+  const intros = Object.keys(zh).filter((k) => k.startsWith('Opens a graphical program from this machine'));
+  const intro = intros[0];
+  ok(intros.length === 1 && /agents cannot see it unless you share it/.test(intro) && ja[intro] && /共享/.test(zh[intro]) && /agent/.test(zh[intro]) && /エージェント/.test(ja[intro]) && /共有/.test(ja[intro]), "the Apps dialog's intro (who operates it) is translated in both, saying agents cannot see it unless you share it (lane E) — the retired wording is gone");
   // retired: absent from both unless a source still says it
   const RETIRED = ['Browser profiles', 'Browser profiles…', 'Browser (live)', 'Browser profile…', 'Live browser view', 'Hand back the browser', 'Show Browser button', 'Browser button',
     'Open this URL in the embedded browser', 'Off — turn it on in Settings → Browser', 'action trace is off (Settings → Browser)', 'The action trace is OFF (Settings → Browser → Action trace).',

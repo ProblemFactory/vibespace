@@ -1,6 +1,7 @@
 import { escHtml, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
+import { stallWords, liveNoteKind } from '../workflow-disk.js'; // PURE: the ONE spelling of a stalled run (the chat card's chip reads it too) + which note a live view carries (the stall first)
 
 /**
  * Workflow detail window (window type 'workflow') — POST-HOC viewer for a
@@ -8,11 +9,14 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
  *
  * A workflow writes ONE terminal-state snapshot when it finishes, at
  *   <projectDir>/<claudeSessionId>/workflows/wf_<runId>.json
- * (the rich phase/agent tree is NOT written live — live progress is a
- * TUI-only render layer, verified empirically). So this window shows a
- * COMPLETED (or killed/failed) run: phases → agents with per-agent state,
- * model and token totals. Each agent's transcript opens in the existing
- * read-only subagent viewer (server resolves the workflow-nested agent files).
+ * — phases → agents with per-agent state, model and token totals. Before
+ * that (or when the run stopped without one) the server reads the run DIR
+ * (src/workflow-disk.js): labels, phases and states from the journal + the
+ * agents' meta files, and a liveness verdict from the files' mtimes — a run
+ * nothing has written to for 10 minutes is `stalled`, never "running"; the
+ * launching session's live progress tree is laid over it while this server
+ * holds one. Each agent's transcript opens in the existing read-only subagent
+ * viewer (server resolves the workflow-nested agent files).
  *
  * Entry: the "View Workflow" button on a Workflow tool card in chat.
  * openSpec 'openWorkflowDetail' persists it across restore / multi-client.
@@ -28,6 +32,8 @@ const STATE_META = {
   // a retry replaced this attempt (its log ends in an aborted request) —
   // without the label these read as mysterious user interrupts (real report)
   superseded: { label: t('retried — replaced by a newer attempt'), color: 'var(--text-dim)' },
+  // an agent of a STALLED run with no result: it is not running either
+  unfinished: { label: t('unfinished — the run stopped before it returned'), color: 'var(--yellow, #e5a04c)' },
 };
 
 const RUN_STATUS_META = {
@@ -35,6 +41,8 @@ const RUN_STATUS_META = {
   running:   { label: t('Running'),   color: 'var(--blue, #61afef)' },
   killed:    { label: t('Killed'),    color: 'var(--yellow, #e5a04c)' },
   failed:    { label: t('Failed'),    color: 'var(--red, #e55)' },
+  // no result, no terminal snapshot, no file written for 10 minutes (src/workflow-disk.js)
+  stalled:   { label: t('Stalled'),   color: 'var(--yellow, #e5a04c)' },
 };
 
 function fmtDuration(ms) {
@@ -112,7 +120,10 @@ export function openWorkflowDetail(app, runId, opts = {}) {
   const rows = new Map(); // agent key -> { row, sig }
   const render = (wf) => {
     if (head && !head.isConnected) lastDigest = '';   // an error / loading line replaced the view: the next answer renders
-    const digest = JSON.stringify(wf);
+    // a stalled run's sentence carries a relative time ("12 min ago") — part of
+    // the digest, so the words follow the clock while nothing else changed
+    const stall = stallWords(wf, { t, now: Date.now() });
+    const digest = JSON.stringify(wf) + (stall ? '|' + stall.detail : '');
     if (digest === lastDigest) return;
     lastDigest = digest;
     const title = wf.workflowName || name || 'Workflow';
@@ -135,10 +146,13 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     const st = RUN_STATUS_META[wf.status] || { label: wf.status || '?', color: 'var(--text-dim)' };
     const wfTitle = wf.workflowName || 'Workflow';
     if (headTitle.textContent !== wfTitle) headTitle.textContent = wfTitle;
-    const chipCls = 'workflow-status-chip' + (wf.live ? ' workflow-status-live' : '');
+    // the pulse means RUNNING — a stalled run's disk view is live data, not a live run
+    const chipCls = 'workflow-status-chip' + (wf.live && wf.status === 'running' ? ' workflow-status-live' : '');
     if (headChip.className !== chipCls) headChip.className = chipCls;
     if (headChip.style.getPropertyValue('--chip-color') !== st.color) headChip.style.setProperty('--chip-color', st.color);
     if (headChip.textContent !== st.label) headChip.textContent = st.label;
+    const chipTip = stall ? stall.detail : '';
+    if (headChip.title !== chipTip) headChip.title = chipTip;
 
     // the open state of every expander survives the rebuild of the body
     const openBoxes = new Set([...body.querySelectorAll('details.workflow-detail-box')].filter((d) => d.open).map((d) => d.dataset.box));
@@ -156,7 +170,8 @@ export function openWorkflowDetail(app, runId, opts = {}) {
     meta.className = 'workflow-detail-meta';
     let bits;
     if (wf.live) {
-      bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} done', { n: wf.doneCount || 0 }), t('running…')];
+      bits = [t('{n} agents', { n: wf.agentCount || 0 }), t('{n} done', { n: wf.doneCount || 0 })];
+      if (stall) { if (stall.detail) bits.push(stall.detail); } else bits.push(t('running…'));
       // the stream tree carries the run's own usage while it is live (2.369.119)
       if (wf.liveTree && wf.totalTokens) bits.push(t('{n} tokens', { n: fmtTokens(wf.totalTokens) }));
       if (wf.liveTree && wf.totalToolCalls) bits.push(t('{n} tool calls', { n: wf.totalToolCalls }));
@@ -170,13 +185,23 @@ export function openWorkflowDetail(app, runId, opts = {}) {
 
     if (wf.live) {
       const note = document.createElement('div');
-      note.className = 'workflow-live-note';
+      // STALL FIRST (lane Q verify, 2026-09-26): a stalled view may still carry a
+      // merged tree (the stream holds one, closed or stale) — its sentence must
+      // agree with the chip, so the stall picks the note and the rail on its own
+      // (PURE liveNoteKind, tabled in test-workflow-disk).
+      const noteKind = liveNoteKind(wf);
+      note.className = 'workflow-live-note' + (noteKind === 'stalled' ? ' workflow-live-note-stalled' : '');
       // 2.369.119: with the harness's own progress tree (the same one the chat
-      // card renders) phases, labels and states are live; without it (a window
-      // opened after the launching session is gone) only the disk skeleton is.
-      note.textContent = wf.liveTree
-        ? t('Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.')
-        : t('Live view — updates every few seconds. Phase names, labels and token totals appear when the run finishes. Open any agent to watch its transcript.');
+      // card renders) phases, labels and states are live. Without it (a window
+      // opened after the launching session is gone, a server restart) the view
+      // is the run DIR's (2026-09-26): labels and phases come from the run's
+      // files too — only token totals wait for the run's end — and a run that
+      // stopped writing says so instead of "running…" forever.
+      note.textContent = noteKind === 'stalled'
+        ? t('None of this run’s files has changed for over {n} minutes and it never wrote its final result — it most likely stopped together with the session that launched it. Open any agent to read its transcript.', { n: 10 })
+        : noteKind === 'tree'
+          ? t('Live view — phases, labels and states come from the run’s own progress records (the same ones the chat card shows); token totals are final when the run finishes.')
+          : t('Live view from the run’s own files — agent states update every few seconds; token totals appear when the run finishes. Open any agent to watch its transcript.');
       nextBody.appendChild(note);
     }
 
@@ -188,19 +213,25 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       const doneN = phase.agents.filter(a => a.state === 'done').length;
       const hdr = document.createElement('div');
       hdr.className = 'workflow-phase-head';
+      // a phase the run's files did not name (an untitled remainder) reads in the device's words
+      const phaseTitle = phase.untitled ? (phase.title === 'Other' ? t('Other') : t('Agents')) : phase.title;
       hdr.innerHTML =
-        `<span class="workflow-phase-title">${escHtml(phase.title)}</span>` +
+        // the full title on hover — a long one is clipped to an ellipsis (lane Q verify)
+        `<span class="workflow-phase-title" title="${escHtml(phaseTitle)}">${escHtml(phaseTitle)}</span>` +
         `<span class="workflow-phase-count">${doneN}/${phase.agents.length}</span>`;
       sec.appendChild(hdr);
 
       phase.agents.forEach((ag, i) => {
         const key = ag.agentId ? 'a:' + ag.agentId : `p:${phase.index}:${i}`;
         seen.add(key);
-        const sm = STATE_META[ag.state] || { label: ag.state || '?', color: 'var(--text-dim)' };
+        // a stalled run's agent with no result is `unfinished`, never "running"
+        const shown = wf.status === 'stalled' && ag.state === 'progress' ? 'unfinished' : ag.state;
+        const sm = STATE_META[shown] || { label: shown || '?', color: 'var(--text-dim)' };
         const model = ag.model ? ag.model.replace(/^claude-/, '') : '';
         const spans =
           `<span class="workflow-agent-state" aria-hidden="true" style="--chip-color:${sm.color}" title="${escHtml(sm.label)}"></span>` +
-          `<span class="workflow-agent-label">${escHtml(ag.label || '(agent)')}</span>` +
+          // the full label on hover — a 500-char one is clipped to an ellipsis (lane Q verify)
+          `<span class="workflow-agent-label"${ag.label ? ` title="${escHtml(ag.label)}"` : ''}>${escHtml(ag.label || '(agent)')}</span>` +
           (ag.lastToolName && (ag.state === 'progress' || ag.state === 'queued') ? `<span class="workflow-agent-tool" title="${escHtml(ag.lastToolSummary || ag.lastToolName)}">${escHtml(ag.lastToolName)}</span>` : '') +
           (model ? `<span class="workflow-agent-model">${escHtml(model)}</span>` : '');
         let rec = rows.get(key);
@@ -269,14 +300,14 @@ export function openWorkflowDetail(app, runId, opts = {}) {
       }
       const wf = await res.json();
       render(wf);
-      if (wf.live || wf.status === 'running') {
+      if (wf.status === 'running') {
         // hidden-tab backoff: 2.5s polling of a background tab is waste
         if (!pollTimer || pollSlow) { stopPoll(); pollSlow = false; pollTimer = setInterval(() => { if (!document.hidden) load(); }, 2500); }
-      } else if (wf.status === 'killed' || wf.status === 'failed') {
-        // a killed/failed run can be RESUMED under the SAME runId (verified:
-        // resumeFromRunId reuses it) — keep a slow re-check so an open viewer
-        // notices the resume / the healed final snapshot instead of freezing
-        // on the stale terminal state forever (real report)
+      } else if (wf.status === 'killed' || wf.status === 'failed' || wf.status === 'stalled') {
+        // a killed/failed/stalled run can be RESUMED under the SAME runId
+        // (verified: resumeFromRunId reuses it) — keep a slow re-check so an
+        // open viewer notices the resume / the healed final snapshot instead of
+        // freezing on the stale state forever (real report)
         if (!pollTimer || !pollSlow) { stopPoll(); pollSlow = true; pollTimer = setInterval(() => { if (!document.hidden) load(); }, 15000); }
       } else {
         stopPoll(); // completed — genuinely final

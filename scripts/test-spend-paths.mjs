@@ -423,6 +423,9 @@ const ALLOW = [
   // turn, and the engine's ONE site for it forwards to the gated ladder
   // (spendReason 'peer-message'). Everything else a group does is FREE: the
   // default next-turn mode rides the member's own next user turn as context.
+  // desktop lane E (D3): the user's "Ask <agent> to take control" — FREE by default (the stash: the agent's next turn);
+  // its "wake it now" is the ONE billed site, forwarded to the gated ladder under its own declared reason.
+  { file: 'src/server/window-request.js', prim: 'deliver-ladder', why: "the window-control request FORWARDS its wake to the gated ladder (spendReason 'window-share-request'); the default is the free next-turn stash, a refused or undeliverable wake is stashed too, and a 30 s per-conversation floor is pacing, not money" },
   { file: 'src/server/groups-engine.js', prim: 'deliver-ladder', why: "the agent-groups engine's ONE wake site FORWARDS to the gated ladder (spendReason 'peer-message'); a refusal is journaled and the message rides the member's next-turn report — the engine never stashes and never opens a turn beside the ladder" },
 ];
 

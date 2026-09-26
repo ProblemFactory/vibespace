@@ -3,7 +3,9 @@
 // the OUTER window's resize must be limited to that height". Every VibeSpace window already has ONE
 // minimum — the `.window` CSS floor 320×180 (public/style.css), the rule the terminal lives by: a CSS
 // min-width/min-height, so a grid cell, a snap zone or a restored layout SMALLER than it leaves the
-// window at its minimum, overlapping the neighbouring cell honestly (never squeezed, never cropped).
+// window at its minimum, overlapping the neighbouring cell honestly (never squeezed, never cropped) —
+// and, at the workspace's right / bottom edge where there IS no neighbouring cell, slid back inside
+// (`zoneBox`, inc-muhmqvzf-jodk: the overlap there was a crop by #workspace's overflow: clip).
 // A window may now raise that floor for itself (`winInfo.minWidth/minHeight`, set through
 // WindowManager.setMinSize — a desktop-app window from its app's size constraints): the SAME rule, per
 // window — the inline min-width/min-height carries it through every path that sizes the element (snap,
@@ -39,6 +41,57 @@ export function keepInside({ left, top, width, height }, ws) {
   if (ws && Number(ws.w) > 0 && l + width > ws.w) l = Math.max(0, ws.w - width);
   if (ws && Number(ws.h) > 0 && tp + height > ws.h) tp = Math.max(0, ws.h - height);
   return { left: l, top: tp, width, height, moved: l !== left || tp !== top };
+}
+
+/**
+ * A ZONE'S BOX for a window with a minimum (inc-muhmqvzf-jodk, 2026-09-26 — Chrome snapped into the right third of
+ * a 1×3 grid on a 1450 px workspace: a 478 px cell, a 502 px window minimum; the window grew rightward from the
+ * cell's left edge, hung 20 px past the workspace, and #workspace (overflow: clip) cut the app's ⋮ and our own ✕).
+ * `zone` = where a snap / grid cell / stored bounds / a restored size puts the window (layout px), `min` = its
+ * effective minimum (minOf, workspace-capped), `ws` = the workspace box, `gap` = the snap gutter kept at the edge.
+ * The size is the zone raised to the minimum; the growth goes toward the INSIDE: a box that would end past the
+ * workspace edge (less `gap`) slides left / up just enough, never past the workspace's own left / top edge. A zone
+ * that already ended past that edge (a window the person dropped hanging off the screen) keeps ITS right / bottom
+ * edge — the minimum never adds a crop, and a window without a raised minimum is never moved. `ws` null (the
+ * workspace not laid out) ⇒ the raised size, no slide.
+ */
+export function zoneBox(zone, min, ws, gap = 0) {
+  const axis = (pos, size, need, room) => {
+    const s = Math.max(size, Number(need) || 0);
+    if (!(Number(room) > 0)) return [pos, s];
+    const bound = Math.max(pos + size, room - gap);
+    return pos + s > bound ? [Math.max(Math.min(pos, 0), bound - s), s] : [pos, s];
+  };
+  const [left, width] = axis(zone.left, zone.width, min && min.w, ws && ws.w);
+  const [top, height] = axis(zone.top, zone.height, min && min.h, ws && ws.h);
+  return { left, top, width, height, moved: left !== zone.left || top !== zone.top, raised: width !== zone.width || height !== zone.height };
+}
+
+/**
+ * A box with its EDGES on whole layout px (the sizes follow from the rounded edges, never rounded apart — two
+ * neighbours keep their shared gutter; inc-muhmqvzf-jodk r2, the verifier's low: stored fractions × a 1450 px
+ * workspace wrote 727.03 / 778.94 px and the pane on that fractional box left up to one device px of the picture
+ * under its edge). `offsetLeft` / `offsetWidth` are integers, so a whole-px box round-trips through the grid-bounds
+ * capture without drift.
+ */
+export function wholePx({ left, top, width, height }) {
+  const l = Math.round(left), t = Math.round(top);
+  return { left: l, top: t, width: Math.round(left + width) - l, height: Math.round(top + height) - t };
+}
+
+/**
+ * A box the WINDOW MANAGER stored on one workspace (the restore box it keeps through a maximize), carried to the
+ * workspace of now: the same fractions of it — exactly where the workspace reflow puts a visible window's grid bounds
+ * — edges on whole px (inc-muhmqvzf-jodk r2: a right third of a 1876 px workspace kept at left 1252 through a
+ * maximize while the sidebar opened, restored on a 1450 px one, hung 422 CSS px past it and was then captured as
+ * the window's fractions — a cascade). `from` / `to` = {w, h} workspace boxes; the same, or either unknown ⇒ the
+ * box as it was.
+ */
+export function rescaleBox(box, from, to) {
+  const ok = (b) => b && Number(b.w) > 0 && Number(b.h) > 0;
+  if (!ok(from) || !ok(to) || (from.w === to.w && from.h === to.h)) return box;
+  const kx = to.w / from.w, ky = to.h / from.h;
+  return wholePx({ left: box.left * kx, top: box.top * ky, width: box.width * kx, height: box.height * ky });
 }
 
 /**

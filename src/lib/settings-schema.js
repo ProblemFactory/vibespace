@@ -134,10 +134,10 @@ const SETTINGS_SCHEMA = {
     type: 'enum', default: 'auto', options: [
       { value: 'auto', label: t('Auto (this screen)') },
       { value: '1', label: '1×' },
-      { value: '1.5', label: t('1.5× (text only in GTK apps)') },
+      { value: '1.5', label: '1.5×' }, // lane D (a): a fraction is a real scale (drawn at 2×, shown at 75 %)
       { value: '2', label: '2×' },
     ], label: t('Desktop app scale (xpra)'),
-    description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×: widgets 2×, text 2.5×). 1.5× enlarges only the text of GTK apps — their buttons stay 1× (GTK cannot scale by a fraction on X11). The scale is fixed when the app starts; a window\'s ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.'),
+    description: t('How large a desktop application draws itself, for sharp text on high-resolution screens. Auto: derived from the screen you launch it from — its pixel ratio × your UI scale (a 2× screen at UI scale 125 % = 2.5×). A fractional scale (1.5×, 2.5×) scales buttons and text alike: the app is drawn at the next whole scale and shown smaller, a little softer than a whole scale. The scale is fixed when the app starts; a window\'s ⋯ → Scale relaunches it at another one, and its status bar shows the scale and where it came from.'),
     category: t('Window'), liveApply: true,
   },
   'desktop.seamless': {

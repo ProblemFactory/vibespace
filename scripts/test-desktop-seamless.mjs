@@ -18,6 +18,10 @@
 //   §5 wiring pins: the setting (Window category, auto|off, liveApply) is READ by the window; the view's
 //      onMoveResize reaches the WindowManager seams; the CSS folds with a class (never display:none of the bars);
 //      the taskbar menu rows; every t() key of desktop-seamless.js / the seamless block has zh + ja;
+//   §6 lane D (a) item C — Chrome (MEASURED, Chrome 153 under xpra 6.5.3): its main-window metadata by default
+//      (decorations 1 ⇒ ssd — the owner's stacked bars) and with the keeper's seeded browser.custom_chrome_frame
+//      (decorations 0 ⇒ seamless); the seeding → Chrome's frame → the verdict pipeline; no browser exclusion in the
+//      verdict path; CONTROL: a desktop-apps.js copy that never seeds keeps a fresh profile ssd;
 //   NEGATIVE CONTROL (scripts/mutant-copy.mjs): a copy of desktop-seamless.js whose verdict forgets the pauses
 //      fails §1's matrix — the matrix is a judge, not an echo; a copy of window.js without the fix-r1 un-maximize
 //      notifications (§4 (e)) drags a maximized window off SILENTLY (the app's header bar is never told).
@@ -26,6 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { createRequire } from 'node:module';
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MUT = mutantCopies('desktop-seamless', repo);
@@ -277,6 +282,45 @@ console.log('§5 wiring pins');
   ok(keys.length >= 15 && missing.length === 0, `every t() key of the seamless words (the window's block, the menu rows, the setting) has zh + ja entries (${new Set(keys).size} keys)`, missing);
 }
 
-for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+console.log('§6 lane D (a) item C — CHROME draws its own frame (MEASURED 2026-09-25: Google Chrome 153.0.8010.47 under xpra 6.5.3)');
+{
+  const require = createRequire(import.meta.url);
+  const M = require('../src/desktop-apps.js');
+  const P = await import('../src/lib/xpra-proto.js');
+  // the MEASURED main-window metadata of the keeper's chromium row (the new-window packet, verbatim keys): by default
+  // Chrome does not know xpra's WM ⇒ "Use system title bar and borders" ⇒ _MOTIF_WM_HINTS 0x2,0,1,0,0 ⇒ decorations 1;
+  // with browser.custom_chrome_frame=true ⇒ 0x2,0,0,0,0 ⇒ decorations 0 (+ _GTK_FRAME_EXTENTS 5,5,5,5 ⇒ the minimum +10)
+  const CHROME_DEFAULT = { title: 'New Tab - Google Chrome', 'class-instance': ['google-chrome (/p/profile)', 'Google-chrome'], 'window-type': ['NORMAL'], 'has-alpha': true, 'size-constraints': { gravity: 10, 'minimum-size': [500, 87] }, decorations: 1 };
+  const CHROME_OWN = { ...CHROME_DEFAULT, 'size-constraints': { gravity: 10, 'minimum-size': [510, 97] }, decorations: 0 };
+  const TOOLTIP = { 'window-type': ['TOOLTIP'], above: true };
+  const live = { setting: 'auto', userToggle: 'auto', lease: false, chain: false, phone: false, connected: true };
+  ok(P.windowKind(CHROME_DEFAULT) === 'main' && P.windowKind(TOOLTIP, true) === 'popup', 'Chrome\'s browser window (0x400004, the only one xpra forwards; the leader / clipboard / 1×1 helpers stay unmapped) is the MAIN; its menus and tooltips arrive override-redirect ⇒ popups — the first-main pick is right for Chrome, no evidence picker needed');
+  const vDef = S.seamlessVerdict({ ...live, csd: S.isCsd(CHROME_DEFAULT) }), vOwn = S.seamlessVerdict({ ...live, csd: S.isCsd(CHROME_OWN) });
+  ok(!S.isCsd(CHROME_DEFAULT) && same(vDef, { seamless: false, why: 'ssd' }), `a fresh profile (decorations 1): not CSD ⇒ ${JSON.stringify(vDef)} — the owner's screenshot: OUR title bar (carrying Chrome's own title and icon) and OUR strip, both stacked`);
+  ok(S.isCsd(CHROME_OWN) && same(vOwn, { seamless: true, why: 'csd' }), `Chrome drawing its own frame (decorations 0) is CSD ⇒ ${JSON.stringify(vOwn)} — seamless like GNOME Calculator`);
+  // the keeper's decision → the profile → what Chrome reports (the measured map: custom_chrome_frame true ⇒ 0, false / absent ⇒ 1)
+  const decoOf = (prefs) => (prefs && prefs.browser && prefs.browser.custom_chrome_frame === true ? 0 : 1);
+  const pipeline = (mod, prefs) => { const v = mod.chromiumFramePrefs(prefs); const after = v.ok ? v.prefs : prefs; return S.seamlessVerdict({ ...live, csd: S.isCsd({ decorations: decoOf(after) }) }); };
+  const PL = [[null, true], [{}, true], [{ browser: { custom_chrome_frame: false } }, false], [{ browser: { custom_chrome_frame: true } }, true]];
+  ok(PL.every(([pr, want]) => pipeline(M, pr).seamless === want), `the keeper's seeding → Chrome's frame → the verdict: a new / key-less profile ⇒ seamless; the user's own "Use system title bar" (false) kept ⇒ the frame shown (${PL.map(([pr]) => JSON.stringify(pipeline(M, pr))).join(' ')})`);
+  ok(S.frameKeyOf({ appId: 'chromium', exec: '/usr/bin/google-chrome', browser: 'chromium' }) === 'chromium', 'the chromium row\'s "Show window frame" key is its app id (a Scale ▸ relaunch keeps it)');
+  // nothing in the verdict path singles out a browser row (the strip folds with the title bar under .window.seamless)
+  const daw = read('src/lib/desktop-app-window.js'), seam = read('src/lib/desktop-seamless.js');
+  const applyBody = daw.slice(daw.indexOf('function applySeamless()'), daw.indexOf('function stepReveal('));
+  ok(applyBody.length > 100 && !/browser/.test(applyBody) && !/browser/.test(seam.slice(seam.indexOf('export function seamlessVerdict'), seam.indexOf('export const isPaused'))), 'no browser-row exclusion anywhere in the verdict path (applySeamless + seamlessVerdict never read `browser`)');
+  // NEGATIVE CONTROL — a copy of desktop-apps.js whose seeding never sets the pref: the same pipeline keeps Chrome SSD
+  const srcA = read('src/desktop-apps.js');
+  const from = "  return { ok: true, changed: true, prefs: { ...prefs, browser: { ...(b || {}), custom_chrome_frame: true } }, why: 'absent' };";
+  const from0 = "  if (prefs === null || prefs === undefined) return { ok: true, changed: true, prefs: { browser: { custom_chrome_frame: true } }, why: 'new' };";
+  ok(srcA.split(from).length === 2 && srcA.split(from0).length === 2, 'the seeding is spelled once per branch (the control patches exactly them)');
+  const mf = MUT.write('src/desktop-apps.js', srcA.replace(from, "  return { ok: true, changed: false, prefs, why: 'absent' }; // CONTROL: never seeded").replace(from0, "  if (prefs === null || prefs === undefined) return { ok: true, changed: false, prefs: null, why: 'new' }; // CONTROL"), 'noseed');
+  const MC = require(mf);
+  ok(same(pipeline(MC, null), { seamless: false, why: 'ssd' }) && same(pipeline(MC, {}), { seamless: false, why: 'ssd' }), `CONTROL: without the seeding a fresh profile stays SSD (${JSON.stringify(pipeline(MC, null))}) — both bars stacked, as in the owner's screenshot`);
+  // WIRING: the keeper seeds before the browser starts (a fresh scaffold, a kept profile, one carried to a relaunch)
+  const serve = read('src/desktop-serve.js');
+  ok(serve.indexOf('await seedChromiumFrame(rec.profileDir)') > 0 && serve.indexOf('await seedChromiumFrame(rec.profileDir)') < serve.indexOf('display.startApp(') && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(serve), 'WIRING PIN: the keeper seeds a chromium profile inside bringUp, BEFORE display.startApp (so a carried profile is seeded where it lands)');
+}
+
+for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);

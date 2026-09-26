@@ -1844,7 +1844,7 @@ console.log('§18 B-bfe6 — a BROWSER as a desktop app: its OWN profile dir (cr
   ok(a.browser === 'chromium' && a.profileDir === prof && a.keepProfile === false && a.url === 'https://example.com/vs-bfe6', 'the record names the family, its OWN profile dir (data/desktop-apps/<id>/profile), the URL and keepProfile false', a);
   ok(fs.existsSync(prof) && (fs.statSync(prof).mode & 0o777) === 0o700, 'the profile dir exists before the app starts, mode 0700');
   ok(!prof.startsWith(fakeHome + path.sep) && !prof.startsWith(process.env.HOME + path.sep), `the profile is NOT under $HOME (the apps' HOME ${fakeHome}, nor the real one) — it lives in the keeper's data dir`);
-  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', 'https://example.com/vs-bfe6']), 'the record\'s argv: the profile flags, THEN the URL', a.args);
+  ok(same(a.args, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', 'https://example.com/vs-bfe6']), 'the record\'s argv: the profile flags (+ desktop lane E\'s accessibility switch), THEN the URL', a.args);
   const ready = await until(() => { const r = k.get(a.id); return r.state === 'ready' || r.state === 'failed' ? r : null; });
   ok(ready && ready.state === 'ready', 'the browser session reaches ready on the private display', ready && ready.lastError);
   const argvFile = await until(() => { try { return fs.readFileSync(path.join(prof, 'argv.txt'), 'utf8'); } catch { return null; } }, 8000);
@@ -2044,17 +2044,17 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
   else {
     const k = mk('k20', { settings: { 'desktop.backendPrefs': '', 'desktop.appScale': 'auto' } });
     await k.adoptAll(); k.start();
-    // (a) a DPR-2 client at UI scale 125 % under `auto`: 2.5× = GDK_SCALE 2 in the app's environ + Xft.dpi 120 on its display
+    // (a) a DPR-2 client at UI scale 125 % under `auto`: 2.5× — lane D (a): drawn at GDK_SCALE 3 (Xft.dpi 96) and SHOWN at 0.8333
     const a0 = await k.launch({ exec: XT, args: ['-T', 'vs-a3-scale', '-geometry', '40x10'], label: 'a3-scale', dpr: 2, uiScale: 1.25 });
     const a1 = await readyOf(k, a0.id);
     const aEnv = envOf(a1.pids.app), aDpi = xftDpiOf(k, a1);
-    // the TEXT half, measured: xterm's 40×10 cells are drawn by its Xft face (faceSize 8 × GDK_SCALE) at the display's dpi —
-    // its window at 120 dpi against the same face at 96 dpi (the CONTROL (f) below) is the text scale 2.5 / 2 = 1.25
+    // the TEXT half, measured: xterm's 40×10 cells are drawn by its Xft face (faceSize 8 × GDK_SCALE) — at GDK_SCALE 3 (24) against
+    // the 2× face (16, the CONTROL (f) below) the X window is 1.5× the size, SHOWN at the record's pictureScale 0.8333 ⇒ 1.25 = 2.5 / 2
     const xtermWin = async (kk, id, title) => { const w = await until(async () => { const r = await kk.windows(id).catch(() => null); return ((r && r.windows) || []).find((x) => x.title === title && x.w > 16) || null; }, 10000).catch(() => null); return w ? { w: w.w, h: w.h } : null; };
     const aWin = await xtermWin(k, a0.id, 'vs-a3-scale');
     console.log(`  §20 (a): record scale ${a1.scale} dpi ${a1.dpi} origin ${a1.scaleOrigin} from ${JSON.stringify(a1.scaleFrom)}; inside the display: GDK_SCALE=${aEnv.GDK_SCALE}, Xft.dpi ${aDpi}`);
-    ok(a1.state === 'ready' && a1.backend === 'xpra' && a1.scale === 2.5 && a1.dpi === 120 && a1.scaleOrigin === 'auto' && a1.scaleFrom && a1.scaleFrom.dpr === 2 && a1.scaleFrom.uiScale === 1.25, '§20 (a): dpr 2 × uiScale 1.25 under auto ⇒ the record says 2.5×, 120 dpi, origin auto, and the numbers it came from', { state: a1.state, scale: a1.scale, dpi: a1.dpi, origin: a1.scaleOrigin, from: a1.scaleFrom, lastError: a1.lastError });
-    ok(aEnv.GDK_SCALE === '2' && aDpi === 120, `§20 (a): MEASURED inside the app's display — GDK_SCALE=${aEnv.GDK_SCALE} in the app's environ, Xft.dpi ${aDpi} in its resource database`, { GDK_SCALE: aEnv.GDK_SCALE, xft: aDpi });
+    ok(a1.state === 'ready' && a1.backend === 'xpra' && a1.scale === 2.5 && a1.dpi === 96 && a1.gdkScale === 3 && a1.pictureScale === 0.8333 && a1.scaleOrigin === 'auto' && a1.scaleFrom && a1.scaleFrom.dpr === 2 && a1.scaleFrom.uiScale === 1.25, '§20 (a): dpr 2 × uiScale 1.25 under auto ⇒ the record says 2.5× — drawn at GDK_SCALE 3, 96 dpi, shown at 0.8333 (lane D (a)) — origin auto, and the numbers it came from', { state: a1.state, scale: a1.scale, dpi: a1.dpi, origin: a1.scaleOrigin, from: a1.scaleFrom, lastError: a1.lastError });
+    ok(aEnv.GDK_SCALE === '3' && aDpi === 96, `§20 (a): MEASURED inside the app's display — GDK_SCALE=${aEnv.GDK_SCALE} in the app's environ, Xft.dpi ${aDpi} in its resource database`, { GDK_SCALE: aEnv.GDK_SCALE, xft: aDpi });
     // (b) the per-window relaunch at 1.5×: the successor first, the old one names it BEFORE its stop broadcasts, then stops
     const castsBefore = k._events.length;
     // desktop A r1: two clients on the window — L active, H blocked (x5). H follows the `replacedBy` broadcast and attaches to
@@ -2076,15 +2076,15 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     const olds = k._events.slice(castsBefore).filter((m) => m.type === 'desktop-apps-updated').map((m) => (m.apps || []).find((x) => x.id === a0.id)).filter(Boolean);
     const firstNamed = olds.findIndex((x) => x.replacedBy === rl.app.id), firstExited = olds.findIndex((x) => x.state === 'exited');
     console.log(`  §20 (b): relaunched ${a0.id} → ${rl.app.id} in ${readyMs} ms to ready; record scale ${b1.scale} dpi ${b1.dpi} origin ${b1.scaleOrigin}; GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}; old: ${rl.replaced.state} stoppedBy ${rl.replaced.stoppedBy} replacedBy ${rl.replaced.replacedBy}; broadcasts of the old record: named at #${firstNamed}, exited at #${firstExited}`);
-    ok(rl.app.id !== a0.id && b1.state === 'ready' && b1.scale === 1.5 && b1.dpi === 144 && b1.scaleOrigin === 'chosen' && b1.exec === a1.exec && JSON.stringify(b1.args) === JSON.stringify(a1.args) && b1.label === a1.label, '§20 (b): the successor is the SAME command at the CHOSEN 1.5× (144 dpi, origin chosen)', { scale: b1.scale, dpi: b1.dpi, origin: b1.scaleOrigin, state: b1.state });
-    ok(bEnv.GDK_SCALE === '1' && bDpi === 144, `§20 (b): MEASURED — 1.5× is text only for GTK: GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}`);
+    ok(rl.app.id !== a0.id && b1.state === 'ready' && b1.scale === 1.5 && b1.dpi === 96 && b1.gdkScale === 2 && b1.pictureScale === 0.75 && b1.scaleOrigin === 'chosen' && b1.exec === a1.exec && JSON.stringify(b1.args) === JSON.stringify(a1.args) && b1.label === a1.label, '§20 (b): the successor is the SAME command at the CHOSEN 1.5× (drawn at GDK_SCALE 2, 96 dpi, shown at 0.75; origin chosen)', { scale: b1.scale, dpi: b1.dpi, origin: b1.scaleOrigin, state: b1.state });
+    ok(bEnv.GDK_SCALE === '2' && bDpi === 96, `§20 (b): MEASURED — lane D (a): 1.5× is a REAL scale (widgets AND text), drawn at GDK_SCALE=${bEnv.GDK_SCALE}, Xft.dpi ${bDpi}, shown at 0.75`);
     ok(rl.replaced.state === 'exited' && rl.replaced.stoppedBy === 'relaunch' && rl.replaced.replacedBy === rl.app.id && [a1.pids.x, a1.pids.app].every((p) => !alive(p)) && markerPids(a0.id).length === 0, '§20 (b): the old session is stopped (stoppedBy relaunch, replacedBy the successor) and nothing of it is left', { state: rl.replaced.state, stoppedBy: rl.replaced.stoppedBy, replacedBy: rl.replaced.replacedBy, left: markerPids(a0.id) });
     ok(firstNamed >= 0 && firstExited >= 0 && firstNamed <= firstExited && M.exitCloseVerdict(olds[firstExited]).why === 'relaunched', `§20 (b): every client learns the successor no later than the stop (named at broadcast #${firstNamed}, exited at #${firstExited}) — the window follows it instead of closing (${JSON.stringify(M.exitCloseVerdict(olds[firstExited] || null))})`);
     // (c) refusals by name: an ended record, an unknown scale, an unknown id
     const r1 = await k.relaunch(a0.id, { scale: 2 }).then(() => null, (e) => e.code);
-    const r2 = await k.relaunch(rl.app.id, { scale: 3 }).then(() => null, (e) => e.code);
+    const r2 = await k.relaunch(rl.app.id, { scale: 1.25 }).then(() => null, (e) => e.code); // lane D: 3 is a choice now (EXPLICIT_SCALES); 1.25 is spelled by scaleKnobs but never PICKED
     const r3 = await k.relaunch('da-nope', { scale: 2 }).then(() => null, (e) => e.code);
-    ok(r1 === 'not-ready' && r2 === 'bad-request' && r3 === 'not-found', `§20 (c): relaunch refuses by name — an ended record ${r1}, scale 3 ${r2}, an unknown id ${r3}`);
+    ok(r1 === 'not-ready' && r2 === 'bad-request' && r3 === 'not-found', `§20 (c): relaunch refuses by name — an ended record ${r1}, scale 1.25 ${r2}, an unknown id ${r3}`);
     // (d) the cap: the app being replaced does not count (a keeper at its ceiling can still change a window's scale)
     const kc = mk('k20c', { settings: { 'desktop.backendPrefs': '' }, limits: { ...M.LIMITS, CONCURRENT_CAP: 1 } });
     await kc.adoptAll(); kc.start();
@@ -2106,7 +2106,7 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     await k.stop(rl.app.id);
     k.shutdown();
     // (f) CONTROL — the pre-A3 keeper (the scale from the setting + dpr only): the same client gets 2× / 96 — the UI scale never reached the app
-    const { mod } = mutant('prea3scale', [["const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });", "const pick = { scale: [1, 1.5, 2].includes(Number(serverSetting('desktop.appScale'))) ? Number(serverSetting('desktop.appScale')) : (v.launch.dpr >= 1.5 ? 2 : 1), origin: null, from: null }; // pre-A3"]]);
+    const { mod } = mutant('prea3scale', [["const pick = M.scalePick({ choice: opts.scaleChoice, appDefault: v.launch.scaleChoice, setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });", "const pick = { scale: [1, 1.5, 2].includes(Number(serverSetting('desktop.appScale'))) ? Number(serverSetting('desktop.appScale')) : (v.launch.dpr >= 1.5 ? 2 : 1), origin: null, from: null }; // pre-A3"]]);
     fs.mkdirSync(path.join(root, 'k20-ctl'), { recursive: true });
     const kx = mod.create({ dataDir: path.join(root, 'k20-ctl'), env: baseEnv, broadcast: () => {}, serverSetting: (key) => ({ ...PIN, 'desktop.backendPrefs': '', 'desktop.appScale': 'auto' })[key], backends: XVFB_TABLE, log: { log() {}, warn() {}, error() {} } });
     keepers.push(kx);
@@ -2115,9 +2115,11 @@ console.log('§20 round 3 A3 (docs/design-desktop-apps-seamless §3.4) — the s
     const x1 = await readyOf(kx, x0.id);
     const xDpi = xftDpiOf(kx, x1);
     const xWin = await xtermWin(kx, x0.id, 'vs-a3-ctl');
-    const rw = aWin && xWin ? aWin.w / xWin.w : 0, rh = aWin && xWin ? aWin.h / xWin.h : 0;
-    console.log(`  §20 (a)/(f): xterm 40×10 at 2.5× (120 dpi) ${aWin && `${aWin.w}×${aWin.h}`} vs at 2× (96 dpi) ${xWin && `${xWin.w}×${xWin.h}`} device px — ratio ${rw.toFixed(3)} × ${rh.toFixed(3)}`);
-    ok(rw >= 1.15 && rw <= 1.35 && rh >= 1.15 && rh <= 1.35, `§20 (a): MEASURED the text half — the same 40×10 xterm is ${rw.toFixed(2)}× wider and ${rh.toFixed(2)}× taller at 2.5× (120 dpi) than at 2× (96 dpi): the text is drawn at 2.5×, the fraction carried by the dpi`, { aWin, xWin });
+    // lane D (a): the X window at GDK_SCALE 3 is ~1.5× the 2× one; the view SHOWS it at the record's pictureScale — the ratio on screen is 1.25
+    const pic = Number(a1.pictureScale) || 1;
+    const rw = aWin && xWin ? aWin.w * pic / xWin.w : 0, rh = aWin && xWin ? aWin.h * pic / xWin.h : 0;
+    console.log(`  §20 (a)/(f): xterm 40×10 at 2.5× (GDK_SCALE 3, shown at ${pic}) ${aWin && `${aWin.w}×${aWin.h}`} vs at 2× ${xWin && `${xWin.w}×${xWin.h}`} X px — on screen ${rw.toFixed(3)} × ${rh.toFixed(3)}`);
+    ok(rw >= 1.15 && rw <= 1.35 && rh >= 1.15 && rh <= 1.35, `§20 (a): MEASURED the text — the same 40×10 xterm is SHOWN ${rw.toFixed(2)}× wider and ${rh.toFixed(2)}× taller at 2.5× than at 2× (drawn at GDK_SCALE 3, shown at ${pic}): the text AND the widgets at 2.5×`, { aWin, xWin, pic });
     ok(x1.scale === 2 && x1.dpi === 96 && xDpi === 96, `CONTROL: the pre-A3 pick gives the same DPR-2 / 125 % client ${x1.scale}× at Xft.dpi ${xDpi} — the (a) leg is the derivation, not a coincidence`, { scale: x1.scale, dpi: x1.dpi, xft: xDpi });
     await kx.stop(x0.id); kx.shutdown();
   }

@@ -1,5 +1,5 @@
 import { attachPopoverClose, escHtml, uiScale } from './utils.js';
-import { minOf, clampToMin, raiseToMin, keepInside } from './window-min-size.js';
+import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox } from './window-min-size.js';
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { showWindowContextMenu } from './taskbar.js';
@@ -78,8 +78,8 @@ class WindowManager {
     this._mobileYieldSidebar();
     const id = syncId || ('win-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6));
     this.windowCounter++;
-    if (x === undefined) { const o = (this.windowCounter % 8) * 30; x = 40 + o; y = 40 + o; }
     width = width || 700; height = height || 500;
+    if (x === undefined) ({ left: x, top: y, width, height } = this._defaultPlacement(width, height));
     // BORN IN A CHAIN (agent browser P7, §4.6): `intoChain: { hostId, split, side }`
     // — the window is never painted standalone (no visible jump, no
     // created-then-merged autosave churn); it joins the host's chain below.
@@ -164,16 +164,22 @@ class WindowManager {
     // is viewport px — under the DPI zoom the mixed ratio recorded fractions
     // divided by the zoom, which poisoned layouts.json for every client (F1)
     const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight };
-    const el = win.element;
+    if (!(r.width > 0) || !(r.height > 0)) return; // a workspace not laid out: no fractions (÷ 0), the old bounds kept
+    // the box as laid out — or, for a window that is NOT rendered (a minimized one is display:none: every offset 0),
+    // its inline px (inc-muhmqvzf-jodk r2: a capture there wrote {0,0,0,0} — a snap's own 220 ms capture after a
+    // quick minimize, the autosave's first capture of a minimized window, a raise while minimized — and the reflow
+    // that now places minimized windows would have put that window at the workspace's corner); neither ⇒ kept
+    const b = this._layoutBoxOf(win.element);
+    if (!b) return;
     // Quantize to 4 decimals: offsetLeft/Width are integer px, so raw
     // fractions carry viewport-dependent rounding noise — two clients would
     // never agree on the "same" bounds and layout-sync bounced forever.
     const q = (v) => Math.round(v * 10000) / 10000;
     win.gridBounds = {
-      left: q(el.offsetLeft / r.width),
-      top: q(el.offsetTop / r.height),
-      width: q(el.offsetWidth / r.width),
-      height: q(el.offsetHeight / r.height),
+      left: q(b.left / r.width),
+      top: q(b.top / r.height),
+      width: q(b.width / r.width),
+      height: q(b.height / r.height),
     };
     // Keep the desktop previews honest: the drag path mutates preview rects
     // DIRECTLY (live tracking), which the switcher's digest guard cannot see —
@@ -187,12 +193,14 @@ class WindowManager {
     if (!win.gridBounds) return;
     const r = { width: this.workspace.offsetWidth, height: this.workspace.offsetHeight }; // layout px (F1)
     const b = win.gridBounds;
-    const el = win.element;
-    el.style.left = (b.left * r.width) + 'px';
-    el.style.top = (b.top * r.height) + 'px';
-    el.style.width = (b.width * r.width) + 'px';
-    el.style.height = (b.height * r.height) + 'px';
-    if (win.onResize) win.onResize();
+    // through the ONE placement (inc-muhmqvzf-jodk): a restored / synced / reflowed box below the window's minimum
+    // (a narrower workspace — the sidebar opened, another client's wider screen) slides inside, never hangs past it.
+    // Its edges on WHOLE layout px (r2, the verifier's low: 4-decimal fractions × 1450 wrote 727.03 / 778.94 px and the
+    // pane on that fractional box left a device px of the picture under its edge; offsetLeft / offsetWidth are
+    // integers, so the whole-px box round-trips through _captureGridBounds without drift)
+    this._placeWindow(win, wholePx({ left: b.left * r.width, top: b.top * r.height, width: b.width * r.width, height: b.height * r.height }), 4);
+    // a MINIMIZED window (display:none) is placed but measures nothing — restore() tells its view (its onResize)
+    if (win.onResize && !win.isMinimized) win.onResize();
   }
 
   _reflowWindows() {
@@ -203,9 +211,11 @@ class WindowManager {
       // Skip grouped guests — they share the host's element
       if (win._tabChain && win._tabChain.tabs[0] !== win.id) continue;
       if (win._hiddenByDesktop) continue;
-      if (win.gridBounds && !win.isMinimized && !win.isMaximized) {
-        this._applyGridBounds(win);
-      }
+      // a MINIMIZED window is placed too (inc-muhmqvzf-jodk r2, the verifier's MAJOR): its box is the WM's, kept through
+      // the minimize — skipped here, a workspace that narrowed while it was hidden (the sidebar opened) handed the
+      // restore the old workspace's box (a right third of 1876 px at left 1252 on a 1450 px one: 422 CSS px past the
+      // edge), which restore's capture then persisted as the window's fractions (a cascade on the next widening)
+      if (win.gridBounds && !win.isMaximized) this._applyGridBounds(win);
       if (win.minWidth || win.minHeight) this._applyOwnMin(win); // the workspace cap follows the workspace (r2)
     }
   }
@@ -839,7 +849,8 @@ class WindowManager {
    * A window's OWN minimum size (layout px; 2.369.158 — a desktop-app window from its app's size
    * constraints; null clears it). The terminal's rule, per window: the inline min-width/min-height
    * holds it through snap zones, grid cells, presets, maximize and layout restore (a cell smaller than
-   * the minimum leaves the window at its minimum, overlapping the next cell — never squeezed), the
+   * the minimum leaves the window at its minimum, overlapping the next cell — never squeezed; in the last
+   * column / row it slides back inside, never hanging past the workspace: `_placeWindow`), the
    * resize drag stops at it, and an open window below it is raised NOW (its top-left kept, or slid
    * up/left just enough to stay on the workspace). NEVER LARGER THAN THE WORKSPACE (r2): the minimum is
    * capped at the workspace box and re-capped when the workspace resizes — a minimum the screen cannot
@@ -854,6 +865,32 @@ class WindowManager {
     this._applyOwnMin(win);
   }
 
+  /**
+   * Resize a window to {w, h} (LAYOUT px) keeping its top-left (lane D (a): a desktop-app window after a Scale ▸
+   * relaunch takes the size that shows the same app content at the new scale — desktop-app-window.js
+   * fitAfterRelaunch): never below its own minimum, capped at the workspace and slid inside it (keepInside), the
+   * grid bounds re-captured, onResize, and the layout notified (the sync carries it to every other client).
+   * A maximized / minimized window, a tab chain (its size is the chain's) and the ≤768 px phone layout (the window
+   * is the screen) are left alone — returns false. Sub-pixel sizes are kept (0.01 px) so a 0.75× pane stays exact.
+   */
+  resizeWindowTo(id, { w, h } = {}) {
+    const win = this.windows.get(id); if (!win) return false;
+    if (win.isMaximized || win.isMinimized || win._tabChain || this._mobileLayout()) return false;
+    if (!(Number(w) > 0) || !(Number(h) > 0)) return false;
+    const el = win.element, ws = this._workspaceBox(), min = this._ownMinOf(win);
+    const q = (v) => Math.round(v * 100) / 100;
+    let nw = Math.max(min.w, q(Number(w))), nh = Math.max(min.h, q(Number(h)));
+    if (ws) { nw = Math.min(nw, ws.w); nh = Math.min(nh, ws.h); }
+    const k = keepInside({ left: el.offsetLeft, top: el.offsetTop, width: nw, height: nh }, ws);
+    el.style.width = nw + 'px'; el.style.height = nh + 'px';
+    if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
+    if (win.gridBounds) this._captureGridBounds(win);
+    if (win.onResize) win.onResize();
+    this._scheduleOverlapUpdate();
+    this._notify();
+    return true;
+  }
+
   /** The workspace box (layout px) a window's own minimum is capped at; null while the workspace is not laid out. */
   _workspaceBox() {
     const w = this.workspace.offsetWidth, h = this.workspace.offsetHeight;
@@ -861,6 +898,47 @@ class WindowManager {
   }
   /** A window's effective minimum: its own (or the floor), capped at the workspace (window-min-size.js minOf). */
   _ownMinOf(win) { return minOf(win, this._workspaceBox()); }
+  /**
+   * A window element's box (layout px) as laid out; for one that is NOT rendered (a minimized window is display:none —
+   * every offset reads 0) its inline px, which the placement wrote (inc-muhmqvzf-jodk r2); null when neither is known —
+   * never a box of zeros.
+   */
+  _layoutBoxOf(el) {
+    if (el.offsetWidth > 0 && el.offsetHeight > 0) return { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight };
+    const px = (v) => (/^-?\d+(\.\d+)?(e-?\d+)?px$/.test(String(v || '')) ? parseFloat(v) : NaN);
+    const b = { left: px(el.style.left), top: px(el.style.top), width: px(el.style.width), height: px(el.style.height) };
+    return Object.values(b).every(Number.isFinite) && b.width > 0 && b.height > 0 ? b : null;
+  }
+  /**
+   * THE DEFAULT PLACEMENT of a new window (the cascade 40 + (n % 8) × 30) — ours, never the person's, so it is kept on
+   * the workspace (inc-muhmqvzf-jodk: at UI 125 % a 963 px viewport's workspace is 685.6 layout px tall and the
+   * cascade's 70 + a desktop app's 620 hung 4.4 px past it — #workspace clips, the app's bottom rows cut at rest):
+   * capped at the workspace and slid up / left onto it (keepInside). The phone layout / a workspace not laid out: as is.
+   */
+  _defaultPlacement(width, height) {
+    const o = (this.windowCounter % 8) * 30, box = { left: 40 + o, top: 40 + o, width, height };
+    const ws = this._mobileLayout() ? null : this._workspaceBox();
+    if (!ws) return box;
+    const k = keepInside({ ...box, width: Math.min(width, ws.w), height: Math.min(height, ws.h) }, ws);
+    return { left: k.left, top: k.top, width: k.width, height: k.height };
+  }
+  /**
+   * PUT A WINDOW INTO A ZONE — the ONE placement every sizing path goes through (inc-muhmqvzf-jodk, 2026-09-26: Chrome
+   * in the right third of a 1×3 grid, its 502 px minimum wider than the 478 px cell, grew rightward from the cell's
+   * left edge and #workspace — overflow: clip — cut its last 20 px, the app's ⋮ and our own ✕ with them): the snap
+   * zones (drag + snapToHalf), a grid cell and a grid range, stored grid bounds (the workspace reflow, layout restore,
+   * layout sync, desktop switches) and the restore from maximize. The zone raised to the window's own minimum (the
+   * workspace-capped `_ownMinOf`, the .window floor included) with the growth slid toward the INSIDE (PURE
+   * window-min-size.js `zoneBox`): the window overlaps its neighbour, never hangs past the workspace edge. `gap` = the
+   * snap gutter kept at the edge. The ≤768 px phone layout (the window IS the screen) and a workspace not laid out
+   * take the zone as given. Writes left / top / width / height (layout px) and returns the box.
+   */
+  _placeWindow(win, zone, gap = 0) {
+    const el = win.element, ws = this._workspaceBox();
+    const box = ws && !this._mobileLayout() ? zoneBox(zone, this._ownMinOf(win), ws, gap) : { ...zone };
+    el.style.left = box.left + 'px'; el.style.top = box.top + 'px'; el.style.width = box.width + 'px'; el.style.height = box.height + 'px';
+    return box;
+  }
 
   /**
    * Apply a window's own minimum: the inline min-width/min-height (the workspace-capped value — re-applied
@@ -880,14 +958,20 @@ class WindowManager {
     const r = raiseToMin(before, min);
     if (!r.raised) return;
     const ws = this._workspaceBox();
-    const k = keepInside({ left: el.offsetLeft, top: el.offsetTop, width: r.width, height: r.height }, ws);
+    const at = this._layoutBoxOf(el) || { left: el.offsetLeft, top: el.offsetTop }; // a hidden window: its inline px, never 0,0
+    const k = keepInside({ left: at.left, top: at.top, width: r.width, height: r.height }, ws);
     el.style.width = r.width + 'px'; el.style.height = r.height + 'px';
     if (k.moved) { el.style.left = k.left + 'px'; el.style.top = k.top + 'px'; }
-    if (win.gridBounds) this._captureGridBounds(win);
+    // a minimum the WORKSPACE capped (this screen is smaller than the app needs — its picture scales here) is THIS
+    // client's compromise (inc-muhmqvzf-jodk r2, the verifier's low): raised here, never captured into the shared
+    // grid bounds nor announced — the layout sync moved another client's calculator 61 px when a 1280×800 client took
+    // the seat; this client's own next placement raises it again (zoneBox)
+    const full = minOf(win), local = full.w > min.w || full.h > min.h;
+    if (win.gridBounds && !local) this._captureGridBounds(win);
     if (win._tabChain) this._syncChainBounds(win._tabChain);
     if (win.onResize) win.onResize();
     this._scheduleOverlapUpdate();
-    this._notify();
+    if (!local) this._notify();
   }
 
   // ── Snap Zones ──
@@ -917,7 +1001,7 @@ class WindowManager {
     const win = this.windows.get(winId); if (!win) return;
     const z = this._getSnapZones(4)[zone], el = win.element;
     el.classList.add('snap-animating');
-    el.style.left=z.left+'px'; el.style.top=z.top+'px'; el.style.width=z.width+'px'; el.style.height=z.height+'px';
+    this._placeWindow(win, z, 4); // a zone smaller than the window's minimum: slid inside (inc-muhmqvzf-jodk)
     win.isMaximized = false;
     setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); this._captureGridBounds(win); if (win._tabChain) this._syncChainBounds(win._tabChain); }, 220);
   }
@@ -982,8 +1066,7 @@ class WindowManager {
     };
     const z = zones[side]; if (!z) return;
     el.classList.add('snap-animating');
-    el.style.left = z.left + 'px'; el.style.top = z.top + 'px';
-    el.style.width = z.width + 'px'; el.style.height = z.height + 'px';
+    this._placeWindow(win, z, g); // a half smaller than the window's minimum: slid inside (inc-muhmqvzf-jodk)
     win.isMaximized = false;
     setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); this._captureGridBounds(win); if (win._tabChain) this._syncChainBounds(win._tabChain); }, 220);
   }
@@ -1014,10 +1097,7 @@ class WindowManager {
 
     const el = win.element;
     el.classList.add('snap-animating');
-    el.style.left = (g + minC * (cw + g)) + 'px';
-    el.style.top = (g + minR * (ch + g)) + 'px';
-    el.style.width = ((maxC - minC + 1) * (cw + g) - g) + 'px';
-    el.style.height = ((maxR - minR + 1) * (ch + g) - g) + 'px';
+    this._placeWindow(win, { left: g + minC * (cw + g), top: g + minR * (ch + g), width: (maxC - minC + 1) * (cw + g) - g, height: (maxR - minR + 1) * (ch + g) - g }, g); // slid inside (inc-muhmqvzf-jodk)
     win.isMaximized = false;
     setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); this._captureGridBounds(win); if (win._tabChain) this._syncChainBounds(win._tabChain); }, 220);
   }
@@ -1030,8 +1110,9 @@ class WindowManager {
     const cw = (r.width - g * (cols + 1)) / cols, ch = (r.height - g * (rows + 1)) / rows;
     const el = win.element;
     if (animate) el.classList.add('snap-animating');
-    el.style.left = (g + col * (cw + g)) + 'px'; el.style.top = (g + row * (ch + g)) + 'px';
-    el.style.width = cw + 'px'; el.style.height = ch + 'px';
+    // a cell smaller than the window's minimum: the window overlaps its neighbour and, in the last column / row, slides
+    // back inside — the owner's Chrome in the right third of a 1×3 grid (inc-muhmqvzf-jodk)
+    this._placeWindow(win, { left: g + col * (cw + g), top: g + row * (ch + g), width: cw, height: ch }, g);
     win.isMaximized = false;
     if (animate) setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); }, 220);
     else if (win.onResize) win.onResize();
@@ -1188,8 +1269,24 @@ class WindowManager {
       if (!win) return;
     }
     const el = win.element;
-    if (win.isMaximized) { const p = win.prevBounds; el.style.left=p.left; el.style.top=p.top; el.style.width=p.width; el.style.height=p.height; win.isMaximized = false; }
-    else { win.prevBounds={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height}; el.style.left='0';el.style.top='0';el.style.width='100%';el.style.height='100%'; win.isMaximized = true; }
+    if (win.isMaximized) {
+      // the restored box through the ONE placement (inc-muhmqvzf-jodk): a pre-maximize zone below the window's minimum
+      // (a bottom half, a grid cell) slides inside instead of hanging past the workspace; a non-px box as it was
+      const p = win.prevBounds, px = (v) => (/^-?\d+(\.\d+)?(e-?\d+)?px$/.test(String(v || '')) ? parseFloat(v) : NaN);
+      let box = { left: px(p.left), top: px(p.top), width: px(p.width), height: px(p.height) };
+      if (Object.values(box).every(Number.isFinite)) {
+        // the box is OURS, kept through the maximize on the workspace of THAT moment (`p.ws`), never the person's drop
+        // (r2, the verifier's MAJOR): a workspace that changed meanwhile (the sidebar opened) carries it to the one of
+        // now — the same fractions, where the reflow put a visible twin — before the ONE placement; the stale px hung a
+        // right third of 1876 px at left 1252 on a 1450 px workspace, 422 CSS px past it, then cascaded through the
+        // captured fractions. The same workspace (or an older record without one): the px exactly as stored
+        box = rescaleBox(box, p.ws, this._workspaceBox());
+        this._placeWindow(win, box, 4);
+      }
+      else { el.style.left=p.left; el.style.top=p.top; el.style.width=p.width; el.style.height=p.height; }
+      win.isMaximized = false;
+    }
+    else { win.prevBounds={left:el.style.left,top:el.style.top,width:el.style.width,height:el.style.height,ws:this._workspaceBox()}; el.style.left='0';el.style.top='0';el.style.width='100%';el.style.height='100%'; win.isMaximized = true; }
     setTimeout(() => {
       if (win.onResize) win.onResize();
       this._captureGridBounds(win);

@@ -111,6 +111,20 @@
 // reachable with the bars folded (the design's honest list): the blocked overlay and the fit badge live in the pane;
 // the plain-http copy chip FLOATS at the pane's top-right and hides itself after 10 s; Show window frame ▸, Scale ▸,
 // Keep running and Stop app ride the taskbar / window menu as well as the ⋯; the idle stop < 1 min is a toast.
+//
+// LANE D (b) (2026-09-25 — the owner: "那个1.5x 已选的提示直接可以点快速切换"): the scale CHIP is a control — a click or
+// Enter / Space opens the same Scale ▸ rows right at the chip (one function, `scaleItems`; plain text with its reason
+// while the window cannot relaunch). The rows end with the APP's default scale (PURE src/lib/desktop-app-scale.js; user
+// state `desktopAppScale`, set on the launch dialog's cards too): its row marked, "Make n× the default for this app",
+// "Forget this app's default". A record launched at that default says "1.5× · App default". Both per-app maps (frame +
+// scale) come from ONE loader, src/lib/desktop-app-prefs.js.
+//
+// SHARING WITH AGENTS (desktop lane E, docs/design-desktop-apps-seamless §3.6 — the owner's D1–D7): every window is
+// HIDDEN from every agent until the user shares it. The ⋯ (now on EVERY rung — before lane E it held only xpra rows)
+// and the title-bar / taskbar menu carry "Share with agent…" and "Ask an agent to take control…" (src/lib/window-
+// share.js); a "Shared with N · <mode>" chip (its tooltip names who) appears once anybody is shared, and a click on it
+// opens the same dialog. The chip follows the `window-reach-updated` broadcast; an app on a PAIRED machine is not an
+// agent target (lane C) and offers neither row.
 import { t } from './i18n.js';
 import { escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { windowMinForPane } from './window-min-size.js';
@@ -119,14 +133,17 @@ import { createVncView, streamUrl } from './vnc-view.js';
 import { createXpraView } from './xpra-view.js';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from './window-live-mode.js';
 import { paneState } from '../desktop-viewers.js';
-import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel } from '../desktop-apps.js';
+import { exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS, scaleKnobs, scaleMenuModel, renderOf, relaunchPaneCss, relaunchVerdict } from '../desktop-apps.js';
 import { memoryText } from '../runaway-guard.js';
-import { launchDpr, launchUiScale } from './desktop-app-launcher.js';
+import { launchDpr, launchUiScale, explicitScaleLabel } from './desktop-app-launcher.js';
 import { UI_ICONS } from './icons.js';
 import { registerMenuItem } from './contributions.js';
 import { createBarFold } from './bar-fold.js'; // lane I: the strip folds into ⋯ by priority — never wraps, never overlaps
 import { shortModeBadge } from './live-bar-layout.js';
 import { seamlessVerdict, isCsd, isPaused, revealStep, revealInitial, HOT_ZONE_PX, moveResizeAction, windowStateAction, frameKeyOf, frameChoiceOf, setFrameChoice, frameMenuModel, userToggleOfFrame } from './desktop-seamless.js';
+import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from './desktop-app-scale.js';
+import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
+import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 
 const WATCH_HINT_EVERY_MS = 8000;
 /** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
@@ -136,7 +153,8 @@ const ICON = svgIcon16('<rect x="1.5" y="2.5" width="13" height="10" rx="1"/><pa
 
 /** HiDPI (2.369.158): the scale chip — "2×" / "1.5×" for an xpra record, '' elsewhere (a whole-display rung is CSS px).
  *  Round 3 A3: with its ORIGIN — "2.5× · auto" (derived from the launching screen), "1.5× · chosen" (this window's
- *  Scale ▸), "2× · Settings" (an explicit desktop.appScale); a record from before A3 has no origin: the number alone. */
+ *  Scale ▸), "2× · Settings" (an explicit desktop.appScale), lane D "1.5× · App default" (the default scale chosen for
+ *  this app in the launch dialog); a record from before A3 has no origin: the number alone. */
 export function scaleChipText(rec) {
   if (!rec || rec.stream !== 'xpra') return '';
   const s = Number(rec.scale);
@@ -145,25 +163,51 @@ export function scaleChipText(rec) {
   return o ? `${s}× · ${o}` : `${s}×`;
 }
 function scaleOriginWord(origin) {
-  return origin === 'auto' ? t('auto') : origin === 'chosen' ? t('chosen') : origin === 'setting' ? t('Settings') : '';
+  return origin === 'auto' ? t('auto') : origin === 'chosen' ? t('chosen') : origin === 'setting' ? t('Settings') : origin === 'app' ? t('App default') : '';
 }
-/** The chip's tooltip: the numbers behind the scale (dpr × UI scale for auto, GDK_SCALE and the font dpi). */
-export function scaleChipTitle(rec) {
+/** The chip's tooltip: the numbers behind the scale (dpr × UI scale for auto, GDK_SCALE and the font dpi) — and, lane D,
+ *  what a click does: `why` = the relaunch verdict's CODE when the window cannot change its scale (the chip is plain
+ *  text then and the tooltip says why), else the chip is a control ("Click to change the scale"). */
+export function scaleChipTitle(rec, why = null) {
   if (!rec || rec.stream !== 'xpra') return '';
-  const k = scaleKnobs(rec.scale);
-  const p = { scale: k.scale, gdk: k.gdkScale, dpi: Number.isInteger(rec.dpi) ? rec.dpi : k.dpi };
-  const tail = ' ' + t('⋯ → Scale relaunches the app at another scale.');
+  const k = scaleKnobs(rec.scale), rd = renderOf(rec);
+  // lane D (a): "widgets" = the widgets' TRUE scale (GDK_SCALE × the picture scale — 1.5 for a fractional record drawn at 2×
+  // and shown at 75 %; ⌊s⌋ for a record from before lane D, whose fraction reached the text only), the text = widgets × dpi ÷ 96
+  const p = { scale: k.scale, gdk: rd.widget, dpi: Number.isInteger(rec.dpi) ? rec.dpi : k.dpi };
+  const drawn = rd.picture < 1 ? ' ' + t('Drawn at {gdk}× and shown at {pct}% — a fractional scale is resampled.', { gdk: rd.gdk, pct: Math.round(rd.picture * 1000) / 10 }) : '';
+  // lane D (b): what a click on the chip does — or, while the window cannot relaunch, why it is plain text
+  const tail = drawn + ' ' + (why ? scaleWhyText(why) || t('Only a running app can be relaunched at another scale') : t('Click to change the scale'));
   if (rec.scaleOrigin === 'auto' && rec.scaleFrom) return t('Scale {scale}× derived from the screen it was launched on: devicePixelRatio {dpr} × UI scale {ui}% — widgets {gdk}×, text at {dpi} dpi.', { ...p, dpr: rec.scaleFrom.dpr, ui: Math.round(rec.scaleFrom.uiScale * 100) }) + tail;
   if (rec.scaleOrigin === 'chosen') return t('Scale {scale}× chosen for this window — widgets {gdk}×, text at {dpi} dpi.', p) + tail;
   if (rec.scaleOrigin === 'setting') return t('Scale {scale}× from Settings → Desktop app scale — widgets {gdk}×, text at {dpi} dpi.', p) + tail;
+  if (rec.scaleOrigin === 'app') return t('Scale {scale}× — the default you chose for this app — widgets {gdk}×, text at {dpi} dpi.', p) + tail;
   return t('The scale this app was started at (Settings → Desktop app scale). A change takes effect when the app is launched again.');
+}
+/** Lane D: the chip is a CONTROL (a click opens the Scale ▸ rows) exactly when this window can relaunch at another scale
+ *  — a running xpra app (PURE relaunchVerdict); null ⇒ a control, else the verdict's code (plain text, the reason in
+ *  its tooltip). An agent lease / another client's seat keep it a control: its menu names that reason on its first line. */
+export function scaleChipWhy(rec) {
+  const v = relaunchVerdict(rec);
+  return v ? v.code : null;
 }
 /** Round 3 A3: the words for a Scale ▸ row and for the reason CODE a window cannot relaunch (PURE scaleMenuModel). */
 export function scaleRowLabel(row) {
   const mark = row.current ? '✓ ' : '\u2003';
-  if (row.choice === 'auto') return mark + t('Auto ({scale}×)', { scale: row.scale });
-  if (row.choice === 1.5) return mark + t('1.5× (text only in GTK apps)');
-  return mark + `${row.choice}×`;
+  const tail = row.appDefault ? ' · ' + t('App default') : ''; // lane D: the row this app starts at by default
+  if (row.choice === 'auto') return mark + t('Auto ({scale}×)', { scale: row.scale }) + tail;
+  return mark + explicitScaleLabel(row.choice) + tail;
+}
+/** Lane D: the rows after the scale rows — the app's default (PURE appDefaultModel): one status line when the window runs
+ *  at it, "Make n× the default for this app", "Forget this app's default (n×)". `save(choice)` stores ('auto' = forget). */
+export function appDefaultItems(model, save) {
+  if (!model) return [];
+  const sep = 'border-top: 1px solid var(--border); margin-top: 2px; padding-top: 6px;';
+  const out = [];
+  if (model.isDefault) out.push({ label: t('{scale}× is this app’s default', { scale: model.def }), disabled: true });
+  if (model.make != null) out.push({ label: t('Make {scale}× the default for this app', { scale: model.make }), action: () => save(model.make) });
+  if (model.clear) out.push({ label: t('Forget this app’s default ({scale}×)', { scale: model.def }), action: () => save('auto') });
+  if (out.length) out[0] = { ...out[0], style: sep };
+  return out;
 }
 export function scaleWhyText(code) {
   if (code === 'lease') return t('An agent holds this app — relaunching it would end the agent\'s lease');
@@ -243,34 +287,12 @@ export function exitToastText(rec, name) {
   return rec.lastError ? t('{app} stopped: {why}', { app, why: rec.lastError }) : t('{app} stopped', { app });
 }
 
-// ── SEAMLESS: the per-app "Show window frame" choice (user state `desktopAppFrame`, PATCH merge-only, the
-// jobsPanelFolds pattern) — loaded ONCE per page, kept in step with other clients by the user-state-updated broadcast,
-// written locally FIRST (never waiting for the echo) ──
-let FRAMES = null;
-let framesWired = false;
-const frameSubs = new Set();
-const frameNotify = () => { for (const f of frameSubs) { try { f(); } catch {} } };
-function wireFrames(app) {
-  if (framesWired) return;
-  framesWired = true;
-  app.ws.onGlobal((m) => {
-    if (m.type !== 'user-state-updated' || !m.state || typeof m.state !== 'object' || !('desktopAppFrame' in m.state)) return;
-    FRAMES = m.state.desktopAppFrame && typeof m.state.desktopAppFrame === 'object' ? { ...m.state.desktopAppFrame } : {};
-    frameNotify();
-  });
-  fetchJson('/api/user-state').then((st) => {
-    if (FRAMES !== null) return;
-    FRAMES = st && st.desktopAppFrame && typeof st.desktopAppFrame === 'object' ? { ...st.desktopAppFrame } : {};
-    frameNotify();
-  });
-}
-async function saveFrameChoice(key, choice) {
-  if (!key) return;
-  FRAMES = setFrameChoice(FRAMES, key, choice);
-  frameNotify();
-  const r = await fetchJson('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktopAppFrame: FRAMES }) });
-  if (!r || r.error) showToast(t('Could not save the window frame choice') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
-}
+// ── SEAMLESS: the per-app "Show window frame" choice (user state `desktopAppFrame`) and, lane D, the app's default scale
+// (`desktopAppScale`) — ONE loader for both (desktop-app-prefs.js: read once per page and on every reconnect, kept in
+// step by the user-state-updated broadcast; a save is an EDIT of this app's entry — shown locally FIRST, applied to the
+// server's current map, PATCHed merge-only; a refused save rolls back and toasts) ──
+const saveFrameChoice = (key, choice) => { if (key) saveAppPrefs('desktopAppFrame', (map) => setFrameChoice(map, key, choice), t('Could not save the window frame choice')); };
+const saveScaleDefault = (key, choice) => { if (key) saveAppPrefs(SCALE_PREF_KEY, (map) => setScaleChoice(map, key, choice), t('Could not save the app’s default scale')); };
 /** The first, disabled line of Show window frame ▸: what the verdict is and why (the reason words). */
 export function frameStatusText(v) {
   if (!v) return '';
@@ -344,7 +366,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   let idleWarned = false;
   const phoneMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 768px)') : null;
   const frameKey = () => frameKeyOf(rec);
-  const frameChoice = () => frameChoiceOf(FRAMES, frameKey());
+  const frameChoice = () => frameChoiceOf(appPrefs('desktopAppFrame'), frameKey());
   const readyGate = async () => {
     if (!rec) { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`); if (r && !r.error) rec = r; }
     if (!rec) return { ok: false, error: t('This desktop app no longer exists') };
@@ -379,7 +401,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const ensureView = (kind) => {
     if (view) return view;
     view = kind === 'xpra'
-      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96) })
+      ? createXpraView(winInfo.content, { ...viewOpts(), workerUrl: `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`, onTitle: (text) => { appTitle = String(text || ''); render(); }, onIcon: setAppIcon, onMinSize: applyMinSize, onMain: onAppMain, onState: onAppState, onMoveResize: onAppMoveResize, dpi: () => (rec && Number.isInteger(rec.dpi) ? rec.dpi : 96), pictureScale: () => renderOf(rec).picture }) // lane D (a): the RECORD says what it was drawn at
       : createVncView(winInfo.content, viewOpts());
     view.mount.classList.add('desktop-app-mount');
     winInfo._desktopAppView = view; // the raw handle the heavy suite reads (never the DOM)
@@ -391,7 +413,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     const bar = view.bar;
     barFold = createBarFold(bar, {
       more: moreBtn,
-      moreAlways: () => !!rec && rec.stream === 'xpra',
+      moreAlways: () => !!rec && (rec.stream === 'xpra' || shareable()), // xpra's own rows, or lane E's share rows (a local app, every rung); read in a frame, never during this body
       items: () => [...bar.children].filter((el) => el !== moreBtn && !el.classList.contains('bar-ruler-host')).map((el, i) => ({
         key: DESK_BAR_KEY.get(el) || `shell-${i}-${String(el.className || el.tagName).split(/\s+/)[0]}`, el,
         priority: DESK_BAR_PRIORITY.get(el) || 0,
@@ -486,7 +508,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
   const backendChip = document.createElement('span'); backendChip.className = 'desktop-app-chip desktop-app-chip-backend';
   const hostChip = document.createElement('span'); hostChip.className = 'desktop-app-chip desktop-app-chip-host'; // lane C2: which machine the app runs on (a paired one only)
-  const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch
+  const scaleChip = document.createElement('span'); scaleChip.className = 'desktop-app-chip desktop-app-chip-scale'; // HiDPI: the app's scale, fixed at launch; lane D: a CONTROL (role=button) whenever the window can relaunch
   const fitChip = document.createElement('span'); fitChip.className = 'desktop-app-chip desktop-app-chip-fit'; // P8-2 x4: names a display that cannot follow the window
   fitChip.title = t('This rung’s display cannot resize: the app is fitted to the fixed framebuffer and scaled in the browser. With TigerVNC (Xvnc) the display follows the window.');
   const liveChip = document.createElement('span'); liveChip.className = 'desktop-app-chip desktop-app-chip-live';
@@ -497,7 +519,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   stopBtn.textContent = t('Stop'); stopBtn.title = t('Stop this application and its display');
   // ── P9b: the window-live controls (shown only while an agent holds the lease) ──
   const originChip = document.createElement('span'); originChip.className = 'desktop-app-chip desktop-app-chip-origin';
-  originChip.textContent = t('VibeSpace-started window'); originChip.title = t('This window runs on a display VibeSpace started — an agent may act in it. Your own desktop is never listed or addressable.');
+  originChip.textContent = t('VibeSpace-started window'); originChip.title = t('This window runs on a display VibeSpace started — an agent may act in it only while you share it with that agent. Your own desktop is never listed or addressable.');
   const agentChip = document.createElement('span'); agentChip.className = 'desktop-app-chip desktop-app-chip-agent';
   const modeBadge = document.createElement('span'); modeBadge.className = 'browser-live-mode';
   const takeBtn = document.createElement('button'); takeBtn.className = 'file-tool-btn browser-live-mode-btn'; takeBtn.textContent = t('Take over');
@@ -506,13 +528,15 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   // lane I: the ⋯ is ALSO the strip's overflow — shown while anything is folded (bar-fold.js owns its `bar-folded` class)
   const moreBtn = document.createElement('button'); moreBtn.type = 'button'; moreBtn.className = 'file-tool-btn desktop-app-more bar-folded'; moreBtn.style.cssText = 'width:auto;padding:0 6px';
   moreBtn.innerHTML = UI_ICONS.more; moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
-  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, hostChip, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
+  // lane E: "Shared with N · <mode>" — a click opens the share dialog (a button: it does something)
+  const shareChip = document.createElement('button'); shareChip.type = 'button'; shareChip.className = 'desktop-app-chip desktop-app-chip-share'; shareChip.style.display = 'none';
+  const controls = [originChip, agentChip, modeBadge, takeBtn, handBtn, shareChip, hostChip, backendChip, scaleChip, fitChip, liveChip, idleChip, keepBtn, stopBtn, moreBtn];
   // lane I: THE STRIP'S FOLD PRIORITIES (src/lib/live-bar-layout.js; the live view's rule): the picture shell's own items
   // (status — the ONE flexible item —, Paste, Reconnect, the copy chip + hint) and the mode badge + Take over / Hand
-  // back never fold (0); the holder chip 2; the origin marker and the fact chips 3 (the machine chip of a paired-machine app, 2.369.178, is one); Keep running / Stop 4 (both are
+  // back never fold (0); the holder chip and, lane E, the share chip 2 (who may see this window — its words also ride the ⋯ as a fact); the origin marker and the fact chips 3 (the machine chip of a paired-machine app, 2.369.178, is one); Keep running / Stop 4 (both are
   // rows of this ⋯ menu already). Equal priorities fold right-to-left.
-  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
-  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
+  const DESK_BAR_PRIORITY = new Map([[agentChip, 2], [shareChip, 2], [originChip, 3], [hostChip, 3], [backendChip, 3], [scaleChip, 3], [fitChip, 3], [liveChip, 3], [idleChip, 3], [keepBtn, 4], [stopBtn, 4]]);
+  const DESK_BAR_KEY = new Map([[originChip, 'origin'], [agentChip, 'agent'], [modeBadge, 'badge'], [takeBtn, 'take'], [handBtn, 'handback'], [shareChip, 'share'], [hostChip, 'host'], [backendChip, 'backend'], [scaleChip, 'scale'], [fitChip, 'fit'], [liveChip, 'live'], [idleChip, 'idle'], [keepBtn, 'keep'], [stopBtn, 'stop']]);
   let barFold = null;
   // the badge's words come from the PURE tables; t() needs the literal keys below to be extractable
   void [t('Agent is driving'), t('You are driving — agent asked to pause'), t('Another viewer is driving — agent asked to pause'), t('You are driving'), t('Another viewer is driving')];
@@ -571,9 +595,10 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     backendChip.textContent = backendChipText(rec);
     backendChip.title = rec.fallbackWhy ? t('Backend: {backend} — fell back because {why}', { backend: rec.backend, why: rec.fallbackWhy }) : t('Backend: {backend}', { backend: rec.backend || '' });
     if (rec.stream === 'xpra') backendChip.title += ' — ' + t('xpra streams each app window as pixels; text stays crisp at your screen’s scale');
-    const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none'; scaleChip.title = scaleChipTitle(rec);
+    const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none';
+    applyScaleChipControl(sc);
     winInfo._desktopAppStream = rec.stream || null;
-    barFold?.schedule(); // lane I: the ⋯ is shown for xpra (Show window frame ▸ / Scale ▸) or while anything is folded — bar-fold.js decides
+    barFold?.schedule(); // lane I: bar-fold.js decides the ⋯ — shown for xpra (Show window frame ▸ / Scale ▸), for a shareable app on EVERY rung (lane E: Share with agent… / Ask an agent…) and while anything is folded
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     const lt = liveChipText(rec); liveChip.textContent = lt; liveChip.style.display = lt ? '' : 'none';
     liveChip.title = rec.live && rec.live.over ? String(rec.live.over) : ''; // the keeper's report (never a stop) — the sentence names the metric
@@ -648,14 +673,37 @@ export function openDesktopApp(app, id, { syncId } = {}) {
 
   // ── round 3 A3: the per-window Scale ▸ (a relaunch) and following a replacement ──
   /** The Scale ▸ rows for THIS window (PURE scaleMenuModel; auto = what this client's dpr × UI scale derives now). */
+  const scaleModel = () => scaleMenuModel(rec, { dpr: launchDpr(), uiScale: launchUiScale(), leased: !!lease, seat: seatState(), appDefault: scaleChoiceOf(appPrefs(SCALE_PREF_KEY), frameKey()) });
   const scaleItems = () => {
-    const m = scaleMenuModel(rec, { dpr: launchDpr(), uiScale: launchUiScale(), leased: !!lease, seat: seatState() });
+    const m = scaleModel();
     const why = scaleWhyText(m.why);
     const rows = m.rows.map((r) => ({ label: scaleRowLabel(r), disabled: r.disabled, action: () => { relaunchAt(r.choice, r.scale); } }));
-    return why ? [{ label: why, disabled: true }, ...rows] : rows;
+    // lane D: the app's default scale — stored under the same per-app key as the frame choice, heard by every client
+    const tail = appDefaultItems(appDefaultModel(rec, appPrefs(SCALE_PREF_KEY)), (choice) => saveScaleDefault(frameKey(), choice));
+    return why ? [{ label: why, disabled: true }, ...rows, ...tail] : [...rows, ...tail];
   };
   winInfo._desktopAppScaleItems = scaleItems;
-  winInfo._desktopScaleMenu = () => scaleMenuModel(rec, { dpr: launchDpr(), uiScale: launchUiScale(), leased: !!lease, seat: seatState() }); // the raw handle the heavy suite reads
+  winInfo._desktopScaleMenu = scaleModel; // the raw handle the heavy suite reads
+  winInfo._desktopScaleDefault = () => appDefaultModel(rec, appPrefs(SCALE_PREF_KEY)); // the raw handle the suites read (lane D)
+  // lane D (the owner: "那个1.5x 已选的提示直接可以点快速切换"): the scale CHIP opens the same Scale ▸ rows, right there — a
+  // button to the keyboard (role=button, Enter / Space) whenever the window can relaunch; plain text with its reason else
+  const openScaleMenu = (e) => {
+    e?.stopPropagation?.();
+    if (scaleChip.getAttribute('role') !== 'button') return;
+    const r = scaleChip.getBoundingClientRect();
+    showContextMenu(r.left, r.bottom + 2, scaleItems());
+  };
+  scaleChip.addEventListener('click', openScaleMenu, { signal: lsig });
+  scaleChip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); openScaleMenu(e); } }, { signal: lsig });
+  function applyScaleChipControl(text) {
+    const why = text ? scaleChipWhy(rec) : 'not-xpra';
+    const control = !why;
+    scaleChip.classList.toggle('is-control', control);
+    if (control) { scaleChip.setAttribute('role', 'button'); scaleChip.tabIndex = 0; scaleChip.setAttribute('aria-haspopup', 'menu'); scaleChip.setAttribute('aria-label', `${text} — ${t('Click to change the scale')}`); }
+    else { scaleChip.removeAttribute('role'); scaleChip.removeAttribute('tabindex'); scaleChip.removeAttribute('aria-haspopup'); scaleChip.removeAttribute('aria-label'); }
+    scaleChip.title = scaleChipTitle(rec, why);
+    winInfo._desktopScaleChip = { control, why, text, title: scaleChip.title }; // the raw handle the suites read
+  }
   moreBtn.onclick = (e) => {
     e.stopPropagation();
     const r = moreBtn.getBoundingClientRect();
@@ -665,6 +713,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     for (const [el, key] of DESK_BAR_KEY) if (folded.includes(key) && key !== 'keep' && key !== 'stop' && el.textContent) items.push({ label: el.textContent, title: el.title || '', disabled: true });
     if (items.length) items.push({ separator: true });
     if (rec && rec.stream === 'xpra') items.push({ label: t('Show window frame'), children: frameItems() }, { label: t('Scale'), children: scaleItems() });
+    items.push(...shareItems()); // lane E: Share with agent… / Ask an agent to take control… (a local app, every rung)
     if (canKeep()) items.push({ label: t('Keep running'), action: () => keepBtn.onclick() });
     if (canStop()) items.push({ label: t('Stop app'), action: () => stopApp() });
     if (items.length && items[items.length - 1].separator) items.pop();
@@ -672,17 +721,45 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     showContextMenu(r.left, r.bottom + 2, items);
   };
   let relaunching = false;
+  /** LANE D (a) F2: what a Scale ▸ relaunch keeps — the record it was, the pane (viewport px = CSS px at net zoom 1), the
+   *  app's main X window (larger than the pane when its minimum is scaled to fit), the chrome around the pane (the
+   *  seamless state it was in) and this screen's ratio. Read BEFORE the relaunch: the view is replaced after it. */
+  const relaunchGeometry = () => {
+    if (!view || !view.pane || !rec || rec.stream !== 'xpra') return null;
+    const er = winInfo.element.getBoundingClientRect(), pr = view.pane.getBoundingClientRect();
+    if (!(pr.width > 0) || !(pr.height > 0) || !(er.width > 0)) return null;
+    // the main's own size only when the view SCALES it to fit (its minimum is larger than the pane) — otherwise it is the
+    // pane rounded to the device grid, and reading it would drift the window by a pixel per relaunch
+    const c = view.client, main = c && c.mainWid && view.stageScale < 1 ? c.windows.get(c.mainWid) : null;
+    return { from: { ...rec }, pane: { w: pr.width, h: pr.height }, mainPx: main ? { w: main.w, h: main.h } : null, chrome: { w: Math.max(0, er.width - pr.width), h: Math.max(0, er.height - pr.height) }, dpr: typeof devicePixelRatio === 'number' && devicePixelRatio > 0 ? devicePixelRatio : 1 };
+  };
+  /** …and after it: THIS window takes the size that shows the same app content at the new scale (PURE relaunchPaneCss —
+   *  the app's logical size kept, "你窗口尺寸计算不对"), top-left kept, capped at and slid inside the workspace. Only the
+   *  ASKING client (the layout sync carries the bounds to the others); never a maximized / minimized window, a tab
+   *  chain or the phone layout (WindowManager.resizeWindowTo refuses them). Called AFTER retarget, which clears the old
+   *  app's minimum — the new app's own minimum arrives with its window and may raise it again. */
+  const fitAfterRelaunch = (g, next) => {
+    if (!g || !next || closed) return false;
+    const p = relaunchPaneCss({ pane: g.pane, mainPx: g.mainPx, dpr: g.dpr, from: g.from, to: next });
+    if (!p) return false;
+    const s = uiScale();
+    const done = app.wm.resizeWindowTo(winInfo.id, { w: (p.w + g.chrome.w) / s, h: (p.h + g.chrome.h) / s });
+    winInfo._desktopRelaunchFit = { pane: p, chrome: { ...g.chrome }, from: renderOf(g.from), to: renderOf(next), applied: !!done }; // the raw handle the heavy suite reads
+    return done;
+  };
   async function relaunchAt(choice, scale) {
     if (relaunching || !rec) return;
     const name = titleText();
     const okd = await showConfirmDialog({ title: t('Relaunch {app} at {scale}×?', { app: name, scale }), message: rec && rec.browser ? t('The browser restarts at the new scale with the same profile (logins and tabs kept); unsaved page state is lost.') : t('The app restarts at the new scale; unsaved work in it is lost.'), confirmText: t('Relaunch'), danger: true });
     if (!okd || closed) return;
     relaunching = true;
+    const geo = relaunchGeometry();
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/relaunch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scale: choice, dpr: launchDpr(), uiScale: launchUiScale() }) });
     relaunching = false;
     if (!r || r.error || !r.app || !r.app.id) { showToast(r?.error || t('Could not relaunch the app'), { type: 'error' }); return; }
     showToast(t('{app} relaunched at {scale}×', { app: name, scale: r.app.scale }), { duration: 3500 });
     retarget(r.app.id); // at once — never waiting for the broadcast echo (the other clients follow it from theirs)
+    fitAfterRelaunch(geo, r.app); // lane D (a) F2: the window keeps the app's size at the new scale
   }
   /** A record that names its successor (`replacedBy`): this window follows it — same window, the picture reconnects. */
   function followReplacement(r) {
@@ -705,17 +782,40 @@ export function openDesktopApp(app, id, { syncId } = {}) {
     winInfo._openSpec = { action: 'openDesktopApp', id };
     try { app.wm._notify?.(); } catch { /* optional */ }
     claimPane();
-    refetchLease(); refetchViewers();
+    refetchLease(); refetchViewers(); reachView = null; applyReach(null); // lane E: the share follows the successor on the server — re-read once its record answers
     fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
       if (closed || winInfo._desktopAppId !== nextId) return;
       if (r && r.code === 'not-found') { forgotten(); return; }
       if (!r || r.error) { ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
-      applyRecord(r);
+      applyRecord(r); refetchReach();
       if (rec && rec.state === 'launching') view.setStatus(t('Starting application…'));
     });
   }
 
+  // ── lane E: sharing with agents (the chip, the rows, the broadcast) — kept in its own functions ──
+  let reachView = null;
+  const shareable = () => !!rec && (!rec.hostId || rec.hostId === 'local') && (rec.state === 'ready' || rec.state === 'launching');
+  function applyReach(v) {
+    reachView = v && v.handle === id ? v : null;
+    const txt = shareable() ? shareChipText(reachView) : '';
+    shareChip.textContent = txt;
+    shareChip.style.display = txt ? '' : 'none';
+    const names = reachView ? reachView.rows.map((r) => r.principal.name || r.principal.id) : [];
+    shareChip.title = names.length ? t('Shared with {names} — click to change', { names: names.join(', ') }) : '';
+    winInfo._desktopReach = reachView; // the raw handle the heavy suite reads
+  }
+  const shareItems = () => (shareable() ? [
+    { label: t('Share with agent…'), action: () => openShareDialog(app, id, { label: titleText() }) },
+    { label: t('Ask an agent to take control…'), action: () => openAskDialog(app, id, { label: titleText() }) },
+  ] : []);
+  shareChip.onclick = () => openShareDialog(app, id, { label: titleText() });
+  const refetchReach = async () => { if (!shareable()) { applyReach(null); return; } const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/reach`); if (closed) return; applyReach(r && !r.error ? r : null); };
+  winInfo._desktopAppShareable = shareable;
+  winInfo._desktopAppShare = () => openShareDialog(app, id, { label: titleText() });
+  winInfo._desktopAppAsk = () => openAskDialog(app, id, { label: titleText() });
+
   const off = app.ws.onGlobal((m) => {
+    if (m.type === 'window-reach-updated') { const v = (m.reach || []).find((x) => x && x.handle === id) || null; if (v || reachView) applyReach(v); return; } // lane E
     if (m.type === 'desktop-app-viewers') { if (m.id === id) applyViewers(m); return; } // x5
     if (m.type === 'window-leases-updated') { const l = (m.leases || []).find((x) => x && x.handle === id) || null; if ((l && !lease) || (!l && lease) || (l && lease && (l.input !== lease.input || l.sessionId !== lease.sessionId || (l.takenBy && l.takenBy.viewerId) !== (lease.takenBy && lease.takenBy.viewerId)))) applyLease(l); else lease = l; return; }
     if (m.type !== 'desktop-apps-updated') return;
@@ -726,7 +826,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   const refetchViewers = async () => { const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/viewers`); if (r && !r.error) applyViewers(r); };
   // a server restart ADOPTS the session before any client reconnects, so the
   // adoption broadcast reaches nobody — re-read the record on every reconnect
-  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); } };
+  const onWs = (connected) => { if (connected) { refetch(); refetchLease(); refetchViewers(); refetchReach(); } };
   app.ws.onStateChange(onWs);
   const tick = setInterval(() => {
     if (rec && rec.state === 'ready') { const it = idleChipText(rec); idleChip.textContent = it; idleChip.style.display = it ? '' : 'none'; }
@@ -736,7 +836,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
       if (!idleWarned) { idleWarned = true; winInfo._desktopIdleWarned = Date.now(); showToast(t('{app} stops in under a minute without input — Keep running is in the window menu', { app: titleText() }), { duration: 8000 }); }
     } else if (left == null || left >= 60000) idleWarned = false;
   }, 1000);
-  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); clearTimeout(revealTimer); frameSubs.delete(applySeamless); });
+  let offPrefs = null;
+  winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch {} try { app.ws.offStateChange?.(onWs); } catch {} clearInterval(tick); clearTimeout(revealTimer); try { offPrefs?.(); } catch {} });
   winInfo.onMoved = () => view?.resnap?.(); // a moved window puts the picture back on the device-pixel grid (r2)
   winInfo.onClose = () => { minRo?.disconnect(); if (minRaf) cancelAnimationFrame(minRaf); view?.dispose(); };
 
@@ -776,8 +877,8 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   winInfo._desktopAppKeep = () => keepBtn.onclick();
   winInfo._desktopAppStop = () => stopApp();
   winInfo.onChainChanged = applySeamless;
-  frameSubs.add(applySeamless);
-  wireFrames(app);
+  offPrefs = onAppPrefs(() => { applySeamless(); if (rec) render(); }); // a frame choice re-decides the verdict; a default scale re-words the chip's menu
+  wireAppPrefs(app);
   app.settings.on('desktop.seamless', applySeamless);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { app.settings.off('desktop.seamless', applySeamless); });
   phoneMq?.addEventListener?.('change', applySeamless, { signal: lsig });
@@ -839,7 +940,7 @@ export function openDesktopApp(app, id, { syncId } = {}) {
   fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}`).then((r) => {
     if (closed) return;
     if (r && r.code === 'not-found') { forgotten(); return; } // a replay of a record the keeper forgot: no window
-    if (r && !r.error) { if (followReplacement(r) || decideExit(r)) return; reveal(); rec = r; ensureView(streamKindOf(r)); render(); } // a dead record replayed: closed before it ever painted; a replaced one follows its successor
+    if (r && !r.error) { if (followReplacement(r) || decideExit(r)) return; reveal(); rec = r; ensureView(streamKindOf(r)); render(); refetchReach(); } // a dead record replayed: closed before it ever painted; a replaced one follows its successor
     else { reveal(); ensureView('rfb').setStatus(r?.error ? `${t('Desktop app unavailable')}: ${r.error}` : t('Desktop app unavailable'), { error: true, reconnect: false }); return; }
     if (rec.state === 'launching') {
       view.setStatus(t('Starting application…'));
@@ -868,6 +969,17 @@ registerMenuItem({
   menu: 'window', group: '1_window', order: 34, id: 'window/desktop-app-frame', kind: 'frame',
   when: (c) => isXpraApp(c) && typeof c.win._desktopAppFrameItems === 'function',
   label: () => t('Show window frame'), children: (c) => c.win._desktopAppFrameItems(),
+});
+// desktop lane E (D2 / D3): Share with agent… and Ask an agent to take control… on the title-bar / taskbar / window-list
+// menu — every rung, this machine's apps only (the same rows the ⋯ carries)
+const isShareable = (c) => !!c.win && c.win.type === 'desktop-app' && typeof c.win._desktopAppShareable === 'function' && c.win._desktopAppShareable();
+registerMenuItem({
+  menu: 'window', group: '1_window', order: 38, id: 'window/desktop-app-share', kind: 'share',
+  when: isShareable, label: () => t('Share with agent…'), run: (c) => { c.win._desktopAppShare(); },
+});
+registerMenuItem({
+  menu: 'window', group: '1_window', order: 39, id: 'window/desktop-app-ask', kind: 'ask',
+  when: isShareable, label: () => t('Ask an agent to take control…'), run: (c) => { c.win._desktopAppAsk(); },
 });
 registerMenuItem({
   menu: 'window', group: '1_window', order: 36, id: 'window/desktop-app-keep', kind: 'keep',

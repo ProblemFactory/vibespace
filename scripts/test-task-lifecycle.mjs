@@ -71,10 +71,11 @@ ok('session-store taskState scan uses the SAME parser (no twin)', /require\('\.\
 ok('phantom cut: a synthesized running task launched BEFORE the current wrapper start is dropped (an OS task cannot outlive the CLI process)', /tk\.status === 'running' && tk\._launchTs && tk\._launchTs < wStart\) delete tasks\[tuid\]/.test(ss));
 ok('…and closes from persisted <task-notification> records with summary', /<task-notification>/.test(ss) && /tasks\[tu\]\.summary = sm\.slice\(0, 200\)/.test(ss));
 const cr = read('src/lib/chat-renderers.js');
-// the chip is ONE helper since 2026-09-21 (taskStatusChipHtml: running ⟳ / soft `finished` / err), called by BOTH cards
-ok('Agent + Workflow cards show the lifecycle chip (the ONE taskStatusChipHtml helper, two call sites) and prefer the completion summary', /const taskStatusChipHtml = \(ti\) =>/.test(cr) && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && (cr.match(/chat-task-status-chip/g) || []).length >= 3 && /ti\?\.summary/.test(cr) && /tiW\?\.summary/.test(cr));
+// the chip is ONE helper since 2026-09-21 (taskStatusChipHtml: running ⟳ / soft `finished` / err), called by BOTH cards;
+// since 2026-09-26 it also takes the server's stalled verdict for a Workflow run (src/workflow-disk.js)
+ok('Agent + Workflow cards show the lifecycle chip (the ONE taskStatusChipHtml helper, two call sites) and prefer the completion summary', /const taskStatusChipHtml = \(ti, verdict = null\) =>/.test(cr) && (cr.match(/taskStatusChipHtml\(/g) || []).length === 2 && (cr.match(/chat-task-status-chip/g) || []).length >= 3 && /ti\?\.summary/.test(cr) && /tiW\?\.summary/.test(cr));
 const sb = read('src/lib/chat-status-bar.js');
-ok('multiple running workflows COLLAPSE into one chip with a dropdown (like tasks)', /chat-status-wf-multi/.test(sb) && /\{count\} workflows/.test(sb) && /wfMulti && this\._workflows\?\.size/.test(sb));
+ok('multiple running workflows COLLAPSE into one chip with a dropdown (like tasks)', /chat-status-wf-multi/.test(sb) && /\{count\} workflows/.test(sb) && /wfMulti && this\._runningWorkflows\(\)\.length/.test(sb) /* lane Q verify: a stalled run stays tracked, never drawn as running */);
 ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) \{/.test(sb));
 
 
@@ -190,12 +191,23 @@ ok('single-workflow chip keeps direct click-through', /wfChip\.dataset\.wfRun\) 
     const persisted = { toolu_wf_rep: { started: { type: "system", subtype: "task_started", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", task_type: "local_workflow", description: "lane" },
       progress: { type: "system", subtype: "task_progress", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", description: "Build: b1", usage: { total_tokens: 5, tool_uses: 1, duration_ms: 9 }, workflow_progress: TREE }, at: 1 } };
     const recs = taskReplayRecords(persisted);
-    ok("taskReplayRecords orders started → progress (→ notification) per task", recs.length === 2 && recs[0].subtype === 'task_started' && recs[1].subtype === 'task_progress');
-    for (const r of recs) mm5.replay(r);
+    ok("taskReplayRecords orders started → progress (→ notification) per task, each with the task's persisted arrival time `at` (lane Q verify)", recs.length === 2 && recs[0].record.subtype === 'task_started' && recs[1].record.subtype === 'task_progress' && recs.every((r) => r.at === 1));
+    // the tree's clock (lane Q verify, 2026-09-26): a HISTORY conversion stamps nothing (the rebuild converts the
+    // stdout ring too — task records with no arrival time, possibly days old) …
+    const ringCard = mm5.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_rep");
+    ok("a history conversion leaves taskInfo.aliveAt UNSET (no arrival time is known)", ringCard?.taskInfo && ringCard.taskInfo.aliveAt === undefined, ringCard?.taskInfo);
+    const AT = Date.now() - 2 * 86400e3;
+    for (const r of recs) mm5.replay(r.record, { at: AT });
     const card5 = mm5.messages.find((m) => m.content?.[0]?.toolCallId === "toolu_wf_rep");
     ok("after the silent replay the card carries the tree, type 'workflow', running — and NO op was emitted (a rebuild has no client yet)", card5?.taskInfo?.workflow?.agents?.length === 2 && card5.taskInfo.type === 'workflow' && card5.taskInfo.status === 'running' && ops5.length === 0, JSON.stringify({ ti: card5?.taskInfo, ops: ops5.length }).slice(0, 300));
+    ok("…and taskInfo.aliveAt is the RECORD's arrival (two days ago), never the replay's clock — /api/workflow's treeAlive then refuses the tree as proof of life", card5.taskInfo.aliveAt === AT, card5.taskInfo.aliveAt);
     mm5.replay({ type: "system", subtype: "task_notification", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", status: "completed", summary: "done" });
     ok("a replayed notification closes it (completed) — still silently", card5.taskInfo.status === 'completed' && ops5.length === 0, JSON.stringify(card5.taskInfo).slice(0, 200));
+    const before = Date.now();
+    mm5.processLive({ type: "system", subtype: "task_progress", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", description: "Build: b2" });
+    ok("a LIVE task_progress (even a tree-less heartbeat) stamps aliveAt with now", card5.taskInfo.aliveAt >= before && card5.taskInfo.aliveAt <= Date.now());
+    mm5.replay({ type: "system", subtype: "task_progress", task_id: "wu9rep1", tool_use_id: "toolu_wf_rep", description: "Build: b3" });
+    ok("a replay with NO known `at` leaves the stamp alone (unknown is not now)", card5.taskInfo.aliveAt >= before);
   }
   // renderer + wiring pins
   const cr = read("src/lib/chat-renderers.js"), cv = read("src/lib/chat-view.js"), css = read("public/chat.css");

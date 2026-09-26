@@ -30,7 +30,7 @@ const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudg
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
-const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt']);
+const MSG_STASH_BLOCK_SOURCES = new Set(['channel', 'channel-receipt', 'window-request']); // lane E: the user's window request is one block (handle + mode + their line), never clipped to 400
 const clipBytes = (text, max) => { const b = Buffer.from(String(text), 'utf-8'); if (b.length <= max) return String(text); let cut = b.subarray(0, max).toString('utf-8'); const nl = cut.lastIndexOf('\n'); if (nl > max * 0.5) cut = cut.slice(0, nl); return cut + '\n(… clipped)'; };
 /** @returns {{text:string, shown:object[], rest:object[]}} — `shown` are the
  *  entries rendered (emit their cards), `rest` the ones to re-stash. */
@@ -93,6 +93,7 @@ function renderMsgStash(entries) {
   const hints = [];
   if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source))) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
   if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
+  if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
 }
 function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null }) {
@@ -1715,7 +1716,7 @@ function sessionToolsIntro(T, facts = {}) {
   // (a resumed conversation re-carries its leases, so the agent must not
   // assume the ephemeral default it would otherwise read from the line above)
   if (facts.browserSet) L.push(browserSetLine(facts.browserSet));
-  L.push('A native desktop app (not a web page): `vibespace-window open <app>` starts it on a private display VibeSpace owns and `vibespace-window snapshot <handle>` reads its accessibility tree with @refs (the same @ref habit as `vibespace-browser snapshot`) — `click <handle> @ref` acts on a node through its own declared action, never a blind coordinate click; only windows VibeSpace started are addressable — unless the user turned on their real-desktop switch, in which case their own applications are listed too (marked YOUR DESKTOP: tree verbs only, no key / --at, no live pane). Manual: vibespace-docs window.');
+  L.push('A native desktop app (not a web page): `vibespace-window open <app>` starts it on a private display VibeSpace owns and `vibespace-window snapshot <handle>` reads its accessibility tree with @refs (the same @ref habit as `vibespace-browser snapshot`) — `click <handle> @ref` acts on a node through its own declared action, never a blind coordinate click; only windows the user SHARED with you (or you opened) are listed, each in tree or pixel mode as the user chose (`not_exposed` = not shared: ask them) — and if the user turned on their real-desktop switch, their own applications are listed too (marked YOUR DESKTOP: tree verbs only, no key / --at, no live pane). Manual: vibespace-docs window.');
   L.push(
     'Designs, mockups, posters: `vibespace-page kit` prepares the design-canvas kit on this machine and prints its base directory — read that directory\'s SKILL.md and follow it; it ends in `vibespace-page publish <file.html> --title "…"`, which hosts the page on this VibeSpace and prints a share link (private by default, `--public` for anyone with the link). Any self-contained HTML you produce can be shared the same way. Manual: vibespace-docs pages.');
   L.push(

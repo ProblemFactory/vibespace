@@ -12,12 +12,21 @@
  *   GET  /api/agent/window/targets                 the rows I may address + the verb verdicts + the probe
  *   POST /api/agent/window/open      {appId, label?}   start a REGISTRY app on a private display, attach (`exec`/`args`/`cwd` ⇒ 403 exec_is_human: an exec is the user's, §5;
  *                                                     a BROWSER row, or `url`/`keepProfile` ⇒ 403 browser_is_human: the desktop-app browser is the user's, B-bfe6)
- *   POST /api/agent/window/attach    {handle}      a desktop-app BROWSER window ⇒ 403 browser_is_human (takeover T6 — snapshot / act /
- *                                                  screenshot / watch refuse it the same; `targets` omits it)
+ *   POST /api/agent/window/attach    {handle}      lane E (D1): a window NOT SHARED with this session ⇒ 403 not_exposed (snapshot / act /
+ *                                                  screenshot / watch / detach refuse it the same; `targets` lists only shared windows);
+ *                                                  a shared desktop-app BROWSER attaches like any app (D4; T6's attach refusal retired) —
+ *                                                  the answer names the share's MODE (D7: auto resolves here — tree | pixels + why)
  *   POST /api/agent/window/detach    {handle}
  *   POST /api/agent/window/snapshot  {handle, budget?, text?}
- *   POST /api/agent/window/act       {handle, verb: click|type|key, ref?, at?, text?, replace?, chord?, action?, button?}
- *   GET  /api/agent/window/screenshot?handle=   image/png (the temp file is removed once sent)
+ *   POST /api/agent/window/act       {handle, verb: click|type|key|scroll, ref?, at?, text?, replace?, chord?, action?, button?, direction?, by?}
+ *                                                  (lane E verify r2: an injection the user's takeover / a revoke cut short answers
+ *                                                  409 window_paused / 403 not_exposed WITH `did: {partial: true}`; a Task Group
+ *                                                  store that cannot be read ⇒ 503 reach_unreadable, the lease kept)
+ *                                                  (lane E: a tree verb under a pixel share ⇒ 409 mode_pixels; a pixel verb on an xpra
+ *                                                  window nobody has open ⇒ 409 window_not_visible; --at outside the image ⇒ 400 outside_window)
+ *   GET  /api/agent/window/screenshot?handle=   image/png (the temp file is removed once sent); `X-Window-Shot` = {handle, w, h,
+ *                                                  originX, originY, coords: 'window'|'display', scale, windows, blank} — lane E: the
+ *                                                  image is the app's OWN windows and `--at x,y` is a pixel of it
  *   POST /api/agent/window/watch     {handle}
  *
  * P10 (design §7.6 tier 3 / §6.6, D27 (b)) — the USER'S side of the other
@@ -49,11 +58,17 @@ const STATUS = {
   'bad-request': 400, bad_chord: 400, action_unknown: 400, 'unsupported-host': 400, 'exec-not-found': 400, 'cwd-missing': 400, 'needs-wayland': 400,
   window_leased: 409, window_paused: 409, node_has_no_action: 409, node_not_editable: 409, no_focused_node: 409, ref_stale: 409, no_injection_backend: 409, action_refused: 409, cap: 409, 'no-backend': 409, 'backend-not-wired': 409, 'no-display': 409,
   a11y_unavailable: 503, helper_missing: 503, python3_missing: 503, screenshot_unavailable: 503,
+  no_utf8_locale: 503, // lane E verify r3 (F3): a non-ASCII text typed as keys, and no UTF-8 locale loads here — nothing was typed
   helper_timeout: 504, helper_error: 502, action_failed: 502, ref_unreadable: 502, inject_failed: 502, screenshot_failed: 502,
   // P10 — the desktop class (src/window-desktop.js REFUSALS) + the user's pause/resume verdicts
   desktop_consent_off: 403, provider_needs_consent: 403, escalation_needs_user: 403, exec_is_human: 403,
-  // takeover C3 (T6): a desktop-app BROWSER is the user's own window — attach / snapshot / act / screenshot / watch refuse it
+  // takeover C3 (T6) → lane E (D4): `open` of a desktop-app BROWSER row (or url / keepProfile) stays the user's act;
+  // a browser the USER shares is a target like any app
   browser_is_human: 403,
+  // lane E (src/window-reach.js REFUSALS): reach, the share mode, the pixel road, the user's share routes
+  not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, not_live: 404,
+  reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
+  outside_window: 400, bad_principal: 400, bad_mode: 400, share_local_only: 400,
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,
   desktop_window_gone: 404,
   capture_needs_portal: 503, capture_unavailable: 503,
@@ -61,7 +76,7 @@ const STATUS = {
 function fail(res, e) {
   const code = e?.code || null;
   const body = { error: String(e?.message || e), code };
-  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease', 'handle']) if (e && e[k] !== undefined) body[k] = e[k];
+  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease', 'handle', 'mode', 'resolvedMode', 'plan', 'nodes', 'did']) if (e && e[k] !== undefined) body[k] = e[k]; // `did` (r2, L5): {partial:true} — a cancelled act that may have partly landed
   res.status(STATUS[code] || 500).json(body);
 }
 function engineOr503(res) {
@@ -95,12 +110,13 @@ router.post('/api/agent/window/open', async (req, res) => {
   const f = agentFacts(req, res, engine); if (!f) return;
   try { res.json(await engine.open(req.body || {}, f)); } catch (e) { fail(res, e); }
 });
-router.post('/api/agent/window/attach', (req, res) => {
+router.post('/api/agent/window/attach', async (req, res) => {
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const f = agentFacts(req, res, engine); if (!f) return;
   const h = handleOf(req, res); if (!h) return;
-  try { res.json(engine.attach(h, f)); } catch (e) { fail(res, e); }
+  // lane E (D7): the attach answers the share's mode — auto is resolved here (a probe of the app's tree)
+  try { res.json(typeof engine.attachWithMode === 'function' ? await engine.attachWithMode(h, f) : engine.attach(h, f)); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/window/detach', (req, res) => {
   if (refuseHost(req, res)) return;
@@ -131,7 +147,7 @@ router.get('/api/agent/window/screenshot', async (req, res) => {
   try {
     const r = await engine.screenshot(h, f);
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('X-Window-Shot', JSON.stringify({ handle: r.handle, w: r.w, h: r.h, x: r.x, y: r.y, cropped: r.cropped }));
+    res.setHeader('X-Window-Shot', JSON.stringify({ handle: r.handle, w: r.w, h: r.h, x: r.x, y: r.y, originX: r.originX ?? r.x, originY: r.originY ?? r.y, coords: r.coords || 'display', scale: r.scale || 1, windows: r.windows ?? null, blank: !!r.blank, cropped: r.cropped }));
     const s = fs.createReadStream(r.file);
     const done = () => { try { fs.unlinkSync(r.file); } catch { /* gone */ } };
     s.on('close', done); s.on('error', (e) => { done(); if (!res.headersSent) fail(res, e); else res.end(); });

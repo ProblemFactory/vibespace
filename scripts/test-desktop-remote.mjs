@@ -35,6 +35,9 @@
 //      unknown-host-offline, the bridge refuses its upgrade (404, never a local
 //      connect); a keeper launch on an agent without the capability ⇒
 //      host_needs_daemon within 1 s
+//      LANE D (b): the app's default scale (`scaleChoice`, the launch dialog's) rides the op INSIDE `body`, the
+//      device's record runs at it with origin 'app' over the hub's explicit Settings value (GDK_SCALE on the device —
+//      2 for 1.5×, lane D (a)'s ceil rule, and the record's gdkScale / pictureScale reach the hub's copy)
 //   §8 C2 verify: an op IN FLIGHT when the device's link dies answers
 //      host_unavailable at once (CONTROL: the pre-fix client waits out the op's
 //      own timeout); run-stream's belt is per op; the install run past its
@@ -355,6 +358,25 @@ if (canRunAll()) {
   ok(sp && sp.state === 'exited' && sp.stoppedBy === 'user' && sp.hostId === 'dev-a', 'stop through the hub keeper ⇒ exited on the device');
   await sleep(400);
   ok(markerPids(L.id).length === 0, 'nothing carries the session marker after the stop');
+  // lane D (b): the app's default scale (the launch dialog's `scaleChoice`) rides the `launch` op INSIDE `body` — the op's
+  // shape otherwise unchanged — and the DEVICE's record runs at it with origin 'app', over the hub's explicit Settings
+  // value ('1' here: without the field the device would answer 1× · setting — the leg discriminates)
+  const opLog = [];
+  const realCall = acc3.call;
+  acc3.call = (...a) => { opLog.push(a); return realCall(...a); };
+  try {
+    const Ld = await hub.launch({ exec: XTERM_ALL, args: ['-geometry', '40x10', '-T', 'vs-remote-lane-d'], label: 'hub xterm lane D', scaleChoice: 1.5 }, { host: 'dev-a' });
+    ids.add(Ld.id);
+    const lo = opLog.find(([h, op]) => h === 'dev-a' && op === 'launch');
+    ok(!!lo && JSON.stringify(Object.keys(lo[2]).sort()) === JSON.stringify(['body', 'settings']) && lo[2].body.scaleChoice === 1.5 && lo[2].settings['desktop.appScale'] === '1', 'lane D: the launch op to the device = {body, settings} as before, `scaleChoice: 1.5` INSIDE body (the hub\'s Settings value 1 beside it)', lo && lo[2]);
+    const rd = await until(() => { const r = hub.get(Ld.id); return r && (r.state === 'ready' || r.state === 'failed' || r.state === 'exited') ? r : null; }, 30000, 100);
+    const devRec = (() => { try { return JSON.parse(fs.readFileSync(path.join(home, '.vibespace', 'desktop-apps.json'), 'utf8')).apps[Ld.id]; } catch { return null; } })();
+    const gdk = (() => { try { return (fs.readFileSync(`/proc/${devRec.pids.app}/environ`, 'latin1').split('\0').find((l) => l.startsWith('GDK_SCALE=')) || '').slice(10) || null; } catch { return null; } })();
+    ok(!!rd && rd.state === 'ready' && rd.scale === 1.5 && rd.scaleOrigin === 'app' && rd.gdkScale === 2 && rd.pictureScale === 0.75 && !!devRec && devRec.scale === 1.5 && devRec.dpi === 96 && devRec.gdkScale === 2 && devRec.pictureScale === 0.75 && devRec.scaleOrigin === 'app' && gdk === '2', `lane D: the DEVICE's record runs at the app default — ${devRec && devRec.scale}× drawn at GDK_SCALE ${devRec && devRec.gdkScale} (${devRec && devRec.dpi} dpi) shown at ${devRec && devRec.pictureScale} (lane D (a)'s rule), origin ${devRec && devRec.scaleOrigin} (the hub's copy: ${rd && rd.scale}× ${rd && rd.scaleOrigin}, GDK_SCALE ${rd && rd.gdkScale} × ${rd && rd.pictureScale}); GDK_SCALE=${gdk} in the app's environ on the device`, { rd: rd && { state: rd.state, scale: rd.scale, gdk: rd.gdkScale, pic: rd.pictureScale, origin: rd.scaleOrigin }, devRec: devRec && { scale: devRec.scale, dpi: devRec.dpi, gdk: devRec.gdkScale, pic: devRec.pictureScale, origin: devRec.scaleOrigin } });
+    if (rd) await hub.stop(Ld.id, { why: 'user' });
+    await sleep(400);
+    ok(markerPids(Ld.id).length === 0, 'lane D: nothing carries that session\'s marker after its stop');
+  } finally { acc3.call = realCall; }
   hub.shutdown(); acc3.shutdown(); srv.close(); dm3.stop();
 }
 

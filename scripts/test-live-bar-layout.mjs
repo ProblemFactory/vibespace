@@ -205,7 +205,22 @@ console.log('§5 wiring pins');
   ok(/takeBtn\.style\.display = show && m\.mode !== 'takeover' \? '' : 'none';/.test(dw) && /handBtn\.style\.display = show && m\.mode === 'takeover' \? '' : 'none';/.test(dw) && /modeBadge\.textContent = t\(shortModeBadge\(m\)\)/.test(dw), "the desktop strip's window-live form: the same ONE toggle and the same short badge (the sentence in its tooltip)");
   ok(/openBtn\.innerHTML = UI_ICONS\.globe;/.test(lw) && !/UI_ICONS\.web\b/.test(lw), 'the web-view hand-off wears UI_ICONS.globe — never the missing UI_ICONS.web that printed "undefined"');
   ok(/bindBtn\.innerHTML = BIND_SVG;/.test(lw) && /bindBtn\.setAttribute\('aria-label', label\)/.test(lw), 'the bind button is icon-only (its label names the session — unbounded) with the label as its accessible name');
-  ok(/barFold = createBarFold\(bar, \{\s*more: moreBtn,\s*moreAlways: \(\) => !!rec && rec\.stream === 'xpra',/.test(dw) && !/moreBtn\.style\.display =/.test(dw) && /DESK_BAR_PRIORITY\.get\(el\) \|\| 0/.test(dw) && /barFold\?\.dispose\(\); barFold = null;/.test(dw), 'the desktop strip folds through createBarFold (⋯ kept for xpra, the shell\'s own items never fold, a retarget disposes the fold)');
+  { // THE STRIP'S CHIP CENSUS (2.369.181 — lanes D + E met lane I's fold): every control the desktop strip adds carries a
+    // fold priority unless it is one of the never-fold set (the mode badge, Take over / Hand back, the ⋯ itself) — a chip
+    // added without one keys as a shell item (priority 0) and could never fold, so the bar overflows at a narrow width
+    const NEVER = new Set(['modeBadge', 'takeBtn', 'handBtn', 'moreBtn']);
+    const census = (text) => {
+      const ctl = /const controls = \[([^\]]*)\];/.exec(text), pm = /const DESK_BAR_PRIORITY = new Map\(\[(.*)\]\);/.exec(text);
+      const names = ctl ? ctl[1].split(',').map((x) => x.trim()).filter(Boolean) : [];
+      const prio = new Set(pm ? [...pm[1].matchAll(/\[(\w+),\s*\d+\]/g)].map((m) => m[1]) : []);
+      return { names, missing: names.filter((n) => !NEVER.has(n) && !prio.has(n)) };
+    };
+    const c = census(dw);
+    ok(c.names.length >= 14 && c.names.includes('shareChip') && c.names.includes('scaleChip') && c.missing.length === 0, `every desktop-strip control but the never-fold set has a fold priority (${c.names.length} controls${c.missing.length ? '; missing: ' + c.missing.join(', ') : ''})`);
+    const planted = census(dw.replace('const controls = [', 'const controls = [lateChip, '));
+    ok(planted.missing.length === 1 && planted.missing[0] === 'lateChip', 'NEGATIVE CONTROL: a control added to the strip without a priority (planted into a copy of the text) is named missing');
+  }
+  ok(/barFold = createBarFold\(bar, \{\s*more: moreBtn,\s*moreAlways: \(\) => !!rec && \(rec\.stream === 'xpra' \|\| shareable\(\)\),/.test(dw) && !/moreBtn\.style\.display =/.test(dw) && /DESK_BAR_PRIORITY\.get\(el\) \|\| 0/.test(dw) && /barFold\?\.dispose\(\); barFold = null;/.test(dw), 'the desktop strip folds through createBarFold (⋯ kept for xpra and — lane E — for a shareable app on every rung, the shell\'s own items never fold, a retarget disposes the fold)');
   ok(/import \{ barLayout \} from '\.\/live-bar-layout\.js';/.test(bf) && /new ResizeObserver\(schedule\)/.test(bf) && /requestAnimationFrame\(\(\) => \{ raf = 0; layoutNow\(\); \}\)/.test(bf) && /signal\.addEventListener\('abort', stop, \{ once: true \}\)/.test(bf) && /strip\(r\.oldValue\) === strip\(r\.target\.className\)/.test(bf), 'bar-fold.js: the PURE verdict, a ResizeObserver, ONE layout per frame, the AbortSignal lifecycle, its own fold toggles never re-trigger it');
   ok(!/^import /m.test(read('src/lib/live-bar-layout.js')) && !/\bdocument\b|\bwindow\./.test(read('src/lib/live-bar-layout.js').replace(/\/\/.*$/gm, '')), 'live-bar-layout.js is PURE (imports nothing, no DOM)');
   const rule = (sel) => new RegExp(sel.replace(/[.>*]/g, (x) => '\\' + x) + '\\s*\\{([^}]*)\\}').exec(cssText)?.[1] || '';

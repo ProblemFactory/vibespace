@@ -200,12 +200,15 @@ console.log('§3 THE ENGINE over a fake keeper + a fake helper + the routes, and
   const mk = () => ENGINE.create({ keeper, dataDir, env: () => ({ PATH: process.env.PATH }), activeSessions: sessions, wt: WT, python: process.execPath, helper, bins, serverSetting: (k) => settings[k], broadcast: (m) => broadcasts.push(m), userEnv: () => ({ PATH: process.env.PATH }), selfPid: process.pid, log: { log() { }, warn() { } } });
   let engine = mk();
   const A = { sessionId: 'sess-a', browserKey: 'bk-a', name: 'Alpha' }, Bf = { sessionId: 'sess-b', browserKey: 'bk-b', name: 'Beta' };
+  // desktop lane E (D1): a VibeSpace-started window is hidden until the user shares it — share `da-ours` with both
+  // sessions (the tier-3 class below never reads a share: D5, its own switch — the legs below pin that too)
+  for (const sid of ['sess-a', 'sess-b']) engine.grantReach('da-ours', { kind: 'session', id: sid });
   const caught = async (fn) => { try { return { ok: true, value: await fn() }; } catch (e) { return { ok: false, code: e.code, message: e.message, e }; } };
   const H = `dw-${FOREIGN}`;
 
   // the switch OFF
   let l = await engine.list(A);
-  ok(l.desktop.enabled === false && l.verbsDesktop === null && !l.targets.some((t) => t.origin === 'desktop') && l.targets.some((t) => t.handle === 'da-ours') && /never enumerated/.test(l.note), 'switch OFF: no desktop rows, no desktop verbs, the vibespace row still listed');
+  ok(l.desktop.enabled === false && l.verbsDesktop === null && !l.targets.some((t) => t.origin === 'desktop') && l.targets.some((t) => t.handle === 'da-ours') && /never enumerated/.test(l.note), 'switch OFF: no desktop rows, no desktop verbs, the (shared) vibespace row still listed');
   let r = await caught(() => engine.attach(H, A));
   ok(!r.ok && r.code === 'desktop_consent_off' && r.e.setting === DESK.SETTING_KEY && /Settings/.test(r.message), 'switch OFF: attach on a desktop handle ⇒ desktop_consent_off naming the setting (consent is asked BEFORE existence)');
   r = await caught(() => engine.attach('dw-1', A));

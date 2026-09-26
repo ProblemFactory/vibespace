@@ -77,6 +77,14 @@ const PTR = (x, y) => Buffer.from([5, 0, (x >> 8) & 255, x & 255, (y >> 8) & 255
 const HS = [Buffer.from('RFB 003.008\n'), Buffer.from([1]), Buffer.from([1])];
 
 // ─────────────────────────────────────────────────────────────────────────────
+const LANE_E_CHILD = process.argv.includes('--lane-e-child');
+if (LANE_E_CHILD) {
+  console.log('§4 LANE E (child, private session bus, HOME ' + process.env.HOME + ')');
+  await laneE();
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } // the child's own scratch (never used — its HOME is the parent's)
+  console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
+  process.exit(fail ? 1 : 0);
+}
 console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic, the engine, the announcer');
 {
   // strip: watch cuts the input out and relays the rest
@@ -149,6 +157,10 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   const mkEngine = () => ENGINE.create({ keeper, dataDir: edir, env: () => process.env, activeSessions: sessions, now, broadcast: (m) => bcasts.push(m), serverSetting: (k) => settings[k], log: { warn() { }, log() { } } });
   const e1 = mkEngine();
   const f1 = e1.factsForToken('vsst_aaaa'), f2 = e1.factsForToken('vsst_bbbb');
+  // lane E (D1): a window is hidden until the user shares it — share both windows with both sessions (persisted in
+  // edir: every later engine over it — the "restart" — reads the same share)
+  { let hid = null; try { e1.attach('da-one', f1); } catch (e) { hid = e; } ok(hid && hid.code === 'not_exposed', 'lane E: before any share the window is hidden (attach ⇒ not_exposed)'); }
+  for (const h of ['da-one', 'da-two']) for (const sid of ['s1', 's2']) e1.grantReach(h, { kind: 'session', id: sid });
   const a1 = e1.attach('da-one', f1);
   ok(a1.lease.origin === 'vibespace' && a1.lease.input === 'agent' && a1.lease.sessionName === 'alpha' && a1.lease.orphaned === false, 'a lease view carries origin (§6.6\'s class marker), input, the holder\'s name, orphaned');
   ok(fs.existsSync(e1.leaseFile) && JSON.parse(fs.readFileSync(e1.leaseFile, 'utf8')).leases['da-one'].sessionId === 's1', 'the lease is written to data/window-leases.json at once');
@@ -264,6 +276,7 @@ console.log('§2 THE BRIDGE over a fake RFB server, policy = the engine');
   const seen = () => Buffer.concat(got);
   const reset = () => { got.length = 0; };
   const f1 = engine.factsForToken('vsst_aaaa');
+  engine.grantReach('da-b', { kind: 'session', id: 's1' }); // lane E: shared before the agent may attach
   const A = await open('vA'), B = await open('vB');
   ok(stream.viewersOf('da-b').sort().join(',') === 'vA,vB' && stream.viewerAlive('da-b', 'vA') && !stream.viewerAlive('da-b', 'vZ'), 'the bridge knows its viewers by id');
   // 2026-09-21 (the verifier's finding): a second socket claiming a LIVE id used to REPLACE the holder's socket in the map
@@ -362,7 +375,7 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
       const onBus = await until(async () => { const r = await cli('vsst_aaaa', 'snapshot', handle, '--json'); if (r.code === 0) { try { const j = JSON.parse(r.out); if (j.nodes && j.nodes.length) { snap = j; return true; } } catch { } } return false; }, 30000, 500);
       ok(onBus && snap && snap.census.nodes > 5, `snapshot through the CLI: ${snap && snap.census.nodes} nodes from the real tree (Action ${snap && snap.census.action}, EditableText ${snap && snap.census.editableText})`);
       const listed = await cli('vsst_aaaa', 'list');
-      ok(listed.code === 0 && listed.out.includes(`* ${handle}`) && /held by me/.test(listed.out) && /only windows VibeSpace started/.test(listed.out), 'list marks the window as held by me and states the scope');
+      ok(listed.code === 0 && listed.out.includes(`* ${handle}`) && /held by me/.test(listed.out) && /only windows the user shared with you \(or you opened\)/.test(listed.out) && /because you opened it/.test(listed.out), 'list marks the window as held by me, says it reaches me because I opened it, and states the scope');
       const countBtn = snap && snap.nodes.find((n) => n.role === 'push button' || n.role === 'button') && snap.nodes.find((n) => (n.role === 'push button' || n.role === 'button') && n.name === 'Count');
       const countLabel = () => snap && snap.nodes.find((n) => n.role === 'label' && /^count \d+/.test(n.name || ''));
       ok(!!countBtn && countBtn.actions && countBtn.actions.length > 0 && countLabel() && countLabel().name === 'count 0', 'the Count button (with Action) and the count label are in the snapshot');
@@ -372,6 +385,11 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
         try { snap = JSON.parse(again.out); } catch { }
         ok(clicked.code === 0 && /click/.test(clicked.out) && countLabel() && countLabel().name === 'count 1', `click @ref through the CLI changed the app's state, read back from ITS OWN tree (${countLabel() && countLabel().name})`);
       }
+      // lane E (D1): the window the agent OPENED is shared with IT only — the second session does not even see it
+      const hid2 = await cli('vsst_bbbb', 'attach', handle);
+      const hidList = await cli('vsst_bbbb', 'list');
+      ok(hid2.code === 1 && /not_exposed/.test(hid2.err) && hidList.code === 0 && !hidList.out.includes(handle) && /no window is shared with you/.test(hidList.out), 'lane E: a SECOND session cannot see the window the first one opened (not listed, attach ⇒ not_exposed) — the opener\'s self-open share reaches only itself');
+      ok((await api('POST', `/api/desktop/apps/${handle}/reach`, { principal: { kind: 'session', id: 's2' } })).status === 200, 'the user shares it with the second session (POST …/reach)');
       // the second session is refused by the lease — attach and act alike, typed, exit 1
       const at2 = await cli('vsst_bbbb', 'attach', handle);
       ok(at2.code === 1 && /window_leased/.test(at2.err) && /alpha/.test(at2.err) && /one holder per window/.test(at2.err), 'a SECOND session\'s attach is refused window_leased naming the holder (exit 1)');
@@ -457,6 +475,239 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('§4 LANE E REAL: reach + the share mode + the pixel road on the xpra rung (a child under a PRIVATE session bus)');
+{
+  const base = { ...process.env };
+  const need = ['xpra', 'Xvfb', 'xdpyinfo', 'dbus-run-session', 'gnome-calculator', 'xterm', 'xdotool'].filter((b) => !D.binOnPath(b, { env: base }));
+  const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2.0'); gi.require_version('Gdk','3.0'); gi.require_version('GdkX11','3.0'); from gi.repository import Atspi, Gdk, GdkX11; print('ok')"], base, 20000);
+  if (need.length) skip(`the lane-E real legs need ${need.join(', ')} — not on PATH here`);
+  else if (py.err) skip(`python3 gi Atspi/Gdk/GdkX11 not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
+  else {
+    const home = path.join(dir, 'lane-e', 'home'), rt = path.join(dir, 'lane-e', 'run');
+    fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(rt, { recursive: true }); fs.chmodSync(rt, 0o700);
+    const env = { ...base, HOME: home, XDG_RUNTIME_DIR: rt }; delete env.WAYLAND_DISPLAY; delete env.DISPLAY; delete env.DBUS_SESSION_BUS_ADDRESS; delete env.AT_SPI_BUS_ADDRESS;
+    const child = spawn('dbus-run-session', ['--', process.execPath, new URL(import.meta.url).pathname, '--lane-e-child'], { env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    children.add(child);
+    let buf = '', summary = null;
+    child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); const m = /^(\d+) passed, (\d+) failed, (\d+) skipped$/.exec(line.trim()); if (m) summary = m.slice(1).map(Number); else if (/^\s+[✓✗⚠]|^§4|^\s{4}/.test(line)) console.log(line); } });
+    let errTail = '';
+    let ebuf = '';
+    child.stderr.on('data', (d) => { errTail = (errTail + d).slice(-3000); ebuf += d; let i; while ((i = ebuf.indexOf('\n')) >= 0) { const line = ebuf.slice(0, i); ebuf = ebuf.slice(i + 1); if (/^\s+✗|^\s{4}\S/.test(line)) console.error(line); } }); // the child's ✗ lines go to its stderr
+    const code = await new Promise((r) => { const t = setTimeout(() => { try { process.kill(-child.pid, 'SIGKILL'); } catch { } r('timeout'); }, 420000); child.on('close', (c) => { clearTimeout(t); r(c); }); });
+    if (!summary) ok(false, `the lane-E child answered no summary (exit ${code})`, errTail.split('\n').filter((l) => !/dbus-daemon|WARNING|Message:|SpiRegistry|discover_other/.test(l)).slice(-12).join('\n'));
+    else { pass += summary[0]; fail += summary[1]; skipped += summary[2]; ok(code === 0 || summary[1] > 0, `the lane-E child ran to its end (${summary[0]} passed, ${summary[1]} failed, ${summary[2]} skipped, exit ${code})`); }
+    try { fs.rmSync(path.join(dir, 'lane-e'), { recursive: true, force: true }); } catch { }
+  }
+}
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);
 cleanup();
 process.exit(fail ? 1 : 0);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §4 LANE E REAL (docs/design-desktop-apps-seamless §3.6, the owner's D1–D7) — on the DEFAULT xpra rung, in a
+// child process under a PRIVATE session bus (dbus-run-session) with a scratch HOME / XDG_RUNTIME_DIR: the apps
+// (GNOME Calculator is a GApplication — on the owner's bus a second launch would hand off to THEIR instance) never
+// touch the owner's bus, dconf or keyring. A headless `xpra attach` on a scratch Xvfb stands in for the user's pane
+// (with no client the xpra main window is UNMAPPED: black pixels, lost input). The child prints its own ✓/✗ lines
+// and a summary the parent adds to its counts.
+async function laneE() {
+  const HOME = process.env.HOME;
+  const dataDir = path.join(HOME, 'data'); fs.mkdirSync(dataDir, { recursive: true });
+  const base = { ...process.env }; delete base.WAYLAND_DISPLAY; delete base.DISPLAY;
+  const kids = [];
+  const kill = () => { for (const k of kids) { try { process.kill(-k.pid, 'SIGKILL'); } catch { try { k.kill('SIGKILL'); } catch { } } } };
+  process.on('exit', kill);
+  const K = require('../src/server/desktop-app-keeper.js');
+  const RE = require('../src/window-reach.js');
+  const chromeBin = D.binOnPath('google-chrome', { env: base });
+  const outFile = path.join(HOME, 'xterm-typed.txt');
+  const NET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-features=Translate,OptimizationHints,MediaRouter'];
+  const registryRows = [
+    { id: 'vs-calc', label: 'Calculator', exec: 'gnome-calculator', args: [], env: { GSETTINGS_BACKEND: 'memory' }, category: 'utility' },
+    { id: 'vs-xterm', label: 'xterm', exec: 'xterm', args: ['-e', 'sh', '-c', `cat > ${outFile}`], category: 'terminal' },
+    ...(chromeBin ? [{ id: 'vs-chrome', label: 'Chrome', exec: 'google-chrome', execs: ['google-chrome'], args: NET, category: 'browser', browser: 'chromium' }] : []),
+  ];
+  const keeper = K.create({ dataDir, env: () => ({ ...base }), broadcast: () => { }, serverSetting: () => undefined, registryRows, log: { log() { }, warn() { }, error() { } } });
+  await keeper.adoptAll(); keeper.start();
+  const groups = { s1: [], s2: [] };
+  const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha', backend: 'claude', backendSessionId: 'conv-a' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta', backend: 'codex', backendSessionId: 'conv-b' }]]);
+  // THE LADDER, real, with the REAL spend guard at an owner's cap of 0 unattended turns an hour: a wake must be refused
+  // (fail closed) and fall to the free next-turn stash
+  const guard = require('../src/server/spend-guard.js').create({ dataDir, serverSetting: (k) => (k === 'spend.unattendedPerIdentityHour' ? 0 : undefined), identityOf: () => ({ key: 'acct-lane-e', name: 'the test account' }) });
+  const deliver = require('../src/server/conversation-deliver.js').create({ dataDir, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }) }, getHosts: () => null, getConvIndex: () => null, serverSetting: () => undefined, activeSessions: sessions, emitPeerCard: () => { }, authorizeSpend: (r) => guard.authorize(r), noteSpend: (r) => guard.note(r), releaseSpend: (r) => guard.release(r) });
+  const express = require('express');
+  const app = express();
+  app.use(express.json());
+  const wired = WIRING.install({ app, auth: { requestAuthed: () => true }, vnc: { port: 0 }, keeper, DESKTOP_SINGLETON_ID: 'desktop-singleton', dataDir, env: () => ({ ...base }), activeSessions: () => sessions, serverSetting: () => undefined, broadcast: () => { }, deliver, groupsOf: (s, id) => groups[id] || [], log: { log() { }, warn() { } } });
+  const srv = http.createServer(app);
+  srv.on('upgrade', (req, socket, head) => { const id = wired.desktopStream.upgradeId(req.url.split('?')[0]); if (!id) { socket.destroy(); return; } wired.desktopStream.handleUpgrade(req, socket, head, id); });
+  const port = await freePort();
+  await new Promise((r) => srv.listen(port, '127.0.0.1', r));
+  const API = `http://127.0.0.1:${port}`;
+  const cli = (token, ...args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data', 'bin', 'vibespace-window'), ...args], { env: { ...base, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => res({ code, out, err })); });
+  const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
+  const engine = wired.windowEngine;
+  const launch = async (body) => { const r = await api('POST', '/api/desktop/apps', body); if (r.status !== 200) return { err: r.j }; const ready = await until(() => { const x = keeper.get(r.j.id); return x && x.state === 'ready'; }, 45000, 250); return { id: r.j.id, ready, rec: keeper.get(r.j.id), reach: r.j.reach || null }; };
+  // the stand-in for the user's pane: ONE scratch Xvfb, one `xpra attach` per app
+  let cdisp = null;
+  const viewer = async (id) => {
+    if (!cdisp) {
+      cdisp = ':' + (300 + (process.pid % 400));
+      kids.push(spawn('Xvfb', [cdisp, '-screen', '0', '1920x1200x24', '-nolisten', 'tcp'], { detached: true, stdio: 'ignore' }));
+      await until(async () => !(await run('xdpyinfo', ['-display', cdisp], base, 3000)).err, 10000, 200);
+    }
+    const cenv = { ...base, DISPLAY: cdisp, GDK_BACKEND: 'x11', XDG_SESSION_TYPE: 'x11' }; delete cenv.XAUTHORITY;
+    kids.push(spawn('xpra', ['attach', `tcp://127.0.0.1:${keeper.get(id).port}/`, '--opengl=no', '--notifications=no', '--tray=no', '--audio=no', '--speaker=no', '--microphone=no', '--webcam=no', '--splash=no', '--mdns=no', '--dbus=no', '--system-tray=no', '--clipboard=no', '--printing=no', '--file-transfer=no', '--desktop-scaling=off', '--bell=no', '--cursors=no', '--xsettings=no', '--socket-dir=' + process.env.XDG_RUNTIME_DIR, '--sessions-dir=' + process.env.XDG_RUNTIME_DIR], { env: cenv, detached: true, stdio: 'ignore' }));
+    return until(async () => { const w = await keeper.windows(id); return w.ok && w.windows.some((x) => x.mapped); }, 25000, 300);
+  };
+  const tree = async (id) => { const r = await WT.snapshotTarget({ pids: keeper.sessionPids(keeper.get(id)), env: base, budget: 3000 }); return r.ok ? r.snapshot.nodes : []; };
+  const textOf = (nodes, re) => (nodes.find((n) => re.test(String(n.text != null ? n.text : '')) || re.test(String(n.name || ''))) || null);
+  /** The calculator's display, digits only (GNOME Calculator groups thousands: "77,551"). */
+  const displayHas = (nodes, digits) => nodes.some((n) => String(n.text != null ? n.text : '').replace(/[^0-9]/g, '') === digits && /\d/.test(String(n.text || '')));
+  const audit = () => fs.readFileSync(path.join(dataDir, 'window-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  try {
+    // ── the calculator on the xpra rung, launched by the USER (no share) ──
+    const calc = await launch({ appId: 'vs-calc', dpr: 2, uiScale: 1 });
+    ok(calc.ready && calc.rec.stream === 'xpra', `the user launches GNOME Calculator on the xpra rung (${calc.rec && calc.rec.backend}, scale ${calc.rec && calc.rec.scale})`, calc.err);
+    if (!calc.ready || calc.rec.stream !== 'xpra') throw new Error('no xpra calculator — the lane-E legs need it');
+    const C = calc.id;
+    // D1 hidden by default
+    const l0 = await cli('vsst_aaaa', 'list');
+    const a0 = await cli('vsst_aaaa', 'attach', C);
+    ok(l0.code === 0 && !l0.out.includes(C) && /no window is shared with you/.test(l0.out) && a0.code === 1 && /\[not_exposed\]/.test(a0.err) && a0.err.includes(RE.NOT_EXPOSED_SENTENCE), 'D1 HIDDEN BY DEFAULT: `list` shows nothing, `attach` answers [not_exposed] with "ask them (they can share it from the window\'s ⋯ menu)"');
+    // D2 after launch: share with the session
+    ok((await api('POST', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'session', id: 's1' } })).status === 200, 'D2: the user shares it with alpha (POST …/reach, the Share with agent… dialog\'s write)');
+    const l1 = await cli('vsst_aaaa', 'list');
+    const a1 = await cli('vsst_aaaa', 'attach', C);
+    ok(l1.out.includes(C) && /mode: auto/.test(l1.out) && a1.code === 0 && /mode: auto → tree — its accessibility tree answers/.test(a1.out), `shared: listed with its mode, and attach RESOLVES auto → tree (the calculator exports a tree) — "${(a1.out.match(/mode: .*/) || [''])[0]}"`);
+    // D7 pixels: the tree is refused by name; with nobody viewing, pixels are refused too (never a silent no-op)
+    ok((await api('PUT', `/api/desktop/apps/${C}/reach/mode`, { mode: 'pixels' })).status === 200, 'D7: the user switches the share to PIXELS (PUT …/reach/mode)');
+    const s0 = await cli('vsst_aaaa', 'snapshot', C);
+    ok(s0.code === 1 && /\[mode_pixels\]/.test(s0.err) && s0.err.includes(RE.PIXELS_SENTENCE), 'pixels: `snapshot` is refused [mode_pixels] with the owner\'s sentence');
+    const sh0 = await cli('vsst_aaaa', 'screenshot', C, '--out', path.join(HOME, 'no-viewer.png'));
+    ok(sh0.code === 1 && /\[window_not_visible\]/.test(sh0.err) && !fs.existsSync(path.join(HOME, 'no-viewer.png')), 'with NO viewer the xpra window is unmapped: `screenshot` is refused [window_not_visible] (never a black image passed off as the window)');
+    const ck0 = await cli('vsst_aaaa', 'click', C, '--at', '10,10');
+    ok(ck0.code === 1 && /window_not_visible/.test(ck0.err), '…and a point click too (it would have been silently lost)');
+    ok(await viewer(C), 'the user opens the window (a headless xpra client stands in for the pane) — the main window MAPS');
+    const shotFile = path.join(HOME, 'calc.png');
+    const sh1 = await cli('vsst_aaaa', 'screenshot', C, '--out', shotFile);
+    const png = fs.existsSync(shotFile) ? fs.readFileSync(shotFile) : Buffer.alloc(0);
+    const pw = png.length > 24 ? png.readUInt32BE(16) : 0, ph = png.length > 24 ? png.readUInt32BE(20) : 0;
+    ok(sh1.code === 0 && png.slice(0, 8).toString('hex') === '89504e470d0a1a0a' && pw === 720 && ph === 1232 && /the window's own pixels \(origin 0,0 on its display, scale 2×\)/.test(sh1.out) && !/BLANK/.test(sh1.out), `pixels: \`screenshot\` = the window's OWN image ${pw}x${ph} (scale 2), window coordinates named — "${sh1.out.trim().slice(0, 160)}"`);
+    // where is "7"? the tree's WINDOW-relative extents (GTK4's screen extents are all 0,0 — measured) × the scale, read test-side
+    const py = await run('python3', ['-c', `import gi\ngi.require_version('Atspi','2.0')\nfrom gi.repository import Atspi\npids=set(${JSON.stringify(keeper.sessionPids(keeper.get(C)))})\nd=Atspi.get_desktop(0)\ndef walk(a):\n  if a.get_role_name()=='button' and a.get_name()=='7':\n    e=a.get_component_iface().get_extents(Atspi.CoordType.WINDOW); print(e.x,e.y,e.width,e.height); raise SystemExit\n  for i in range(a.get_child_count()): walk(a.get_child_at_index(i))\nfor i in range(d.get_child_count()):\n  app=d.get_child_at_index(i)\n  if app.get_process_id() in pids: walk(app)`], base, 20000);
+    const b7 = py.stdout.trim().split(/\s+/).map(Number);
+    const at7 = b7.length === 4 ? `${Math.round((b7[0] + b7[2] / 2) * 2)},${Math.round((b7[1] + b7[3] / 2) * 2)}` : '86,876';
+    const c7 = await cli('vsst_aaaa', 'click', C, '--at', at7);
+    const c7b = await cli('vsst_aaaa', 'click', C, '--at', at7);
+    let disp = null;
+    await until(async () => { disp = displayHas(await tree(C), '77'); return !!disp; }, 5000, 250);
+    ok(c7.code === 0 && c7b.code === 0 && /of the window image/.test(c7.out) && !!disp, `pixels: \`click --at ${at7}\` (a pixel of the screenshot) pressed "7" — TWICE on the same point (M9: the old --sync move hung and failed the second) — the display reads "77"`, c7.err + c7b.err);
+    const k5 = await cli('vsst_aaaa', 'key', C, '5');
+    const k5b = await cli('vsst_aaaa', 'key', C, '5');
+    await until(async () => displayHas(await tree(C), '7755'), 5000, 250);
+    ok(k5.code === 0 && k5b.code === 0 && displayHas(await tree(C), '7755'), 'pixels: `key 5` twice in a row lands both (the display reads "7755")');
+    // switched to tree: snapshot has refs; the switch is audited at the holder's next verb
+    ok((await api('PUT', `/api/desktop/apps/${C}/reach/mode`, { mode: 'tree' })).status === 200, 'the user switches the same window to TREE');
+    const s1 = await cli('vsst_aaaa', 'snapshot', C, '--json');
+    let sj = null; try { sj = JSON.parse(s1.out); } catch { }
+    const btn1 = sj && sj.nodes.find((n) => /button/.test(n.role) && n.name === '1');
+    ok(s1.code === 0 && sj && sj.nodes.length > 50 && btn1 && btn1.actions && btn1.actions.length, `tree: \`snapshot\` answers the calculator's tree with refs (${sj && sj.nodes.length} nodes; button "1" = ${btn1 && btn1.ref})`);
+    ok(audit().some((l) => l.verb === 'mode-changed' && l.from === 'pixels' && l.to === 'tree' && l.by === 'user' && l.handle === C), 'the switch took effect at the holder\'s NEXT verb — audited mode-changed pixels → tree');
+    // ── xterm: a Task Group joined later; auto resolves to pixels ──
+    const xt = await launch({ appId: 'vs-xterm', dpr: 1, uiScale: 1 });
+    ok(xt.ready, 'the user launches xterm (its shell is `cat > file`, the injection witness)');
+    const X = xt.id;
+    ok((await api('POST', `/api/desktop/apps/${X}/reach`, { principal: { kind: 'group', id: 'task-ops', name: 'Ops' } })).status === 200, 'D2: the user shares xterm with the Task Group Ops');
+    const lb0 = await cli('vsst_bbbb', 'list');
+    groups.s2 = ['task-ops'];
+    const lb1 = await cli('vsst_bbbb', 'list');
+    ok(!lb0.out.includes(X) && lb1.out.includes(X) && /through a Task Group/.test(lb1.out), 'a session that JOINS the group later sees it (membership asked at the verb) — listed "through a Task Group"');
+    const ax = await cli('vsst_bbbb', 'attach', X);
+    ok(ax.code === 0 && /mode: auto → pixels — no accessibility tree — pixel mode/.test(ax.out), `auto on xterm resolves to PIXELS and says why — "${(ax.out.match(/mode: .*/) || [''])[0]}"`);
+    ok(await viewer(X), 'the user opens xterm too');
+    // ── D6: two agents, two windows, acting at the same time ──
+    const [pa, pb] = await Promise.all([cli('vsst_aaaa', 'click', C, btn1 ? btn1.ref : '@e1'), cli('vsst_bbbb', 'type', X, 'lane-e-typed')]);
+    const kr = await cli('vsst_bbbb', 'key', X, 'Return');
+    let typed = '';
+    await until(() => { try { typed = fs.readFileSync(outFile, 'utf8'); } catch { typed = ''; } return /lane-e-typed/.test(typed); }, 6000, 200);
+    let d551 = false;
+    await until(async () => { d551 = displayHas(await tree(C), '77551'); return d551; }, 5000, 250);
+    ok(pa.code === 0 && pb.code === 0 && kr.code === 0 && /lane-e-typed/.test(typed) && d551, 'D6: alpha clicks @ref on the calculator WHILE beta types into xterm (pixels: keys into its focus) — both land (display "77551", the file reads "lane-e-typed")', { pa: pa.err, pb: pb.err, typed });
+    ok((await api('POST', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'group', id: 'task-ops' } })).status === 200, 'the calculator is shared with Ops too — beta now reaches it');
+    const cross = await cli('vsst_bbbb', 'click', C, '--at', '10,10');
+    ok(cross.code === 1 && /\[not_attached\]/.test(cross.err), 'D6: beta acting on alpha\'s window is refused [not_attached] — one holder per window');
+    // ── revoke mid-lease: alpha loses the calculator at once ──
+    ok((await api('DELETE', `/api/desktop/apps/${C}/reach`, { principal: { kind: 'session', id: 'claude:conv-a' } })).status === 200, 'the user REVOKES alpha while it holds the calculator');
+    ok(!engine.leaseOf(C) && audit().some((l) => l.verb === 'lease-dropped' && l.handle === C && l.by === 'user' && /revoked/.test(l.why)), 'the lease is gone at once (audited by:user)');
+    const afterRv = await cli('vsst_aaaa', 'snapshot', C);
+    ok(afterRv.code === 1 && /\[not_exposed\]/.test(afterRv.err), 'alpha\'s next verb: [not_exposed]');
+    // ── the opener exception ──
+    const op = await cli('vsst_aaaa', 'open', 'vs-xterm', '--json');
+    let opened = null; try { opened = JSON.parse(op.out); } catch { }
+    const lo = await cli('vsst_aaaa', 'list');
+    const bo = opened ? await cli('vsst_bbbb', 'attach', opened.handle) : { code: -1, err: op.err };
+    ok(opened && opened.attached && lo.out.includes(opened.handle) && /because you opened it/.test(lo.out) && bo.code === 1 && /not_exposed/.test(bo.err), 'D1\'s exception: the xterm alpha OPENED is shared with alpha ("because you opened it") and with nobody else (beta: not_exposed)', op.err);
+    // ── D3: the request — free next turn; a wake refused by the spend guard (cap 0) falls to the next turn, said ──
+    const rq = await api('POST', `/api/desktop/apps/${C}/reach/request`, { sessionId: 's1', note: 'please press 5' });
+    ok(rq.status === 200 && rq.j.delivered === 'next-turn' && rq.j.granted === true, 'D3: "Ask alpha to take control" GRANTS the calculator back to alpha (by:request) and rides its next turn (free)');
+    const rw = await api('POST', `/api/desktop/apps/${C}/reach/request`, { sessionId: 's1', wake: true });
+    ok(rw.status === 200 && rw.j.delivered === 'next-turn' && rw.j.whyCode === 'spend' && /budget/.test(rw.j.why) && /hour-cap/.test(rw.j.why), `D3 "wake it now" at an owner cap of 0: the REAL spend guard refuses (hour-cap, fail closed) and the request falls to the next turn, said — "${rw.j && rw.j.why}"`);
+    deliver.flush();
+    const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'msg-stash.json'), 'utf8'));
+    ok(Array.isArray(st['conv-a']) && st['conv-a'].length === 2 && st['conv-a'].every((e) => e.source === 'window-request' && e.fromName === 'The user (Desktop apps)' && e.text.includes(`handle ${C}`)) && /please press 5/.test(st['conv-a'][0].text), 'both ride alpha\'s next turn on the ladder\'s stash (source window-request, the handle, the user\'s line)');
+    const ar = require('../src/agent-routes.js').renderMsgStash(st['conv-a']);
+    ok(/a window request is answered by acting on the window/.test(ar.text) && !/vibespace-msg send/.test(ar.text) && ar.text.includes('please press 5'), 'the next injection renders them as a block with the window hint (never the agent-message hint)');
+    // ── D4: Chrome shared at LAUNCH in tree mode: the page's tree, click @ref, type, scroll ──
+    if (!chromeBin) skip('google-chrome is not installed — the D4 browser legs need it');
+    else {
+      const PAGE = '<!doctype html><title>lane e</title><body style="height:3000px"><button onclick="n=(window.n||0)+1;window.n=n;document.getElementById(\'o\').textContent=\'pressed \'+n">Press me</button><p id=o>none</p><label for=t>Your name</label><input id=t oninput="document.getElementById(\'o2\').textContent=\'typed \'+this.value"><p id=o2>untyped</p><p id=o3>unscrolled</p><script>addEventListener(\'scroll\',()=>{document.getElementById(\'o3\').textContent=\'scrolled \'+Math.round(scrollY)})</script></body>';
+      const pageSrv = http.createServer((q, r) => { r.setHeader('content-type', 'text/html'); r.end(PAGE); });
+      await new Promise((r) => pageSrv.listen(0, '127.0.0.1', r));
+      const URL0 = `http://127.0.0.1:${pageSrv.address().port}/`;
+      const ch = await launch({ appId: 'vs-chrome', dpr: 1, uiScale: 1, url: URL0, share: { principals: [{ kind: 'session', id: 's2', name: 'beta' }], mode: 'tree' } });
+      ok(ch.ready && ch.reach && ch.reach.mode === 'tree' && ch.reach.rows.some((r) => r.principal.id === 'codex:conv-b') && ch.rec.args.includes('--force-renderer-accessibility'), 'D2 before launch + D4: the user launches Chrome SHARED with beta in tree mode — its argv carries --force-renderer-accessibility', ch.err);
+      const H = ch.id;
+      const ac = await cli('vsst_bbbb', 'attach', H);
+      ok(ac.code === 0 && /\[the user's browser\]|the user's own browser/.test(ac.out + (await cli('vsst_bbbb', 'list')).out) && /mode: tree/.test(ac.out), 'beta attaches the user\'s browser like any app (marked as the user\'s browser), mode tree');
+      let pj = null;
+      const t0 = Date.now();
+      await until(async () => { const r = await cli('vsst_bbbb', 'snapshot', H, '--json', '--budget', '3000'); try { pj = JSON.parse(r.out); } catch { pj = null; } return !!(pj && pj.nodes.some((n) => n.name === 'Press me')); }, 25000, 700);
+      const press = pj && pj.nodes.find((n) => n.name === 'Press me');
+      ok(!!press && press.actions.includes('press'), `THE MEASUREMENT: a snapshot of the Chrome desktop app reaches the PAGE — ${pj && pj.nodes.length} nodes (census Action ${pj && pj.census.action}, EditableText ${pj && pj.census.editableText}), the button "Press me" [${press && press.actions.join(' ')}] ${Date.now() - t0} ms after attach`);
+      const cp = press ? await cli('vsst_bbbb', 'click', H, press.ref) : { code: -1 };
+      let pressed = null;
+      await until(async () => { pressed = textOf(await tree(H), /^pressed 1$/); return !!pressed; }, 5000, 250);
+      ok(cp.code === 0 && !!pressed, 'click @ref on the page button runs its own `press` — the page reads "pressed 1" (read back from its tree)');
+      ok(await viewer(H), 'the user opens the browser window (typing needs a mapped window)');
+      const snapE = await cli('vsst_bbbb', 'snapshot', H, '--json', '--budget', '3000');
+      let ej = null; try { ej = JSON.parse(snapE.out); } catch { }
+      const entry = ej && ej.nodes.find((n) => n.role === 'entry' && n.name === 'Your name');
+      const tp = entry ? await cli('vsst_bbbb', 'type', H, 'xyz', entry.ref) : { code: -1, err: 'no entry' };
+      let typedP = null;
+      await until(async () => { typedP = textOf(await tree(H), /^typed xyz$/); return !!typedP; }, 6000, 250);
+      ok(entry && !entry.editable && tp.code === 0 && /as keys into @e\d+ \(focused through the tree\)/.test(tp.out) && !!typedP, 'type @ref into the page field (editable, no EditableText — Chromium) focuses it through the tree and types keys — the page reads "typed xyz"', tp.err);
+      const sc = await cli('vsst_bbbb', 'scroll', H, 'down', '--by', '5');
+      let scrolled = null;
+      await until(async () => { scrolled = textOf(await tree(H), /^scrolled \d+$/); return !!scrolled; }, 5000, 250);
+      ok(sc.code === 0 && scrolled && Number(String(scrolled.text || scrolled.name).split(' ')[1]) >= 500, `\`scroll down --by 5\` scrolls the page (${scrolled && (scrolled.text || scrolled.name)})`);
+      // THE CONTROL: the same browser launched WITHOUT the switch (an ad-hoc command — no browser row, so no a11y flag)
+      const ctl = await launch({ exec: chromeBin, args: [`--user-data-dir=${path.join(HOME, 'chrome-ctl')}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', ...NET, URL0], dpr: 1, uiScale: 1, share: { principals: [{ kind: 'session', id: 's2' }], mode: 'auto' } });
+      const acl = ctl.ready ? await cli('vsst_bbbb', 'attach', ctl.id) : { code: -1, out: '', err: JSON.stringify(ctl.err) };
+      let cj = null;
+      await sleep(3000);
+      const sn = ctl.ready ? await cli('vsst_bbbb', 'snapshot', ctl.id) : { code: -1, err: '' };
+      ok(ctl.ready && !ctl.rec.args.includes('--force-renderer-accessibility') && /mode: auto → pixels — its accessibility tree is closed/.test(acl.out) && sn.code === 1 && /mode_pixels/.test(sn.err), `NEGATIVE CONTROL: Chrome launched WITHOUT the switch exposes no page — auto resolves to pixels "closed" and a snapshot is refused (${(acl.out.match(/mode: .*/) || [''])[0]})`, acl.err + sn.err);
+      void cj;
+      pageSrv.close();
+    }
+  } catch (e) { ok(false, `lane E threw: ${e && e.stack}`); }
+  finally {
+    kill();
+    for (const r of keeper.listApps()) { try { await keeper.stop(r.id); } catch { } }
+    try { wired.shutdown(); } catch { }
+    keeper.shutdown();
+    await new Promise((r) => srv.close(r));
+  }
+}

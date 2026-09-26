@@ -43,6 +43,12 @@
  * parent's RSS-proportional fork cost, §1.6), never per node.
  *
  * Refusals are TYPED `{ok:false, code, why}` from a closed set (REFUSALS).
+ *
+ * Lane E verify r2 (2026-09-25, L5): every injection is a child the caller can CANCEL (`signal`) — killed by its own
+ * handle, never by name — and a killed injection (cancel or timeout) RELEASES the keys / buttons it may hold before it
+ * answers (`releaseHeld`: measured, a bare SIGKILL mid-key leaves the key autorepeating on the display).
+ * Lane E verify r3 (2026-09-26, F3): a typed text holding a non-ASCII character runs under desktop-display's UTF-8 rule
+ * (xdotool decodes its argv through the C locale) or is refused `no_utf8_locale` before anything is typed.
  */
 const fs = require('fs');
 const path = require('path');
@@ -71,6 +77,7 @@ const REFUSALS = Object.freeze([
   'helper_missing', 'python3_missing', 'helper_timeout', 'helper_error', 'a11y_unavailable',
   'node_has_no_action', 'node_not_editable', 'action_unknown', 'action_failed', 'action_refused', 'ref_stale', 'ref_unreadable', 'ref_unknown', 'app_gone',
   'no_injection_backend', 'bad_chord', 'bad-request', 'screenshot_unavailable', 'screenshot_failed', 'inject_failed',
+  'no_utf8_locale', // lane E verify r3 (F3): a non-ASCII text typed as keys, and no UTF-8 locale loads for xdotool here
 ]);
 const refuse = (code, why, extra = {}) => {
   if (!REFUSALS.includes(code)) throw new Error(`window-targets: unknown refusal code ${code}`);
@@ -213,7 +220,8 @@ function verbVerdicts({ a11y = { ok: true }, backends = { rows: [], injection: n
     click: { via: 'tree', ok: !!a11y.ok, why: a11y.ok ? null : `accessibility tree unreachable: ${a11y.why}`, note: 'per node — only a node that exports Action; a node without one is refused, never degraded to a coordinate click' },
     type: { via: 'tree', ok: !!a11y.ok, why: a11y.ok ? null : `accessibility tree unreachable: ${a11y.why}`, note: 'per node — only a node that exports EditableText' },
     key: { via: 'inject', ok: !!inj, backend: inj ? inj.backend : null, why: injectWhy, note: 'a chord has no road on the tree (AT-SPI names no chord); injection only' },
-    'click-at': { via: 'inject', ok: !!inj, backend: inj ? inj.backend : null, why: injectWhy, note: 'a point is injection by definition; audited by:point' },
+    'click-at': { via: 'inject', ok: !!inj, backend: inj ? inj.backend : null, why: injectWhy, note: 'a point is injection by definition; audited by:point — x,y is a pixel of `vibespace-window screenshot` (the window\'s own image)' },
+    scroll: { via: 'inject', ok: !!inj, backend: inj ? inj.backend : null, why: injectWhy, note: 'the wheel (lane E): up|down|left|right, --by notches, --at a pixel of the screenshot' },
     probe: probeText,
   };
 }
@@ -272,7 +280,7 @@ function pickAction(actions, want = null) {
 /** `@ref` → the node's identity as the helper needs it back. */
 function refTableOf(snapshot) {
   const t = new Map();
-  for (const n of (snapshot && snapshot.nodes) || []) t.set(n.ref, { ref: n.ref, pid: n.pid, path: n.path, role: n.role, name: n.name, bounds: n.bounds || null, actions: n.actions || null, editable: !!n.editable, iface: n.iface || [] });
+  for (const n of (snapshot && snapshot.nodes) || []) t.set(n.ref, { ref: n.ref, pid: n.pid, path: n.path, role: n.role, name: n.name, bounds: n.bounds || null, actions: n.actions || null, editable: !!n.editable, iface: n.iface || [], states: Array.isArray(n.states) ? n.states.filter((x) => x === 'editable' || x === 'focusable' || x === 'focused') : [] });
   return t;
 }
 function resolveRef(table, ref) {
@@ -335,26 +343,250 @@ async function screenshotDisplay({ xenv, out, bounds = null, wallMs = TRAVERSAL_
   return runHelper({ op: 'screenshot', out, bounds }, { env: xenv, wallMs, ...rest });
 }
 
+// ── lane E verify r2 (L5): an injection the lease can CANCEL, and the keys it leaves held ────────────────────────
+/**
+ * ONE injection child, killable by ITS OWN handle. `signal` (an AbortSignal the engine keeps on the lease while the verb
+ * injects) aborts it: node kills exactly this ChildProcess (SIGKILL — `child.kill`, never a name, never a group), and so
+ * does the `timeout`. Resolves only once the child is GONE (its 'close'), so the release pass that follows cannot race
+ * a keystroke the dying child still had in flight. → `{err, stdout, cancelled, killed}`.
+ */
+function runInject(bin, args, { env, timeout = 5000, signal = null } = {}) {
+  return new Promise((resolve) => {
+    let child = null, res = null, closed = false, settled = false;
+    const finish = () => { if (settled || !res || !(closed || res.spawnFailed)) return; settled = true; resolve(res); };
+    try {
+      child = execFile(bin, args, { env, timeout, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024, encoding: 'utf8', ...(signal ? { signal } : {}) }, (err, stdout, stderr) => {
+        const cancelled = !!(err && (err.name === 'AbortError' || err.code === 'ABORT_ERR'));
+        res = { err, stdout: String(stdout || ''), stderr: String(stderr || ''), cancelled, killed: cancelled || !!(err && err.killed), spawnFailed: !!(err && typeof err.code === 'string' && err.code !== 'ABORT_ERR' && !err.killed) };
+        finish();
+        if (!settled) setTimeout(() => { closed = true; finish(); }, 1000).unref?.(); // a child whose 'close' never comes cannot hold the verb
+      });
+    } catch (e) { resolve({ err: e, stdout: '', stderr: '', cancelled: !!(e && e.name === 'AbortError'), killed: false, spawnFailed: true }); return; }
+    child.once('close', () => { closed = true; finish(); });
+  });
+}
+/** How many distinct keysyms a release pass names at most (TYPE_MAX distinct characters + the modifiers). */
+const RELEASE_MAX = 2048;
+/**
+ * THE RELEASE PASS (measured 2026-09-25 on this box's Xvfb with an xev witness): SIGKILLing a running `xdotool` between
+ * a key's press and its release leaves that key HELD on the X server, and the server AUTOREPEATS it — 37 presses in
+ * 1.5 s of one letter; a CJK character typed through xdotool's scratch keycode stays held the same way. A cancel that
+ * only kills would type into the window the user just took over. So every killed injection (a cancel or its timeout)
+ * releases what it may have held: each keysym it could have pressed is mapped to its keycode ON THE DISPLAY NOW and a
+ * release is faked through XTEST (python3 + ctypes over libX11 / libXtst — no remapping: a keysym the keymap does not
+ * map cannot be held and is skipped for free, while a scratch-bound character IS mapped at that moment and is released;
+ * measured: 302 keysyms in 32 ms, the stuck key's autorepeat stopped). A release of a key or button that is not down is
+ * dropped by the server (measured: no event). Without python3 / the X libraries: `xdotool keyup` / `mouseup` of the
+ * keysyms every keymap maps (printable ASCII + the named keys) — never a remap per character.
+ */
+const RELEASE_PY = [
+  'import ctypes, ctypes.util, json, sys',
+  'req = json.loads(sys.stdin.read() or "{}")',
+  'def lib(n, so):',
+  '    return ctypes.CDLL(ctypes.util.find_library(n) or so)',
+  'try:',
+  '    x11, xtst = lib("X11", "libX11.so.6"), lib("Xtst", "libXtst.so.6")',
+  'except OSError as e:',
+  '    print(json.dumps({"ok": False, "why": "libX11/libXtst not loadable: %s" % e})); sys.exit(0)',
+  'x11.XOpenDisplay.restype = ctypes.c_void_p; x11.XOpenDisplay.argtypes = [ctypes.c_char_p]',
+  'x11.XStringToKeysym.restype = ctypes.c_ulong; x11.XStringToKeysym.argtypes = [ctypes.c_char_p]',
+  'x11.XKeysymToKeycode.restype = ctypes.c_ubyte; x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]',
+  'x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]; x11.XCloseDisplay.argtypes = [ctypes.c_void_p]',
+  'xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]',
+  'xtst.XTestFakeButtonEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]',
+  'd = x11.XOpenDisplay(None)',
+  'if not d:',
+  '    print(json.dumps({"ok": False, "why": "no X display reachable"})); sys.exit(0)',
+  'codes = set()',
+  'for name in req.get("keysyms") or []:',
+  '    ks = x11.XStringToKeysym(str(name).encode())',
+  '    kc = x11.XKeysymToKeycode(d, ks) if ks else 0',
+  '    if kc: codes.add(int(kc))',
+  'for kc in sorted(codes): xtst.XTestFakeKeyEvent(d, kc, 0, 0)',
+  'btns = sorted(set(int(b) for b in (req.get("buttons") or []) if 1 <= int(b) <= 7))',
+  'for b in btns: xtst.XTestFakeButtonEvent(d, b, 0, 0)',
+  'x11.XSync(d, 0); x11.XCloseDisplay(d)',
+  'print(json.dumps({"ok": True, "keycodes": len(codes), "buttons": btns}))',
+].join('\n');
+/** The keysyms a typed text may hold down: one per distinct character (`U<hex>` — XStringToKeysym's Unicode spelling,
+ *  Latin-1 folds to its own keysym), Return / Tab for the control characters xdotool types, the shift levels it uses
+ *  for capitals and AltGr characters, and ctrl + a for `--replace`. */
+function keysymsOfText(text, { replace = false } = {}) {
+  const out = new Set(['Shift_L', 'Shift_R', 'ISO_Level3_Shift', 'Mode_switch']);
+  for (const ch of String(text ?? '')) {
+    if (out.size >= RELEASE_MAX) break;
+    const cp = ch.codePointAt(0);
+    if (ch === '\n' || ch === '\r') out.add('Return');
+    else if (ch === '\t') out.add('Tab');
+    else if (cp >= 0x20 && cp !== 0x7f) out.add('U' + cp.toString(16).toUpperCase().padStart(4, '0'));
+  }
+  if (replace) for (const k of ['Control_L', 'Control_R', 'U0061']) out.add(k);
+  return [...out];
+}
+const MOD_KEYSYMS = Object.freeze({ ctrl: ['Control_L', 'Control_R'], shift: ['Shift_L', 'Shift_R'], alt: ['Alt_L', 'Alt_R'], super: ['Super_L', 'Super_R'], meta: ['Meta_L', 'Meta_R'] });
+/** The keysyms a parsed chord presses (its modifiers — both sides — and its key). */
+function keysymsOfChord(chord) {
+  if (!chord || !chord.ok) return [];
+  const out = [];
+  for (const m of chord.mods || []) out.push(...(MOD_KEYSYMS[m] || []));
+  if (chord.key) out.push(chord.key);
+  return out;
+}
+/** A keysym every keymap maps without a remap (the fallback's filter): printable ASCII in its U spelling, or a name. */
+const cheapKeysym = (k) => { const m = /^U([0-9A-F]{4,6})$/.exec(k); if (!m) return true; const cp = parseInt(m[1], 16); return cp >= 0x20 && cp <= 0x7e; };
+/**
+ * Release what a killed injection may hold (see RELEASE_PY). Never throws; `{ok, via: 'xtest'|'xdotool'|null,
+ * keycodes?, buttons?, why?}`. `python` is the same interpreter the AT-SPI helper uses.
+ */
+function releaseHeld({ bins = null, xenv, keysyms = [], buttons = [], python = 'python3', timeout = 3000 } = {}) {
+  const ks = [...new Set((keysyms || []).map(String))].slice(0, RELEASE_MAX);
+  const bs = [...new Set((buttons || []).map(Number).filter((b) => Number.isInteger(b) && b >= 1 && b <= 7))];
+  if (!ks.length && !bs.length) return Promise.resolve({ ok: true, via: null, keycodes: 0, buttons: [] });
+  const fallback = async (why) => {
+    if (!bins || !bins.xdotool) return { ok: false, via: null, why };
+    const keys = ks.filter(cheapKeysym);
+    const args = [...(keys.length ? ['keyup', ...keys] : []), ...bs.flatMap((b) => ['mouseup', String(b)])];
+    if (!args.length) return { ok: false, via: null, why };
+    const r = await runInject(bins.xdotool, args, { env: xenv, timeout });
+    return r.err ? { ok: false, via: 'xdotool', why: `${why}; xdotool keyup failed: ${String(r.err.message || r.err).split('\n')[0]}` } : { ok: true, via: 'xdotool', keys: keys.length, buttons: bs, partial: keys.length < ks.length, why };
+  };
+  return new Promise((resolve) => {
+    let child, out = '', done = false;
+    const finish = (v) => { if (done) return; done = true; clearTimeout(timer); resolve(v); };
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } fallback(`the XTEST release did not answer within ${timeout} ms`).then(finish); }, timeout);
+    try { child = spawn(python, ['-c', RELEASE_PY], { env: xenv, stdio: ['pipe', 'pipe', 'ignore'] }); }
+    catch (e) { clearTimeout(timer); fallback(`${python} could not be spawned: ${e.message}`).then(finish); return; }
+    child.on('error', (e) => { if (!done) fallback(`${python}: ${e && e.message}`).then(finish); });
+    child.stdout.on('data', (d) => { if (out.length < 65536) out += d; });
+    child.on('close', () => {
+      if (done) return;
+      let j = null; try { j = JSON.parse(out.trim().split('\n').pop() || 'null'); } catch { j = null; }
+      if (j && j.ok) finish({ ok: true, via: 'xtest', keycodes: j.keycodes, buttons: j.buttons || [] });
+      else fallback((j && j.why) || 'the XTEST release answered nothing').then(finish);
+    });
+    child.stdin.on('error', () => { /* it exited first — 'close' answers */ });
+    child.stdin.end(JSON.stringify({ keysyms: ks, buttons: bs }));
+  });
+}
+/** A killed injection → `{released}` after the release pass; the refusal says whether it was a cancel or a timeout. */
+async function afterKill(r, { what, timeout, bins, xenv, keysyms = [], buttons = [], python }) {
+  const released = await releaseHeld({ bins, xenv, keysyms, buttons, python });
+  if (r.cancelled) return refuse('inject_failed', `${what} was cancelled part-way (the lease's holder lost the window) — whatever it had pressed was released`, { cancelled: true, partial: true, released });
+  return refuse('inject_failed', `${what} did not finish within ${timeout} ms and was killed — whatever it had pressed was released`, { partial: true, released });
+}
+
 /** XTEST through xdotool on OUR display: the pointer is first moved to
  *  `focus` (a point inside the target window — a bare Xvfb has PointerRoot
  *  focus, so the key lands on the window under the pointer), then the chord.
- *  `chord` must come from parseChord (its argv is never the agent's string). */
-async function injectKey({ bins, xenv, chord, focus = null, timeout = 5000 } = {}) {
+ *  `chord` must come from parseChord (its argv is never the agent's string).
+ *  Lane E (M9, reproduced): NO `--sync` on the move — `mousemove --sync` to the
+ *  pointer's CURRENT position waits for a motion that never comes (7 s, then
+ *  the second key in a row failed `inject_failed`); one xdotool connection
+ *  orders the motion before the key anyway. */
+async function injectKey({ bins, xenv, chord, focus = null, timeout = 5000, signal = null, python = 'python3' } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   if (!chord || !chord.ok) return refuse('bad_chord', 'injectKey needs a parsed chord');
   const args = [];
-  if (focus && Number.isFinite(focus.x) && Number.isFinite(focus.y)) args.push('mousemove', '--sync', String(Math.round(focus.x)), String(Math.round(focus.y)));
+  if (focus && Number.isFinite(focus.x) && Number.isFinite(focus.y)) args.push('mousemove', String(Math.round(focus.x)), String(Math.round(focus.y)));
   args.push('key', '--clearmodifiers', chord.xdotool);
-  const r = await run(bins.xdotool, args, { env: xenv, timeout });
+  const r = await runInject(bins.xdotool, args, { env: xenv, timeout, signal });
+  if (r.killed) return afterKill(r, { what: `the chord ${chord.xdotool}`, timeout, bins, xenv, keysyms: keysymsOfChord(chord), python });
   return r.err ? refuse('inject_failed', `xdotool key failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'key', chord: chord.xdotool, backend: 'xtest' } };
 }
-/** A coordinate click on OUR display (audited `by:'point'` by the caller). */
-async function injectClick({ bins, xenv, x, y, button = 1, timeout = 5000 } = {}) {
+/** The buttons a point click may press — anything else is refused by name (lane E M8: a coerced
+ *  wheel button became a LEFT click); the wheel is `injectScroll`. */
+const CLICK_BUTTONS = Object.freeze([1, 2, 3]);
+/** A coordinate click on OUR display (audited `by:'point'` by the caller). No `--sync` (M9). */
+async function injectClick({ bins, xenv, x, y, button = 1, timeout = 5000, signal = null, python = 'python3' } = {}) {
   if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return refuse('bad-request', '--at needs two non-negative integers x,y');
-  const b = [1, 2, 3].includes(Number(button)) ? Number(button) : 1;
-  const r = await run(bins.xdotool, ['mousemove', '--sync', String(Math.round(x)), String(Math.round(y)), 'click', String(b)], { env: xenv, timeout });
+  const b = button == null || button === '' ? 1 : Number(button);
+  if (!CLICK_BUTTONS.includes(b)) return refuse('bad-request', `--button is 1 (left), 2 (middle) or 3 (right) — not ${JSON.stringify(button)}; the wheel is \`vibespace-window scroll\``);
+  const r = await runInject(bins.xdotool, ['mousemove', String(Math.round(x)), String(Math.round(y)), 'click', String(b)], { env: xenv, timeout, signal });
+  if (r.killed) return afterKill(r, { what: `the click (button ${b})`, timeout, bins, xenv, buttons: [b], python });
   return r.err ? refuse('inject_failed', `xdotool click failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'click', by: 'point', x: Math.round(x), y: Math.round(y), button: b, backend: 'xtest' } };
+}
+/** Lane E (D7): the WHEEL — X buttons 4/5/6/7 = up/down/left/right, `by` notches (1..20; Chrome scrolls 120 px a
+ *  notch, measured) at a display point (null = where the pointer is). */
+const SCROLL_BUTTONS = Object.freeze({ up: 4, down: 5, left: 6, right: 7 });
+const SCROLL_MAX = 20;
+async function injectScroll({ bins, xenv, x = null, y = null, direction, by = 3, timeout = 5000, signal = null, python = 'python3' } = {}) {
+  if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
+  const btn = SCROLL_BUTTONS[String(direction || '').toLowerCase()];
+  if (!btn) return refuse('bad-request', `scroll needs a direction: ${Object.keys(SCROLL_BUTTONS).join(' | ')}`);
+  const n = Number(by);
+  if (!Number.isInteger(n) || n < 1 || n > SCROLL_MAX) return refuse('bad-request', `--by is a whole number of wheel notches, 1..${SCROLL_MAX}`);
+  const args = [];
+  if (x != null && y != null) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) return refuse('bad-request', '--at needs two non-negative integers x,y');
+    args.push('mousemove', String(Math.round(x)), String(Math.round(y)));
+  }
+  args.push('click', '--repeat', String(n), '--delay', '20', String(btn));
+  const r = await runInject(bins.xdotool, args, { env: xenv, timeout, signal });
+  if (r.killed) return afterKill(r, { what: `the scroll (${n} notch${n === 1 ? '' : 'es'})`, timeout, bins, xenv, buttons: [btn], python });
+  return r.err ? refuse('inject_failed', `xdotool scroll failed: ${r.err.message.split('\n')[0]}`) : { ok: true, did: { verb: 'scroll', direction: String(direction).toLowerCase(), by: n, ...(x != null ? { x: Math.round(x), y: Math.round(y) } : {}), backend: 'xtest' } };
+}
+/** Lane E (D7): TYPED text as key events into whatever holds focus on OUR display (pixel mode's `type`, and a
+ *  tree node that is editable without EditableText — Chrome's entries). The text is ONE argv item after `--`
+ *  (never parsed as an option); the caller audits its length, never the text.
+ *  Lane E verify r2 (L5): xdotool types one character per `TYPE_DELAY_MS` (measured 12.5 ms), so `TYPE_MAX` 4000 could
+ *  never finish inside the old fixed 20 s timeout (killed after ~1,600 characters and answered inject_failed). Now
+ *  `TYPE_MAX` = 1500 and the timeout SCALES with the text (`typeTimeoutMs` — twice the nominal typing time + 5 s), and
+ *  the run is the lease's to cancel (`signal`): a takeover or a lost share kills it and releases the held key. */
+const TYPE_DELAY_MS = 12;
+const TYPE_MAX = 1500;
+/** Lane E verify r3 (F3): the first character xdotool can only type through a UTF-8 locale — `{ch, cp, n}` (n = its
+ *  1-based position in characters) or null for an all-ASCII text. */
+function firstNonAscii(text) {
+  let n = 0;
+  for (const ch of String(text ?? '')) { n++; const cp = ch.codePointAt(0); if (cp > 0x7f) return { ch, cp, n }; }
+  return null;
+}
+const typeTimeoutMs = (n) => 5000 + 2 * TYPE_DELAY_MS * Math.max(0, Number(n) || 0);
+async function injectType({ bins, xenv, text, replace = false, focus = null, timeout = null, signal = null, python = 'python3', delay = TYPE_DELAY_MS } = {}) {
+  if (!bins || !bins.xdotool) return refuse('no_injection_backend', 'xdotool not on PATH');
+  const s = String(text ?? '');
+  if (!s) return refuse('bad-request', 'type needs some text');
+  if (s.length > TYPE_MAX) return refuse('bad-request', `typed text is at most ${TYPE_MAX} characters a call (about ${Math.ceil(TYPE_MAX * TYPE_DELAY_MS / 1000)} s of keystrokes) — split a longer text over several calls`);
+  if (/[\u0000]/.test(s)) return refuse('bad-request', 'typed text may not contain a NUL');
+  // `replace` selects what the field holds first (ctrl+a — a chord in the same connection, ordered before the text)
+  // `focus` = a point inside the window (the key verb's rule): on a display whose X focus follows the pointer, keys
+  // typed with the pointer elsewhere are lost (measured on xterm under xpra: the Return after it landed, the text did not)
+  const move = focus && Number.isFinite(focus.x) && Number.isFinite(focus.y) ? ['mousemove', String(Math.round(focus.x)), String(Math.round(focus.y))] : [];
+  const d = Number.isInteger(delay) && delay >= 1 && delay <= 5000 ? delay : TYPE_DELAY_MS; // `delay` exists for the suite's real-display cancel leg
+  const tmo = Number(timeout) > 0 ? Number(timeout) : typeTimeoutMs(s.length) + (d - TYPE_DELAY_MS) * 2 * s.length;
+  // lane E verify r3 (F3): xdotool decodes the text through the C locale — a non-ASCII text runs under desktop-display's
+  // UTF-8 rule (LC_ALL=C.UTF-8, else the env's own UTF-8 locale), and when no UTF-8 locale loads it is refused BY NAME
+  // here, before anything is typed (measured without one: the ASCII before the first multi-byte character LANDED, then
+  // xdotool failed — a half-typed text answered as a plain failure)
+  const wide = firstNonAscii(s);
+  const loc = wide ? await display.utf8LocaleEnv(xenv, { bins }) : { ok: true, env: xenv };
+  if (!loc.ok) return refuse('no_utf8_locale', `the text holds ${JSON.stringify(wide.ch)} (U+${wide.cp.toString(16).toUpperCase().padStart(4, '0')}, character ${wide.n}), and xdotool can type a non-ASCII character only through a UTF-8 locale — none loads on this machine (tried ${loc.tried.join(', ')}: ${loc.why}); nothing was typed`);
+  const r = await runInject(bins.xdotool, [...move, ...(replace ? ['key', '--clearmodifiers', 'ctrl+a'] : []), 'type', '--clearmodifiers', '--delay', String(d), '--', s], { env: loc.env, timeout: tmo, signal });
+  if (r.killed) return afterKill(r, { what: `typing ${s.length} character(s)`, timeout: tmo, bins, xenv, keysyms: keysymsOfText(s, { replace }), python });
+  // a type xdotool gave up on AFTER it started may have typed what came before the failure (`partial`); its own message
+  // is the why — never the command line, which holds the text (the audit records a length, never the text)
+  if (r.err) return refuse('inject_failed', `xdotool type failed${r.spawnFailed ? ` to start: ${String(r.err.code || r.err.message).split('\n')[0]}` : ` (exit ${r.err.code}): ${([...new Set(String(r.stderr || '').split('\n').map((l) => l.trim()).filter(Boolean))].join('; ') || 'no message').slice(0, 200)} — what it typed before the failure may already be in the window`}`, r.spawnFailed ? {} : { partial: true });
+  return { ok: true, did: { verb: 'type', by: 'inject', chars: s.length, backend: 'xtest' } };
+}
+/** The display's size as X states it (`xdotool getdisplaygeometry`) — `{ok, w, h}`; a point beyond it cannot be clicked. */
+async function displayGeometry({ bins, xenv, timeout = 3000 } = {}) {
+  if (!bins || !bins.xdotool) return { ok: false, w: 0, h: 0 };
+  const r = await run(bins.xdotool, ['getdisplaygeometry'], { env: xenv, timeout });
+  const m = /^(\d+)\s+(\d+)/.exec(r.stdout.trim());
+  return !r.err && m ? { ok: true, w: Number(m[1]), h: Number(m[2]) } : { ok: false, w: 0, h: 0 };
+}
+/** Lane E (D7): the pixel road's READ — the app's own windows (window-reach `pixelPlan`) grabbed as themselves and
+ *  composed onto the plan's canvas (helper op `windowshot`); writes `out` (PNG). */
+async function windowShot({ xenv, out, plan, wallMs = TRAVERSAL_LIMITS.ACT_WALL_MS, ...rest } = {}) {
+  if (!xenv || !xenv.DISPLAY) return refuse('bad-request', 'windowShot needs an x11 env naming the display');
+  if (!plan || !plan.ok) return refuse('bad-request', 'windowShot needs a window plan');
+  return runHelper({ op: 'windowshot', out, origin: plan.origin, w: plan.w, h: plan.h, windows: plan.members }, { env: xenv, wallMs, ...rest });
+}
+/** Lane E: keyboard focus to ONE node through the tree (Component.grab_focus) — the first half of an injected type. */
+async function focusNode({ entry, callTimeoutMs = TRAVERSAL_LIMITS.CALL_TIMEOUT_MS, wallMs = TRAVERSAL_LIMITS.ACT_WALL_MS, env = process.env, ...rest } = {}) {
+  if (!entry || !Number.isInteger(entry.pid) || !Array.isArray(entry.path)) return refuse('bad-request', 'focusNode needs a ref entry (pid + path)');
+  return runHelper({ op: 'act', pid: entry.pid, path: entry.path, expect: { role: entry.role, name: entry.name }, verb: 'focus', callTimeoutMs }, { env, wallMs, ...rest });
 }
 
 /** A snapshot's node list trimmed to what an agent reads (the path stays
@@ -376,4 +608,10 @@ module.exports = {
   runHelper, probeA11y, probeInputBackends, probeScreenCastPortal, resetProbeMemo,
   verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView,
   snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
+  // lane E (D7): the pixel road
+  CLICK_BUTTONS, SCROLL_BUTTONS, SCROLL_MAX, TYPE_MAX, injectScroll, injectType, displayGeometry, windowShot, focusNode,
+  // lane E verify r2 (L5): the cancellable injection + the release pass
+  TYPE_DELAY_MS, typeTimeoutMs, runInject, releaseHeld, keysymsOfText, keysymsOfChord, RELEASE_PY, RELEASE_MAX,
+  // lane E verify r3 (F3): the text's first non-ASCII character (the no_utf8_locale refusal names it)
+  firstNonAscii,
 };

@@ -476,7 +476,9 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   }
   function newId() { return `da-${now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`; }
 
-  /** `opts` (internal — the relaunch's): `scaleChoice` = the Scale ▸ row ('auto' | 1 | 1.5 | 2), `replacing` = the
+  /** `body.scaleChoice` (lane D) = the app's default scale from the launch dialog (origin 'app' — PURE scalePick).
+   *  `opts` (internal — the relaunch's): `scaleChoice` = the Scale ▸ row ('auto' | 1 | 1.5 | 2 | 2.5 | 3; origin
+   *  'chosen' — it outranks the body's default), `replacing` = the
    *  id this launch replaces (it is about to stop, so it does not count against the cap); `id` + `deferBringUp` = a
    *  browser relaunch's successor, minted and recorded now, brought up by startDeferred(id) once the record it
    *  replaces has stopped and handed over its profile (2.369.176; never reachable through the op); `settings` = the hub's
@@ -505,7 +507,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (!pv.ok) throw namedError(pv.code, pv.error);
       const av = M.browserArgv(row, { profileDir: pv.dir, url: v.launch.url });
       if (!av.ok) throw namedError(av.code, av.error);
-      browser = { kind: row.browser, profileDir: pv.dir, argv: av.argv, url: av.url, keepProfile: v.launch.keepProfile === true, confinement };
+      browser = { kind: row.browser, profileDir: pv.dir, argv: av.argv, url: av.url, env: av.env || {}, keepProfile: v.launch.keepProfile === true, confinement }; // lane E (D4): av.env = the accessibility switch (firefox)
     }
     const resolved = resolve(f, row, serverSetting);
     if (!resolved.backend) throw namedError('no-backend', `no display backend on this machine (${resolved.fallbackWhy})`);
@@ -518,9 +520,12 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // client's devicePixelRatio — on the xpra rung only (its client maps CSS px → device px; a whole-display
     // rung's picture is CSS px, so an app scaled there would only look twice as big). A change needs a relaunch.
     // Round 3 A3: × the client's UI scale (VibeSpace's own effective scale), and a relaunch's Scale ▸ choice wins;
-    // the ORIGIN (auto | setting | chosen) is recorded beside the value — the chip says which.
-    const pick = opts.scaleChoice ? M.scalePick({ choice: opts.scaleChoice, dpr: v.launch.dpr, uiScale: v.launch.uiScale }) : M.scalePick({ setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });
-    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale) : M.scaleKnobs(1);
+    // lane D: then the app's OWN default scale the person chose in the launch dialog (the body's `scaleChoice`, origin
+    // 'app'), then an explicit `desktop.appScale`, then auto — the ORIGIN is recorded beside the value (the chip says which).
+    const pick = M.scalePick({ choice: opts.scaleChoice, appDefault: v.launch.scaleChoice, setting: serverSetting('desktop.appScale'), dpr: v.launch.dpr, uiScale: v.launch.uiScale });
+    // lane D (a): a fraction is a REAL scale (GDK_SCALE at the ceiling, the picture shown at s ÷ it) — a browser row keeps the
+    // floor rule (it scales whole from the font dpi, measured); the record stores what it was rendered at (gdkScale, pictureScale)
+    const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);
     if (browser) {
       // created 0700 (the profile holds the browser's cookies and saved secrets); firefox's first-run switch is its user.js
       try {
@@ -529,7 +534,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (browser.kind === 'firefox') await fs.promises.writeFile(path.join(browser.profileDir, 'user.js'), M.firefoxUserJs(), { mode: 0o600 });
       } catch (e) { throw namedError('profile-dir', `could not create the browser profile ${browser.profileDir}: ${e.message}`); }
     }
-    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: browser ? browser.argv : (row.args || []), cwd, env: row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
+    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: browser ? browser.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: backend.stream === 'xpra' ? knobs.gdkScale : null, pictureScale: backend.stream === 'xpra' ? knobs.pictureScale : null, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
     if (v.launch.source === 'registry') rec.appId = row.id;
     if (browser) { rec.browser = browser.kind; rec.profileDir = browser.profileDir; rec.keepProfile = browser.keepProfile; rec.url = browser.url; rec.confinement = browser.confinement; }
     rec.recipe = resolved.recipe;
@@ -590,6 +595,31 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return { app: get(next.id) || next, replaced: old };
   }
 
+  /** LANE D (a) item C: `Default/Preferences` gets `browser.custom_chrome_frame: true` when the key is ABSENT (PURE
+   *  chromiumFramePrefs — an existing choice is kept, an unreadable file is never overwritten), written tmp + rename at
+   *  0600 in a 0700 `Default/`; then the marker, so a profile is seeded once in its life. → { ok, why } */
+  async function seedChromiumFrame(profileDir) {
+    const marker = path.join(profileDir, M.CHROMIUM_FRAME_MARKER);
+    try { await fs.promises.access(marker); return { ok: true, why: 'seeded-before' }; } catch { /* not yet */ }
+    const dir = path.join(profileDir, 'Default'), file = path.join(dir, 'Preferences');
+    let prefs = null;
+    try {
+      const raw = await fs.promises.readFile(file, 'utf8');
+      try { prefs = JSON.parse(raw); } catch { return { ok: false, why: `${file} is not JSON` }; }
+    } catch (e) { if (e.code !== 'ENOENT') return { ok: false, why: `${file}: ${e.message}` }; }
+    const v = M.chromiumFramePrefs(prefs);
+    if (!v.ok) return { ok: false, why: `${file}: ${v.why}` };
+    try {
+      if (v.changed) {
+        await fs.promises.mkdir(dir, { recursive: true, mode: 0o700 });
+        const tmp = `${file}.vibespace-${process.pid}.tmp`;
+        await fs.promises.writeFile(tmp, JSON.stringify(v.prefs), { mode: 0o600 });
+        await fs.promises.rename(tmp, file);
+      }
+      await fs.promises.writeFile(marker, `${v.why}\n`, { mode: 0o600 });
+    } catch (e) { return { ok: false, why: e.message }; }
+    return { ok: true, why: v.why };
+  }
   function appDir(id) { const d = path.join(logRoot, id); fs.mkdirSync(d, { recursive: true }); return d; }
   const sessionMarker = (id) => `${SESSION_ENV}=${id}`;
   /** The environ needles that PROVE a pid belongs to `rec` (2026-09-22): the
@@ -679,7 +709,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (gone()) return;
       } else commit();
       // the app itself — the sanitised env + the scale's knobs + the row's own (a row may pin GDK_SCALE) + the display
-      const knobs = M.scaleKnobs(rec.scale || 1);
+      const knobs = M.scaleKnobs(rec.scale || 1, { rule: M.scaleRuleOf(rec) }); // the same rule the launch recorded (lane D (a))
       const appEnv = { ...display.x11Env(base, { display: up.display, authFile: sessionAuth || base.XAUTHORITY }), ...(M.streamKindOf(rec, backends) === 'xpra' ? knobs.env : {}), ...(rec.env || {}) };
       if (!sessionAuth) delete appEnv.XAUTHORITY;
       // r2 (the verifier's race): xpra REPLACES the display's resource database ~1 s after its display is up — an app
@@ -693,6 +723,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (own && knobs.xresources) { // an Xft face for xterm at a scale > 1 (its bitmap default no dpi reaches) — on OUR display only, before the app reads its resources
         const xr = await display.applyXResources({ binPath: f.bins.xrdb, env: appEnv, text: knobs.xresources });
         if (!xr.ok) log.warn?.(`[desktop] ${id}: ${xr.why} — a bitmap-font terminal stays at 1x on this ${rec.scale}x display`);
+        if (gone()) return;
+      }
+      // lane D (a) item C: a chromium-family profile draws its OWN frame (seamless) — seeded once per profile, BEFORE the
+      // browser starts (a fresh scaffold, a kept profile and one carried to a Scale ▸ successor alike); a failure is logged
+      if (rec.browser === 'chromium' && rec.profileDir) {
+        const sd = await seedChromiumFrame(rec.profileDir);
+        if (!sd.ok) log.warn?.(`[desktop] ${id}: the browser's own frame was not seeded (${sd.why}) — it keeps the system title bar and VibeSpace's`);
         if (gone()) return;
       }
       const a = await display.startApp({ exec: rec.exec, args: rec.args, cwd: rec.cwd, env: appEnv, logFd });
@@ -1280,6 +1317,8 @@ const idOf = (p) => (typeof p.id === 'string' && /^da-[\w-]{1,64}$/.test(p.id) ?
  *              {installState: true}                   → {ok, installState} (the install slot only — verify r2; nothing probed)
  *   list       {settings?}                            → {ok, apps, registry, availability, cap, idleTimeoutMin}
  *   launch     {body, settings?, scaleChoice?, replacing?} → {ok, app}
+ *              (lane D: `body.scaleChoice` = the app's default scale from the launch dialog, origin 'app' — a field of the
+ *              launch REQUEST, validated like every other; the op's own `scaleChoice` = a relaunch's pick, origin 'chosen')
  *   stop       {id, why?}                             → {ok, app}
  *   status     {id?}                                  → {ok, app, sample} | {ok, apps, samples}
  *   windows    {id}                                   → {ok, windows}

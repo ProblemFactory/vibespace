@@ -67,6 +67,11 @@ import { minPaneCss, pixelRatioOf, backingSize } from './xpra-proto.js';
 export { streamUrl, copyViaSelection };
 
 const RESIZE_DEBOUNCE_MS = 150;
+/** A window whose X size SHRINKS keeps its canvas backing (its pixels) this long before the backing follows (lane D
+ *  (a)): GTK apps snap to their own size ~650 ms after the map and the belt re-fits them in the SAME task — a backing
+ *  shrunk and regrown in between lost the rows past the snapped size, a band of the pane's background until the app
+ *  repainted (~110 ms, measured on every GNOME Calculator connect). The element's box still follows at once (it clips). */
+export const BACKING_SHRINK_MS = 1000;
 const Z_BASE = { main: 1000, dialog: 200000, popup: 300000 };
 
 /** bytes → a data: URL (PNG); the base64 alphabet is validated on the way OUT
@@ -103,11 +108,13 @@ const pointerMods = (e) => ({ shift: !!e.shiftKey, control: !!e.ctrlKey, alt: !!
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
  *   onMoveResize(ev) — the app's header bar moves/resizes its window: {direction, button, main, press:{clientX,clientY}|null}
  *   pixelRatio    — () => devicePixelRatio (injectable); CSS px × this = the device px the session speaks
+ *   pictureScale  — () => the record's pictureScale (lane D (a): a fractional scale renders at GDK_SCALE = ⌈s⌉ and is
+ *                   SHOWN at s ÷ ⌈s⌉ — the view's ratio is devicePixelRatio ÷ this; 1 = the picture 1:1, as ever)
  *   Worker / decode / now / secure / clipboardApi — injectable for the node suite
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
 
@@ -140,8 +147,14 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   let stageOffset = { x: 0, y: 0 };
   let minSize = null; // the smallest pane (CSS px) — minPaneCss(the main's constraints, the ratio)
   let constraints = null; // the main window's size constraints (device px), as the client last named them
-  const ratio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);
+  // LANE D (a): the SCREEN's ratio and the picture's own scale — the windows are laid out at their quotient: X px per CSS
+  // px = devicePixelRatio ÷ pictureScale (1.5× on a 2× screen = a GDK_SCALE-2 picture at 2.667 X px per CSS px, shown
+  // at 0.75); a pictureScale of 1 is the 1:1 picture of 2.369.158, bit for bit
+  const screenRatio = () => pixelRatioOf(typeof pixelRatio === 'function' ? pixelRatio() : pixelRatio);
+  const pictureK = () => { const k = Number(typeof pictureScale === 'function' ? pictureScale() : pictureScale); return Number.isFinite(k) && k > 0.3 && k <= 1 ? k : 1; };
+  const ratio = () => pixelRatioOf(screenRatio() / pictureK());
   let drawRatio = ratio(); // the ratio the windows are laid out with (re-read at every connect / resize)
+  let drawK = pictureK();  // the picture scale the windows are laid out with (the same moments)
   /** x5 Watch: the stage scaled so every non-popup window fits the pane (contain — never cropped) and CENTRED in it;
    *  the scale is CAPPED AT 1 (2.369.156, the product's default: a pane larger than the app shows it crisp at 1:1,
    *  never blown up); identity otherwise. The offset is whole pixels so a 1:1 picture stays on the pixel grid.
@@ -158,7 +171,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
    *  fit, when the pointer enters the pane and when the window is moved (`resnap`, the window's onMoved). */
   const gridNudge = (ox, oy) => {
     const r = drawRatio;
-    if (!(r > 0) || r === 1) return { x: 0, y: 0 };
+    if (!(r > 0) || r === 1 || drawK !== 1) return { x: 0, y: 0 }; // a resampled picture (lane D (a)) has no 1:1 grid to land on
     let pr = null; try { pr = pane.getBoundingClientRect(); } catch {}
     if (!pr || !Number.isFinite(pr.left) || !Number.isFinite(pr.top)) return { x: 0, y: 0 };
     const nudge = (v) => { const d = v * r; const f = Math.ceil(d - 1e-3) - d; return f > 1e-3 ? f / r : 0; };
@@ -172,7 +185,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
         for (const w of client.windows.values()) if (w.kind !== 'popup') { bw = Math.max(bw, (w.x + w.w) / drawRatio); bh = Math.max(bh, (w.y + w.h) / drawRatio); }
       } else if (minSize) {
         const main = client.mainWid ? client.windows.get(client.mainWid) : null;
-        if (main) { bw = (main.x + main.w) / drawRatio; bh = (main.y + main.h) / drawRatio; }
+        if (main && !main.premap) { bw = (main.x + main.w) / drawRatio; bh = (main.y + main.h) / drawRatio; } // a main being announced has no fit yet (lane D (a) F3)
       }
       const p = paneSize();
       if (bw > 0 && bh > 0) {
@@ -204,7 +217,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     fitStage();
   };
   const wins = new Map(); // wid → { el, canvas, ctx }
-  const clearWindows = () => { for (const w of wins.values()) w.el.remove(); wins.clear(); };
+  const clearWindows = () => { for (const w of wins.values()) { clearTimeout(w.shrinkTimer); w.el.remove(); } wins.clear(); };
 
   const paneSize = () => ({ width: Math.max(1, pane.clientWidth || 1), height: Math.max(1, pane.clientHeight || 1) });
 
@@ -213,12 +226,19 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   // r2: the canvas BACKING is the window rounded up to the ratio's grid step and its CSS box backing ÷ ratio — a size the
   // is a WHOLE CSS px (Chrome snaps a canvas's paint box to whole CSS px — 697.5 or 897.33 CSS resamples, measured), so the
   // picture is drawn 1:1 at an odd device width and a fractional ratio alike (xpra-proto backingSize)
-  const place = (win, w) => {
+  const place = (win, w, shrinkNow = false) => {
     const r = drawRatio;
     w.el.style.left = `${win.x / r}px`; w.el.style.top = `${win.y / r}px`;
     w.el.style.width = `${win.w / r}px`; w.el.style.height = `${win.h / r}px`;
     w.el.style.zIndex = String((Z_BASE[win.kind] || Z_BASE.main) + Math.min(win.z, 99999));
-    const bw = backingSize(win.w, r), bh = backingSize(win.h, r);
+    let bw = backingSize(win.w, r), bh = backingSize(win.h, r);
+    if (!shrinkNow && w.r === r && (w.canvas.width > bw || w.canvas.height > bh)) {
+      // a shrink keeps the backing for BACKING_SHRINK_MS (see the constant) — the element clips it meanwhile
+      bw = Math.max(bw, w.canvas.width); bh = Math.max(bh, w.canvas.height);
+      clearTimeout(w.shrinkTimer);
+      w.shrinkTimer = setTimeout(() => { w.shrinkTimer = null; const cur = client && client.windows.get(win.wid); if (cur && wins.get(win.wid) === w) place(cur, w, true); }, BACKING_SHRINK_MS);
+    }
+    w.r = r;
     if (w.canvas.width !== bw || w.canvas.height !== bh) {
       // a resize clears a canvas — keep what was painted until the server repaints
       let keep = null;
@@ -249,18 +269,33 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     const w = wins.get(win.wid);
     if (!w) return;
     if (kind === 'geometry' || kind === 'raise') { place(win, w); fitStage(); }
-    else if (kind === 'lost') { w.el.remove(); wins.delete(win.wid); fitStage(); if (!wins.size && client && client.state === 'connected') setStatus(t('The application closed its window')); }
+    else if (kind === 'lost') { clearTimeout(w.shrinkTimer); w.el.remove(); wins.delete(win.wid); fitStage(); if (!wins.size && client && client.state === 'connected') setStatus(t('The application closed its window')); }
   };
   const onPaint = (win, op) => {
     const w = wins.get(win.wid);
     if (!w) return;
-    if (op.type === 'image') { try { w.ctx.drawImage(op.img, op.x, op.y, op.w, op.h); } finally { try { op.img.close?.(); } catch {} } }
+    // a window with an ALPHA channel (Chrome's own frame: `has-alpha`, rounded top corners) is CLEARED under each draw first —
+    // composited over what was there, a translucent pixel would blend with stale ones (upstream xpra-html5 clears the same way)
+    if (op.type === 'image') { try { if (win.meta && win.meta['has-alpha']) w.ctx.clearRect(op.x, op.y, op.w, op.h); w.ctx.drawImage(op.img, op.x, op.y, op.w, op.h); } finally { try { op.img.close?.(); } catch {} } }
     else if (op.type === 'scroll') {
-      for (const m of op.moves) {
-        if (!Array.isArray(m) || m.length < 6) continue;
-        const [x, y, mw, mh, dx, dy] = m.map(Number);
-        try { w.ctx.drawImage(w.canvas, x, y, mw, mh, x + dx, y + dy, mw, mh); } catch {}
+      // every move of ONE scroll packet reads the picture as it was BEFORE the packet (upstream xpra-html5's do_paint
+      // draws each from its draw canvas into the offscreen one): applied one after another on the same canvas, a later
+      // move read rows an earlier one had already overwritten — ghost rows until the next full repaint (measured on
+      // chrome://settings: 593 overlapping reads in 66 packets). One snapshot per packet, one reusable canvas per window.
+      const moves = op.moves.filter((m) => Array.isArray(m) && m.length >= 6).map((m) => m.map(Number));
+      if (!moves.length) return;
+      let src = w.canvas;
+      if (moves.length > 1) {
+        try {
+          const snap = (w.scrollSrc ||= document.createElement('canvas'));
+          if (snap.width !== w.canvas.width || snap.height !== w.canvas.height) { snap.width = w.canvas.width; snap.height = w.canvas.height; }
+          const sctx = snap.getContext('2d');
+          sctx.clearRect(0, 0, snap.width, snap.height);
+          sctx.drawImage(w.canvas, 0, 0);
+          src = snap;
+        } catch { src = w.canvas; }
       }
+      for (const [x, y, mw, mh, dx, dy] of moves) { try { w.ctx.drawImage(src, x, y, mw, mh, x + dx, y + dy, mw, mh); } catch {} }
     }
   };
 
@@ -335,7 +370,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!client) return;
     try { pane.setPointerCapture(e.pointerId); } catch {}
     const [x, y] = paneXY(e);
-    press = { pointerId: e.pointerId, button: e.button, xy: [x, y] };
+    press = { pointerId: e.pointerId, button: e.button, xy: [x, y], client: { clientX: e.clientX, clientY: e.clientY } };
     client.pointerButton(x, y, e.button, true, pointerMods(e));
   });
   pane.addEventListener('pointerup', (e) => {
@@ -372,7 +407,11 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       document.addEventListener('pointercancel', (e) => { if (e.pointerId === wmHold?.pointerId) { press = null; releaseWmHold(e); } }, { signal: ctl.signal });
     }
     const hasRoot = Number.isFinite(ev.xRoot) && Number.isFinite(ev.yRoot) && (ev.xRoot !== 0 || ev.yRoot !== 0);
-    try { onMoveResize?.({ direction: ev.direction, button: ev.button, main: ev.main, wid: ev.wid, press: hasRoot ? rootToClient(ev.xRoot, ev.yRoot) : null, held: !!wmHold }); } catch (e) { log?.warn?.(`[xpra] onMoveResize threw: ${e && e.message}`); }
+    // the gesture starts where the pointer WENT DOWN in this pane (its own press, viewport px) — the app's x_root/y_root
+    // only when no press is in flight (a keyboard move): Chrome 153 reports its root point +10,+5 off the real press
+    // (measured, both frame modes), so the window moved 110/59 for a 120/64 drag; GNOME Calculator's was exact
+    const pressAt = !cancel && press && press.client ? { ...press.client } : hasRoot ? rootToClient(ev.xRoot, ev.yRoot) : null;
+    try { onMoveResize?.({ direction: ev.direction, button: ev.button, main: ev.main, wid: ev.wid, press: pressAt, held: !!wmHold }); } catch (e) { log?.warn?.(`[xpra] onMoveResize threw: ${e && e.message}`); }
   };
 
   // ── the pane follows the window: debounce, then the session re-fits ──────
@@ -381,7 +420,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     if (!client) return;
     const r = ratio();
     if (r !== drawRatio) { // a monitor move (or a browser zoom) changed the ratio: every box and the minimum follow
-      drawRatio = r;
+      drawRatio = r; drawK = pictureK();
       for (const win of client.windows.values()) { const w = wins.get(win.wid); if (w) place(win, w); }
       applyConstraints(constraints);
     }
@@ -395,7 +434,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     try { dprMq?.removeEventListener?.('change', onRatio); } catch {}
     dprMq = null;
     if (typeof matchMedia !== 'function' || typeof pixelRatio !== 'function') return;
-    try { dprMq = matchMedia(`(resolution: ${ratio()}dppx)`); dprMq.addEventListener?.('change', onRatio); } catch { dprMq = null; }
+    try { dprMq = matchMedia(`(resolution: ${screenRatio()}dppx)`); dprMq.addEventListener?.('change', onRatio); } catch { dprMq = null; } // the SCREEN's ratio — a (resolution: 2.667dppx) query never matches, so it never fired on a monitor move
   };
   function onRatio() { relayout(); watchRatio(); }
   watchRatio();
@@ -422,12 +461,12 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
     try { client?.close(); } catch {}
     clearWindows();
     const s = paneSize();
-    drawRatio = ratio();
+    drawRatio = ratio(); drawK = pictureK();
     constraints = null; minSize = null;
     client = createXpraClient({
       url: typeof url === 'function' ? url() : url,
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
-      screen: s, ratio: () => drawRatio, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log,
+      screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log,
       on: {
         status: (st, detail) => {
           if (shell.closed) return;
@@ -444,7 +483,9 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
           }
         },
         window: onWindow, paint: onPaint, title: (text) => { try { onTitle?.(text); } catch {} },
-        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} },
+        // F3 (lane D (a)): the window hears the main's metadata (a CSD app folds its bars) and the client gets the pane of
+        // AFTER that, inside this call — a main being announced is fitted and mapped at the final pane (no re-fit, no snap-back)
+        main: (win) => { try { onMain?.(win ? { ...win.meta } : null); } catch {} if (client && win && mode === 'active') { const s = paneSize(); client.resize(s.width, s.height); } },
         state: (win, changed) => { if (client && win && win.wid === client.mainWid) { try { onState?.({ ...changed }); } catch {} } },
         moveresize: onClientMoveResize,
         icon: ({ data }) => { const u = pngDataUrl(data); if (u) { try { onIcon?.(u); } catch {} } },
@@ -489,5 +530,5 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
   const closeApp = () => (client ? client.closeMain() : false);
   /** seamless: the display is told what our window did (maximized / iconified) — the client's setMainState. */
   const setAppState = (st) => (client ? client.setMainState(st) : false);
-  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
+  return { container, bar, mount, pane, stage, ime, status, chip, fitBadge, resnap, connect, disconnect, setStatus, addControl, focus, dispose, setViewOnly, setMode, windows, closeApp, setAppState, rootToClient, setFloatingChip: shell.setFloatingChip, get wmHeld() { return !!wmHold; }, get mode() { return mode; }, get stageScale() { return stageScale; }, get ratio() { return drawRatio; }, get pictureScale() { return drawK; }, get minSize() { return minSize ? { ...minSize } : null; }, get stageOffset() { return { ...stageOffset }; }, get client() { return client; }, get state() { return shell.state; }, get wanted() { return shell.wanted; }, get chipText() { return shell.copiedText; }, get hintShown() { return shell.hintShown; }, get copyHint() { return shell.copyHint; }, get pasteOpen() { return shell.pasteOpen; } };
 }

@@ -26,6 +26,10 @@
  * the taker active; no lease ⇒ the election. Every change re-applies at once:
  * the keeper's viewer listener and every `window-leases-updated` the engine
  * publishes call the bridge's `refresh`.
+ * LANE E (2026-09-25, docs/design-desktop-apps-seamless §3.6): the engine is handed `groupsOf` (the Task Group
+ * membership the reach gate asks at VERB time — D2's "live now or later") and the ONE window-control request
+ * producer (src/server/window-request.js — D3; its wake rides `deliver`, the gated ladder) is created here and
+ * handed to the user routes beside the engine.
  * `boot()` runs after restoreSessions (the live-session set is final);
  * `shutdown()` stops the tick. A missing python3/AT-SPI is a per-verb typed
  * refusal at call time, never a boot failure — this wiring throws only on a
@@ -33,14 +37,16 @@
  */
 const path = require('path');
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, log = console } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, log = console } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
   const DV = require('../desktop-viewers.js');
   let streamRef = null;
   // a lease change re-applies every viewer's state (x5): the engine publishes through this broadcast
   const leaseBroadcast = (m) => { broadcast?.(m); if (m && m.type === 'window-leases-updated') { try { streamRef?.refreshAll(); } catch (e) { log.warn?.(`[window] viewer refresh failed — ${e && e.message}`); } } };
   // lane C2: the engine's world is THIS machine's windows (xdotool / AT-SPI act here) — a paired machine's app is not an agent window target
-  const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, log });
+  const engine = require('./window-targets-engine.js').create({ keeper: keeper.local || keeper, dataDir, env, activeSessions, serverSetting, broadcast: leaseBroadcast, groupsOf, log });
+  // lane E (D3): the ONE producer of "Ask <agent> to take control" — free next turn by default, a wake through the gated ladder
+  const windowRequest = require('./window-request.js').create({ engine, deliver, activeSessions, log });
   const governed = (id) => id !== DESKTOP_SINGLETON_ID && typeof keeper.viewerJoined === 'function';
   const stream = require('./desktop-stream.js').create({
     auth, onInput: (id) => { keeper.noteInput(id); engine.noteUserInput(id); },
@@ -61,12 +67,12 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   keeper.onViewers?.((id) => stream.refresh(id)); // x5: join / leave / Resume here / the session ended ⇒ every socket of that window re-applied
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
   keeper.setWatchProbe?.((id) => stream.connections(id) > 0); // the fit belt checks a WATCHED session every tick (a window that appears without input), an unwatched one on the slow belt
-  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access }); app.use(router); }
+  { const { router, setup } = require('../routes/desktop-apps'); setup({ keeper, vnc, windowEngine: engine, stream, access, windowRequest }); app.use(router); }
   { const wt = require('../routes/window-targets'); wt.setup({ engine }); app.use(wt.router); }
   let announced = false;
   if (browserHandback && typeof browserHandback.installWindow === 'function') { try { announced = browserHandback.installWindow(engine); } catch (e) { log.warn?.(`[window] handback announcer not attached — ${e && e.message}`); } }
   return {
-    desktopStream: stream, windowEngine: engine, announced,
+    desktopStream: stream, windowEngine: engine, windowRequest, announced,
     boot: () => { try { const r = engine.boot(); if (r.leases || r.dropped) log.log?.(`[window] boot: ${r.leases} lease(s) kept, ${r.dropped} dropped`); return r; } catch (e) { log.warn?.(`[window] boot reconcile failed — ${e && e.message}`); return null; } },
     shutdown: () => { try { engine.shutdown(); } catch { /* timers only */ } },
   };

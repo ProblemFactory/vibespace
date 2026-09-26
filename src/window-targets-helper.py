@@ -26,6 +26,14 @@ Requests (one JSON object on stdin):
    "verb":"do_action"|"set_text"|"insert_text"|"read","action":"click"|0,"text":"…"}
   {"op":"focused","pids":[…]}                      the node holding keyboard focus (type's default target)
   {"op":"screenshot","out":"/p.png","bounds":{x,y,w,h}}   pixels of the DISPLAY in the env (the fallback)
+  {"op":"windowshot","out":"/p.png","origin":{x,y},"w":W,"h":H,"windows":[{id,x,y,w,h}]}
+                                                   lane E (D7): the app's OWN X windows, each grabbed as
+                                                   itself (a foreign GdkWindow per xid — on the xpra rung the
+                                                   ROOT is composited offscreen and grabs black), composed by
+                                                   root position onto a W×H canvas whose (0,0) is `origin`
+  act verb "focus"                                 lane E: Component.grab_focus on the node (an injected
+                                                   `type` then lands in it — Chrome's entries have no
+                                                   EditableText)
 The reply is ALWAYS a JSON object with `ok`; a refusal carries `code` + `why`.
 Exit 0 whenever a reply was written; 3 when AT-SPI itself is unavailable.
 """
@@ -358,6 +366,14 @@ def op_act(req):
         return {"ok": bool(ok), "code": None if ok else "action_refused", "did": {"verb": verb, "chars": len(text), "role": role, "name": name}, "ms": round((time.time() - t0) * 1000, 1)}
     if verb == "read":
         return {"ok": True, "did": {"verb": "read", "role": role, "name": name, "iface": ifaces, "text": text_of(acc, 2000), "actions": actions_of(acc), "states": state_names(acc)}}
+    if verb == "focus":
+        if "Component" not in ifaces:
+            return {"ok": False, "code": "action_refused", "why": "%s %r exports no Component interface — it cannot take keyboard focus through the tree" % (role, name)}
+        comp = safe(lambda: acc.get_component_iface() if hasattr(acc, "get_component_iface") else acc.get_component())
+        ok = safe(lambda: Atspi.Component.grab_focus(comp), None) if comp is not None else None
+        if ok is None:
+            return {"ok": False, "code": "action_failed", "why": "grab_focus did not answer within %d ms" % call_ms}
+        return {"ok": bool(ok), "code": None if ok else "action_refused", "did": {"verb": "focus", "role": role, "name": name}, "ms": round((time.time() - t0) * 1000, 1)}
     return {"ok": False, "code": "bad-request", "why": "unknown verb %r" % verb}
 
 
@@ -403,7 +419,84 @@ def op_screenshot(req):
     return {"ok": True, "v": REPLY_VERSION, "out": out, "x": x, "y": y, "w": w, "h": h, "bytes": os.path.getsize(out)}
 
 
-OPS = {"probe": op_probe, "apps": op_apps, "snapshot": op_snapshot, "act": op_act, "focused": op_focused, "screenshot": op_screenshot}
+def op_windowshot(req):
+    """Lane E (D7): the app's OWN windows composed by root position — the
+    pixel road's read. Each xid is grabbed as ITSELF (a foreign GdkWindow):
+    on the xpra rung the display's root is composited offscreen and a root
+    grab is black even with a viewer attached (measured 2026-09-25), while
+    the app's own X window has its pixels whenever it is mapped. The canvas
+    is `w`×`h` with (0,0) at `origin` (the main window's top-left), so a
+    pixel of the image IS the `--at` coordinate the engine maps back."""
+    try:
+        gi.require_version("Gdk", "3.0")
+        gi.require_version("GdkX11", "3.0")
+        gi.require_version("GdkPixbuf", "2.0")
+        from gi.repository import Gdk, GdkX11, GdkPixbuf, GLib
+    except Exception as e:
+        return {"ok": False, "code": "screenshot_unavailable", "why": "python3 gi Gdk/GdkX11 not importable: %s" % e}
+    out = req.get("out")
+    if not out:
+        return {"ok": False, "code": "bad-request", "why": "windowshot needs `out`"}
+    origin = req.get("origin") or {}
+    ox, oy = int(origin.get("x", 0)), int(origin.get("y", 0))
+    cw, ch = int(req.get("w") or 0), int(req.get("h") or 0)
+    if cw <= 0 or ch <= 0 or cw > 16384 or ch > 16384:
+        return {"ok": False, "code": "bad-request", "why": "a %dx%d canvas is not a window image" % (cw, ch)}
+    # the X backend BY NAME: a caller env that still names a Wayland display would hand us a GdkWaylandDisplay
+    # (measured), and a foreign X window needs the X one — the display named by DISPLAY, opened explicitly
+    safe(lambda: Gdk.set_allowed_backends("x11"))
+    disp = safe(lambda: Gdk.Display.open(os.environ.get("DISPLAY") or ""))
+    if disp is None or not isinstance(disp, GdkX11.X11Display):
+        return {"ok": False, "code": "screenshot_unavailable", "why": "no X display reachable (DISPLAY=%s)" % os.environ.get("DISPLAY")}
+    # the canvas carries alpha (a window pixmap does — depth 32) and every pixel is made OPAQUE: an X window's
+    # contents are what the user sees, but its alpha bytes are often 0 (measured: a straight alpha composite of the
+    # calculator's grab was all black while its RGB was drawn)
+    canvas = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, cw, ch)
+    canvas.fill(0x000000ff)
+    shot, lit, total = [], 0, 0
+    for w in req.get("windows") or []:
+        try:
+            xid, wx, wy, ww, wh = int(w["id"]), int(w["x"]), int(w["y"]), int(w["w"]), int(w["h"])
+        except Exception:
+            continue
+        gw = safe(lambda: GdkX11.X11Window.foreign_new_for_display(disp, xid))
+        if gw is None:
+            shot.append({"id": xid, "ok": False, "why": "the window is gone"})
+            continue
+        pb = safe(lambda: Gdk.pixbuf_get_from_window(gw, 0, 0, ww, wh))
+        if pb is None:
+            shot.append({"id": xid, "ok": False, "why": "no pixels (unmapped or off-screen)"})
+            continue
+        if pb.get_has_alpha():
+            buf = bytearray(pb.get_pixels())
+            buf[3::4] = b"\xff" * len(buf[3::4])
+            pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(buf)), GdkPixbuf.Colorspace.RGB, True, 8, pb.get_width(), pb.get_height(), pb.get_rowstride())
+        else:
+            pb = pb.add_alpha(False, 0, 0, 0)
+        dx, dy = wx - ox, wy - oy
+        sx, sy = max(0, -dx), max(0, -dy)
+        cx, cy = max(0, dx), max(0, dy)
+        cwid = min(pb.get_width() - sx, cw - cx)
+        chei = min(pb.get_height() - sy, ch - cy)
+        if cwid > 0 and chei > 0:
+            pb.copy_area(sx, sy, cwid, chei, canvas, cx, cy)
+        shot.append({"id": xid, "ok": True, "w": pb.get_width(), "h": pb.get_height()})
+    # a coarse "is anything drawn" census (every 97th pixel): a black image is a fact the caller names, never a success
+    px = canvas.get_pixels()
+    stride, nch = canvas.get_rowstride(), canvas.get_n_channels()
+    for yy in range(0, ch, max(1, ch // 64)):
+        row = yy * stride
+        for xx in range(0, cw, max(1, cw // 64)):
+            i = row + xx * nch
+            total += 1
+            if px[i] or px[i + 1] or px[i + 2]:
+                lit += 1
+    canvas.savev(out, "png", [], [])
+    return {"ok": True, "v": REPLY_VERSION, "out": out, "w": cw, "h": ch, "originX": ox, "originY": oy, "windows": shot,
+            "lit": lit, "sampled": total, "bytes": os.path.getsize(out)}
+
+
+OPS = {"probe": op_probe, "apps": op_apps, "snapshot": op_snapshot, "act": op_act, "focused": op_focused, "screenshot": op_screenshot, "windowshot": op_windowshot}
 
 
 def main():

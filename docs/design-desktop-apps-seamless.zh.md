@@ -128,6 +128,17 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 - Gate：test-desktop-seamless（fast）、test-xpra-client §2d/§2e、test-desktop-xpra-window §12（heavy，控制组 = 判定强制为 false 的副本）。
 - **验证者 r1（2026-09-25），与首版的三处不同，每条都先在真实链路上复现为红：** (a) 从**最大化**的 seamless 窗口拖出来（应用的 header bar 或我们的标题栏）会让 X 保持 `maximized: true`——应用一直显示还原图标，第一次点击是死的；window.js 拖动取消最大化时现在像其他所有取消最大化一样调用 `onResize`（取消拖动而重新最大化时也调用），由它发出 `setAppState({maximized:false})`；(b) 浮动复制 chip 挪到 pane **右下角**（右上角在它的 10 s 里盖住应用的 ─ □ ✕）；(c) 展开后的标题栏与状态条原来是 z-index 25 / 24，压在 resize 手柄（10）之上，于是 250 ms 展开之后按在顶边 3 px 手柄带上变成了标题栏**拖动**——现在是 9 / 8，展开时顶边仍然是 resize（§12 (4) 命中测试，把 25 放回去的现场控制组）。热区仍是几何判断。
 
+**Lane D (a) item C（2026-09-25）— seamless 下的 CHROME，实测**（Google Chrome 153.0.8010.47，xpra 6.5.3，keeper 的 `chromium` 行，全新 profile；owner 的第二张截图：两条栏叠在一起，"Chrome的顶部标题栏似乎不会自动隐藏？"）：
+- **Chrome 创建了什么：** 0x400004 = 浏览器窗口（xpra 唯一转发的那个，被 reparent 进 `Xpra-CorralWindow-0x400004`）；不映射的辅助窗口 0x600001 "google-chrome" 10×10（WM_CLIENT_LEADER）、0x400000 "Chromium clipboard"（override-redirect，位于 -100,-100）、0x400006 1×1 override-redirect；菜单与 tooltip 以 `new-override-redirect` 到来（popup）。"第一个 main"的选法对 Chrome 是对的——不需要按证据挑窗口。
+- **默认报告了什么：** `new-window` 元数据 `has-alpha: true`、`title "New Tab - Google Chrome"`、`class-instance ["google-chrome (<profile 目录>)", "Google-chrome"]`、`window-type ["NORMAL"]`、`size-constraints {gravity 10, minimum-size [500,87]}`、**`decorations: 1`**；X：`_MOTIF_WM_HINTS 0x2,0x0,0x1,0x0,0x0`（flags = DECORATIONS，decorations 1 = "窗口管理器，给我画边框"）、`_NET_WM_WINDOW_TYPE_NORMAL`、`WM_WINDOW_ROLE "browser"`、没有 `_GTK_FRAME_EXTENTS`、`_NET_FRAME_EXTENTS 0,0,0,0`。
+- **为什么两条栏没折起：** Chrome 不认识这个窗口管理器（`_NET_SUPPORTING_WM_CHECK` 写的是 "Xpra"），所以它的"使用系统标题栏和边框"——profile 偏好 `browser.custom_chrome_frame` = false——就是默认值：它只画标签条和工具栏，**没有** ─ □ ✕，并请 WM 画边框 ⇒ 不是 CSD ⇒ `{seamless:false, why:'ssd'}`。owner 以为是 Chrome 自己的标题栏，其实是**我们的**（它带着 Chrome 的 X 标题和图标）；下面那条状态条也是我们的。判定路径上没有任何地方排除浏览器行，状态条也没有自己的规则（它在 `.window.seamless` 下与标题栏一起折起）。Chrome 153 **没有**对应的命令行开关（二进制的字符串里只有这个偏好名）。
+- **`browser.custom_chrome_frame: true` 时：** `_MOTIF_WM_HINTS 0x2,0x0,0x0,0x0,0x0` ⇒ **`decorations: 0`**、`_GTK_FRAME_EXTENTS 5,5,5,5`、最小 [510,97]（最大化 [500,87]）、`_GTK_HIDE_TITLEBAR_WHEN_MAXIMIZED 1`、`_NET_WM_OPAQUE_REGION` = 窗口减去顶部两个 15 px 的圆角。Chrome 画出标签**以及**自己的 ─ □ ✕ ⇒ `why: 'csd'` ⇒ seamless。在 Chrome 自己的"设置 → 外观"里拨这个开关，会在**同一个** X 窗口上实时翻转 `decorations`（判定跟着变）。
+- **经我们的客户端按它的按钮**（可信点击，900×620 窗口，DPR 1）：□ ⇒ `{maximized:true}` ⇒ 我们的窗口最大化；它的还原 ⇒ 我们还原；─ ⇒ `{iconic:true}` ⇒ 我们最小化；我们还原 ⇒ `setAppState({iconified:false})` ⇒ Chrome 重绘；✕ ⇒ Chrome 以 0 退出且不留窗口 ⇒ 我们的窗口关闭（A2）。拖标签条 ⇒ 两种边框模式下都发 `initiate-moveresize` 方向 8——但 x_root/y_root 比真实按下点**偏 +10,+5**（GNOME 计算器的是准的）：120/64 的手势只移动了 110/59。现在 view 在有按下进行中时从 pane **自己**记录的按下点起拖（只有键盘移动才用应用的根坐标）：120/64 ⇒ 120/64。
+- **建了什么：** keeper 在 `<profile>/Default/Preferences` 里写 `browser.custom_chrome_frame: true`，每个 profile **只写一次**（旁边放标记文件 `.vibespace-frame-seeded`——Chrome 可能丢掉等于默认值的键，而用户在 Chrome 里把系统标题栏开回来之后不能被下次启动推翻），且只在该键**不存在**时写（已有的 `false` 是用户的选择），写在 `bringUp` 里、浏览器启动**之前**——全新 scaffold、保留的 profile、以及随缩放 ▸ 重启搬到后继的 profile 都一样（若在 `launch` 时写，后继的空 scaffold 就不空了，搬运的 `rmdir` 会失败）。单靠"显示窗口边框 ▸ 关"**不是**解法：默认布局下 Chrome 没有 ─ □ ✕，强制 seamless 只剩拖动。经缩放 ▸ 从 1× 重启到 1.5×（DPR 1）实测：搬过去的 profile 保留偏好与标记，后继再次 seamless（decorations 0，最小 [765,146] = 1.5 × [510,97]），窗口像任何应用一样跟随缩放（798×558 → 1197×837——浏览器行的控件就是它的整体缩放）。
+- **实测的残留（未解）：** 非最大化时，Chrome 在我们 1 px 边框内侧画一条 5 px 的缩放边带（边缘 1 px 灰、3 px 白、一条 1 px 灰线），并把顶部两个角画成圆角（透明像素）；最大化后两者都消失。xpra 6.5.3 不转发 `_GTK_FRAME_EXTENTS`，Chrome 的不透明区域**包含**这条边带，Chrome 153 也不支持 `_GTK_EDGE_CONSTRAINTS`（平铺态）——客户端没有可以据以裁掉它的事实；要做就得让 keeper 从 X 读 `_GTK_FRAME_EXTENTS`。Firefox 未实测（本机是 snap，被 `snap-profile-unreachable` 按名拒绝）；它大概的开关（`browser.tabs.inTitlebar`）没有写。keeper 的停止会让 Chrome 留下 `profile.exit_type: "Crashed"`（reader 2 三次中两次——缩放 ▸ 的后继随后弹出"恢复页面？"）：原因未定位，未解。
+- **顺手发现（已修）：** 一个 scroll 包里的各个 move 在它们读取的同一张画布上依次应用，后一个 move 读到的是前一个已经覆盖过的行（chrome://settings 上 66 个包里 593 次重叠——直到整屏重绘前都有重影行）；现在同一个包的每个 move 都读**同一份**快照（上游的 `do_paint`）。`has-alpha` 的窗口每次绘制前先清空该区域。
+- Gate：test-desktop-seamless §6（实测元数据 ⇒ 判定；写入偏好 ⇒ Chrome 的边框 ⇒ seamless；控制组：不写 ⇒ `ssd`）、test-desktop-apps §14（偏好表）、test-xpra-client §7（按下点、scroll 快照、alpha 清空）、heavy test-desktop-xpra-window §16（真二进制）及其控制组副本。
+
 ### 3.4 DPI：从 VibeSpace 自己的缩放推导，每窗可改
 
 - **推导（PURE，`appScaleFor(setting, dpr, uiScale)`）**：`eff = clamp(dpr × uiScale, 1, 3)`；`gdk = eff < √2 ? 1 : eff < 2√2 ? 2 : 3`（r2 的比例就近规则推广到 3）；`dpi = max(96, round(96 × eff / gdk))`（余数只向上进 dpi，永不把文字缩到 96 以下）。`scaleKnobs(eff)` 接受任意有效值，返回 `{scale: eff, gdkScale, dpi, env, xresources}`（GDK_SCALE、QT_SCALE_FACTOR=gdk、XTerm faceSize = 8 × gdk × (dpi/96)）。表：
@@ -146,6 +157,34 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 - **.158 已经做了的、这里不动的**：设备像素端到端、`size-constraints` 的最小尺寸夹住窗口、Watch 的舞台缩放、客户端 `dpi` = 记录 dpi。
 - **诚实限制**：改缩放必须重启（GDK_SCALE 启动时读）；小数在 GTK 上只影响文字（X11 的限制）；Qt/Electron 的小数 knob 未实测；vnc-display 一级不缩放（整屏级）。
 - Gate：test-desktop-apps §10 加推导表（上表 6 行 + 边界 √2/2√2 + uiScale 缺省=1 与 .158 逐行相等的回归控制）；heavy §7 加一腿：uiScale 125 + DPR 2 ⇒ 记录 `scale 2.5, dpi 120`，计算器最小 `[900,1540]` 附近（720×1232 × 1.25 文字增量——只断言 ≥ 2× 的值且文字行高 > 2× 的）。
+- **2026-09-25 补记 — lane D (b)：可点击的缩放芯片 + 每个应用的默认缩放**（owner："可以改成那个1.5x 已选的提示直接可以点快速切换" + "最好加入可以在app启动前那个app选择界面调整每个app默认dpi的能力"）。(1) 状态条上的缩放芯片在窗口能重启时（`relaunchVerdict` 为 null——运行中的 xpra 应用）是一个**控件**：role=button、Enter / Space，点击就在芯片处打开与 ⋯ 完全相同的 Scale ▸ 行（同一个函数）；否则是纯文本，原因写在 tooltip 里。(2) 启动对话框里每张应用卡片（所选机器的一级是 xpra 时）旁边有一个并列的小控件，菜单为 自动（设置 → 桌面应用缩放）/ 1× / 1.5× / 2× / 2.5× / 3×，把该**应用**的默认缩放存进 user state `desktopAppScale[<key>]`（与 `desktopAppFrame` 同一个键：注册表 id，否则 `exec:<basename>`；选“自动”即删除该键；同步到所有客户端），不会启动应用。每次启动都把该应用存下的默认值作为 `scaleChoice` 发出；`scalePick` 的优先级 = 窗口自己的重启选择 > 应用默认（来源 `app`，芯片 "1.5× · 应用默认"）> 显式的 `desktop.appScale` > 自动。路由在问配对机器之前就按名拒绝非法值；配对机器在 `launch` op 的 `body` 里收到它（op 形状不变；旧 agent 丢弃该字段，其记录如实写出实际缩放）。窗口的 Scale ▸ 标出应用默认那一行，并追加 "{n}× 是此应用的默认缩放" / "把 {n}× 设为此应用的默认缩放"（不重启）/ "取消此应用的默认缩放"。(3) 可点名选择的缩放现在是 1 / 1.5 / 2 / 2.5 / 3（`EXPLICIT_SCALES`——每一个都被 `scaleKnobs` 精确表达；lane D (b) 建成时用的是取整规则（2.5 = GDK_SCALE 2 + 120 dpi，标注"GTK 应用：控件 2×，文字 2.5×"），lane D 合并时由下文 lane D (a) 的向上取整规则取代：2.5 = 按 GDK_SCALE 3 绘制、以 0.8333 显示，每一行都只写"n×"；3 = GDK_SCALE 3），用于窗口菜单和卡片；设置里的枚举仍是 1 / 1.5 / 2。留给 owner 的决定：当设置是显式值时，某个应用选"自动"= 跟随设置（若要"该应用始终按屏幕推导"需要存一个 'auto' 行——未实现）。Gate：test-desktop-app-scale（快）、test-desktop-xpra-window §14（真实一级、两个客户端、去掉字段与控件的副本做对照）、test-desktop-remote §7（真实 daemon）。
+
+**Lane D (a)（2026-09-25）— 小数是真正的缩放；窗口跟随重启**（上表是 A3 拼写小数的方式——已被取代）。owner 用缩放 ▸ 把 GNOME 计算器从 2× 重启到 1.5×："从2x切换到1.5x之后出现大量白边，你窗口尺寸计算不对"。**先实测**（xpra 6.5.3 + gnome-calculator 50，无头 Chrome DPR 2 / 1.5 / 1，真实的缩放 ▸ 路径）：我们的几何在每次切换都是精确的——X 主窗口 = 设备 px 的 pane，边距 0/0/0/0，pane 未覆盖 0.0 %。白的是计算器**自己的**背景：旧的 floor 规则把 1.5× 画成 GDK_SCALE 1 + 144 dpi（控件 1×，只放大文字），而 libadwaita 把内容列夹在约 676 逻辑 px，于是这次重启把每个控件和内容列都减半（DPR 2 下 676 → 338 CSS px），窗口却保持原尺寸——应用自己的背景从宽度的 25 % 变成 62 %。
+- **现在的规则**（`scaleKnobs(s)`，规则 `ceil`）：GDK_SCALE = ⌈s⌉、96 dpi，view 以 `pictureScale` = s ÷ ⌈s⌉ 显示画面——控件**和**文字都是 s，由浏览器重新采样；整数缩放仍然 1:1。
+
+| s | GDK_SCALE | dpi | 画面 | 控件 + 文字 |
+|---|---|---|---|---|
+| 1 | 1 | 96 | 1 | 1× |
+| 1.25 | 2 | 96 | 0.625 | 1.25× |
+| 1.5 | 2 | 96 | 0.75 | 1.5× |
+| 2 | 2 | 96 | 1 | 2× |
+| 2.5 | 3 | 96 | 0.8333 | 2.5× |
+| 3 | 3 | 96 | 1 | 3× |
+
+  auto 的小数用同一规则（DPR 1 上 125 % 的界面按 2 绘制、以 0.625 显示——应用与 chrome 一致，像素量约为 1:1 画面的 2.56 倍；让 auto 只取整数则会把 M4 的"1.25× chrome 旁边一个 1.0× 应用"带回来）。浏览器行保留 floor 规则（`rule: 'dpi'`、`scaleRuleOf`）：Chrome 按字体 dpi **整体**缩放（实测 1 + 144 dpi 时最小 [750,131] = 1.5 × [500,87]），1:1 保持锐利。记录里存 `gdkScale` + `pictureScale`；客户端读**记录**（`renderOf`）——没有这两个字段的记录（更早的，或跑旧代码的已配对机器）就是 floor 规则，按 1:1 显示。
+- **窗口跟随重启**（PURE `relaunchPaneCss`）：新 pane = 应用的逻辑尺寸 × 新的控件缩放 ÷ dpr，逻辑尺寸 = pane 的 X px（view 把它缩放适配时取主窗口的）÷ 旧 GDK_SCALE；由发起的客户端改窗口尺寸（`WindowManager.resizeWindowTo`，左上角不动、以工作区为上限；最大化 / tab 链 / 手机布局不动），布局同步带到其他客户端。DPR 2：898×678 → 1× 449×339 → 1.5× 673.5×508.5 → 2× 898×678 → auto 898×678 → 1× 449×339——来回精确；应用自己的背景每一步都是 24.7 %。
+- **我们自己的边距可能出现的三处，逐一实测并修复：** (1) F3——每次 CSD 连接都在栏还没折起时按 pane 映射应用（折起要等 `main`，而 `main` 在 fit 之后才来），约 160 ms 后再 fit 一次：现在客户端在 fit **之前**先报出主窗口，view 在这次回调里就 resize，map-window 就是最终尺寸；(2) pane 小于应用最小尺寸时（DPR 1 下的 2×：720×1232 放进被工作区夹住的 898×913 pane）缩放适配后两侧各露出 116 CSS px 的 pane 背景（25.8 %）：fit 现在在适配比例下保持 pane 的**形状**（1212×1232）；(3) GTK 在映射后约 650 ms 把自己缩回自己的尺寸，而 belt 同一任务内的再 fit 让中间那些行被清掉约 110 ms：缩小的窗口保留画布后备 1 s。
+- **修后实测**（test-desktop-xpra-window §15，DPR 2 与 DPR 1，窗口自己的缩放 ▸ 行 auto → 1 → 1.5 → 2 → auto → 1，再改到 1200×800 又改回）：每一步每条边 ≤ 1 CSS px、截图里 pane 自己的背景 0.00 %；计算器每 1× 的内容列不变（DPR 2：2×、1×、1.5× 都是 338.0 CSS；DPR 1：676 / 673）；每个 map-window = 稳定后的主窗口。控制组（floor 旋钮、没有重启跟随的副本）：2× → 1.5× 内容列比 0.500，窗口保持 898 px——owner 的截图。
+- **诚实的限制：** 小数画面是**重新采样**的（比整数缩放略柔和——这是真控件的代价）；1:1 的逐像素测试腿（test-desktop-xpra-window §6/§7）仍然用整数缩放。
+
+**Lane D verify 修复（2026-09-25，对抗验证者唯一一条高于 low 的发现，先复现红）。** 每个应用的 map 从一个错过了广播的页面被**整张**带走：`src/lib/desktop-app-prefs.js` 每页只读一次 user state、此后再也不读，而保存时 PATCH 的是**整张** map（`{desktopAppScale: <本页的副本>}`），路由只按顶层键合并。在真服务器上用两个无头 Chrome 页面实测（两边都开着启动对话框）：B 的 socket 断开（合盖 / 网络抖动——WsManager 会自己重连），A 存了 xterm 2× ⇒ `{"xterm":2}`；B 重连后它的 xterm 卡片仍显示 "Auto"；B 存了计算器 1.5× ⇒ `{"gnome-calculator":1.5}`——A 的选择悄无声息地没了；B 在断线期间保存也一样；"显示窗口边框 ▸" 的 map 走的是同一个 loader。修复：loader 在**每一次**重连时重读（`ws.onStateChange`，desktop-app-window.js 对它的记录早就遵守这条规则），一次保存是对**一个**应用条目的**编辑**——`saveAppPrefs(key, (map) => setScaleChoice(map, appKey, choice))`——先在本地显示，再应用到服务器**此刻**持有的 map（一次新的 GET）上，只 PATCH 那一个键；同一页面的保存逐个执行；被拒的保存把视图回滚到服务器的 map（low 发现"先本地应用、从不回滚"随之修复）并用 toast 说明原因。修后同一配方实测：B 重连后卡片显示 "2×"，服务器保留 `{"xterm":2,"gnome-calculator":1.5}`；B 断线期间保存保留 `{"xterm":3,"gnome-calculator":2}`。残余（点名）：两个页面在同一个 GET→PATCH 窗口（几十毫秒）内编辑**同一张** map 时仍是后写者赢，与 user state 上同键竞争的现状一致。门：test-desktop-app-scale §8（两个页面挂在一个假服务器上，合并方式与路由完全相同、只向已连接的 socket 广播，两张 map 都测；三个 patched-copy 对照：去掉重连重读、旧的整张本地 map PATCH、保留被拒的编辑）+ §7 普查（每个 `saveAppPrefs` 调用传的都是编辑）+ heavy test-desktop-xpra-window §14 (1b)（同一配方在两个真页面上）。同一套件的 §12 (8) 在本地优先的视图一翻转就**只读一次** user state（显示窗口边框 ▸ 开，再回 Auto）——判官在和写入赛跑，保存多出的那次 GET 让它每次都输（首轮 heavy 两次尝试都红：`us` 为 null、随后键仍在）；两处读取现在都等（≤ 4 秒）服务器的副本，断言不变。
+
+**Lane D verify lows（未修，2026-09-25）**——按验证者原意记录：
+- **负载下快速层 test-exit-forensics 变红**：真 xpra / 计算器 / Chrome 测试腿与快速层并行时，`pty/SIGHUP` 基线收到 0 个信号；单跑 285/285。本 lane 的文件都不涉及（`data/bin/pty-wrapper.js`、`chat-wrapper.js`、`src/exit-facts.js`、该套件：无 diff）。集成者在 push 前于安静的机器上跑一次快速层；该套件的基线腿也许值得一个耐负载的等待（本 lane 之外）。
+- **两个 "Auto" 含义不同**：窗口缩放 ▸ 的 "Auto (n×)" 按屏幕重新推导，既不看 设置 → Desktop app scale 也不看应用默认；卡片上的 "Auto" 意为"跟随设置"。`desktop.appScale` 为 2、应用默认 1.5× 时，在 DPR 1 的页面上窗口的 Auto 会以 1× · auto 重启。属于 owner 决策（§3.4 补记）：至少把窗口那一行按它做的事命名（"Auto — 本屏幕 (n×)"），和 / 或把 "设置 (2×)" / "应用默认 (1.5×)" 各自作为一行提供。
+- **页面前 3 秒内的启动可能悄悄丢掉应用默认**：启动器最多等 3 秒第一次 user-state 读取，之后不带 `scaleChoice` 启动（记录以实例默认运行，"1× · auto"），一言不发。碰到时再修：等读取完成（卡片已有启动中状态），或 toast 说明读不到应用默认。
+- **每个应用的 map 从不修剪**：registry 已不再列出的应用（删掉的行、只输过一次的命令）的键永远留在 `desktopAppScale` / `desktopAppFrame` 里；只有用户选 Auto 才会删除。增长以一个人选过的不同应用数为上限。可在对话框渲染时修剪，或继续把这个形状记为有意不修剪（frame map 也是如此）。
+- （验证者的第五条 low——"先本地应用、服务器拒绝时从不回滚"——不在此列：上面那条修复已把它回滚。）
 
 ### 3.5 远程主机：在应用所在的机器上跑同一份代码
 
@@ -201,6 +240,65 @@ seamless ⇔ connected ∧ ¬lease ∧ ¬chain ∧ ¬phone ∧ (userToggle==='on
 
 **C2 验证 r5 修复（2026-09-25，四条 low——本 lane 的最后一轮，每条带 pin 与对照）。** L1 与上一次安装的退出落在**同一秒**里的 `start`，在那次安装留下的子进程仍持有锁时，会回答那个过期的退出码而不是去跑（验证者：6/6）——退出文件的时刻现在是纳秒，`start` 只在它**严格晚于**自己开始时才把它当作答案（对照：整秒 `-ge` 的启动器回答过期的 100）。L2（措辞）锁由 runner shell 与 apt-get 持有，从不是 dpkg（见上面 ㉒）。L3 锁目录原来取 `$XDG_RUNTIME_DIR` 或 `/tmp`——环境不同的两个启动方会为同一个状态目录起出两把锁，而 `/tmp` 的名字可预测；现在是 `/run/user/<uid>`，否则 `/tmp/vibespace-<uid>`（0700），不是本用户拥有的目录时按名拒绝（对照：r4 那一行在三种环境下为同一个状态目录起出两把锁）。L4 没拿到锁（fd 9）就被启动的 runner，要等启动器 10 s 的 pidfile 等待走完才被报告；这段等待现在以 runner 自己的寿命为界（约 0.2 s 回 125 并点名那把锁；对照：3 s 时仍在等）。门：test-desktop-serve §10、test-desktop-remote §8。
 
+
+### 3.6 lane E（2026-09-25）：窗口是**共享**给 agent 的，而不是默认可见 —— 可达性、无障碍树 / 像素模式、控制请求
+
+**owner 原话（2026-09-25）：** "浏览器窗口不是也应该能给agent操作吗？为啥你说不让？另外可能默认不要让agent能看到所有窗口，而是创建前和创建后能选择把窗口暴露给哪些agent或者group，或者直接从一个窗口能发起让某个特定agent控制的request。话说我们的设计下多个窗口是可以同时被多个agent操作的吧？" —— 19:05 补充："我理解任何窗口发送给agent的时候应该都要有个选项可以切换无障碍还是像素模式。像素模式是最接近用户本人操作的方案作为兜底。"
+
+**决定（默认值已告知 owner，按此构建）：**
+- **D1 默认隐藏。** 桌面应用窗口对所有 agent 不可见；`vibespace-window list` 只列用户共享过的；对未共享窗口的每个动词都按名拒绝 `not_exposed`。唯一例外：agent 自己 `vibespace-window open` 打开的窗口只共享给它自己的会话。
+- **D2 共享给谁、何时共享。** 共享对象是活的 agent **会话**（按持久的对话键 —— `<backend>:<对话 id>`，尚无对话时 `webui:<id>`，与 server.js `sessionStatusKey` 同一拼法，重启 / resume 同一对话后依然有效）或整个**任务组**（组内每个会话，现在或以后加入的 —— 每个动词执行时才查询成员关系）。在**启动前**选（桌面应用对话框的「共享给 agent」一行，按应用记在用户状态 `desktopAppReach`，键与 desktopAppFrame 相同）或**启动后**选（窗口的 ⋯ 以及标题栏 / 任务栏菜单 →「共享给 agent…」）。随时可撤销；agent 占用窗口时撤销会立即结束它的租约 —— 它的下一个动词得到 `not_exposed`。
+- **D3 控制请求。** 在窗口上「请 <agent> 接管」—— VibeSpace 给该 agent 发一条指明窗口的消息（标签、句柄、模式、操作方式、用户可选的一句话作为备注）。默认**免费**：走投递梯的 stash，即 agent 的下一个回合。「立即唤醒」（默认关）= 经投递梯受门控的 `deliverToConversation`、声明的花费理由 `window-share-request` 开启的计费回合（被无人值守回合预算拒绝时 fail closed，或没有活的通道时，退回到下一回合并说明原因；每个对话 30 秒内最多唤醒一次）。请求会先把窗口**授予**该 agent。**开放点的实现：** 当**另一个** agent 占用窗口时，对话框会说明并提供「结束 <name> 对这个窗口的占用」（默认勾选）—— 用户的意图是「让这个 agent 来控制」。
+- **D4 浏览器也是窗口。** 用户从桌面应用启动的 Chrome / Firefox 一经共享即与普通应用一样可操作（标记为「[the user's browser]」；agent 自己的网页工作仍用 `vibespace-browser`）；agent `open` 浏览器行（以及 `url` / `keepProfile`）仍是 `browser_is_human`。浏览器行启动时**总是**带无障碍开关（chromium `--force-renderer-accessibility`；firefox 在环境里设 `GNOME_ACCESSIBILITY=1`）—— 因为启动后才共享也需要它，而运行时再打开无障碍会翻转用户整个会话的 org.a11y.Status。
+- **D5** 真实桌面的同意开关（`window.realDesktopTargets`，tier 3）不变且正交 —— 那一类窗口从不读取共享。
+- **D6** 每个窗口一个持有者；不同 agent 可以同时持有任意多个窗口（每个应用有自己的显示，一个上的注入永远到不了另一个）。写进手册并钉住。
+- **D7 模式。** 每次共享都带 `auto`（默认）| `tree` | `pixels`，在选择器里选、随时可切换（切换在持有者的下一个动词生效，审计 `mode-changed`）；窗口上的芯片会写明（「已共享给 2 个 · 像素」）。`pixels` = 最接近用户亲手操作：`screenshot`（窗口自己的图像 + 尺寸 + 原点 + 缩放）和 `click --at`（**这张图像**里的一个像素）、`type`（按键）、`key`、`scroll`（新增）；树动词（`snapshot`、`click @ref`、`type @ref`）按 owner 的原句拒绝 `mode_pixels`。`tree` = 全部可用（像素动词是 agent 自己的兜底）。`auto` 在 attach 时解析（一次探测；刚启动的应用最多重试 3 秒），并在每次 snapshot 时重新解析：有可操作节点时为 tree，否则为 pixels，`list` / `attach` 会说明结果和原因（"no accessibility tree — pixel mode"）。
+
+**模型。** 纯函数模块 src/window-reach.js（每个窗口一条可达记录 `{windowId, mode, rows:[{principal, grantedAt, by: user|request|self-open}]}`，每个主体一行，撤销只删自己那一行，只放宽，`reachFor` = 取最大并指明起决定作用的那一行；模式表 `verbGate`；像素计划 / 可见性 / 坐标映射；请求文本；选择器；启动记忆）。window-targets 引擎持有存储（data/window-reach.json，原子写 0600，缩放 ▸ 重启后转给继任窗口，窗口结束时清理；广播 `window-reach-updated`）、每个动词上的可达门、模式解析和像素路径。用户路由（cookie 认证，仅限人 —— agent 令牌得到 `agent_forbidden`）：`GET/POST/DELETE /api/desktop/apps/:id/reach`、`PUT …/reach/mode`、`POST …/reach/request`，以及启动请求里的 `share`。配对机器上的窗口不是 agent 目标（`share_local_only`）。
+
+**实测（lane E 读者 + 构建者，2026-09-25，xpra 6.5.3、at-spi 2.60.4、Chrome 153、GTK4 的 GNOME 计算器、私有会话总线）：**
+- **Chrome 带 `--force-renderer-accessibility`：** 在默认 600 节点预算内快照就能到达**页面** —— 235–237 个节点，约 50 ms；记录就绪后约 0.9 秒页面出现（attach 的 auto 探测 825 ms 解析为 `tree`）；按钮「Press me」= 角色 `button`，动作 `[press, showContextMenu]`，`click @ref` 后页面显示「pressed 1」，**无需查看者**；页面输入框 = 角色 `entry`、状态 `editable` 但**没有 EditableText**（census `editableText 0`）⇒ 先经无障碍树聚焦（`Component.grab_focus`）再以按键输入 ⇒「typed xyz」（需要查看者）；`scroll down --by 5` ⇒ 滚动约 600 px（每格 120 px）。**不带该标志（对照组）：** 4 个节点 —— application + 3 个 frame，子节点不可读 —— 30 秒内没有页面；auto 解析为 pixels "its accessibility tree is closed"。
+- **GNOME 计算器（GTK4）：** 约 0.5 秒 107 个节点，每个按钮都有 `click`；`click @ref` 无需查看者。GTK4 把每个节点的 SCREEN 坐标都报成 0,0（WINDOW 相对坐标是对的：「7」在 24,428 64×44 逻辑像素）—— 树坐标永远不是点击坐标。
+- **xterm：** 根本不在无障碍总线上 ⇒ auto 解析为 pixels "no accessibility tree"。
+- **没有客户端时的 xpra 一级：** 主窗口 `IsUnviewable` —— 根窗口截图和窗口截图都是黑的，`click --at` 返回成功但什么都没发生，`key` 丢失，AT-SPI `grab_focus` 返回 True 却无效。挂上客户端后，应用**自己的** X 窗口有真实像素（其 alpha 字节为 0 —— 已强制不透明），而**根窗口**截图（lane E 之前的截图方式）仍是黑的（xpra 在屏外合成）。第一个客户端会把根窗口从 4096×2304 改成它自己的 1920×1200（2264 像素高的 Chrome 窗口于是超出下边 ⇒ 按名拒绝 `outside_window`）。无头替身查看者约 171 MB PSS（Xvfb 56 + 客户端 115）。
+- **坐标：** `click --at` 是窗口自己图像里的像素（按应用缩放的设备像素）：缩放 2 的计算器 ——「7」在 (86,876) / (112,900)，缩放 1 时 (43,438)；计算器主窗口在 (0,0)，Chrome 在 (20,20) —— 原点在动作时读取，从不假定。
+- **顺手修掉的缺陷：** `xdotool mousemove --sync` 移到指针当前位置会挂 7 秒（同一点第二次点击 / 按键失败 `inject_failed`）—— 现在不再同步；`--button` 4..7 被强制成**左键**点击 —— 现在按名拒绝，滚轮用 `scroll`；指针在 xterm 窗口外时输入的按键会丢 —— 现在按键 / 输入前指针先停在主窗口内。
+- **D6：** 两个 agent 同时操作两个窗口（计算器上的树点击 + 向 xterm 输入）—— 都生效；跨窗口操作 ⇒ `not_attached`。
+
+**门禁：** test-window-reach（fast —— 30 格可达表、72 格模式表、按实测几何的像素计划、三个补丁副本对照）、test-window-targets §4–§5（fast —— 默认隐藏、浏览器用例在共享前为 `not_exposed`、存根投递梯上的请求、人类路由、STATUS 普查）、test-window-target §4（heavy —— 私有会话总线下真实 xpra 一级：计算器、xterm、Chrome 的全部 D1–D7 用例，真实投递梯 + 真实花费守卫在 owner 上限 0 时拒绝唤醒）、test-desktop-app-window §E（heavy —— chrome UI）。
+
+**诚实的限制：** Firefox 的 `GNOME_ACCESSIBILITY=1` 未实测（本机 firefox 是 snap，无法在临时目录打开配置文件）；Chromium 渲染器无障碍在重页面上的 CPU 开销未实测；模式解析结果只在内存中（重启后重新探测）；配对机器上的窗口不能共享（lane C 的引擎只操作本机窗口）。
+
+**lane E 核验（2026-09-25）—— 对抗式核验者高于 low 的两条发现，已修复（每条都先复现为红）：**
+- **MAJOR —— 启动器那一行说的和点击做的正相反。** 未动过时，「共享给 agent」一行写着「对 agent 隐藏（每个应用会记住上次的选择）」，而启动却套用了这个应用**记住的**共享（lane 自己的重型套件恰好钉住了这一点）。D2 说下一次启动要**提议**同样的共享 —— 提议是动作之前就能看到的东西。现在这行字由点击所用的同一条规则推导（纯函数 `launchSummary` 基于 `launchShare`）：未动过时，只要有任何应用记住了共享，这一行就写「每个应用按你上次的共享设置启动」；应用记住了共享的目录卡片上带一个标签（「已共享给 Ops · 像素」）；套用了记住的共享的启动会弹出提示，说明在哪里修改。门禁：test-window-reach §7b（50 格表 + 未动过时总说"隐藏"的对照副本）、test-desktop-app-window §E（第二次启动前的标签和行文字、启动后的提示）。
+- **MINOR（可达性泄漏）—— 撤销挡不住已经在执行中的动词。** 可达性只在动词的各个 await 之前检查一次（最长 3 秒的 `auto` 探测、helper 的快照、输入后端探测、窗口计划、截图）；落在这期间的撤销仍然会注入（`click --at`、`click @ref`）、交出树（`snapshot`）或在租约已没的情况下回答"已 attach"（`attachWithMode`）—— 用 400 ms 的假 helper、撤销落在第 100 ms 复现。现在 `stillHeld` 在每一个动作和每一次交付之前**紧接着**重新判定整件事（窗口还在、开关还开着、可达、租约还是自己的、没被接管）；一个动词要么排在撤回之前、要么排在之后，绝不横跨。同一次重检也覆盖动词执行中离开任务组、被接管、真实桌面开关被关掉。门禁：test-window-targets §5（七条竞态用例 + 去掉重检的引擎补丁副本对照）。事故文：docs/kb-bugfix-invariants.md。
+
+**lane E 核验 low 级（未修复，2026-09-25）** —— 记录下来留给后续一轮，各附核验者提出的修法：
+1. **像素原点跟着**最大**的窗口走。** `pixelPlan` 按面积选主窗口，所以比主窗口**更大**的弹窗 / 对话框会在截图和点击之间移动坐标原点（偏 100 px 的点击且不拒绝）。在 Chrome 153 上实测其弹窗（320×274）一直比主窗口（2033×2284）小，所以需要一个超大的对话框才会触发。修法：按句柄记住主窗口 id，只要它仍然映射就沿用（消失了才重选），原点自上次截图后变了就带说明拒绝 `outside_window`。
+2. **30 秒唤醒节流只在内存里。** 两次「立即唤醒」之间服务器重启，就允许在间隔内再计费唤醒一次（此时只有支出守卫按身份的每小时上限兜底）。修法：把上次唤醒时间记在可达记录上，或在 create() 时读支出日志里该对话最后一条 `window-share-request`。
+3. **「结束 <agent> 对这个窗口的占用」结束的是**发送时**的持有者。** 对话框打开时记下了持有者；如果点发送前另一个 agent 拿走了租约，请求会结束**那个** agent 的占用。修法：发送 `endHoldOf` 指明对话框显示的持有者；只有它仍持有时才结束，否则回答 `holderChanged` 并说明。
+4. **仅限人类的共享路由只靠 Authorization 头挡 agent。** 关闭密码认证时，一个省略自己令牌的本地调用者挡不住（与现有 reset-credit / inbox-reply 同一模式 —— 开启认证时 cookie 门会拒绝）。修法：在每个仅限人类的路由上加正向的人类见证（每页一个 nonce），reset-credit 和 inbox-reply 一并改。
+5. **未复现：`key ctrl+t` 之后向 Chrome 地址栏输入 URL 没有跳转**，只在一次真实运行里见过（标签条显示新标签页；树里没有任一页面的标题；页面字段的 `type @ref` 用例通过）。怀疑：`focusedNode` 选中的不是地址栏。如果复现：ctrl+t 之后未给 ref 时优先选地址栏输入框，或在手册里教 `type @<地址栏 ref>`。
+- **观察到的门禁偶发失败，不是核验者的发现（2026-09-25，留给下一次诊断）：** test-window-targets §5 在真实 GTK 夹具上的像素用例在 15:14–15:23 PDT 之间 11 次运行里失败 5 次，抛出 `windowShot needs a window plan`（未捕获，整个套件退出）—— 含本轮修复的 7 次里 4 次，未修复的 lane E 基线提交上 4 次里 1 次，所以早于本轮修复 —— 当时另一条 lane 的完整 heavy 层正以四条并行 lane 在本机运行；抛出时套件自己的显示对 `xwininfo -root -tree` 回答**没有任何窗口**（夹具没了，或该显示号被另一个 X 服务器占用）。之后 10 次运行 0 失败，其中 6 次是三个同时跑。原因未找到；再出现时先记录夹具和 Xvfb 的退出（退出码 + 信号）。
+
+**lane E 核验第二轮（2026-09-25）—— 第二轮对抗式核验：无 major，两条 minor + 五条 low；修了四条（每条都先复现为红），三条记录在下面。**
+- **M1（minor）—— 重新判定按**函数**钉住，而不是按**调用点**。** 四个只删掉一处的变异体 —— 滚动之前没有重新判定、键入键位的路径里没有、应用窗口截图回答之前没有、tier 3 截图回答之前没有 —— 都让 test-window-targets 的每个行为用例通过（核验者：244/0；这里在树的副本上复现）（产品在这四处都是对的；套件分辨不出来）。现在竞态用例是**确定性**的（用户的动作在某个具名 await 开始时触发），并由**逐调用点普查**从引擎源码里 grep 出每一个 `held()` / `heldOrUnlink(` / `stillHeld(` 调用，在补丁副本里把它单独换成不检查的租约，要求至少一个用例变红（14 处；click @ref 那一处标注 `// no-await-before` —— 按构造就是冗余的，其断言在代码里核对）。新增用例：滚动、像素模式的 type、向"按状态可编辑"字段的 type、窗口计划截图、tier 3 截图期间开关被关掉。
+- **M2（minor）—— 启动器说出的是过时的共享。** 卡片标签和启动提示直接用每个应用的记忆里的名字（一个已结束的会话、一个已删除的任务组 —— 「已共享给 alpha, Ops (old name) · 自动」，而启动写下的行谁也匹配不上；记忆只在这一行被动过时才重写）。现在这些字读的是选择器的名单：「alpha（当前未运行）」「Ops（当前不在列表中）」（选择器自己的说法），改过名的任务组用它的当前标题；启动的审计行会数出无人匹配的行。门禁：test-window-reach §7b（名单用例 + 对照）、test-desktop-app-window §E（第三次启动前删掉记住的任务组）。
+- **L4（low，已修 —— 失败即关闭的方向）—— 任务组存储**抛异常**时被读成"不是成员"。** 动词回答 `not_exposed`，租约被丢掉并审计为 "exposure revoked by the user"；故障期间撤销一个不相关的主体也会丢掉经由任务组持有的租约。现在是 `reach_unreadable`（新的封闭代码，503）：动词按名字被拒绝，租约**保留**，审计 by:store；`list` 会数出无法判定的窗口；`detach` 永远可用。
+- **L5（low，已修）—— 接管不会取消已经在执行的动作。** `type`（每个字符 12 ms）在接管或撤销之后还会继续注入最长 20 秒，和用户的按键交错；`TYPE_MAX` 4000 在固定的 20 秒里根本打不完。现在每次注入都是**租约**可取消的子进程（接管 / 租约被丢时按它自己的句柄杀掉），动词回答 `window_paused` / `not_exposed` 并带 `did.partial`；`TYPE_MAX` = 1500，超时随文本长度增长。**顺带实测：** 在按下和松开一个键之间 SIGKILL，会让这个键**一直按着**，服务器还会自动重复它（1.5 秒 37 次，输入框里一串 "qqqq…"）—— 所以每次被杀的注入（取消或超时）都先经 XTEST **松开**它可能按着的键（没映射的 keysym 零成本跳过；松开一个没按下的键会被服务器丢弃）。事件文章：docs/kb-bugfix-invariants.md。
+
+**lane E 核验第二轮 low 级（未修复，2026-09-25）** —— 记录下来留给后续一轮，各附核验者提出的修法：
+- **L3 —— 未动过的「共享给 agent」弹出框显示**空的**选择器**，而这一行说的是每个应用按上次的共享启动（选择器从对话框自己的空白选择开始，而不是任何应用的记忆）。修法：在弹出框里加第一行说明 —— 未动过时每个应用保留自己记住的共享，在这里选择则会覆盖这次启动。
+- **L6 —— 「高级」（exec）或「最近」启动会套用记住的共享，但点击之前没有标签**（标签只装饰目录卡片）。修法：同样装饰「最近」的各行，并在「高级」的运行按钮上注明该命令的键记住的共享。
+- **L7 —— 很长的中文 / 日文任务组名会把卡片标签里的**模式**挤掉**（40 个字符的标题占满标签的两行；工具提示里仍有）。修法：把模式放在前面（「像素 · 已共享给 …」），或者只显示一个名字 + "+N"。
+- **观察到的门禁偶发失败，不是核验者的发现（2026-09-25 17:2x PDT，第二轮修复的运行）：** test-desktop-app-window 的**最后一个**用例 —— 单例 Desktop 窗口的状态标签在 15 秒内稳定下来（在这个 worktree 服务器上是 "no VNC server installed"）—— 三次运行里有一次回答 `null`（第一次，紧接在 test-window-target 之后，机器负载约 3.5）；两次重跑全部通过。该用例及其代码都没被 lane E 改动；留给下一次诊断（先在超时那一刻抓下标签的文字）。
+
+**lane E 核验第三轮（2026-09-26）—— 第三轮对抗式核验：一条 minor + 四条 low，全部修复（每条都先复现为红）；没有新增「未修复」项。**
+- **F1（minor）—— 第二轮的取消挂在一个会被重新 attach 替换掉的租约**对象**上。** `injecting` 注册在 `act()` 开头 `requireLease` 返回的那个租约对象上；同一个会话在动词的探测期间 detach 再 attach（或者用户撤销、重新共享、agent 再 attach），租约表里就换成了一个**新**对象 —— 重新判定在新对象上通过，接管的取消去看新对象、什么也没找到，于是 type 穿过接管一直打完（403 ms 后回答 `ok`，什么都没被杀）。现在正在执行的动作按**窗口句柄**记录；接管或丢掉租约会取消这个窗口上的每一个动作。门禁：test-window-targets §5（两条重新 attach 用例；对照 = 第二轮按对象记录的写法）。事故文：docs/kb-bugfix-invariants.md。
+- **F2（low）—— 被**超时**杀掉的注入，其 `partial` 到不了调用方。** 原语说了 `partial: true` + `released`，引擎抛出时却没带 `did`。现在每一个没做完的注入，其拒绝和审计行上都带 `did`（路由 502 + `did`，CLI 的 "STOPPED PART-WAY"）。门禁：§5 经真实原语强制超时的用例 + 路由 + CLI + 对照。
+- **F3（low）—— 像素模式下输入非 ASCII 文本需要 UTF-8 locale，而显示环境并不保证有。** 在本机 Xvfb 上、没有 LANG 时实测：`type "ab中文é"` 先打出了 "ab"，随后 xdotool 以 "Invalid multi-byte sequence encountered" 失败，且不带 `partial`。现在含非 ASCII 字符的文本按 desktop-display.js 早已用于 xwininfo 的 UTF-8 规则运行（`LC_ALL=C.UTF-8`，否则用环境自己的 UTF-8 locale，均用 `locale charmap` 核实）；一个都加载不了时，在打任何字之前就以 `no_utf8_locale`（503）拒绝，并指出第一个这样的字符。xdotool 开始之后才放弃的 type 回答 `partial`，理由用它自己的报错（绝不是命令行 —— 那里有文本）。门禁：§2b 用假的 `locale` 回答，§3 在真实 Xvfb 上去掉 LANG + 无规则对照。
+- **F4（low）—— `list` 晚一个 await 交出了已撤销窗口的那一行。** 现在它在最后一个 await 之后重新判定可达性（`stillListed`，逐调用点普查的第 15 处）。门禁：§5 一条竞态用例。
+- **F5（low）—— 启动审计把存储读不出来的任务组算成 `unmatched`。** 一个组行在某次成员关系读取抛异常时谁也没找到，记为 `undecided`（纯函数 `reachedState` / `launchCounts`；共享视图把这一行标为 `undecided`）。门禁：test-window-reach §2c + 对照 (g)，test-window-targets §5 + 对照。
 
 ## 4. 精简集（建议就建这些）
 

@@ -18,6 +18,7 @@ const {
 const { isCliProcess } = require('../cli-identity');
 const { createMessageManager } = require('../normalizers');
 const { mergeLiveWorkflow } = require('../workflow-live'); // 2.369.119: the card's stream tree laid over the disk skeleton
+const { parseRunDir, journalAttemptsFromText, treeAlive } = require('../workflow-disk'); // 2026-09-26: the run dir's labels/phases/liveness — THE disk view (PURE)
 // S3: discovery iterates the harness registry — each descriptor's
 // store.discover lists its own sessions (claude lock-first sweep in
 // session-store, codex worker-side rollout walk); no backend ternary here.
@@ -341,11 +342,14 @@ function setup(ctx) {
   }
 
   // The rich snapshot is written only at the END. While a run is in progress
-  // the live signals are the per-run dir's journal.jsonl (one {started}/{result}
-  // per agent, appended live) + the agent-<id>.jsonl transcripts (streamed).
-  // We build a LIVE skeleton from those so the viewer works mid-run — with the
-  // caveat that phase names / labels / token totals only exist in the snapshot,
-  // so a running view shows agent count + per-agent state + live transcripts only.
+  // (or after it stopped without one) the run dir is the truth: journal.jsonl
+  // (started {key, agentId, label, phase} / result / failed, appended live),
+  // agent-<id>.meta.json (description = label, workflowPhase, model) and the
+  // agent-<id>.jsonl transcripts. src/workflow-disk.js parseRunDir turns them
+  // into the view — labels + phases since CLI 2.1.267 (older runs: states only),
+  // and a LIVENESS verdict from the files' mtimes (no write for 10 min, no live
+  // tree, no snapshot ⇒ `stalled`, never `running`). Token totals exist only in
+  // the snapshot (or the live tree while this server holds it).
   function findWorkflowRunDir(runId, claudeSessionId, cwd) {
     const projectsDir = path.join(os.homedir(), '.claude', 'projects');
     const sub = (base) => path.join(base, 'subagents', 'workflows', runId);
@@ -362,55 +366,19 @@ function setup(ctx) {
     return null;
   }
 
-  // Journal retry chains (2.181.1, real confusion report): the harness
-  // re-spawns an agent whose API stream aborted — SAME journal `key`, NEW
-  // agentId. Every non-newest attempt of a key without its own result is a
-  // DEAD superseded attempt (its transcript dead-ends in "[Request
-  // interrupted by user]") — label it instead of showing a bare interrupt.
-  function journalAttemptsFromText(text) {
-    const started = new Set(), done = new Set();
-    const keyOf = new Map(), lastAttempt = new Map();
-    for (const line of String(text || '').split('\n')) {
-      const t = line.trim(); if (!t) continue;
-      let o; try { o = JSON.parse(t); } catch { continue; }
-      if (!o.agentId) continue;
-      if (o.type === 'started') {
-        started.add(o.agentId);
-        if (o.key) { keyOf.set(o.agentId, o.key); lastAttempt.set(o.key, o.agentId); }
-      } else if (o.type === 'result') done.add(o.agentId);
-    }
-    const superseded = new Set();
-    for (const [id, k] of keyOf) { if (!done.has(id) && lastAttempt.get(k) !== id) superseded.add(id); }
-    return { started, done, superseded };
-  }
+  // Journal retry chains (2.181.1): the text parser lives in src/workflow-disk.js
+  // (ONE implementation — the disk view and the snapshot's superseded tagging
+  // below read the same arithmetic).
   function journalAttempts(runDir) {
     let text = '';
     try { text = fs.readFileSync(path.join(runDir, 'journal.jsonl'), 'utf-8'); } catch {}
     return journalAttemptsFromText(text);
   }
 
-  // Pure core shared by the local reader and the remote (?host=) branch
-  // (2.191.0): the live skeleton built from a journal-attempts object, the
-  // run dir's file inventory, and the persisted script filename.
-  function liveWorkflowFromParts({ runId, attempts, agentFiles = [], scriptName = '' }) {
-    const { started, done, superseded } = attempts;
-    // A transcript file can exist before its journal 'started' line lands.
-    for (const f of agentFiles) { const m = String(f).match(/^agent-([0-9a-f]+)\.jsonl$/); if (m) started.add(m[1]); }
-    const name = scriptName && scriptName.endsWith(`-${runId}.js`) ? scriptName.slice(0, -(`-${runId}.js`.length)) : 'Workflow';
-    const agents = [...started].map((id) => ({ index: 0, label: '', model: '', state: done.has(id) ? 'done' : (superseded.has(id) ? 'superseded' : 'progress'), agentId: id }));
-    agents.sort((a, b) => a.agentId.localeCompare(b.agentId));
-    return {
-      runId, workflowName: name, summary: '', status: 'running', live: true,
-      agentCount: started.size, doneCount: done.size,
-      durationMs: 0, totalTokens: 0, totalToolCalls: 0,
-      error: null, result: null, timestamp: null,
-      phases: [{ index: 0, title: 'Agents (live — phase names, labels & tokens appear when the run finishes)', agents }],
-    };
-  }
   // ONE live view for the card AND the window (2.369.119, owner: "怎么这个内外实现还不一样？"):
   // the normalizer of the session that launched the run holds the harness's own
   // task_progress tree (phases/labels/states/last tool) on taskInfo.workflow —
-  // lay it over the disk skeleton by agentId (src/workflow-live.js). Local and
+  // lay it over the disk view by agentId (src/workflow-live.js). Local and
   // remote sessions alike: the stream is parsed HERE, so the tree lives here.
   function liveTreeFor(runId) {
     try {
@@ -422,20 +390,59 @@ function setup(ctx) {
     } catch { /* a normalizer mid-teardown */ }
     return null;
   }
-  function withLiveTree(view, runId) {
+  // THE disk view of every live return (2026-09-26): parseRunDir over the run
+  // dir's parts, the stream tree laid over it when this server holds one. A
+  // tree counts as proof of life only while the stream has not closed the task
+  // itself (a level-set close is a guess, not a close) AND its newest record is
+  // fresh (treeAlive, lane Q verify: a tree replayed after a restart is as old
+  // as its records). `now` judges the FILES (the host's clock for a remote run;
+  // 0 = no clock ⇒ liveness unknown); the tree's freshness is judged by THIS
+  // server's clock, the one that stamped it.
+  function liveView(parts, { runId, snapshotPresent = false, now = Date.now() }) {
     const ti = liveTreeFor(runId);
+    const treeLive = treeAlive(ti, Date.now());
+    const view = parseRunDir({
+      runId, snapshotPresent, now, liveTree: treeLive,
+      journalLines: String(parts.journalText || '').split('\n'),
+      metas: parts.metas || {}, agentFiles: parts.agentFiles || [], scriptName: parts.scriptName || '',
+      newestMtime: parts.newestMtime || 0,
+    });
     return ti ? mergeLiveWorkflow(view, ti.workflow, ti.usage || null) : view;
   }
-  function readLiveWorkflow(runDir, runId) {
-    const attempts = journalAttempts(runDir);
-    let agentFiles = []; try { agentFiles = fs.readdirSync(runDir); } catch {}
+  // The local run dir's parts, read OFF the event loop (a 2.5 s poll per open
+  // window): the journal, every file's mtime (the newest = the run's last sign
+  // of life), each agent's meta.json (cached by path + mtime — written once at
+  // spawn) and the persisted script's name.
+  const _wfMetaCache = new Map();
+  async function readRunDirParts(runDir, runId) {
+    const fsp = fs.promises;
+    let names = []; try { names = await fsp.readdir(runDir); } catch {}
+    let journalText = ''; try { journalText = await fsp.readFile(path.join(runDir, 'journal.jsonl'), 'utf-8'); } catch {}
+    let newestMtime = 0;
+    const metas = {};
+    await Promise.all(names.map(async (n) => {
+      const fp = path.join(runDir, n);
+      let st; try { st = await fsp.stat(fp); } catch { return; }
+      if (!st.isFile()) return;
+      if (st.mtimeMs > newestMtime) newestMtime = st.mtimeMs;
+      const m = n.match(/^agent-([0-9a-f]+)\.meta\.json$/);
+      if (!m) return;
+      const hit = _wfMetaCache.get(fp);
+      if (hit && hit.mtimeMs === st.mtimeMs) { metas[m[1]] = hit.meta; return; }
+      try {
+        const meta = JSON.parse(await fsp.readFile(fp, 'utf-8'));
+        metas[m[1]] = meta;
+        _wfMetaCache.set(fp, { mtimeMs: st.mtimeMs, meta });
+        if (_wfMetaCache.size > 4000) _wfMetaCache.delete(_wfMetaCache.keys().next().value);
+      } catch { /* half-written — the next poll reads it */ }
+    }));
     // Best-effort workflow name from the persisted script filename (<name>-<runId>.js).
     let scriptName = '';
     try {
       const scriptsDir = path.join(path.resolve(runDir, '..', '..', '..'), 'workflows', 'scripts');
-      for (const f of fs.readdirSync(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { scriptName = f; break; } }
+      for (const f of await fsp.readdir(scriptsDir)) { if (f.endsWith(`-${runId}.js`)) { scriptName = f; break; } }
     } catch {}
-    return liveWorkflowFromParts({ runId, attempts, agentFiles, scriptName });
+    return { journalText, metas, agentFiles: names, scriptName, newestMtime };
   }
 
   router.get('/api/workflow', async (req, res) => {
@@ -450,10 +457,16 @@ function setup(ctx) {
         const st = await hosts.fetchWorkflowState(String(host), runId, String(claudeSessionId || ''), String(cwd || ''));
         if (!st.snapText && !st.hasRunDir) return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
         const attempts = journalAttemptsFromText(st.journalText);
-        const liveParts = { runId, attempts, agentFiles: st.agentFiles, scriptName: st.scriptName };
+        // the host's own clock judges the host's mtimes (no skew between machines);
+        // no NOW line ⇒ no clock ⇒ liveness `unknown` (running), never the hub's
+        // clock against the host's mtimes (lane Q verify)
+        const now = st.now ? st.now * 1000 : 0;
+        // the newest mtime of EVERY file of the run (NMT — meta.json too, the local
+        // read's rule), never only the journal + transcripts (lane Q verify)
+        const liveParts = { journalText: st.journalText, metas: st.metas || {}, agentFiles: st.agentFiles, scriptName: st.scriptName, newestMtime: Math.max(st.journalMtime || 0, st.agentMtime || 0, st.newestMtime || 0) * 1000 };
         if (st.snapText) {
           const liveS = Math.max(st.journalMtime || 0, st.agentMtime || 0);
-          if (st.snapMtime && liveS > st.snapMtime + 15) return res.json({ ...withLiveTree(liveWorkflowFromParts(liveParts), runId), resumed: true });
+          if (st.snapMtime && liveS > st.snapMtime + 15) return res.json(liveView(liveParts, { runId, snapshotPresent: true, now }));
           try {
             const out = normalizeWorkflowSnapshot(JSON.parse(st.snapText), runId);
             for (const ph of out.phases || []) for (const ag of ph.agents || []) {
@@ -462,7 +475,7 @@ function setup(ctx) {
             return res.json(out);
           } catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
         }
-        return res.json(withLiveTree(liveWorkflowFromParts(liveParts), runId));
+        return res.json(liveView(liveParts, { runId, now }));
       } catch (err) { return res.status(502).json({ error: 'remote workflow fetch failed: ' + err.message }); }
     }
     // Terminal snapshot wins (it's complete). Prefer it even if the run dir
@@ -488,7 +501,7 @@ function setup(ctx) {
               if (/^agent-[\w-]+\.jsonl$/.test(f)) liveMs = Math.max(liveMs, fs.statSync(path.join(runDir, f)).mtimeMs);
             }
           } catch {}
-          if (liveMs > snapMs + 15000) return res.json({ ...withLiveTree(readLiveWorkflow(runDir, runId), runId), resumed: true });
+          if (liveMs > snapMs + 15000) return res.json(liveView(await readRunDirParts(runDir, runId), { runId, snapshotPresent: true }));
         }
       } catch {}
       try {
@@ -507,8 +520,9 @@ function setup(ctx) {
       }
       catch (err) { return res.status(500).json({ error: 'failed to parse workflow snapshot: ' + err.message }); }
     }
-    // No snapshot yet — surface a LIVE view if the run is still going.
-    if (runDir) return res.json(withLiveTree(readLiveWorkflow(runDir, runId), runId));
+    // No snapshot — the run dir's view: running while it writes (or this server
+    // holds its live tree), `stalled` once nothing has been written for 10 min.
+    if (runDir) return res.json(liveView(await readRunDirParts(runDir, runId), { runId }));
     return res.status(404).json({ error: 'workflow not found (no run directory or snapshot for this id)' });
   });
 

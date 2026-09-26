@@ -24,12 +24,27 @@
 //      "Open URL" (http/https, checked by the PURE `validateBrowserUrl` before
 //      the request and by the server again) and a "keep the profile" choice;
 //      both ride the launch as `url` / `keepProfile` for a browser row only.
+//   3c. THE APP'S DEFAULT SCALE (lane D, 2026-09-25 — the owner: "最好加入可以在app启动前那个app选择界面调整每个app默认
+//      dpi的能力"): on a machine whose rung scales apps (the xpra stream), every catalog card carries a small control
+//      beside it (a sibling BUTTON — a control cannot nest inside the card's button) naming the app's default scale
+//      ("Auto" / "1.5×"); its menu Auto (Settings → Desktop app scale) / 1× / 1.5× / 2× / 2.5× / 3× stores the choice
+//      in user state `desktopAppScale[<app id>]` WITHOUT launching (PURE src/lib/desktop-app-scale.js; the loader is
+//      desktop-app-prefs.js, shared with the window). Every launch — a card, a Recent row, a typed command — carries
+//      the stored default of its app as `scaleChoice`; the record's origin is then 'app' ("1.5× · App default").
 //   6. MACHINES (lane C2, docs/design-desktop-apps-seamless §3.5) — a picker above the catalog: this machine + every
 //      paired machine (GET /api/desktop/machines, the PURE machinePickRow verdict), a machine that cannot run apps
 //      GREYED with its reason in plain words (never hidden); choosing one re-reads ITS catalog, ladder and cap
 //      (GET /api/desktop/apps?host=), the launch carries `host`. A machine without xpra offers
 //      "Install xpra on <machine>…": the PLAN first (source, every command), then the run with its log streamed into
 //      the dialog; no passwordless sudo ⇒ the commands to copy, said by name.
+//   7. SHARE WITH AGENTS (desktop lane E, D2 "before launch" — src/lib/window-share.js `mountLaunchShareRow`): under
+//      the machine picker, a summary button + popover picker (live agent sessions, Task Groups, the mode Auto /
+//      Accessibility tree / Pixels); every window is hidden from agents unless shared; the choice rides the launch as
+//      `share` (this machine only — the row hides for a paired one) and is remembered per app (user state
+//      `desktopAppReach`, the desktopAppFrame key); untouched, a launch proposes what that app remembers — and SAYS so
+//      before the click (lane E verify, 2026-09-25): the row never reads "hidden" while any app remembers a share,
+//      each catalog card that will launch shared carries a chip naming it (`decorateCards`), and a launch that applied
+//      a remembered share is toasted with where to change it (`announce`).
 // ≤768px is one column. Every failure reaches a toast (fetchJson never throws;
 // the server always answers `{error}`). The dialog holds NO session state: it
 // re-reads /api/desktop/apps when it opens and follows the
@@ -44,11 +59,14 @@
 // what scrolled the title off-left. test-desktop-app-window pins the three
 // viewports with computed geometry.
 import { t } from './i18n.js';
-import { copyText, createModalShell, escHtml, fetchJson, showToast, uiScale } from './utils.js';
+import { copyText, createModalShell, escHtml, fetchJson, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { setupDirAutocomplete } from './autocomplete.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { validateBrowserUrl } from '../desktop-apps.js';
+import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
+import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
+import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -71,6 +89,24 @@ export function launchDpr(v = (typeof devicePixelRatio === 'number' ? devicePixe
 export function launchUiScale(v = uiScale()) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(2, Math.max(0.6, Math.round(n * 100) / 100)) : 1;
+}
+
+/** One explicit scale in words — shared by a window's Scale ▸ rows and the dialog's cards. Just the number: since lane D (a)
+ *  a fraction is a REAL scale of widgets and text alike (drawn at the next whole GDK_SCALE and shown smaller — the chip's
+ *  tooltip says so on a running window), so no row carries the old "text only in GTK apps" caveat any more. */
+export function explicitScaleLabel(choice) {
+  return `${choice}×`;
+}
+/** Lane D: a catalog card's default-scale control — its words ("Auto" / "1.5×"), its tooltip and its menu rows. */
+export function cardScaleText(choice) { return choice === 'auto' ? t('Auto') : `${choice}×`; }
+export function cardScaleTitle(app, choice) {
+  return choice === 'auto'
+    ? t('Default scale for {app}: Auto (Settings → Desktop app scale). Click to choose the scale it starts at.', { app })
+    : t('Default scale for {app}: {scale}× — it starts at this scale. Click to change.', { app, scale: choice });
+}
+export function cardScaleRowLabel(row) {
+  const mark = row.current ? '✓ ' : '\u2003';
+  return mark + (row.choice === 'auto' ? t('Auto (Settings → Desktop app scale)') : explicitScaleLabel(row.choice));
 }
 
 /** B-bfe6: the ONE sentence that tells a desktop-app browser apart from the Agent browser — the Browsers section
@@ -213,8 +249,9 @@ const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', he
 export async function showLaunchDialog(app) {
   const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: t('Desktop apps'), dialogClass: 'desktop-launch', escapeToClose: true });
   body.innerHTML = `
-    <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — the agent cannot reach it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
+    <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — agents cannot see it unless you share it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
     <div class="desktop-launch-machines" role="group" aria-label="${escHtml(t('Machine'))}"><span class="desktop-launch-machines-label">${escHtml(t('Run on'))}</span></div>
+    <div class="desktop-launch-share-row"></div>
     <div class="desktop-launch-avail"></div>
     <div class="desktop-launch-install is-empty"></div>
     <section class="desktop-launch-sec desktop-launch-running-sec is-empty">
@@ -274,6 +311,38 @@ export async function showLaunchDialog(app) {
   let advancedOpen = false;
   const busy = new Set();      // stop in flight, by session id
   const launching = new Set(); // card launch in flight, by registry row id
+  let refocusScale = null;     // lane D: the card whose default-scale control had the keyboard before a re-render
+
+  // lane D: a card's DEFAULT SCALE control — one sibling button per card (the app's id names it); its menu stores the
+  // choice (never launches); the dialog re-renders from the shared loader, on this client and on every other one
+  const cardScaleControl = (row) => {
+    const key = scaleKeyOf({ appId: row.id });
+    const cur = scaleChoiceOf(appPrefs(SCALE_PREF_KEY), key);
+    const c = document.createElement('button'); c.type = 'button';
+    c.className = 'desktop-launch-card-scale' + (cur !== 'auto' ? ' has-default' : '');
+    c.dataset.scaleFor = row.id;
+    c.textContent = cardScaleText(cur);
+    c.title = cardScaleTitle(row.label, cur);
+    c.setAttribute('aria-label', c.title);
+    c.setAttribute('aria-haspopup', 'menu');
+    c.onclick = (e) => {
+      e.stopPropagation();
+      const r = c.getBoundingClientRect();
+      const rows = scaleDefaultMenuModel(appPrefs(SCALE_PREF_KEY), key).map((m) => ({ label: cardScaleRowLabel(m), disabled: m.disabled, action: () => {
+        refocusScale = row.id;
+        saveAppPrefs(SCALE_PREF_KEY, (map) => setScaleChoice(map, key, m.choice), t('Could not save the app’s default scale'));
+      } }));
+      const pop = showContextMenu(r.left, r.bottom + 2, [{ label: t('Default scale for {app}', { app: row.label }), disabled: true }, ...rows]);
+      // Esc closes THIS menu only: the dialog's own Esc (createModalShell's overlay listener) would close the whole dialog
+      const onEsc = (ev) => {
+        if (!pop.isConnected) { document.removeEventListener('keydown', onEsc, true); return; }
+        if (ev.key !== 'Escape') return;
+        ev.stopPropagation(); ev.preventDefault(); pop.remove(); document.removeEventListener('keydown', onEsc, true); focusQuiet(c);
+      };
+      document.addEventListener('keydown', onEsc, true);
+    };
+    return c;
+  };
 
   // Insurance for every programmatic focus in this dialog: preventScroll. The
   // 2026-09-14 defect was the UA scrolling `.dialog` (overflow:hidden is still
@@ -289,11 +358,21 @@ export async function showLaunchDialog(app) {
 
   const launch = async (payload, recent) => {
     runBtn.disabled = true;
+    // lane E (D2): the share this app launches with — the row's choice, else what the app remembers (this machine only)
+    const shareKey = launchKeyOf(payload);
+    const share = shareRow.shareFor(shareKey);
     // HiDPI (2.369.158): THIS client's devicePixelRatio rides the launch; round 3 A3: and its UI scale — under
-    // `desktop.appScale: auto` the app's scale is derived from dpr × uiScale (VibeSpace's own effective scale here)
-    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale(), ...(host !== 'local' ? { host } : {}) }) });
+    // `desktop.appScale: auto` the app's scale is derived from dpr × uiScale (VibeSpace's own effective scale here);
+    // lane D: and the app's OWN default scale when the person chose one (a card's control, a window's "Make n× the
+    // default") — the user state is read once per page; a click before it answered waits for it (≤ 3 s)
+    await Promise.race([appPrefsReady(), new Promise((r) => setTimeout(r, 3000))]);
+    const scaleChoice = launchScaleChoice(appPrefs(SCALE_PREF_KEY), payload);
+    const r = await fetchJson('/api/desktop/apps', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...payload, dpr: launchDpr(), uiScale: launchUiScale(), ...(scaleChoice != null ? { scaleChoice } : {}), ...(host !== 'local' ? { host } : {}), ...(share ? { share } : {}) }) });
     runBtn.disabled = false;
     if (!r || r.error) { showToast(r?.error || t('Could not launch the application'), { type: 'error' }); return null; }
+    shareRow.remember(shareKey, share);
+    shareRow.announce(shareKey, share, r); // lane E verify: a launch that applied the app's REMEMBERED share says so
+    if (r.reachError) showToast(t('The app started, but sharing it failed: {why}', { why: r.reachError.error || '' }), { type: 'error' });
     if (recent) {
       recents = pushRecent(recents, { ...recent, label: r.label });
       patchUserState({ [RECENTS_KEY]: recents });
@@ -303,7 +382,9 @@ export async function showLaunchDialog(app) {
     return r;
   };
 
+  const shareRow = mountLaunchShareRow(app, $('.desktop-launch-share-row'), { isLocal: () => host === 'local' });
   const renderMachines = () => {
+    shareRow.render(); // lane E: the share row hides for a paired machine (its windows are no agent target)
     for (const el of [...machinesEl.querySelectorAll('.desktop-launch-machine')]) el.remove();
     if (machines.length < 2) { machinesEl.style.display = 'none'; return; } // this machine only: no picker at all (the dialog as before)
     machinesEl.style.display = '';
@@ -339,6 +420,7 @@ export async function showLaunchDialog(app) {
     availEl.classList.toggle('desktop-launch-avail-bad', !!listError || !!(data && data.availability && !data.availability.backend));
     renderInstall();
     const dead = !!listError || !data?.availability?.backend;
+    const scales = !dead && data?.availability?.stream === 'xpra'; // lane D: only a rung that scales apps offers a default scale
     const capUsed = data?.cap?.used ?? 0, cap = data?.cap?.cap ?? 0;
     // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
     regEl.innerHTML = '';
@@ -371,9 +453,16 @@ export async function showLaunchDialog(app) {
         const r = await launch(body, null);
         if (!r) { launching.delete(row.id); render(); }
       };
-      (row.browser ? browsersEl : regEl).appendChild(b);
+      // lane D: the card + (on a scaling rung) its default-scale control, side by side — a control cannot live INSIDE
+      // the card's button, so the grid item is a wrapper holding both
+      const wrap = document.createElement('div'); wrap.className = 'desktop-launch-card-wrap';
+      wrap.appendChild(b);
+      if (scales) wrap.appendChild(cardScaleControl(row));
+      (row.browser ? browsersEl : regEl).appendChild(wrap);
     }
+    if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
     browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
+    shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
     urlIn.disabled = keepIn.disabled = dead;
     const registryEmpty = !regEl.children.length && !browsersEl.children.length;
     if (!regEl.children.length) regEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
@@ -521,7 +610,10 @@ export async function showLaunchDialog(app) {
   };
   const offDesk = app.ws.onGlobal((m) => { if (m.type === 'window-leases-updated' && overlay.isConnected) renderDesk(); });
   renderDesk();
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offDesk?.(); } catch {} obs.disconnect(); } });
+  // lane D: a default scale chosen here, in a window's Scale ▸ or on another client re-renders the cards
+  wireAppPrefs(app);
+  const offPrefs = onAppPrefs(() => { if (overlay.isConnected) render(); });
+  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 
   render();

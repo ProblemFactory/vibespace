@@ -848,6 +848,47 @@ function run(bin, args, { env, timeout = 3000 } = {}) {
     execFile(bin, args, { env, timeout, maxBuffer: 4 * 1024 * 1024, encoding: 'utf8' }, (err, stdout) => resolve({ err, stdout: String(stdout || '') }));
   });
 }
+// ── THE UTF-8 RULE ───────────────────────────────────────────────────────────
+/**
+ * A child that reads or writes UTF-8 TEXT through its C locale runs under LC_ALL=C.UTF-8 (`UTF8_LOCALE`): xwininfo's
+ * rule since 2026-09-22 (its names), and — lane E verify r3 (F3), measured on this box's Xvfb — xdotool's `type`, which
+ * decodes its argv through the locale and, with none, refuses "Invalid multi-byte sequence encountered" after typing
+ * the ASCII before it. The hub's env carries whatever LANG / LC_* the process got (a fleet pod's Dockerfile sets none).
+ */
+const UTF8_LOCALE = 'C.UTF-8';
+function utf8Env(env) { return { ...(env || {}), LC_ALL: UTF8_LOCALE }; }
+/** The locale name the C library would pick for LC_CTYPE from an env (LC_ALL > LC_CTYPE > LANG). */
+const ctypeOf = (env) => String((env && (env.LC_ALL || env.LC_CTYPE || env.LANG)) || '');
+const UTF8_NAMED = /\.utf-?8(@|$)/i;
+const _charmapMemo = new Map(); // `${tool}|LC_ALL|LC_CTYPE|LANG|LOCPATH` → {ok, at} — a YES remembered, a NO re-asked after BIN_RECHECK_MS
+async function charmapOf(tool, env, { now = Date.now, timeout = 3000 } = {}) {
+  const key = [tool, env.LC_ALL || '', env.LC_CTYPE || '', env.LANG || '', env.LOCPATH || ''].join('|');
+  const hit = _charmapMemo.get(key);
+  if (hit && (hit.ok || now() - hit.at < BIN_RECHECK_MS)) return hit.ok;
+  const r = await run(tool, ['charmap'], { env, timeout });
+  const ok = !r.err && r.stdout.trim() === 'UTF-8';
+  _charmapMemo.set(key, { ok, at: now() });
+  return ok;
+}
+function resetCharmapMemo() { _charmapMemo.clear(); }
+/**
+ * An env in which a child can carry non-ASCII text (lane E verify r3, F3) — `{ok, env, locale, verified}` or
+ * `{ok:false, tried, why}`. Candidates in order: the UTF-8 rule (LC_ALL=C.UTF-8), then the env's OWN locale when its
+ * name says UTF-8 (a machine without C.UTF-8 — an old glibc — but with en_US.UTF-8 generated). Each is asked with
+ * `locale charmap` under that env (glibc answers ANSI_X3.4-1968 when the locale cannot be loaded — measured). No
+ * `locale` binary (`bins.locale === null`, or none on PATH): the rule is applied unverified — the child's own error
+ * is then the answer.
+ */
+async function utf8LocaleEnv(env, { bins = null, now = Date.now } = {}) {
+  const base = env || {};
+  const cands = [utf8Env(base)];
+  const own = ctypeOf(base);
+  if (own && own !== UTF8_LOCALE && UTF8_NAMED.test(own)) cands.push(base);
+  const tool = bins && Object.prototype.hasOwnProperty.call(bins, 'locale') ? bins.locale : binOnPath('locale', { env: base, now });
+  if (!tool) return { ok: true, env: cands[0], locale: UTF8_LOCALE, verified: false };
+  for (const c of cands) if (await charmapOf(tool, c, { now })) return { ok: true, env: c, locale: ctypeOf(c), verified: true };
+  return { ok: false, tried: cands.map(ctypeOf), why: '`locale charmap` answers no UTF-8 for any of them' };
+}
 // One `xwininfo -root -tree` child line: indent, id, the NAME, `: ("instance" "Class")`,
 // then `WxH+relX+relY  +absX+absY`. Parsed from the RIGHT, because the name is
 // printed UNESCAPED or not at all — MEASURED on xwininfo 1.1.6 (2026-09-22):
@@ -898,7 +939,7 @@ async function windowTree({ hostId = null, display, authFile, env = process.env,
   if (!bin) return { ok: false, why: 'xwininfo not on PATH', rows: [], text: '' };
   // LC_ALL=C.UTF-8: xwininfo converts a UTF-8 _NET_WM_NAME to the LOCALE's charset and prints a
   // "failure in conversion" under C/POSIX (measured) — we decode its stdout as UTF-8, so we ask for UTF-8
-  const tree = await run(bin, ['-root', '-tree'], { env: { ...x11Env(env, { display, authFile }), LC_ALL: 'C.UTF-8' } });
+  const tree = await run(bin, ['-root', '-tree'], { env: utf8Env(x11Env(env, { display, authFile })) });
   if (tree.err) return { ok: false, why: `xwininfo failed: ${tree.err.message}`, rows: [], text: '' };
   return { ok: true, why: null, rows: parseWininfoTree(tree.stdout), text: tree.stdout };
 }
@@ -1079,4 +1120,5 @@ module.exports = {
   pidAlive, procStart, sameProcess, procSample,
   sessionMembers, refreshSessions, sessionCensus, environHas, sessionSample, sessionSampleSync, markerCensus, environCensus,
   parseWininfoTree, windowTree, viewableWindows, enumerateWindows, displaySize, applyWindowPlan, xpraVersion, installFacts, installState,
+  UTF8_LOCALE, utf8Env, utf8LocaleEnv, resetCharmapMemo,
 };

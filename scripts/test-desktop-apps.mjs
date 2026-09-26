@@ -761,16 +761,17 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   // that bit — a screen of 1.5 or more never gets the text-only 1.5, it gets 2
   const AUTO = [[1, 1], [1.2, 1.2], [1.25, 1.25], [1.49, 2], [1.5, 2], [1.75, 2], [2, 2], [3, 3], [0.5, 1], ['x', 1]];
   const autoGot = AUTO.map(([d]) => M.appScaleFor('auto', d));
-  ok(same(autoGot, AUTO.map(([, w]) => w)) && [1.5, 1.75].every((d) => M.scaleKnobs(M.appScaleFor('auto', d)).gdkScale === 2), `auto never picks the text-only 1.5 on a screen of 1.5 or more — it is 2 there (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
+  ok(same(autoGot, AUTO.map(([, w]) => w)) && [1.5, 1.75].every((d) => M.scaleKnobs(M.appScaleFor('auto', d)).gdkScale === 2 && M.scaleKnobs(M.appScaleFor('auto', d)).pictureScale === 1), `auto on a screen of 1.5 or more is the whole 2 (drawn 1:1, never resampled) (${AUTO.map(([d], i) => `${d} ⇒ ${autoGot[i]}`).join(', ')})`);
   const preFixAuto = (d) => Math.min(2, Math.max(1, Math.round(M.normalizeDpr(d) * 2) / 2)); // the shipped-then-refuted rule: the nearest 0.5
   ok(!same(AUTO.map(([d]) => preFixAuto(d)), AUTO.map(([, w]) => w)) && preFixAuto(1.5) === 1.5 && preFixAuto(1.25) === 1.5, 'CONTROL: the pre-fix rule (the nearest 0.5) fails that table — it picks 1.5 on a 1.25 and a 1.5 screen');
-  ok(M.appScaleFor('1', 2) === 1 && M.appScaleFor('1.5', 1) === 1.5 && M.appScaleFor(2, 1) === 2 && M.appScaleFor('3', 1) === 1, 'an explicit scale wins over the DPR (as a string — the enum\'s values — or a number); an unknown value ⇒ 1');
+  ok(M.appScaleFor('1', 2) === 1 && M.appScaleFor('1.5', 1) === 1.5 && M.appScaleFor(2, 1) === 2 && M.appScaleFor('3', 1) === 3 && M.appScaleFor('1.25', 2) === 1 && M.appScaleFor('4', 1) === 1, 'an explicit scale wins over the DPR (as a string — the enum\'s values — or a number; lane D: every EXPLICIT_SCALES value, 3 included); an unknown value ⇒ 1');
   const k2 = M.scaleKnobs(2), k15 = M.scaleKnobs(1.5), k1 = M.scaleKnobs(1);
   ok(k2.gdkScale === 2 && k2.dpi === 96 && k2.env.GDK_SCALE === '2' && k2.env.QT_SCALE_FACTOR === '2' && k2.env.QT_ENABLE_HIGHDPI_SCALING === '1', '2×: GDK_SCALE=2 (GTK3 + GTK4 widgets AND fonts 2×, measured) with the display at 96 dpi — Xft.dpi multiplies with GDK_SCALE (192 would be 4× text, measured)');
-  ok(k15.gdkScale === 1 && k15.dpi === 144 && k15.env.GDK_SCALE === '1', '1.5×: the integer part in GDK_SCALE, the fraction in the display\'s font dpi (144)');
+  ok(k15.gdkScale === 2 && k15.dpi === 96 && k15.env.GDK_SCALE === '2' && k15.pictureScale === 0.75 && k15.rule === 'ceil', 'lane D (a): 1.5× is a REAL scale — GDK_SCALE 2 at 96 dpi, the picture shown at 0.75 (widgets AND text 1.5×)', k15);
+  ok(k2.pictureScale === 1 && k1.pictureScale === 1 && M.scaleKnobs(3).pictureScale === 1, 'lane D (a): an integer scale is drawn 1:1 (pictureScale 1 — the 2.369.158 picture, bit for bit)');
   ok(k1.dpi === 96 && k1.xresources === '' && k1.env.GDK_SCALE === '1', '1×: 96 dpi, no X resources');
   ok(!('GDK_DPI_SCALE' in k2.env) && !('GDK_DPI_SCALE' in k15.env), 'GDK_DPI_SCALE is NOT set (GTK4 ignores it — measured — and in GTK3 it would double-count the fraction already in Xft.dpi)');
-  ok(/XTerm\*faceName: Monospace\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k2.xresources) && /UXTerm\*faceSize: 16\n/.test(k2.xresources) && /XTerm\*faceSize: 8\n/.test(k15.xresources), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE, the fraction through Xft.dpi');
+  ok(/XTerm\*faceName: Monospace\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k2.xresources) && /UXTerm\*faceSize: 16\n/.test(k2.xresources) && /XTerm\*faceSize: 16\n/.test(k15.xresources) && /XTerm\*faceSize: 8\n/.test(M.scaleKnobs(1.5, { rule: 'dpi' }).xresources), 'xterm gets an Xft face at a scale > 1 (its bitmap default no dpi reaches — measured): faceSize 8 × GDK_SCALE — 16 at 1.5 (drawn at 2, shown at 0.75), 8 under the dpi rule (the fraction through Xft.dpi)');
   ok(M.scaleKnobs(7).scale === 1 && M.scaleKnobs('2').scale === 2, 'scaleKnobs: out of range ⇒ 1, a string is read as its number');
   // the launch request's dpr
   const reg = M.DEFAULT_REGISTRY;
@@ -782,7 +783,7 @@ console.log('§10 HiDPI (2.369.158, docs/design-desktop-apps.zh.md §7.6): the a
   const recD = M.newRecord({ id: 'da-2', label: 'x', exec: '/usr/bin/xterm', source: 'registry', backend: 'vnc-display', now: 1 });
   ok(rec.scale === 2 && rec.dpi === 96 && recD.scale === 1 && recD.dpi === 96, 'the record carries its scale and its display\'s font dpi (fixed at launch; defaults 1 / 96)');
   const keeper = keeperSrc(), disp = read('src/desktop-display.js');
-  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px); the pick itself is §13\'s pin');
+  ok(/const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper decides the scale ONCE at launch — on the xpra STREAM only (a whole-display rung\'s picture is CSS px), by the row\'s rule (lane D (a)); the pick itself is §13\'s pin');
   ok(/\.\.\.\(M\.streamKindOf\(rec, backends\) === 'xpra' \? knobs\.env : \{\}\), \.\.\.\(rec\.env \|\| \{\}\)/.test(keeper) && /display\.applyXResources\(\{ binPath: f\.bins\.xrdb, env: appEnv, text: knobs\.xresources \}\)/.test(keeper), 'WIRING PIN: the app\'s env gets the knobs (a row\'s own env still wins) and the X resources are merged BEFORE the app starts');
   { const iWait = keeper.indexOf('display.waitForXftDpi('), iMerge = keeper.indexOf('display.applyXResources('), iApp = keeper.indexOf('display.startApp(');
     ok(iWait > 0 && iWait < iMerge && iMerge < iApp && /if \(own && M\.streamKindOf\(rec, backends\) === 'xpra'\) \{\n\s*const xd = await display\.waitForXftDpi\(/.test(keeper), 'WIRING PIN (r2, the verifier\'s race): on its own xpra display the keeper WAITS for xpra\'s resource write (Xft.dpi) BEFORE it merges its X resources and BEFORE it starts the app — xpra replaces the database ~1 s after the display is up'); }
@@ -813,10 +814,11 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   // the argv: the profile flags, then the URL — no automation flag, ever
   const P = '/tmp/vs-da/desktop-apps/da-1/profile';
   const ac = M.browserArgv({ ...cr, exec: 'google-chrome' }, { profileDir: P, url: 'https://example.com/a?b=1' });
-  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic, THEN the URL (last)', ac);
+  ok(ac.ok && same(ac.argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility', 'https://example.com/a?b=1']), 'chromium argv: --user-data-dir=<the session\'s profile> --no-first-run --no-default-browser-check --password-store=basic --force-renderer-accessibility (lane E, D4: the page\'s tree for a shared browser), THEN the URL (last)', ac);
+  ok(M.BROWSER_A11Y_FLAG === '--force-renderer-accessibility' && same(Object.keys(ac.env || {}), []) && M.browserArgv({ browser: 'firefox', args: [] }, { profileDir: P }).env.GNOME_ACCESSIBILITY === '1' && !M.isForbiddenBrowserArg(M.BROWSER_A11Y_FLAG), 'lane E (D4): the accessibility switch — chromium the flag, firefox GNOME_ACCESSIBILITY=1 in the answer\'s env — and it is no forbidden (automation) flag');
   const af = M.browserArgv(fx, { profileDir: P, url: 'http://127.0.0.1:8080/' });
   ok(af.ok && same(af.argv, ['--new-instance', '-profile', P, 'http://127.0.0.1:8080/']), 'firefox argv: --new-instance -profile <the session\'s profile>, THEN the URL', af);
-  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
+  ok(same(M.browserArgv(cr, { profileDir: P }).argv, [`--user-data-dir=${P}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--force-renderer-accessibility']), 'no URL ⇒ no URL argument (the browser opens its own start page)');
   ok(same(M.browserArgv(cr, { profileDir: '/tmp/vs-da/desktop-apps/./da-1/x/../profile' }).argv[0], `--user-data-dir=${P}`), 'the profile path is normalised (`.` / `..` folded) before it reaches argv');
   const AUTOMATION = /^--?(remote-debugging|enable-automation|headless|marionette|remote-allow|start-debugger-server|load-extension)/;
   ok([ac, af].every((a) => a.argv.every((x) => !AUTOMATION.test(x))), 'no automation flag in either family\'s argv (remote-debugging / enable-automation / headless / marionette / debugger server / extensions)');
@@ -944,19 +946,20 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
 {
   // (a) the derivation — design §3.4's table, row for row: eff = dpr × uiScale (clamped 1..3); GDK_SCALE by the ratio-nearest
   // integer (the geometric midpoints √2 and 2√2), the fraction ONLY UPWARD into the font dpi (never text below 96)
-  const TABLE = [[1, 1, 1, 96], [1.25, 1, 1.25, 120], [1.5, 1, 2, 96], [2, 1, 2, 96], [2, 1.25, 2.5, 120], [3, 1, 3, 96], [1.25, 1.25, 2, 96], [1, 1.25, 1.25, 120], [2, 0.75, 2, 96], [1, 0.6, 1, 96], [3, 2, 3, 96]];
-  const got = TABLE.map(([dpr, ui]) => { const s = M.appScaleFor('auto', dpr, ui); const k = M.scaleKnobs(s); return [s, k.gdkScale, k.dpi]; });
-  const want = TABLE.map(([, , s, dpi]) => [s, s >= 3 ? 3 : s >= 2 ? 2 : 1, dpi]);
-  ok(same(got, want), `auto = the ratio rule over dpr × uiScale: ${TABLE.map(([d, u], i) => `${d}×${u} ⇒ ${got[i][0]}× (GDK_SCALE ${got[i][1]}, ${got[i][2]} dpi)`).join('; ')}`, { got, want });
+  // lane D (a): a fraction is drawn at the CEILING and shown at s ÷ it — [dpr, ui, scale, GDK_SCALE, pictureScale] (dpi 96 always)
+  const TABLE = [[1, 1, 1, 1, 1], [1.25, 1, 1.25, 2, 0.625], [1.5, 1, 2, 2, 1], [2, 1, 2, 2, 1], [2, 1.25, 2.5, 3, 0.8333], [3, 1, 3, 3, 1], [1.25, 1.25, 2, 2, 1], [1, 1.25, 1.25, 2, 0.625], [2, 0.75, 2, 2, 1], [1, 0.6, 1, 1, 1], [3, 2, 3, 3, 1]];
+  const got = TABLE.map(([dpr, ui]) => { const s = M.appScaleFor('auto', dpr, ui); const k = M.scaleKnobs(s); return [s, k.gdkScale, k.pictureScale, k.dpi]; });
+  const want = TABLE.map(([, , s, g, p]) => [s, g, p, 96]);
+  ok(same(got, want), `auto = the ratio rule over dpr × uiScale: ${TABLE.map(([d, u], i) => `${d}×${u} ⇒ ${got[i][0]}× (GDK_SCALE ${got[i][1]} shown at ${got[i][2]})`).join('; ')}`, { got, want });
   // the boundaries: √2 and 2√2 are the geometric midpoints between 1/2 and 2/3
   const B = [[1.41, 1.41], [1.42, 2], [2.82, 2.82], [2.83, 3]].map(([e, w]) => [e, M.appScaleFor('auto', e, 1), w]);
   ok(B.every(([, g, w]) => g === w), `the boundaries √2 / 2√2: ${B.map(([e, g]) => `${e} ⇒ ${g}`).join(', ')}`, B);
-  // (b) the two numbers the owner asked for, on a DPR-2 screen at UI scale 125 %: GDK_SCALE 2 + Xft.dpi 120
+  // (b) the owner's DPR-2 screen at UI scale 125 %: 2.5× — lane D (a): drawn at GDK_SCALE 3, shown at 0.8333 (widgets AND text 2.5×)
   const k25 = M.scaleKnobs(M.appScaleFor('auto', 2, 1.25));
-  ok(k25.scale === 2.5 && k25.gdkScale === 2 && k25.env.GDK_SCALE === '2' && k25.dpi === 120 && /XTerm\*faceSize: 16\n/.test(k25.xresources), 'DPR 2 × UI 1.25 = 2.5× ⇒ GDK_SCALE 2 (widgets 2×) + 120 dpi (text 2.5×), the xterm face 8 × 2 through the same dpi', k25);
-  // (c) 1.5× stays EXPLICIT and text-only for GTK (the floor rule on a chosen value): widgets 1×, text at 144 dpi
+  ok(k25.scale === 2.5 && k25.gdkScale === 3 && k25.env.GDK_SCALE === '3' && k25.dpi === 96 && k25.pictureScale === 0.8333 && /XTerm\*faceSize: 24\n/.test(k25.xresources), 'DPR 2 × UI 1.25 = 2.5× ⇒ GDK_SCALE 3 at 96 dpi shown at 0.8333 — widgets and text 2.5× (the xterm face 8 × 3)', k25);
+  // (c) an explicit 1.5 stays 1.5 whatever the screen — lane D (a): a REAL 1.5 (drawn at 2, shown at 0.75)
   const k15 = M.scaleKnobs(M.appScaleFor('1.5', 2, 1.25));
-  ok(k15.scale === 1.5 && k15.gdkScale === 1 && k15.dpi === 144, 'an explicit 1.5 stays 1.5 whatever the screen (GDK_SCALE 1 + 144 dpi — text only in GTK)', k15);
+  ok(k15.scale === 1.5 && k15.gdkScale === 2 && k15.dpi === 96 && k15.pictureScale === 0.75, 'an explicit 1.5 stays 1.5 whatever the screen (GDK_SCALE 2 at 96 dpi, shown at 0.75)', k15);
   // (d) REGRESSION CONTROL — uiScale absent = 1: the .158 answers on the integer screens it was measured on are unchanged
   const r158 = [1, 1.5, 2].map((d) => [d, M.appScaleFor('auto', d), M.appScaleFor('auto', d, 1), M.appScaleFor('auto', d, undefined)]);
   ok(r158.every(([d, a, b, c]) => a === b && b === c && a === (d >= 1.5 ? 2 : 1)), `uiScale absent / 1 / undefined give the .158 answer on DPR 1, 1.5, 2 (${r158.map((r) => r.join('→')).join(', ')})`, r158);
@@ -974,8 +977,8 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   const badU = [0.5, 2.5, 'x', -1].map((u) => M.validateLaunchRequest({ appId: 'xterm', uiScale: u }, reg));
   ok(badU.every((b) => !b.ok && /uiScale must be a number from 0\.6 to 2/.test(b.error)), 'a uiScale outside 0.6..2 is REFUSED by name, never silently clamped');
   // (g) the per-window relaunch: the request (auto | 1 | 1.5 | 2 — the menu's four rows) and the record's verdict
-  ok(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2]) && Object.isFrozen(M.SCALE_CHOICES), 'the Scale ▸ menu offers auto, 1×, 1.5×, 2×');
-  const rq = [[{ scale: 'auto', dpr: 2, uiScale: 1.25 }, true], [{ scale: '1.5' }, true], [{ scale: 2 }, true], [{ scale: 3 }, false], [{}, false], [{ scale: 'auto', dpr: 9 }, false], [{ scale: 1, uiScale: 3 }, false]].map(([b, w]) => [b, w, M.validateRelaunchRequest(b)]);
+  ok(same(M.SCALE_CHOICES, ['auto', 1, 1.5, 2, 2.5, 3]) && Object.isFrozen(M.SCALE_CHOICES), 'the Scale ▸ menu offers auto, 1×, 1.5×, 2× — and (lane D) 2.5×, 3×: every value scaleKnobs spells exactly by the floor rule');
+  const rq = [[{ scale: 'auto', dpr: 2, uiScale: 1.25 }, true], [{ scale: '1.5' }, true], [{ scale: 2 }, true], [{ scale: 3 }, true], [{ scale: 1.25 }, false], [{ scale: 4 }, false], [{}, false], [{ scale: 'auto', dpr: 9 }, false], [{ scale: 1, uiScale: 3 }, false]].map(([b, w]) => [b, w, M.validateRelaunchRequest(b)]);
   ok(rq.every(([, w, v]) => v.ok === w) && rq[0][2].choice === 'auto' && rq[0][2].dpr === 2 && rq[0][2].uiScale === 1.25 && rq[1][2].choice === 1.5 && rq.filter(([, w]) => !w).every(([, , v]) => v.code === 'bad-request' && v.error), `validateRelaunchRequest: ${rq.map(([b, , v]) => `${JSON.stringify(b)} ⇒ ${v.ok ? 'ok ' + v.choice : v.error}`).join('; ')}`, rq.map((r) => r[2]));
   const live = { id: 'da-9', state: 'ready', backend: 'xpra', exec: '/usr/bin/gnome-calculator', args: [], cwd: null, label: 'Calc', source: 'registry', appId: 'gnome-calculator' };
   const RV = [[live, null], [{ ...live, state: 'launching' }, 'not-ready'], [{ ...live, state: 'exited' }, 'not-ready'], [{ ...live, backend: 'vnc-display' }, 'not-xpra'], [{ ...live, browser: 'chrome' }, null], [null, 'not-found']].map(([r, w]) => [w, M.relaunchVerdict(r)]);
@@ -984,9 +987,9 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   // (g2) the Scale ▸ menu model: auto shows what THIS client would derive now, the row the record runs at is current (and
   // not offered again unless auto would now derive something else), every reason a window cannot relaunch disables it
   const mm = M.scaleMenuModel({ ...live, scale: 2.5, scaleOrigin: 'auto' }, { dpr: 2, uiScale: 1.25 });
-  ok(mm.why === null && same(mm.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 2.5, true, true], [1, 1, false, false], [1.5, 1.5, false, false], [2, 2, false, false]]), 'scaleMenuModel on the auto 2.5× app, same screen: auto (2.5×) is current and not offered again; 1× / 1.5× / 2× offered', mm);
+  ok(mm.why === null && same(mm.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 2.5, true, true], [1, 1, false, false], [1.5, 1.5, false, false], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]]), 'scaleMenuModel on the auto 2.5× app, same screen: auto (2.5×) is current and not offered again; 1× / 1.5× / 2× / 2.5× / 3× offered (an explicit 2.5× is a relaunch, not a no-op: its origin changes)', mm);
   const mm2 = M.scaleMenuModel({ ...live, scale: 1.5, scaleOrigin: 'chosen' }, { dpr: 1, uiScale: 1 });
-  ok(same(mm2.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 1, false, false], [1, 1, false, false], [1.5, 1.5, true, true], [2, 2, false, false]]), 'scaleMenuModel on a chosen 1.5×, from a DPR-1 client: 1.5× current; auto offered at THIS client\'s derivation (1×)', mm2);
+  ok(same(mm2.rows.map((r) => [r.choice, r.scale, r.current, r.disabled]), [['auto', 1, false, false], [1, 1, false, false], [1.5, 1.5, true, true], [2, 2, false, false], [2.5, 2.5, false, false], [3, 3, false, false]]), 'scaleMenuModel on a chosen 1.5×, from a DPR-1 client: 1.5× current; auto offered at THIS client\'s derivation (1×)', mm2);
   const mm3 = M.scaleMenuModel({ ...live, scale: 2, scaleOrigin: 'auto' }, { dpr: 1, uiScale: 1 });
   ok(mm3.rows[0].current && !mm3.rows[0].disabled && mm3.rows[0].scale === 1, 'an auto app opened on ANOTHER screen: auto is current yet offered (it would re-derive 1× here)', mm3.rows[0]);
   const whys = [[{ leased: true }, 'lease'], [{ seat: 'blocked' }, 'seat'], [{}, null]].map(([o, w]) => [w, M.scaleMenuModel(live, o).why]);
@@ -997,11 +1000,70 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
   // (i) WIRING PINS — the keeper decides the scale ONCE through scalePick (the launch's dpr + uiScale, or the relaunch's choice);
   // the launcher sends THIS client's UI scale; the window offers the menu and follows a replacement
   const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), win = read('src/lib/desktop-app-window.js'), routes = read('src/routes/desktop-apps.js');
-  ok(/const pick = opts\.scaleChoice \? M\.scalePick\(\{ choice: opts\.scaleChoice, dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\) : M\.scalePick\(\{ setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (the setting, or a relaunch\'s choice) from the request\'s dpr + uiScale, on the xpra STREAM only');
+  ok(/const pick = M\.scalePick\(\{ choice: opts\.scaleChoice, appDefault: v\.launch\.scaleChoice, setting: serverSetting\('desktop\.appScale'\), dpr: v\.launch\.dpr, uiScale: v\.launch\.uiScale \}\);/.test(keeper) && /const knobs = backend\.stream === 'xpra' \? M\.scaleKnobs\(pick\.scale, \{ rule: M\.scaleRuleOf\(row\) \}\) : M\.scaleKnobs\(1\);/.test(keeper), 'WIRING PIN: the keeper picks the scale once at launch (a relaunch\'s choice, lane D\'s app default, the setting) from the request\'s dpr + uiScale, and spells it by the row\'s rule (lane D (a)), on the xpra STREAM only');
   ok(/const armSeat = typeof onSuccessor === 'function' \? onSuccessor\(next\.id\) : null;\s*rec\.replacedBy = next\.id;\s*commit\(\);\s*let old;\s*try \{ old = await stop\(id, \{ why: 'relaunch' \}\); \} finally \{ if \(typeof armSeat === 'function'\) armSeat\(\); \}/.test(keeper) && /return machine\.relaunch\(id, body, \{ onSuccessor: \(nextId\) => carrySeat\(id, nextId\) \}\);/.test(keeper) && /M\.capVerdict\(liveRecords\(\)\.filter\(\(r\) => r\.id !== opts\.replacing\), limits\)/.test(keeper), 'WIRING PIN: relaunch = the successor launched first (the one it replaces does not count against the cap), the old record names it and is committed BEFORE its stop broadcasts, the seat carried first (A r1)');
   ok(/router\.post\('\/api\/desktop\/apps\/:id\/relaunch'/.test(routes) && /ctx\.keeper\.relaunch\(req\.params\.id, req\.body \|\| \{\}\)/.test(routes), 'WIRING PIN: POST /api/desktop/apps/:id/relaunch → keeper.relaunch');
   ok(/dpr: launchDpr\(\), uiScale: launchUiScale\(\)/.test(launcher), 'WIRING PIN: the launcher sends THIS client\'s dpr AND its UI scale');
   ok(/r\.replacedBy/.test(win) && /retarget\(/.test(win) && /\/relaunch`/.test(win) && /showConfirmDialog\(/.test(win), 'WIRING PIN: the window follows a replacement (retarget) and relaunches through the route after a confirm');
+}
+
+console.log('§14 lane D (a) (docs/design-desktop-apps-seamless §3.4, the owner 2026-09-25: "从2x切换到1.5x之后出现大量白边，你窗口尺寸计算不对"): a fraction is a REAL scale, the record says what it was drawn at, the window follows a relaunch; Chrome draws its own frame');
+{
+  // (a) THE KNOBS — the ceil rule (default) vs the dpi rule (a browser row): [scale, rule] ⇒ [GDK_SCALE, dpi, pictureScale]
+  const KT = [[1, 'ceil', 1, 96, 1], [1.25, 'ceil', 2, 96, 0.625], [1.5, 'ceil', 2, 96, 0.75], [2, 'ceil', 2, 96, 1], [2.5, 'ceil', 3, 96, 0.8333], [3, 'ceil', 3, 96, 1],
+    [1, 'dpi', 1, 96, 1], [1.5, 'dpi', 1, 144, 1], [2, 'dpi', 2, 96, 1], [2.5, 'dpi', 2, 120, 1], [3, 'dpi', 3, 96, 1]];
+  const kGot = KT.map(([sc, rule]) => { const k = M.scaleKnobs(sc, { rule }); return [k.gdkScale, k.dpi, k.pictureScale, k.env.GDK_SCALE, k.rule]; });
+  ok(same(kGot, KT.map(([, rule, g, d, p]) => [g, d, p, String(g), rule])), `scaleKnobs: ${KT.map(([sc, rule], i) => `${sc}/${rule} ⇒ GDK ${kGot[i][0]} @${kGot[i][1]} dpi ×${kGot[i][2]}`).join('; ')}`, kGot);
+  ok(M.scaleKnobs(1.5).rule === 'ceil' && M.scaleKnobs(1.5, { rule: 'bogus' }).rule === 'ceil' && same(M.SCALE_RULES, ['ceil', 'dpi']), 'the default rule is ceil; an unknown rule is ceil');
+  ok(M.scaleRuleOf({ browser: 'chromium' }) === 'dpi' && M.scaleRuleOf({ browser: 'firefox' }) === 'dpi' && M.scaleRuleOf({ browser: 'lynx' }) === 'ceil' && M.scaleRuleOf({ id: 'gnome-calculator' }) === 'ceil' && M.scaleRuleOf(null) === 'ceil', 'scaleRuleOf: a browser row scales WHOLE from the font dpi (Chrome 153 measured: [750,131] = 1.5 × [500,87] at GDK_SCALE 1 + 144 dpi) ⇒ dpi; every other app ⇒ ceil');
+  // (b) THE RECORD says what it was drawn at; renderOf reads it (a record from before lane D = the floor rule, shown 1:1)
+  const r15 = M.newRecord({ id: 'da-d1', label: 'c', exec: '/usr/bin/gnome-calculator', source: 'registry', backend: 'xpra', now: 1, scale: 1.5, dpi: 96, gdkScale: 2, pictureScale: 0.75 });
+  const rBad = M.newRecord({ id: 'da-d2', label: 'c', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: 1.5, dpi: 96, gdkScale: 7, pictureScale: 2 });
+  ok(r15.gdkScale === 2 && r15.pictureScale === 0.75 && rBad.gdkScale === null && rBad.pictureScale === null, 'newRecord carries gdkScale (1..3) + pictureScale (0.3..1] — anything else is null', { r15: [r15.gdkScale, r15.pictureScale], rBad: [rBad.gdkScale, rBad.pictureScale] });
+  const RO = [[r15, { gdk: 2, picture: 0.75, widget: 1.5, perLogical: 2 }], [{ scale: 2.5, gdkScale: 3, pictureScale: 0.8333 }, { gdk: 3, picture: 2.5 / 3, widget: 2.5, perLogical: 3 }], [{ scale: 1.5, dpi: 144 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [{ scale: 2.5, dpi: 120 }, { gdk: 2, picture: 1, widget: 2, perLogical: 2 }], [{ scale: 2 }, { gdk: 2, picture: 1, widget: 2, perLogical: 2 }], [{ scale: 1.5, gdkScale: 1, pictureScale: 1 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [null, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }], [{ scale: 1.5, pictureScale: 0.75 }, { gdk: 1, picture: 1, widget: 1, perLogical: 1 }]];
+  ok(RO.every(([r, w]) => same(M.renderOf(r), w)), 'renderOf: a lane-D record ⇒ its own gdk × picture (1.5 = 2 × 0.75; 2.5 = 3 × 0.8333 reads 2.5 — the stored 0.8333 is read back as the exact 2.5 ÷ 3, never 2.4999, the chip once said so); a record WITHOUT gdkScale (older, or an older paired machine) ⇒ the floor rule it ran under, shown 1:1 — a pictureScale without its gdkScale is never trusted', RO.map(([r]) => M.renderOf(r)));
+  const RB = [[{ scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, { gdk: 1, picture: 1, widget: 1.5, perLogical: 1.5 }], [{ scale: 2.5, dpi: 120, browser: 'chromium' }, { gdk: 2, picture: 1, widget: 2.5, perLogical: 2.5 }]];
+  ok(RB.every(([r, w]) => same(M.renderOf(r), w)), 'renderOf, a BROWSER record (the dpi rule): the widgets are the WHOLE scale — Chrome at 1 + 144 dpi draws everything 1.5× (measured), drawn 1:1', RB.map(([r]) => M.renderOf(r)));
+  const cb = M.relaunchPaneCss({ pane: { w: 898, h: 618 }, dpr: 1, from: { scale: 1, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, to: { scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' } });
+  const cb2 = M.relaunchPaneCss({ pane: cb, dpr: 1, from: { scale: 1.5, gdkScale: 1, pictureScale: 1, browser: 'chromium' }, to: { scale: 2, gdkScale: 2, pictureScale: 1, browser: 'chromium' } });
+  ok(same(cb, { w: 1347, h: 927 }) && same(cb2, { w: 1796, h: 1236 }), `a browser follows its scale too (its X px per logical px = its whole scale): 1× → 1.5× ⇒ ${cb && `${cb.w}×${cb.h}`}, → 2× ⇒ ${cb2 && `${cb2.w}×${cb2.h}`}`, { cb, cb2 });
+  // (c) THE WINDOW FOLLOWS A RELAUNCH (relaunchPaneCss) — the numbers reader 1 predicted, round trips exact
+  const rec = (scale, gdk, pic) => ({ scale, gdkScale: gdk, pictureScale: pic });
+  const R2 = rec(2, 2, 1), R15 = rec(1.5, 2, 0.75), R1 = rec(1, 1, 1);
+  const a = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R15 });
+  ok(same(a, { w: 673.5, h: 510.75 }), `DPR 2, 2× → 1.5×: the 898×681 pane becomes ${a && `${a.w}×${a.h}`} (0.75 — the app's own layout kept)`, a);
+  const b = M.relaunchPaneCss({ pane: a, dpr: 2, from: R15, to: R2 }), c = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R1 }), d = M.relaunchPaneCss({ pane: c, dpr: 2, from: R1, to: R2 });
+  ok(same(b, { w: 898, h: 681 }) && same(c, { w: 449, h: 340.5 }) && same(d, { w: 898, h: 681 }), `round trips are exact: 2 → 1.5 → 2 ⇒ ${b && `${b.w}×${b.h}`}, 2 → 1 → 2 ⇒ ${d && `${d.w}×${d.h}`} (1× = ${c && `${c.w}×${c.h}`})`, { b, c, d });
+  // DPR 1, a 2× app SCALED TO FIT (its minimum 720x1232 in a workspace-capped pane): the main's own X size is the logical size
+  const e = M.relaunchPaneCss({ pane: { w: 898, h: 913 }, mainPx: { w: 898, h: 1232 }, dpr: 1, from: R2, to: R15 });
+  const e2 = M.relaunchPaneCss({ pane: { w: 898, h: 913 }, mainPx: null, dpr: 1, from: R2, to: R15 });
+  ok(same(e, { w: 673.5, h: 924 }) && same(e2, { w: 673.5, h: 684.75 }), `DPR 1, 2× scaled to fit → 1.5×: the main's X size (898×1232 at GDK 2 = 449×616 logical) gives ${e && `${e.w}×${e.h}`} — the capped pane alone would give ${e2 && `${e2.h}`} px tall (the fit's shrink kept)`, { e, e2 });
+  const f = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: { scale: 1.5, dpi: 144 }, to: R2 });
+  ok(same(f, { w: 1796, h: 1362 }), `a record from BEFORE lane D (1.5 = widgets 1×, text only) → 2×: the widgets double, so does the pane (${f && `${f.w}×${f.h}`})`, f);
+  const R25 = rec(2.5, 3, 0.8333), g1 = M.relaunchPaneCss({ pane: { w: 898, h: 681 }, dpr: 2, from: R2, to: R25 }), g2 = M.relaunchPaneCss({ pane: g1, dpr: 2, from: R25, to: R2 });
+  ok(same(g1, { w: 1122.5, h: 851.25 }) && same(g2, { w: 898, h: 681 }), `2× → 2.5× → 2× is exact too (${g1 && `${g1.w}×${g1.h}`} → ${g2 && `${g2.w}×${g2.h}`}) — the divisor is the GDK_SCALE, never widget ÷ a rounded picture scale`, { g1, g2 });
+  ok([{}, { pane: { w: 0, h: 1 }, from: R2, to: R1 }, { pane: { w: 5, h: 5 }, from: R2 }].every((x) => M.relaunchPaneCss(x) === null), 'relaunchPaneCss: a missing pane / record ⇒ null (the window is left as it is)');
+  // (d) CHROME DRAWS ITS OWN FRAME — the profile pref, merge-when-absent (measured: default decorations 1 ⇒ ssd; the pref ⇒ 0 ⇒ seamless)
+  const CF = [[null, true, true, 'new'], [{}, true, true, 'absent'], [{ browser: { x: 1 } }, true, true, 'absent'], [{ browser: { custom_chrome_frame: false } }, true, false, 'set'], [{ browser: { custom_chrome_frame: true } }, true, false, 'set'], [[], false, false, 'not-an-object'], [{ browser: 5 }, false, false, 'browser-not-an-object'], ['x', false, false, 'not-an-object']];
+  const cfGot = CF.map(([pr]) => M.chromiumFramePrefs(pr));
+  ok(CF.every(([, okW, chW, why], i) => cfGot[i].ok === okW && cfGot[i].changed === chW && cfGot[i].why === why), `chromiumFramePrefs: ${CF.map(([pr], i) => `${JSON.stringify(pr)} ⇒ ${cfGot[i].why}`).join('; ')}`, cfGot);
+  ok(cfGot[0].prefs.browser.custom_chrome_frame === true && cfGot[2].prefs.browser.x === 1 && cfGot[2].prefs.browser.custom_chrome_frame === true && cfGot[3].prefs.browser.custom_chrome_frame === false && M.CHROMIUM_FRAME_MARKER === '.vibespace-frame-seeded', 'the pref is set to true only when ABSENT — an existing false (the user turned "Use system title bar and borders" back on inside Chrome) is kept; other keys survive; the marker name');
+  // (e) WIRING PINS — the keeper records what it drew, bringUp uses the SAME rule, the chromium profile is seeded before the app
+  const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js');
+  ok(/gdkScale: backend\.stream === 'xpra' \? knobs\.gdkScale : null, pictureScale: backend\.stream === 'xpra' \? knobs\.pictureScale : null,/.test(keeper) && /const knobs = M\.scaleKnobs\(rec\.scale \|\| 1, \{ rule: M\.scaleRuleOf\(rec\) \}\);/.test(keeper), 'WIRING PIN: the launch records gdkScale + pictureScale; the bring-up spells the env by the same rule');
+  { const iSeed = keeper.indexOf('await seedChromiumFrame(rec.profileDir)'), iApp = keeper.indexOf('display.startApp(');
+    ok(iSeed > 0 && iSeed < iApp && /if \(rec\.browser === 'chromium' && rec\.profileDir\) \{/.test(keeper) && /M\.chromiumFramePrefs\(prefs\)/.test(keeper) && /M\.CHROMIUM_FRAME_MARKER/.test(keeper), 'WIRING PIN: a chromium record\'s profile is seeded (once — the marker) BEFORE the browser starts, through the PURE chromiumFramePrefs'); }
+  ok(/pictureScale: \(\) => renderOf\(rec\)\.picture/.test(win) && /fitAfterRelaunch\(geo, r\.app\)/.test(win) && win.indexOf('retarget(r.app.id);') < win.indexOf('fitAfterRelaunch(geo, r.app);'), 'WIRING PIN: the view reads the RECORD\'s picture scale; the relaunch resizes the window AFTER retarget (the old app\'s minimum cleared first)');
+  // (f) NEGATIVE CONTROL — a patched copy with the floor rule (the pre-lane-D knobs): the 1.5 record's widgets are 1× (the white edges)
+  const srcA = read('src/desktop-apps.js');
+  const fromA = "  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));";
+  ok(srcA.split(fromA).length === 2, 'the GDK_SCALE rule is spelled once (the control patches exactly it)');
+  const fileA = MUTD.write('src/desktop-apps.js', srcA.replace(fromA, '  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s))); // pre-lane-D CONTROL').replace("  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;", '  const dpi = Math.round(96 * s / gdkScale);').replace("  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);", '  const pictureScale = 1;'), 'floorknobs');
+  try {
+    const MC = require(fileA);
+    const kc = MC.scaleKnobs(1.5), rc = MC.newRecord({ id: 'x', label: 'x', exec: '/x', source: 'registry', backend: 'xpra', now: 1, scale: kc.scale, dpi: kc.dpi, gdkScale: kc.gdkScale, pictureScale: kc.pictureScale });
+    ok(MC.renderOf(rc).widget === 1 && kc.dpi === 144 && M.renderOf(r15).widget === 1.5, `CONTROL: under the floor rule a 1.5× record draws its widgets at ${MC.renderOf(rc).widget}× (text at ${kc.dpi} dpi) — ours at ${M.renderOf(r15).widget}×`);
+  } finally { /* MUTD's scratch dir is removed at exit */ }
 }
 
 // ── §tree THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
@@ -1012,7 +1074,7 @@ console.log('§13 round 3 A3 (docs/design-desktop-apps-seamless §3.4): the scal
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\n§tree the patched copies never touch the tree');
-for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 7 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
+for (const r of copiesCensus(MUTD.files, MUTD.dir, repo, { minCopies: 8 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

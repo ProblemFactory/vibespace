@@ -141,8 +141,8 @@ check('inc-mudv05ja WIRING: the pin writes only with somewhere to go and ends on
   /if \(sh - list\.scrollTop - list\.clientHeight > 1\) \{\n\s*this\._traceExpect\('fsb'\);\n\s*list\.scrollTop = sh;/.test(cv)
   && /if \(\+\+this\._fsbFrames < 10 && this\._fsbStable < 2 && !flicker\) requestAnimationFrame\(step\);/.test(cv)
   && /msg\.role === 'tool'\) \{\n\s*this\._scheduleWorkflowPatch\(id\);\n\s*\}/.test(cv)
-  && /this\._renderers\.renderTaskChip\(ti\)/.test(cv) && /this\._renderers\.renderWorkflowLive\(ti\)/.test(cv)
-  && /this\.renderTaskChip\(tiW\)/.test(read('src/lib/chat-renderers.js')) && /this\.renderWorkflowLive\(tiW\)/.test(read('src/lib/chat-renderers.js')));
+  && /this\._renderers\.renderTaskChip\(ti, this\._workflowVerdict\(runId\)\)/.test(cv) && /this\._renderers\.renderWorkflowLive\(ti\)/.test(cv)
+  && /this\.renderTaskChip\(tiW, runId \? this\._getWorkflowVerdict\?\.\(runId\) : null\)/.test(read('src/lib/chat-renderers.js')) && /this\.renderWorkflowLive\(tiW\)/.test(read('src/lib/chat-renderers.js')));
 check('inc-mudv05ja WIRING: the workflow detail window is digest-gated with a persistent head, keyed rows and preserved expanders',
   (() => { const wd = read('src/lib/workflow-detail.js'); return /if \(digest === lastDigest\) return;/.test(wd) && /const rows = new Map\(\);/.test(wd) && /if \(openBoxes\.has\('result'\)\) box\.open = true;/.test(wd) && !/const render = \(wf\) => \{[\s\S]{0,400}root\.innerHTML = '';\n\n/.test(wd) && /class="workflow-agent-state" aria-hidden="true"/.test(wd); })());
 check('the pinned auto-refold still folds every non-last run EXCEPT one the user opened deliberately (_runStickyOpen, keyed by member like _runExpanded)',
@@ -254,6 +254,30 @@ const NBASH = 28, NTAIL = 8, NMCP = 2;
   ipush({ type: 'assistant', message: { id: `imsg_${m}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Looks right.' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `iaf-${m++}`, timestamp: its() });
   fs.writeFileSync(path.join(proj, `${IMG_SID}.jsonl`), il.join('\n') + '\n');
 }
+// ── F5 fixture (2026-09-26): workflow RUN DIRS in the real files' KEY shapes (values synthetic) under
+// the view's own session — the owner's shape: 5 phases (1/7/1/1/1), 11 started, 10 results, no
+// terminal snapshot, every file 2 days old (stalled); and a twin written "now" (running).
+const WF_AGENTS = [['survey:map', 'survey'], ...Array.from({ length: 7 }, (_, i) => [`lane:${i}`, 'lanes']), ['merge:all', 'merge'], ['qa:gate', 'qa'], ['ship:it', 'ship']]
+  .map(([label, phase], i) => ({ id: 'b' + (i + 1).toString(16).padStart(16, '0'), label, phase, result: i < 10 }));
+const WF_PHASES = ['survey', 'lanes', 'merge', 'qa', 'ship'];
+const wfRunDir = (runId) => path.join(fakeHome, '.claude', 'projects', CWD.replace(/[/._]/g, '-'), SID, 'subagents', 'workflows', runId);
+const writeWfRun = (runId, mtimeMs) => {
+  const dir = wfRunDir(runId);
+  fs.mkdirSync(dir, { recursive: true });
+  const key = (a) => ('k:' + a.label + ':').padEnd(67, '0');
+  const lines = [{ type: 'launched' }, ...WF_AGENTS.map((a) => ({ type: 'started', key: key(a), agentId: a.id, label: a.label, phase: a.phase })),
+    ...WF_AGENTS.filter((a) => a.result).map((a) => ({ type: 'result', key: key(a), agentId: a.id, result: { ok: true } }))];
+  fs.writeFileSync(path.join(dir, 'journal.jsonl'), lines.map((o) => JSON.stringify(o)).join('\n') + '\n');
+  for (const a of WF_AGENTS) {
+    fs.writeFileSync(path.join(dir, `agent-${a.id}.jsonl`), JSON.stringify({ type: 'user', message: { role: 'user', content: 'synthetic prompt' } }) + '\n');
+    fs.writeFileSync(path.join(dir, `agent-${a.id}.meta.json`), JSON.stringify({ agentType: 'workflow-subagent', description: a.label, workflowPhase: a.phase, spawnDepth: 1, requestShape: 'subagent-x', requestNonInteractive: true, model: 'opus' }));
+  }
+  const at = new Date(mtimeMs);
+  for (const f of fs.readdirSync(dir)) fs.utimesSync(path.join(dir, f), at, at);
+};
+writeWfRun('wf_e2e0foldstall', Date.now() - 2 * 24 * 3600e3);
+writeWfRun('wf_e2e0foldstall2', Date.now() - 2 * 24 * 3600e3); // the card-comes-back leg's control twin (lane Q verify)
+writeWfRun('wf_e2e0foldlive', Date.now());
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -771,6 +795,123 @@ check('inc-mudv05ja F4: two+ live polls with an unchanged run → ZERO childList
   wd?.polls >= 2 && wd.mutsEqual === 0 && wd.chipKept && wd.live && wd.stateAria === 'true', JSON.stringify(wd));
 check('CONTROL: a CHANGED run does mutate the window (the observer sees renders) while the chip and the keyed row\'s View Log button stay the same nodes',
   wd?.mutsChanged > 0 && wd.chipKept && wd.btnKept, JSON.stringify(wd));
+
+// F5 (2026-09-26, owner: "这个workflow怎么没有细节" — a window reading 运行中 with eleven "(agent)"
+// rows for a run stalled two days): the REAL server reads the run DIR (src/workflow-disk.js) —
+// labels + phases from the journal/meta files, 已中断 from the mtimes — in the owner's language.
+// The page is switched to zh (the per-device language; t() is bound at load ⇒ a reload), the
+// window opens with NO fetch stub, and the CARD's chip gets the same verdict through the status
+// bar's /api/workflow poll. CONTROL: the pre-fix server answer for the same run (the old
+// skeleton, spelled verbatim) fed to the same window fails the same judge.
+await evaljs(`localStorage.setItem('vibespace.lang', 'zh'); true`);
+await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+for (let i = 0; i < 100; i++) { if (await evaljs('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(300); }
+await evaljs('window.app.ready.then(() => true)').catch(() => {});
+await sleep(800);
+const OLD_SKELETON = { runId: 'wf_e2e0foldold', workflowName: 'Workflow', summary: '', status: 'running', live: true, agentCount: 11, doneCount: 10, durationMs: 0, totalTokens: 0, totalToolCalls: 0, error: null, result: null, timestamp: null,
+  phases: [{ index: 0, title: 'Agents (live — phase names, labels & tokens appear when the run finishes)', agents: WF_AGENTS.map((a) => a.id).sort().map((id) => ({ index: 0, label: '', model: '', state: WF_AGENTS.find((a) => a.id === id).result ? 'done' : 'progress', agentId: id })) }] };
+const readWfWindow = (runId, stub) => evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const realFetch = window.fetch;
+  const stub = ${JSON.stringify(stub || null)};
+  if (stub) window.fetch = async (u, o) => (String(u).startsWith('/api/workflow?') && String(u).includes('${runId}') ? new Response(JSON.stringify(stub), { status: 200, headers: { 'content-type': 'application/json' } }) : realFetch(u, o));
+  try {
+    window.app.replayOpenSpec({ action: 'openWorkflowDetail', runId: '${runId}', claudeSessionId: '${SID}', cwd: '${CWD}', name: 'synthetic run' });
+    let w = null, root = null;
+    for (let i = 0; i < 60; i++) { w = [...window.app.wm.windows.values()].find((x) => x._workflowRunId === '${runId}'); root = w && w.content.querySelector('.workflow-detail'); if (root && root.querySelector('.workflow-agent-row')) break; await sleep(150); }
+    if (!root) return { err: 'no window' };
+    const chip = root.querySelector('.workflow-status-chip');
+    const noteEl = root.querySelector('.workflow-live-note');
+    const firstLabel = root.querySelector('.workflow-agent-label');
+    const out = { chip: chip?.textContent || '', pulse: !!chip?.classList.contains('workflow-status-live'), tip: chip?.title || '',
+      phases: [...root.querySelectorAll('.workflow-phase-title')].map((e) => e.textContent),
+      labels: [...root.querySelectorAll('.workflow-agent-label')].map((e) => e.textContent),
+      labelTitles: [...root.querySelectorAll('.workflow-agent-label')].map((e) => e.title),
+      firstClipped: !!firstLabel && firstLabel.scrollWidth > firstLabel.clientWidth,
+      imgs: root.querySelectorAll('img').length, xss: !!window.__vsXss,
+      states: [...root.querySelectorAll('.workflow-agent-state')].map((e) => e.title),
+      meta: root.querySelector('.workflow-detail-meta')?.textContent || '', note: noteEl?.textContent || '', noteStalled: !!noteEl?.classList.contains('workflow-live-note-stalled') };
+    window.app.wm.closeWindow(w.id);
+    return out;
+  } finally { window.fetch = realFetch; }
+})()`);
+const judgeWf = (r) => !!r && !r.err && r.chip === '已中断' && !r.pulse && r.phases.join('|') === WF_PHASES.join('|') && r.labels.join('|') === WF_AGENTS.map((a) => a.label).join('|')
+  && !r.labels.includes('(agent)') && /最后活动 2 天前；1 个 agent 未完成/.test(r.meta) && /最后活动 2 天前；1 个 agent 未完成/.test(r.tip) && !/运行中…/.test(r.meta)
+  && r.states.filter((x) => x === '未完成——运行在它返回之前就停了').length === 1 && !/在运行结束后显示/.test(r.note) && /超过 10 分钟没有任何变化/.test(r.note);
+const f5 = await readWfWindow('wf_e2e0foldstall', null);
+check('F5: the View Workflow window over a REAL stalled run dir (zh): chip 已中断 (no pulse), the five phases and eleven labels from the run\'s files, "最后活动 2 天前；1 个 agent 未完成" in the meta line and the chip\'s tooltip, the one resultless agent 未完成, an honest note',
+  judgeWf(f5), JSON.stringify(f5));
+const f5c = await readWfWindow('wf_e2e0foldold', OLD_SKELETON);
+check(`CONTROL: the PRE-FIX server answer (the old skeleton) in the same window fails the same judge — chip "${f5c?.chip}", labels ${JSON.stringify((f5c?.labels || []).slice(0, 2))}…, one phase "${(f5c?.phases || [])[0] || ''}"`,
+  !judgeWf(f5c) && f5c?.chip === '运行中' && (f5c?.labels || []).every((l) => l === '(agent)'), JSON.stringify(f5c));
+// lane Q verify (2026-09-26): a STALLED view that still carries a merged stream tree (the stream
+// closed the task, or its tree is too old to prove anything) — the route answers `stalled` with
+// `liveTree:true` and the tree's tokens. The note must agree with the chip: the stalled sentence and
+// the stalled rail, never "Live view — …from the run's own progress records". (The control is the
+// PURE liveNoteKind's tree-first copy in test-workflow-disk §7 — the window draws what it returns.)
+const realStalled = await (await fetch(`http://127.0.0.1:${PORT}/api/workflow?runId=wf_e2e0foldstall&claudeSessionId=${SID}&cwd=${encodeURIComponent(CWD)}`)).json();
+const STALLED_TREE = { ...realStalled, runId: 'wf_e2e0foldtree', liveTree: true, totalTokens: 4321 };
+const f5t = await readWfWindow('wf_e2e0foldtree', STALLED_TREE);
+check('F5 (lane Q verify): a stalled view WITH a merged tree — chip 已中断, the STALLED note and its rail, never the live-tree sentence; the tree\'s tokens still in the meta line',
+  realStalled.status === 'stalled' && f5t?.chip === '已中断' && f5t.noteStalled === true && /超过 10 分钟没有任何变化/.test(f5t.note) && !/来自运行自身的进度记录|progress records/.test(f5t.note) && /4\.3k/.test(f5t.meta), JSON.stringify({ chip: f5t?.chip, noteStalled: f5t?.noteStalled, note: f5t?.note, meta: f5t?.meta }));
+// lane Q verify: a 500-char label is clipped to an ellipsis — its full text rides the row's title; a
+// label / phase that spells markup renders as TEXT (no element, no handler run)
+const LONG = 'L'.repeat(500), XSS = '<img src=x onerror="window.__vsXss=1">lane';
+const LONG_VIEW = { ...realStalled, runId: 'wf_e2e0foldlong', phases: realStalled.phases.map((p, pi) => ({ ...p, title: pi === 0 ? 'P<b>1</b>' : p.title, agents: p.agents.map((a, ai) => (pi === 0 && ai === 0 ? { ...a, label: LONG } : pi === 1 && ai === 0 ? { ...a, label: XSS } : a)) })) };
+const f5l = await readWfWindow('wf_e2e0foldlong', LONG_VIEW);
+check('F5 (lane Q verify): a 500-char label is clipped AND its title is the whole label; a markup label and phase render as text (no img, no handler), zero page errors so far',
+  f5l?.firstClipped === true && f5l.labelTitles[0] === LONG && f5l.labels.includes(XSS) && f5l.labelTitles.includes(XSS) && f5l.phases[0] === 'P<b>1</b>' && f5l.imgs === 0 && f5l.xss === false && pageErrors.length === 0, JSON.stringify({ firstClipped: f5l?.firstClipped, titles: (f5l?.labelTitles || []).slice(0, 2).map((x) => x.slice(0, 40)), phase0: f5l?.phases?.[0], imgs: f5l?.imgs, xss: f5l?.xss, pageErrors: pageErrors.length }));
+// the CARD: a Workflow card whose taskInfo still says running (the stream never saw the run end)
+for (const f of fs.readdirSync(wfRunDir('wf_e2e0foldlive'))) fs.utimesSync(path.join(wfRunDir('wf_e2e0foldlive'), f), new Date(), new Date());
+const f5card = await evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.app.viewSession('${SID}', '${CWD}', 'fold ux');
+  let cv = null;
+  for (let i = 0; i < 80 && !cv; i++) { cv = [...window.app.sessions.values()].find((s) => s && s._messageList && s._messageList.isConnected && s._statusBar); if (!cv) await sleep(200); }
+  if (!cv) return { err: 'no chat view' };
+  const card = (runId, n) => {
+    const id = 'e2e00000-wf-f5-' + n, tcid = 'toolu_e2e00000f5' + n;
+    cv._onCreateMessage({ id, role: 'tool', toolName: 'Workflow', toolCallId: tcid, status: 'complete', ts: Date.now(),
+      taskInfo: { id: 'e2e00000f5t' + n, runId, type: 'workflow', status: 'running', description: 'synthetic' },
+      content: [{ type: 'tool_result', toolName: 'Workflow', toolCallId: tcid, input: { script: 'export const meta = {}' }, output: 'Workflow "synthetic" started in the background.\\nRun ID: ' + runId + '\\nSummary: a synthetic run' }] });
+    cv._statusBar.trackWorkflow(runId, 'synthetic');
+    return id;
+  };
+  const a = card('wf_e2e0foldstall', 1), b = card('wf_e2e0foldlive', 2), c = card('wf_e2e0foldstall2', 3);
+  const chipOf = (id) => cv._elements.get(id)?.querySelector('.chat-tool-label > .chat-task-status-chip');
+  for (let i = 0; i < 40 && !(chipOf(a)?.classList.contains('warn') && chipOf(c)?.classList.contains('warn')); i++) await sleep(200);
+  const read = (id) => { const c = chipOf(id); return c ? { text: c.textContent.trim(), cls: c.className, tip: c.title || '' } : null; };
+  window.__f5 = { cv, a, b, c };
+  const sb = cv._statusBar;
+  return { stalled: read(a), live: read(b), wfChip: !!sb._workflows?.has('wf_e2e0foldlive'), stalledTracked: !!sb._workflows?.get('wf_e2e0foldstall')?.stalled,
+    running: [...sb._workflows.values()].filter((w) => !w.stalled).map((w) => w.runId), chipRun: [...document.querySelectorAll('.chat-status-wf')].map((e) => e.dataset.wfRun || 'multi') };
+})()`);
+check('F5 card: the SAME verdict reaches the chat card — the stalled run\'s chip reads 已中断 (warn) with the last-activity sentence as its tooltip; the status bar keeps the stalled run TRACKED (re-asked every 15 s) but its running ⛭ chip names only the live run',
+  f5card?.stalled?.text === '已中断' && /\bwarn\b/.test(f5card.stalled.cls) && /最后活动 2 天前；1 个 agent 未完成/.test(f5card.stalled.tip) && f5card.stalledTracked === true
+  && JSON.stringify(f5card.running) === '["wf_e2e0foldlive"]' && !f5card.chipRun.includes('wf_e2e0foldstall'), JSON.stringify(f5card));
+check('CONTROL (a run written just now): its card keeps ⟳ 运行中 and stays in the status bar\'s running chip — the verdict is the files\', not a blanket rule',
+  f5card?.live?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5card.live.cls) && f5card.wfChip === true, JSON.stringify(f5card));
+// lane Q verify (2026-09-26): THE CARD COMES BACK. A stalled run writes again (a quiet stretch ended, a
+// resume under the same run id) — the window flips to Running within one 15 s re-check, and the card must
+// follow. CONTROL twin: the build commit dropped a stalled run from the poll (`this._workflows.delete(runId)`
+// on the stalled answer) — the same deletion done by hand on the twin run leaves its card Stalled forever.
+await evaljs(`(() => { window.__f5.cv._statusBar._workflows.delete('wf_e2e0foldstall2'); return true; })()`);
+for (const id of ['wf_e2e0foldstall', 'wf_e2e0foldstall2']) for (const f of fs.readdirSync(wfRunDir(id))) fs.utimesSync(path.join(wfRunDir(id), f), new Date(), new Date());
+const f5back = await evaljs(`(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const { cv, a, c } = window.__f5, t0 = Date.now();
+  const chipOf = (id) => cv._elements.get(id)?.querySelector('.chat-tool-label > .chat-task-status-chip');
+  while (Date.now() - t0 < 22000 && !(chipOf(a) && !chipOf(a).classList.contains('warn'))) await sleep(250);
+  const backMs = Date.now() - t0;
+  const read = (id) => { const x = chipOf(id); return x ? { text: x.textContent.trim(), cls: x.className } : null; };
+  const wf = cv._statusBar._workflows.get('wf_e2e0foldstall');
+  return { back: read(a), backMs, tracked: !!wf, stalledFlag: wf ? !!wf.stalled : null, inRunning: [...cv._statusBar._workflows.values()].some((w) => w.runId === 'wf_e2e0foldstall' && !w.stalled), twin: read(c), twinTracked: cv._statusBar._workflows.has('wf_e2e0foldstall2') };
+})()`);
+check(`F5 (lane Q verify): the stalled run WRITES AGAIN ⇒ its card is back to ⟳ 运行中 in ${f5back?.backMs} ms (≤ 22 s — one 15 s re-check), the run tracked, no longer stalled, back in the running ⛭ chip`,
+  f5back?.back?.text === '⟳ 运行中' && !/\bwarn\b/.test(f5back.back.cls) && f5back.backMs <= 22000 && f5back.tracked === true && f5back.stalledFlag === false && f5back.inRunning === true, JSON.stringify(f5back));
+check('CONTROL (the pre-fix drop, done by hand on the twin run): its files were written at the same instant, but untracked it still reads 已中断 after the same wait — the leg sees the defect',
+  f5back?.twin?.text === '已中断' && /\bwarn\b/.test(f5back.twin.cls) && f5back.twinTracked === false, JSON.stringify(f5back));
+await evaljs(`localStorage.removeItem('vibespace.lang'); true`);
 
 check('zero uncaught page exceptions during the whole flow', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
 

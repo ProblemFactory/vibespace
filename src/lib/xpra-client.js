@@ -110,7 +110,7 @@ export function defaultDecode(bytes, mime) {
  *   on.moveresize(ev)          {wid, xRoot, yRoot, direction, button, source, main} — the app asked its window manager to move/resize it
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
   const ime = new P.ImeKeymap();
@@ -118,8 +118,10 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   let worker = null, state = 'idle', closedReason = null;
   let serverCaps = null, packetTypes = [];
   const ratioNow = () => P.pixelRatioOf(typeof ratio === 'function' ? ratio() : ratio);
+  // lane D (a): a RESAMPLED picture (a fractional scale) rounds the device pane UP so the window covers the pane
+  const coverNow = () => !!(typeof cover === 'function' ? cover() : cover);
   let cssPane = { width: Math.max(1, Math.floor(screen?.width || 1)), height: Math.max(1, Math.floor(screen?.height || 1)) };
-  let pane = P.devicePane(cssPane, ratioNow()); // DEVICE px — what X, the fit and the pointer speak
+  let pane = P.devicePane(cssPane, ratioNow(), { cover: coverNow() }); // DEVICE px — what X, the fit and the pointer speak
   let lastConstraints; // the main window's size constraints last announced (undefined = never)
   let mainWid = 0, focusedWid = 0, zTop = 0;
   let helloTimer = null, pingTimer = null;
@@ -175,7 +177,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   };
   /** The main window follows the pane: a new fit ⇒ configure-window (the server confirms with window-move-resize / window-resized). */
   const refit = (win) => {
-    if (!win || win.wid !== mainWid || win.kind !== 'main' || watch) return;
+    if (!win || win.wid !== mainWid || win.kind !== 'main' || watch || win.premap) return; // a main being announced (lane D (a) F3) is fitted by its own map
     const g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(win.meta));
     syncDisplay(); // the display follows the fit FIRST (a minimum larger than the pane grows it; a smaller one gives it back)
     if (g.x === win.x && g.y === win.y && g.w === win.w && g.h === win.h) return;
@@ -201,7 +203,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     return placed.moved ? { x: placed.x, y: placed.y, w: win.w, h: win.h } : null;
   };
   const belt = (win, why) => {
-    if (!win || !windows.has(win.wid) || state !== 'connected' || win.kind === 'popup' || watch) return;
+    if (!win || !windows.has(win.wid) || state !== 'connected' || win.kind === 'popup' || watch || win.premap) return;
     const b = beltOf(win);
     clearTimeout(b.timer); b.timer = null;
     const g = beltTarget(win);
@@ -222,14 +224,22 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const kind = P.windowKind(meta, overrideRedirect);
     let g = { x: p[2], y: p[3], w: Math.max(1, p[4]), h: Math.max(1, p[5]) };
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
+    const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
+    windows.set(wid, win);
+    // LANE D (a) F3 — THE MAIN IS NAMED BEFORE IT IS FITTED: `on.main` carries its metadata (a CSD app's
+    // `decorations: 0` folds the window's bars — the pane GROWS) and the view answers with resize() INSIDE that call,
+    // so the fit and the map below use the FINAL pane. Fitted first, the map was the pane with the bars still up,
+    // re-fitted ~160 ms later, and the app snapped back to its mapped size ~760 ms after that (measured on every CSD
+    // connect: a 65 CSS px band of background twice). The constraints follow the main (the window's minimum is
+    // measured around the folded chrome). refit / belt skip a `premap` window — its own map is the fit.
+    if (isMain) { mainWid = wid; emit('title', win.title); emit('main', win); announceConstraints(); }
     if (watch) { /* x5 Watch: drawn where the server has it — the geometry is the active viewer's */ }
     else if (isMain) g = P.fitGeometry({ paneW: pane.width, paneH: pane.height }, P.sizeHintsOf(meta));
     else if (kind !== 'popup') { const placed = P.placeInside(g, { paneW: pane.width, paneH: pane.height }); g = { x: placed.x, y: placed.y, w: placed.w, h: placed.h }; } // a dialog OR a second top-level: inside, never lost off the pane
-    const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve() };
-    windows.set(wid, win);
-    if (isMain) { mainWid = wid; emit('title', win.title); syncDisplay(); } // the display contains the fit before the map
+    Object.assign(win, g);
+    win.premap = false;
+    if (isMain) syncDisplay(); // the display contains the fit before the map
     emit('window', 'new', win);
-    if (isMain) { announceConstraints(); emit('main', win); }
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
   const lostWindow = (wid) => {
@@ -409,7 +419,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   /** The pane in CSS px; the device size (× the ratio of NOW — a monitor move changes it) is what is sent. */
   const resize = (width, height) => {
     cssPane = { width: Math.max(1, Math.floor(width || 1)), height: Math.max(1, Math.floor(height || 1)) };
-    const d = P.devicePane(cssPane, ratioNow());
+    const d = P.devicePane(cssPane, ratioNow(), { cover: coverNow() });
     const w = d.width, h = d.height;
     if (w === pane.width && h === pane.height) return;
     pane = { width: w, height: h };

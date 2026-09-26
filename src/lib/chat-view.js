@@ -355,6 +355,8 @@ class ChatView {
         this.app.openWorkflowDetail(runId, { claudeSessionId: ids.claudeId, cwd: ids.cwd, host: ids.host, name });
       },
       getWorkflowIds: () => { const ids = this._getSessionIds(); return { claudeId: ids.claudeId, cwd: ids.cwd, host: ids.host }; },
+      // the server's stalled verdict on a run (2026-09-26) → the Workflow card's chip
+      onWorkflowVerdict: (runId, verdict) => this._setWorkflowVerdict(runId, verdict),
       // Ctrl+F's touch face (design-mobile-gaps #4) — the same open() the key
       // runs, and the same gate: a read-only viewer builds no ChatSearch, so
       // it gets no chip either (a control that cannot do what it says).
@@ -474,6 +476,9 @@ class ChatView {
       // one /api/pages read on attach, so a reloaded history shows the same
       // links a live session does.
       getPublishedFiles: () => this._publishedUserFiles,
+      // a Workflow run the server judged STALLED from its run dir — the card's chip
+      // reads it at render; `_setWorkflowVerdict` patches the cards already drawn
+      getWorkflowVerdict: (runId) => this._workflowVerdict(runId),
     });
 
     // Position indicator (shows when not at bottom, e.g. "120-170 / 3000")
@@ -3920,6 +3925,25 @@ class ChatView {
     }
   }
 
+  /** The server's verdict on a Workflow run (2026-09-26, src/workflow-disk.js):
+   *  `{status:'stalled', stall}` or null. A card whose taskInfo still says
+   *  running (the stream never saw the run end) draws Stalled instead of ⟳ when
+   *  the run's files say nothing has happened for 10 minutes. Only a CHANGE
+   *  patches the cards naming the run (their View Workflow button carries it). */
+  _setWorkflowVerdict(runId, verdict) {
+    if (!runId || this._disposed) return;
+    const m = (this._wfVerdicts ||= new Map());
+    const next = verdict && verdict.status === 'stalled' ? { status: 'stalled', stall: verdict.stall || null } : null;
+    if (JSON.stringify(m.get(runId) || null) === JSON.stringify(next)) return;
+    if (next) m.set(runId, next); else m.delete(runId);
+    for (const [id, el] of this._elements) {
+      const btn = el?.querySelector?.('.chat-tool-use > .chat-tool-label > .chat-workflow-view-btn');
+      if (btn && btn.dataset.wfRun === runId) this._scheduleWorkflowPatch(id);
+    }
+  }
+
+  _workflowVerdict(runId) { return (runId && this._wfVerdicts?.get(runId)) || null; }
+
   /** Coalesce live Workflow-card patches: one pass per frame, at most one per
    *  150 ms per view (the `_renderStreamingText` cadence). */
   _scheduleWorkflowPatch(id) {
@@ -3953,8 +3977,10 @@ class ChatView {
     const label = el.querySelector('.chat-tool-use > .chat-tool-label');
     if (!label) { const newEl = this._renderers.renderToolMsg(msg); if (newEl) this._swapMessageEl(el, newEl, id); return; }
     const frag = (html) => { const tpl = document.createElement('template'); tpl.innerHTML = html.trim(); return tpl.content.firstElementChild; };
-    // ① the lifecycle chip (inside the label, before the View Workflow button)
-    const chipHtml = this._renderers.renderTaskChip(ti).trim();
+    // ① the lifecycle chip (inside the label, before the View Workflow button) —
+    // with the server's stalled verdict for the run the button names
+    const runId = label.querySelector(':scope > .chat-workflow-view-btn')?.dataset.wfRun || '';
+    const chipHtml = this._renderers.renderTaskChip(ti, this._workflowVerdict(runId)).trim();
     const oldChip = label.querySelector(':scope > .chat-task-status-chip');
     if (!chipHtml) oldChip?.remove();
     else if (!oldChip) label.insertBefore(frag(chipHtml), label.querySelector(':scope > .chat-workflow-view-btn'));

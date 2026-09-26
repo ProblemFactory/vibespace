@@ -198,16 +198,26 @@ export function clipboardShortcut({ key = '', control = false, meta = false } = 
  * base-size): as large as the pane allows, snapped DOWN to the increment
  * grid from the base (xterm grows by character cells), never below the
  * minimum, never above the maximum, never < 1.
+ * LANE D (a) — A PANE SMALLER THAN THE MINIMUM KEEPS ITS ASPECT: the view shows
+ * such a window scaled to fit (the badge), so the window takes the PANE's
+ * shape at that scale (k = the smaller of pane ÷ minimum per axis; the pane
+ * ÷ k) — the scaled picture fills the pane instead of leaving bands of the
+ * pane's background beside it (measured, DPR 1 at 2×: a 720×1232 minimum in
+ * an 898×913 pane was 25.8 % background, 116 CSS px either side).
  */
 export function fitGeometry({ paneW, paneH }, constraints = null) {
   const c = constraints || {};
   const min = sizePair(c['minimum-size']), max = sizePair(c['maximum-size']), inc = sizePair(c['increment']), base = sizePair(c['base-size']) || min;
   let w = Math.max(1, Math.floor(paneW || 1)), h = Math.max(1, Math.floor(paneH || 1));
+  let k = 1;
+  if (min) { k = Math.min(1, w / min[0], h / min[1]); if (k < 1) { w = Math.max(w, Math.ceil(w / k - 1e-6)); h = Math.max(h, Math.ceil(h / k - 1e-6)); } }
   if (max) { w = Math.min(w, max[0]); h = Math.min(h, max[1]); }
   if (inc) {
     const bw = base ? base[0] : 0, bh = base ? base[1] : 0;
-    if (inc[0] > 1 && w > bw) w = bw + Math.floor((w - bw) / inc[0]) * inc[0];
-    if (inc[1] > 1 && h > bh) h = bh + Math.floor((h - bh) / inc[1]) * inc[1];
+    // scaled to fit (k < 1): the free axis snaps UP one cell — a picture short of the pane by a cell would leave a band
+    const snap = (v, b, i) => { let n = b + Math.floor((v - b) / i) * i; if (k < 1 && n < v) n += i; return n; };
+    if (inc[0] > 1 && w > bw) w = snap(w, bw, inc[0]);
+    if (inc[1] > 1 && h > bh) h = snap(h, bh, inc[1]);
   }
   if (min) { w = Math.max(w, min[0]); h = Math.max(h, min[1]); }
   return { x: 0, y: 0, w: Math.max(1, w), h: Math.max(1, h) };
@@ -238,9 +248,12 @@ export function placeInside({ x, y, w, h }, { paneW, paneH }) {
  * The 1e-6 absorbs float noise (700 × 1.15 = 804.9999…) so an exact product is never a pixel short.
  */
 export function pixelRatioOf(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.min(4, n) : 1; }
-export function devicePane({ width, height }, ratio = 1) {
+export function devicePane({ width, height }, ratio = 1, { cover = false } = {}) {
   const r = pixelRatioOf(ratio);
-  return { width: Math.max(1, Math.floor((Number(width) || 1) * r + 1e-6)), height: Math.max(1, Math.floor((Number(height) || 1) * r + 1e-6)) };
+  // lane D (a): a RESAMPLED picture (a fractional scale shown at s ÷ GDK_SCALE) has no 1:1 grid to keep — rounded UP it
+  // COVERS the pane (the < 1 CSS px overhang is clipped by the pane), where rounding down left a sliver of background
+  const round = cover ? (v) => Math.ceil(v - 1e-6) : (v) => Math.floor(v + 1e-6);
+  return { width: Math.max(1, round((Number(width) || 1) * r)), height: Math.max(1, round((Number(height) || 1) * r)) };
 }
 /**
  * THE WHOLE-CSS-PX BACKING (r2, MEASURED): Chrome paints a canvas into its box snapped to WHOLE CSS

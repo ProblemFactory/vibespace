@@ -26,6 +26,7 @@ import { collabRowsHtml, collabReportHeadText, collabRowTitle } from '../collab-
 // SendUserFile). Same contract as collab-row: esc/t/icons injected, so the
 // escaping is provable in a unit test rather than reviewed by eye.
 import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHtml } from '../user-channel.js';
+import { stallWords } from '../workflow-disk.js'; // PURE: a stalled Workflow run's words — the View Workflow window reads the same function
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
 import { openResetCreditDialog } from './reset-credit-dialog.js';
@@ -131,9 +132,17 @@ const agentModelChip = (model) => (model ? `<span class="chat-agent-model">${esc
 // summary says it); `finished` = the level-set's SOFT close (the harness dropped the task from
 // its live set, no outcome record yet — 2026-09-21) drawn neutral, never as an error; any other
 // terminal value (failed / stopped / killed) is the red error chip naming it.
-const taskStatusChipHtml = (ti) => {
+// A Workflow run the SERVER judged stalled from its run dir (src/workflow-disk.js
+// — no result, no terminal snapshot, no file written for 10 min; the verdict
+// rides the status bar's /api/workflow poll into ChatView) is never "running":
+// the chip says Stalled with the last-activity sentence as its tooltip.
+const taskStatusChipHtml = (ti, verdict = null) => {
   if (!ti || !ti.status || ti.status === 'completed') return '';
-  if (ti.status === 'running') return ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`;
+  if (ti.status === 'running') {
+    const w = verdict && verdict.status === 'stalled' ? stallWords(verdict, { t, now: Date.now() }) : null;
+    if (w) return ` <span class="chat-task-status-chip warn" title="${escHtml(w.detail || w.label)}">${escHtml(w.label)}</span>`;
+    return ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`;
+  }
   if (ti.status === 'finished') return ` <span class="chat-task-status-chip soft" title="${escHtml(t('finished (outcome not reported)'))}">${t('finished')}</span>`;
   return ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>`;
 };
@@ -320,7 +329,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -340,6 +349,7 @@ class ChatRenderers {
     this._onFork = onFork || null;
     this._getSessionCtx = getSessionCtx || null;
     this._getPublishedFiles = getPublishedFiles || null; // toolCallId → published SendUserFile rows (owner ruling 8(c))
+    this._getWorkflowVerdict = getWorkflowVerdict || null; // runId → the server's stalled verdict (the view keeps it; absent = none)
     this.setupLinkHandler();
   }
 
@@ -994,7 +1004,7 @@ class ChatRenderers {
       const wfNameFull = resultText.match(/Summary:\s*(.+)/)?.[1]?.trim() || '';
       const wfName = wfNameFull.length > 160 ? wfNameFull.substring(0, 159) + '…' : wfNameFull;
       const tiW = msg?.taskInfo;
-      const wfChipHtml = this.renderTaskChip(tiW);
+      const wfChipHtml = this.renderTaskChip(tiW, runId ? this._getWorkflowVerdict?.(runId) : null);
       const wfLiveHtml = this.renderWorkflowLive(tiW); // 2.369.118: phases + agent chips while the run is live (the in-place patch renders the same two fragments)
       const viewBtn = runId
         ? ` <button class="chat-workflow-view-btn" data-wf-run="${escHtml(runId)}" data-wf-name="${escHtml(wfName)}">${t('View Workflow')}</button>`
@@ -1213,7 +1223,7 @@ class ChatRenderers {
 
   /** The task-lifecycle chip as a renderer method — the card render and
    *  ChatView's in-place Workflow patch share this ONE spelling. */
-  renderTaskChip(ti) { return taskStatusChipHtml(ti); }
+  renderTaskChip(ti, verdict = null) { return taskStatusChipHtml(ti, verdict); }
 
   /** Does renderToolMsg draw THE Workflow result card — the one that reads taskInfo
    *  (the lifecycle chip, the live tree, the ✓ line) — for this message? A pending

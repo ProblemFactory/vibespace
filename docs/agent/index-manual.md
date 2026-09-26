@@ -12,7 +12,7 @@ server. `vibespace-docs <topic>` prints it.
 | `jobs` | `vibespace-job` | background work that OUTLIVES this conversation: services/long tasks/cron, auto-notify, subscriptions, panels | `vibespace-docs jobs` |
 | `pages` | `vibespace-page` | host self-contained HTML on this VibeSpace with a share link; `kit` prepares the design-canvas kit (design requests from the chat status bar) | `vibespace-docs pages` |
 | `exit` | `vibespace-exit` | borrow a paired machine's network for a single command (region/VPN/fixed-IP egress) | run `vibespace-exit` with no args |
-| `window` | `vibespace-window` | a NATIVE app as a target: start it on a private display, read its accessibility tree with @refs, act on a node through its own declared action; only windows VibeSpace started — plus, behind the user's real-desktop switch, their own desktop's applications (marked YOUR DESKTOP, tree verbs only) | `vibespace-docs window` |
+| `window` | `vibespace-window` | a NATIVE app as a target: only the windows the user SHARED with you (or you opened with `open`) — the user's shared browser included; each shared in TREE mode (accessibility tree + @refs) or PIXEL mode (screenshot + click --at / type / key / scroll); plus, behind the user's real-desktop switch, their own desktop's applications (marked YOUR DESKTOP, tree verbs only) | `vibespace-docs window` |
 | `browser` | `vibespace-browser` | THE browser tool: every page verb (`open` / `snapshot` / `click @ref` / `fill` …) runs in THIS conversation's own browser (ephemeral, watched, shown live to the user); named profiles + handles for logins that survive; raw CDP / identity flags refused by name | `vibespace-docs browser` |
 
 ## Which tool when
@@ -22,7 +22,7 @@ server. `vibespace-docs <topic>` prints it.
 - User said "later" → `vibespace-task backlog-add` (never start parked items unasked).
 - A process/schedule must survive this conversation → `vibespace-job` (never nohup/systemd/harness-cron).
 - Turn-scoped waits → your harness's background Bash; in-session continuation → `/goal`.
-- Need a native desktop app (not a web page) → `vibespace-window open <app>` then `snapshot` / `click @ref` (`vibespace-docs window`); pixels are the fallback, a node without an action is refused, never faked; YOUR DESKTOP rows (the user's switch) allow tree verbs only.
+- Need a native desktop app (not a web page) → `vibespace-window list` (windows the user shared with you) or `vibespace-window open <app>`, then `snapshot` / `click @ref` — or, in pixel mode, `screenshot` / `click --at x,y` (`vibespace-docs window`); `not_exposed` = not shared with you: ask the user; a node without an action is refused, never faked; YOUR DESKTOP rows (the user's switch) allow tree verbs only.
 - Need a web page → `vibespace-browser open <url>`, then `snapshot` and `click @ref` / `fill @ref "…"`; the browser is this conversation's own, so `close --all` is safe, and a login you perform does not survive — `vibespace-browser new <label>` + `use <label>` for one that does (`vibespace-docs browser`).
 
 ## Shared rules

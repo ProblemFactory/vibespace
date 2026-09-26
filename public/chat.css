@@ -1344,6 +1344,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 }
 .chat-task-status-chip.err { color: var(--red); }
 .chat-task-status-chip.soft { color: var(--text-dim); } /* the level-set's soft close (outcome not reported) */
+.chat-task-status-chip.warn { color: var(--yellow); } /* a Workflow run the server judged STALLED from its run dir (src/workflow-disk.js) */
 
 /* Style-menu restart row + sidebar locate flash (2.369.8) */
 .chat-status-restart-row { color: var(--accent); font-weight: 600; }

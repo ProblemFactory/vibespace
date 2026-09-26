@@ -365,6 +365,8 @@ function windowTitleOf(name) {
 //     1.5 screen, 1.14× on 1.75), below that 1 (0.8× on a 1.25 screen) — the
 //     nearer of the two integer scales in ratio. 1.5× stays a CHOICE, labelled
 //     for what it does (bigger text in GTK apps, an Xft xterm scales whole).
+//     LANE D (a) (2026-09-25): no longer text only — a chosen 1.5× is drawn at
+//     GDK_SCALE 2 and shown at 0.75 (scaleKnobs' ceil rule); auto's thresholds kept.
 //   • The CLIENT's dpi (hello / display-configure) must equal the display's
 //     font dpi: xpra rewrites Xft.dpi to a client's dpi whenever it CHANGES
 //     (measured: 96 → 144 through one display-configure), so a client that
@@ -376,14 +378,34 @@ function windowTitleOf(name) {
 // the RATIO-NEAREST integer (the geometric midpoints √2 and 2√2 — r2's rule, carried to 3); the fraction goes
 // ONLY UPWARD into the font dpi (text is never drawn below 96 dpi):
 //   eff 1.00 ⇒ 1×/96 · 1.25 ⇒ 1×/120 · 1.5 ⇒ 2×/96 · 2.0 ⇒ 2×/96 · 2.5 ⇒ 2×/120 · 3.0 ⇒ 3×/96
-// so `appScaleFor('auto', …)` answers the TEXT scale (1..√2 as is, √2..2 ⇒ 2, 2..2√2 as is, above ⇒ 3) and
-// `scaleKnobs` spells ANY value 1..3 by the floor rule (GDK_SCALE = floor, the rest in Xft.dpi) — which is also
-// what an explicit 1.5 has always been: text only in GTK. The ORIGIN rides the record (`scaleOrigin`
-// auto | setting | chosen) so the chip can say whether the number was derived or picked.
+// so `appScaleFor('auto', …)` answers the scale (1..√2 as is, √2..2 ⇒ 2, 2..2√2 as is, above ⇒ 3). LANE D (a)
+// (2026-09-25, see scaleKnobs): that table is how A3 SPELLED a fraction (the floor rule, text only in GTK) —
+// superseded: `scaleKnobs` now draws a fraction at the CEILING and the view shows it at s ÷ ⌈s⌉ (1.25 ⇒ 2 × 0.625,
+// 2.5 ⇒ 3 × 0.8333), so every number above is a real scale of widgets AND text; the dpi rule stays for the browser
+// rows. The ORIGIN rides the record (`scaleOrigin` auto | setting | chosen | app — lane D) so the chip can say whether
+// the number was derived or picked.
 /** The scales `desktop.appScale` offers (the setting's enum is these + 'auto'). */
 const APP_SCALES = Object.freeze([1, 1.5, 2]);
+/** The scales a PERSON picks by name (lane D, 2026-09-25 — a window's Scale ▸ row, an app's default scale in the launch
+ *  dialog): every value `scaleKnobs` spells EXACTLY — under the default ceil rule (lane D (a)) 1 (GDK_SCALE 1, shown 1:1),
+ *  1.5 (GDK_SCALE 2, shown at 0.75), 2 (2, 1:1), 2.5 (3, shown at 0.8333), 3 (3, 1:1): widgets AND text at the number;
+ *  under the dpi rule (the browser rows) 1 (1, 96 dpi), 1.5 (1 + 144 dpi), 2 (2, 96), 2.5 (2 + 120 dpi — Chrome scales
+ *  whole, measured 2.5× its 1× minimum), 3 (3, 96). The Settings enum stays APP_SCALES (an instance default, not a
+ *  per-app choice). */
+const EXPLICIT_SCALES = Object.freeze([1, 1.5, 2, 2.5, 3]);
 /** The per-window Scale ▸ menu's rows (round 3 A3): re-derive from this screen, or one of the explicit scales. */
-const SCALE_CHOICES = Object.freeze(['auto', ...APP_SCALES]);
+const SCALE_CHOICES = Object.freeze(['auto', ...EXPLICIT_SCALES]);
+/** Where a record's scale came from (the chip names it): derived on the launching screen · an explicit Settings value ·
+ *  this window's Scale ▸ relaunch · the app's own default scale chosen in the launch dialog (lane D). */
+const SCALE_ORIGINS = Object.freeze(['auto', 'setting', 'chosen', 'app']);
+/** One scale choice as a request spells it → 'auto' | one of EXPLICIT_SCALES (a number) | null (not a choice). A number
+ *  or its string ('1.5'), never an empty value — the relaunch's `scale` and the launch's `scaleChoice` read it the same. */
+function parseScaleChoice(raw) {
+  if (raw === 'auto') return 'auto';
+  if (raw === undefined || raw === null || raw === '' || typeof raw === 'boolean' || (typeof raw !== 'number' && typeof raw !== 'string')) return null;
+  const n = Number(raw);
+  return EXPLICIT_SCALES.includes(n) ? n : null;
+}
 /** The highest effective scale a launch derives (GDK_SCALE 3). */
 const SCALE_MAX = 3;
 /** The UI scale range the product itself offers (utils UI_SCALE_MIN/MAX, as fractions). */
@@ -410,7 +432,7 @@ function appScaleFor(setting, dpr = 1, uiScale = 1) {
   const s = setting === undefined || setting === null || setting === '' ? 'auto' : String(setting);
   if (s !== 'auto') {
     const n = Number(s);
-    return APP_SCALES.includes(n) ? n : 1;
+    return EXPLICIT_SCALES.includes(n) ? n : 1;
   }
   const eff = effectiveScale(dpr, uiScale);
   if (eff < Math.SQRT2) return eff;
@@ -418,14 +440,18 @@ function appScaleFor(setting, dpr = 1, uiScale = 1) {
   if (eff < 2 * Math.SQRT2) return eff;
   return SCALE_MAX;
 }
-/** The scale a launch runs at AND where it came from → { scale, origin: 'auto'|'setting'|'chosen', from: {dpr, uiScale}|null }.
- *  `choice` (a relaunch's Scale ▸ row) wins over `setting`; its 'auto' re-derives from the RELAUNCHING client. */
-function scalePick({ setting, choice, dpr = 1, uiScale = 1 } = {}) {
+/** The scale a launch runs at AND where it came from → { scale, origin: 'auto'|'setting'|'chosen'|'app', from: {dpr, uiScale}|null }.
+ *  Precedence: `choice` (a relaunch's Scale ▸ row; its 'auto' re-derives from the RELAUNCHING client) > `appDefault` (lane
+ *  D: the app's own default scale the person chose in the launch dialog — an explicit scale; 'auto' / absent = none, the
+ *  instance default decides) > `setting` (an explicit `desktop.appScale`) > auto (derived from dpr × uiScale). */
+function scalePick({ setting, appDefault, choice, dpr = 1, uiScale = 1 } = {}) {
   const from = { dpr: normalizeDpr(dpr), uiScale: normalizeUiScale(uiScale) };
   if (choice !== undefined && choice !== null) {
     if (String(choice) === 'auto') return { scale: appScaleFor('auto', dpr, uiScale), origin: 'auto', from };
     return { scale: appScaleFor(choice, dpr, uiScale), origin: 'chosen', from: null };
   }
+  const app = parseScaleChoice(appDefault);
+  if (typeof app === 'number') return { scale: app, origin: 'app', from: null };
   const s = setting === undefined || setting === null || setting === '' ? 'auto' : String(setting);
   if (s === 'auto') return { scale: appScaleFor('auto', dpr, uiScale), origin: 'auto', from };
   return { scale: appScaleFor(s, dpr, uiScale), origin: 'setting', from: null };
@@ -435,21 +461,76 @@ function normalizeScale(v) {
   const n = Number(v);
   return Number.isFinite(n) && n >= 1 && n <= SCALE_MAX ? round2(n) : 1;
 }
-/** Every knob a scale sets (see the tables above): `{scale, gdkScale, dpi, env, xresources}` — GDK_SCALE = the
- *  integer part (floor), the fraction in the display's font dpi (96 × scale / GDK_SCALE). */
-function scaleKnobs(scale) {
+/** Every knob a scale sets (see the tables above): `{scale, gdkScale, dpi, pictureScale, rule, env, xresources}`.
+ *  LANE D (a) — A FRACTION IS A REAL SCALE (2026-09-25, the owner's white edges after 2× → 1.5×, measured): the
+ *  default `rule: 'ceil'` renders the app at the integer CEILING (GDK_SCALE = ⌈s⌉, the font dpi a plain 96) and the
+ *  view shows that picture at `pictureScale` = s / GDK_SCALE (1.5 ⇒ 2 × 0.75, 2.5 ⇒ 3 × 0.833, 1.25 ⇒ 2 × 0.625) —
+ *  widgets AND text at s, resampled by the browser (an integer scale stays 1:1, pictureScale 1). The floor rule (the
+ *  fraction in the font dpi only) halved every GTK widget at 1.5 while the text grew — GNOME Calculator's content
+ *  column (libadwaita clamps it to ~676 logical px) went from 676 to 338 CSS px in a window that kept its size.
+ *  `rule: 'dpi'` keeps the floor rule for an app that scales WHOLE from the font dpi — the browser rows: Chrome 153's
+ *  minimum is [750,131] at GDK_SCALE 1 + 144 dpi, exactly 1.5 × [500,87] (MEASURED, reader 2) — so it stays crisp at
+ *  1:1 (pictureScale 1). The record stores what it was launched with (`gdkScale`, `pictureScale`): the client reads
+ *  the RECORD (`renderOf`), never re-derives it — a record from before lane D (or from an older paired machine) has
+ *  no `gdkScale` and was the floor rule, shown at 1. */
+const SCALE_RULES = Object.freeze(['ceil', 'dpi']);
+const round4 = (n) => Math.round(n * 10000) / 10000;
+function scaleKnobs(scale, { rule = 'ceil' } = {}) {
   const s = normalizeScale(scale);
-  const gdkScale = Math.max(1, Math.min(SCALE_MAX, Math.floor(s)));
-  const dpi = Math.round(96 * s / gdkScale);
+  const r = rule === 'dpi' ? 'dpi' : 'ceil';
+  const gdkScale = r === 'dpi' ? Math.max(1, Math.min(SCALE_MAX, Math.floor(s))) : Math.max(1, Math.min(SCALE_MAX, Math.ceil(s - 1e-9)));
+  const dpi = r === 'dpi' ? Math.round(96 * s / gdkScale) : 96;
+  const pictureScale = r === 'dpi' ? 1 : round4(s / gdkScale);
   const env = { GDK_SCALE: String(gdkScale), QT_ENABLE_HIGHDPI_SCALING: '1', QT_SCALE_FACTOR: String(gdkScale) };
   const xresources = s > 1 ? ['XTerm', 'UXTerm'].map((c) => `${c}*faceName: Monospace\n${c}*faceSize: ${8 * gdkScale}\n`).join('') : '';
-  return { scale: s, gdkScale, dpi, env, xresources };
+  return { scale: s, gdkScale, dpi, pictureScale, rule: r, env, xresources };
 }
-/** POST /api/desktop/apps/:id/relaunch `{ scale: 'auto'|1|1.5|2, dpr?, uiScale? }` → { ok, choice, dpr, uiScale } | { ok:false, code, error }. */
+/** The scale rule of an app: 'dpi' for a browser row (it scales whole from the font dpi — measured on Chrome), else 'ceil'. */
+function scaleRuleOf(rowOrRec) {
+  return rowOrRec && rowOrRec.browser && Object.prototype.hasOwnProperty.call(BROWSER_KINDS, rowOrRec.browser) ? 'dpi' : 'ceil';
+}
+/** How a RECORD renders (lane D (a)): `{gdk, picture, widget, perLogical}` — the GDK_SCALE it was launched with, the fraction the
+ *  view shows the picture at, and the widgets' TRUE scale: GDK_SCALE × the picture scale for a GTK-style app; the whole
+ *  scale for a browser row (the dpi rule — Chrome scales everything from the font dpi, measured). A record without
+ *  `gdkScale` predates lane D (or came from an older paired machine): the floor rule, shown 1:1 — a GTK app's widgets
+ *  are then ⌊scale⌋ (the fraction reached its text only). */
+function renderOf(rec) {
+  const s = normalizeScale(rec && rec.scale);
+  const g = Number(rec && rec.gdkScale);
+  const gdk = Number.isInteger(g) && g >= 1 && g <= SCALE_MAX ? g : Math.max(1, Math.min(SCALE_MAX, Math.floor(s)));
+  const p = Number(rec && rec.pictureScale);
+  // the stored picture scale is s ÷ gdk rounded to 4 places (0.8333): read back UNROUNDED when it is that quotient, so the
+  // view's ratio and a relaunch round trip are exact (a 2× → 2.5× → 2× trip drifted 0.04 px on the rounded value)
+  const picture = Number.isInteger(g) && g >= 1 && g <= SCALE_MAX && Number.isFinite(p) && p > 0.3 && p <= 1 ? (Math.abs(p - s / gdk) < 5e-4 ? s / gdk : p) : 1;
+  const dpiRule = scaleRuleOf(rec) === 'dpi';
+  // perLogical = the X px the app draws per logical px (its GDK_SCALE; its whole scale under the dpi rule) — the relaunch arithmetic's
+  // divisor, kept apart from `widget` so a rounded picture scale (0.8333) never skews it
+  return { gdk, picture, widget: dpiRule ? s : round2(gdk * picture), perLogical: dpiRule ? s : gdk };
+}
+/**
+ * LANE D (a) — THE WINDOW FOLLOWS A SCALE ▸ RELAUNCH (the owner: "你窗口尺寸计算不对"): the successor is started at
+ * another scale, so the SAME app content needs a pane of `to.widget / from.widget` times the size — the window keeps
+ * the app's LOGICAL size (its layout at 1×), never the pane's CSS size (a 2× → 1.5× relaunch in a kept 898-wide pane
+ * showed the calculator's clamped column with 280 CSS px of its own background either side). `pane` = the pane now
+ * (CSS px), `mainPx` = the app's main X window now (X px — larger than the pane when the app's minimum made the view
+ * scale it to fit; null when unknown), `dpr` = this screen's devicePixelRatio, `from` / `to` = the two RECORDS.
+ * Logical = max(the pane's X px, the main's) ÷ the X px the old app drew per logical px (renderOf's `perLogical`: its
+ * GDK_SCALE for a GTK-style app, its whole scale for a browser); the new pane = logical × to.widget ÷ dpr. → {w, h} CSS px
+ * (0.01 px — rounded any coarser, a 2× → 1.5× → 2× round trip drifts by a pixel), or null when an input is missing.
+ */
+function relaunchPaneCss({ pane, mainPx = null, dpr = 1, from, to } = {}) {
+  if (!pane || !(pane.w > 0) || !(pane.h > 0) || !from || !to) return null;
+  const d = Number.isFinite(Number(dpr)) && Number(dpr) > 0 ? Number(dpr) : 1;
+  const a = renderOf(from), b = renderOf(to);
+  const xw = Math.max(pane.w * d / a.picture, mainPx && mainPx.w > 0 ? mainPx.w : 0);
+  const xh = Math.max(pane.h * d / a.picture, mainPx && mainPx.h > 0 ? mainPx.h : 0);
+  const q = (v) => Math.round(v * 100) / 100;
+  return { w: q(xw / a.perLogical * b.widget / d), h: q(xh / a.perLogical * b.widget / d) };
+}
+/** POST /api/desktop/apps/:id/relaunch `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale? }` → { ok, choice, dpr, uiScale } | { ok:false, code, error }. */
 function validateRelaunchRequest(body) {
   const b = body && typeof body === 'object' ? body : {};
-  const raw = b.scale;
-  const choice = raw === 'auto' ? 'auto' : (raw !== undefined && raw !== null && raw !== '' && APP_SCALES.includes(Number(raw)) ? Number(raw) : null);
+  const choice = parseScaleChoice(b.scale);
   if (choice === null) return { ok: false, code: 'bad-request', error: `scale must be one of ${SCALE_CHOICES.join(', ')}` };
   if (b.dpr !== undefined && b.dpr !== null && !(Number.isFinite(Number(b.dpr)) && Number(b.dpr) >= 1 && Number(b.dpr) <= 3)) return { ok: false, code: 'bad-request', error: 'dpr must be a number from 1 to 3' };
   if (b.uiScale !== undefined && b.uiScale !== null && !(Number.isFinite(Number(b.uiScale)) && Number(b.uiScale) >= UI_SCALE_RANGE[0] && Number(b.uiScale) <= UI_SCALE_RANGE[1])) return { ok: false, code: 'bad-request', error: `uiScale must be a number from ${UI_SCALE_RANGE[0]} to ${UI_SCALE_RANGE[1]}` };
@@ -473,17 +554,20 @@ function relaunchBodyOf(rec) {
   return { exec: rec.exec, args: Array.isArray(rec.args) ? rec.args.slice() : [], cwd: rec.cwd || null, label: rec.label };
 }
 
-/** The Scale ▸ menu of ONE window (round 3 A3), words left to the client: the four rows (auto = what THIS client's
- *  dpr × uiScale would derive now), which one the record runs at, and — when the window cannot relaunch — the reason
- *  CODE (relaunchVerdict's, or 'lease' = an agent holds the app, 'seat' = another client is the active viewer). */
-function scaleMenuModel(rec, { dpr = 1, uiScale = 1, leased = false, seat = 'active', backends = DISPLAY_BACKENDS } = {}) {
+/** The Scale ▸ menu of ONE window (round 3 A3), words left to the client: the rows (auto = what THIS client's
+ *  dpr × uiScale would derive now, then every EXPLICIT_SCALES value), which one the record runs at, and — when the
+ *  window cannot relaunch — the reason CODE (relaunchVerdict's, or 'lease' = an agent holds the app, 'seat' = another
+ *  client is the active viewer). Lane D: `appDefault` = the app's own default scale (a number, or null / 'auto' = none)
+ *  marks its row `appDefault: true` — the client names it; the record launched AT that default is simply current. */
+function scaleMenuModel(rec, { dpr = 1, uiScale = 1, leased = false, seat = 'active', appDefault = null, backends = DISPLAY_BACKENDS } = {}) {
   const v = relaunchVerdict(rec, backends);
   const why = v ? v.code : leased ? 'lease' : seat !== 'active' ? 'seat' : null;
   const cur = rec ? normalizeScale(rec.scale) : 1;
+  const def = parseScaleChoice(appDefault);
   const rows = SCALE_CHOICES.map((choice) => {
     const scale = choice === 'auto' ? appScaleFor('auto', dpr, uiScale) : choice;
     const current = !!rec && (choice === 'auto' ? rec.scaleOrigin === 'auto' : rec.scaleOrigin !== 'auto' && cur === choice);
-    return { choice, scale, current, disabled: !!why || (current && (choice !== 'auto' || scale === cur)) };
+    return { choice, scale, current, appDefault: typeof def === 'number' && choice === def, disabled: !!why || (current && (choice !== 'auto' || scale === cur)) };
   });
   return { rows, why };
 }
@@ -636,8 +720,15 @@ function profileDirVerdict(dir, { home = null, ownedRoot = null, confinement = n
  *                    (the last: the app's display has no keyring of its own, and a window on it must never
  *                    reach for the user's REAL session keyring — the profile's own 0700 dir holds its secrets)
  *   firefox family:  --new-instance -profile <dir>  (+ the profile's user.js, `firefoxUserJs`, is its first-run switch)
+ * LANE E (D4, 2026-09-25): the ACCESSIBILITY switch, always — a browser the user shares with an agent is read through
+ * its AT-SPI tree, and the tree is closed unless asked for at launch: chromium `--force-renderer-accessibility`
+ * (measured on Chrome 153 under the keeper: WITH it a snapshot reaches the page in the default 600-node budget — 235
+ * nodes, the button's `press` action, click @ref pressing it with no viewer; WITHOUT it 4 nodes, the application and
+ * three unreadable frames, no page in 30 s), firefox the `GNOME_ACCESSIBILITY=1` env (`env` in the answer — the
+ * keeper merges it into the app's environment; unmeasured here: the box's firefox is a snap). Turning a11y on at
+ * runtime instead would flip org.a11y.Status for the user's WHOLE session (the Windows-freeze class) — never.
  * Refused by name: not a browser row, a forbidden (profile / automation) flag in the row, a bad profile dir, a bad URL.
- * Returns `{ ok, argv, url, code, error }`.
+ * Returns `{ ok, argv, url, env, code, error }`.
  */
 function browserArgv(row, { profileDir, url = null } = {}) {
   const kind = row && BROWSER_KINDS[row.browser];
@@ -649,9 +740,39 @@ function browserArgv(row, { profileDir, url = null } = {}) {
   if (!d) return { ok: false, argv: null, url: null, code: 'profile-not-owned', error: 'a desktop-app browser needs its own absolute profile directory' };
   let u = null;
   if (url !== null && url !== undefined && url !== '') { const v = validateBrowserUrl(url); if (!v.ok) return { ok: false, argv: null, url: null, code: v.code, error: v.error }; u = v.url; }
-  const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic'];
-  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, code: null, error: null };
+  const profile = row.browser === 'firefox' ? ['--new-instance', '-profile', d] : [`--user-data-dir=${d}`, '--no-first-run', '--no-default-browser-check', '--password-store=basic', BROWSER_A11Y_FLAG];
+  return { ok: true, argv: [...own, ...profile, ...(u ? [u] : [])], url: u, env: row.browser === 'firefox' ? { ...BROWSER_A11Y_ENV } : {}, code: null, error: null };
 }
+/**
+ * LANE D (a) item C — CHROME DRAWS ITS OWN FRAME (MEASURED 2026-09-25, Google Chrome 153.0.8010.47 under xpra 6.5.3,
+ * docs/design-desktop-apps-seamless §3.3): Chrome does not recognise xpra's window manager ("Xpra"), so its "Use system
+ * title bar and borders" (the profile pref `browser.custom_chrome_frame` = false) is its default — `_MOTIF_WM_HINTS
+ * 0x2,0,1,0,0` ⇒ xpra `decorations: 1`: Chrome draws its tab strip and toolbar with NO ─ □ ✕ and asks the window
+ * manager for a frame, so the window is SSD and VibeSpace's title bar (carrying Chrome's own title and icon — the bar
+ * the owner read as Chrome's) and the status strip both stay. With the pref TRUE Chrome draws its own frame
+ * (`decorations: 0`, `_GTK_FRAME_EXTENTS 5,5,5,5`, minimum +10 px) — seamless like GNOME Calculator, its own ─ □ ✕
+ * acting on OUR window; flipping the pref in Chrome's own Settings flips the same X window live. Chrome 153 has NO
+ * command-line flag for it (a strings search of the binary finds only the pref name) — the profile is the switch.
+ * `chromiumFramePrefs(prefs)` → `{ ok, changed, prefs, why }`: the Preferences object with
+ * `browser.custom_chrome_frame: true` ONLY when the key is absent (an existing true / false — the user's own choice
+ * inside Chrome — is kept as is); `null` (no file yet) ⇒ a new minimal object; anything that is not a plain object ⇒
+ * `ok: false` (never overwrite a file we cannot read). The keeper seeds a profile ONCE (`CHROMIUM_FRAME_MARKER` beside
+ * it): Chrome may drop a pref equal to its default, and a user who turned the system title bar back on must not be
+ * overridden at the next launch.
+ */
+const CHROMIUM_FRAME_MARKER = '.vibespace-frame-seeded';
+function chromiumFramePrefs(prefs) {
+  if (prefs === null || prefs === undefined) return { ok: true, changed: true, prefs: { browser: { custom_chrome_frame: true } }, why: 'new' };
+  if (typeof prefs !== 'object' || Array.isArray(prefs)) return { ok: false, changed: false, prefs: null, why: 'not-an-object' };
+  const b = prefs.browser;
+  if (b !== undefined && (b === null || typeof b !== 'object' || Array.isArray(b))) return { ok: false, changed: false, prefs: null, why: 'browser-not-an-object' };
+  if (b && Object.prototype.hasOwnProperty.call(b, 'custom_chrome_frame')) return { ok: true, changed: false, prefs, why: 'set' };
+  return { ok: true, changed: true, prefs: { ...prefs, browser: { ...(b || {}), custom_chrome_frame: true } }, why: 'absent' };
+}
+
+/** Lane E (D4): the accessibility switch of a desktop-app browser — chromium's flag, firefox's env (see browserArgv). */
+const BROWSER_A11Y_FLAG = '--force-renderer-accessibility';
+const BROWSER_A11Y_ENV = Object.freeze({ GNOME_ACCESSIBILITY: '1' });
 /** Firefox has no --no-first-run: its profile's user.js IS the switch (written by the keeper before the launch). */
 function firefoxUserJs() {
   return [
@@ -705,12 +826,19 @@ function validateAppRow(row) {
  *   { source:'registry', row, dpr }  |  { source:'adhoc', row:{ id:null, label, exec, args, cwd }, dpr }
  * `dpr` = the launching client's devicePixelRatio (1..3, absent ⇒ 1; out of range ⇒ refused) and
  * `uiScale` = its UI scale (0.6..2, absent ⇒ 1; out of range ⇒ refused) — the inputs `appScaleFor`
- * turns into the app's scale under `desktop.appScale: auto` (round 3 A3: dpr × uiScale).
+ * turns into the app's scale under `desktop.appScale: auto` (round 3 A3: dpr × uiScale). Lane D: `scaleChoice`
+ * (either shape) = the app's own default scale from the launch dialog — one of EXPLICIT_SCALES, or 'auto' = none;
+ * carried as `launch.scaleChoice` (a number | null), anything else refused `bad-request` (scaleChoiceVerdict).
  * `registry` is the array of rows the keeper serves. Nothing here checks PATH
  * or the file system — the keeper does (exec resolved on PATH, cwd must exist).
  */
 function validateLaunchRequest(body, registry = []) {
   if (!body || typeof body !== 'object') return { ok: false, error: 'expected a JSON object' };
+  // lane D: `scaleChoice` = the app's own default scale the person chose in the launch dialog (origin 'app'); 'auto' =
+  // none (the instance default decides) — anything else is REFUSED by name, never silently dropped
+  const sv = scaleChoiceVerdict(body);
+  if (!sv.ok) return { ok: false, error: sv.error, code: sv.code };
+  const scaleChoice = sv.scaleChoice;
   if (body.dpr !== undefined && body.dpr !== null && !(Number.isFinite(Number(body.dpr)) && Number(body.dpr) >= 1 && Number(body.dpr) <= 3)) return { ok: false, error: 'dpr must be a number from 1 to 3' };
   if (body.uiScale !== undefined && body.uiScale !== null && !(Number.isFinite(Number(body.uiScale)) && Number(body.uiScale) >= UI_SCALE_RANGE[0] && Number(body.uiScale) <= UI_SCALE_RANGE[1])) return { ok: false, error: `uiScale must be a number from ${UI_SCALE_RANGE[0]} to ${UI_SCALE_RANGE[1]}` };
   // B-bfe6: `url` + `keepProfile` belong to a BROWSER row — anywhere else they are refused by name, never ignored
@@ -723,21 +851,34 @@ function validateLaunchRequest(body, registry = []) {
     if (!row.browser && (hasUrl || body.keepProfile !== undefined)) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app — ${row.label} is not one`, code: 'not-a-browser' };
     let url = null;
     if (hasUrl) { const u = validateBrowserUrl(body.url); if (!u.ok) return { ok: false, error: u.error, code: u.code }; url = u.url; }
-    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}) } };
+    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice, ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}) } };
   }
   if (hasUrl || body.keepProfile !== undefined) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app from the catalog — a command you type is run as typed`, code: 'not-a-browser' };
   const row = { id: null, label: cleanStr(body.label, 80) ? body.label : null, exec: body.exec, args: body.args === undefined ? [] : body.args, cwd: body.cwd === undefined || body.cwd === '' ? null : body.cwd };
   if (!row.label) row.label = typeof row.exec === 'string' ? row.exec.split('/').pop().slice(0, 80) : null;
   const v = validateAppRow({ ...row, id: 'adhoc' });
   if (!v.ok) return { ok: false, error: v.error };
-  return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale) } };
+  return { ok: true, error: null, launch: { source: 'adhoc', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice } };
+}
+/** Lane D: the launch body's `scaleChoice` (the app's default scale from the launch dialog) → { ok, scaleChoice: a number
+ *  of EXPLICIT_SCALES | null (absent / 'auto' — the instance default decides) } | { ok:false, code:'bad-request', error }.
+ *  The ONE check: validateLaunchRequest (on the machine the app runs on) and the hub's launch route (before a paired
+ *  machine is asked — an older device would drop an unknown field silently) both call it. */
+function scaleChoiceVerdict(body) {
+  const raw = body && typeof body === 'object' ? body.scaleChoice : undefined;
+  if (raw === undefined || raw === null) return { ok: true, scaleChoice: null };
+  const c = parseScaleChoice(raw);
+  if (c === null) return { ok: false, code: 'bad-request', error: `scaleChoice must be one of ${SCALE_CHOICES.join(', ')}` };
+  return { ok: true, scaleChoice: c === 'auto' ? null : c };
 }
 
 // ── which launches are WEB BROWSERS (takeover r2, T6 / I6) ─────────────────
 /**
  * A desktop-app browser is the HUMAN'S window (its own profile, its logins; no
  * mediation, no action trace, no egress policy) — the window-targets engine
- * refuses it to agents `browser_is_human`. r1 recognised only a registry
+ * MARKS it (lane E, 2026-09-25: a browser the user SHARES is a target like any
+ * app, flagged "the user's browser"; `open` of a browser row stays refused
+ * `browser_is_human`). r1 recognised only a registry
  * browser ROW or an ad-hoc launch of the SAME executable as one (firefox /
  * chromium), so a human's dialog-launched Chrome, Edge, Brave or flatpak
  * Chromium was attachable and AT-SPI-drivable. A browser is recognised by its
@@ -919,7 +1060,7 @@ function streamTargetOf(rec) {
 }
 
 /** New record shape (§4) — facts only. */
-function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now, scale = 1, dpi = 96, scaleOrigin = null, scaleFrom = null, hostId = 'local' }) {
+function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fallbackWhy, idleTimeoutMs, now, scale = 1, dpi = 96, gdkScale = null, pictureScale = null, scaleOrigin = null, scaleFrom = null, hostId = 'local' }) {
   return {
     id, label, exec, args: Array.isArray(args) ? args.slice() : [], cwd: cwd || null, env: env && Object.keys(env).length ? { ...env } : undefined,
     source, backend, via: via || null, fallbackWhy: fallbackWhy || null,
@@ -927,7 +1068,10 @@ function newRecord({ id, label, exec, args, cwd, env, source, backend, via, fall
     startedAt: now, state: 'launching', exitCode: null, lastError: null,
     idleTimeoutMs: Number(idleTimeoutMs) || 0, lastInputAt: now,
     scale: normalizeScale(scale), dpi: Number.isInteger(dpi) && dpi >= 48 && dpi <= 288 ? dpi : 96, // HiDPI (2.369.158): the app's scale + the display's font dpi, fixed at launch
-    scaleOrigin: ['auto', 'setting', 'chosen'].includes(scaleOrigin) ? scaleOrigin : null, scaleFrom: scaleFrom && typeof scaleFrom === 'object' ? { dpr: normalizeDpr(scaleFrom.dpr), uiScale: normalizeUiScale(scaleFrom.uiScale) } : null, // round 3 A3: where the scale came from (the chip says it)
+    // lane D (a): what the app was RENDERED at — GDK_SCALE and the fraction the view shows the picture at (renderOf reads them)
+    gdkScale: Number.isInteger(gdkScale) && gdkScale >= 1 && gdkScale <= SCALE_MAX ? gdkScale : null,
+    pictureScale: Number.isInteger(gdkScale) && gdkScale >= 1 && gdkScale <= SCALE_MAX && Number.isFinite(Number(pictureScale)) && Number(pictureScale) > 0.3 && Number(pictureScale) <= 1 ? round4(Number(pictureScale)) : null,
+    scaleOrigin: SCALE_ORIGINS.includes(scaleOrigin) ? scaleOrigin : null, scaleFrom: scaleFrom && typeof scaleFrom === 'object' ? { dpr: normalizeDpr(scaleFrom.dpr), uiScale: normalizeUiScale(scaleFrom.uiScale) } : null, // round 3 A3: where the scale came from (the chip says it)
     hostId: typeof hostId === 'string' && hostId ? hostId : 'local', // lane C1 (D8): the MACHINE the app runs on — 'local' = the machine that holds this record (the hub's own, or a device's own)
   };
 }
@@ -1180,11 +1324,13 @@ module.exports = {
   LIMITS, DESKTOP_SINGLETON_ID, APP_STATES, LIVE_STATES, DEFAULT_IDLE_TIMEOUT_MIN, KEEPER_ENV,
   DISPLAY_BACKENDS, BACKEND_IDS, backendById, recipeFor, needsVerdict, resolveBackend, fallbackLogLine, parseBackendPrefs, streamKindOf,
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, windowTitleOf, APP_TITLE_MAX,
-  validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs,
+  validateAppRow, validateLaunchRequest, DEFAULT_REGISTRY, APP_SCALES, normalizeDpr, appScaleFor, scaleKnobs, SCALE_RULES, scaleRuleOf, renderOf, relaunchPaneCss, // lane D (a)
   BROWSER_EXEC_RE, BROWSER_APP_ID_RE, isBrowserName, launchedProgram, browserLaunchVerdict,
   SCALE_CHOICES, SCALE_MAX, UI_SCALE_RANGE, normalizeUiScale, normalizeScale, effectiveScale, scalePick, validateRelaunchRequest, relaunchVerdict, relaunchBodyOf, scaleMenuModel,
+  EXPLICIT_SCALES, SCALE_ORIGINS, parseScaleChoice, scaleChoiceVerdict, // lane D: the per-app default scale + the widened explicit set
   OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
-  BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX,
+  BROWSER_KINDS, BROWSER_BINS, REAL_BROWSER_ROOTS, isForbiddenBrowserArg, browserRowFor, validateBrowserUrl, profileDirVerdict, browserArgv, firefoxUserJs, URL_MAX, BROWSER_A11Y_FLAG, BROWSER_A11Y_ENV,
+  CHROMIUM_FRAME_MARKER, chromiumFramePrefs, // lane D (a) item C
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, profileRetireVerdict, PERSON_ENDINGS, adoptVerdict, streamTargetOf, newRecord,
   HOST_OFFLINE_STATE, XPRA_APT_MIN_MAJOR, XPRA_PIN_MAJOR, XPRA_REPO_URL, XPRA_KEY_URL, XPRA_APT_PACKAGES, XPRA_ORG_EXTRA, xpraInstallPlan, installArgv, machinePickRow, // lane C2

@@ -154,13 +154,21 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // P8-2 x5 (docs/design-desktop-apps §7 P8-2): ONE active viewer per app window — the election, the
   // active/blocked/watch rule with the agent lease, the broadcast shape; bundled into the window too
   'src/desktop-viewers.js',
+  // DESKTOP LANE E (docs/design-desktop-apps-seamless §3.6, 2026-09-25): WHO may address a window (hidden by
+  // default, sessions + Task Groups, one row per principal, the opener's own row), the share MODE table
+  // (auto | tree | pixels) and the pixel road's plan — imports nothing; engine, routes, request producer + bundle
+  'src/window-reach.js',
   // HARNESS SETTINGS (docs/design-harness-settings.zh.md §2, 2026-09-20): the per-harness
   // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
   // browser (settings-schema derives the harness sections), required by the server and the daemon
   'src/harness-settings.js',
   // THE node-pty DUCK's listener SET (B-ae4b): daemonPtyShim, the R6 pipe duck and the OpenCode
   // serve terminal share it so setupSessionPty's liveness stamp is never replaced by the consumer
-  'src/pty-duck.js']);
+  'src/pty-duck.js',
+  // A WORKFLOW RUN DIR's view (2026-09-26): labels/phases from journal + meta files, liveness from
+  // mtimes, the stalled sentence — the route builds its view with it and the window + the chat
+  // card word a stalled run with it (bundled), so it may import nothing
+  'src/workflow-disk.js']);
 const SHARED = new Set(['src/discovery-facts.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
@@ -1991,7 +1999,10 @@ console.log('§56 a capability is pinned by content, never by the capability lis
 // names an env that carries scratch.mjs `vncEnv()` — inline, or through the variable / spread it is built from.
 console.log('§57 every suite that spawns server.js hands it per-run singleton-Desktop names (scratch.mjs vncEnv)');
 {
-  const SPAWN = /\b(?:spawn|fork)\(\s*(?:process\.execPath|'node'|"node")\s*,\s*\[[^\]]*?(?:['"`]server\.js['"`]|path\.join\([^)]*?['"`]server\.js['"`]\s*\))\s*\]/g;
+  // …and (2.369.181) a server.js spawned THROUGH a launcher — `spawn(DBUS, ['--', process.execPath, 'server.js'])`, the
+  // shape lane D's test-desktop-app-snap used (dbus-run-session): node is an argv ELEMENT there, never the command, and the
+  // first cut of this census read it as no spawn at all (the suite booted with the machine-global :7 / 5901)
+  const SPAWN = /\b(?:spawn|fork)\(\s*(?:(?:process\.execPath|'node'|"node")\s*,\s*\[[^\]]*?|[A-Za-z_$][\w$.]*\s*,\s*\[[^\]]*?(?:process\.execPath|'node'|"node")\s*,[^\]]*?)(?:['"`]server\.js['"`]|path\.join\([^)]*?['"`]server\.js['"`]\s*\))\s*\]/g;
   // walk(t, i, false) = the balanced text from the opening bracket at `i`; walk(t, i, true) = from `i` to the end of its statement (strings skipped)
   const walk = (t, i, stopAtStatementEnd) => {
     let d = 0, q = null;
@@ -2078,6 +2089,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
     inline: "const srv = spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, PORT: String(PORT) }, stdio: 'ignore' });",
     none: "const srv = spawn(process.execPath, ['-r', preload, 'server.js'], { cwd: wt, stdio: 'ignore' });",
     joined: "const srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env,PORT:String(PORT)},stdio:'ignore'});",
+    wrapped: "const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: { ...process.env, PORT: String(port), HOME: home } });",
   };
   const pass = {
     inline: "const VNC_ENV = await vncEnv();\nconst srv = spawn('node', ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT) } });",
@@ -2086,6 +2098,7 @@ console.log('§57 every suite that spawns server.js hands it per-run singleton-D
     fn: "const VNC_ENV = await vncEnv();\nconst srvEnv = (extra = {}) => ({ ...process.env, ...VNC_ENV, ...extra });\nsrv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv(extraEnv) });",
     shorthand: "const env = { ...process.env, ...(await vncEnv()) };\nconst c = spawn(process.execPath, ['server.js'], { cwd: wt, env, stdio: 'ignore' });",
     literal: "const srv = spawn('node', ['server.js'], { env: { ...process.env, VIBESPACE_VNC_DISPLAY: ':1234', VIBESPACE_VNC_PORT: String(P) } });",
+    wrapped: "const s = spawn(DBUS, ['--', process.execPath, 'server.js'], { cwd: wt, detached: true, env: { ...process.env, ...(await vncEnv()), PORT: String(port) } });",
     git: "execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js'], {});",
     quoted: "const ctl = \"const srv = spawn('node', ['server.js'], { env: { PORT } });\"; // spawn(process.execPath, ['server.js'])",
   };

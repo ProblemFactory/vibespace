@@ -64,6 +64,10 @@ const SPEND_REASONS = Object.freeze({
   // browser.announceIdleHandback is ON, an idle/viewer-left one. The producer
   // is src/server/browser-handback.js, through the delivery ladder.
   'browser-handback': { turn: true, what: 'the browser control handback announcement' },
+  // desktop lane E (D3, 2026-09-25): the user's "Ask <agent> to take control" from a desktop-app window, when they
+  // tick "wake it now" — the default rides the agent's next turn for free (the stash). The producer is
+  // src/server/window-request.js, through the delivery ladder.
+  'window-share-request': { turn: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
 });
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see

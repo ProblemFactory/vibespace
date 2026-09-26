@@ -11,10 +11,15 @@
  *                                     (B-bfe6: `url` / `keepProfile` for a BROWSER row only —
  *                                     bad-url / not-a-browser 400, browser-absent /
  *                                     snap-profile-unreachable 409, each by name)
+ *                                     + (both shapes) `dpr`, `uiScale`, and (lane D) `scaleChoice`:
+ *                                     the app's default scale the person chose in the launch
+ *                                     dialog (auto | 1 | 1.5 | 2 | 2.5 | 3 — the record's origin
+ *                                     'app'); anything else 400 bad-request HERE, before a paired
+ *                                     machine is asked (an older device drops an unknown field)
  *   GET  /api/desktop/apps/:id
  *   POST /api/desktop/apps/:id/stop
  *   POST /api/desktop/apps/:id/keep-alive   ("keep running" = one explicit action, §5)
- *   POST /api/desktop/apps/:id/relaunch     round 3 A3: `{ scale: 'auto'|1|1.5|2, dpr?, uiScale? }` — the
+ *   POST /api/desktop/apps/:id/relaunch     round 3 A3: `{ scale: 'auto'|1|1.5|2|2.5|3, dpr?, uiScale? }` — the
  *                                     same app started again at that scale (auto = derived from
  *                                     THIS client's dpr × uiScale), the old session stopped with
  *                                     `replacedBy` naming the new one → `{ app, replaced }`;
@@ -81,6 +86,25 @@
  *                                     the machine's facts say it is gone); `install_timeout` /
  *                                     `install_link_lost` / `install_unrecorded` by name
  *
+ *   LANE E (2026-09-25, docs/design-desktop-apps-seamless §3.6 — the owner's D1–D7; model src/window-reach.js,
+ *   decided by the window-targets engine) — WHO MAY ADDRESS A WINDOW, and HOW. Cookie-authed like every route here,
+ *   and HUMAN-ONLY: an agent's session / job token (`Bearer vsst_` / `jbt_`) is refused 403 `agent_forbidden` — a
+ *   share is the user's act, never an agent's. A window on a PAIRED machine is not an agent target (lane C: the
+ *   engine's world is this machine) ⇒ 400 `share_local_only`.
+ *   GET    /api/desktop/apps/:id/reach            {handle, mode, rows:[{principal, by, grantedAt, live:[…]}], resolved,
+ *                                                  summary, modeInfo, lease, browser, stream}
+ *   POST   /api/desktop/apps/:id/reach  {principal:{kind:'session'|'group', id, name?}}   grant (a session by its live
+ *                                                  id or its conversation key) — one row per principal
+ *   DELETE /api/desktop/apps/:id/reach  {principal}   revoke that principal's row; a holder that no longer reaches the
+ *                                                  window loses its lease at once (its next verb: not_exposed)
+ *   PUT    /api/desktop/apps/:id/reach/mode {mode: auto|tree|pixels}   D7 — takes effect at the holder's next verb
+ *   POST   /api/desktop/apps/:id/reach/request {sessionId, note?, wake?, endHold?}   D3 "Ask <agent> to take control":
+ *                                                  grants the window to that agent, then the message rides its NEXT turn
+ *                                                  (free) or — `wake` — a billed turn through the gated ladder
+ *                                                  (spendReason window-share-request; refused ⇒ next turn, said why)
+ *                                                  → {delivered:'woken'|'next-turn', why?, whyCode?, granted, endedHold}
+ *   POST   /api/desktop/apps  {…, share:{principals, mode}}   D2 "before launch": applied to the new window
+ *
  * `host` (lane C2): GET /api/desktop/apps and the launch take `host` (query /
  * body) and run on THAT machine through src/server/desktop-access.js — this
  * machine in-process, a paired machine through the `desktop-serve` agentd op,
@@ -91,7 +115,7 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { streamKindOf } = require('../desktop-apps');
+const { streamKindOf, scaleChoiceVerdict } = require('../desktop-apps');
 const router = express.Router();
 
 let ctx = null;
@@ -108,13 +132,17 @@ function hostParam(req, res) {
   if (!HOST_RE.test(h)) { res.status(400).json({ error: `bad host ${JSON.stringify(h.slice(0, 40))}`, code: 'bad-request' }); return null; }
   return h;
 }
-/** The launch body without the routing field (the machine is not part of the app's request). */
-function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; return b; }
+/** The launch body without the routing field (the machine is not part of the app's request) — nor the share (lane E:
+ *  the user's exposure choice is applied by the window-targets engine once the window exists, never by the keeper). */
+function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; return b; }
+/** Lane E: a share is the USER's act — an agent's session / job token is refused (the reset-credit / inbox-reply rule). */
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 function fail(res, e) {
   const code = e?.code || null;
   const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host' ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
-      || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' ? 409
+      || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'wake_paced' ? 409
+      : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}) });
 }
@@ -126,7 +154,28 @@ router.get('/api/desktop/apps', async (req, res) => {
 });
 router.post('/api/desktop/apps', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
-  try { res.json(host === 'local' ? await ctx.keeper.launch(bodyOf(req)) : await ctx.keeper.launch(bodyOf(req), { host })); } catch (e) { fail(res, e); }
+  // lane D: the app's default scale is checked HERE too (the PURE verdict the machine runs) — a paired machine whose agent
+  // predates the field would drop it silently; a bad value is the person's request refused by name, on every machine
+  const sv = scaleChoiceVerdict(req.body);
+  if (!sv.ok) return fail(res, { code: sv.code, message: sv.error });
+  // lane E (D2 "before launch"): the dialog's share rides the launch — validated BEFORE anything starts, human-only,
+  // this machine only (a paired machine's window is no agent target), applied once the window exists
+  const share = req.body && req.body.share != null ? req.body.share : null;
+  if (share != null) {
+    if (isAgentBearer(req)) return fail(res, { code: 'agent_forbidden', message: 'sharing a window is the user\'s act — an agent token cannot' });
+    const RE = require('../window-reach');
+    const v = RE.normShare(share);
+    if (!v.ok) return fail(res, { code: v.code, message: v.why });
+    if (host !== 'local' && v.share && v.share.principals.length) return fail(res, { code: 'share_local_only', message: 'a window on another machine cannot be shared with an agent — agents address this machine\'s windows only' });
+  }
+  try {
+    const r = host === 'local' ? await ctx.keeper.launch(bodyOf(req)) : await ctx.keeper.launch(bodyOf(req), { host });
+    let reach = null;
+    if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.shareAtLaunch === 'function' && r && r.id) {
+      try { reach = ctx.windowEngine.shareAtLaunch(r.id, share); } catch (e) { return res.json({ ...r, reach: null, reachError: { error: String(e.message || e), code: e.code || null } }); } // the app runs; the share's failure is said, never silent
+    }
+    res.json(reach ? { ...r, reach } : r);
+  } catch (e) { fail(res, e); }
 });
 // lane C2: the machine picker, the install rung's plan, and the install itself (streamed)
 router.get('/api/desktop/machines', async (req, res) => {
@@ -297,6 +346,47 @@ router.post('/api/desktop/apps/:id/handback', (req, res) => {
   const viewerId = req.body?.viewerId != null && VIEWER_RE.test(String(req.body.viewerId)) ? String(req.body.viewerId) : null;
   if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
   try { const r = engine.handback({ handle: req.params.id, viewerId, cause: 'explicit' }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, byHolder: r.byHolder, lease: r.lease }); } catch (e) { fail(res, e); }
+});
+
+// ── lane E: reach + the share mode + the window request (human-only; the engine decides) ──
+/** The engine for a window THIS machine addresses: 503 no-engine, 404 not-found, 400 share_local_only (a paired
+ *  machine's app), 403 agent_forbidden (an agent token) — each answered here; returns null after answering. */
+function reachGate(req, res) {
+  const id = req.params.id;
+  if (!ID_RE.test(id)) { res.status(400).json({ error: 'bad id', code: 'bad-request' }); return null; }
+  if (isAgentBearer(req)) { fail(res, { code: 'agent_forbidden', message: 'sharing a window is the user\'s act — an agent token cannot' }); return null; }
+  const engine = engineOr503(res); if (!engine) return null;
+  const rec = ctx.keeper.get(id);
+  if (!rec) { res.status(404).json({ error: `no desktop app ${id}`, code: 'not-found' }); return null; }
+  if (typeof engine.addressable === 'function' && !engine.addressable(id)) {
+    if (rec.hostId && rec.hostId !== 'local') { fail(res, { code: 'share_local_only', message: `${rec.label || id} runs on ${rec.hostLabel || rec.hostId} — agents address this machine's windows only` }); return null; }
+    res.status(404).json({ error: `${rec.label || id} is not running`, code: 'not-found' }); return null;
+  }
+  return engine;
+}
+router.get('/api/desktop/apps/:id/reach', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.reachOf(req.params.id)); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/apps/:id/reach', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.grantReach(req.params.id, req.body && req.body.principal, { by: 'user' })); } catch (e) { fail(res, e); }
+});
+router.delete('/api/desktop/apps/:id/reach', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.revokeReach(req.params.id, req.body && req.body.principal)); } catch (e) { fail(res, e); }
+});
+router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.setShareMode(req.params.id, req.body && req.body.mode)); } catch (e) { fail(res, e); }
+});
+router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  if (!ctx.windowRequest) return fail(res, { code: 'no-engine', message: 'window requests are not wired in this process' });
+  const b = req.body || {};
+  if (typeof b.sessionId !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(b.sessionId)) return fail(res, { code: 'bad-request', message: 'a request names the agent session it asks (sessionId)' });
+  if (b.note != null && typeof b.note !== 'string') return fail(res, { code: 'bad-request', message: 'note is text' });
+  try { res.json(await ctx.windowRequest.request({ handle: req.params.id, sessionId: b.sessionId, note: b.note || '', wake: b.wake === true, endHold: b.endHold === true })); } catch (e) { fail(res, e); }
 });
 
 // the singleton desktop (src/vnc.js) — answers unchanged from server.js

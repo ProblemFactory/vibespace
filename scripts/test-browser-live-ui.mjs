@@ -542,6 +542,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
         const deskClip = `(() => { const w = ${DESK}; const bar = w.content.querySelector('.desktop-bar'); const hr = w.element.getBoundingClientRect(); const br = bar.getBoundingClientRect(); return { getBoundingClientRect: () => ({ left: hr.left, top: hr.top, width: hr.width, height: br.bottom + 40 - hr.top }) }; })()`;
         const placeDesk = async (W) => { await evaluate(`(() => { const w = ${DESK}; w.gridBounds = null; const e = w.element; e.style.left = '20px'; e.style.top = '20px'; e.style.width = '${W}px'; e.style.height = '480px'; window.app.wm.focusWindow(w.id); if (w.onResize) w.onResize(); return true; })()`); await frames(); await sleep(150); };
         const xpra = rec.stream === 'xpra';
+        // desktop lane E (D1, 2.369.181): a window is hidden from every agent until the user shares it — share it with the
+        // browsing session so the agent-lease legs below can attach; a local app's ⋯ then carries Share with agent… /
+        // Ask an agent… on EVERY rung, so it is always shown (bar-fold's moreAlways), not only on xpra
+        const shared = await j('POST', `/api/desktop/apps/${appId}/reach`, { principal: { kind: 'session', id: S1 } });
+        ok(shared.status === 200, `the user shares the app with the browsing session (POST …/reach ${shared.status})`, JSON.stringify(shared.json).slice(0, 300));
+        const deskMoreAlways = xpra || !rec.hostId || rec.hostId === 'local';
         console.log(`  (the app runs on the ${rec.backend} rung, stream ${rec.stream})`);
         for (const lang of LANGS) {
           await load(lang, 'dark');
@@ -561,7 +567,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
               }
               for (const W of WIDTHS) {
                 await placeDesk(W);
-                await record('desktop', `desktop-${lang}-${theme}-${lease}-w${W}`, deskBar, deskClip, { moreSel: '.desktop-app-more', fold: deskFold, moreAlways: xpra });
+                await record('desktop', `desktop-${lang}-${theme}-${lease}-w${W}`, deskBar, deskClip, { moreSel: '.desktop-app-more', fold: deskFold, moreAlways: deskMoreAlways });
               }
             }
             await evaluate(`(() => { const b = (${DESK}).content.querySelector('.desktop-bar .browser-live-handback'); if (b && getComputedStyle(b).display !== 'none') b.click(); return 1; })()`);

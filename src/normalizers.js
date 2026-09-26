@@ -114,14 +114,17 @@ let rebuildChain = Promise.resolve();
  * rebuilding twice. `_historyLoaded` is set AFTER success (2.89.2 rule).
  */
 /** The persisted task records (session-meta `taskRecords`) in the order the live
- *  stream produced them: started → progress → notification, per task. */
+ *  stream produced them: started → progress → notification, per task, each as
+ *  `{ record, at }` — `at` = the stdout consumer's `cur.at`, the instant the
+ *  server saw the task's NEWEST record live (lane Q verify, 2026-09-26: the
+ *  replay stamps `taskInfo.aliveAt` with it, never with the rebuild's clock, so a
+ *  run that stalled days ago is not proven alive again by every restart). */
 function taskReplayRecords(taskRecords) {
   const out = [];
   for (const cur of Object.values(taskRecords || {})) {
     if (!cur || typeof cur !== 'object') continue;
-    if (cur.started) out.push(cur.started);
-    if (cur.progress) out.push(cur.progress);
-    if (cur.notification) out.push(cur.notification);
+    const at = Number.isFinite(cur.at) ? cur.at : 0;
+    for (const record of [cur.started, cur.progress, cur.notification]) if (record) out.push({ record, at });
   }
   return out;
 }
@@ -142,7 +145,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
     try {
       await mm.convertHistoryAsync(records, { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
-      for (const rec of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(rec); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
+      for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       drainQueue(session, mm);
       session._historyLoaded = true;
     } finally {

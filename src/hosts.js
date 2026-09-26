@@ -1890,27 +1890,55 @@ class HostManager {
       + `echo "SNAPMT:$( [ -n "$S" ] && mt "$S" )"; `
       + `echo "JMT:$( [ -n "$D" ] && mt "$D/journal.jsonl" )"; `
       + `echo "AMT:$( [ -n "$D" ] && for f in "$D"/agent-*.jsonl; do [ -f "$f" ] && mt "$f"; done | sort -n | tail -1 )"; `
+      // the newest mtime of EVERY file of the run (meta.json too) — the stall
+      // verdict's input, the local read's rule (readRunDirParts stats every file);
+      // JMT/AMT stay the resumed-after-snapshot rule's inputs, as locally (lane Q verify)
+      + `echo "NMT:$( [ -n "$D" ] && for f in "$D"/*; do [ -f "$f" ] && mt "$f"; done | sort -n | tail -1 )"; `
+      // the HOST's clock — the stall verdict (src/workflow-disk.js) compares the
+      // host's mtimes against the host's now, so machine clock skew never
+      // turns a live run stalled or a dead one running (2026-09-26)
+      + `echo "NOW:$(date +%s)"; `
       + `[ -n "$D" ] && ls -1 "$D" 2>/dev/null | sed 's/^/AG:/'; `
       + `echo "NM:$( [ -n "$D" ] && ls -1 "$(dirname "$(dirname "$(dirname "$D")")")/workflows/scripts" 2>/dev/null | grep -F -- ${JSON.stringify('-' + runId + '.js')} | head -1 )"; `
       // dial run-cmd slices stdout at 1MB — keep the whole payload under it
-      // (snapshot 700K + journal 250K + headers; a truncated journal only
-      // degrades attempt labels, a truncated snapshot 500s with a clear error)
+      // (snapshot 700K + journal 250K + metas 40K + headers; a truncated journal
+      // only degrades attempt labels — the metas carry them too — a truncated
+      // snapshot 500s with a clear error)
       + `echo ${JSON.stringify(M('SNAP'))}; [ -n "$S" ] && head -c 700000 "$S"; `
-      + `echo; echo ${JSON.stringify(M('JOURNAL'))}; [ -n "$D" ] && head -c 250000 "$D/journal.jsonl"; echo`;
+      + `echo; echo ${JSON.stringify(M('JOURNAL'))}; [ -n "$D" ] && head -c 250000 "$D/journal.jsonl"; echo`
+      // each agent's meta.json (description = label, workflowPhase, model) as ONE
+      // line `<file>\t<json>` — JSON's own newlines are whitespace, folded to spaces
+      + `; echo ${JSON.stringify(M('META'))}; [ -n "$D" ] && for f in "$D"/agent-*.meta.json; do [ -f "$f" ] && printf '%s\\t' "$(basename "$f")" && head -c 4000 "$f" | tr '\\n\\r' '  ' && echo; done | head -c 40000; echo`;
     const out = await this._hostShell(h, script, { timeoutMs: 20000 });
     const [head, rest] = out.split(M('SNAP') + '\n');
     if (rest === undefined) throw new Error('workflow probe returned no payload');
-    const [snapRaw, journalRaw] = rest.split('\n' + M('JOURNAL') + '\n');
+    const [snapRaw, journalAndMeta] = rest.split('\n' + M('JOURNAL') + '\n');
+    // the META section trails the journal (absent ⇒ no metas: the disk view
+    // then labels from the journal alone — never the old skeleton)
+    const metaAt = journalAndMeta === undefined ? -1 : journalAndMeta.lastIndexOf('\n' + M('META') + '\n');
+    const journalRaw = journalAndMeta === undefined ? undefined : (metaAt >= 0 ? journalAndMeta.slice(0, metaAt) : journalAndMeta);
+    const metas = {};
+    if (metaAt >= 0) {
+      for (const line of journalAndMeta.slice(metaAt + M('META').length + 2).split('\n')) {
+        const tab = line.indexOf('\t');
+        const m = tab > 0 ? line.slice(0, tab).match(/^agent-([0-9a-f]+)\.meta\.json$/) : null;
+        if (!m) continue;
+        try { const o = JSON.parse(line.slice(tab + 1)); if (o && typeof o === 'object') metas[m[1]] = o; } catch { /* cut by the 40K cap */ }
+      }
+    }
     const headLines = head.split('\n');
     const grab = (p) => { const l = headLines.find((x) => x.startsWith(p)); return l ? l.slice(p.length).trim() : ''; };
     const val = {
       snapMtime: Number(grab('SNAPMT:')) || 0,
       journalMtime: Number(grab('JMT:')) || 0,
       agentMtime: Number(grab('AMT:')) || 0,
+      newestMtime: Number(grab('NMT:')) || 0,
       agentFiles: headLines.filter((x) => x.startsWith('AG:')).map((x) => x.slice(3).trim()).filter(Boolean),
       scriptName: grab('NM:'),
       snapText: (snapRaw || '').trim() || null,
       journalText: (journalRaw === undefined ? '' : journalRaw),
+      metas,
+      now: Number(grab('NOW:')) || 0,
       hasRunDir: false,
     };
     val.hasRunDir = !!(val.journalMtime || val.agentMtime || val.agentFiles.length);
