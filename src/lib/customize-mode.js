@@ -1,4 +1,4 @@
-import { uiScale } from './utils.js';
+import { onOutsidePress, uiScale } from './utils.js';
 // CustomizeMode — Firefox-style "Customize Toolbar" edit mode for the chrome.
 //
 // Instead of hunting through the Settings dialog for abstract toggle names,
@@ -382,14 +382,10 @@ export class CustomizeMode {
     pop.style.top = ((r.top - ph - 8 > 0 ? r.top - ph - 8 : r.bottom + 8) / Zc) + 'px';
     pop.style.left = (Math.max(8, Math.min(r.left + r.width / 2 - (pop.offsetWidth * Zc) / 2, innerWidth - pop.offsetWidth * Zc - 8)) / Zc) + 'px';
 
-    const close = (e) => {
-      if (pop.contains(e.target) || el.contains(e.target)) return;
-      if (this._picking) return; // width-pick clicks must not dismiss the popover
-      pop.remove();
-      document.removeEventListener('mousedown', close, true);
-    };
-    document.addEventListener('mousedown', close, true);
-    this._cleanup.push(() => { this._stopWidthPick?.(); pop.remove(); document.removeEventListener('mousedown', close, true); });
+    // an outside press closes it — THE ONE closer (utils.js onOutsidePress, armed at once as before); the spring
+    // itself is exempt, and width-pick clicks must not dismiss the popover
+    const disposeClose = onOutsidePress(pop, () => pop.remove(), { exclude: [el], ignore: () => !!this._picking, nested: false });
+    this._cleanup.push(() => { this._stopWidthPick?.(); pop.remove(); disposeClose(); });
   }
 
   // Width-pick mode: hover highlights any bar element (sections like

@@ -173,6 +173,19 @@ const HARNESS_SETTINGS = {
       description: t("Claude Code's own wait-and-continue at a usage limit (its autoContinueAtUsageLimit setting). Chat sessions never run it — VibeSpace starts Claude Code non-interactively there, and VibeSpace's own auto-resume (with the unattended-spend ceiling and the account pool) is what continues them, when it is on. In terminal sessions it is the only automatic continue: off (the default) means a terminal session stops at the limit, the limit dialog offers the wait as a choice, and nothing continues it by itself; on leaves Claude Code's own setting alone (its default is on), so terminal sessions continue by themselves at the reset — outside the unattended-spend ceiling. Applies to newly started sessions."),
       apply: { kind: 'spawn', how: '--settings autoContinueAtUsageLimit=false (while off)' },
     },
+    // VIBESPACE'S OWN AGENT TOOLS NEVER ASK PER COMMAND (lane L, 2026-09-25 —
+    // the naive-user study: 7–15 "Permission: Bash" cards per browser task in
+    // the default permission mode). ON = every claude spawn carries allow rules
+    // for VibeSpace's own tools in its inline --settings (the CLI's flagSettings
+    // layer: nothing is written to ~/.claude/settings.json). The table, the
+    // measured rule spelling and the held verbs: src/agent-tool-rules.js.
+    {
+      key: "allowAgentTools",
+      type: "boolean", default: true,
+      label: t("Let the agent use VibeSpace's own tools without asking"),
+      description: t("VibeSpace's own agent tools — its browser (vibespace-browser), status, task, inbox, messages, desktop windows, channels, manuals, and the list of its published pages — run without a permission card for every step, in every permission mode. Only these tools: any other command still asks, and so does the part of a command line that runs something else. Starting a background shell command (vibespace-job run) still asks, because it can run anything, and publishing a page (vibespace-page publish) asks every time, unless the session runs with full access (Never ask), where it runs as it always did. The trade-off: anything the agent can read, it can type or upload into a web page without asking — except an upload from ~/.claude, ~/.ssh, ~/.vibespace, ~/.codex or VibeSpace's account stores, which the browser tool refuses. The browser tool also writes files (a screenshot, a PDF, a download) only under the project directory, /tmp or ~/Downloads — never over your keys, logins or config. Off = every step asks again. Applies to newly started and resumed sessions; nothing is written to your Claude settings file."),
+      apply: { kind: 'spawn', how: '--settings permissions.allow + permissions.ask (VibeSpace\'s own agent tools; publishing a page asks in a mode that asks anyway)' },
+    },
     {
       key: "transcriptRetentionDays",
       type: "number", default: 36500, min: 0, max: 36500, step: 30,

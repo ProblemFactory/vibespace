@@ -1,0 +1,19 @@
+agent-browser close - Close the browser
+
+Usage: agent-browser close [options]
+
+Closes the browser instance for the current session.
+
+Aliases: quit, exit
+
+Options:
+  --all                Close all active sessions
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser close
+  agent-browser close --session mysession
+  agent-browser close --all

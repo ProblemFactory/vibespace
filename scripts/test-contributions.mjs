@@ -788,6 +788,16 @@ const project = (items, parentKind) => items.map((i) => (i.separator ? { sep: 1 
   ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Group two windows first', 'chain.splitBeside with an unknown partner says so and touches nothing');
   toasts.length = 0; swm.activeWindowId = null; runCommand('chain.toggleSplit', { app: sapp });
   ok(sc.length === 0 && toasts.length === 1, "'v' with no active window is never silent either");
+  // ── split tabs v2 (docs/design-split-ux.zh.md §8): move the active tab within its list ──
+  ok(hasCommand('chain.moveTabLeft') && hasCommand('chain.moveTabRight'), 'command-mode registers chain.moveTabLeft / chain.moveTabRight (the verbs the Ctrl+Shift+PageUp / PageDown chords run)');
+  ok(/case '\{': runCommand\('chain\.moveTabLeft', cctx\); break;/.test(cm) && /case '\}': runCommand\('chain\.moveTabRight', cctx\); break;/.test(cm), "'{' / '}' route to chain.moveTabLeft / chain.moveTabRight through runCommand and STAY in command mode (a tab often moves several places)");
+  ok(/\[CMD\][^']*· \{\} move tab/.test(cm), 'the armed [CMD] hint line lists "{} move tab"');
+  sc.length = 0; toasts.length = 0; swm.activeWindowId = 'w2'; swm.moveActiveTab = (d) => sc.push(['moveActiveTab', d]);
+  runCommand('chain.moveTabLeft', { app: sapp }); runCommand('chain.moveTabRight', { app: sapp });
+  ok(J(shape()) === J([['moveActiveTab', -1], ['moveActiveTab', 1]]) && toasts.length === 0, 'in a group: chain.moveTabLeft / Right → wm.moveActiveTab(-1 / +1) (the ONE mutation path lives in the window manager)', J([shape(), toasts]));
+  sc.length = 0; for (const w of [w1, w2, w3]) delete w._tabChain;
+  runCommand('chain.moveTabLeft', { app: sapp });
+  ok(sc.length === 0 && toasts.length === 1 && toasts[0][0] === 'Group two windows first', 'no group: the move says "Group two windows first" (never silent) and touches nothing', J(toasts));
 }
 
 // ── C. ws-handler default: the REAL handler on a fake wss ──

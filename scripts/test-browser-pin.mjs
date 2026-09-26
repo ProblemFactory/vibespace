@@ -624,7 +624,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   {
     const M6 = mutantCopies('browser-pin-l6', REPO);
     const csrc = fs.readFileSync(CLI, 'utf8');
-    const cmut = csrc.replace("  const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];", '  const argv = [...rest];');
+    const cmut = csrc.replace("  const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", '  const argv = [...framed.argv];'); // the hand-over line since the 2.369.182 integration (lane L's in-frame argv)
     if (cmut !== csrc) {
       const cliCopy = M6.write('data/bin/vibespace-browser', cmut, 'close-all-namespace');
       c = await cli(['use', 'Squad']);

@@ -99,6 +99,7 @@ Command mode auto-exits after 2 seconds or on Escape.
 | Tab | Cycle to next window (stays in command mode) |
 | ] / [ | Move active window to the next / previous desktop |
 | v | Side by side on / off for the active window's tab group (see [Side by side](#side-by-side)) |
+| { / } | Move the active tab one place left / right in its group |
 | V | Swap the left and right panes |
 
 ### Global commands
@@ -206,10 +207,16 @@ When windows merge, the title bar is replaced by a tab bar with rounded-top tabs
 
 - **Click** a tab to switch to that window's content
 - **Close button** on each tab to remove it from the group (window closes or becomes standalone)
-- **Drag a tab downward** (>30px) to pull it out of the group. The detached window is raised above all others and follows the cursor. You can then drop it in empty space (becomes standalone), onto another window's icon/tab bar (merges into that group — including the original group), or on a snap zone.
+- **Drag a tab sideways** to reorder it: a thin marker shows where it will land, **Esc** cancels. The first few pixels decide — a drag that starts sideways stays a reorder.
+- **Drag a tab downward** (>30px) to pull it out of the group. The detached window is raised above all others and follows the cursor. You can then drop it in empty space (becomes standalone), onto another window's icon/tab bar (merges into that group — including the original group, at the spot under the pointer), or on a snap zone.
+- **Ctrl+Shift+PageUp / PageDown** (or command mode `{` / `}`) move the active tab one place left / right.
 - **Right-click** a tab to open that tab's own window menu.
 
-Merging is the **only** drag that does something other than move and snap: dragging a window over another window's title bar (anywhere but its icon or tab bar) just moves it, and dropping it near a screen edge snaps it as usual.
+Merging is the **only** drag that does something other than move and snap: dragging a window over another window's title bar (anywhere but its icon or tab bar) just moves it, and dropping it near a screen edge snaps it as usual. A whole tab group dragged by its title bar only moves — merge its tabs one by one.
+
+With **Settings → Window → Dropping a window onto another** set to *Side by side at once*, a merge lands side by side straight away (the window you dragged on the right); the notification then offers **Undo** (the window goes back where it was) and **Unsplit** (keep them grouped as tabs, the window at the spot you dropped it on). Dropping a window onto a group that is **already** side by side (with either setting) puts it in the half under the pointer and shows it there; the notification names the new pair and offers **Undo** (the window goes back where it was, the group back to how it was).
+- On a narrow window the right-hand pane never gets narrower than the window controls plus room for one tab (the divider stops there); when that column is too tight for the side-by-side badge as well, the badge steps aside — the divider's right-click still has **Unsplit** / **Swap left and right**.
+- Dragging a tab first **shows** it (a press shows the tab, as in a browser), so a tab dragged across the middle arrives shown on its new side.
 
 ### Side by side
 
@@ -219,16 +226,21 @@ Two tabs of a group can be shown **side by side** in the same window — one pan
 - **The window menu** (right-click the title bar, or a tab): in a group of two or more, **Show side by side ▸ Beside {name} (on the right)** — this window on the left, the tab you pick on the right; the focus stays on the window you right-clicked. In side-by-side mode the menu has **Unsplit** and **Swap left and right** instead.
 - **Command mode**: `Ctrl+\` then `v` turns side by side on or off for the active window's group, `V` swaps the sides. Outside a group of two or more tabs it tells you to group two windows first.
 - **In side-by-side mode** the same button is highlighted. Click it for **Unsplit** (back to tabs — nothing moves) or **Swap left and right**. Right-clicking the divider offers the same two.
-- The tab bar follows the panes: the left pane's tab is on the left, a short bar sits between the two pane tabs, and each pane tab is underlined in its own colour. Clicking a third tab replaces one pane in place.
+- **The tab bar is split in two halves**, one above each pane, following the divider as you drag it: every tab belongs to one side, the tab shown in each pane is highlighted and underlined in its own colour, and a short bar marks the middle. **Click a tab in the left half to show it on the left, in the right half to show it on the right** — both sides can be switched.
+- **Drag a tab sideways** to reorder it within its half; drag it across the middle to move it to the other side (the tab you were looking at stays visible there, and its old side shows its neighbour). Moving the last tab of a side out ends side by side.
+- **Opening a file path or a local link from a chat** shows it side by side with that chat by default (on the side the chat is not on, if the window is already side by side); opening the same path again shows its tab. **Settings → Window → Opening a file path or link from a window** switches this to *As a tab of the window* or *In its own window*.
 - Drag the divider to resize the panes; double-click it to make them equal.
 - Every side-by-side you start shows a notification with **Undo** for 5 seconds — it puts both windows back exactly where they were.
-- On a phone (≤ 768 px wide) a side-by-side group shows one pane at a time as tabs; the button is hidden and the layout on your other devices is not changed.
+- On a phone (≤ 768 px wide) a side-by-side group shows one pane at a time as tabs (one tab bar, left side first); the button is hidden and the layout on your other devices is not changed.
 
 ### In the taskbar
 
 A tab group shows as a **single stacked taskbar item** (Windows-style) — the unique tab icons offset like a stack of cards, with a count badge — instead of hiding the grouped windows behind the host. The item is titled by the currently active tab.
 
-- **Click** the stacked item to open a popover listing every tab in the group; click one to restore + focus the group and switch to that tab.
+- **Click** the stacked item to open the group: its window is restored if minimized, focused and brought to the front, showing the tab that was on show.
+- **Click it again** while the group is already in front to get the **chooser** — a list of every tab in the group (the one on show is marked); click one to switch straight to that tab.
+- **Hover** the stacked item with a mouse for a moment (~0.3 s) and the same chooser appears above it without taking the focus; move onto it and click a tab, or move away and it closes. Passing over the item on the way to another one does nothing, and there is no hover on a touch screen or during a drag.
+- With the keyboard: **Tab** to the item, **Enter** / **Space** = the click, **↑** = the chooser (then ↑ / ↓ and Enter to pick, Esc to close).
 - **Right-click** acts on the whole group (move, minimize/restore, close).
 
 The item blinks if **any** tab is waiting for input.

@@ -16,7 +16,7 @@ import { openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, liveDotS
 import { renderRow, patchRow, applyLive, replyBoxEl, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { anchorFixedPopup, copyText, createModalShell, createPopover, escHtml, fetchJson, getToastHistory, showToast } from './utils.js';
+import { anchorFixedPopup, copyText, createModalShell, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 
@@ -744,12 +744,15 @@ export function installUserTodos(app) {
   };
   btn.onclick = () => togglePopup(btn);
   if (mBtn) mBtn.onclick = () => togglePopup(mBtn);
-  document.addEventListener('mousedown', (e) => {
-    // the nav button is exempt like the taskbar one — a mousedown on it would
-    // hide the popup and the click would re-open it (a tap that never closes)
-    // the title-bar mini inbox (chunk 3) is a layer ABOVE the panel, not outside it
-    if (e.target?.closest?.('.ut-mini-popover, .win-inbox-badge')) return;
-    if (!popup.contains(e.target) && !btn.contains(e.target) && !(mBtn && mBtn.contains(e.target))) popup.classList.add('hidden');
+  // an outside press hides the popup — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press
+  // into an app's picture counts too; lane M). A PERSISTENT element: armed once for the app's life. Its rules, kept:
+  // the nav button is exempt like the taskbar one — a press on it would hide the popup and the click would re-open it
+  // (a tap that never closes); the title-bar mini inbox (chunk 3) is a layer ABOVE the panel, not outside it; any
+  // other popover is outside (the panel never honoured the chained-popover rule)
+  onOutsidePress(popup, () => popup.classList.add('hidden'), {
+    exclude: [btn, mBtn],
+    ignore: (t) => !!t?.closest?.('.ut-mini-popover, .win-inbox-badge'),
+    nested: false, once: false,
   });
   // Escape closes the popup / phone sheet (verifier r2). This is a PERSISTENT
   // element, so it cannot carry [data-popover] — the global handler (app.js

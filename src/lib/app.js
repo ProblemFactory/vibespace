@@ -1,6 +1,6 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
 import { installPluginClient } from './plugin-client.js';
-import { installKeybindings } from './contributions.js';
+import { installKeybindings, registerKeybinding } from './contributions.js';
 import { buildGearMenu } from './gear-menu.js';
 import { BUILD_VERSION } from './build-version.js';
 import { track } from './telemetry-client.js';
@@ -55,18 +55,13 @@ import { installUserTodos } from './user-todos-panel.js';
 import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
 import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser P4 (§7.4/§7.5): the backend switcher, the chip, the blocked claims
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
+import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor } from './agent-meta.js';
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
     models: [{ id: '', label: t('Default') }, { id: 'fable', label: t('fable (latest, 200k)') }, { id: 'fable[1m]', label: t('fable[1m] (latest, 1M)') }, { id: 'opus', label: t('opus (latest, 200k)') }, { id: 'opus[1m]', label: t('opus[1m] (latest, 1M)') }, { id: 'sonnet', label: t('sonnet (latest)') }, { id: 'sonnet[1m]', label: t('sonnet[1m] (latest, 1M)') }, { id: 'haiku', label: t('haiku (latest)') }],
-    permissions: [
-      { value: '', label: t('Default') },
-      { value: 'auto', label: t('Auto') },
-      { value: 'bypassPermissions', label: t('Bypass') },
-      { value: 'plan', label: t('Plan') },
-      { value: 'acceptEdits', label: t('Accept Edits') },
-    ],
+    permissions: permissionModeOptions('claude', ['', 'auto', 'bypassPermissions', 'plan', 'acceptEdits'], t),
     efforts: [
       { value: '', label: t('Auto (model default)') },
       { value: 'low', label: t('Low') },
@@ -79,12 +74,7 @@ const BACKEND_SESSION_OPTIONS = {
   },
   codex: {
     models: [{ id: '', label: t('Default') }],
-    permissions: [
-      { value: '', label: t('Default') },
-      { value: 'read-only', label: t('Read Only') },
-      { value: 'safe-yolo', label: t('Safe Yolo') },
-      { value: 'yolo', label: t('Yolo') },
-    ],
+    permissions: permissionModeOptions('codex', ['', 'read-only', 'safe-yolo', 'yolo'], t),
     efforts: [
       { value: '', label: t('Auto (model default)') },
       { value: 'minimal', label: t('Minimal') },
@@ -99,11 +89,7 @@ const BACKEND_SESSION_OPTIONS = {
   // the agent's session mode; no effort ladder (META caps.effort false hides the row).
   opencode: {
     models: [{ id: '', label: t('Default') }],
-    permissions: [
-      { value: '', label: t('Default') },
-      { value: 'build', label: t('Build') },
-      { value: 'plan', label: t('Plan') },
-    ],
+    permissions: permissionModeOptions('opencode', ['', 'build', 'plan'], t),
     efforts: [{ value: '', label: t('Auto (model default)') }],
   },
 };
@@ -150,7 +136,7 @@ fetchJson('/api/session-options').then(data => {
     SETTINGS_SCHEMA['claude.defaultEffort'].options = efforts.map(e => ({ value: e.value, label: e.label }));
   }
   if (data.permissionModes?.length) {
-    const perms = [{ value: '', label: t('Default') }, ...data.permissionModes.map(p => ({ value: p, label: p }))];
+    const perms = permissionModeOptions('claude', ['', ...data.permissionModes], t); // lane L: words + the raw value as a hint (was the raw value alone)
     BACKEND_SESSION_OPTIONS.claude.permissions = perms;
     SETTINGS_SCHEMA['claude.defaultPermissionMode'].options = perms.map(p => ({ value: p.value, label: p.label }));
   }
@@ -376,6 +362,13 @@ class App {
     // session-palette.js say why); plugin bindings ride this one.
     this._contribCtl = new AbortController();
     installKeybindings(document, { signal: this._contribCtl.signal, getCtx: () => ({ app: this }) });
+    // split tabs v2: Ctrl+Shift+PageUp / PageDown move the active tab within its
+    // list (the commands live in command-mode.js). Inert unless the active
+    // window is in a ≥2-tab group — the browser keeps the chord otherwise; a
+    // terminal lets it through only then (terminal.js's key handler).
+    const inGroup = () => { const w = this.wm.windows.get(this.wm.activeWindowId); return !!(w && w._tabChain && w._tabChain.tabs.length >= 2); };
+    registerKeybinding({ key: 'ctrl+shift+pageup', command: 'chain.moveTabLeft', when: inGroup, inTerminal: true, signal: this._contribCtl.signal });
+    registerKeybinding({ key: 'ctrl+shift+pagedown', command: 'chain.moveTabRight', when: inGroup, inTerminal: true, signal: this._contribCtl.signal });
     this._setupGridConfig();
     this._setupLayoutManager();
     this._setupUsage();
@@ -679,7 +672,9 @@ class App {
     const reveal = () => document.body.classList.add('taskbar-revealed');
     const conceal = (e) => {
       // stay revealed while a popover spawned from the taskbar is open
-      if (document.querySelector('.taskbar-window-list, .usage-popup:not(.hidden), [data-popover]')) return;
+      // (the window list is an `overlap-switcher` [data-popover]; every class
+      // named here is one the tree produces — test-taskbar-group §7's census)
+      if (document.querySelector('.usage-popup:not(.hidden), [data-popover]')) return;
       document.body.classList.remove('taskbar-revealed');
     };
     hz.addEventListener('mouseenter', reveal);
@@ -1401,11 +1396,36 @@ class App {
     // Global Escape: close the transient chrome layer-by-layer — context menus
     // and popovers first, then the modal dialog. Skipped while focus is inside
     // a terminal (Esc is meaningful to TUI apps there).
+    // lane L (the naive-user study, S6-01 / S12-02: "Esc with a dropdown open
+    // closes the whole dialog"): an OPEN dropdown owns its Escape — a native
+    // <select> whose picker is open (`:open`, Chrome ≥133; a tracked state
+    // where the selector is unknown) and any control that already consumed the
+    // key (the cwd suggestion list preventDefaults it) close THEMSELVES only;
+    // the next Escape closes the dialog.
+    const openSelects = new WeakSet(); // fallback only — `:open` is the fact where supported
+    const selectPickerOpen = (el) => {
+      if (!el || el.tagName !== 'SELECT') return false;
+      try { return el.matches(':open'); } catch { return openSelects.has(el); }
+    };
+    // a capture-phase pointerdown (2.369.182 integration, lane M's census — test-architecture §59: no document
+    // mousedown listener outside its closed allow-list): the press that opens / closes a picker, a tracker, never a closer
+    document.addEventListener('pointerdown', (e) => {
+      const sel = e.target?.closest?.('select');
+      if (!sel) return;
+      if (openSelects.has(sel)) openSelects.delete(sel); else openSelects.add(sel);
+    }, true);
+    for (const ev of ['change', 'blur']) document.addEventListener(ev, (e) => { if (e.target?.tagName === 'SELECT') openSelects.delete(e.target); }, true);
     document.addEventListener('keydown', (e) => {
+      if (e.target?.tagName === 'SELECT' && e.key !== 'Escape') {
+        if (e.key === 'F4' || e.key === ' ' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))) openSelects.add(e.target);
+        else if (e.key === 'Enter' || e.key === 'Tab') openSelects.delete(e.target);
+      }
       if (e.key !== 'Escape' || e.isComposing) return;
       if (e.target.closest?.('.xterm')) return;
       const floats = document.querySelectorAll('[data-popover]');
       if (floats.length) { floats.forEach(el => el.remove()); e.preventDefault(); return; }
+      if (selectPickerOpen(e.target)) { openSelects.delete(e.target); return; } // the picker closes; the dialog stays
+      if (e.defaultPrevented) return; // a control inside the dialog closed its own list with this key
       if (!overlay.classList.contains('hidden')) { this.hideDialogs(); e.preventDefault(); }
     });
 
@@ -1914,6 +1934,12 @@ class App {
     const b = backend || 'claude';
     document.getElementById('input-backend').value = b;
     this._applySessionBackendOptions(b, { applyDefaults: true });
+    // lane L (the naive-user study, S6-01 / S12-02: the previous session's name
+    // stayed in the field, so typing appended — "S11 chromeS12 first…"). A name
+    // names ONE session: the field starts empty on every open. The other rows
+    // keep their designed prefills (the cwd the caller passed or the last one
+    // typed, the Task Group, the backend defaults applied just above).
+    { const nameInput = document.getElementById('input-session-name'); if (nameInput) nameInput.value = ''; }
     document.getElementById('input-mode').value = this.settings.get('session.defaultMode') ?? 'chat';
     if (cwd) document.getElementById('input-cwd').value = cwd;
     this._fillCwdRecent(hostId || '');
@@ -1968,10 +1994,53 @@ class App {
     return true;
   }
 
-  openFileExplorer(startPath, { syncId, host } = {}) {
+  /** OPEN FROM A WINDOW (split tabs v2, F2 — the owner: "以后从窗口打开文件路径/本地链接的时候
+   *  默认side by side展示吧"): where a file / folder opened from window `fromId`
+   *  (a chat's path or local link — the ChatView's OWN window, never the active
+   *  one) is born. `window.openLinkPlacement` is read HERE, at the act:
+   *  'split' (default) = `intoChain {split}` — beside the source (on a chain
+   *  already split, the side the source is NOT on: enterSplit); 'tab' = a tab
+   *  right after the source; 'window' = today's free window (undefined). No
+   *  placement (a free window) when the source is gone, minimized, on another
+   *  desktop, the stage is up, or on the phone (R6: one pane — its own window). */
+  linkPlacement(fromId) {
+    const mode = this.settings?.get('window.openLinkPlacement') ?? 'split';
+    if (mode !== 'split' && mode !== 'tab') return undefined;
+    const src = fromId ? this.wm.windows.get(fromId) : null;
+    if (!src || this.isMobile || this.stage?.isActive) return undefined;
+    const host = src._tabChain ? this.wm.windows.get(src._tabChain.tabs[0]) : src;
+    if (!host || host.isMinimized || host._hiddenByDesktop || src._hiddenByDesktop) return undefined;
+    return { hostId: src.id, split: mode === 'split', side: 'right' };
+  }
+
+  /** The dedupe of an open FROM A WINDOW: the same path (same host) already open
+   *  in the source window's own chain ⇒ show THAT tab (on its side in a split)
+   *  instead of a second window; a `:line` link moves its editor to the line.
+   *  Returns whether it did. Nothing else is deduped (a free window stays free). */
+  _focusOpenInChain(fromId, { path: p, host, line, dir = false } = {}) {
+    const src = fromId ? this.wm.windows.get(fromId) : null;
+    const ch = src && src._tabChain;
+    if (!ch || !p) return false;
+    for (const id of ch.tabs) {
+      const w = this.wm.windows.get(id);
+      if (!w || id === fromId) continue;
+      const wHost = (w._openSpec && w._openSpec.host) || w._explorerHost || '';
+      if ((wHost || '') !== (host || '')) continue;
+      const same = dir ? (w.type === 'files' && w._explorerPath === p) : ((w.type === 'viewer' || w.type === 'editor' || w.type === 'hex-viewer') && w._filePath === p);
+      if (!same) continue;
+      if (ch.tabs[0] === id) this.wm.switchTab(ch, 0); // the host's own tab (focusWindow switches only a guest's)
+      this.wm.focusWindow(id);
+      if (line && typeof w._gotoLine === 'function') { try { w._gotoLine(line); } catch { } }
+      return true;
+    }
+    return false;
+  }
+
+  openFileExplorer(startPath, { syncId, host, from, intoChain } = {}) {
+    if (from && this._focusOpenInChain(from, { path: startPath, host, dir: true })) return this.wm.windows.get(this.wm.activeWindowId);
     this._hideWelcome();
     const openSpec = { action: 'openFileExplorer', path: startPath, host: host || undefined };
-    const winInfo = this.wm.createWindow({ title: t('File Explorer'), type: 'files', syncId, openSpec });
+    const winInfo = this.wm.createWindow({ title: t('File Explorer'), type: 'files', syncId, openSpec, intoChain: intoChain || (from ? this.linkPlacement(from) : undefined) });
     if (host) winInfo._explorerHost = host; // read by FileExplorer constructor
     const explorer = new FileExplorer(winInfo, this, startPath);
     winInfo._explorer = explorer;
@@ -2110,7 +2179,15 @@ class App {
     return this._hostNames;
   }
 
-  openFile(filePath, fileName, opts) {
+  /** `opts.from` = the window the open came FROM (F2): the same path already in
+   *  its chain is shown instead; otherwise the placement is resolved NOW (the
+   *  act) and rides `opts.intoChain` through FileViewer.open's async checks. */
+  openFile(filePath, fileName, opts = {}) {
+    if (opts.from) {
+      if (this._focusOpenInChain(opts.from, { path: filePath, host: opts.host, line: opts.line })) return;
+      const { from, ...rest } = opts;
+      opts = { ...rest, intoChain: this.linkPlacement(from) };
+    }
     FileViewer.open(this, filePath, fileName, opts);
   }
 
@@ -2124,7 +2201,7 @@ class App {
     const hostPfx = (h) => opts.host ? (h(opts.host) || opts.host) + ': ' : '';
     const title = opts._tempFile ? t('View: {name}', { name: fileName }) : hostPfx((id) => this.hostName(id)) + frontTruncate(filePath);
     const openSpec = opts._tempFile ? undefined : { action: 'openEditor', path: filePath, name: fileName, ...(opts.host ? { host: opts.host } : {}) };
-    const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec });
+    const winInfo = this.wm.createWindow({ title, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
     if (opts.host && !opts._tempFile) this._ensureHostNames().then(() => { try { this.wm.setTitle(winInfo.id, this.hostName(opts.host) + ': ' + frontTruncate(filePath)); } catch {} });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     new CodeEditor(winInfo, filePath, fileName, this, opts);

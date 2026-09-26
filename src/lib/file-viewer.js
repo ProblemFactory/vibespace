@@ -9,6 +9,11 @@ import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 
+/** The viewer types renderInto draws itself (its if-chain, one entry each —
+ *  scripts/test-window-binding-model.mjs pins the two lists equal); any other
+ *  type opens in the code editor. */
+export const RENDERED_VIEWERS = new Set(['archive', 'image', 'video', 'audio', 'pdf', 'eml', 'csv', 'xlsx', 'docx', 'pptx']);
+
 class FileViewer {
   static async open(app, filePath, fileName, opts = {}) {
     const ext = fileName.split('.').pop().toLowerCase();
@@ -34,7 +39,7 @@ class FileViewer {
 
     // Force hex mode
     if (opts.hex) {
-      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -42,7 +47,7 @@ class FileViewer {
 
     // Binary file without a dedicated viewer → hex viewer
     if (fileInfo.isBinary && !hasDedicatedViewer(ext)) {
-      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + t('Hex: {name}', { name: fileName }), type: 'hex-viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new HexViewer(winInfo, filePath, fileInfo, host);
       return;
@@ -58,13 +63,18 @@ class FileViewer {
 
     // HTML: open in CodeEditor with preview toggle (same as markdown)
     if (viewerType === 'html-editor') {
-      const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec });
+      const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'editor', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
       winInfo._filePath = filePath; winInfo._fileName = fileName;
       new CodeEditor(winInfo, filePath, fileName, app, { host });
       return;
     }
 
-    const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'viewer', syncId: opts.syncId, openSpec });
+    // No dedicated viewer (renderInto would return false) ⇒ straight to the
+    // editor. It used to create a throwaway 'viewer' window, render nothing and
+    // close it — a window born INTO a chain (F2) must not flash a tab in and out.
+    if (!RENDERED_VIEWERS.has(viewerType)) { app.openEditor(filePath, fileName, opts); return; }
+
+    const winInfo = app.wm.createWindow({ title: hostPfx + fileName, type: 'viewer', syncId: opts.syncId, openSpec, intoChain: opts.intoChain });
     winInfo._filePath = filePath; winInfo._fileName = fileName;
     const container = document.createElement('div'); container.className = 'file-viewer';
     winInfo.content.appendChild(container);

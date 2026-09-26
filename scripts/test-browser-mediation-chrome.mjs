@@ -448,6 +448,31 @@ if (AB && CHROME) {
     const vl = await via(['batch'], 'get title\nget url\n');
     const vj = await via(['batch'], '[["get","title"],["get","url"]]');
     ok(vl.ok && /still-web/.test(vl.so) && /data:text\/html/.test(vl.so) && vj.ok && /still-web/.test(vj.so), 'r4: through vibespace-browser a plain-line stdin batch AND the JSON form both run on the real binary (r3: the JSON form was refused, the plain form was the binary\'s Invalid JSON)', JSON.stringify({ vl: [vl.code, vl.so.slice(0, 200), vl.se.slice(0, 200)], vj: [vj.code, vj.so.slice(0, 200), vj.se.slice(0, 200)] }));
+    // lane L r5 F1 (verify r3 CRITICAL) — THE FRAME ON THE REAL BINARY. This daemon was started by `bare` from ROOT
+    // (A); the CLI runs from B. The daemon resolves a relative word against ITS cwd (measured): through
+    // vibespace-browser `pdf ./frame.pdf` lands in B — the absolute path it judged —, while the r4 hand-over (a
+    // patched copy handing the word as typed) lands in A. Precondition read off /proc: the daemon's cwd IS A.
+    {
+      const inf = (await bare(['session', 'info', '--json'])).text;
+      let dpid = null; try { dpid = JSON.parse(inf.trim().split('\n').filter(Boolean).pop()).data.pid; } catch { dpid = null; }
+      let dcwd = null; try { dcwd = fs.readlinkSync(`/proc/${dpid}/cwd`); } catch { dcwd = null; }
+      const A = fs.realpathSync(ROOT); const Bd = path.join(ROOT, 'frame-b'); fs.mkdirSync(Bd, { recursive: true });
+      const shellB = { ...shell4, VIBESPACE_SESSION_CWD: Bd };
+      const viaFile = (cliFile, args) => new Promise((res) => execFile(process.execPath, [...cliUnder(H4).slice(0, 2), cliFile, ...args], { env: shellB, cwd: Bd, encoding: 'utf8', timeout: 45000 }, (e, so, se) => res({ ok: !e, so: String(so), se: String(se || '') })));
+      const pdfAt = (f) => { try { return fs.readFileSync(f).subarray(0, 5).toString('latin1') === '%PDF-'; } catch { return false; } };
+      if (!ok(dpid && dcwd === A, `lane L r5 F1 precondition: the real daemon (pid ${dpid}) runs in A = ${A} (the cwd it was started from)`, JSON.stringify({ dpid, dcwd, inf: inf.slice(0, 200) }))) { /* the legs below would prove nothing */ }
+      else {
+        await bare(['open', 'data:text/html,<title>frame</title><h1>frame</h1>']);
+        const r1 = await viaFile(path.join(REPO, 'data/bin/vibespace-browser'), ['pdf', './frame.pdf']);
+        ok(r1.ok && pdfAt(path.join(Bd, 'frame.pdf')) && !fs.existsSync(path.join(A, 'frame.pdf')), 'lane L r5 F1 (the REAL 0.38.1 daemon, started in A): `vibespace-browser pdf ./frame.pdf` from B writes B/frame.pdf — the path it judged — and nothing in A', JSON.stringify({ r1: [r1.ok, r1.so.slice(-200), r1.se.slice(-300)], inB: fs.existsSync(path.join(Bd, 'frame.pdf')), inA: fs.existsSync(path.join(A, 'frame.pdf')) }));
+        const src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
+        const pre = src.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
+        const ctl = path.join(ROOT, 'ctl-frame', 'bin'); fs.mkdirSync(ctl, { recursive: true });
+        fs.writeFileSync(path.join(ctl, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ctl, 'vibespace-browser-verbs.js'));
+        const r2 = await viaFile(path.join(ctl, 'vibespace-browser'), ['pdf', './frame2.pdf']);
+        ok(pre !== src && r2.ok && pdfAt(path.join(A, 'frame2.pdf')) && !fs.existsSync(path.join(Bd, 'frame2.pdf')), 'lane L r5 F1 NEGATIVE CONTROL (the REAL daemon): the r4 hand-over (patched copy, the word as typed) — judged in B — lands in A, the daemon\'s own frame', JSON.stringify({ r2: [r2.ok, r2.so.slice(-200), r2.se.slice(-300)], inA: fs.existsSync(path.join(A, 'frame2.pdf')), inB: fs.existsSync(path.join(Bd, 'frame2.pdf')) }));
+      }
+    }
     await bare(['close']);
   }
   stub.close();

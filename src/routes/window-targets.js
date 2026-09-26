@@ -76,7 +76,7 @@ const STATUS = {
 function fail(res, e) {
   const code = e?.code || null;
   const body = { error: String(e?.message || e), code };
-  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease', 'handle', 'mode', 'resolvedMode', 'plan', 'nodes', 'did']) if (e && e[k] !== undefined) body[k] = e[k]; // `did` (r2, L5): {partial:true} — a cancelled act that may have partly landed
+  for (const k of ['node', 'backends', 'holder', 'since', 'takenAt', 'setting', 'verb', 'class', 'origin', 'yourDesktop', 'lease', 'handle', 'mode', 'resolvedMode', 'plan', 'nodes', 'did', 'reason']) if (e && e[k] !== undefined) body[k] = e[k]; // `did` (r2, L5): {partial:true} — a cancelled act that may have partly landed; `reason` (mirror red on 2.369.181): {code, why} — what an auto snapshot saw when it folded an unreachable tree into mode_pixels
   res.status(STATUS[code] || 500).json(body);
 }
 function engineOr503(res) {

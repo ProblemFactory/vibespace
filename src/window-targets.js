@@ -83,6 +83,15 @@ const refuse = (code, why, extra = {}) => {
   if (!REFUSALS.includes(code)) throw new Error(`window-targets: unknown refusal code ${code}`);
   return { ok: false, code, why, ...extra };
 };
+/** The refusals that mean THIS MACHINE CANNOT READ AN ACCESSIBILITY TREE RIGHT NOW — no interpreter
+ *  (python3_missing), no helper file (helper_missing), no GObject binding or a11y bus (a11y_unavailable: the helper's
+ *  own import refusal), a helper that died or answered garbage (helper_error — e.g. libatspi's dbind SIGABRT with no
+ *  bus) or never answered (helper_timeout). Which one a box answers is a fact about the BOX (the Actions runner has no
+ *  gi, this one has the fixture's bus): an `auto` share folds every one of them into ONE verdict — pixel mode,
+ *  `mode_pixels`, the reason riding beside it (mirror red on 2.369.181). test-window-targets derives this set's
+ *  coverage from runHelper's own refusals + the helper's import refusal (a new failure road must join it). */
+const TREE_UNREACHABLE = Object.freeze(['helper_missing', 'python3_missing', 'helper_timeout', 'helper_error', 'a11y_unavailable']);
+const treeUnreachable = (r) => !!(r && r.ok === false && TREE_UNREACHABLE.includes(r.code));
 
 // ── the bounded subprocess ───────────────────────────────────────────────────
 /**
@@ -131,15 +140,21 @@ const _memo = new Map();
 function memoGet(key, now) { const m = _memo.get(key); return m && m.until > now() ? m.value : null; }
 function memoSet(key, value, ms, now) { _memo.set(key, { value, until: now() + ms }); return value; }
 function resetProbeMemo() { _memo.clear(); }
+/** A remembered YES belongs to the ENVIRONMENT it was asked in (mirror red on 2.369.181): the facts a probe's answer
+ *  depends on — the PATH the interpreter is found on, the session / a11y bus, the display, the runtime dir. One
+ *  process asking from two environments (the suite's constructed runner shape beside this box's real bus) never
+ *  hears the other's answer. */
+const envKeyOf = (env) => ['PATH', 'DBUS_SESSION_BUS_ADDRESS', 'AT_SPI_BUS_ADDRESS', 'DISPLAY', 'WAYLAND_DISPLAY', 'XDG_RUNTIME_DIR'].map((k) => (env && env[k]) || '').join('\u0001');
 
 /** Is AT-SPI reachable from here (the helper + its binding + the a11y bus)?
  *  `{ok, apps, why}`; a YES is remembered PROBE_MEMO_MS, a NO is re-asked. */
 async function probeA11y({ env = process.env, now = Date.now, ...rest } = {}) {
-  const hit = memoGet('a11y', now);
+  const key = `a11y\u0000${envKeyOf(env)}\u0000${rest.python || 'python3'}\u0000${rest.helper || HELPER_PATH}`;
+  const hit = memoGet(key, now);
   if (hit) return hit;
   const r = await runHelper({ op: 'probe' }, { env, wallMs: 8000, now, ...rest });
   if (!r.ok) return { ok: false, apps: 0, why: `${r.code}: ${r.why}`, code: r.code };
-  return memoSet('a11y', { ok: true, apps: r.apps, why: null, sessionBus: r.sessionBus, ms: r.ms }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
+  return memoSet(key, { ok: true, apps: r.apps, why: null, sessionBus: r.sessionBus, ms: r.ms }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
 }
 
 function run(bin, args, { env, timeout = 3000 } = {}) {
@@ -164,7 +179,8 @@ async function probeInputBackends({ env = process.env, bins = null, ours = true,
     : !ours ? { backend: 'xtest', available: false, wired: true, why: 'the display is not one VibeSpace started — only our own windows are addressable (D27 (a))' }
       : { backend: 'xtest', available: true, wired: true, why: null, bin: b.xdotool });
   // portal: present on the session bus?
-  let portal = memoGet('portal', now);
+  const portalKey = `portal\u0000${envKeyOf(env)}\u0000${b.gdbus || ''}`;
+  let portal = memoGet(portalKey, now);
   if (!portal) {
     if (!env.DBUS_SESSION_BUS_ADDRESS) portal = { backend: 'portal', available: false, wired: false, why: 'no session bus in the environment (DBUS_SESSION_BUS_ADDRESS unset)' };
     else if (!b.gdbus) portal = { backend: 'portal', available: false, wired: false, why: 'gdbus not on PATH (cannot ask the session bus for org.freedesktop.portal.Desktop)' };
@@ -174,7 +190,7 @@ async function probeInputBackends({ env = process.env, bins = null, ours = true,
         : !/org\.freedesktop\.portal\.RemoteDesktop/.test(r.stdout) ? { backend: 'portal', available: false, wired: false, why: 'the desktop portal has no RemoteDesktop interface' }
           : { backend: 'portal', available: 'consent', wired: false, why: 'RemoteDesktop portal present — every session needs the user\'s consent click (persist_mode=2 + restore_token remembers it); not wired in this version (D29 (a))' };
     }
-    if (portal.available) memoSet('portal', portal, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
+    if (portal.available) memoSet(portalKey, portal, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
   }
   rows.push(portal);
   // uinput: a writable device node
@@ -191,9 +207,10 @@ async function probeInputBackends({ env = process.env, bins = null, ours = true,
  *  PROBE_MEMO_MS. `{screenCast, version, windowSources, why}`. Nothing here
  *  starts a session or raises the consent dialog — that is the user's click. */
 async function probeScreenCastPortal({ env = process.env, bins = null, now = Date.now } = {}) {
-  const hit = memoGet('screencast', now);
-  if (hit) return hit;
   const gdbus = bins && bins.gdbus !== undefined ? bins.gdbus : display.binOnPath('gdbus', { env, now });
+  const scKey = `screencast\u0000${envKeyOf(env)}\u0000${gdbus || ''}`;
+  const hit = memoGet(scKey, now);
+  if (hit) return hit;
   if (!env.DBUS_SESSION_BUS_ADDRESS) return { screenCast: false, version: null, windowSources: false, why: 'no session bus in the environment (DBUS_SESSION_BUS_ADDRESS unset)' };
   if (!gdbus) return { screenCast: false, version: null, windowSources: false, why: 'gdbus not on PATH' };
   const get = (prop) => run(gdbus, ['call', '--session', '--dest', 'org.freedesktop.portal.Desktop', '--object-path', '/org/freedesktop/portal/desktop', '--method', 'org.freedesktop.DBus.Properties.Get', 'org.freedesktop.portal.ScreenCast', prop], { env, timeout: 4000 });
@@ -202,7 +219,7 @@ async function probeScreenCastPortal({ env = process.env, bins = null, now = Dat
   const st = await get('AvailableSourceTypes');
   const version = Number((/uint32 (\d+)/.exec(v.stdout) || [])[1]) || null;
   const types = Number((/uint32 (\d+)/.exec(st.stdout) || [])[1]) || 0;
-  return memoSet('screencast', { screenCast: true, version, windowSources: !!(types & 2), types, why: null }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
+  return memoSet(scKey, { screenCast: true, version, windowSources: !!(types & 2), types, why: null }, TRAVERSAL_LIMITS.PROBE_MEMO_MS, now);
 }
 
 // ── PURE verdicts ────────────────────────────────────────────────────────────
@@ -605,7 +622,9 @@ function nodeView(n) {
 
 module.exports = {
   HELPER_PATH, HELPER_FILE, TRAVERSAL_LIMITS, REFUSALS, refuse,
-  runHelper, probeA11y, probeInputBackends, probeScreenCastPortal, resetProbeMemo,
+  // mirror red on 2.369.181: the failures that mean "no tree here" (an auto share folds them into mode_pixels)
+  TREE_UNREACHABLE, treeUnreachable,
+  runHelper, probeA11y, probeInputBackends, probeScreenCastPortal, resetProbeMemo, envKeyOf,
   verbVerdicts, parseChord, pickAction, ACTION_PREFERENCE, NEVER_BY_DEFAULT, NAMED_KEYS, refTableOf, resolveRef, targetRows, nodeView,
   snapshotTarget, actOnNode, focusedNode, screenshotDisplay, injectKey, injectClick,
   // lane E (D7): the pixel road

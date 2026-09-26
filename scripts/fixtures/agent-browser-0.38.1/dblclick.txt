@@ -1,0 +1,14 @@
+agent-browser dblclick - Double-click an element
+
+Usage: agent-browser dblclick <selector>
+
+Double-clicks on the specified element. Useful for text selection
+or triggering double-click handlers.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser dblclick "#editable-text"
+  agent-browser dblclick @e5

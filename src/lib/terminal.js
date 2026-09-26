@@ -247,6 +247,10 @@ class TerminalSession {
         e.preventDefault();
         if (this.winInfo?._editorDoSave) { this.winInfo._editorDoSave(); return false; }
       }
+      // Ctrl+Shift+PageUp / PageDown in a TAB GROUP = move this tab (split tabs v2,
+      // app.js registry chord): not xterm's — it bubbles to the one dispatcher.
+      // Outside a group the terminal keeps it (xterm sends its own sequence).
+      if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && (e.key === 'PageUp' || e.key === 'PageDown') && this.winInfo?._tabChain && this.winInfo._tabChain.tabs.length >= 2) return false;
       // Ctrl+C / Cmd+C with selection: copy to clipboard (fallback for HTTP)
       if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
         const sel = this.terminal.getSelection();

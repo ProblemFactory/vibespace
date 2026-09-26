@@ -165,7 +165,7 @@ else await (async () => {
   const measure = (hostId) => ev(`
     const host = wm.windows.get(${S(hostId)});
     const rows = host._tabChain
-      ? [...host.titleBar.querySelectorAll(':scope > .tab-bar-tabs > .tab-item')].map((tab) => ({ box: tab, label: tab.querySelector(':scope > .tab-label'), chip: tab.querySelector(':scope > .win-auth-badge'), inbox: tab.querySelector(':scope > .win-inbox-badge') }))
+      ? [...host.titleBar.querySelectorAll(':scope > .tab-bar-tabs .tab-item')].map((tab) => ({ box: tab, label: tab.querySelector(':scope > .tab-label'), chip: tab.querySelector(':scope > .win-auth-badge'), inbox: tab.querySelector(':scope > .win-inbox-badge') }))
       : [{ box: host.titleBar, label: host.titleSpan, chip: host.titleBar.querySelector(':scope > .win-auth-badge'), inbox: host.titleBar.querySelector(':scope > .win-inbox-badge') }];
     const visible = (label) => {
       const node = label.firstChild; if (!node) return { n: 0, of: 0 };
@@ -226,7 +226,7 @@ else await (async () => {
     ok(rows.every((r) => r.tip && r.tip.startsWith(FULL_WORDS)), `${tag}every chip's tooltip LEADS with the full words "${FULL_WORDS}"`, S(rows.map((r) => r.tip)));
     ok(rows.every((r) => r.inbox === '1' && r.inboxW <= 32), `${tag}the inbox chip keeps its number at its minimal width (${rows.map((r) => r.inboxW + 'px').join(', ')})`);
   };
-  const TAB_LABEL = '.window .tab-bar-tabs > .tab-item > .tab-label';
+  const TAB_LABEL = '.window .tab-bar-tabs .tab-item > .tab-label';
 
   // THE FACE (lane G integration): legs 1–5 run under this box's own `system-ui` AND under 'DejaVu Sans' —
   // what `system-ui, sans-serif` resolves to on the Actions runner (no Noto / Cantarell there; this box

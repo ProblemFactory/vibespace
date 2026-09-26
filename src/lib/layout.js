@@ -1,7 +1,11 @@
 import { track } from './telemetry-client.js';
 import { cssVarDefault } from './utils.js';
 import { isTransientWindowType } from './window-types.js';
-import { chainSyncKey, ratioDiffers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place
+import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
+
+// The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
+// records with the same members differ only in layout and are applied in place.
+const membersOf = (c) => ((c && Array.isArray(c.tabs)) ? c.tabs : []).map(String).join(',');
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
@@ -129,6 +133,7 @@ class LayoutManager {
   _applyRemoteState(state) {
     if (!state) return;
     this._restoring = true;
+    let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
     try {
       // Grid
       if (state.grid) {
@@ -227,23 +232,43 @@ class LayoutManager {
         // Sync tab chains from remote state. THE KEY CARRIES THE LAYOUT
         // (agent browser P7, §4.6's named trap): `tabs.join(',')` alone read a
         // remote tabs→split flip of the same tabs as "unchanged" — a silent
-        // state fork. chainSyncKey = tabs + layout + pair; the RATIO is applied
-        // in place on a structural match (a rebuild for a divider drag would
-        // re-parent two live views).
-        const remoteChains = new Map(); // key -> { tabs, active, layout, split }
+        // state fork. chainSyncKey = members + strip order + layout + the side
+        // cut + pair (split tabs v2); the RATIO is applied in place on a
+        // structural match (a rebuild for a divider drag would re-parent two
+        // live views). A key that differs while the MEMBERS (and the host) are
+        // the same — a reorder, a cross-side move, a per-side switch, a swap, a
+        // split / unsplit — is applied IN PLACE too (applyChainRecord: no
+        // re-parenting, `active` stays this client's); only a membership or
+        // host change rebuilds the chain.
+        const remoteChains = new Map(); // key -> { tabs, active, layout, split, order }
+        const remoteByMembers = new Map(); // tabs.join(',') -> key
         for (const rw of state.windows) {
           if (!rw.tabChain || rw.isTabGuest) continue;
           const key = chainSyncKey(rw.tabChain);
           remoteChains.set(key, rw.tabChain);
+          remoteByMembers.set(membersOf(rw.tabChain), key);
         }
         // Break local chains not in remote
+        // A LOCAL divider drag this record could not have known (it was held
+        // for that drag's pointerup — §6b guard 3) keeps its ratio on BOTH
+        // in-place paths and re-arms one save below (v2 verify r1 ①).
         const localChainKeys = new Set();
         for (const [, w] of this.app.wm.windows) {
           if (w._tabChain && w._tabChain.tabs[0] === w.id) {
             const key = chainSyncKey(w._tabChain);
             localChainKeys.add(key);
             const rc = remoteChains.get(key);
-            if (rc && ratioDiffers(rc, w._tabChain)) this.app.wm.setSplitRatio(w._tabChain, rc.split.ratio, { notify: false });
+            if (rc && ratioDiffers(rc, w._tabChain)) {
+              if (heldRatio(w._tabChain, Date.now()) !== null) heldKept = true;
+              else this.app.wm.setSplitRatio(w._tabChain, rc.split.ratio, { notify: false });
+            }
+            const sameMembers = !remoteChains.has(key) && remoteByMembers.get(membersOf(w._tabChain));
+            if (sameMembers && !localChainKeys.has(sameMembers)) {
+              const kept = this.app.wm.applyChainRecord(w._tabChain, remoteChains.get(sameMembers));
+              if (kept) heldKept = true;
+              localChainKeys.add(sameMembers);
+              continue;
+            }
             if (!remoteChains.has(key)) {
               // Break this chain
               while (w._tabChain && w._tabChain.tabs.length > 1) {
@@ -254,13 +279,17 @@ class LayoutManager {
             }
           }
         }
-        // Create remote chains not present locally
+        // Create remote chains not present locally. A member whose window is
+        // still being REPLAYED (an async openSpec — FileViewer.open awaits
+        // /api/file/info before it creates its window) keeps the chain PENDING
+        // until it appears (split tabs v2, F2's race): restoring without it left
+        // a free viewer here, and this client's next user-caused save (no
+        // chain) broke the other client's chain.
+        this._pendingChains = [];
+        const replaying = this._replaying || new Set();
         for (const [key, tc] of remoteChains) {
           if (localChainKeys.has(key)) continue;
-          const validTabs = tc.tabs.filter(id => this.app.wm.windows.has(id));
-          if (validTabs.length >= 2) {
-            this.app.wm.restoreTabChain(validTabs, tc.active, { layout: tc.layout, split: tc.split });
-          }
+          this._queueChain(key, tc, { inFlight: replaying, waitMs: 8000 });
         }
       }
     } catch (err) {
@@ -274,6 +303,71 @@ class LayoutManager {
     // after the 1s cooldown, but _doAutoSave drops them while !_userDirty.
     this._userDirty = false;
     setTimeout(() => { this._restoring = false; }, 1000);
+    // …except a local divider drag the apply KEPT (the record could not know it): it is this user's act, not the
+    // record's, and its own save was just dropped by the clear above — send it once, after the gate opens
+    // (same delay, scheduled later ⇒ runs later).
+    if (heldKept) setTimeout(() => this._resendHeldRatio(), 1000);
+  }
+
+  /** v2 verify r1 ①: a remote apply KEPT a local divider drag (PURE heldRatio) — send it ONCE, as the user's own
+   *  act: the dirty bit is re-set with the drag's REAL release time (so §6b's 60 s expiry keeps its meaning — a
+   *  stamp past it holds nothing) and the ordinary autosave sends it (the no-op guard included). The other client
+   *  applies it in place (ratioDiffers) and its own apply clears its dirty bit — one send, no echo. */
+  _resendHeldRatio(tries = 0) {
+    if (this._restoring) { if (tries < 25) setTimeout(() => this._resendHeldRatio(tries + 1), 200); return; }
+    const now = Date.now();
+    let at = 0;
+    for (const [, w] of this.app.wm.windows) {
+      const ch = w._tabChain;
+      if (ch && ch.tabs[0] === w.id && heldRatio(ch, now) !== null) at = Math.max(at, ch._ratioHeld.at);
+    }
+    if (!at) return; // a later save (or the expiry) already took it
+    this._userDirty = true;
+    this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at);
+    this.scheduleAutoSave();
+  }
+
+  /** Every save that leaves this client (or is skipped as identical to the last one sent) carries every held
+   *  ratio — release them (v2 verify r1 ①). */
+  _releaseHeldRatios() {
+    for (const [, w] of this.app.wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id) releaseRatio(w._tabChain);
+  }
+
+  /** Rebuild ONE chain record (remote or persisted) now, or keep it PENDING
+   *  while a member it names is still being created (`inFlight` — a replayed
+   *  openSpec whose window lands asynchronously), bounded by `waitMs`; past the
+   *  deadline whatever members exist are grouped (never a hang). The retry
+   *  runs on a 200 ms timer while anything is pending. Never notifies (the
+   *  apply's user-dirty gate stays the only way a save leaves this client). */
+  _queueChain(key, tc, { inFlight = new Set(), waitMs = 8000 } = {}) {
+    const entry = { key, tc, inFlight, deadline: Date.now() + waitMs };
+    if (this._reconcileChain(entry)) return;
+    (this._pendingChains ||= []).push(entry);
+    this._armPendingChains();
+  }
+
+  /** true = done (restored, superseded or gave up); false = still waiting. */
+  _reconcileChain({ key, tc, inFlight, deadline }) {
+    const wm = this.app.wm;
+    for (const [, w] of wm.windows) if (w._tabChain && w._tabChain.tabs[0] === w.id && chainSyncKey(w._tabChain) === key) return true; // already here
+    const present = tc.tabs.filter((id) => wm.windows.has(id));
+    const waiting = tc.tabs.some((id) => !wm.windows.has(id) && inFlight.has(id));
+    if (waiting && Date.now() < deadline) return false;
+    if (present.length < 2) return true;
+    // a member still grouped locally (a chain the record does not name) leaves it first — never two chains claiming one window
+    for (const id of present) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); }
+    wm.restoreTabChain(present, tc.active, { layout: tc.layout, split: tc.split, order: tc.order });
+    return true;
+  }
+
+  _armPendingChains() {
+    if (this._pendingTimer) return;
+    const tick = () => {
+      this._pendingTimer = null;
+      this._pendingChains = (this._pendingChains || []).filter((e) => !this._reconcileChain(e));
+      if (this._pendingChains.length) this._pendingTimer = setTimeout(tick, 200);
+    };
+    this._pendingTimer = setTimeout(tick, 200);
   }
 
   // Create a window from remote layout state using its saved openSpec
@@ -284,6 +378,8 @@ class LayoutManager {
 
     try {
       this.app.replayOpenSpec(spec, winId);
+      // an async opener (FileViewer.open) has not created the window yet — a chain naming it waits (_queueChain)
+      if (!this.app.wm.windows.has(winId)) { (this._replaying ||= new Set()).add(winId); setTimeout(() => this._replaying?.delete(winId), 10000); }
       // Apply position after creation (may be async)
       setTimeout(() => {
         const winInfo = this.app.wm.windows.get(winId);
@@ -398,8 +494,8 @@ class LayoutManager {
       // it cannot display and never writes its own flattening back)
       if (win._tabChain) {
         const c = win._tabChain;
-        winState.tabChain = { tabs: [...c.tabs], active: c.active, layout: c.layout === 'split' ? 'split' : 'tabs' };
-        if (c.layout === 'split' && c.split) winState.tabChain.split = { pair: [...c.split.pair], ratio: c.split.ratio, dir: 'row' };
+        winState.tabChain = { tabs: [...c.tabs], active: c.active, layout: c.layout === 'split' ? 'split' : 'tabs', order: [...(c.order || c.tabs)] };
+        if (c.layout === 'split' && c.split) winState.tabChain.split = { pair: [...c.split.pair], ratio: c.split.ratio, dir: 'row', left: [...(c.split.left || [])], right: [...(c.split.right || [])] }; // split tabs v2: the strip order + the SIDES (a missing field reads as the pre-v2 default — repaired by rule)
         winState.isTabGuest = c.tabs[0] !== id;
       }
       windows.push(winState);
@@ -479,11 +575,13 @@ class LayoutManager {
       // Remap window ID to saved ID for cross-client sync
       if (winState.winId && winInfo.id !== winState.winId) {
         const wm = this.app.wm;
-        wm.windows.delete(winInfo.id);
-        const session = this.app.sessions.get(winInfo.id);
-        if (session) { this.app.sessions.delete(winInfo.id); this.app.sessions.set(winState.winId, session); }
+        const oldId = winInfo.id;
+        wm.windows.delete(oldId);
+        const session = this.app.sessions.get(oldId);
+        if (session) { this.app.sessions.delete(oldId); this.app.sessions.set(winState.winId, session); }
         winInfo.id = winState.winId;
         wm.windows.set(winState.winId, winInfo);
+        if (wm.activeWindowId === oldId) wm.activeWindowId = winState.winId; // the focus follows the re-key (it named a window that no longer existed — v2 verify r1 ⑦)
       }
       if (winState.gridBounds) {
         winInfo.gridBounds = winState.gridBounds;
@@ -646,11 +744,10 @@ class LayoutManager {
         const key = chainSyncKey(ws.tabChain);
         if (restoredChains.has(key)) continue;
         restoredChains.add(key);
-        // Verify all tabs exist
-        const validTabs = ws.tabChain.tabs.filter(id => this.app.wm.windows.has(id));
-        if (validTabs.length >= 2) {
-          this.app.wm.restoreTabChain(validTabs, ws.tabChain.active, { layout: ws.tabChain.layout, split: ws.tabChain.split });
-        }
+        // a member still opening (an async openFile replay) is waited for — the
+        // ONE chain reconcile the remote apply uses (split tabs v2)
+        const inFlight = new Set(state.windows.filter((x) => x.openSpec && !this.app.wm.windows.has(x.winId || x.id)).map((x) => x.winId || x.id));
+        this._queueChain(key, ws.tabChain, { inFlight, waitMs: 5000 });
       }
     }, 1000);
   }
@@ -700,6 +797,7 @@ class LayoutManager {
     // unchanged state — skip the send (and the server disk write + rebroadcast
     // + every other client's full diff pass) when nothing actually changed.
     const json = JSON.stringify({ state, desktopId });
+    this._releaseHeldRatios(); // this state (or the identical one already sent) carries every held divider ratio
     if (json === this._lastSentJson) return;
     this._lastSentJson = json;
     // Full state to server for disk persistence

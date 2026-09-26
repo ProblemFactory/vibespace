@@ -1,4 +1,4 @@
-import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl } from './utils.js';
+import { escHtml, showInputDialog, uiScale, showToast, fetchJson, copyText, absUrl, onOutsidePress } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -1085,13 +1085,10 @@ export class ChatStatusBar {
       dropdown.style.left = left + 'px';
       const cap = bounded ? Math.min(maxWidth, Math.max(minW, containerW - left - DROPDOWN_EDGE_PAD)) : maxWidth;
       if (Number.isFinite(cap)) dropdown.style.maxWidth = cap + 'px';
-      const close = (ev) => {
-        if (!dropdown.contains(ev.target) && ev.target !== anchor) {
-          dropdown.remove();
-          document.removeEventListener('mousedown', close);
-        }
-      };
-      setTimeout(() => document.addEventListener('mousedown', close), 0);
+      // an outside press closes it — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press
+      // into an app's picture counts too); its own rule kept: a press ON the anchor element is the toggle's, and a
+      // press in another [data-popover] still closes it (it never honoured the chained-popover rule)
+      onOutsidePress(dropdown, () => dropdown.remove(), { ignore: (t) => t === anchor, nested: false });
       return dropdown;
     };
 

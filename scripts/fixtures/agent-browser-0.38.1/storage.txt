@@ -1,0 +1,25 @@
+agent-browser storage - Manage web storage
+
+Usage: agent-browser storage <type> [operation] [key] [value]
+
+Manage localStorage and sessionStorage.
+
+Types:
+  local                localStorage
+  session              sessionStorage
+
+Operations:
+  get [key]            Get all storage or specific key
+  set <key> <value>    Set a key-value pair
+  clear                Clear all storage
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser storage local
+  agent-browser storage local get authToken
+  agent-browser storage local set theme "dark"
+  agent-browser storage local clear
+  agent-browser storage session get userId

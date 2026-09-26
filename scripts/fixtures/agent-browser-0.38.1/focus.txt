@@ -1,0 +1,13 @@
+agent-browser focus - Focus an element
+
+Usage: agent-browser focus <selector>
+
+Sets keyboard focus to the specified element.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser focus "#input-field"
+  agent-browser focus @e2

@@ -1,0 +1,14 @@
+agent-browser keydown - Press a key down (without release)
+
+Usage: agent-browser keydown <key>
+
+Presses a key down without releasing it. Use keyup to release.
+Useful for holding modifier keys.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser keydown Shift
+  agent-browser keydown Control

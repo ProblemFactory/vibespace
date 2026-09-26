@@ -471,7 +471,15 @@
 }
 .chat-perm-btn:hover { background: var(--bg-hover); border-color: var(--border-active); }
 .chat-perm-allow { background: var(--green); color: var(--accent-fg); border-color: var(--green); }
-.chat-perm-allow:hover { opacity: 0.85; }
+/* lane L (the naive-user study, S9-68): `.chat-perm-btn:hover` (0,2,0) outranked
+   `.chat-perm-allow` (0,1,0), so a HOVERED Allow turned bg-hover with the
+   accent-fg text on it — a dark button with dark words, read as "disabled" and
+   clicked again. The hover keeps the button green. */
+.chat-perm-btn.chat-perm-allow:hover { background: var(--green); border-color: var(--green); color: var(--accent-fg); opacity: 0.85; }
+.chat-permission-what { font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+.chat-permission-also { color: var(--text-dim); }
+.chat-permission-scope, .chat-permission-withheld { font-size: 11px; color: var(--text-secondary); margin-top: -4px; }
+.chat-agent-cmd { font-weight: 400; color: var(--text-secondary); overflow-wrap: anywhere; }
 .chat-perm-always { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 .chat-perm-always:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .chat-perm-deny { background: var(--bg-input); color: var(--text); }

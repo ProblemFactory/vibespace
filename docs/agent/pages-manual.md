@@ -23,6 +23,14 @@ vibespace-page list
   browser's *Publish page…* dialog.
 - **Same file path again = same URL, new snapshot.** Iterate freely; the
   link the user already shared keeps working and shows the latest publish.
+- **Every publish asks the user** (a permission card in their chat) — unless
+  the session runs with full access ("Never ask", bypassPermissions), where
+  nothing asks and publish runs directly; in the "refuse what is not
+  pre-approved" mode (dontAsk) publish is refused. A page goes out under the
+  user's name, `--public` as a link anyone can open, so even with full access
+  publish only what they asked for. `vibespace-page list` and `kit` run without
+  asking in every mode. If the user denies (or the mode refuses) a publish, say
+  what you would have published and stop — never retry it in a loop.
 - Name things as the user would (`--title "Spring Menu Poster"`), never by
   format or tool. Say the URL in your reply — the chat UI linkifies it.
 - Hosted pages run under a CSP `sandbox` (opaque origin): scripts run,

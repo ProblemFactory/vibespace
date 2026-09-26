@@ -29,13 +29,13 @@ vibespace-browser find role button click --name Submit
 vibespace-browser scroll down 600 · scrollintoview @ref · wait <ms|@ref> · wait --load networkidle
 vibespace-browser back · forward · reload
 vibespace-browser tab list · tab new · tab 2 · tab close
-vibespace-browser screenshot <path> [--annotate] · pdf <path>
+vibespace-browser screenshot <path> [--annotate] · pdf <path>   (write under the project, /tmp or ~/Downloads only)
 vibespace-browser eval "<js that READS the page>"
 vibespace-browser cookies get|set|clear · storage local|session · state save|load <file>
 vibespace-browser console · errors · vitals · a11y [url] · trace/profiler/record start|stop · network requests|route
 vibespace-browser batch "open <url>" "snapshot -i" "click @e3"     several verbs in one call
   (or on stdin: one command per line, or a JSON array of string arrays — [["open","<url>"],["snapshot","-i"]])
-vibespace-browser close                         close your browser session; `close --all` closes YOUR browser only
+vibespace-browser close                         close your browser session; `close --all` closes only THIS conversation's browser — other sessions' browsers are never touched
                                                 (on an attached profile both close only YOUR session + drop your lease)
 vibespace-browser -- <newer verb …>             the valve for a verb newer than this list (same rules)
 ```
@@ -56,9 +56,30 @@ which cookie jar you are in.
 | `auth …` | `verb_not_offered` | a password never rides the command line: log in inside the page with `fill`, or hand the login to the user |
 | `session`, `stream`, `inspect`, `install`, `upgrade`, `doctor`, `plugin`, `mcp`, `dashboard`, `chat`, `skills`, `webmcp` | `verb_not_offered` | `vibespace-browser status` / the live view / ask the user — the message says which (`webmcp`: drive the page through its own UI with `snapshot` + `click`/`fill`) |
 | `open` / `tab new` / `window new` / `pushstate` / `diff url` / `read` / `vitals` / `a11y` / `record start` to an address that is not the web — `file:…`, `chrome://…`, `about:` other than `about:blank`, `view-source:`, `devtools:`, `javascript:`, `blob:`, `filesystem:`, another `x://…` — or a `state load` of a file whose origins include one | `local_scheme_refused` | the browser's own pages and this machine's files are not the web: open an `http(s)` page (or `data:…` / `about:blank`); read a file of yours with your shell, or serve its directory over http (`python3 -m http.server`) and open `http://127.0.0.1:<port>/…` |
+| `upload` of a file under `~/.claude`, `~/.ssh`, `~/.vibespace`, `~/.codex` or VibeSpace's account stores (a symlink into one counts; in a batch or after `--` too) | `upload_secret_refused` | upload a file of the task — never a key, a login or a credential; if the user wants that very file sent, they upload it themselves |
+| a file WRITE — `download <sel> <path>`, `pdf <path>`, `screenshot [sel] [path]`, `state save <path>`, `record start <path>`, `trace/profiler stop <path>`, `network har stop <path>`, `wait --download <path>`, `diff screenshot -o <path>`, `--screenshot-dir <dir>` — to a path OUTSIDE the project directory the session was started in (not wherever your shell has `cd`ed since), `/tmp` or `~/Downloads`; or into a store: a `.ssh` / `.claude` / `.codex` / `.vibespace` / `.git` directory anywhere (a project's `.claude/settings.json` and `.git/hooks` too), a dot-entry directly under your home (`~/.bashrc`, `~/.config/…` — unless the project itself lives there), or VibeSpace's own data directory. A relative path, `..` after a symlink, a symlink, `~`, a trailing slash and a batch line all resolve first | `write_path_refused` | save under the project, `/tmp` or `~/Downloads`; if the user wants a file written elsewhere, they move it there themselves |
 | a batch with one refused line | `batch_line_refused` | the message names the line (or, for JSON on stdin, the command's index); nothing in the batch ran |
 | a stdin batch that is neither lines nor a JSON array of string arrays (or is empty) | `batch_stdin_refused` | pipe one command per line, or `[["open","https://x"],["snapshot","-i"]]` |
 | a word not in the list | `unknown_verb` (exit 2) | `vibespace-browser help`; a genuinely newer verb runs as `vibespace-browser -- <verb> …` |
+
+**Where a file lands.** A relative path means what it means in your shell —
+from the directory you are in — and it must end up inside the project
+directory this session was started in, `/tmp`, or `~/Downloads`. The command
+hands the browser the ABSOLUTE path it checked (`✓ PDF saved to /full/path`),
+so the file lands exactly where it was checked — never in some other
+directory the browser happens to run in. `~/…` is expanded for you. A lone
+`screenshot <word>` is a selector unless the word ends in `.png` / `.jpg` /
+`.jpeg` / `.webp`, or holds a `/` and does not start like a selector (`#`,
+`@`, or a `.` that is not `./` / `../`): `screenshot .btn` and
+`screenshot '.x[href="/login"]'` shoot that element; `screenshot ./shot.png`,
+`screenshot shots/a.png` and `screenshot @e3 shot.png` save a file. To save a
+download to a path you choose, use `download <sel> <path>` — it honours the
+path; `wait --download <path>` is checked like every write, but the browser
+may keep the file in its own Downloads folder under the server's name. Outside a
+VibeSpace session — or in a session started before this version, until it is
+restarted — only `/tmp` and `~/Downloads` are writable.
+`AGENT_BROWSER_SCREENSHOT_DIR` from your shell is not passed — say
+`--screenshot-dir <dir>` on the command instead.
 
 **Environment variables do not choose your browser either.** Every flag in the
 table above has an `AGENT_BROWSER_*` environment twin; `vibespace-browser`

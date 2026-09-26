@@ -6,11 +6,12 @@
 
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { escHtml, copyText, showContextMenu, showToast, absUrl } from './utils.js';
+import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
+import { describeAgentCommand, agentCommandText, alwaysAllowFor, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -86,6 +87,35 @@ export function browserTraceHolderHtml(block, msg) {
   if (!cmd || !commandDrivesBrowser(cmd)) return '';
   const ts = Number(msg && msg.ts) || 0;
   return `<div class="chat-browser-trace" data-trace-ts="${ts}"><button type="button" class="chat-browser-trace-btn" title="${escHtml(t('Every action the agent sent to its browser during this call — before / after frames and where it clicked'))}">${UI_ICONS.image} ${escHtml(t('Browser actions'))}</button><span class="chat-browser-trace-sum chat-status-dim">${escHtml(t('loading…'))}</span><div class="chat-browser-trace-strip" style="display:none"></div><div class="chat-browser-trace-list" style="display:none"></div></div>`;
+}
+
+/**
+ * lane L (the naive-user study, 2026-09-25: "every browser step is a
+ * 'Permission: Bash' card"): a shell call that runs VibeSpace's OWN tools is
+ * described in plain words — the PURE classifier src/agent-tool-rules.js reads
+ * the command (display only; the CLI decides permissions). null otherwise.
+ */
+export function agentCommandOf(input) {
+  if (!input || typeof input !== 'object') return null;
+  const cmd = agentCommandText(input);
+  return cmd ? describeAgentCommand(cmd) : null;
+}
+/** The steps as one line in the reader's language ("Click @e1 · Read the page"). */
+export function agentStepsText(desc) {
+  return (desc && desc.steps || []).map((s) => t(s.key, s.params)).join(' · ');
+}
+/** A call that is ONLY browser steps wears the agent browser's face: its one
+ *  glyph, "Agent browser", the steps — escHtml on every model-written word. */
+export function agentBrowserHeadHtml(desc) {
+  return `${UI_ICONS.browserLive} ${escHtml(t('Agent browser'))} <span class="chat-agent-cmd">${escHtml(agentStepsText(desc))}</span>`;
+}
+/** The permission card's "what this does" block: the steps, anything else the
+ *  line also runs, and a scope sentence where one is owed (`close --all`). */
+export function agentPermissionWhatHtml(desc) {
+  if (!desc) return '';
+  const also = desc.others && desc.others.length ? ` <span class="chat-permission-also">${escHtml(t('also runs: {cmds}', { cmds: desc.others.join(', ') }))}</span>` : '';
+  const scope = desc.scope ? `<div class="chat-permission-scope">${escHtml(t(desc.scope))}</div>` : '';
+  return `<div class="chat-permission-what">${escHtml(agentStepsText(desc))}${also}</div>${scope}`;
 }
 
 // Curated localized display names for harness built-in tools (fallback: raw
@@ -329,7 +359,7 @@ class ChatRenderers {
    * @param {HTMLElement} opts.messageList - Message list DOM element
    * @param {Function} [opts.onPermissionResolve] - Called when a permission is resolved (allow/deny)
    */
-  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict }) {
+  constructor({ ws, sessionId, app, backend = 'claude', compact, messageList, onPermissionResolve, onFork, getSessionCtx, onSendText, onQueueChipClick, getQueueCaps, isCollabLive, getPublishedFiles, getWorkflowVerdict, getSourceWinId }) {
     // Is THIS collab card the one the next row would coalesce into, on a turn
     // that is still streaming? Only the VIEW knows (it owns the streaming flag
     // and the message list), and the answer decides live age vs frozen span.
@@ -350,6 +380,10 @@ class ChatRenderers {
     this._getSessionCtx = getSessionCtx || null;
     this._getPublishedFiles = getPublishedFiles || null; // toolCallId → published SendUserFile rows (owner ruling 8(c))
     this._getWorkflowVerdict = getWorkflowVerdict || null; // runId → the server's stalled verdict (the view keeps it; absent = none)
+    // THE WINDOW THIS CHAT IS DRAWN IN, read at click time (a restore can remap
+    // window ids): a path / local link opened here is born beside it (split tabs
+    // v2, F2 — app.linkPlacement). Absent ⇒ a free window, as before.
+    this._getSourceWinId = getSourceWinId || null;
     this.setupLinkHandler();
   }
 
@@ -358,6 +392,11 @@ class ChatRenderers {
   // `view-…` and a terminated window's webuiId is gone, so links there lost
   // their host/cwd and probed the LOCAL machine (audit 2.192.0). ChatView's
   // _getSessionIds already solves this (openSpec fallback) — prefer it.
+  /** The window this chat is drawn in, now (F2's source), or null. */
+  _sourceWinId() {
+    try { return this._getSourceWinId?.() || null; } catch { return null; }
+  }
+
   _sessionCtx() {
     // publishedFiles rides the SAME accessor every link resolver already
     // calls, so a view-only / terminated window gets it too (its map is empty
@@ -863,7 +902,8 @@ class ChatRenderers {
         const label = `${UI_ICONS.hourglass} ${escHtml(verb)} ${this.clickablePath(fp, mb)}`;
         html = `<div class="chat-tool-pending"><span class="chat-tool-label">${label}</span><span class="chat-spinner" aria-hidden="true"></span></div>`;
       } else {
-        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`;
+        const ac = isAgent ? null : agentCommandOf(block.input); // lane L: a browser-only call wears the browser's face
+        const desc = isAgent && block.input?.description ? `${icon} Agent: ${escHtml(block.input.description)}${agentModelChip(block.input?.model)}` : ac?.browser ? agentBrowserHeadHtml(ac) : `${icon} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`;
         const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${t('running...')}</div>`
@@ -912,8 +952,9 @@ class ChatRenderers {
     }
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
+    const acDone = agentCommandOf(block.input); // lane L: a browser-only call keeps the browser's face once it ran
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -1014,7 +1055,7 @@ class ChatRenderers {
     }
     // Generic tool
     const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
   }
 
   /**
@@ -1489,7 +1530,23 @@ class ChatRenderers {
         if (approved) this._onPermissionResolve('allowed');
       });
     } else {
-      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(msg.permission.toolName) })}</span><div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${t('Allow')}</button>${msg.permission.suggestions?.length ? `<button class="chat-perm-btn chat-perm-always">${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
+      // lane L: a card for VibeSpace's own tools says what the step DOES (the
+      // browser's name, the verb + url, the scope of `close --all`), and its
+      // Always Allow covers the TOOL, not the one verb the CLI suggested
+      // (`vibespace-browser click *` never covered the next fill) — the
+      // widened rules are named in the button's tooltip.
+      // r2: a HELD command's suggestion (`vibespace-job run *` = every future
+      // shell command through that verb) is narrowed to THIS exact line, and
+      // an ask verb's (`vibespace-page publish`) is withheld — then the card
+      // says why in the button's place, never a silent missing button.
+      const ac = agentCommandOf(msg.permission.input);
+      const toolName = ac?.browser ? t('Agent browser') : msg.permission.toolName;
+      const aa = alwaysAllowFor(msg.permission.suggestions || [], agentCommandText(msg.permission.input));
+      const always = aa.updates || [];
+      const alwaysRules = rulesText(always).join(', ');
+      const alwaysTitle = alwaysRules ? ` title="${escHtml(t('Always allow: {rules}', { rules: alwaysRules }))}"` : '';
+      const withheldHtml = aa.withheld && !always.length ? `<div class="chat-permission-withheld">${escHtml(t(aa.withheld))}</div>` : '';
+      section.innerHTML = `<div class="chat-permission-prompt"><span class="chat-permission-label">${UI_ICONS.lock} ${t('Permission: {tool}', { tool: escHtml(toolName) })}</span>${agentPermissionWhatHtml(ac)}${withheldHtml}<div class="chat-permission-actions"><button class="chat-perm-btn chat-perm-allow">${t('Allow')}</button>${always.length ? `<button class="chat-perm-btn chat-perm-always"${alwaysTitle}>${t('Always Allow')}</button>` : ''}<button class="chat-perm-btn chat-perm-deny">${t('Deny')}</button></div></div>`;
       section.querySelector('.chat-perm-allow')?.addEventListener('click', () => {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input });
         msg.permission.resolved = 'allowed';
@@ -1497,7 +1554,7 @@ class ChatRenderers {
         this._onPermissionResolve('allowed');
       });
       section.querySelector('.chat-perm-always')?.addEventListener('click', () => {
-        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input, permissionUpdates: msg.permission.suggestions });
+        this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input, permissionUpdates: always });
         msg.permission.resolved = 'allowed';
         this.renderPermissionOverlay(el, msg);
         this._onPermissionResolve('allowed');
@@ -2020,8 +2077,9 @@ class ChatRenderers {
           // open on the SESSION's host — a remote session's files live on the
           // remote machine; opening the bare path opened a nonexistent LOCAL
           // path (real report: remote-chat file links did nothing)
-          if (info.isDirectory) this.app.openFileExplorer(c, { host });
-          else this.app.openFile(c, c.split('/').pop(), { host });
+          const from = this._sourceWinId();
+          if (info.isDirectory) this.app.openFileExplorer(c, { host, from });
+          else this.app.openFile(c, c.split('/').pop(), { host, from });
           return;
         }
       } catch {}
@@ -2038,7 +2096,7 @@ class ChatRenderers {
         const { hits = [] } = await r.json();
         const exact = hits.filter(h => h.endsWith('/' + norm));
         const use = exact.length ? exact : hits;
-        const openHit = (h) => type === 'd' ? this.app.openFileExplorer(h, { host }) : this.app.openFile(h, h.split('/').pop(), { host });
+        const openHit = (h) => { const from = this._sourceWinId(); return type === 'd' ? this.app.openFileExplorer(h, { host, from }) : this.app.openFile(h, h.split('/').pop(), { host, from }); };
         if (use.length === 1) { openHit(use[0]); return; }
         if (use.length > 1) {
           const rect = link.getBoundingClientRect();
@@ -2075,9 +2133,9 @@ class ChatRenderers {
           if (info.error) {
             this.flashLink(link, t('Not found'));
           } else if (info.isDirectory) {
-            this.app.openFileExplorer(cleanPath, { host });
+            this.app.openFileExplorer(cleanPath, { host, from: this._sourceWinId() });
           } else {
-            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host });
+            this.app.openFile(cleanPath, cleanPath.split('/').pop(), { line: lineNum, host, from: this._sourceWinId() });
           }
         })
         .catch(() => this.flashLink(link, t('Error')));
@@ -2240,9 +2298,9 @@ class ChatRenderers {
           input.onkeydown = (ev) => { if (ev.key === 'Escape') { dd.remove(); closeFn(); } };
           langPicker.appendChild(dd);
           setTimeout(() => input.focus(), 0);
-          const closeFn = () => document.removeEventListener('mousedown', closeHandler);
-          const closeHandler = (ev) => { if (!dd.contains(ev.target) && ev.target !== langBtn) { dd.remove(); closeFn(); } };
-          setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
+          // an outside press closes it (utils.js onOutsidePress — the ONE closer); a press ON the button is its toggle's;
+          // a pick / Escape removes the list itself and retires the closer (closeFn = the dispose)
+          const closeFn = onOutsidePress(dd, () => dd.remove(), { ignore: (t) => t === langBtn, nested: false });
         };
         langPicker.appendChild(langBtn);
         toolbar.appendChild(langPicker);

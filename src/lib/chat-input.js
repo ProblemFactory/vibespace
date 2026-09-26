@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay, onOutsidePress } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -1896,8 +1896,8 @@ export class ChatInput {
       popup.style.left = '12px';
       popup.style.right = '12px';
       container.appendChild(popup);
-      const close = (ev) => { if (!popup.contains(ev.target) && !this._todoDisplay.contains(ev.target)) { popup.remove(); document.removeEventListener('mousedown', close); } };
-      setTimeout(() => document.addEventListener('mousedown', close), 0);
+      // an outside press closes it (utils.js onOutsidePress — the ONE closer); a press on the TODO line is its toggle's
+      onOutsidePress(popup, () => popup.remove(), { exclude: [this._todoDisplay], nested: false });
     };
   }
 }

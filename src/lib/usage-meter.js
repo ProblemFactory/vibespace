@@ -1,7 +1,7 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
 import { createBackendIconHtml } from './agent-meta.js';
 import { t, tc } from './i18n.js';
-import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, showConfirmDialog, showToast } from './utils.js';
+import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, onOutsidePress, showConfirmDialog, showToast } from './utils.js';
 import { backendFeatureCaps } from './agent-meta.js';
 // PURE reading-provenance rules (2026-09-07 readings-by-slot): who produced the
 // panel's latest number, and — for a member that can no longer produce one at
@@ -46,9 +46,10 @@ export function installUsageMeter(App, ctx = {}) {
     // quota chip is the only way to reach the popup (incl. account switching).
     const mChip = document.getElementById('mobile-nav-usage');
     if (mChip) mChip.onclick = () => togglePopup(mChip);
-    document.addEventListener('mousedown', (e) => {
-      if (!popup.contains(e.target) && !usageEl.contains(e.target) && !(mChip && mChip.contains(e.target))) popup.classList.add('hidden');
-    });
+    // an outside press hides it — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press into
+    // an app's picture counts too). A PERSISTENT element (hidden by class, never removed): armed once for the app's
+    // life; the taskbar chip and the phone's quota chip are its toggles; a press in another popover hides it (its rule)
+    onOutsidePress(popup, () => popup.classList.add('hidden'), { exclude: [usageEl, mChip], nested: false, once: false });
     // Account switcher chips (popup re-renders every poll → delegate)
     popup.addEventListener('click', (e) => {
       // "Full overview" → the Agents machine-sectioned account+quota center

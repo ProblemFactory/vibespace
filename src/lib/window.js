@@ -126,7 +126,7 @@ class WindowManager {
     controls.querySelector('.win-minimize').onclick = (e) => { e.stopPropagation(); this.minimize(winInfo.id); };
     controls.querySelector('.win-maximize').onclick = (e) => { e.stopPropagation(); this.toggleMaximize(winInfo.id); };
     controls.querySelector('.win-close').onclick = (e) => { e.stopPropagation(); this.requestClose(winInfo.id); };
-    el.addEventListener('mousedown', () => this.focusWindow(winInfo.id));
+    el.addEventListener('mousedown', (e) => this._focusFromPointer(winInfo, e));
     titleBar.addEventListener('dblclick', (e) => { if (!e.target.closest('.window-controls')) this.toggleMaximize(winInfo.id); });
     // Right-click on title bar (2.212.0): full window menu — the old direct
     // overlap-switcher popup now lives inside it as the "Switch window"
@@ -143,7 +143,7 @@ class WindowManager {
     this._app?.stage?.onWindowCreated(winInfo); // stage aux binding / transient tag
     if (born) {
       if (intoChain.split) this.bindSplit(born, winInfo, { side: intoChain.side || 'right' });
-      else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo);
+      else if (born._tabChain) this.addToTabChain(born._tabChain, winInfo, { afterId: born.id }); // a TAB born right after its source (on the source's side in a split)
       else this.createTabChain(born, winInfo);
     }
     this.focusWindow(id); this._notify(); this._scheduleOverlapUpdate(); return winInfo;
@@ -296,9 +296,11 @@ class WindowManager {
 
     // ONE start for every drag of this window: the title bar's mousedown, and (seamless, round 3 lane B) a pointer
     // the app's own header bar handed over (beginDragFromPointer) — the same move and drop handlers from here on
+    let dragFrom = null; // where the window stood when the drag began (F3's Undo puts a merged window back there)
     const beginAt = (x, y) => {
       mouseDown = true; dragging = false; tabMergeTarget = null;
       startX = x; startY = y;
+      dragFrom = typeof this._rectSnap === 'function' ? this._rectSnap(win) : null; // the tab-group mixin's (absent on a bare WindowManager)
       initL = element.offsetLeft; initT = element.offsetTop;
       shiftDragStart = -1;
       resetShake({ clientX: x, clientY: y });
@@ -404,7 +406,10 @@ class WindowManager {
       // occluded icons don't match). Pass the dragged window so it's
       // ignored by elementFromPoint.
       const prevTarget = tabMergeTarget;
-      tabMergeTarget = this._detectTabMergeTarget(e.clientX, e.clientY, win.id, [element]);
+      // a tab GROUP dragged by its title bar moves as one window — it never merges
+      // into another (the merge re-parented the host alone and orphaned every
+      // other tab inside its hidden element; merge a group tab by tab)
+      tabMergeTarget = win._tabChain ? null : this._detectTabMergeTarget(e.clientX, e.clientY, win.id, [element]);
       for (const [, w] of this.windows) w.element.classList.toggle('tab-drop-target', w === tabMergeTarget);
       // split UX R1 (docs/design-split-ux.zh.md): NO split zone — a window drag is move / snap / grid; the merge above is the one exception
 
@@ -608,24 +613,8 @@ class WindowManager {
         this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
         element.style.display = '';
         if (savedBounds) { element.style.left = savedBounds.left; element.style.top = savedBounds.top; element.style.width = savedBounds.width; element.style.height = savedBounds.height; savedBounds = null; }
-        if (tabMergeTarget._tabChain) {
-          // Calculate insert position from cursor relative to existing tabs. The
-          // strip is in VISUAL order in a split (split UX R3) — map the strip
-          // neighbour back to its CHAIN index by window id, never by position.
-          const ch = tabMergeTarget._tabChain;
-          const tabItems = [...tabMergeTarget.element.querySelectorAll('.tab-item')];
-          let before = tabItems.length; // append at end
-          for (let i = 0; i < tabItems.length; i++) {
-            const r = tabItems[i].getBoundingClientRect();
-            if (e.clientX < r.left + r.width / 2) { before = i; break; }
-          }
-          const prevId = before > 0 ? tabItems[before - 1].dataset.winId : null;
-          const insertIdx = prevId ? ch.tabs.indexOf(prevId) : -1;
-          this.addToTabChain(ch, win, insertIdx < 0 ? 0 : insertIdx);
-        } else {
-          this.createTabChain(tabMergeTarget, win);
-        }
-        this._afterUserMerge(win._tabChain); // the bridge to the explicit second step (split UX R1)
+        // the slot under the pointer — in a split the HALF it is over (split tabs v2)
+        this._mergeDrop(tabMergeTarget, win, { x: e.clientX, y: e.clientY, from: dragFrom }); // the ONE merge-drop body (tab-group.js) — the bridge to the explicit second step (split UX R1); F3 may land it side by side
         tabMergeTarget = null;
         return;
       }
@@ -1116,6 +1105,23 @@ class WindowManager {
     win.isMaximized = false;
     if (animate) setTimeout(() => { el.classList.remove('snap-animating'); if (win.onResize) win.onResize(); }, 220);
     else if (win.onResize) win.onResize();
+  }
+
+  /** A press anywhere in a window. In a SPLIT host the press may land in the
+   *  OTHER pane: that pane becomes the focused tab (`chain.active`, the strip's
+   *  focus mark, `activeWindowId`) — before split tabs v2 a click in either pane
+   *  focused the HOST whichever pane it hit, so the keyboard, command mode and
+   *  the window menu acted on the wrong tab (inc-muhfb5al-jzk6 reader, M7). */
+  _focusFromPointer(win, e) {
+    const ch = win._tabChain;
+    if (ch && ch.layout === 'split' && ch.split && ch.tabs[0] === win.id) {
+      const pane = e && e.target && e.target.closest ? e.target.closest('.window-content.tab-split-pane') : null;
+      const paneWin = pane ? ch.tabs.map((id) => this.windows.get(id)).find((w) => w && w.content === pane) : null;
+      const target = paneWin ? paneWin.id : ch.tabs[ch.active]; // the title bar's own area keeps the focused pane
+      if (target !== win.id && this.windows.has(target)) return this.focusWindow(target); // a guest pane: focusWindow switches to its tab and raises the host
+      if (ch.tabs[ch.active] !== win.id) this.switchTab(ch, 0); // the host's own pane
+    }
+    this.focusWindow(win.id);
   }
 
   // ── Layout Presets ──
@@ -1636,7 +1642,7 @@ class WindowManager {
     const host = win._tabChain ? this.windows.get(win._tabChain.tabs[0]) : win;
     if (!host) return;
     if (host._tabChain) {
-      for (const tab of host.titleBar.querySelectorAll(':scope > .tab-bar-tabs > .tab-item')) {
+      for (const tab of host.titleBar.querySelectorAll(':scope > .tab-bar-tabs .tab-item')) { // split tabs v2: a split's tabs sit inside its two strip halves
         const chip = tab.querySelector(':scope > .win-auth-badge');
         if (chip) this._fitChip(tab, tab.querySelector(':scope > .tab-label'), chip, this.windows.get(tab.dataset.winId));
       }

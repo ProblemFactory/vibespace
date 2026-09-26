@@ -487,6 +487,16 @@ else await (async () => {
   att = await j('POST', '/api/browser/attach', { sessionId, profile: 'Personal' });
   ok(att.status === 200 && att.json.attachments.length === 2, 'attached Personal — the session holds TWO attachments');
   try { for (const l of fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n')) { const pid = Number(l); if (pid) procs.add({ kill: () => process.kill(pid, 'SIGKILL') }); } } catch { }
+  // lane L r5 F1 (b) — THE KEEPER'S FRAME: the server runs from the worktree (its checkout); every daemon its keeper
+  // launched (the fake `open`'s detached child, which keeps the cwd it was started in — as the real daemon does) runs
+  // in the runtime's private directory, never the checkout (r4: the server's WorkingDirectory, so a relative
+  // `pdf ./data/bin/vibespace-hook.mjs` landed in the checkout)
+  {
+    let dpids = []; try { dpids = fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n').map(Number).filter(Boolean); } catch { }
+    const cwds = dpids.map((pid) => { try { return fs.readlinkSync(`/proc/${pid}/cwd`); } catch { return null; } });
+    const wtReal = fs.realpathSync(wt);
+    ok(dpids.length >= 1 && cwds.every((c) => c && c === F.runDir().dir && c !== wtReal && !c.startsWith(wtReal + '/') && !wtReal.startsWith(c + '/')), `lane L r5 F1(b): the worktree server's KEEPER launched ${dpids.length} daemon(s), each running in the private directory (${[...new Set(cwds)].join(', ')}) — never its checkout ${wtReal}`, JSON.stringify({ dpids, cwds }));
+  }
   await j('POST', '/api/browser/pin', { sessionId, profile: 'Work' });
   // pin Work ⇒ the default; the strip shows both
 
@@ -827,11 +837,20 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
     const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_')) env[k] = v;
     const extraEnv = { AGENT_BROWSER_CONFIG: path.join(D, 'cfg.json'), AGENT_BROWSER_HEADED: '0', AGENT_BROWSER_SOCKET_DIR: path.join(D, 'sock') };
     const rt = F.createBrowserRuntime({ env, log: null });
+    // lane L r5: the config rides the runtime's launch itself (the runtime path is the keeper's — its cwd is what ⑤ below asserts)
     const launched = await rt.launch(ns, { dir: path.join(D, 'prof'), idleMs: 120000, headed: false, url: 'data:text/html,<title>live</title><h1>live</h1>', timeout: 90000, extraEnv });
     // the runtime's launch merges its own pairs; the config must ride too
     const lr = launched.ok ? launched : await new Promise((r) => { const { execFile } = require('child_process'); execFile('agent-browser', ['open', 'data:text/html,<title>live</title><h1>live</h1>'], { env: { ...env, AGENT_BROWSER_SESSION: ns, AGENT_BROWSER_NAMESPACE: ns, AGENT_BROWSER_PROFILE: path.join(D, 'prof'), AGENT_BROWSER_IDLE_TIMEOUT_MS: '120000', AGENT_BROWSER_JSON: '1', ...extraEnv }, timeout: 90000, encoding: 'utf8' }, (err, stdout, stderr) => r({ ok: !err, stdout, stderr })); });
     if (!lr.ok) { skip(`the real chromium did not launch here: ${String(lr.stderr || lr.stdout || lr.error || '').slice(0, 200)}`); reapDaemons(new Set([ns])); return; }
     try {
+      // lane L r5 F1 (b): the REAL daemon the runtime launched runs in the runtime's private directory — never the
+      // checkout this suite (and, in production, the server) runs from
+      {
+        const inf = await rt.info(ns, { dir: path.join(D, 'prof'), extraEnv });
+        let dcwd = null; try { dcwd = fs.readlinkSync(`/proc/${inf.pid}/cwd`); } catch { }
+        const co = fs.realpathSync(repo);
+        ok(launched.ok && inf.pid && dcwd === F.runDir().dir && dcwd !== co && !dcwd.startsWith(co + '/') && !co.startsWith(dcwd + '/'), `lane L r5 F1(b): the REAL daemon (pid ${inf.pid}) launched through the runtime runs in ${dcwd} — not the checkout ${co}`, JSON.stringify({ launched: launched.ok, launchErr: String(launched.stderr || launched.error || '').slice(0, 200), pid: inf.pid, dcwd }));
+      }
       const port = await rt.streamPort(ns, { dir: path.join(D, 'prof'), session: ns, extraEnv });
       // THE LAUNCH SHAPE IS EVIDENCE (2026-09-21): on a box whose chromium exits before
       // DevToolsActivePort (exit 21 here — the sandbox/driver situation of the machine,
@@ -872,7 +891,7 @@ console.log('— ④ the real agent-browser: one headless chromium, the real str
       }
       bridge.shutdown(); srv.close();
     } finally {
-      // lane H: close under the SAME socket root + config the browser was launched with — without `extraEnv` the close
+      // lane H (+ lane L r5): close under the SAME socket root + config the browser was launched with (the daemon lives under extraEnv's socket dir) — without `extraEnv` the close
       // asked another root's daemon and every run leaked this one (and, once the launch worked, its Chrome)
       // lane J: then reap the namespace's daemons, twice: `close --all` may itself start a daemon that registers a beat later
       await rt.closeAll(ns, { dir: path.join(D, 'prof'), extraEnv }).catch(() => { });

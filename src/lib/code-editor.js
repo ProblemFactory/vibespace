@@ -360,15 +360,20 @@ class CodeEditor {
 
     this._updatePreviewSupport(detectedLang);
 
-    // Jump to line if requested
-    if (this._gotoLine && this.editorView) {
-      const line = Math.min(this._gotoLine, this.editorView.state.doc.lines);
+    // Jump to line if requested — and keep the verb on the window: a `path:line`
+    // link opened again from the same chat shows THIS tab (app._focusOpenInChain,
+    // split tabs v2 F2) and moves it to the new line
+    const gotoLine = (n) => {
+      if (!this.editorView || !(Number(n) > 0)) return;
+      const line = Math.min(Math.trunc(Number(n)), this.editorView.state.doc.lines);
       const lineInfo = this.editorView.state.doc.line(line);
       this.editorView.dispatch({
         selection: EditorSelection.cursor(lineInfo.from),
         effects: EditorView.scrollIntoView(lineInfo.from, { y: 'center' }),
       });
-    }
+    };
+    if (this._gotoLine) gotoLine(this._gotoLine);
+    this.winInfo._gotoLine = gotoLine;
 
     // Chain, don't clobber: app.openEditor installs its own onClose (temp-file
     // cleanup + welcome check) BEFORE this async load completes — overwriting

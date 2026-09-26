@@ -93,8 +93,10 @@ const acOf = (opts) => settingsOf(adapter.buildSessionArgs({ cwd: '/tmp', mode: 
 check('auto-continue: row OFF (the default) ⇒ --settings autoContinueAtUsageLimit:false', acOf({ settings: { autoContinueAtUsageLimit: false } }) === false);
 check('auto-continue: NO settings bag at all ⇒ still false (the money-safe direction)', acOf({}) === false);
 check('auto-continue: terminal mode carries it too (the one mode where the CLI\'s continue can arm — a real pty)', settingsOf(adapter.buildSessionArgs({ cwd: '/tmp', mode: 'terminal' })).autoContinueAtUsageLimit === false);
+// (lane L: the ONE --settings flag also carries the agent-tool allow rules by default,
+// so "nothing passed" is asserted with that row off too — the key itself is the claim)
 check('auto-continue: row ON ⇒ nothing passed (the CLI\'s own setting governs) — NEGATIVE CONTROL for the leg above', acOf({ settings: { autoContinueAtUsageLimit: true } }) === undefined
-  && !adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', settings: { autoContinueAtUsageLimit: true } }).args.includes('--settings'));
+  && !adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', settings: { autoContinueAtUsageLimit: true, allowAgentTools: false } }).args.includes('--settings'));
 spec = adapter.buildSessionArgs({ cwd: '/tmp', mode: 'chat', effort: 'ultracode', settings: { disableModelFallback: true }, neutralizeKeyHelper: true });
 check('auto-continue: MERGED into the ONE --settings flag with every other key', spec.args.filter((a) => a === '--settings').length === 1
   && (() => { const o = settingsOf(spec); return o.ultracode === true && o.switchModelsOnFlag === false && o.apiKeyHelper === '' && o.autoContinueAtUsageLimit === false; })());

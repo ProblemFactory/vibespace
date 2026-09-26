@@ -313,12 +313,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** D7: one probe of the app's tree (a YOUNG app is re-asked for up to modeProbeMs) → auto's resolution. */
   async function probeMode(rec) {
     const a11y = await wt.probeA11y({ env: env(), ...helperOpts() });
-    if (!a11y.ok) return R.resolveMode({ mode: 'auto', probe: { a11yOk: false } });
+    // mirror red on 2.369.181: WHY the tree is unreachable (no python3, no gi binding, no bus, a helper that died)
+    // is a fact about this machine — it rides in the sentence, the resolution is pixels whatever it is
+    if (!a11y.ok) return R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: a11y.why || a11y.code || null } });
     const t0 = Date.now();
     let last = { a11yOk: true, nodes: 0, usable: 0 };
     for (let i = 0; i < 8; i++) {
       const r = await wt.snapshotTarget({ pids: pidsOf(rec), budget: MODE_PROBE_BUDGET, text: false, env: env(), ...helperOpts() });
       if (r.ok) last = { a11yOk: true, nodes: r.snapshot.nodes.length, usable: R.usableNodes(r.snapshot.nodes) };
+      else if (WT.treeUnreachable(r)) { last = { a11yOk: false, reason: `${r.code}: ${r.why}` }; break; }
       if (last.usable) break;
       const young = now() - (Number(rec.readyAt || rec.startedAt) || 0) < MODE_PROBE_YOUNG_MS;
       if (!young || Date.now() - t0 >= modeProbeMs) break;
@@ -858,6 +861,16 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const pids = pidsOf(rec);
     const r = await wt.snapshotTarget({ pids, budget, text, env: env(), ...helperOpts() });
     const held = stillHeld(rec, facts, 'snapshot'); // lane E verify: a revoke during the traversal ⇒ the tree is never handed over
+    // mirror red on 2.369.181: under `auto` the snapshot IS the probe, and a tree this machine cannot read — for ANY reason
+    // (no python3, no gi binding, no bus, a helper that died or hung) — resolves to pixels like a window with no tree:
+    // ONE code (mode_pixels), the reason it saw named beside it. The helper's own code used to leak through here, so
+    // the refusal named the machine (python3_missing / a11y_unavailable / helper_error), not the window's road.
+    if (!r.ok && rec.origin !== 'desktop' && reachRecord(rec.id).mode === 'auto' && WT.treeUnreachable(r)) {
+      const v = R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: `${r.code}: ${r.why}` } });
+      setResolution(rec.id, v);
+      audit({ ...who, verb: 'snapshot', by: 'mode', ok: false, code: 'mode_pixels', mode: 'auto', reason: r.code });
+      throw namedError('mode_pixels', `${v.why}: read it with screenshot, act with click --at x,y / type / key / scroll`, { mode: 'auto', resolvedMode: 'pixels', reason: { code: r.code, why: r.why } });
+    }
     if (!r.ok) { audit({ ...who, verb: 'snapshot', by: 'tree', ok: false, code: r.code }); throw namedError(r.code, r.why, { helper: true }); }
     const s = r.snapshot;
     // lane E (D7): under `auto` every snapshot re-probes — a tree that answers resolves to tree; none (xterm), or a closed one
@@ -915,9 +928,6 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       audit({ ...who, verb, by: 'inject', ok: false, code: 'inject_failed', ...cutLine(did) });
       throw namedError('inject_failed', `${verb} was cancelled part-way — part of it may already have landed`, { did });
     };
-    // lane E (D7): THE MODE TABLE — a tree verb (click @ref / type @ref) under a pixel share is refused by name
-    let mg = gateMode(rec, lease, verb, !!body.ref, who);
-    if (mg.probe) { await ensureResolved(rec); stillHeld(rec, facts, verb); mg = gateMode(rec, lease, verb, !!body.ref, who); }
     /** lane E verify: the re-check that IMMEDIATELY precedes every act (no await between it and the call it guards) */
     const held = () => stillHeld(rec, facts, verb);
     const refEntry = () => {
@@ -926,6 +936,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       if (!r.ok) throw namedError(r.code, r.why);
       return r.entry;
     };
+    // lane E (D7): THE MODE TABLE — a tree verb (click @ref / type @ref) under a pixel share is refused by name
+    let mg = gateMode(rec, lease, verb, !!body.ref, who);
+    // PRECONDITIONS BEFORE PROBES (mirror red on 2.369.181): a @ref names a node of THIS lease's last snapshot — with no
+    // snapshot yet, or a ref that snapshot never minted, there is nothing to act on whatever this machine's
+    // accessibility stack can do, so ref_unknown is answered HERE, before the auto probe spawns anything. It used to
+    // follow the probe: mode_pixels on a box whose tree is unreachable, ref_unknown on one with the fixture's bus — the
+    // code named the machine, not the call. (Re-read after the probe by refEntry() below: a snapshot may land meanwhile.)
+    if (body.ref && (verb === 'click' || verb === 'type')) refEntry(); // PRECONDITION-BEFORE-PROBE
+    if (mg.probe) { await ensureResolved(rec); stillHeld(rec, facts, verb); mg = gateMode(rec, lease, verb, !!body.ref, who); }
     const fromHelper = (r, line) => {
       if (!r.ok) {
         const cut = cutOf(r); // lane E verify r3 (F2): a TIMEOUT-killed injection carries its progress too — never a bare error

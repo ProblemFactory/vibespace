@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { escHtml, showContextMenu } from './utils.js';
+import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
@@ -208,16 +208,11 @@ export class MobileNav {
     renderContent();
 
     document.body.appendChild(pop);
-    // Chained-popover rule (same as attachPopoverClose): a context menu or
-    // dialog opened FROM a row (billing switcher + its confirm) is a child
-    // interaction, not a dismissal of the list.
-    const onTap = (e) => {
-      if (pop.contains(e.target) || e.target === anchor) return;
-      if (e.target.closest('[data-popover], .dialog-overlay, #dialog-overlay')) return;
-      pop.remove();
-      document.removeEventListener('pointerdown', onTap);
-    };
-    setTimeout(() => document.addEventListener('pointerdown', onTap), 0);
+    // An outside tap closes the list — THE ONE closer (utils.js onOutsidePress: capture phase, a touch counts as a
+    // TAP, so a scroll outside the list no longer dismisses it). Chained-popover rule (same as attachPopoverClose): a
+    // context menu or dialog opened FROM a row (billing switcher + its confirm) is a child interaction, not a
+    // dismissal of the list; a press ON the nav button itself is its toggle's.
+    onOutsidePress(pop, () => pop.remove(), { ignore: (t) => t === anchor || !!t?.closest?.('.dialog-overlay, #dialog-overlay') });
   }
 
   _buildWindowItem(win, wm, pop, rerender) {

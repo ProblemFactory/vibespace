@@ -1,0 +1,13 @@
+agent-browser reload - Reload the current page
+
+Usage: agent-browser reload
+
+Reloads the current page, equivalent to pressing F5 or clicking
+the browser's reload button.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser reload

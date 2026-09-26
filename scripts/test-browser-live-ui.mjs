@@ -639,8 +639,9 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     // the bar in every language. Per state: the toggle and the ⋯ lie inside the bar's rect, the bar does not overflow
     // (scrollWidth ≤ clientWidth + 1), the whole census (overlap / wrap / cut / outside / bad text / the fold = barLayout)
     // holds, the pane is never narrower than the bar's published floor; the folded badge's sentence is the ⋯'s first
-    // row and the ⋯ wears the badge's colour. CONTROL: the floor removed at runtime (setPaneMinWidth neutralised, the
-    // recorded floor cleared) on a 320 px host ⇒ the toggle / the ⋯ fall outside the bar again (red).
+    // row and the ⋯ wears the badge's colour. CONTROL: the floors removed at runtime (setPaneMinWidth neutralised, the
+    // recorded floor cleared; since 2.369.182 also the right track's controls floor) on a 320 px host ⇒ the toggle / the
+    // ⋯ fall outside the bar again (red).
     console.log('— ⑥ the split floor: a bound live pane dragged to ratio 0.85 on 900 / 600 / 320 px hosts (zh / ja / en × Watch / Take over)');
     {
       const dragDivider = async (frac) => {
@@ -703,7 +704,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           const cmode = lang === 'zh' ? 'watch' : 'takeover';
           await setMode(cmode);
           await placeHost(320); await dragDivider(0.995);
-          await evaluate(`(() => { const wm = window.app.wm; window.__vsPaneMinSave = Object.prototype.hasOwnProperty.call(wm, 'setPaneMinWidth') ? wm.setPaneMinWidth : undefined; wm.setPaneMinWidth = () => {}; const l = ${LIVE}; l.paneMinWidth = null; wm._applyChainLayout(l._tabChain); return true; })()`);
+          // 2.369.182 integration (lane I × split tabs v2): the RIGHT track now carries a second floor of its own — the
+          // window controls + a tab's room, ≤ 45 % of the host (chain-layout.js splitColumns) — which alone holds a
+          // 320 px host's right pane at ~143 px, above this bar's need. The control removes the pane's floors from its
+          // track — lane I's (setPaneMinWidth neutralised, the recorded floor cleared) AND the controls' floor (the
+          // track spelled `minmax(0, …)`, the pre-floor grid) — so the reachability judge can still say no.
+          await evaluate(`(() => { const wm = window.app.wm; window.__vsPaneMinSave = Object.prototype.hasOwnProperty.call(wm, 'setPaneMinWidth') ? wm.setPaneMinWidth : undefined; wm.setPaneMinWidth = () => {}; const l = ${LIVE}; l.paneMinWidth = null; const ch = l._tabChain; wm._applyChainLayout(ch); const host = wm.windows.get(ch.tabs[0]); const r = Math.round(ch.split.ratio * 10000) / 10000, rr = Math.round((1 - ch.split.ratio) * 10000) / 10000; host.element.style.gridTemplateColumns = 'minmax(0, ' + r + 'fr) 6px minmax(0, ' + rr + 'fr)'; return true; })()`);
           await frames(); await sleep(100); await frames();
           const c = await reach();
           await shot(path.join(SHOTS, `control-floor-removed-${lang}-${cmode}-host320.png`), await evaluate(`(() => { const el = ${liveClip}; const r = el.getBoundingClientRect(); return { x: r.left, y: r.top, width: r.width, height: r.height }; })()`));

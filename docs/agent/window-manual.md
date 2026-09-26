@@ -267,6 +267,28 @@ A point outside the image — or off the display (a window taller than the
 screen of the person viewing it) — is refused **`outside_window`**, never
 clamped to the edge.
 
+**Where the PNG lands.** Without `--out` it goes to
+`<temp dir>/vibespace-window/<handle>-<time>.png` (a private directory, made
+0700) and the CLI prints that path — it is **never** written into your
+current directory (a screenshot must not litter the project you stand in).
+Name the file yourself with `--out`:
+
+```
+vibespace-window screenshot da-1                       # → /tmp/vibespace-window/da-1-1790000000000.png
+vibespace-window screenshot da-1 --out shots/calc.png  # relative: under the SESSION's directory
+vibespace-window screenshot da-1 --out /tmp/calc.png   # absolute: exactly there
+```
+
+A relative `--out` is resolved against the session's own directory (the one
+the session was started in), not against wherever your shell has `cd`'d; with
+no session directory known it goes under the temp directory above. An `--out`
+under `~/.ssh`, `~/.claude`, `~/.codex`, `~/.vibespace`, a `.git` directory,
+any other `~/.<name>` entry, or VibeSpace's own data directory is refused
+**`write_path_refused`** (the path is judged after symbolic links — `link/..`
+counts where the link points), and so is an `--out` that is itself a symbolic
+link or sits in a directory that does not exist (**`out_unusable`**). A
+refused `--out` captures nothing.
+
 **`window_not_visible`** — a window on VibeSpace's xpra display has pixels only
 while somebody has it open (the user's window in VibeSpace). When nobody does,
 `screenshot`, `click --at`, `key`, `scroll` and a typed `type` are refused

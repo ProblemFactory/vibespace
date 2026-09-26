@@ -1,0 +1,18 @@
+agent-browser frame - Switch frame context
+
+Usage: agent-browser frame <selector|main>
+
+Switch to an iframe or back to the main frame.
+
+Arguments:
+  <selector>           CSS selector for iframe
+  main                 Switch back to main frame
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser frame "#embed-iframe"
+  agent-browser frame "iframe[name='content']"
+  agent-browser frame main

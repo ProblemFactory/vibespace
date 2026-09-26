@@ -49,6 +49,15 @@
 //      (a `--require` preload injects it; a disagreeing $HOME is refused, once
 //      with the real passwd entry); the older-server config; the version gate;
 //      the census CLI. A patched r3 copy is the control for each.
+//   lane L r2 (the verifier's upload finding): with VibeSpace's own tools
+//      pre-approved a page verb runs with no card, so an UPLOAD from a
+//      credential store is refused by the CLI BY NAME (`upload_secret_refused`):
+//      the router names every positional word after `upload` (any reading, every
+//      batch line), the PURE `uploadPathVerdict` judges it against ~/.claude,
+//      ~/.ssh, ~/.vibespace, ~/.codex and the data dir's account stores, and the
+//      shipped CLI refuses before the binary or /resolve (a literal `~`, a
+//      relative path, a symlink into a store); a normal file uploads; a patched
+//      pre-r2 copy is the control.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -388,6 +397,221 @@ console.log('① the PURE router');
     const lc = r3 !== src && load(r3).childEnv({ AGENT_BROWSER_CONFIG: '/tmp/mine.json' }, { ok: true, kind: 'none', env: [] });
     ok(lc && lc.env.AGENT_BROWSER_CONFIG === '/tmp/mine.json' && lc.needsConfig === false, 'r4 NEGATIVE CONTROL: the r3 legacy keep (patched copy) hands the binary the agent\'s decoy file and composes nothing', JSON.stringify(lc));
   }
+  // lane L r2: an upload NAMES its files, and a credential store is refused by name
+  {
+    const u = V.classify(['upload', '@e1', '~/.ssh/id_rsa']);
+    ok(u.kind === 'page' && JSON.stringify(u.uploadFiles) === '["@e1","~/.ssh/id_rsa"]', 'lane L r2 PURE: `upload @e1 <file>` names every positional word after `upload` (the selector too — over-naming never refuses a non-path)', JSON.stringify(u));
+    ok(JSON.stringify(V.classify(['batch', 'open https://x', 'upload @e1 a.txt b.txt']).uploadFiles) === '["@e1","a.txt","b.txt"]' && JSON.stringify(V.classify(['--', 'upload', '--json', '@e1', 'k']).uploadFiles) === '["@e1","k"]' && JSON.stringify(V.classify(['--newglobal', 'upload', '@e1', 'k']).uploadFiles) === '["@e1","k"]', 'lane L r2 PURE: …in a batch line, after `--`, and past a flag of unknown arity (reading-independent)');
+    ok(V.classify(['click', '@e1']).uploadFiles === undefined && V.classify(['upload', '@e1', 'x', '--cdp', '1']).kind === 'refused', 'lane L r2 PURE: a verb that uploads nothing names nothing; a refused command stays refused');
+    const roots = V.secretUploadRoots({ homes: ['/home/u', '/home/u/'], dataDir: '/srv/vs/data' });
+    ok(JSON.stringify(roots.map((r) => r.dir)) === JSON.stringify(['/home/u/.claude', '/home/u/.ssh', '/home/u/.vibespace', '/home/u/.codex', '/srv/vs/data/subs', '/srv/vs/data/codex-subs']), 'lane L r2 PURE: the roots — ~/.claude ~/.ssh ~/.vibespace ~/.codex per home (deduped) + the data dir\'s account stores', JSON.stringify(roots));
+    const v = V.uploadPathVerdict([{ file: '~/.ssh/id_rsa', paths: ['/home/u/.ssh/id_rsa'] }], roots);
+    ok(v && v.code === 'upload_secret_refused' && /under ~\/\.ssh/.test(v.error) && /nothing ran/.test(v.error) && v.remedy, 'lane L r2 PURE: an upload of ~/.ssh/id_rsa ⇒ refused BY NAME (upload_secret_refused, the store named, a remedy)', JSON.stringify(v));
+    ok(V.uploadPathVerdict([{ file: 'x.txt', paths: ['/tmp/x.txt', '/home/u/.claude/.credentials.json'] }], roots)?.code === 'upload_secret_refused' && /<VibeSpace data>\/subs/.test(V.uploadPathVerdict([{ file: 'c', paths: ['/srv/vs/data/subs/a/.credentials.json'] }], roots)?.error || ''), 'lane L r2 PURE: a realpath into a store is the store; the account stores are named');
+    ok(V.uploadPathVerdict([{ file: 'report.pdf', paths: ['/home/u/work/report.pdf'] }, { file: '@e1', paths: ['/home/u/work/@e1'] }], roots) === null && V.uploadPathVerdict([{ file: 'x', paths: ['/home/u/.sshx/k', '/home/u/.claude-notes/a', '/srv/vs/data/subsidies.txt'] }], roots) === null, 'lane L r2 CONTROL: a normal path passes; a sibling that only SHARES a prefix (~/.sshx, ~/.claude-notes, data/subsidies.txt) is not a store');
+  }
+  // lane L r4 (the verifier's WRITE finding): a WRITE names its output path, and a path outside the project /
+  // /tmp / ~/Downloads (or into a store) is refused by name — the write-direction twin of the upload guard
+  {
+    // ── the CENSUS: every TOP-LEVEL command row of the --help whose signature names a `<path>`/`[path]` is
+    // a writer this table must classify (WRITE_VERBS), so a writer a newer build adds cannot slip in
+    // unclassified. Sub-section rows (`network …`, `record …` families spelled `<cli> <verb> <`) are skipped,
+    // exactly as the verb census above does; `har <start|stop> [path]` lives under the Network family, so its
+    // writer is the top-level `network`. `<path.webm…>` counts; a `[url]` never does.
+    const help = fs.readFileSync(path.join(FIX, 'help-0.32.0.txt'), 'utf8');
+    const head = help.split(/\nSnapshot Options:/)[0];
+    const helpWriters = new Set();
+    let sub = false;
+    for (const line of head.split('\n')) {
+      if (/^\S/.test(line)) { sub = new RegExp(V.REAL_BINARY + ' \\w+ <').test(line); continue; }
+      const m = /^ {2}([a-z][a-z0-9-]*)(?=[\s[]|$)/.exec(line);
+      if (!m || sub) continue;
+      if (/<path[^>]*>|\[path\]/.test(line)) helpWriters.add(m[1]);
+    }
+    const registered = new Set(Object.keys(V.WRITE_VERBS));
+    const missing = [...helpWriters].filter((w) => !registered.has(w));
+    ok(helpWriters.size >= 5 && missing.length === 0, `lane L r4 CENSUS: every top-level help <path> writer is in WRITE_VERBS (${[...helpWriters].sort().join(' ')}; missing: ${missing.join(', ') || 'none'})`, JSON.stringify([...helpWriters]));
+    ok(['download', 'pdf', 'screenshot', 'record', 'trace', 'profiler'].every((w) => registered.has(w)) && ['state', 'network'].every((w) => registered.has(w)), 'lane L r4 CENSUS: the positional writers, the sub writers (state save) and the har writer (network) are all registered');
+    // a FAKE new writer NOT in WRITE_VERBS names no target — the census (above) is what must list it
+    ok(!('exfil' in V.WRITE_VERBS) && V.classify(['exfil', '@e1', '/etc/x']).writeFiles === undefined && !V.known('exfil'), 'lane L r4 CENSUS: an UNregistered verb names no write target — a new writer only becomes classified by being added to WRITE_VERBS (and the census reddens if the help lists it and the table does not)');
+    // ── writeTargetsAt through classify: every writer names its path; a reader / non-writer names nothing
+    const wf = (a) => { const c = V.classify(a); return c.writeFiles; };
+    ok(JSON.stringify(wf(['download', '#k', '/x/y'])) === '["#k","/x/y"]', 'lane L r4 PURE: `download <sel> <path>` names both positionals (the selector too — over-naming never refuses a non-path)');
+    ok(JSON.stringify(wf(['pdf', '/x/y.pdf'])) === '["/x/y.pdf"]' && JSON.stringify(wf(['screenshot', '@e1', 'shot.png'])) === '["@e1","shot.png"]' && wf(['screenshot']) === undefined, 'lane L r4 PURE: pdf / screenshot name the path; a screenshot with none (temp dir) names nothing');
+    ok(JSON.stringify(wf(['state', 'save', '/x.json'])) === '["/x.json"]' && wf(['state', 'load', '/x.json']) === undefined && wf(['state', 'list']) === undefined, 'lane L r4 PURE: `state save` names its path; `state load` (a READ) and `state list` name nothing');
+    ok(JSON.stringify(wf(['record', 'start', '/x.webm', 'https://y'])) === '["/x.webm","https://y"]' && wf(['record', 'stop']) === undefined, 'lane L r4 PURE: `record start <path> [url]` names both; `record stop` names nothing');
+    ok(JSON.stringify(wf(['trace', 'stop', '/x.json'])) === '["/x.json"]' && JSON.stringify(wf(['profiler', 'stop', '/x.json'])) === '["/x.json"]' && wf(['trace', 'start']) === undefined, 'lane L r4 PURE: `trace stop` / `profiler stop` name the path; `trace start` names nothing');
+    ok(JSON.stringify(wf(['network', 'har', 'stop', '/x.har'])) === '["/x.har"]' && wf(['network', 'har', 'start']) === undefined, 'lane L r4 PURE: `network har stop [path]` names the path; `har start` names nothing');
+    ok(JSON.stringify(wf(['screenshot', '--screenshot-dir', '/z'])) === '["/z"]' && JSON.stringify(wf(['diff', 'screenshot', '--baseline', 'b.png', '-o', '/x/out.png'])) === '["/x/out.png"]', 'lane L r4 PURE: the write-target FLAGS — `--screenshot-dir <dir>`, `diff … -o <file>` — name their value (baseline is a read, not named)');
+    ok(JSON.stringify(V.classify(['batch', 'open https://x', 'pdf /a.pdf', 'download #k /b']).writeFiles) === '["/a.pdf","#k","/b"]' && JSON.stringify(V.classify(['--', 'download', '#k', '/c']).writeFiles) === '["#k","/c"]', 'lane L r4 PURE: a batch collects write targets from every line; `-- <writer>` (the escape) too');
+    ok(wf(['click', '@e1']) === undefined && wf(['type', '@e1', '/etc/passwd']) === undefined && wf(['read', 'https://x']) === undefined, 'lane L r4 PURE: a non-writer names nothing — `type @e1 /etc/passwd` (a path typed into a field) is not a write');
+    // ── writePathVerdict: containment + the store deny (on the RESOLVED path)
+    const opt = { allow: ['/home/u/proj', '/tmp', '/home/u/Downloads'], homes: ['/home/u', '/root'], dataDir: '/srv/vs/data' };
+    const pv = (paths) => V.writePathVerdict([{ file: paths[0], paths }], opt);
+    ok(pv(['/home/u/proj/out.pdf']) === null && pv(['/tmp/x.pdf']) === null && pv(['/home/u/Downloads/x.pdf']) === null, 'lane L r4 PURE: the project cwd, /tmp and ~/Downloads are ALLOWED');
+    for (const [p, why] of [[['/home/u/.ssh/authorized_keys'], '~/.ssh'], [['/home/u/.claude/settings.json'], '~/.claude'], [['/home/u/.bashrc'], '~/.bashrc'], [['/home/u/.config/foo'], '~/.config'], [['/root/.ssh/k'], '~/.ssh'], [['/srv/vs/data/subs/a'], '<VibeSpace data>/subs'], [['/srv/vs/data/codex-subs/a'], '<VibeSpace data>/codex-subs']]) {
+      const v = pv(p);
+      ok(v && v.code === 'write_path_refused' && v.error.includes(`under ${why}`) && /nothing ran/.test(v.error) && v.remedy, `lane L r4 PURE: a write to ${p[0]} ⇒ write_path_refused (under ${why})`, JSON.stringify(v));
+    }
+    ok(pv(['/etc/passwd'])?.code === 'write_path_refused' && /outside the places/.test(pv(['/etc/passwd']).error), 'lane L r4 PURE: a path in no allowed root (/etc) ⇒ write_path_refused with the containment sentence');
+    ok(pv(['/home/u/proj/link', '/home/u/.ssh/k'])?.code === 'write_path_refused' && pv(['/home/u/proj/link', '/home/u/.ssh/k']).error.includes('~/.ssh'), 'lane L r4 PURE: a symlink from the project into ~/.ssh (abs in the project, realpath in the store) is refused BY THE STORE — the RESOLVED path is judged');
+    // project cwd IS $HOME: containment would allow ~/.ssh, the store deny still refuses it
+    const opth = { allow: ['/home/u', '/tmp'], homes: ['/home/u'], dataDir: '/srv/vs/data' };
+    ok(V.writePathVerdict([{ file: 'k', paths: ['/home/u/.ssh/authorized_keys'] }], opth)?.code === 'write_path_refused' && V.writePathVerdict([{ file: 'n', paths: ['/home/u/notes.txt'] }], opth) === null, 'lane L r4 PURE: with the project cwd = $HOME, ~/.ssh is still refused (the store deny is unconditional) while ~/notes.txt is allowed');
+    ok(V.writePathVerdict([], opt) === null && V.writePathVerdict([{ file: 'x', paths: [] }], opt) === null, 'lane L r4 CONTROL: no candidates / no paths ⇒ nothing to refuse');
+  }
+  // lane L r5 (verify r3 F1–F6): THE FRAME RULE — a path is judged and written in the SAME frame
+  {
+    const sl = (a) => V.pathSlots(a).map((x) => `${x.kind}:${a[x.i]}`).join(' ');
+    // the measured table (real 0.38.1, daemon started in A, commands from B)
+    ok(sl(['download', '#k', './d1', './d2']) === 'write:./d1 write:./d2', 'lane L r5 PURE: `download <sel> <path> [more]` — every word after the selector is a slot (measured: `download #k d1 d2` SAVED d1 — "the last positional" would have left d1 relative); the selector never', sl(['download', '#k', './d1', './d2']));
+    ok(sl(['screenshot', '@e1', 'o.png']) === 'write:o.png' && sl(['screenshot', '#b', 'c1.png', 'c2.png']) === 'write:c1.png write:c2.png', 'lane L r5 PURE: `screenshot <sel> <path>` — two words ⇒ the second (measured: `#b c1.png c2.png` saved c1.png) and any after it');
+    const lone = ['noext', '.btn', 'a.b', 'x.gif', 'x.pdf', '@e1', '#b', '~'];
+    ok(lone.every((w) => sl(['screenshot', w]) === ''), `lane L r5 PURE: ONE screenshot word that the binary reads as a SELECTOR is never rewritten (measured "Element not found" for ${lone.join(' ')})`);
+    const paths = ['x.png', 'x.jpg', 'x.jpeg', 'x.webp', './noext', 'sub/noext', '/abs/noext', '~x.png', 'X.PNG'];
+    ok(paths.every((w) => sl(['screenshot', w]) === `write:${w}`), `lane L r5 PURE: ONE screenshot word is a path when it holds a \`/\` or ends .png/.jpg/.jpeg/.webp (measured on 0.38.1; X.PNG case-insensitively — a superset) (${paths.join(' ')})`);
+    ok(sl(['screenshot', '--threshold', '0.2', '@e1', 'o.png']) === 'write:o.png' && sl(['screenshot', '--full', 'z.png']) === 'write:z.png' && sl(['screenshot', 'o.png', '--threshold', '0.2']) === 'write:o.png', 'lane L r5 PURE: a verb\'s own value flag (`--threshold <n>`) takes its value, never a slot; a boolean (`--full`) takes nothing');
+    ok(sl(['record', 'start', './v.webm', 'https://x', '--fps', '30']) === 'write:./v.webm' && sl(['record', 'restart', 'v.mp4']) === 'write:v.mp4' && sl(['record', 'stop']) === '', 'lane L r5 PURE: `record start|restart <path> [url]` — the FIRST word after the sub only (a URL is never rewritten)');
+    ok(sl(['pdf', './p.pdf']) === 'write:./p.pdf' && sl(['state', 'save', './s.json']) === 'write:./s.json' && sl(['state', 'load', 's.json']) === 'read:s.json' && sl(['state', 'list']) === '' && sl(['trace', 'stop', './t.json']) === 'write:./t.json' && sl(['profiler', 'stop', 'p.json']) === 'write:p.json' && sl(['trace', 'start']) === '' && sl(['network', 'har', 'stop', 'h.har']) === 'write:h.har' && sl(['network', 'har', 'start']) === '', 'lane L r5 PURE: pdf / state save / trace·profiler stop / network har stop are write slots; `state load` a READ slot');
+    ok(sl(['upload', '@e1', 'a.png', './b.png']) === 'read:a.png read:./b.png', 'lane L r5 PURE: `upload <sel> <files…>` — every file is a READ slot (the upload guard\'s twin frame), the selector never');
+    ok(sl(['screenshot', '--screenshot-dir', './shots']) === 'write:./shots' && sl(['diff', 'screenshot', '--baseline', 'b.png', '-o', 'o.png']) === 'read:b.png write:o.png' && sl(['diff', 'snapshot', '-b', 'snap.txt']) === 'read:snap.txt' && sl(['open', 'https://x', '--init-script', './i.js']) === 'read:./i.js' && sl(['cookies', 'set', '--curl', './c.txt']) === 'read:./c.txt', 'lane L r5 PURE: the flag slots — `--screenshot-dir` / `-o` (write), diff\'s `-b/--baseline`, open\'s `--init-script`, cookies\' `--curl` (read)');
+    ok(sl(['click', '@e1']) === '' && sl(['type', '@e1', './x']) === '' && sl(['open', 'https://x']) === '' && sl(['batch', 'pdf ./x']) === '' && sl(['cookies', 'set', 'n', 'v', '--path', '/api']) === '' && sl(['batch', '-b', 'open https://x']) === '', 'lane L r5 PURE: a word that is not a path is never a slot (a typed value, a URL, a batch line — its own command is framed —, a cookie\'s --path, batch\'s -b)');
+    const w1 = ['screenshot', '--screenshot-dir=./shots', '@e1', 'o.png'];
+    ok(JSON.stringify(V.rewriteSlots(w1, V.pathSlots(w1), (x) => '/abs/' + x.word)) === JSON.stringify(['screenshot', '--screenshot-dir=/abs/./shots', '@e1', '/abs/o.png']), 'lane L r5 PURE: rewriteSlots keeps a `--flag=value` form\'s prefix and touches nothing else');
+    const judged = [['download', '#k', './d1', './d2'], ['screenshot', '@e1', 'o.png'], ['screenshot', 'x.png'], ['record', 'start', 'v.webm', 'https://x'], ['state', 'save', 's.json'], ['trace', 'stop', 't.json'], ['network', 'har', 'stop', 'h.har'], ['screenshot', '--screenshot-dir=./d'], ['diff', 'screenshot', '--baseline', 'b.png', '-o', 'o.png'], ['--', 'pdf', 'e.pdf'], ['wait', '--download', './w.pdf'], ['wait', '--download=./w.pdf']];
+    const unjudged = judged.filter((a) => { const c = V.classify(a); const body = a[0] === '--' ? a.slice(1) : a; const wf = c.writeFiles || []; return !V.pathSlots(body).filter((x) => x.kind === 'write').every((x) => wf.includes(x.word)); });
+    ok(unjudged.length === 0, `lane L r5 PURE: every WRITE slot is also a word the router names for judging (over-naming ⊇ exact) (${JSON.stringify(unjudged)})`);
+    // physicalPath over a FAKE filesystem (lstat / readlink injected)
+    const FSX = { '/h': 'd', '/h/.ssh': 'd', '/p': 'd', '/p/sub': 'd', '/p/l': '/h/.ssh', '/p/r': '../h', '/p/loop': '/p/loop', '/p/dang': '/h/.ssh/newkey', '/p/e': '/etc', '/etc': 'd' };
+    const lstat = (q) => { if (!Object.prototype.hasOwnProperty.call(FSX, q)) { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; } const v = FSX[q]; return { isSymbolicLink: () => v !== 'd', isDirectory: () => v === 'd' }; };
+    const readlink = (q) => FSX[q];
+    const pp = (w, base = '/p') => V.physicalPath(w, { base, home: '/h', lstat, readlink });
+    ok(pp('l/../.ssh/authorized_keys').path === '/h/.ssh/authorized_keys' && path.posix.resolve('/p', 'l/../.ssh/authorized_keys') === '/p/.ssh/authorized_keys', 'lane L r5 F2 PURE: `l/../.ssh/authorized_keys` with l -> ~/.ssh is ~/.ssh/authorized_keys — the `..` steps up from where l POINTS (the lexical r4 rule said <cwd>/.ssh/authorized_keys)', JSON.stringify(pp('l/../.ssh/authorized_keys')));
+    ok(pp('e/../etc/cron.d/x').path === '/etc/cron.d/x' && pp('r/.ssh/k').path === '/h/.ssh/k', 'lane L r5 F2 PURE: the verifier\'s `e -> /etc` spelling, and a RELATIVE link target resolved from the link\'s own directory');
+    ok(pp('dang').path === '/h/.ssh/newkey', 'lane L r5 F2 PURE: a DANGLING final link is followed (a write through it creates its target — open(O_CREAT) follows it)');
+    ok(pp('loop/x').ok === false && /symbolic links/.test(pp('loop/x').error) && pp('a\0b').ok === false, 'lane L r5 F2 PURE: a link loop and a NUL are errors, never a path');
+    ok(pp('~/x').path === '/h/x' && pp('~').path === '/h' && pp('~root/x').path === '/p/~root/x' && pp('/abs/../etc/./x').path === '/etc/x' && pp('sub/../x').path === '/p/x' && pp('nope/../sub/y').path === '/p/sub/y', 'lane L r5 PURE: `~` / `~/…` are the home (the binary never expands them — F4), `~user` literal (the binary\'s reading too), `.`/`..` without a link are plain');
+    // writePathVerdict: F3 the fence is the SESSION's, F6 a root inside a dot-dir wins, the named stores anywhere
+    const H = '/home/u';
+    const wv = (q, root) => V.writePathVerdict([{ file: q, paths: [q] }], { allow: ['/tmp', `${H}/Downloads`], homes: [H], dataDir: '/srv/vs/data', sessionRoot: root });
+    ok(wv(`${H}/proj/x.pdf`, null)?.code === 'write_path_refused' && /no session directory is known/.test(wv(`${H}/proj/x.pdf`, null).error) && wv('/tmp/x.pdf', null) === null && wv(`${H}/Downloads/x.pdf`, null) === null, 'lane L r5 F3 PURE: no session root ⇒ only /tmp and ~/Downloads — never "wherever the shell stands"');
+    ok(wv(`${H}/proj/x.pdf`, `${H}/proj`) === null && /the project directory \(\/home\/u\/proj\)/.test(wv('/etc/cron.d/x', `${H}/proj`)?.error || '') && /no session directory/.test(wv('/x.pdf', '/')?.error || ''), 'lane L r5 F3 PURE: with the root the project writes; a path beside it is refused naming it; a root of `/` is no root');
+    ok(wv(`${H}/.config/nvim/init.lua`, `${H}/.config/nvim`) === null && wv(`${H}/.local/share/proj/x`, `${H}/.local/share/proj`) === null, 'lane L r5 F6 PURE: a project under a dot-directory (~/.config/nvim, ~/.local/share/proj) writes under its own root');
+    ok(/~\/\.config/.test(wv(`${H}/.config/autostart/x.desktop`, `${H}/.config/nvim`)?.error || '') && /~\/\.bashrc/.test(wv(`${H}/.bashrc`, H)?.error || ''), 'lane L r5 F6 PURE: …never beside it (~/.config/autostart), and a root of $HOME never opens ~/.bashrc');
+    const inRoot = [`${H}/.config/nvim/.ssh/k`, `${H}/.config/nvim/.git/hooks/pre-commit`, `${H}/.config/nvim/.claude/settings.json`, `${H}/.config/nvim/.codex/auth.json`, `${H}/.config/nvim/.vibespace/x`];
+    ok(inRoot.every((q) => wv(q, `${H}/.config/nvim`)?.code === 'write_path_refused') && wv(`${H}/.ssh/k`, `${H}/.ssh`)?.code === 'write_path_refused', 'lane L r5 F6 PURE: the named stores stay refused INSIDE a winning root (and a root that IS ~/.ssh opens nothing)');
+    ok(/a \.git directory/.test(wv(`${H}/proj/.git/hooks/pre-commit`, `${H}/proj`)?.error || '') && /a \.claude directory/.test(wv(`${H}/proj/.claude/settings.json`, `${H}/proj`)?.error || ''), 'lane L r5 PURE: a project\'s .git (hooks git runs) and .claude (settings whose hooks run commands) are stores wherever they stand');
+    ok(/<VibeSpace data>/.test(wv('/srv/vs/data/bin/vibespace-hook.mjs', '/srv/vs')?.error || '') && /<VibeSpace data>/.test(wv('/srv/vs/data/auth.json', '/srv/vs')?.error || '') && wv('/srv/vs/src/x.js', '/srv/vs') === null, 'lane L r5 PURE: VibeSpace\'s whole data dir is refused even when the project IS the checkout (data/bin/vibespace-hook.mjs runs in every session); the checkout\'s source is the project\'s');
+    ok(wv(`${H}/proj/.gitignore`, `${H}/proj`) === null && wv(`${H}/proj/x.git/y`, `${H}/proj`) === null && wv('/srv/vs/database/x', '/srv/vs') === null && wv(`${H}/proj/.btn`, `${H}/proj`) === null, 'lane L r5 CONTROL: a name that only SHARES a prefix (.gitignore, x.git, database) or another dot name (.btn — a class selector a screenshot names) is not a store');
+    ok(V.writePathVerdict([{ file: 'x', paths: [`${H}/.config/nvim/x`] }], { allow: ['/tmp', `${H}/.config/nvim`], homes: [H] })?.code === 'write_path_refused', 'lane L r5 F6 CONTROL: the same write with the root only on the allow list (the r4 shape — no `sessionRoot`) is refused by the dot rule: the exemption is what admits it');
+    // daemonCwdVerdict: a daemon never runs in the checkout
+    const dv = (d) => V.daemonCwdVerdict(d, { checkout: '/srv/vs', serverCwd: '/srv/run' });
+    ok(['/srv/vs', '/srv/vs/data', '/srv', '/', '/srv/run', 'rel'].every((d) => dv(d)?.code === 'daemon_cwd_refused') && dv('/tmp/vibespace-browser-cwd-1000') === null && /inside the VibeSpace checkout/.test(dv('/srv/vs/data').error) && /ancestor/.test(dv('/srv').error), 'lane L r5 F1(b) PURE: a daemon cwd that is the checkout, inside it, an ancestor of it, `/`, the server\'s cwd or relative is refused; a private tmp dir passes');
+    ok(!V.ENV_PASS.includes('AGENT_BROWSER_SCREENSHOT_DIR') && V.childEnv({ AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, { spawnEnv: [] }).dropped.includes('AGENT_BROWSER_SCREENSHOT_DIR'), 'lane L r5 F5 PURE: AGENT_BROWSER_SCREENSHOT_DIR is a write target, not output shape — not passed, and said by name');
+  }
+  {
+    // lane L r6 (verify r4 F-A, MAJOR): THE OPTION CENSUS. `wait --download [path]` ("Wait for a download to complete
+    // (optionally save to path)", 0.38.1) is a WRITE option the r4 census never read — it read only the help's COMMAND
+    // signatures — so `wait --download /etc/cron.d/x` was judged nowhere and a relative path was handed relative. The
+    // census now reads OPTION lines too: every option line of every verb's own `--help` (checked in, one file per verb:
+    // scripts/fixtures/agent-browser-0.38.1/<verb>.txt; the verbs whose `--help` prints the top-level help are read from
+    // its command rows) and every flag with a placeholder in the top-level help's rows and option sections. An option
+    // whose placeholder names a path/file/dir, or whose description says save/write/path/file/dir/output, must be a
+    // WRITE slot (WRITE_FLAGS, WRITE_VERBS[verb].flags), a READ slot (READ_FLAGS[verb]), refused wholesale (its verb
+    // refused by name, an identity / raw-CDP / launch flag — a launch flag `open` lets through must be open's read slot),
+    // or on PATH_OPTION_ALLOW with its reason.
+    const AB = path.join(REPO, 'scripts/fixtures/agent-browser-0.38.1');
+    const AB_INDEX = JSON.parse(fs.readFileSync(path.join(AB, 'index.json'), 'utf8'));
+    const PATHY_PH = /path|file|dir/i;
+    const PATHY_DESC = /\b(?:save[sd]?|saving|writes?|writing|written|paths?|files?|filename|dirs?|director(?:y|ies)|outputs?)\b/i;
+    const OPT = /^(\s+)(-{1,2}[A-Za-z][\w-]*(?:,\s*-{1,2}[A-Za-z][\w-]*)*)(?:[ =](<[^>]*>|\[[^\]]*\]))?(?:\s+(.*))?$/;
+    const optionLines = (text, verb) => {
+      const out = []; let prev = null;
+      for (const line of text.split('\n')) {
+        const m = OPT.exec(line);
+        if (m) { prev = { verb, names: m[2].split(/,\s*/), ph: m[3] || '', desc: m[4] || '', indent: m[1].length, line: line.trim() }; out.push(prev); continue; }
+        // a wrapped description line (deeper, not itself an option) belongs to the option above it
+        if (prev && line.trim() && /^\s*/.exec(line)[0].length > prev.indent + 3 && !/^\s*-/.test(line)) { prev.desc += ' ' + line.trim(); continue; }
+        prev = null;
+      }
+      return out;
+    };
+    const optionRows = (() => {
+      const rows = [];
+      const files = fs.readdirSync(AB).filter((n) => n.endsWith('.txt') && n !== '_top.txt');
+      for (const f of files) for (const o of optionLines(fs.readFileSync(path.join(AB, f), 'utf8'), f.slice(0, -4))) rows.push({ ...o, src: f, pathy: PATHY_PH.test(o.ph) || PATHY_DESC.test(o.desc) });
+      const top = fs.readFileSync(path.join(AB, '_top.txt'), 'utf8').split('\nConfiguration:')[0];
+      const [cmdPart, optPart] = top.split('\nSnapshot Options:');
+      for (const o of optionLines(optPart || '', '*')) rows.push({ ...o, src: '_top.txt options', pathy: PATHY_PH.test(o.ph) || PATHY_DESC.test(o.desc) });
+      // the command rows: a flag WITH a placeholder anywhere in a row (`cookies set --curl <file>`, `webmcp invoke
+      // <tool> … --params <json|@file>`) belongs to the row's verb — or the section's, when its header spells one
+      let secVerb = null; let rowVerb = null;
+      for (const line of cmdPart.split('\n')) {
+        if (/^\S/.test(line)) { const h = new RegExp(V.REAL_BINARY + ' ([a-z][\\w-]*) ').exec(line); secVerb = h ? h[1] : null; rowVerb = null; continue; }
+        const r = /^ {2}([a-z][\w-]*)/.exec(line);
+        if (r && !secVerb) rowVerb = r[1];
+        for (const m of line.matchAll(/(-{1,2}[A-Za-z][\w-]*)[ =](<[^>]*>|\[[^\]]*\])/g)) rows.push({ verb: secVerb || rowVerb, names: [m[1]], ph: m[2], desc: '', line: line.trim(), src: '_top.txt rows', pathy: PATHY_PH.test(m[2]) });
+      }
+      return rows;
+    })();
+    const optionCensus = (Vx) => {
+      const allowSeen = new Set(); const missing = []; const covered = [];
+      for (const r of optionRows.filter((x) => x.pathy)) {
+        const key = r.names.map((n) => [`${r.verb} ${n}`, `* ${n}`]).flat().find((k) => Object.prototype.hasOwnProperty.call(Vx.PATH_OPTION_ALLOW || {}, k));
+        if (key) { allowSeen.add(key); covered.push(`${r.verb} ${r.names.join(',')} ⇒ allow`); continue; }
+        if (r.verb !== '*' && Object.prototype.hasOwnProperty.call(Vx.REFUSED_VERBS, r.verb)) { covered.push(`${r.verb} ⇒ verb refused`); continue; }
+        const one = (n) => {
+          if (Vx.WRITE_FLAGS.includes(n)) return 'write';
+          const ws = r.verb !== '*' && Object.prototype.hasOwnProperty.call(Vx.WRITE_VERBS, r.verb) ? Vx.WRITE_VERBS[r.verb] : null;
+          if (ws && (ws.flags || []).includes(n)) return 'write';
+          const rf = r.verb !== '*' && Vx.READ_FLAGS && Object.prototype.hasOwnProperty.call(Vx.READ_FLAGS, r.verb) ? Vx.READ_FLAGS[r.verb] : [];
+          if (rf.includes(n)) return 'read';
+          if (Vx.IDENTITY_FLAGS.includes(n) || Vx.RAW_CDP_FLAGS.includes(n)) return 'refused';
+          if (Vx.LAUNCH_FLAGS.includes(n)) return !Vx.OPEN_FLAGS.includes(n) || ((Vx.READ_FLAGS || {}).open || []).includes(n) ? 'refused' : null;
+          return null;
+        };
+        const hows = r.names.map(one);
+        if (hows.every(Boolean)) covered.push(`${r.verb} ${r.names.join(',')} ⇒ ${hows.join('/')}`);
+        else missing.push(`${r.verb} ${r.names.join(',')} ${r.ph}`.trim());
+      }
+      return { missing: [...new Set(missing)], covered, allowSeen, dead: Object.keys(Vx.PATH_OPTION_ALLOW || {}).filter((k) => !allowSeen.has(k)) };
+    };
+    {
+      const verbFiles = fs.readdirSync(AB).filter((n) => n.endsWith('.txt') && n !== '_top.txt').map((n) => n.slice(0, -4));
+      ok(AB_INDEX.version === '0.38.1' && verbFiles.length >= 45 && fs.readFileSync(path.join(AB, 'wait.txt'), 'utf8').includes('--download [path]'), `lane L r6 CENSUS: the 0.38.1 help fixtures are non-vacuous (${verbFiles.length} verb helps + the top-level help; wait's documents \`--download [path]\`)`);
+      const noHelp = V.PAGE_VERBS.filter((v) => !verbFiles.includes(v) && !AB_INDEX.generic.includes(v));
+      ok(noHelp.length === 0 && AB_INDEX.generic.every((v) => !verbFiles.includes(v)), `lane L r6 CENSUS: every page verb has its own help fixture or is named in index.json's \`generic\` (read from the top-level rows) — missing: ${noHelp.join(', ') || 'none'}`);
+      const pathy = optionRows.filter((x) => x.pathy);
+      ok(pathy.length >= 60 && ['wait --download', 'diff -o', 'diff --baseline', 'open --init-script', 'cookies --curl', 'screenshot --screenshot-dir', '* --ca-cert', 'webmcp --params'].every((s) => { const [v, f] = s.split(' '); return pathy.some((x) => x.verb === v && x.names.includes(f)); }), `lane L r6 CENSUS: the option census is non-vacuous (${optionRows.length} options read, ${pathy.length} path-shaped — option lines, the top-level rows' inline flags and its option sections all counted)`);
+      const cz = optionCensus(V);
+      ok(cz.missing.length === 0, `lane L r6 CENSUS: every path-shaped OPTION of the 0.38.1 help is a write slot, a read slot, refused wholesale, or on PATH_OPTION_ALLOW with a reason (missing: ${cz.missing.join('; ') || 'none'})`, cz.missing.join('\n    '));
+      ok(cz.dead.length === 0 && Object.values(V.PATH_OPTION_ALLOW || {}).every((why) => typeof why === 'string' && why.length >= 20), `lane L r6 CENSUS: every PATH_OPTION_ALLOW row names a reason and is an option the help really documents (dead rows: ${cz.dead.join(', ') || 'none'})`);
+      // the pins (the verifier's): judged, and one exact write slot handed absolute
+      const sl = (a) => V.pathSlots(a).map((x) => `${x.kind}:${x.prefix}${x.word}`).join(' ');
+      ok(V.writeTargetsAt(['wait', '--download', '/etc/x'], 0).includes('/etc/x') && JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x']).writeFiles) === '["/etc/cron.d/x"]', 'lane L r6 F-A PURE: `wait --download /etc/x` NAMES its path for judging (writeTargetsAt + classify.writeFiles)', JSON.stringify(V.classify(['wait', '--download', '/etc/cron.d/x'])));
+      ok(sl(['wait', '--download', './w']) === 'write:./w' && sl(['wait', '--download=./w']) === 'write:--download=./w' && sl(['wait', '--download', './f.pdf', '--timeout', '5000']) === 'write:./f.pdf', 'lane L r6 F-A PURE: `wait --download <path>` is ONE write slot (the `=` form keeps its prefix; `--timeout <ms>` is not a slot)', sl(['wait', '--download', './f.pdf', '--timeout', '5000']));
+      ok(sl(['wait', '--download']) === '' && sl(['wait', '--download', '--timeout', '30000']) === '' && sl(['wait', '#spinner']) === '' && sl(['wait', '--text', 'a/b']) === '' && sl(['wait', '--url', '**/dashboard']) === '' && V.classify(['wait', '--download']).writeFiles === undefined, 'lane L r6 F-A PURE: `wait --download` with no path (an optional value) names nothing and is no slot; a selector / text / URL pattern never is');
+      ok(['constructor', 'toString', '__proto__', 'hasOwnProperty'].every((w) => { try { return V.pathSlots([w, 'x', '--output', 'o']).length === 1 && V.writeTargetsAt([w, 'x'], 0).length === 0; } catch { return false; } }), 'lane L r6 PURE: a verb word that names an inherited property (`constructor`, `toString`, …) is looked up as an OWN key — no throw, no phantom slot');
+      ok(JSON.stringify(V.classify(['batch', 'open https://x', 'wait --download /etc/x']).writeFiles) === '["/etc/x"]', 'lane L r6 F-A PURE: a batch line `wait --download /etc/x` names its path like every other writer');
+      // NEGATIVE CONTROL: the table WITHOUT `wait` (a patched copy) — the census reddens naming the option, and the pins go red
+      const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+      const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
+      const noWaitSrc = src.replace(/\n\s*wait: \{ flags: \['--download'\] \},/, '');
+      const NW = noWaitSrc !== src ? load(noWaitSrc) : null;
+      const czc = NW ? optionCensus(NW) : null;
+      ok(NW && JSON.stringify(czc.missing) === '["wait --download [path]"]', 'lane L r6 NEGATIVE CONTROL: the table without `wait` (patched copy) — the option census names exactly `wait --download [path]` missing', JSON.stringify(czc && czc.missing));
+      ok(NW && NW.classify(['wait', '--download', '/etc/x']).writeFiles === undefined && NW.pathSlots(['wait', '--download', './w']).length === 0, 'lane L r6 NEGATIVE CONTROL: …and names nothing for judging, rewrites nothing — the pins above can go red');
+      // ── F-B (MINOR): a lone screenshot word starting with `#`, `@` or `.` (not `./` / `../`) and without an image
+      // extension is a SELECTOR on the binary even with a `/` inside (measured on 0.38.1 by the verifier) — never rewritten
+      const sel = ['.x[href="/login"]', '.x/y', '@e1/x', '#d/y', '.nope/zz'];
+      ok(sel.every((w) => sl(['screenshot', w]) === ''), `lane L r6 F-B PURE: a lone selector with a \`/\` inside is never rewritten (${sel.join('  ')})`, JSON.stringify(sel.map((w) => sl(['screenshot', w]))));
+      const pth = ['[href="/login"]', 'a[href="/login"]', './c.png', 'shots/a.png', '../up/x', '.shots/a.png', 'sub/noext'];
+      ok(pth.every((w) => sl(['screenshot', w]) === `write:${w}`), `lane L r6 F-B PURE: a lone path is still a slot, handed absolute (${pth.join('  ')} — \`.shots/a.png\` too: an image name, which the binary would read as a selector and silently save to its temp dir; handed absolute it lands where the agent named it)`, JSON.stringify(pth.map((w) => sl(['screenshot', w]))));
+      ok(sl(['screenshot', '.x[href="/login"]', './out.png']) === 'write:./out.png', 'lane L r6 F-B PURE: the two-word form is unchanged — the selector is positional 0, the path the slot');
+      const oldHeur = src.replace(/if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n");
+      ok(oldHeur !== src && load(oldHeur).pathSlots(['screenshot', '.x[href="/login"]']).length === 1, 'lane L r6 F-B NEGATIVE CONTROL: the r5 heuristic (patched copy: "holds a `/` or an image extension") rewrites `.x[href="/login"]` — the leg above can go red');
+    }
+  }
   // resolveRealBinary
   const files = new Set(['/shim/agent-browser', '/home/u/.vibespace/bin/agent-browser', '/prod/data/bin/agent-browser', '/nvm/bin/agent-browser']);
   const exists = (p) => files.has(p);
@@ -457,7 +681,7 @@ if (process.argv.includes('batch') && !process.argv.slice(process.argv.indexOf('
   catch (e) { console.error('✗ Invalid JSON input: ' + e.message + ' Expected an array of string arrays.'); fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ argv: process.argv.slice(2), invalidStdin: true, input }) + '\\n'); process.exit(1); }
 }
 const ab = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
-fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ argv: process.argv.slice(2), session: process.env.AGENT_BROWSER_SESSION || null, env: ab, xdg: Object.prototype.hasOwnProperty.call(process.env, 'XDG_RUNTIME_DIR') ? process.env.XDG_RUNTIME_DIR : null, input, batchJson }) + '\\n');
+fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ argv: process.argv.slice(2), session: process.env.AGENT_BROWSER_SESSION || null, env: ab, xdg: Object.prototype.hasOwnProperty.call(process.env, 'XDG_RUNTIME_DIR') ? process.env.XDG_RUNTIME_DIR : null, input, batchJson, cwd: process.cwd() }) + '\\n');
 if (process.argv[2] === 'open') console.log('✓ opened ' + process.argv[3]);
 process.exit(0);
 `, { mode: 0o755 });
@@ -748,9 +972,247 @@ try {
     ok(r5.status === 1 && /\[local_scheme_refused\]/.test(r5.stderr), 'r4: …inside a batch too', r5.stderr);
     ok(calls.length === nb && realCalls().length === nr, 'r4: …every one with ZERO server calls and nothing run');
     r5 = await nodeCli(CLI, ['state', 'load', 'good.json'], { env: baseEnv, cwd: SD });
-    ok(r5.status === 0 && JSON.stringify(realCalls().pop().argv) === '["state","load","good.json"]', 'r4 CONTROL: a state file of web origins loads (the fake binary ran it)', r5.stderr);
+    ok(r5.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['state', 'load', path.join(SD, 'good.json')]), 'r4 CONTROL: a state file of web origins loads (the fake binary ran it) — lane L r5: handed as the ABSOLUTE path that was read', r5.stderr);
     r5 = await cli(['open', 'https://example.com']);
     ok(r5.status === 0 && realCalls().pop().argv[1] === 'https://example.com', 'r4 CONTROL: `open https://example.com` runs');
+  }
+  // lane L r2 (the verifier's upload finding): an upload never takes a file from a credential store —
+  // refused LOCALLY by name, before the binary is looked up or /resolve is called
+  {
+    resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
+    const UD = path.join(ROOT, 'upload-cwd'); fs.mkdirSync(UD, { recursive: true });
+    fs.mkdirSync(path.join(HOME, '.ssh'), { recursive: true }); fs.writeFileSync(path.join(HOME, '.ssh', 'id_rsa'), 'KEY');
+    fs.writeFileSync(path.join(UD, 'report.pdf'), 'pdf');
+    fs.symlinkSync(path.join(HOME, '.ssh', 'id_rsa'), path.join(UD, 'innocent.txt'));
+    const nb = calls.length; const nr = realCalls().length;
+    for (const [argv, shown] of [
+      [['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')], '~/.ssh'],
+      [['upload', '@e1', '~/.ssh/id_rsa'], '~/.ssh'],
+      [['upload', '@e1', 'innocent.txt'], '~/.ssh'],
+      [['upload', '@e1', `../${path.basename(HOME)}/.ssh/id_rsa`], '~/.ssh'],
+      [['upload', '@e1', 'report.pdf', path.join(HOME, '.claude', '.credentials.json')], '~/.claude'],
+      [['upload', '@e1', path.join(REPO, 'data', 'subs', 'a', '.credentials.json')], '<VibeSpace data>/subs'],
+      [['batch', 'open https://x', `upload @e1 ${path.join(HOME, '.vibespace', 'x')}`], '~/.vibespace'],
+      [['--', 'upload', '@e1', path.join(HOME, '.codex', 'auth.json')], '~/.codex'],
+    ]) {
+      const r6 = await nodeCli(CLI, argv, { env: baseEnv, cwd: UD });
+      ok(r6.status === 1 && /\[upload_secret_refused\]/.test(r6.stderr) && r6.stderr.includes(`is under ${shown}`) && /remedy: /.test(r6.stderr), `lane L r2: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r6.stderr);
+    }
+    ok(calls.length === nb && realCalls().length === nr, 'lane L r2: …every one with ZERO server calls and nothing run');
+    let r6 = await nodeCli(CLI, ['upload', '@e1', 'report.pdf'], { env: baseEnv, cwd: UD });
+    ok(r6.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['upload', '@e1', path.join(UD, 'report.pdf')]), 'lane L r2 CONTROL: a normal file uploads (the fake binary ran it) — lane L r5: handed as the ABSOLUTE path that was judged, the selector untouched', r6.stderr);
+    // NEGATIVE CONTROL: the pre-r2 CLI (no upload check) in a patched copy hands the key to the binary
+    const src = fs.readFileSync(CLI, 'utf8');
+    const pre = src.replace('  if (cls.uploadFiles && cls.uploadFiles.length) {', '  if (false) {');
+    const D6 = path.join(ROOT, 'r2-uploadctl'); fs.mkdirSync(D6, { recursive: true });
+    fs.writeFileSync(path.join(D6, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js'));
+    r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')], { env: baseEnv, cwd: UD });
+    ok(pre !== src && r6.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')]), 'lane L r2 NEGATIVE CONTROL: the pre-r2 CLI (patched copy, no upload check) hands ~/.ssh/id_rsa to the binary — the legs above can go red', r6.stderr);
+  }
+  // lane L r4 (the verifier's WRITE finding): a WRITE outside the project / /tmp / ~/Downloads (or into a
+  // credential store) is refused LOCALLY by name, before the binary is looked up (no `--version` spawn) or
+  // /resolve is called — the write-direction twin of the upload guard. Measured on the real 0.38.1: `download`
+  // wrote a clicked `data:` payload to an arbitrary abs path, `pdf` a %PDF; `open data:text/html,<a download>`
+  // is not refused, so no external server is needed.
+  {
+    resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
+    const WD = path.join(ROOT, 'write-cwd'); fs.mkdirSync(WD, { recursive: true });
+    for (const d of ['.ssh', '.claude', '.codex', '.vibespace', '.config', 'Downloads']) fs.mkdirSync(path.join(HOME, d), { recursive: true });
+    fs.writeFileSync(path.join(WD, 'base.png'), 'png');                              // a baseline for `diff`
+    fs.symlinkSync(path.join(HOME, '.ssh', 'id_rsa'), path.join(WD, 'evil.txt'));    // a symlink from the cwd into a store
+    const nb = calls.length; const nr = realCalls().length;
+    // lane L r5 F3: a VibeSpace session exports its directory — the fence is VIBESPACE_SESSION_CWD, never the shell's cwd
+    const wenv = { ...baseEnv, VIBESPACE_SESSION_CWD: WD };
+    for (const [argv, shown] of [
+      [['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')], '~/.ssh'],
+      [['pdf', path.join(HOME, '.claude', 'settings.json')], '~/.claude'],
+      [['state', 'save', path.join(HOME, '.ssh', 'x')], '~/.ssh'],
+      [['screenshot', '@e1', path.join(HOME, '.codex', 'shot.png')], '~/.codex'],
+      [['record', 'start', path.join(HOME, '.vibespace', 'x.webm')], '~/.vibespace'],
+      [['trace', 'stop', path.join(HOME, '.config', 'x.json')], '~/.config'],
+      [['screenshot', '--screenshot-dir', path.join(HOME, '.ssh')], '~/.ssh'],
+      [['diff', 'screenshot', '--baseline', 'base.png', '-o', path.join(HOME, '.ssh', 'o.png')], '~/.ssh'],
+      [['download', '#k', '~/.ssh/authorized_keys'], '~/.ssh'],                       // a literal ~
+      [['download', '#k', `../${path.basename(HOME)}/.ssh/k`], '~/.ssh'],             // a relative path into the store
+      [['download', '#k', path.join(HOME, '.ssh') + '/'], '~/.ssh'],                  // a trailing slash
+      [['download', '#k', 'evil.txt'], '~/.ssh'],                                     // a symlink from the cwd into the store
+      [['--', 'pdf', path.join(HOME, '.claude', 'y.pdf')], '~/.claude'],              // the `--` escape valve
+      [['batch', 'open https://x', `pdf ${path.join(HOME, '.codex', 'z.pdf')}`], '~/.codex'],  // a batch line
+      [['pdf', path.join(REPO, 'data', 'subs', 'a', 'x.pdf')], '<VibeSpace data>/subs'],       // an account store
+    ]) {
+      const r7 = await nodeCli(CLI, argv, { env: wenv, cwd: WD });
+      ok(r7.status === 1 && /\[write_path_refused\]/.test(r7.stderr) && r7.stderr.includes(`is under ${shown}`) && /remedy: /.test(r7.stderr), `lane L r4: \`vibespace-browser ${argv.join(' ')}\` is refused LOCALLY by name (${shown})`, r7.stderr);
+    }
+    // a path in no allowed root (not a store either) — the containment sentence
+    let r7 = await nodeCli(CLI, ['pdf', '/etc/x.pdf'], { env: wenv, cwd: WD });
+    ok(r7.status === 1 && /\[write_path_refused\]/.test(r7.stderr) && /outside the places a browser command may write/.test(r7.stderr), 'lane L r4: `pdf /etc/x.pdf` (in no allowed root) is refused with the containment sentence', r7.stderr);
+    ok(calls.length === nb && realCalls().length === nr, 'lane L r4: …every one with ZERO server calls and nothing run (not even `--version`)');
+    // CONTROL: the project cwd, /tmp and ~/Downloads all WRITE (the fake binary ran)
+    r7 = await nodeCli(CLI, ['pdf', 'report.pdf'], { env: wenv, cwd: WD });
+    ok(r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['pdf', path.join(WD, 'report.pdf')]), 'lane L r4 CONTROL: a path in the session\'s project writes (the fake binary ran it) — r5: handed ABSOLUTE', r7.stderr);
+    // the CLI runs with an env carrying no TMPDIR, so its OS temp dir is /tmp (the scratch ROOT is under it)
+    r7 = await nodeCli(CLI, ['download', '#k', '/tmp/vs-r4-dl.bin'], { env: wenv, cwd: WD });
+    ok(r7.status === 0 && realCalls().pop().argv[2] === '/tmp/vs-r4-dl.bin', 'lane L r4 CONTROL: a path in the OS temp dir (/tmp) writes', r7.stderr);
+    r7 = await nodeCli(CLI, ['screenshot', '~/Downloads/x.png'], { env: wenv, cwd: WD });
+    ok(r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['screenshot', path.join(HOME, 'Downloads', 'x.png')]), 'lane L r5 F4: a path in ~/Downloads is ALLOWED and the binary is handed the EXPANDED absolute word (the binary never expands `~` — measured: `pdf \'~/x.pdf\'` looked for a directory named ~; r4 pinned the word as given)', r7.stderr);
+    // NEGATIVE CONTROL: the pre-r4 CLI (no write check) in a patched copy hands the store path to the binary
+    const src = fs.readFileSync(CLI, 'utf8');
+    const pre = src.replace('  if (cls.writeFiles && cls.writeFiles.length) {', '  if (false) {')
+      .replace('{ const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }', '{ }');
+    const D7 = path.join(ROOT, 'ctl', 'r4-writectl', 'bin'); fs.mkdirSync(D7, { recursive: true });
+    fs.writeFileSync(path.join(D7, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js'));
+    r7 = await nodeCli(path.join(D7, 'vibespace-browser'), ['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')], { env: wenv, cwd: WD });
+    ok(pre !== src && r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')]), 'lane L r4 NEGATIVE CONTROL: the pre-r4 CLI (patched copy, no write check) hands ~/.ssh/authorized_keys to the binary — the legs above can go red', r7.stderr);
+    fs.rmSync(path.join(WD, 'evil.txt'), { force: true });
+  }
+  // lane L r5 (verify r3 F1–F6): THE FRAME, end to end over the fake binary (it records its argv AND its cwd)
+  {
+    resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
+    const os = require('os');
+    const P = path.join(ROOT, 'r5-proj'); const ELSE = path.join(ROOT, 'r5-elsewhere'); const TMPD = path.join(ROOT, 'r5-tmp');
+    for (const d of [P, path.join(P, 'sub'), ELSE, TMPD, path.join(HOME, '.ssh'), path.join(HOME, 'Downloads')]) fs.mkdirSync(d, { recursive: true });
+    // the scratch ROOT itself sits under /tmp — an allowed root — so these legs name their OWN temp dir (TMPDIR), or
+    // every "outside" target would pass as a temp file
+    const benv = { ...baseEnv, TMPDIR: TMPD };
+    const penv = { ...benv, VIBESPACE_SESSION_CWD: P };
+    const last = () => realCalls().pop();
+    const DC = V.ensureDaemonCwd({ fs, tmpdirs: [TMPD, '/tmp'], uid: process.getuid(), checkout: REPO });   // what the CLI (TMPDIR = TMPD) must run the binary in
+    const ctlCopy = (name, cliSrc, verbsSrc) => { const d = path.join(ROOT, 'ctl', name, 'bin'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'vibespace-browser'), cliSrc); fs.writeFileSync(path.join(d, 'vibespace-browser-verbs.js'), verbsSrc || fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8')); return path.join(d, 'vibespace-browser'); };
+    const src = fs.readFileSync(CLI, 'utf8');
+    ok(DC.ok && DC.dir === path.join(fs.realpathSync(TMPD), `vibespace-browser-cwd-${process.getuid()}`) && (fs.statSync(DC.dir).mode & 0o777) === 0o700, `lane L r5 F1(b): the private daemon directory is <TMPDIR>/vibespace-browser-cwd-<uid>, 0700 (${DC.dir})`, JSON.stringify(DC));
+    // ── F1 (CRITICAL): the binary is handed the ABSOLUTE path that was judged, and runs in the private directory
+    let r = await nodeCli(CLI, ['pdf', './out.pdf'], { env: penv, cwd: P });
+    let lc = last();
+    ok(r.status === 0 && JSON.stringify(lc.argv) === JSON.stringify(['pdf', path.join(P, 'out.pdf')]), 'lane L r5 F1: `pdf ./out.pdf` reaches the binary as the ABSOLUTE path it was judged as — the daemon\'s own cwd can no longer move it', JSON.stringify([r.status, r.stderr.slice(0, 300), lc && lc.argv]));
+    ok(lc.cwd === DC.dir && lc.cwd !== P && !lc.cwd.startsWith(REPO), `lane L r5 F1(b): the binary (and any daemon it starts) runs in the private directory, never the agent's (${lc.cwd})`);
+    r = await nodeCli(CLI, ['pdf', 'x.pdf'], { env: penv, cwd: path.join(P, 'sub') }); lc = last();
+    ok(r.status === 0 && lc.argv[1] === path.join(P, 'sub', 'x.pdf'), 'lane L r5 F1: a relative word means "from where the agent stands" (P/sub/x.pdf), then is fenced to the session\'s root');
+    const handed = async (argv, want, what) => { const rr = await nodeCli(CLI, argv, { env: penv, cwd: P }); const l2 = last(); ok(rr.status === 0 && l2 && JSON.stringify(l2.argv) === JSON.stringify(want), `lane L r5 F1: ${what}`, JSON.stringify([rr.status, rr.stderr.slice(0, 300), l2 && l2.argv])); };
+    await handed(['download', '#k', './d1', 'd2'], ['download', '#k', path.join(P, 'd1'), path.join(P, 'd2')], '`download #k ./d1 d2` — every word after the selector absolute (the binary saves the FIRST: measured), the selector untouched');
+    await handed(['screenshot', '.btn'], ['screenshot', '.btn'], 'a lone selector (`screenshot .btn`) is handed as typed — it is not a path');
+    await handed(['screenshot', 'o.png'], ['screenshot', path.join(P, 'o.png')], 'a lone path-like word (`screenshot o.png`) is handed absolute');
+    await handed(['screenshot', '--screenshot-dir=./shots', '@e1'], ['screenshot', `--screenshot-dir=${path.join(P, 'shots')}`, '@e1'], 'a `--screenshot-dir=` value is handed absolute, the selector kept');
+    await handed(['record', 'start', './v.webm', 'https://example.com'], ['record', 'start', path.join(P, 'v.webm'), 'https://example.com'], '`record start ./v.webm <url>` — the path absolute, the URL untouched');
+    await handed(['state', 'save', 's.json'], ['state', 'save', path.join(P, 's.json')], '`state save s.json` absolute');
+    await handed(['pdf', '~/Downloads/r.pdf'], ['pdf', path.join(HOME, 'Downloads', 'r.pdf')], 'F4: `~/Downloads/r.pdf` is handed EXPANDED (the binary does not expand `~`)');
+    // a batch: its lines are framed too — an argument-form batch whose lines carry a path goes over in the binary's own stdin JSON
+    r = await nodeCli(CLI, ['batch', 'open https://x', 'pdf ./b.pdf'], { env: penv, cwd: P }); lc = last();
+    ok(r.status === 0 && JSON.stringify(lc.argv) === '["batch"]' && JSON.stringify(lc.batchJson) === JSON.stringify([['open', 'https://x'], ['pdf', path.join(P, 'b.pdf')]]), 'lane L r5 F1: an argument-form batch line `pdf ./b.pdf` reaches the binary absolute — handed in its own stdin JSON form (exactly the judged words, never re-quoted)', JSON.stringify([r.status, r.stderr.slice(0, 300), lc && { argv: lc.argv, b: lc.batchJson }]));
+    r = await nodeCli(CLI, ['batch'], { env: penv, cwd: P, input: '[["pdf","./c.pdf"]]' }); lc = last();
+    ok(r.status === 0 && JSON.stringify(lc.batchJson) === JSON.stringify([['pdf', path.join(P, 'c.pdf')]]), 'lane L r5 F1: a stdin JSON batch element `pdf ./c.pdf` is handed absolute', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.batchJson]));
+    r = await nodeCli(CLI, ['batch', 'open https://x', 'snapshot'], { env: penv, cwd: P }); lc = last();
+    ok(r.status === 0 && JSON.stringify(lc.argv) === '["batch","open https://x","snapshot"]' && lc.input === '', 'lane L r5 CONTROL: a batch with no path is handed exactly as typed');
+    // NEGATIVE CONTROLS: the r4 hand-over (the words as typed) and the r4 spawn (the agent's cwd)
+    let c1 = ctlCopy('r5-framectl', src.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];")); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
+    r = await nodeCli(c1, ['pdf', './out.pdf'], { env: penv, cwd: P }); lc = last();
+    ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0 && lc.argv[1] === './out.pdf', 'lane L r5 F1 NEGATIVE CONTROL: the r4 hand-over (patched copy) gives the binary `./out.pdf` — a word its DAEMON resolves in its own frame', JSON.stringify(lc && lc.argv));
+    c1 = ctlCopy('r5-cwdctl', src.replace('const child = spawn(bin.path, argv, { stdio, env, cwd: runCwd.dir });', 'const child = spawn(bin.path, argv, { stdio, env });'));
+    r = await nodeCli(c1, ['snapshot'], { env: penv, cwd: P }); lc = last();
+    ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0 && lc.cwd === P, 'lane L r5 F1(b) NEGATIVE CONTROL: without the spawn cwd (patched copy) the binary runs in the agent\'s directory — a daemon it starts would keep it', JSON.stringify(lc && lc.cwd));
+    // ── lane L r6 F-A (verify r4 MAJOR): `wait --download <path>` is judged like every writer and handed ABSOLUTE
+    {
+      const n0 = calls.length; const n1 = realCalls().length;
+      r = await nodeCli(CLI, ['wait', '--download', '/etc/cron.d/x'], { env: penv, cwd: P });
+      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /outside the places/.test(r.stderr) && calls.length === n0 && realCalls().length === n1, 'lane L r6 F-A: `wait --download /etc/cron.d/x` ⇒ write_path_refused — zero server calls, nothing run', r.stderr);
+      r = await nodeCli(CLI, ['wait', '--download', path.join(HOME, '.ssh', 'zz'), '--timeout', '5000'], { env: penv, cwd: P });
+      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r6 F-A: `wait --download ~/.ssh/zz --timeout 5000` ⇒ refused (under ~/.ssh)', r.stderr);
+      r = await nodeCli(CLI, ['wait', '--download', './f.pdf', '--timeout', '30000'], { env: penv, cwd: P }); lc = last();
+      ok(r.status === 0 && JSON.stringify(lc.argv) === JSON.stringify(['wait', '--download', path.join(P, 'f.pdf'), '--timeout', '30000']), 'lane L r6 F-A: `wait --download ./f.pdf --timeout 30000` reaches the binary with the path ABSOLUTE under the session root (the timeout untouched)', JSON.stringify([r.status, r.stderr.slice(0, 300), lc && lc.argv]));
+      r = await nodeCli(CLI, ['wait', '--download'], { env: penv, cwd: P }); lc = last();
+      ok(r.status === 0 && JSON.stringify(lc.argv) === '["wait","--download"]', 'lane L r6 F-A: `wait --download` with no path is handed as typed (the value is optional)', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.argv]));
+      r = await nodeCli(CLI, ['batch', 'open https://x', 'wait --download ./g.pdf'], { env: penv, cwd: P }); lc = last();
+      ok(r.status === 0 && JSON.stringify(lc.batchJson) === JSON.stringify([['open', 'https://x'], ['wait', '--download', path.join(P, 'g.pdf')]]), 'lane L r6 F-A: a batch line `wait --download ./g.pdf` is handed absolute', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.batchJson]));
+      // NEGATIVE CONTROL: the r5 table (a verbs copy without `wait`) passes the store path and hands a relative one relative
+      const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+      const noWait = vsrc.replace(/\n\s*wait: \{ flags: \['--download'\] \},/, '');
+      const cw = ctlCopy('r6-nowait', src, noWait);
+      r = await nodeCli(cw, ['wait', '--download', '/etc/cron.d/x'], { env: penv, cwd: P }); lc = last();
+      const r2 = await nodeCli(cw, ['wait', '--download', './f.pdf'], { env: penv, cwd: P }); const lc2 = last();
+      ok(noWait !== vsrc && r.status === 0 && lc.argv[2] === '/etc/cron.d/x' && r2.status === 0 && lc2.argv[2] === './f.pdf', 'lane L r6 F-A NEGATIVE CONTROL: the table without `wait` (a verbs copy) runs `wait --download /etc/cron.d/x` and hands `./f.pdf` relative — the legs above can go red', JSON.stringify([r.status, lc && lc.argv, r2.status, lc2 && lc2.argv]));
+      // ── F-B (verify r4 MINOR): a lone selector holding a `/` is handed as typed, a lone path absolute
+      r = await nodeCli(CLI, ['screenshot', '.x[href="/login"]'], { env: penv, cwd: P }); lc = last();
+      ok(r.status === 0 && JSON.stringify(lc.argv) === JSON.stringify(['screenshot', '.x[href="/login"]']), 'lane L r6 F-B: `screenshot .x[href="/login"]` (a class selector whose attribute holds a URL path) is handed as typed — an element screenshot, not a save to <cwd>/.x[href=…', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.argv]));
+      r = await nodeCli(CLI, ['screenshot', 'a[href="/login"]'], { env: penv, cwd: P }); lc = last();
+      ok(r.status === 0 && lc.argv[1] === path.join(P, 'a[href="/login"]'), 'lane L r6 F-B: `screenshot a[href="/login"]` — a path to the binary (measured) — is handed absolute', JSON.stringify(lc && lc.argv));
+      const oldHeur = vsrc.replace(/if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n");
+      const ch = ctlCopy('r6-oldheur', src, oldHeur);
+      r = await nodeCli(ch, ['screenshot', '.x[href="/login"]'], { env: penv, cwd: P }); lc = last();
+      ok(oldHeur !== vsrc && r.status === 0 && lc.argv[1] === path.join(P, '.x[href="/login"]'), 'lane L r6 F-B NEGATIVE CONTROL: the r5 heuristic (a verbs copy) rewrites the selector into <P>/.x[href="/login"] — the leg above can go red', JSON.stringify([r.status, lc && lc.argv]));
+    }
+    // ── F2 (MAJOR): `..` after a symlink is resolved PHYSICALLY
+    fs.writeFileSync(path.join(HOME, '.ssh', 'id_rsa'), 'KEY');
+    fs.symlinkSync(path.join(HOME, '.ssh'), path.join(P, 'l'));
+    fs.symlinkSync(ELSE, path.join(P, 'e'));
+    const nb = calls.length; const nr = realCalls().length;
+    r = await nodeCli(CLI, ['pdf', 'l/../.ssh/authorized_keys'], { env: penv, cwd: P });
+    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r5 F2: with l -> ~/.ssh, `pdf l/../.ssh/authorized_keys` is refused (under ~/.ssh — the kernel follows l before the `..`)', r.stderr);
+    r = await nodeCli(CLI, ['upload', '#f', 'l/../.ssh/id_rsa'], { env: penv, cwd: P });
+    ok(r.status === 1 && /\[upload_secret_refused\]/.test(r.stderr) && r.stderr.includes('is under ~/.ssh'), 'lane L r5 F2: …the upload guard\'s twin: `upload #f l/../.ssh/id_rsa` is refused', r.stderr);
+    r = await nodeCli(CLI, ['pdf', 'e/../r5-elsewhere/x.pdf'], { env: penv, cwd: P });
+    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /outside the places/.test(r.stderr), 'lane L r5 F2: with e -> a directory outside the project, `pdf e/../r5-elsewhere/x.pdf` is refused (it names <scratch>/r5-elsewhere/x.pdf, not P/r5-elsewhere/x.pdf)', r.stderr);
+    ok(calls.length === nb && realCalls().length === nr, 'lane L r5 F2: …each with ZERO server calls and nothing run');
+    // NEGATIVE CONTROL: the r4 LEXICAL rule (patched copy: path.resolve, then the realpath of the deepest existing ancestor)
+    const lex = "const r = (() => { const exp = s === '~' ? HOMES.home : (s.startsWith('~/') ? path.join(HOMES.home, s.slice(2)) : s); const abs = path.resolve(base || '/', exp); let anc = abs; const rem = []; for (;;) { try { const rp = fs.realpathSync(anc); return { ok: true, path: rem.length ? path.join(rp, ...rem) : rp }; } catch { } const par = path.dirname(anc); if (par === anc) return { ok: true, path: abs }; rem.unshift(path.basename(anc)); anc = par; } })();";
+    c1 = ctlCopy('r5-lexctl', src.replace("const r = V.physicalPath(s, { base: base || '/', home: HOMES.home, ...FSOPS });", lex));
+    r = await nodeCli(c1, ['pdf', 'e/../r5-elsewhere/x.pdf'], { env: penv, cwd: P }); lc = last();
+    ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0 && lc.argv[1] === path.join(P, 'r5-elsewhere', 'x.pdf'), 'lane L r5 F2 NEGATIVE CONTROL: the r4 lexical rule (patched copy) passes `e/../r5-elsewhere/x.pdf` as P/r5-elsewhere/x.pdf — the leg above can go red', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.argv]));
+    // ── F3 (MAJOR): the fence is the SESSION's directory — VIBESPACE_SESSION_CWD — never the shell's
+    r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: benv, cwd: P });
+    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && /no session directory is known/.test(r.stderr), 'lane L r5 F3: VIBESPACE_SESSION_CWD unset ⇒ `pdf ./x.pdf` is refused (no session directory) — the shell\'s cwd is not a fence', r.stderr);
+    r = await nodeCli(CLI, ['pdf', path.join(TMPD, 'x.pdf')], { env: benv, cwd: P });
+    ok(r.status === 0 && last().argv[1] === path.join(TMPD, 'x.pdf'), 'lane L r5 F3: …unset, the OS temp dir still writes', r.stderr);
+    r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: penv, cwd: ELSE });
+    ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`the project directory (${fs.realpathSync(P)}`), 'lane L r5 F3: set ⇒ a `./x.pdf` typed from a directory outside it (the verifier\'s `cd /etc`) is refused, naming the project', r.stderr);
+    r = await nodeCli(CLI, ['pdf', path.join(P, 'y.pdf')], { env: penv, cwd: ELSE });
+    ok(r.status === 0 && last().argv[1] === path.join(P, 'y.pdf'), 'lane L r5 F3: set ⇒ a path under it writes, wherever the shell stands');
+    r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: { ...benv, VIBESPACE_SESSION_CWD: 'r5-proj' }, cwd: ROOT });
+    ok(r.status === 1 && /no session directory is known/.test(r.stderr), 'lane L r5 F3: a RELATIVE VIBESPACE_SESSION_CWD is no root', r.stderr);
+    c1 = ctlCopy('r5-fencectl', src.replace('  const v = process.env.VIBESPACE_SESSION_CWD;\n', '  const v = process.env.VIBESPACE_SESSION_CWD || process.cwd();\n'));
+    r = await nodeCli(c1, ['pdf', './x.pdf'], { env: benv, cwd: ELSE });
+    ok(fs.readFileSync(c1, 'utf8') !== src && r.status === 0, 'lane L r5 F3 NEGATIVE CONTROL: the r4 fence (patched copy: the shell\'s cwd when nothing is exported) writes from anywhere the shell stands', r.stderr);
+    // ── F5 (LOW): AGENT_BROWSER_SCREENSHOT_DIR never reaches the binary
+    r = await nodeCli(CLI, ['snapshot'], { env: { ...penv, AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, cwd: P }); lc = last();
+    ok(r.status === 0 && !('AGENT_BROWSER_SCREENSHOT_DIR' in lc.env) && /AGENT_BROWSER_SCREENSHOT_DIR/.test((/.*\[env_twin_dropped\].*/.exec(r.stderr) || [''])[0]), 'lane L r5 F5: AGENT_BROWSER_SCREENSHOT_DIR in the shell is not passed to the binary, and the drop is said by name', JSON.stringify([lc && lc.env, r.stderr.slice(0, 300)]));
+    c1 = ctlCopy('r5-envctl', src, fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8').replace("'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_FORMAT'", "'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_DIR', 'AGENT_BROWSER_SCREENSHOT_FORMAT'"));
+    r = await nodeCli(c1, ['snapshot'], { env: { ...penv, AGENT_BROWSER_SCREENSHOT_DIR: '/etc' }, cwd: P }); lc = last();
+    ok(r.status === 0 && lc.env.AGENT_BROWSER_SCREENSHOT_DIR === '/etc', 'lane L r5 F5 NEGATIVE CONTROL: the r4 table (a verbs copy with it in ENV_PASS) hands the binary an unjudged write directory', JSON.stringify(lc && lc.env));
+    // ── F6 (MINOR): a project under a dot-directory writes under its own root; the stores stay refused
+    const DOT = path.join(HOME, '.config', 'r5proj'); fs.mkdirSync(DOT, { recursive: true });
+    const denv = { ...benv, VIBESPACE_SESSION_CWD: DOT };
+    r = await nodeCli(CLI, ['pdf', './x.pdf'], { env: denv, cwd: DOT });
+    ok(r.status === 0 && last().argv[1] === path.join(DOT, 'x.pdf'), 'lane L r5 F6: a session in ~/.config/<proj> writes `./x.pdf` there', r.stderr);
+    for (const [argv, shown] of [[['pdf', '../autostart/x.desktop'], '~/.config'], [['pdf', './.git/hooks/pre-commit'], 'a .git directory'], [['pdf', './.claude/settings.json'], 'a .claude directory'], [['pdf', '~/.ssh/k'], '~/.ssh']]) {
+      r = await nodeCli(CLI, argv, { env: denv, cwd: DOT });
+      ok(r.status === 1 && /\[write_path_refused\]/.test(r.stderr) && r.stderr.includes(`is under ${shown}`), `lane L r5 F6: …but \`${argv.join(' ')}\` is refused (under ${shown})`, r.stderr);
+    }
+    // ── F1 (b): the keeper's RUNTIME (src/browser-facts.js) runs every call in the private directory, never the checkout
+    const F = require('../src/browser-facts.js');
+    const RTD = path.join(ROOT, 'r5-rt'); fs.mkdirSync(RTD, { recursive: true });
+    const RTLOG = path.join(RTD, 'rt.log'); const RTFAKE = path.join(RTD, 'fake-daemon-cli');
+    fs.writeFileSync(RTFAKE, `#!${process.execPath}\nrequire('fs').appendFileSync(${JSON.stringify(RTLOG)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + '\\n'); console.log(JSON.stringify({ success: true, data: {} }));\n`, { mode: 0o755 });
+    const rtCalls = () => { try { return fs.readFileSync(RTLOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+    const opts = []; const viaFake = (bin, args, o, cb) => { opts.push(o && o.cwd); return execFile(RTFAKE, args, o, cb); };
+    const rt = F.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake });
+    const lr = await rt.launch(null, { extraEnv: {} });
+    const rc0 = rtCalls().pop();
+    ok(lr.ok && rc0 && JSON.stringify(rc0.argv) === '["open","about:blank"]' && rc0.cwd === F.runDir().dir && /\/vibespace-browser-cwd-\d+$/.test(rc0.cwd) && !rc0.cwd.startsWith(REPO) && rc0.cwd !== process.cwd() && F.CHECKOUT === REPO.replace(/\/$/, ''), `lane L r5 F1(b): the keeper's runtime launches the daemon in ${rc0 && rc0.cwd} — not the checkout (${F.CHECKOUT}), not this process's cwd`, JSON.stringify([lr, rc0]));
+    const nrt = rtCalls().length;
+    for (const bad of [REPO, path.join(REPO, 'data'), path.dirname(REPO.replace(/\/$/, ''))]) {
+      const rtBad = F.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake, daemonCwd: () => ({ ok: true, dir: bad }) });
+      const b = await rtBad.launch(null, {});
+      ok(!b.ok && b.code === 'daemon_cwd_refused' && rtCalls().length === nrt, `lane L r5 F1(b): an injected daemon directory ${bad} (the checkout / inside / its ancestor) is REFUSED by the runtime — nothing launched`, JSON.stringify(b).slice(0, 300));
+    }
+    // NEGATIVE CONTROL: the pre-r5 runtime (a patched copy through mutant-copy: no cwd) launches in THIS process's cwd —
+    // the keeper's is the server's WorkingDirectory, the checkout (run it from the checkout to show the very frame)
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const M = mutantCopies('browser-verbs-r5', REPO);
+    const fsrc = fs.readFileSync(path.join(REPO, 'src/browser-facts.js'), 'utf8');
+    const fpre = fsrc.replace('maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }', 'maxBuffer: 4 * 1024 * 1024 }');
+    const Fpre = M.load('src/browser-facts.js', fpre, 'nocwd');
+    const here = process.cwd(); process.chdir(REPO);
+    try { await Fpre.createBrowserRuntime({ env: { PATH: process.env.PATH }, execFileImpl: viaFake }).launch(null, {}); } finally { process.chdir(here); }
+    const rc1 = rtCalls().pop();
+    ok(fpre !== fsrc && rc1 && rc1.cwd === fs.realpathSync(REPO), 'lane L r5 F1(b) NEGATIVE CONTROL: the pre-r5 runtime (patched copy, no cwd) starts the daemon in the launcher\'s cwd — here the checkout, exactly the keeper\'s frame', JSON.stringify(rc1));
   }
   // r4 (takeover finding 2): the configuration is the ACCOUNT's — its passwd home, never $HOME
   {

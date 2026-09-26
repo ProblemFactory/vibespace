@@ -212,6 +212,30 @@ const SETTINGS_SCHEMA = {
     description: t('Allow tab bar to wrap into multiple rows when there are many tabs (like a flow layout)'),
     category: t('Window'), liveApply: true,
   },
+  // split tabs v2 (docs/design-split-ux.zh.md §8, inc-muhfb5al-jzk6 — the owner: "拖动窗口后是直接side by side
+  // 还是普通tabbed，以及打开文件路径/链接默认用并排还是独立窗口也都加入设置选项"). Both are read AT THE ACT
+  // (tab-group.js _afterUserMerge / app.js linkPlacement → settings.get), never cached at boot.
+  'window.mergeDropLayout': {
+    type: 'enum', default: 'tabs',
+    options: [
+      { value: 'tabs', label: t('Tabs (then offer side by side)') },
+      { value: 'split', label: t('Side by side at once') },
+    ],
+    label: t('Dropping a window onto another'),
+    description: t('What a window dragged onto another window\'s icon or tab bar becomes: grouped as tabs (a toast offers "Show side by side"), or shown side by side at once — the dragged window on the right, with Undo (it goes back where it was) and Unsplit (stay grouped as tabs).'),
+    category: t('Window'), liveApply: true,
+  },
+  'window.openLinkPlacement': {
+    type: 'enum', default: 'split',
+    options: [
+      { value: 'split', label: t('Side by side with the window') },
+      { value: 'tab', label: t('As a tab of the window') },
+      { value: 'window', label: t('In its own window') },
+    ],
+    label: t('Opening a file path or link from a window'),
+    description: t('Where a file or folder opened from a chat (a path or a local link) appears: beside that chat window (the side it is not on, if it is already side by side), as a tab next to it, or in its own free window. Opening the same path again from the same window shows the tab it is already in. The phone always opens its own window.'),
+    category: t('Window'), liveApply: true,
+  },
   'window.closeBehavior': {
     type: 'enum', default: 'detach',
     options: [

@@ -1,5 +1,7 @@
-import { createPopover, showContextMenu } from './utils.js';
+import { createPopover, showContextMenu, uiScale } from './utils.js';
+import { groupClickVerdict, hoverVerdict, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
+import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
 
 // Resolve the sidebar SESSION object behind a session window (chat/terminal)
@@ -153,10 +155,8 @@ function _rebuildTaskbarItems(app, container, entries) {
       e.dataTransfer.effectAllowed = 'move';
     });
     item.addEventListener('click', () => {
-      if (win.isMinimized) app.wm.restore(id);
-      else if (id === app.wm.activeWindowId) app.wm.minimize(id);
-      else app.wm.focusWindow(id);
-      const session = app.sessions.get(id); if (session && !win.isMinimized) session.focus();
+      if (!win.isMinimized && id === app.wm.activeWindowId) app.wm.minimize(id);
+      else activateWindow(app, id); // restore a minimized one, else focus + raise (the grouped button's activation too)
     });
     // Right-click context menu for window recovery
     item.addEventListener('contextmenu', (e) => {
@@ -347,11 +347,67 @@ function _buildStackIcon(app, group) {
   return stack;
 }
 
-// Render a stacked tab-group taskbar item. Click expands the tab list; right
-// click acts on the whole group (host).
+// THE activation a taskbar button performs (lane K): restore a minimized window
+// (a tab restores its chain's host), else focus + raise it; the session inside
+// takes the keyboard. A single window's click when it is not the focused one,
+// and a GROUP's click when the group is behind (its active tab), both come here.
+export function activateWindow(app, id) {
+  const win = app.wm.windows.get(id);
+  if (!win) return;
+  const hostId = win._tabChain ? win._tabChain.tabs[0] : id;
+  if (app.wm.windows.get(hostId)?.isMinimized) app.wm.restore(id);
+  else app.wm.focusWindow(id);
+  const session = app.sessions.get(id); if (session) session.focus();
+}
+
+// ── THE GROUPED BUTTON (lane K, 2026-09-25 — the owner: every click on a grouped
+//    button popped the chooser, "这个体验比较差"). The rules are PURE
+//    (src/lib/taskbar-group.js); this reads the world for them. CLICK = activate
+//    the group, or the chooser when the group is already in front; HOVER with
+//    intent on a fine pointer = the same chooser, non-modal; Enter/Space = the
+//    click rule, ArrowUp = the chooser. Right-click = the window menu, as before.
+function _groupInFront(app, hostId) {
+  const host = app.wm.windows.get(hostId);
+  const chain = host?._tabChain;
+  if (!host || !chain) return false;
+  const activeDesk = app.desktopManager?.activeDesktopId;
+  return inFrontOf({
+    focusedId: app.wm.activeWindowId, hostId, tabIds: chain.tabs, minimized: !!host.isMinimized,
+    sameDesktop: !host._hiddenByDesktop && !host._hiddenByStage && (!activeDesk || !host._desktopId || host._desktopId === activeDesk),
+  });
+}
+// A drag of any kind: a held primary button, a window / tab drag, a split divider, a window resize.
+function _dragInProgress(app, buttons = 0) {
+  if (buttons & 1) return true;
+  if (document.querySelector('.window.dragging, .tab-ghost, .split-resizing')) return true;
+  for (const w of app.wm.windows.values()) if (w._resizeOp) return true;
+  return false;
+}
+// The chooser open for this group (either mode), or null.
+function _chooserOf(hostId) {
+  const pop = document.querySelector('.taskbar-group-chooser');
+  return pop && pop._chooser && pop._chooser.hostId === hostId ? pop : null;
+}
+// Another popover or menu on screen — a HOVER chooser (this group's or a
+// neighbour's) is not one: it yields to the next hover. The window list, every
+// context menu and every createPopover carry [data-popover]; the quota/For-you
+// popups are toggled by class instead. (Every class named here is one the tree
+// PRODUCES — test-taskbar-group §7's census; `.taskbar-window-list` never was.)
+function _otherPopoverOpen() {
+  if (document.querySelector('.usage-popup:not(.hidden)')) return true;
+  for (const el of document.querySelectorAll('[data-popover]')) {
+    if (el._chooser && el._chooser.mode === 'hover') continue;
+    if (el.getClientRects().length) return true;
+  }
+  return false;
+}
+const _finePointer = () => !!window.matchMedia?.('(any-pointer: fine)').matches;
+
+// Render a stacked tab-group taskbar item: click activates the group (the chooser
+// when it is already in front), hover shows the chooser, right click acts on the
+// whole group (host).
 function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   item.classList.add('taskbar-group');
-  item.title = group.tabWins.map(t => t.win.title).join('\n');
   item.dataset.groupTabs = group.tabWins.map(t => t.id).join(',');
   _applyTaskbarItemState(app, item);
   item.appendChild(_buildStackIcon(app, group));
@@ -362,34 +418,141 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   const parts = activeTab.win.title.split(' \u2014 ');
   title.textContent = starPrefix + (parts[0] || activeTab.win.title);
   const subtitle = document.createElement('div'); subtitle.className = 'taskbar-subtitle';
-  subtitle.textContent = `${group.tabWins.length} windows grouped`;
+  subtitle.textContent = t('{n} windows grouped', { n: group.tabWins.length });
   textCol.append(title, subtitle);
   item.appendChild(textCol);
+  // no native tooltip: the hover chooser lists every title (a tooltip would sit
+  // over it); the keyboard / screen reader get the button's name
+  item.tabIndex = 0;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-haspopup', 'menu');
+  item.setAttribute('aria-expanded', 'false');
+  item.setAttribute('aria-label', `${activeTab.win.title} \u2014 ${subtitle.textContent}`);
 
   const hostId = group.chain.tabs[0];
+  // a REBUILD under an open chooser (a tab title change re-keys the structure)
+  // hands it this button: aria-expanded, the Esc focus return and the
+  // outside-mousedown exclusion follow the live button, never a detached one
+  _chooserOf(hostId)?._chooser.reanchor(item);
+  const liveChain = () => app.wm.windows.get(hostId)?._tabChain || null; // never the build-time object (a layout sync may swap it)
+  const activeTabOf = (chain) => chain.tabs[Math.min(chain.active, chain.tabs.length - 1)] || hostId;
+  // hover intent: armed on entry by a fine pointer, cancelled by leaving,
+  // pressing, dragging; re-judged when it fires (a drag or a menu may have begun)
+  let timer = null, armed = false, enteredAt = 0, lastButtons = 0, fine = false;
+  const cancelIntent = () => { armed = false; if (timer) { clearTimeout(timer); timer = null; } };
+  const hoverNow = (intentMs) => hoverVerdict({ pointerFine: fine, touch: !!app.isTouch, dragging: _dragInProgress(app, lastButtons), popoverOpen: _otherPopoverOpen(), intentMs });
+  const fire = () => {
+    timer = null;
+    if (!armed || !item.isConnected) return;
+    const elapsed = performance.now() - enteredAt;
+    const v = hoverNow(elapsed);
+    if (v === 'wait') { timer = setTimeout(fire, Math.max(1, GROUP_HOVER_INTENT_MS - elapsed)); return; }
+    armed = false;
+    const chain = liveChain();
+    if (v === 'open' && chain) showTabGroupList(app, item, chain, { hover: true });
+  };
+  item.addEventListener('pointerenter', (e) => {
+    lastButtons = e.buttons;
+    const open = _chooserOf(hostId);
+    if (open) { open._chooser.keep(); return; } // back onto the button from its own chooser
+    cancelIntent();
+    fine = (e.pointerType === 'mouse' || e.pointerType === 'pen') && _finePointer(); // a mouse or a pen hovers; a touch pointerenter never arms
+    if (hoverNow(0) !== 'wait') return;
+    armed = true; enteredAt = performance.now();
+    timer = setTimeout(fire, GROUP_HOVER_INTENT_MS);
+  });
+  item.addEventListener('pointermove', (e) => { lastButtons = e.buttons; });
+  item.addEventListener('pointerleave', () => { cancelIntent(); _chooserOf(hostId)?._chooser.leave(); });
+  item.addEventListener('pointerdown', cancelIntent); // a press is not a hover (and the hover does not come back until the pointer leaves)
+
   item.draggable = true;
   item.addEventListener('dragstart', (e) => {
+    cancelIntent();
+    const open = _chooserOf(hostId); if (open && open._chooser.mode === 'hover') open.remove();
     e.dataTransfer.setData('text/window-id', hostId);
     e.dataTransfer.effectAllowed = 'move';
   });
-  item.addEventListener('click', () => showTabGroupList(app, item, group.chain));
+  const act = (verdict, { keyboard = false } = {}) => {
+    const chain = liveChain();
+    if (!chain) return;
+    if (verdict === 'activate') { _chooserOf(hostId)?.remove(); activateWindow(app, activeTabOf(chain)); }
+    else if (verdict === 'chooser') showTabGroupList(app, item, chain, { keyboard });
+  };
+  item.addEventListener('click', (e) => {
+    cancelIntent();
+    // `dragging` from THIS event only (a primary button still held): a leaked drag class must never eat a click
+    act(groupClickVerdict({ inFront: _groupInFront(app, hostId), pointerType: e.pointerType || '', dragging: !!(e.buttons & 1), popoverOpen: !!_chooserOf(hostId) }));
+  });
+  item.addEventListener('keydown', (e) => {
+    if (e.target !== item || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return;
+    const v = groupKeyVerdict({ key: e.key, inFront: _groupInFront(app, hostId) });
+    if (!v) return;
+    e.preventDefault();
+    cancelIntent();
+    act(v, { keyboard: true });
+  });
   item.addEventListener('contextmenu', (e) => {
     e.preventDefault();
+    cancelIntent();
+    _chooserOf(hostId)?.remove();
     showWindowContextMenu(app, hostId, e.clientX, e.clientY, { closeLabel: '\u2715 ' + t('Close group') });
   });
   container.appendChild(item);
 }
 
-// Popover listing the tabs in a group; click one to focus the group + switch to it.
-export function showTabGroupList(app, anchor, chain) {
-  const pop = createPopover(anchor, 'overlap-switcher');
-  for (let i = 0; i < chain.tabs.length; i++) {
-    const tid = chain.tabs[i];
+// THE CHOOSER: the tabs of a group, anchored above its taskbar button; a row
+// activates THAT tab (focus + raise + switch the chain's active tab).
+// opts.hover = opened by hover intent — non-modal (no focus moves), closes
+// GROUP_HOVER_LEAVE_MS after the pointer leaves the button + chooser; a click or
+// a key on the button PINS it (then it closes on a row, Esc or a click elsewhere).
+// opts.keyboard = the focus goes to the active row (Arrow keys / Home / End /
+// Enter / Space / Esc inside). Esc closes it in every mode.
+export function showTabGroupList(app, anchor, chain, { hover = false, keyboard = false } = {}) {
+  const hostId = chain.tabs[0];
+  const existing = _chooserOf(hostId);
+  if (existing && existing._chooser.anchor === anchor) { // already open for this button: never re-created (no flicker)
+    if (!hover) existing._chooser.pin({ keyboard });
+    return existing;
+  }
+  const pop = createPopover(anchor, 'overlap-switcher taskbar-group-chooser');
+  pop.setAttribute('role', 'menu');
+  pop.setAttribute('aria-label', t('Windows in this group'));
+  const rows = [];
+  const focusRow = () => requestAnimationFrame(() => { // after createPopover's reveal frame (a hidden subtree takes no focus)
+    if (pop.isConnected) (rows.find((r) => r.classList.contains('active')) || rows[0])?.focus();
+  });
+  let leaveTimer = null;
+  const state = pop._chooser = {
+    hostId, anchor, mode: hover ? 'hover' : 'click',
+    keep() { if (leaveTimer) { clearTimeout(leaveTimer); leaveTimer = null; } },
+    leave() {
+      if (state.mode !== 'hover') return;
+      state.keep();
+      leaveTimer = setTimeout(() => { leaveTimer = null; if (state.mode === 'hover') pop.remove(); }, GROUP_HOVER_LEAVE_MS);
+    },
+    pin({ keyboard: kb = false } = {}) { state.keep(); state.mode = 'click'; pop.dataset.mode = 'click'; if (kb) focusRow(); },
+    reanchor(el) { state.anchor = el; el.setAttribute?.('aria-expanded', 'true'); pop._closeExclude?.push(el); },
+    // after a row's window menu acted: re-list from the LIVE chain (a tab
+    // closed, renamed, split), or close when the group is gone from here
+    relist() {
+      const live = app.wm.windows.get(hostId)?._tabChain, el = state.anchor;
+      pop.remove();
+      if (live && live.tabs[0] === hostId && live.tabs.length > 1 && el.isConnected) showTabGroupList(app, el, live);
+    },
+  };
+  pop.dataset.mode = state.mode;
+  // the rows follow the group's STRIP (visualTabOrder — split tabs v2: a split's left half, then its right; a
+  // reordered strip its own order), never the chain's internal array; the active row is marked by window id
+  const activeId = chain.tabs[Math.min(chain.active, chain.tabs.length - 1)];
+  for (const tid of visualTabOrder(chain)) {
     const win = app.wm.windows.get(tid);
     if (!win) continue;
     const item = document.createElement('div');
     item.className = 'overlap-switcher-item';
-    if (i === chain.active) item.classList.add('active');
+    item.setAttribute('role', 'menuitem');
+    item.tabIndex = -1;
+    item.dataset.winId = tid;
+    if (tid === activeId) { item.classList.add('active'); item.setAttribute('aria-current', 'true'); }
     // carry the waiting blink into the list — the stacked icon only says "one
     // of these is waiting"; the row says WHICH
     if (win.element.classList.contains('window-waiting')) item.classList.add('waiting');
@@ -408,16 +571,64 @@ export function showTabGroupList(app, anchor, chain) {
       if (session) session.focus();
       pop.remove();
     };
+    // right-click = THAT tab's window menu, as a window-list row does; the
+    // chooser stays beneath it PINNED (the pointer leaves it for the menu) and
+    // re-lists after the action — a Move takes the whole screen: it closes
+    item.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      state.pin();
+      showWindowContextMenu(app, tid, e.clientX, e.clientY, {
+        onAction: (kind) => { if (pop.isConnected) (kind === 'move' ? pop.remove() : state.relist()); },
+      });
+    });
+    rows.push(item);
     pop.appendChild(item);
   }
+  pop.addEventListener('pointerenter', () => state.keep());
+  pop.addEventListener('pointerleave', () => state.leave());
+  pop.addEventListener('keydown', (e) => {
+    const i = rows.indexOf(document.activeElement);
+    const go = (j) => { e.preventDefault(); rows[(j + rows.length) % rows.length]?.focus(); };
+    if (e.key === 'ArrowDown') go(i + 1);
+    else if (e.key === 'ArrowUp') go(i < 0 ? rows.length - 1 : i - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(rows.length - 1);
+    else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); rows[i].click(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); pop.remove(); state.anchor.focus?.(); } // the LIVE button (a rebuild re-anchors)
+  });
+  // Esc closes it wherever the keyboard is — also inside a terminal, where the
+  // global Esc handler stands aside; never swallowed (the terminal still gets it)
+  const ctl = new AbortController();
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing && !pop.contains(e.target)) pop.remove(); }, { capture: true, signal: ctl.signal });
+  // ONE cleanup whichever path removed it (a row, Esc, a click elsewhere, the
+  // leave timer, createPopover's dedup, an activation): EVERY listener the
+  // chooser caused goes with it — its own Esc listener and createPopover's
+  // outside-click close (`_closeCtl`: a hover chooser opens and closes with no
+  // click at all, so nothing else would ever remove that one — lane K verify r1
+  // measured 3 → 33 document mousedown listeners over 30 hovers, each holding
+  // its detached chooser)
+  anchor.setAttribute?.('aria-expanded', 'true');
+  const mo = new MutationObserver(() => {
+    if (pop.isConnected) return;
+    mo.disconnect(); ctl.abort(); pop._closeCtl?.abort(); state.keep();
+    // the LIVE button (a rebuild re-anchors); a re-list already opened the next
+    // chooser on the same button: it stays expanded
+    if (_chooserOf(hostId)?._chooser.anchor !== state.anchor) state.anchor.setAttribute?.('aria-expanded', 'false');
+  });
+  mo.observe(pop.parentNode, { childList: true });
   requestAnimationFrame(() => {
-    const rect = anchor.getBoundingClientRect();
-    pop.style.left = Math.max(0, Math.min(rect.left, window.innerWidth - pop.offsetWidth - 4)) + 'px';
+    if (!pop.isConnected) return;
+    // viewport px in, layout px out (a fixed body child under the UI-scale zoom)
+    const Z = uiScale();
+    const rect = state.anchor.getBoundingClientRect(), pr = pop.getBoundingClientRect();
+    pop.style.left = (Math.max(4, Math.min(rect.left, window.innerWidth - pr.width - 4)) / Z) + 'px';
     // Prefer above (bottom taskbar); flip below when the anchor is near the
     // top edge (top-docked taskbar)
-    const above = rect.top - pop.offsetHeight - 4;
-    pop.style.top = (above >= 4 ? above : rect.bottom + 4) + 'px';
+    const above = rect.top - pr.height - 4;
+    pop.style.top = ((above >= 4 ? above : rect.bottom + 4) / Z) + 'px';
+    if (keyboard) focusRow();
   });
+  return pop;
 }
 
 /**

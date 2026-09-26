@@ -1973,6 +1973,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // tools, codex wrapper) guards on api AND token so token-alone is
               // inert. The CLI itself never reads either var.
               ...(integrationOn ? [`VIBESPACE_API=http://127.0.0.1:${PORT}`] : []),
+              // lane L r5 F3: the SESSION's directory — the browser tool's write fence (never the agent shell's
+              // cwd). A LOCAL session's own cwd (`spawnCwd` = the session's cwd field, host label stripped above);
+              // a remote session's CLI gets it from buildRemoteExec's prelude (this argv only runs the local
+              // ssh/wrapper there, in the server's home), so it is not repeated here. Like the token it is inert
+              // plumbing with integration OFF (no tool on PATH reads it), and structural like the remote export.
+              ...(!session.host ? [`VIBESPACE_SESSION_CWD=${spawnCwd}`] : []),
               // AGENT_BIN_DIR (vibespace-* tools), NOT dirname(EDITOR_CMD):
               // the fake `code` lives in editor/ precisely so PATH never
               // resolves it (B-b87b — it shadowed real VS Code locally)

@@ -1,5 +1,6 @@
 import { t } from './i18n.js';
 import { metric } from './telemetry-client.js';
+import { pressCloses, pressPhase, tapVerdict } from './outside-press.js';
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -137,7 +138,7 @@ function _recordToast(message, type) {
 // `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
 // toast (Undo / Show side by side): a click runs it and dismisses the toast; an
 // action toast lives 5 s unless the user's toast-seconds setting says otherwise.
-export function showToast(message, { type = 'info', duration, action } = {}) {
+export function showToast(message, { type = 'info', duration, action, actions } = {}) {
   let stack = document.getElementById('global-toasts');
   if (!stack) {
     stack = document.createElement('div');
@@ -171,11 +172,13 @@ export function showToast(message, { type = 'info', duration, action } = {}) {
   x.textContent = '✕';
   x.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); };
   el.append(body);
-  if (action && typeof action.run === 'function') {
+  // `action` = one button; `actions` = several, in order (split tabs v2: Undo · Unsplit) — each runs once and closes the toast
+  const acts = (Array.isArray(actions) ? actions : action ? [action] : []).filter((a) => a && typeof a.run === 'function');
+  for (const a of acts) {
     const act = document.createElement('button');
     act.className = 'global-toast-action';
-    act.textContent = String(action.label || '');
-    act.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); try { action.run(); } catch (err) { console.warn('toast action failed', err); } };
+    act.textContent = String(a.label || '');
+    act.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); try { a.run(); } catch (err) { console.warn('toast action failed', err); } };
     el.appendChild(act);
   }
   el.append(x);
@@ -184,7 +187,7 @@ export function showToast(message, { type = 'info', duration, action } = {}) {
   // Cap the stack so a burst of errors doesn't fill the screen
   while (stack.children.length > 4) stack.firstChild.remove();
   const secs = Number(_toastCfg.getSeconds?.());
-  const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (action ? 5000 : 3000)));
+  const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (acts.length ? 5000 : 3000)));
   setTimeout(() => {
     el.classList.add('global-toast-out');
     setTimeout(() => { el.remove(); if (!stack.children.length) stack.remove(); }, 250);
@@ -309,21 +312,94 @@ export function stripCwdHostLabel(cwd) {
   return m ? cwd.slice(m[0].length) : cwd;
 }
 
+// ── THE ONE OUTSIDE-PRESS CLOSER (lane M, inc-muhms5kt-0ejl) ──
+// Every floating menu / popover / flyout / popup closes through this. It
+// listens on document for `pointerdown` in the CAPTURE phase — the first thing
+// a press dispatches, before any element on its path runs — because an app's
+// picture (xpra-view.js's pane, noVNC's canvas) cancels its pointerdown, and a
+// cancelled pointerdown SUPPRESSES the compatibility `mousedown` in every phase:
+// the old document `mousedown` closers never saw a press into the picture and
+// the menu stayed open over the app (the incident). The listeners are PASSIVE
+// and call neither preventDefault nor stopPropagation — the press still reaches
+// the app. The decision is PURE (src/lib/outside-press.js, tabled by
+// scripts/test-outside-press.mjs): inside the root / an `exclude` element / the
+// `ignore(target)` rule / a nested [data-popover] (when `nested`) keeps it
+// open; a mouse press counts at pointerdown, a touch / pen press only as a TAP
+// (a scroll, drag or long-press never closes). Escape stays the [data-popover]
+// protocol (app.js's global handler removes the tagged surface); a surface
+// removed by other means retires its closer on the next press without calling
+// `close` (`root-gone`). It arms SYNCHRONOUSLY: a press that BEGAN before it
+// was armed (event timeStamp < the arming instant) is the one that opened the
+// surface, never an outside press of it (`opening`) — the old setTimeout(0)
+// deferral was starved on a busy page (Chrome dispatches input ahead of timer
+// tasks; measured on the real xpra rung: the click into the picture arrived
+// before the deferred closer existed and the menu stayed open).
+//   const dispose = onOutsidePress(pop, () => pop.remove(), { exclude: [anchor] });
+// opts: exclude (elements), ignore(target) → true keeps it open, nested (default
+// true: the chained-popover rule), once (default true: retire after closing;
+// false for a PERSISTENT popup that closes by class), signal (AbortSignal —
+// window-scoped surfaces pass winInfo._listenerCtl.signal).
+export function onOutsidePress(root, close, { exclude = [], ignore = null, nested = true, once = true, signal = null } = {}) {
+  const roots = (Array.isArray(root) ? root : [root]).filter(Boolean);
+  const ctl = new AbortController();
+  const dispose = () => ctl.abort();
+  if (signal) {
+    if (signal.aborted) return dispose;
+    signal.addEventListener('abort', dispose, { once: true, signal: ctl.signal });
+  }
+  const within = (els, target) => els.some((el) => !!el && typeof el.contains === 'function' && el.contains(target));
+  // event timeStamps and performance.now() share the time origin; a press stamped before this instant began before the
+  // surface existed
+  const armedAt = typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : 0;
+  const began = (e) => (Number.isFinite(e.timeStamp) && e.timeStamp < armedAt ? 'before' : 'after');
+  const judge = (target, e, opening = false) => {
+    const v = pressCloses({
+      connected: roots.some((r) => r.isConnected !== false),
+      opening,
+      inRoot: within(roots, target),
+      excluded: within(exclude, target),
+      ignored: !!(ignore && ignore(target, e)),
+      inNestedPopover: !!target?.closest?.('[data-popover]'),
+      nested,
+    });
+    if (v.retire) { dispose(); return; }
+    if (!v.close) return;
+    if (once) dispose();
+    close(e);
+  };
+  let pending = null; // a touch / pen press waiting to become a tap
+  const o = { capture: true, passive: true, signal: ctl.signal };
+  document.addEventListener('pointerdown', (e) => {
+    const opening = began(e) === 'before';
+    if (pressPhase(e.pointerType) === 'down') { pending = null; judge(e.target, e, opening); return; }
+    pending = opening ? null : { id: e.pointerId, x: e.clientX, y: e.clientY, at: e.timeStamp, target: e.target };
+  }, o);
+  document.addEventListener('pointerup', (e) => {
+    const p = pending;
+    if (!p || p.id !== e.pointerId) return;
+    pending = null;
+    // the press is judged where it went DOWN (a captured pointer's pointerup targets the capturing element)
+    if (tapVerdict({ dx: e.clientX - p.x, dy: e.clientY - p.y, heldMs: e.timeStamp - p.at })) judge(p.target, e);
+  }, o);
+  document.addEventListener('pointercancel', (e) => { if (pending && pending.id === e.pointerId) pending = null; }, o);
+  return dispose;
+}
+
+/** The popover closer every createPopover / showContextMenu / hand-built menu uses: an outside press removes it. A
+ *  popover spawned FROM this one (a context menu on a list row, a submenu flyout) is a child interaction — a press in
+ *  it (any [data-popover]) does not dismiss this one; opening a popover from regular UI still closes this one (that
+ *  press lands outside any [data-popover]). Returns the dispose function.
+ *  The popover OWNS its closer (lane K verify r1 — the hover chooser opens and closes with ZERO presses, and each cycle
+ *  used to leave a listener holding its detached popover): `popover._closeCtl.abort()` disposes it (an owner whose
+ *  popover can go by another path — a leave timer, Esc, a row — calls it in its own cleanup; a closer whose popover is
+ *  already gone retires itself on the next press, `root-gone`), and `popover._closeExclude` is the LIVE exclusion list
+ *  (the very array the helper reads at every press): an owner that rebuilds its anchor pushes the new one (the taskbar
+ *  chooser's re-anchor — a rebuilt button's press is never "a press elsewhere"). */
 export function attachPopoverClose(popover, ...excludeEls) {
-  setTimeout(() => {
-    const close = (e) => {
-      if (popover.contains(e.target)) return;
-      for (const el of excludeEls) { if (el?.contains(e.target)) return; }
-      // A popover spawned FROM this one (context menu on a list row, submenu)
-      // is a child interaction — clicking it must not dismiss this popover.
-      // Opening a popover from regular UI still closes this one (that
-      // mousedown lands outside any [data-popover]).
-      if (e.target.closest?.('[data-popover]')) return;
-      popover.remove();
-      document.removeEventListener('mousedown', close);
-    };
-    document.addEventListener('mousedown', close);
-  }, 0);
+  popover._closeExclude = excludeEls; // LIVE: onOutsidePress reads this array at every press
+  const dispose = onOutsidePress(popover, () => popover.remove(), { exclude: excludeEls });
+  popover._closeCtl = { abort: dispose }; // the owner's disposer (lane K: the hover chooser's one cleanup)
+  return dispose;
 }
 
 /**
@@ -944,6 +1020,8 @@ export function clearDraft(type, id) {
   const hide = () => { if (tip) tip.style.display = 'none'; };
   document.addEventListener('mouseover', (e) => { const el = e.target.closest && e.target.closest('[data-tip]'); if (el) show(el); });
   document.addEventListener('mouseout', (e) => { if (e.target.closest && e.target.closest('[data-tip]')) hide(); });
-  document.addEventListener('mousedown', hide, true);
+  // any press hides it — `pointerdown` in the capture phase: a press into an app's picture cancels its pointerdown and
+  // so never produces a mousedown (lane M, the onOutsidePress note above)
+  document.addEventListener('pointerdown', hide, { capture: true, passive: true });
   window.addEventListener('scroll', hide, true);
 })();

@@ -1,0 +1,16 @@
+agent-browser console - View console logs
+
+Usage: agent-browser console [--clear]
+
+View browser console output (log, warn, error, info).
+
+Options:
+  --clear              Clear console log buffer
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser console
+  agent-browser console --clear

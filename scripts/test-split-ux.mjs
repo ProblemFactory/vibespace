@@ -37,6 +37,16 @@
 //      tabs" toast, and its action SAYS why when the split already happened elsewhere or the
 //      group is gone (never a silent no-op); ③ the window menu's "Beside {name}" keeps the
 //      focus on the tab that was right-clicked (the strip button's rule)
+//  12  SPLIT TABS v2 (docs/design-split-ux.zh.md §8, inc-muhfb5al-jzk6): L1 the strip is TWO halves ON the panes'
+//      columns (glyph = divider ±1 px) and they follow a REAL divider drag frame by frame (control: the subgrid rule
+//      neutered ⇒ misaligned); L2 a LEFT-half tab shows on the left, the right pane untouched; L3 a drag inside a
+//      half reorders (marker, persisted, client 2 follows in place, no ping-pong; control: moveTabInChain neutered);
+//      L4 across the boundary MOVES the tab (it carries its display), the last tab out ends the split; L5 vertical
+//      still detaches, horizontal-first never does; L10 Ctrl+Shift+PageDown / PageUp (control: inert outside a
+//      group); L6 a path opened from a chat is born beside THAT chat (never the active window), again = its tab,
+//      tab / window per setting, a reload restores the born windows, client 2 gets the async viewer IN the chain
+//      (control: the pre-fix reconcile ⇒ free); L9 a pre-v2 record restores as a valid split; L7 mergeDropLayout =
+//      split lands the merge side by side with Undo (back where it stood) / Unsplit (control: tabs)
 // RED on 2.369.160 (the title-bar half zone): 1 / 1a / 2 split, 4 has no button / toast.
 // SKIPs with evidence without chrome / dtach. Free ports, scratch dirs only.
 import fs from 'node:fs';
@@ -251,11 +261,11 @@ else await (async () => {
     if (!tt || !tt.actionRect) return;
     await click(centre(tt.actionRect));
     await sleep(300);
-    const s = await ev(`const A = wm.windows.get(${S(ids.A)}), B = wm.windows.get(${S(ids.B)}); const ch = A._tabChain; const host = wm.windows.get(ch.tabs[0]); const strip = [...host.titleBar.querySelectorAll('.tab-item')]; const glyphs = [...host.titleBar.querySelectorAll('.tab-split-glyph')]; const g = glyphs[0]; const probe = (c) => { const p = document.createElement('div'); p.style.background = c; document.body.appendChild(p); const v = getComputedStyle(p).backgroundColor; p.remove(); return v; }; return { layout: ch.layout, pair: ch.split && ch.split.pair, active: ch.tabs[ch.active], strip: strip.map((t) => t.dataset.winId), glyphs: glyphs.length, glyphBetween: !!(g && g.previousElementSibling && g.nextElementSibling && g.previousElementSibling.dataset.winId === ch.split.pair[0] && g.nextElementSibling.dataset.winId === ch.split.pair[1]), glyphHidden: g ? g.getAttribute('aria-hidden') : null, panes: strip.filter((t) => t.classList.contains('tab-pane')).map((t) => ({ id: t.dataset.winId, sid: sidOf(t.dataset.winId), got: getComputedStyle(t, '::before').backgroundColor })), probe: { A: probe(${S(C.ownerColor(sidA))}), B: probe(${S(C.ownerColor(sidB))}) }, aLeft: rect(A.content).left, bLeft: rect(B.content).left };`);
+    const s = await ev(`const A = wm.windows.get(${S(ids.A)}), B = wm.windows.get(${S(ids.B)}); const ch = A._tabChain; const host = wm.windows.get(ch.tabs[0]); const strip = [...host.titleBar.querySelectorAll('.tab-item')]; const glyphs = [...host.titleBar.querySelectorAll('.tab-split-glyph')]; const g = glyphs[0]; const probe = (c) => { const p = document.createElement('div'); p.style.background = c; document.body.appendChild(p); const v = getComputedStyle(p).backgroundColor; p.remove(); return v; }; return { layout: ch.layout, pair: ch.split && ch.split.pair, active: ch.tabs[ch.active], strip: strip.map((t) => t.dataset.winId), glyphs: glyphs.length, glyphBetween: (() => { if (!g) return false; const d = host.element.querySelector(':scope > .tab-split-divider'); if (!d) return false; const gr = g.getBoundingClientRect(), dr = d.getBoundingClientRect(); const tl = strip.find((t) => t.dataset.winId === ch.split.pair[0]).getBoundingClientRect(), trr = strip.find((t) => t.dataset.winId === ch.split.pair[1]).getBoundingClientRect(); return Math.abs((gr.left + gr.width / 2) - (dr.left + dr.width / 2)) <= 1 && tl.right <= gr.left + 1 && trr.left >= gr.right - 1; })(), glyphHidden: g ? g.getAttribute('aria-hidden') : null, panes: strip.filter((t) => t.classList.contains('tab-pane')).map((t) => ({ id: t.dataset.winId, sid: sidOf(t.dataset.winId), got: getComputedStyle(t, '::before').backgroundColor })), probe: { A: probe(${S(C.ownerColor(sidA))}), B: probe(${S(C.ownerColor(sidB))}) }, aLeft: rect(A.content).left, bLeft: rect(B.content).left };`);
     ok(s.layout === 'split' && S(s.pair) === S([ids.B, ids.A]) && s.active === ids.B, 'one click ⇒ split, pair [B, A]: the active B on the LEFT', S(s));
     ok(s.bLeft < s.aLeft, `B's pane is drawn left of A's (${Math.round(s.bLeft)} < ${Math.round(s.aLeft)})`, S(s));
     ok(S(s.strip) === S(s.pair), 'the strip\'s tab order == the pane order (tab-item data-win-id sequence)', S({ strip: s.strip, pair: s.pair }));
-    ok(s.glyphs === 1 && s.glyphBetween && s.glyphHidden === 'true', 'exactly ONE .tab-split-glyph, between the two pane tabs, aria-hidden', S(s));
+    ok(s.glyphs === 1 && s.glyphBetween && s.glyphHidden === 'true', 'exactly ONE .tab-split-glyph, between the two pane tabs — over the divider, ±1 px (split tabs v2: the halves\' boundary) — aria-hidden', S(s));
     const pa = s.panes.find((p) => p.sid === sidA), pb = s.panes.find((p) => p.sid === sidB);
     ok(s.panes.length === 2 && pa && pb && pa.got === s.probe.A && pb.got === s.probe.B && s.probe.A !== s.probe.B, `each pane tab's underline = ownerColor(its session) as computed colours (Alpha ${s.probe.A}, Bravo ${s.probe.B})`, S(s.panes));
   }
@@ -419,6 +429,9 @@ else await (async () => {
     ok(ph.layout === 'split' && S(ph.pair) === S(want.pair) && ph.narrow && ph.isMobile, 'the phone\'s model says split with the same pair (narrow, isMobile)', S({ ph, want }));
     ok(ph.shown === 1, 'the phone DISPLAYS one pane', S(ph));
     ok(ph.btnVisible === 0 && ph.glyphVisible === 0, 'no .tab-split-btn / .tab-split-glyph visible on the phone', S(ph));
+    // L8 (split tabs v2): the phone keeps ONE strip — the halves dissolve, the tabs read left then right in one row
+    const ph8 = await P.ev(`const c = chats().find((w) => w._tabChain); const ch = c._tabChain; const host = wm.windows.get(ch.tabs[0]); const halves = [...host.titleBar.querySelectorAll('.tab-strip-half')]; const tabs = [...host.titleBar.querySelectorAll('.tab-item')].map((t) => ({ sid: sidOf(t.dataset.winId), r: t.getBoundingClientRect() })); return { halfDisp: halves.map((h) => disp(h)), sides: ch.split ? [...ch.split.left, ...ch.split.right].map(sidOf) : null, byX: [...tabs].sort((a, b) => a.r.left - b.r.left).map((t) => t.sid), tops: [...new Set(tabs.map((t) => Math.round(t.r.top)))], tbDisp: disp(host.titleBar) };`);
+    ok(ph8.halfDisp.length === 2 && ph8.halfDisp.every((d) => d === 'contents') && ph8.tbDisp === 'flex' && ph8.tops.length === 1 && S(ph8.byX) === S(ph8.sides), 'L8 the phone shows ONE strip: the halves dissolve (display: contents), the title bar is a flex row, the tabs sit in one row reading left then right', S(ph8));
     await P.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 200, y: 400 }] });
     await P.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await sleep(100);
@@ -533,6 +546,435 @@ else await (async () => {
     ok(item && f.layout === 'split' && S(f.pair) === S([ids.A, idC]), '11③ "Beside Charlie" ⇒ pair [Alpha, Charlie]', S({ item, f }));
     ok(f.active === ids.A && f.wmActive === ids.A, '11③ the focus stays on the right-clicked Alpha (r0: it moved to Charlie)', S(f));
     await clearToasts();
+  }
+
+  // ── 12 · SPLIT TABS v2 (docs/design-split-ux.zh.md §8, inc-muhfb5al-jzk6, 2026-09-25) ──
+  // The owner: "首先并排之后tab列表都在左侧，比较难看出来哪边是哪个tab。其次我没法拖动tab重排序，最后我只能调整右侧展示的tab而无法调整左侧的。"
+  // + "以后从窗口打开文件路径/本地链接的时候默认side by side展示吧 … 也都加入设置选项"
+  console.log('— 12 · split tabs v2: the strip halves, both sides switchable, tab drag, links side by side, the two settings');
+  {
+    await P1.send('Page.bringToFront');
+    await clearToasts();
+    fs.writeFileSync(path.join(ROOT, 'notes.md'), '# notes\n\none\ntwo\nthree\n');
+    fs.writeFileSync(path.join(ROOT, 'data.csv'), 'a,b\n1,2\n');
+    fs.mkdirSync(path.join(ROOT, 'sub'), { recursive: true }); fs.writeFileSync(path.join(ROOT, 'sub', 'x.txt'), 'x\n');
+    const tagFn = `const tag = (id) => { const w = wm.windows.get(id); return sidOf(id) || (w ? w.type + ':' + String(w._filePath || w._explorerPath || '').split('/').pop() : id); };`;
+    /** A, B, C as ONE chain on a known host rect (tabs; A shown); every other window closed. */
+    const v2scene = () => ev(`document.getElementById('global-toasts')?.remove(); for (const w of [...wm.windows.values()]) { if (w.type !== 'chat') wm.closeWindow(w.id); } for (const w of chats()) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); } const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}), Cw = bySid(${S(sidC)}); A.element.style.left = '20px'; A.element.style.top = '20px'; A.element.style.width = '1100px'; A.element.style.height = '560px'; A._isSnapped = false; wm._captureGridBounds(A); wm.createTabChain(A, B); wm.addToTabChain(A._tabChain, Cw); wm.switchTab(A._tabChain, A._tabChain.tabs.indexOf(A.id)); wm.focusWindow(A.id); return { A: A.id, B: B.id, C: Cw.id };`);
+    /** The chain of window A as sessions / window tags, the halves, the panes, the divider (viewport px). */
+    const v2 = (X, aSid = sidA) => X.ev(`${tagFn} const A = bySid(${S(aSid)}); const ch = A && A._tabChain; if (!ch) return { chain: false }; const host = wm.windows.get(ch.tabs[0]); const tb = host.titleBar; const div = host.element.querySelector(':scope > .tab-split-divider'); const pane = (id) => { const w = wm.windows.get(id); return w ? rect(w.content) : null; }; return { chain: true, layout: ch.layout, pair: ch.split ? ch.split.pair.map(tag) : null, left: ch.split ? ch.split.left.map(tag) : null, right: ch.split ? ch.split.right.map(tag) : null, order: ch.order.map(tag), active: tag(ch.tabs[ch.active]), wmActive: tag(wm.activeWindowId), halves: [...tb.querySelectorAll('.tab-strip-half')].map((h) => ({ side: h.dataset.side, r: rect(h), tabs: [...h.querySelectorAll('.tab-item')].map((t) => tag(t.dataset.winId)), disp: getComputedStyle(h).display })), strip: [...tb.querySelectorAll('.tab-item')].map((t) => ({ id: tag(t.dataset.winId), r: rect(t), shown: t.classList.contains('tab-pane') })), glyph: tb.querySelector('.tab-split-glyph') ? rect(tb.querySelector('.tab-split-glyph')) : null, divider: div ? rect(div) : null, panes: ch.split ? ch.split.pair.map(pane) : null, host: rect(host.element) };`);
+    const tabAt = (st, id) => st.strip.find((t) => t.id === id);
+    const cx = (r) => r.left + r.width / 2;
+    /** A real tab drag: press, `steps` moves along the path, optional mid-drag probe, release. */
+    const tabDrag = async (from, to, { steps = 12, mid = null } = {}) => {
+      await mouse('mouseMoved', from.x, from.y);
+      await mouse('mousePressed', from.x, from.y, { button: 'left', clickCount: 1 });
+      for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps, { button: 'left', buttons: 1 }); await sleep(30); }
+      const m = mid ? await mid() : null;
+      await mouse('mouseReleased', to.x, to.y, { button: 'left', clickCount: 1 });
+      await sleep(350);
+      return m;
+    };
+    const markerNow = () => ev(`const m = document.querySelector('.tab-insert-marker'); return m ? { side: m.dataset.side, index: Number(m.dataset.index), r: rect(m) } : null;`);
+    const toDisk = (pred, ms = 8000) => until(() => { const c = chainFromDisk(); return !!(c && pred(c)); }, ms);
+
+    // L1 — the halves on the panes' columns, following the divider LIVE
+    const ids12 = await v2scene();
+    const T = (id) => (id === ids12.A ? sidA : id === ids12.B ? sidB : id === ids12.C ? sidC : id);
+    await ev(`wm.bindSplit(wm.windows.get(${S(ids12.A)}), wm.windows.get(${S(ids12.C)}), { side: 'right', focus: 'anchor' }); return true;`);
+    await sleep(350);
+    let s = await v2(P1);
+    const L = s.halves.find((h) => h.side === 'left'), Rh = s.halves.find((h) => h.side === 'right');
+    ok(s.layout === 'split' && S(s.left) === S([sidA, sidB]) && S(s.right) === S([sidC]) && S(s.pair) === S([sidA, sidC]), 'L1 the split is [A, B | C]: C alone on its side, every other tab with the anchor A (the creation rule)', S(s));
+    ok(L && Rh && S(L.tabs) === S([sidA, sidB]) && S(Rh.tabs) === S([sidC]), 'L1 the strip is TWO halves, each listing ITS side in order', S(s.halves));
+    const alignedAt = (x) => !!(x && x.glyph && x.divider && x.panes && near(cx(x.glyph), cx(x.divider), 1) && near(x.halves[1].r.left, x.panes[1].left, 1) && near(x.halves[0].r.right, x.panes[0].right, 1) && x.halves[0].r.left >= x.panes[0].left && x.halves[0].r.left <= x.panes[0].left + 14);
+    ok(alignedAt(s), `L1 the halves sit on the panes' columns: the glyph centre = the divider centre (${cx(s.glyph).toFixed(1)} vs ${cx(s.divider).toFixed(1)}), the right half starts at the right pane, the left half ends at the left pane (±1 px)`, S({ halves: s.halves.map((h) => h.r), glyph: s.glyph, divider: s.divider, panes: s.panes }));
+    // a REAL divider drag: the strip boundary follows it frame by frame
+    const d0 = s.divider, dy = d0.top + 200;
+    await mouse('mouseMoved', cx(d0), dy); await mouse('mousePressed', cx(d0), dy, { button: 'left', clickCount: 1 });
+    const live = [];
+    for (const f of [0.42, 0.34, 0.28, 0.5, 0.66, 0.72]) {
+      const x = s.host.left + s.host.width * f;
+      await mouse('mouseMoved', x, dy, { button: 'left', buttons: 1 }); await sleep(70);
+      const g = await v2(P1);
+      live.push({ f, glyph: cx(g.glyph), divider: cx(g.divider), rightHalf: g.halves[1].r.left, rightPane: g.panes[1].left, ok: alignedAt(g) });
+    }
+    await mouse('mouseReleased', s.host.left + s.host.width * 0.72, dy, { button: 'left', clickCount: 1 }); await sleep(300);
+    ok(live.length === 6 && live.every((p) => p.ok) && Math.abs(live[2].divider - live[5].divider) > 300, 'L1 DURING a real divider drag (6 frames, 28 % → 72 %) the strip boundary follows it: glyph centre = divider centre and the right half starts at the right pane, ±1 px, every frame (no JS per frame — the title bar is a subgrid)', S(live));
+    // CONTROL: the same measurement with the subgrid rule neutered at runtime ⇒ the halves no longer follow the panes
+    await ev(`const st = document.createElement('style'); st.id = 'vs-ctl-nosubgrid'; st.textContent = '.window.tab-split > .window-titlebar { display: flex !important; }'; document.head.appendChild(st); return true;`);
+    await sleep(150);
+    const ctl = await v2(P1);
+    await ev(`document.getElementById('vs-ctl-nosubgrid')?.remove(); return true;`);
+    ok(!alignedAt(ctl), 'L1 CONTROL: with the title bar a plain flex row (the subgrid rule neutered) the same measurement fails — it judges the layout, not a tautology', S({ halves: ctl.halves.map((h) => h.r), glyph: ctl.glyph, divider: ctl.divider, panes: ctl.panes }));
+
+    // L1b (v2 verify r1, low ②) — a NARROW host at the widest ratio: no tab of the right half is PAINTED under the
+    // window controls. As shipped a 640 px host dragged to 0.85 drew the right half's tab over □ — its column (95 px)
+    // was narrower than the controls (89) + the badge, and the tail was reserved by a PADDING of a scroll box (which
+    // paints its overflow into its padding). Now the right column keeps a floor (splitColumns: the controls + a tab's
+    // room), the tail is a margin, and the badge steps aside on a tight column.
+    const tailAt = () => ev(`const ch = wm.windows.get(${S(ids12.A)})._tabChain; const host = wm.windows.get(ch.tabs[0]); const tb = host.titleBar; const ctl = tb.querySelector(':scope > .window-controls'); const b0 = [...ctl.querySelectorAll('.win-btn')].find((b) => getComputedStyle(b).display !== 'none'); const br = rect(b0); const at = (x, y) => document.elementFromPoint(x, y); const bh = at(br.left + br.width / 2, br.top + br.height / 2); const half = tb.querySelector('.tab-strip-half[data-side="right"]'); const hr = rect(half); const cr = rect(ctl); const tabs = [...half.querySelectorAll('.tab-item')].map((t) => { const r = rect(t); const l = Math.max(r.left, hr.left), rr = Math.min(r.right, hr.right); const h = rr - l > 2 ? at((l + rr) / 2, r.top + r.height / 2) : null; return { r, visL: l, visR: rr, vis: Math.max(0, rr - l), hit: !!(h && h.closest('.tab-item') === t) }; }); const badge = tb.querySelector(':scope > .tab-split-btn'); const dv = host.element.querySelector(':scope > .tab-split-divider'); return { ratio: ch.split.ratio, host: rect(host.element), divider: dv ? rect(dv) : null, half: hr, ctl: cr, b0: br, tabs, btnHit: !!(bh && b0.contains(bh)), paintsUnder: tabs.some((x) => x.vis > 0.5 && x.visR > cr.left + 0.5), badgeShown: !!badge && getComputedStyle(badge).display !== 'none', badge: badge ? rect(badge) : null, hidden: tb.classList.contains('split-btn-hidden') };`);
+    await ev(`const A = wm.windows.get(${S(ids12.A)}); A.element.style.width = '640px'; wm._captureGridBounds(A); return true;`); await sleep(300);
+    {
+      const n0 = await v2(P1);
+      const dv = n0.divider, y = dv.top + 150, x0 = cx(dv), x1 = n0.host.right - 3;
+      await mouse('mouseMoved', x0, y); await mouse('mousePressed', x0, y, { button: 'left', clickCount: 1 });
+      for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', x0 + (x1 - x0) * i / 6, y, { button: 'left', buttons: 1 }); await sleep(60); }
+      await mouse('mouseReleased', x1, y, { button: 'left', clickCount: 1 }); await sleep(400);
+    }
+    const n1 = await tailAt();
+    ok(near(n1.ratio, 0.85, 0.001) && near(n1.host.width, 640, 2), `L1b a 640 px host, the divider dragged to the widest ratio (${n1.ratio})`, S({ ratio: n1.ratio, host: n1.host }));
+    ok(!n1.paintsUnder && n1.btnHit, 'L1b no right-half tab is painted under the window controls — the first visible control button is the element at its own centre', S(n1));
+    ok(n1.tabs.length === 1 && n1.tabs[0].vis >= 30 && n1.tabs[0].hit, `L1b …and the right half's tab still shows (${n1.tabs[0] && Math.round(n1.tabs[0].vis)} px) and is the element at its visible centre — the column's floor keeps a tab's room beside the controls (the ratio stays 0.85; the divider stops at the floor)`, S(n1));
+    ok(!n1.badgeShown && n1.hidden, 'L1b the ⫿ badge steps aside when the right column cannot hold it beside the controls and a tab (the divider\'s right-click keeps Unsplit / Swap)', S(n1));
+    // CONTROL: the as-shipped columns (no floor) and tail (a padding reservation, the badge kept) ⇒ the same measurement finds the tab under the controls
+    await ev(`const ch = wm.windows.get(${S(ids12.A)})._tabChain; wm.windows.get(ch.tabs[0]).element.style.gridTemplateColumns = 'minmax(0, 0.85fr) 6px minmax(0, 0.15fr)'; const st = document.createElement('style'); st.id = 'vs-ctl-tail'; st.textContent = '.window.tab-split > .window-titlebar > .tab-bar-split > .tab-strip-half[data-side="right"] { margin-right: 0 !important; padding-right: calc(var(--split-ctl, 89px) + 30px) !important; } .window-titlebar.split-btn-hidden .tab-split-btn { display: inline-flex !important; }'; document.head.appendChild(st); return true;`);
+    await sleep(250);
+    const nc = await tailAt();
+    await ev(`document.getElementById('vs-ctl-tail')?.remove(); const ch = wm.windows.get(${S(ids12.A)})._tabChain; wm._applyChainLayout(ch); return true;`);
+    ok(nc.paintsUnder || !nc.btnHit, 'L1b CONTROL: with the as-shipped columns and tail (no floor, a padding, the badge kept) the same measurement finds the tab painted under the controls — it judges the paint, not a tautology', S(nc));
+    await ev(`const A = wm.windows.get(${S(ids12.A)}); A.element.style.width = '1100px'; wm._captureGridBounds(A); wm.setSplitRatio(A._tabChain, 0.5); return true;`); await sleep(400);
+    const n2 = await tailAt();
+    ok(n2.badgeShown && !n2.hidden && !n2.paintsUnder, 'L1b back on the 1100 px host at 0.5 the badge is back — it steps aside only while the column is too narrow', S(n2));
+
+    // L2 — BOTH sides switchable: a tab of the LEFT half shows on the left, the right pane untouched
+    s = await v2(P1);
+    const rightPaneBefore = s.panes[1];
+    await click(centre(tabAt(s, sidB).r));
+    let s2 = await v2(P1);
+    ok(S(s2.pair) === S([sidB, sidC]) && s2.active === sidB, 'L2 a click on B in the LEFT half shows B on the LEFT (pair [B, C]) — the owner: "I can only change the right side"', S(s2));
+    ok(sameRect(s2.panes[1], rightPaneBefore, 1) && s2.pair[1] === sidC, 'L2 …and the right pane is untouched: still C, same rect (the retired D19 (a) replaced the non-anchor pane — C — instead)', S({ before: rightPaneBefore, after: s2.panes[1] }));
+    ok(S(s2.left) === S([sidA, sidB]) && S(tabAt(s2, sidA) && [tabAt(s2, sidA).shown, tabAt(s2, sidB).shown, tabAt(s2, sidC).shown]) === S([false, true, true]), 'L2 the lists do not move; the strip marks each side\'s shown tab (B and C), A waits in the left half', S(s2.strip));
+
+    // client 2 boots now (before the drags) and waits out its restore gate — the L3 / L6 follower
+    ok(await saveNow(), 'the v2 scene reached data/layouts.json (client 2 boots from it)');
+    const p2 = await newPage();
+    if (!ok(!!p2, 'a second desktop client for the v2 legs')) return;
+    const Q = p2.X;
+    await Q.send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47
+    await Q.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+    await Q.send('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    ok(await bootOk(Q), 'client 2 booted');
+    if (deskId) await Q.ev(`const dm = app.desktopManager; if (dm && dm.activeDesktopId !== ${S(deskId)}) await dm.switchTo(${S(deskId)}); return true;`);
+    ok(await until(() => Q.ev('return app.layoutManager._restoring === false;'), 15000, 100), 'client 2 is past its boot-restore gate');
+    await P1.send('Page.bringToFront');
+
+    // L3 — a drag WITHIN a half reorders; the order persists and reaches client 2 (in place)
+    s = await v2(P1);
+    const bA = tabAt(s, sidA).r, bB = tabAt(s, sidB).r;
+    const mid3 = await tabDrag(centre(bB), { x: bA.left + 6, y: centre(bB).y }, { mid: markerNow });
+    const s3 = await v2(P1);
+    ok(mid3 && mid3.side === 'left' && mid3.index === 0 && mid3.r.height > 8, 'L3 mid-drag an insertion marker shows the slot (left half, index 0)', S(mid3));
+    ok(S(s3.left) === S([sidB, sidA]) && S(s3.pair) === S([sidB, sidC]) && s3.layout === 'split', 'L3 dragging B before A inside the LEFT half reorders it: left [B, A] — never a new split, the pair unchanged', S(s3));
+    ok(!(await ev('return !!document.querySelector(".tab-insert-marker") || !!document.querySelector(".tab-item.tab-reordering");')), 'L3 the marker and the dragged mark are gone after the drop');
+    ok(await toDisk((c) => c.split && Array.isArray(c.split.left) && c.split.left.length === 2 && c.split.right.length === 1 && Array.isArray(c.order)), 'L3 the reorder is PERSISTED: layouts.json carries the order and the side lists', S(chainFromDisk()));
+    const f3 = await until(async () => { const q = await v2(Q); return q.chain && S(q.left) === S(s3.left) && S(q.right) === S(s3.right) && S(q.pair) === S(s3.pair); }, 15000, 200);
+    const q3 = await v2(Q);
+    ok(f3 && q3.halves.length === 2 && S(q3.halves[0].tabs) === S([sidB, sidA]), 'L3 client 2 follows: the same side lists, pair and halves (a same-member change is applied IN PLACE)', S({ q3, s3 }));
+    // CONTROL: the reorder path neutered at runtime ⇒ the same kind of drag changes nothing
+    await sleep(1200); // client 2 takes the reorder first (it DROPS a layout-sync inside its 1 s post-apply gate — the pre-existing §7 gap, not this lane's)
+    await ev(`wm.__moveOrig = wm.moveTabInChain; wm.moveTabInChain = () => false; return true;`);
+    s = await v2(P1);
+    await tabDrag(centre(tabAt(s, sidA).r), { x: tabAt(s, sidB).r.left + 6, y: centre(tabAt(s, sidA).r).y });
+    const c3 = await v2(P1);
+    await ev(`wm.moveTabInChain = wm.__moveOrig; delete wm.__moveOrig; return true;`);
+    ok(S(c3.left) === S([sidB, sidA]), 'L3 CONTROL: with moveTabInChain neutered the same drag leaves left [B, A] — the leg judges the ONE mutation path', S(c3.left));
+    await sleep(4000);
+    const late1 = await v2(P1), late2 = await v2(Q);
+    ok(S(late1.left) === S([sidB, sidA]) && S(late2.left) === S([sidB, sidA]) && S(late2.pair) === S(late1.pair), 'L3 four seconds later neither client reverted (the §6b guards: no echo ping-pong)', S({ l1: late1.left, l2: late2.left }));
+    ok(await Q.ev('return app.layoutManager._userDirty !== true;'), 'L3 client 2 only applied (never a user-dirty writer)');
+
+    // L11 (v2 verify r1, finding ①) — a REAL divider drag on client 2 ACROSS a structural change made on client 1
+    // mid-drag (§6b guard 3 defers the record to the pointerup, then it is applied in place). The drag survives on
+    // client 2 and reaches client 1 and the disk in ONE send; no echo. As shipped: applyChainRecord copied the
+    // record's ratio (0.50) over the drag (0.15) and the apply's user-dirty clear dropped the pointerup's save —
+    // client 2 snapped back one second later and nothing was persisted.
+    {
+      const ratioOf = (X) => X.ev(`const ch = bySid(${S(sidA)})._tabChain; return ch && ch.split ? ch.split.ratio : null;`);
+      const counters = (X) => X.ev(`if (!window.__vsCnt) { window.__vsCnt = { send: 0, apply: 0, restore: 0 }; const s0 = app.ws.send.bind(app.ws); app.ws.send = (m) => { if (m && m.type === 'layout-sync') window.__vsCnt.send++; return s0(m); }; const a0 = wm.applyChainRecord.bind(wm); wm.applyChainRecord = (...x) => { window.__vsCnt.apply++; return a0(...x); }; const r0 = wm.restoreTabChain.bind(wm); wm.restoreTabChain = (...x) => { window.__vsCnt.restore++; return r0(...x); }; } const c = { ...window.__vsCnt }; window.__vsCnt.send = 0; window.__vsCnt.apply = 0; window.__vsCnt.restore = 0; return c;`);
+      /** Client 2 drags the divider from where it is to `toF` of the host in 7 moves 60 ms apart; between move 4 and 5
+       *  client 1 (keydown-marked, as a user) moves the first LEFT tab to the end of its side — and the leg waits until
+       *  client 2 HOLDS that record (deferred, _pendingRemote). Returns the release instant. */
+      const dragAcross = async (toF) => {
+        const q = await v2(Q);
+        const y = q.divider.top + 180, x0 = cx(q.divider), x1 = q.host.left + q.host.width * toF;
+        await Q.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0, y });
+        await Q.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: x0, y, button: 'left', clickCount: 1 });
+        let held = false;
+        for (let i = 1; i <= 7; i++) {
+          await Q.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x0 + (x1 - x0) * i / 7, y, button: 'left', buttons: 1 }); await sleep(60);
+          if (i === 4) {
+            await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' })); const ch = bySid(${S(sidA)})._tabChain; return wm.moveTabInChain(ch, ch.split.left[0], { side: 'left', index: ch.split.left.length - 1 });`);
+            held = await until(() => Q.ev('return !!app.layoutManager._pendingRemote;'), 4000, 100);
+          }
+        }
+        await Q.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x1, y, button: 'left', clickCount: 1 });
+        return { t0: Date.now(), held };
+      };
+      await Q.send('Page.bringToFront');
+      await counters(Q); await counters(P1);
+      const before11 = await v2(P1);
+      const d11 = await dragAcross(0.15);
+      await sleep(Math.max(0, d11.t0 + 1000 - Date.now()));
+      const q1s = await ratioOf(Q);
+      await sleep(Math.max(0, d11.t0 + 5000 - Date.now()));
+      const q5s = await ratioOf(Q), p5s = await ratioOf(P1), disk5 = chainFromDisk();
+      const cQ = await counters(Q), cP = await counters(P1);
+      const q11 = await v2(Q), p11 = await v2(P1);
+      ok(d11.held, 'L11 client 2 was HOLDING client 1\'s structural record while its pointer was down (§6b guard 3 — the scene the finding needs)');
+      ok(S(p11.left) === S([...before11.left.slice(1), before11.left[0]]) && S(q11.left) === S(p11.left) && S(q11.pair) === S(p11.pair), 'L11 the reorder made on client 1 landed on both clients (applied in place on client 2)', S({ before: before11.left, p: p11.left, q: q11.left }));
+      ok(near(q1s, 0.15, 0.02) && near(q5s, 0.15, 0.02), `L11 client 2 KEEPS its drag: ${q1s} one second after the release, ${q5s} after five (as shipped: 0.50 — the record's ratio)`, S({ q1s, q5s }));
+      ok(near(p5s, 0.15, 0.02) && disk5 && disk5.split && near(disk5.split.ratio, 0.15, 0.02), `L11 …and it reached client 1 (${p5s}) and data/layouts.json (${disk5 && disk5.split && disk5.split.ratio})`, S({ p5s, disk: disk5 && disk5.split }));
+      ok(cQ.send === 1 && cQ.apply === 1 && cQ.restore === 0 && cP.send === 1 && cP.restore === 0, `L11 exactly ONE layout-sync from client 2 (the kept drag), one in-place apply there, no rebuild, and client 1 sent only its own reorder — no echo (client 2 ${S(cQ)}, client 1 ${S(cP)})`, S({ cQ, cP }));
+      // CONTROL: the drag's hold neutered on client 2 (the as-shipped path) ⇒ the record's ratio wins, nothing leaves client 2
+      await sleep(1500);
+      await Q.ev('wm.__holdOrig = wm._holdSplitRatio; wm._holdSplitRatio = () => {}; return true;');
+      await counters(Q); await counters(P1);
+      const dc = await dragAcross(0.5);
+      await sleep(Math.max(0, dc.t0 + 5000 - Date.now()));
+      const qc = await ratioOf(Q), pc = await ratioOf(P1), diskc = chainFromDisk(), cQc = await counters(Q);
+      await Q.ev('wm._holdSplitRatio = wm.__holdOrig; delete wm.__holdOrig; return true;');
+      ok(dc.held && near(qc, 0.15, 0.02) && near(pc, 0.15, 0.02) && diskc && near(diskc.split.ratio, 0.15, 0.02) && cQc.send === 0, `L11 CONTROL: with the hold neutered on client 2 the same drag (0.15 → 0.50) snaps back to the record's ratio (${qc}), client 1 and the disk never learn it, client 2 sends nothing — the as-shipped loss`, S({ qc, pc, disk: diskc && diskc.split, cQc }));
+      // back to 0.5 for the legs below (client 1 as a user; client 2 applies it in place)
+      await sleep(1500);
+      await ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' })); wm.setSplitRatio(bySid(${S(sidA)})._tabChain, 0.5); return true;`);
+      ok(await until(async () => near(await ratioOf(Q), 0.5, 0.01), 6000, 150), 'L11 the ratio is back to 0.5 on client 2 (for the legs below)');
+      await sleep(1500);
+      await P1.send('Page.bringToFront');
+    }
+
+    // L4a (v2 verify r1, low ⑤ — the sentence the design now says): a PRESS shows a tab first (the browser rule), so a
+    // POINTER drag always moves a SHOWN tab — the hidden B dragged across arrives shown on the right; only the keyboard /
+    // API move (moveTabInChain with no press) keeps a hidden tab hidden.
+    s = await v2(P1);
+    ok(S(s.left) === S([sidB, sidA]) && S(s.right) === S([sidC]) && s.pair[0] === sidA, 'L4a the scene: left [B, A], right [C], B HIDDEN (the left side shows A)', S(s));
+    await tabDrag(centre(tabAt(s, sidB).r), { x: tabAt(s, sidC).r.right + 30, y: centre(tabAt(s, sidB).r).y });
+    const s4a = await v2(P1);
+    ok(S(s4a.left) === S([sidA]) && S(s4a.right) === S([sidC, sidB]) && S(s4a.pair) === S([sidA, sidB]), 'L4a the HIDDEN B dragged across arrives SHOWN on the right (pair [A, B]): the press showed it, the move carried its display', S(s4a));
+    await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.moveTabInChain(ch, bySid(${S(sidB)}).id, { side: 'left', index: 0 }); return true;`); await sleep(200);
+    const s4k = await v2(P1);
+    await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.moveTabInChain(ch, bySid(${S(sidA)}).id, { side: 'right' }); return true;`); await sleep(200);
+    const s4h = await v2(P1);
+    ok(S(s4k.pair) === S([sidB, sidC]) && S(s4h.right) === S([sidC, sidA]) && S(s4h.pair) === S([sidB, sidC]), 'L4a …while the API move keeps a hidden tab hidden: A (hidden) moved to the right side, the pair stays [B, C]', S({ s4k, s4h }));
+    await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.moveTabInChain(ch, bySid(${S(sidA)}).id, { side: 'left', index: 1 }); return true;`); await sleep(300);
+
+    // L4 — across the boundary MOVES the tab; the last tab out of a side ends the split
+    s = await v2(P1);
+    const aR = tabAt(s, sidA).r, cR = tabAt(s, sidC).r;
+    ok(S(s.left) === S([sidB, sidA]) && S(s.pair) === S([sidB, sidC]), 'L4 the scene: left [B, A] with A HIDDEN (the left side shows B)', S(s));
+    const mid4 = await tabDrag(centre(aR), { x: cR.right + 30, y: centre(aR).y }, { mid: markerNow });
+    const s4 = await v2(P1);
+    ok(mid4 && mid4.side === 'right', 'L4 mid-drag over the right half the marker is on the RIGHT side', S(mid4));
+    ok(s4.layout === 'split' && S(s4.left) === S([sidB]) && S(s4.right) === S([sidC, sidA]) && S(s4.pair) === S([sidB, sidA]), 'L4 the HIDDEN A dragged across MOVES to the right side SHOWN (pair [B, A]): the press shows a tab first (the browser rule), so a pointer drag always moves a SHOWN tab and carries its display; the left shows B (v2 verify r1 ⑤ — only the keyboard / API move keeps a hidden tab hidden)', S(s4));
+    const bR = tabAt(s4, sidB).r;
+    await tabDrag(centre(bR), { x: tabAt(s4, sidA).r.right + 20, y: centre(bR).y });
+    const s4b = await v2(P1);
+    ok(s4b.chain && s4b.layout === 'tabs' && s4b.halves.length === 0 && s4b.order.length === 3 && s4b.order[2] === sidB, 'L4 dragging the LAST tab out of the left side ends the split: tabs, all three still grouped, B where it was dropped', S(s4b));
+
+    // L5 — the first 8 px decide: vertical = the old detach path; horizontal-first never detaches
+    s = await v2(P1);
+    const cT = tabAt(s, sidC).r;
+    await tabDrag(centre(cT), { x: centre(cT).x + 12, y: centre(cT).y + 90 }, { steps: 10 });
+    const s5 = await v2(P1);
+    const cFree = await ev(`const w = bySid(${S(sidC)}); return { chain: !!w._tabChain, disp: getComputedStyle(w.element).display };`);
+    ok(!cFree.chain && cFree.disp === 'flex' && s5.chain && !s5.order.includes(sidC), 'L5 a VERTICAL tab drag still pulls the tab out as its own window (the pre-v2 detach, |dy| > 30)', S({ cFree, s5 }));
+    // re-group C, then a drag that starts HORIZONTAL and then drops 80 px lower stays a reorder
+    await ev(`const A = bySid(${S(sidA)}), Cw = bySid(${S(sidC)}); wm.addToTabChain(A._tabChain, Cw); return true;`); await sleep(300);
+    s = await v2(P1);
+    const aT = tabAt(s, sidA).r;
+    await mouse('mouseMoved', centre(aT).x, centre(aT).y); await mouse('mousePressed', centre(aT).x, centre(aT).y, { button: 'left', clickCount: 1 });
+    for (let i = 1; i <= 4; i++) { await mouse('mouseMoved', centre(aT).x + 5 * i, centre(aT).y, { button: 'left', buttons: 1 }); await sleep(30); }
+    for (let i = 1; i <= 6; i++) { await mouse('mouseMoved', centre(aT).x + 20, centre(aT).y + 15 * i, { button: 'left', buttons: 1 }); await sleep(30); }
+    await mouse('mouseReleased', centre(aT).x + 20, centre(aT).y + 90, { button: 'left', clickCount: 1 }); await sleep(350);
+    ok(await ev(`return !!bySid(${S(sidA)})._tabChain && wm.windows.size === 3 && chats().every((w) => w._tabChain);`), 'L5 a drag decided HORIZONTAL in its first 8 px stays a reorder even when it then moves 90 px down — no late detach');
+
+    // L10 — Ctrl+Shift+PageDown / PageUp move the active tab within its list; inert outside a group
+    await ev(`const A = bySid(${S(sidA)}); const ch = A._tabChain; ch.order = [A.id, ...ch.tabs.filter((x) => x !== A.id)]; wm._normalizeChain(ch); wm._renderTabBar(ch); wm.switchTab(ch, ch.tabs.indexOf(A.id)); wm.focusWindow(A.id); return true;`);
+    await sleep(200);
+    const chord = async (X, key, vk) => { await X.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code: key, windowsVirtualKeyCode: vk, modifiers: 10 }); await X.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code: key, windowsVirtualKeyCode: vk, modifiers: 10 }); await sleep(250); };
+    const o0 = (await v2(P1)).order;
+    await chord(P1, 'PageDown', 34);
+    const o1 = (await v2(P1)).order;
+    await chord(P1, 'PageDown', 34); await chord(P1, 'PageDown', 34);
+    const o2 = (await v2(P1)).order;
+    await chord(P1, 'PageUp', 33);
+    const o3 = (await v2(P1)).order;
+    ok(o0[0] === sidA && o1[1] === sidA && o2[2] === sidA && o3[1] === sidA && (await v2(P1)).active === sidA, 'L10 Ctrl+Shift+PageDown moves the active tab one place right (twice more: it stops at the edge), PageUp one place left; the tab stays the active one', S({ o0, o1, o2, o3 }));
+    // CONTROL: a window in no group ⇒ the chord is inert (no move, no toast — the browser keeps it)
+    await clearToasts();
+    await ev(`const Cw = bySid(${S(sidC)}); wm._detachFromChain(Cw._tabChain, Cw.id); wm.focusWindow(Cw.id); return true;`); await sleep(200);
+    const before10 = (await v2(P1)).order;
+    await chord(P1, 'PageDown', 34);
+    ok(S((await v2(P1)).order) === S(before10) && !(await ev('return !!document.querySelector(".global-toast");')), 'L10 CONTROL: from a window in no group the chord does nothing (inert — no move, no toast)', S(before10));
+
+    // L6 — open a path from a chat: born side by side in THAT chat's chain; the same path again = its tab; tab / window per setting
+    await v2scene();
+    await ev(`const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}), Cw = bySid(${S(sidC)}); wm._detachFromChain(A._tabChain, B.id); wm._detachFromChain(Cw._tabChain, Cw.id); B.element.style.left = '700px'; wm.focusWindow(B.id); return true;`);
+    await sleep(300);
+    const openFrom = (X, sid, p) => X.ev(`const w = bySid(${S(sid)}); const cv = app.sessions.get(w.id); cv._renderers._openLinkTarget(document.createElement('span'), null, ${S(p)}); return true;`);
+    ok((await ev('return app.settings.get("window.openLinkPlacement");')) === 'split' && (await ev(`return wm.activeWindowId === bySid(${S(sidB)}).id;`)), 'L6 the default placement is split, and ANOTHER window (B) is the active one — the source must be the chat the link is in');
+    await openFrom(P1, sidA, path.join(ROOT, 'notes.md'));
+    await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'editor');`), 8000);
+    await sleep(300);
+    let s6 = await v2(P1);
+    ok(s6.chain && s6.layout === 'split' && S(s6.pair) === S([sidA, 'editor:notes.md']) && S(s6.right) === S(['editor:notes.md']), 'L6 a path opened from chat A is BORN side by side in A\'s chain: [A | notes.md]', S(s6));
+    ok(await ev(`return !bySid(${S(sidB)})._tabChain;`), 'L6 …never beside the ACTIVE window B (it stays alone)');
+    await openFrom(P1, sidA, path.join(ROOT, 'notes.md') + ':3');
+    await sleep(800);
+    ok((await ev(`return [...wm.windows.values()].filter((w) => w.type === 'editor').length;`)) === 1 && (await ev(`return wm.windows.get(wm.activeWindowId)?.type;`)) === 'editor', 'L6 the SAME path opened again from A shows its tab (one editor, focused) — never a second window');
+    await openFrom(P1, sidA, path.join(ROOT, 'data.csv'));
+    await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'viewer');`), 8000); await sleep(300);
+    s6 = await v2(P1);
+    ok(s6.layout === 'split' && s6.left[0] === sidA && S(s6.right) === S(['editor:notes.md', 'viewer:data.csv']) && s6.pair[1] === 'viewer:data.csv' && s6.pair[0] === sidA, 'L6 on a chain already split the next open joins the side the source is NOT on and is shown there (A stays shown)', S(s6));
+    await ev(`app.settings.set('window.openLinkPlacement', 'tab'); return true;`);
+    await openFrom(P1, sidA, path.join(ROOT, 'sub'));
+    await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'files');`), 8000); await sleep(300);
+    s6 = await v2(P1);
+    ok(S(s6.left) === S([sidA, 'files:sub']) && s6.pair[0] === 'files:sub', 'L6 openLinkPlacement = tab: the folder joins as a TAB right after A, on A\'s side, and is shown there', S(s6));
+    await ev(`app.settings.set('window.openLinkPlacement', 'window'); return true;`);
+    await openFrom(P1, sidA, path.join(ROOT, 'sub', 'x.txt'));
+    await until(() => ev(`return [...wm.windows.values()].some((w) => w._filePath && w._filePath.endsWith('x.txt'));`), 8000); await sleep(300);
+    ok(await ev(`const w = [...wm.windows.values()].find((x) => x._filePath && x._filePath.endsWith('x.txt')); return !!w && !w._tabChain && getComputedStyle(w.element).display === 'flex';`), 'L6 openLinkPlacement = window: today\'s free window');
+    await ev(`app.settings.set('window.openLinkPlacement', 'split'); const w = [...wm.windows.values()].find((x) => x._filePath && x._filePath.endsWith('x.txt')); if (w) wm.closeWindow(w.id); return true;`);
+    // the born windows survive a RELOAD: layouts.json carries the chain; the async viewer replay is waited for
+    s6 = await v2(P1);
+    ok(await saveNow(), 'L6 the chain with the born windows is on disk');
+    await P1.send('Page.reload');
+    ok(await bootOk(P1), 'L6 client 1 reloaded');
+    const back = await until(async () => { const r = await v2(P1); return r.chain && S(r.left) === S(s6.left) && S(r.right) === S(s6.right) && S(r.pair) === S(s6.pair); }, 20000, 250);
+    const r6 = await v2(P1);
+    ok(back && r6.halves.length === 2, 'L6 after a reload the chain comes back WITH its born windows (editor, CSV viewer, folder), the same sides and panes — the async viewer replay was waited for', S({ want: s6, got: r6 }));
+    const act6 = await ev('return { id: wm.activeWindowId, live: wm.activeWindowId == null || wm.windows.has(wm.activeWindowId), ids: [...wm.windows.keys()] };');
+    ok(act6.live, 'L6 after the reload wm.activeWindowId names a LIVE window (v2 verify r1 ⑦: the restore re-keys windows to their saved ids — the active id must follow)', S(act6));
+    // client 2 (F2's race): the CSV viewer (an ASYNC openFile replay) lands IN the chain, never as a free window
+    await P1.send('Page.bringToFront');
+    const inChainQ = () => Q.ev(`const v = [...wm.windows.values()].filter((w) => w.type === 'viewer'); return { n: v.length, inChain: v.filter((w) => !!w._tabChain).length, free: v.filter((w) => !w._tabChain && getComputedStyle(w.element).display !== 'none').length };`);
+    const race = await until(async () => { const r = await inChainQ(); return r.n >= 1 && r.inChain === r.n; }, 15000, 200);
+    ok(race, 'L6 client 2: the CSV viewer (created by an ASYNC openFile replay) is IN the chain, not a free window (the pending chain waited for it)', S(await inChainQ()));
+    // CONTROL: the pre-fix reconcile (group whatever is there, at once) on client 2 ⇒ a newly opened async viewer stays FREE there
+    await Q.ev(`const lm = app.layoutManager; lm.__rc = lm._reconcileChain; lm._reconcileChain = function ({ tc }) { const present = tc.tabs.filter((id) => wm.windows.has(id)); if (present.length >= 2) { for (const id of present) { const w = wm.windows.get(id); if (w && w._tabChain) wm._detachFromChain(w._tabChain, id); } wm.restoreTabChain(present, tc.active, { layout: tc.layout, split: tc.split, order: tc.order }); } return true; }; return true;`);
+    fs.writeFileSync(path.join(ROOT, 'more.csv'), 'c,d\n3,4\n');
+    // client 1 just reloaded: past its own restore gate, and a real input so its next save is a user-caused one
+    await until(() => ev('return app.layoutManager._restoring === false;'), 15000, 100);
+    await P1.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16, modifiers: 8 });
+    await P1.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Shift', code: 'ShiftLeft', windowsVirtualKeyCode: 16 });
+    await openFrom(P1, sidA, path.join(ROOT, 'more.csv'));
+    await sleep(3000);
+    const ctl6 = await Q.ev(`const v = [...wm.windows.values()].find((w) => w.type === 'viewer' && (w._filePath || '').endsWith('more.csv')); return v ? { inChain: !!v._tabChain, disp: getComputedStyle(v.element).display } : null;`);
+    await Q.ev(`const lm = app.layoutManager; lm._reconcileChain = lm.__rc; delete lm.__rc; return true;`);
+    ok(ctl6 && !ctl6.inChain, 'L6 CONTROL: with client 2\'s reconcile reverted to "group whatever is there now" the async viewer lands as a FREE window — the race is real and the pending chain is what closes it', S(ctl6));
+    Q.close(); await P1.send('Target.closeTarget', { targetId: p2.targetId });
+    await P1.send('Page.bringToFront');
+
+    // L9 — an OLD layouts record (no order, no side lists) restores as a valid split
+    await v2scene();
+    await ev(`wm.bindSplit(bySid(${S(sidA)}), bySid(${S(sidC)}), { side: 'right', focus: 'anchor' }); return true;`); await sleep(300);
+    const oldState = await ev(`const st = app.layoutManager.captureState(); for (const w of st.windows) if (w.tabChain) { delete w.tabChain.order; if (w.tabChain.split) { delete w.tabChain.split.left; delete w.tabChain.split.right; } } return st;`);
+    ws.send(JSON.stringify({ type: 'layout-sync', state: oldState, desktopId: deskId || undefined }));
+    ok(await toDisk((c) => c.layout === 'split' && !c.order && c.split && !c.split.left), 'L9 the store now holds a PRE-v2 record (no order, no side lists)', S(chainFromDisk()));
+    await P1.send('Page.reload');
+    ok(await bootOk(P1), 'L9 client 1 reloaded onto the old record');
+    const got9 = await until(async () => { const r = await v2(P1); return r.chain && r.layout === 'split'; }, 20000, 250);
+    const r9 = await v2(P1);
+    ok(got9 && S(r9.left) === S([sidA, sidB]) && S(r9.right) === S([sidC]) && S(r9.pair) === S([sidA, sidC]) && r9.halves.length === 2 && alignedAt(r9), 'L9 it restores as a VALID split by the repair rule: the non-anchor pane C alone on the right, B with the anchor A; the halves on the panes', S(r9));
+    const act9 = await ev('return { id: wm.activeWindowId, live: wm.activeWindowId == null || wm.windows.has(wm.activeWindowId), ids: [...wm.windows.keys()] };');
+    ok(act9.live, 'L9 after the reload wm.activeWindowId names a LIVE window (v2 verify r1 ⑦: applyPosition re-keyed the windows but not the active id — it pointed at nothing)', S(act9));
+
+    // L7 — window.mergeDropLayout = split: the merge drop lands side by side at once; Undo puts the window back; Unsplit keeps the group
+    const mergeScene = () => ev(`document.getElementById('global-toasts')?.remove(); for (const w of [...wm.windows.values()]) { if (w.type !== 'chat') wm.closeWindow(w.id); } for (const w of chats()) { if (w._tabChain) wm._detachFromChain(w._tabChain, w.id); } const Cw = bySid(${S(sidC)}); if (Cw && !Cw.isMinimized) wm.minimize(Cw.id); /* a detached C sits exactly on A (the host rect) — its icon would be the drop target */ const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}); A.element.style.left = '20px'; A.element.style.top = '20px'; A.element.style.width = '640px'; A.element.style.height = '480px'; B.element.style.left = '720px'; B.element.style.top = '260px'; B.element.style.width = '460px'; B.element.style.height = '380px'; A._isSnapped = false; B._isSnapped = false; B._preSnapBounds = null; wm._captureGridBounds(A); wm._captureGridBounds(B); wm.focusWindow(B.id); return new Promise((res) => setTimeout(() => res({ a: rect(A.element), b: rect(B.element), bTitle: rect(B.titleSpan), aIcon: rect(A.titleBar.querySelector('.window-icon-stack')) }), 300));`);
+    const mergeDrag = async (g) => { const from = centre(g.bTitle), to = centre(g.aIcon); await mouse('mouseMoved', from.x, from.y); await mouse('mousePressed', from.x, from.y, { button: 'left', clickCount: 1 }); for (let i = 1; i <= 14; i++) { await mouse('mouseMoved', from.x + (to.x - from.x) * i / 14, from.y + (to.y - from.y) * i / 14, { button: 'left', buttons: 1 }); await sleep(35); } await mouse('mouseReleased', to.x, to.y, { button: 'left', clickCount: 1 }); await sleep(350); };
+    await ev(`app.settings.set('window.mergeDropLayout', 'split'); return true;`);
+    let g7 = await mergeScene();
+    await mergeDrag(g7);
+    const s7 = await v2(P1);
+    const t7 = await ev(`const t = [...document.querySelectorAll('.global-toast')].find((x) => (x.querySelector('.global-toast-body')?.textContent || '').includes('Side by side')); return t ? [...t.querySelectorAll('.global-toast-action')].map((a) => ({ label: a.textContent, r: rect(a) })) : null;`);
+    ok(s7.layout === 'split' && S(s7.pair) === S([sidA, sidB]), 'L7 mergeDropLayout = split: B dropped on A\'s icon stack lands side by side AT ONCE, the dragged B on the RIGHT', S(s7));
+    ok(t7 && S(t7.map((a) => a.label)) === S(['Undo', 'Unsplit']) && !(await toastWith('Grouped as tabs')), 'L7 the toast offers Undo and Unsplit (no "Grouped as tabs" offer)', S(t7));
+    if (t7) await click(centre(t7[0].r));
+    const u7 = await ev(`const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}); return { aChain: !!A._tabChain, bChain: !!B._tabChain, a: rect(A.element), b: rect(B.element), bDisp: getComputedStyle(B.element).display };`);
+    ok(!u7.aChain && !u7.bChain && u7.bDisp === 'flex' && sameRect(u7.b, g7.b, 2) && sameRect(u7.a, g7.a, 2), 'L7 Undo ⇒ B is its own window again at the rect it had BEFORE the drag (±2 px), A unmoved', S({ before: g7, after: u7 }));
+    g7 = await mergeScene();
+    await mergeDrag(g7);
+    const t7b = await ev(`const t = [...document.querySelectorAll('.global-toast')].find((x) => (x.querySelector('.global-toast-body')?.textContent || '').includes('Side by side')); return t ? [...t.querySelectorAll('.global-toast-action')].map((a) => ({ label: a.textContent, r: rect(a) })) : null;`);
+    if (t7b) await click(centre(t7b[1].r));
+    const s7b = await v2(P1);
+    ok(s7b.chain && s7b.layout === 'tabs' && s7b.order.length === 2, 'L7 Unsplit ⇒ the two stay GROUPED, as tabs', S(s7b));
+    await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
+    g7 = await mergeScene();
+    await mergeDrag(g7);
+    const s7c = await v2(P1);
+    ok(s7c.layout === 'tabs' && !!(await toastWith('Grouped as tabs')), 'L7 CONTROL: the default (tabs) — the same drop groups as tabs and offers "Show side by side" (the setting is read at the drop)', S(s7c));
+    await clearToasts();
+
+    // L7b / L7c (v2 verify r1, lows ③ ④): a THIRD window dropped on a two-tab chain's strip. triScene = A + B grouped
+    // (A the host; `split` ⇒ [A | B] through the programmatic bind — silent), C free where B stood.
+    const triScene = (split) => mergeScene().then(() => ev(`const A = bySid(${S(sidA)}), B = bySid(${S(sidB)}), Cw = bySid(${S(sidC)}); wm.createTabChain(A, B); ${split ? `wm.bindSplit(A, B, { side: 'right', focus: 'anchor' });` : ''} if (Cw.isMinimized) wm.restore(Cw.id); Cw.element.style.left = '720px'; Cw.element.style.top = '260px'; Cw.element.style.width = '460px'; Cw.element.style.height = '380px'; Cw._isSnapped = false; Cw._preSnapBounds = null; wm._captureGridBounds(Cw); wm.focusWindow(Cw.id); document.getElementById('global-toasts')?.remove(); return new Promise((res) => setTimeout(() => { const t = (id) => rect([...A.titleBar.querySelectorAll('.tab-item')].find((x) => x.dataset.winId === id)); res({ tA: t(A.id), tB: t(B.id), c: rect(Cw.element), cTitle: rect(Cw.titleSpan) }); }, 350));`));
+    const barDrag = async (from, to) => { await mouse('mouseMoved', from.x, from.y); await mouse('mousePressed', from.x, from.y, { button: 'left', clickCount: 1 }); for (let i = 1; i <= 14; i++) { await mouse('mouseMoved', from.x + (to.x - from.x) * i / 14, from.y + (to.y - from.y) * i / 14, { button: 'left', buttons: 1 }); await sleep(35); } await mouse('mouseReleased', to.x, to.y, { button: 'left', clickCount: 1 }); await sleep(400); };
+    const toastActs = (text) => ev(`const t = [...document.querySelectorAll('.global-toast')].find((x) => (x.querySelector('.global-toast-body')?.textContent || '').includes(${S(text)})); return t ? [...t.querySelectorAll('.global-toast-action')].map((a) => ({ label: a.textContent, r: rect(a) })) : null;`);
+    // L7b — mergeDropLayout = split: C dropped BETWEEN A and B lands side by side; the toast's Unsplit puts C back
+    // at the slot it was dropped on (= the tabs setting's result). As shipped it went to the END: [A, B, C].
+    await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
+    let g7t = await triScene(false);
+    const slot = (g) => ({ x: (g.tA.right + g.tB.left) / 2, y: g.tA.top + g.tA.height / 2 });
+    await barDrag(centre(g7t.cTitle), slot(g7t));
+    const ref7 = await v2(P1);
+    ok(ref7.chain && ref7.layout === 'tabs' && S(ref7.order) === S([sidA, sidC, sidB]), 'L7b (reference) under `tabs` C dropped between A and B lands at that slot: [A, C, B]', S(ref7));
+    await ev(`app.settings.set('window.mergeDropLayout', 'split'); return true;`);
+    g7t = await triScene(false);
+    await barDrag(centre(g7t.cTitle), slot(g7t));
+    const s7d = await v2(P1), t7d = await toastActs('Side by side');
+    ok(s7d.layout === 'split' && S(s7d.right) === S([sidC]) && s7d.pair[1] === sidC && t7d && S(t7d.map((a) => a.label)) === S(['Undo', 'Unsplit']), 'L7b under `split` the same drop lands side by side, C alone on the RIGHT, the toast offers Undo / Unsplit', S({ s7d, t7d }));
+    if (t7d) await click(centre(t7d[1].r));
+    const u7d = await v2(P1);
+    ok(u7d.layout === 'tabs' && S(u7d.order) === S(ref7.order), `L7b the toast's Unsplit returns C to the slot it was DROPPED on — ${S(u7d.order.map((x) => x === sidA ? 'A' : x === sidB ? 'B' : 'C'))}, the tabs setting's own result (as shipped: C last)`, S({ got: u7d.order, want: ref7.order }));
+    // CONTROL: Unsplit without the drop slot (the badge menu's plain Unsplit — "left then right") ⇒ C last
+    g7t = await triScene(false);
+    await barDrag(centre(g7t.cTitle), slot(g7t));
+    await ev(`const ch = bySid(${S(sidA)})._tabChain; wm.unbindSplit(ch); return true;`);
+    const c7d = await v2(P1);
+    ok(S(c7d.order) === S([sidA, sidB, sidC]), 'L7b CONTROL: the plain Unsplit of the same split reads left then right ([A, B, C]) — the slot comes from the toast, not from the model', S(c7d.order));
+    await clearToasts();
+    // L7c — a drop onto a chain ALREADY split (either setting): C joins the half under the pointer and is shown there;
+    // the toast says so and offers Undo — C back at its pre-drag rect, the split back to [A | B]. As shipped: silent.
+    for (const mode of ['tabs', 'split']) {
+      await ev(`app.settings.set('window.mergeDropLayout', ${S(mode)}); return true;`);
+      const g = await triScene(true);
+      await barDrag(centre(g.cTitle), { x: g.tA.right - 3, y: g.tA.top + g.tA.height / 2 });
+      const s7e = await v2(P1), t7e = await toastActs('Side by side');
+      ok(s7e.layout === 'split' && S(s7e.left) === S([sidA, sidC]) && S(s7e.pair) === S([sidC, sidB]), `L7c (${mode}) C dropped on the LEFT half joins it and is shown there: left [A, C], pair [C, B]`, S(s7e));
+      ok(t7e && S(t7e.map((a) => a.label)) === S(['Undo']), `L7c (${mode}) …and a toast names the new pair with an Undo (as shipped: no toast at all)`, S(t7e));
+      if (t7e) await click(centre(t7e[0].r));
+      const u7e = await ev(`const Cw = bySid(${S(sidC)}); return { cChain: !!Cw._tabChain, c: rect(Cw.element), cDisp: getComputedStyle(Cw.element).display };`), a7e = await v2(P1);
+      ok(!u7e.cChain && u7e.cDisp === 'flex' && sameRect(u7e.c, g.c, 2), `L7c (${mode}) Undo ⇒ C is its own window again at the rect it had BEFORE the drag (±2 px)`, S({ before: g.c, after: u7e.c }));
+      ok(a7e.layout === 'split' && S(a7e.left) === S([sidA]) && S(a7e.right) === S([sidB]) && S(a7e.pair) === S([sidA, sidB]), `L7c (${mode}) …and the split is back to [A | B] as it was before the drop`, S(a7e));
+      await clearToasts();
+    }
+    // L7d — that Undo restores the split's layout from BEFORE the drop (sides, order, pair), not just "C out": a split
+    // [A, D | B] with D HIDDEN (D = an editor), C dropped between A and D ⇒ left [A, C, D], pair [C, B]; Undo ⇒
+    // [A, D | B], pair [A, B]. The detach alone would show D — the tab now at C's old slot.
+    const l7d = async (neuter) => {
+      await ev(`app.settings.set('window.mergeDropLayout', 'tabs'); app.settings.set('window.openLinkPlacement', 'window'); return true;`);
+      await triScene(true);
+      await openFrom(P1, sidA, path.join(ROOT, 'notes.md'));
+      await until(() => ev(`return [...wm.windows.values()].some((w) => w.type === 'editor');`), 8000); await sleep(300);
+      const g = await ev(`const A = bySid(${S(sidA)}), Cw = bySid(${S(sidC)}); const D = [...wm.windows.values()].find((w) => w.type === 'editor'); const ch = A._tabChain; wm.addToTabChain(ch, D, { side: 'left', index: 1 }); wm.switchTab(ch, ch.tabs.indexOf(A.id)); wm.focusWindow(Cw.id); document.getElementById('global-toasts')?.remove(); return new Promise((res) => setTimeout(() => { const t = (id) => rect([...A.titleBar.querySelectorAll('.tab-item')].find((x) => x.dataset.winId === id)); res({ tA: t(A.id), tD: t(D.id), c: rect(Cw.element), cTitle: rect(Cw.titleSpan) }); }, 350));`);
+      const b = await v2(P1);
+      if (neuter) await ev('wm.__rcl = wm._restoreChainLayout; wm._restoreChainLayout = () => {}; return true;');
+      await barDrag(centre(g.cTitle), { x: (g.tA.right + g.tD.left) / 2, y: g.tA.top + g.tA.height / 2 });
+      const d = await v2(P1), tt = await toastActs('Side by side');
+      if (tt) await click(centre(tt[0].r));
+      const u = await v2(P1);
+      if (neuter) await ev('wm._restoreChainLayout = wm.__rcl; delete wm.__rcl; return true;');
+      await ev(`app.settings.set('window.openLinkPlacement', 'split'); return true;`);
+      await clearToasts();
+      return { b, d, u, c: g.c, cAfter: await ev(`const Cw = bySid(${S(sidC)}); return { chain: !!Cw._tabChain, r: rect(Cw.element) };`) };
+    };
+    const r7d = await l7d(false);
+    ok(S(r7d.b.left) === S([sidA, 'editor:notes.md']) && S(r7d.b.pair) === S([sidA, sidB]) && S(r7d.d.left) === S([sidA, sidC, 'editor:notes.md']) && S(r7d.d.pair) === S([sidC, sidB]), 'L7d the scene: [A, D | B] with D hidden; C dropped between A and D ⇒ left [A, C, D], pair [C, B]', S({ b: r7d.b.left, d: r7d.d }));
+    ok(!r7d.cAfter.chain && sameRect(r7d.cAfter.r, r7d.c, 2) && S(r7d.u.left) === S([sidA, 'editor:notes.md']) && S(r7d.u.right) === S([sidB]) && S(r7d.u.pair) === S([sidA, sidB]), 'L7d Undo ⇒ C back at its rect, and the split exactly as before the drop: [A, D | B], pair [A, B] (D hidden again)', S({ u: r7d.u, cAfter: r7d.cAfter }));
+    const c7d2 = await l7d(true);
+    ok(S(c7d2.u.pair) === S(['editor:notes.md', sidB]), 'L7d CONTROL: with the restore of the before-layout neutered the same Undo leaves D shown (pair [D, B]) — the detach alone does not undo the drop', S(c7d2.u));
+    await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'editor') wm.closeWindow(w.id); app.settings.set('window.mergeDropLayout', 'tabs'); return true;`);
   }
 
   } finally {

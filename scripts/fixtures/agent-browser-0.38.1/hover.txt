@@ -1,0 +1,14 @@
+agent-browser hover - Hover over an element
+
+Usage: agent-browser hover <selector>
+
+Moves the mouse to hover over the specified element. Useful for
+triggering hover states or dropdown menus.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser hover "#dropdown-trigger"
+  agent-browser hover @e4

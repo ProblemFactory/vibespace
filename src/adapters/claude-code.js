@@ -14,6 +14,7 @@
 
 const { BackendAdapter } = require('./base');
 const { worktreeSpawnArgs } = require('../backend-caps');
+const { claudeAllowRules, claudeAskRulesFor, spawnPermissionMode } = require('../agent-tool-rules.js'); // lane L: VibeSpace's own agent tools never ask per command (publish asks in a mode that asks anyway)
 // PURE (imports nothing): `parseGetUsageResponse` marks whether its own parse
 // enumerated the model-scoped set — the claim that lets a write RETIRE a limit
 // (r6). Deliberately the SAME function the other two claude parsers use; a
@@ -97,6 +98,23 @@ class ClaudeCodeAdapter extends BackendAdapter {
     const tuiRenderer = options.tuiRenderer || S.tuiRenderer || '';
     const disableModelFallback = S.disableModelFallback === true;
     const args = [];
+    // lane L r2 — EXACTLY ONE --settings FLAG, EVER. Repeated flags are
+    // undefined behaviour, and every merge below finds "the" flag by
+    // indexOf. A user's `--settings=<v>` in extraArgs is split into the
+    // two-word form so it IS that flag; a user's `--settings <file>` (not an
+    // inline JSON object) makes every default this spawn would ADD stand down
+    // — the user's file governs (`notes` says so; the server logs it).
+    const notes = [];
+    const xa = [];
+    for (const a of extraArgs) {
+      if (typeof a === 'string' && a.startsWith('--settings=')) xa.push('--settings', a.slice('--settings='.length));
+      else xa.push(a);
+    }
+    const userSettingsMergeable = (() => {
+      const i = xa.indexOf('--settings');
+      if (i < 0) return true;
+      try { const o = JSON.parse(xa[i + 1]); return !!o && typeof o === 'object' && !Array.isArray(o); } catch { return false; }
+    })();
 
     if (resumeId) {
       args.push('--resume', resumeId);
@@ -109,12 +127,16 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // (from disassembly: --effort ultracode parses to plain xhigh WITHOUT the
     // mode). Enable the mode at spawn via --settings (a documented setter for
     // the ultracode key); otherwise pass --effort verbatim.
+    // lane L r2: the ultracode key is MERGED into the one flag after the
+    // user's extraArgs land (it used to be pushed as its own flag first, so a
+    // user's `--settings <file>` made TWO); with a user's settings FILE it
+    // stands down — the file governs, and the log says the mode is not on.
     if (effort === 'ultracode') {
-      args.push('--effort', 'xhigh', '--settings', JSON.stringify({ ultracode: true }));
+      args.push('--effort', 'xhigh');
     } else if (effort) {
       args.push('--effort', effort);
     }
-    if (extraArgs.length) args.push(...extraArgs);
+    if (xa.length) args.push(...xa);
     // PER-SESSION GIT WORKTREE (owner ruling 9). The decision is the PURE
     // rule in backend-caps — the flag is passed on a NEW session and on a
     // FORK, never on a plain resume (the CLI re-enters its own recorded
@@ -160,6 +182,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
       const sjson = JSON.stringify(settingsObj);
       if (si >= 0) args[si + 1] = sjson; else args.push('--settings', sjson);
     };
+    if (effort === 'ultracode') {
+      if (userSettingsMergeable) mergeSettings({ ultracode: true });
+      else notes.push(`ultracode stands down: the session's own --settings ${JSON.stringify(String(xa[xa.indexOf('--settings') + 1] || ''))} is not inline JSON, so its file governs — effort runs as xhigh without the ultracode mode (add "ultracode": true to that file to have it)`);
+    }
     // Output style (2.368.0): the CLI's built-in styles (Concise / Explanatory
     // / Learning / Proactive) are a SETTINGS key, and a stream-json session is
     // never offered `/output-style` (verified against a real init record), so
@@ -207,6 +233,48 @@ class ClaudeCodeAdapter extends BackendAdapter {
       if (si >= 0) { try { userObj = JSON.parse(args[si + 1]); } catch { userObj = undefined; } }
       const mergeable = si < 0 || (userObj && typeof userObj === 'object' && !Array.isArray(userObj));
       if (mergeable && !(userObj && Object.prototype.hasOwnProperty.call(userObj, 'autoContinueAtUsageLimit'))) mergeSettings({ autoContinueAtUsageLimit: false });
+    }
+    // VIBESPACE'S OWN AGENT TOOLS NEVER ASK PER COMMAND (lane L, 2026-09-25;
+    // row `allowAgentTools`, default ON — an absent bag is ON too). The naive-
+    // user study counted 7–15 "Permission: Bash" cards per browser task in the
+    // default permission mode, and "Always Allow" never stopped the next one
+    // (the CLI suggests the command's first TWO words, `vibespace-browser
+    // click *`). The allow rules ride the inline --settings JSON = the CLI's
+    // `flagSettings` source, which ADDS to the user/project/local rules (every
+    // source is kept; 2.1.281) and writes nothing to disk. The table and the
+    // measured rule spelling live in src/agent-tool-rules.js (a verb that runs
+    // an arbitrary shell command — `vibespace-job run` — is held). Same
+    // stand-down as the default above: a user's own `--settings <file>` governs;
+    // a user's own inline `permissions.allow` is KEPT and ours appended.
+    // r2 (owner 2026-09-25): `vibespace-page publish` keeps asking — it is
+    // not in the allow list, and it rides `permissions.ask` beside it (2.1.281:
+    // deny > ask > allow, the ask-rule check before the mode check), so a
+    // user's own broader allow rule never pre-approves it either. A user's own
+    // inline `ask` is kept first, ours appended without duplicates.
+    // r3 (integrator 2026-09-26): the ask rule outranks the MODE, so it rides
+    // only a spawn whose mode asks anyway (default / manual / acceptEdits /
+    // plan) — in bypassPermissions publish runs as it always did, in dontAsk it
+    // is refused as it always was, auto / no flag decide for themselves. The
+    // mode is read off THIS argv (the same `--permission-mode` pushed above, a
+    // user's own flag or --dangerously-skip-permissions in extraArgs
+    // included). A mid-session set_permission_mode rewrites no settings, so
+    // the rule follows the SPAWN mode. A user's own inline ask is never touched.
+    if (S.allowAgentTools !== false) {
+      const si = args.indexOf('--settings');
+      let userObj = null;
+      if (si >= 0) { try { userObj = JSON.parse(args[si + 1]); } catch { userObj = undefined; } }
+      const mergeable = si < 0 || (userObj && typeof userObj === 'object' && !Array.isArray(userObj));
+      if (mergeable) {
+        const prev = userObj && userObj.permissions && typeof userObj.permissions === 'object' && !Array.isArray(userObj.permissions) ? userObj.permissions : {};
+        const had = Array.isArray(prev.allow) ? prev.allow.filter((r) => typeof r === 'string') : [];
+        const next = { ...prev, allow: [...had, ...claudeAllowRules().filter((r) => !had.includes(r))] };
+        const askRules = claudeAskRulesFor(spawnPermissionMode(args));
+        if (askRules.length) {
+          const hadAsk = Array.isArray(prev.ask) ? prev.ask.filter((r) => typeof r === 'string') : [];
+          next.ask = [...hadAsk, ...askRules.filter((r) => !hadAsk.includes(r))];
+        }
+        mergeSettings({ permissions: next });
+      }
     }
     // AUTHORITATIVE TURN STATE (design-harness-features §2.5/§3.5, owner
     // decision 8(c)): 2.1.257 emits `system/session_state_changed`
@@ -267,6 +335,8 @@ class ClaudeCodeAdapter extends BackendAdapter {
       else if (tuiRenderer === 'classic') env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = '1';
     }
 
+    // a stand-down is SAID (lane L r2) — the server journal carries it
+    for (const n of notes) console.warn(`[claude-adapter] ${n}`);
     return {
       cmd: this.config.claudeCmd,
       args,
@@ -274,6 +344,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       wrapper: mode === 'chat' ? this.config.chatWrapper : this.config.ptyWrapper,
       cwd: cwd || os.homedir(),
       mode,
+      ...(notes.length ? { notes } : {}),
     };
   }
 
@@ -357,7 +428,18 @@ class ClaudeCodeAdapter extends BackendAdapter {
   // Deny keeps the CLI's familiar sentence.
   static buildPermissionResponse(requestId, approved, toolInput, permissionUpdates, denyMessage) {
     const allowResponse = { behavior: 'allow', updatedInput: toolInput || {} };
-    if (permissionUpdates?.length) allowResponse.permission_updates = permissionUpdates;
+    // THE CLI'S OWN SPELLING IS `updatedPermissions` (lane L, 2026-09-25 — the
+    // naive-user study's "Always Allow does not stop the next one"). The stdio
+    // permission-prompt result is parsed by the 2.1.281 schema
+    // `{behavior:'allow', updatedInput?, updatedPermissions?: PermissionUpdate[],
+    // toolUseID?, decisionClassification?}` (read in the binary; the Agent SDK's
+    // PermissionResult spells it the same), and a zod object STRIPS unknown
+    // keys — so the `permission_updates` this sent since the HAQI days was
+    // dropped on arrival and every "Always Allow" was a plain Allow (no rule,
+    // nothing written to settings.local.json). `updatedPermissions` is applied
+    // by the CLI (`setSessionToolPermissionContext` + persisted to the update's
+    // own destination). test-agent-tool-rules pins the spelling.
+    if (permissionUpdates?.length) allowResponse.updatedPermissions = permissionUpdates;
     const message = typeof denyMessage === 'string' && denyMessage.trim() ? denyMessage.slice(0, 2000) : 'User denied this action';
     return {
       type: 'control_response',

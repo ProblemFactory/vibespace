@@ -2,7 +2,7 @@
  * Command Mode — Ctrl+\ prefix key (tmux-style).
  * Yellow [CMD] indicator in taskbar, 2s auto-exit.
  * Single keystrokes: arrows=snap, m=maximize, w=close, Tab=cycle, v/V=side by side
- * (toggle / swap), f/g/n/s/b/e=global.
+ * (toggle / swap), {/}=move the tab left / right, f/g/n/s/b/e=global.
  */
 
 import { showInputDialog, showToast } from './utils.js';
@@ -106,6 +106,17 @@ export function registerCommandModeCommands() {
   registerCommand({
     id: 'chain.unsplit', title: 'Unsplit',
     run: (c) => { const ch = groupOf(c.app); if (!ch) return needGroup(); if (ch.layout !== 'split') return showToast(t('Not shown side by side')); c.app.wm.unbindSplit(ch); },
+  });
+  // split tabs v2 (docs/design-split-ux.zh.md §8): move the ACTIVE tab one place
+  // within its own list (its side in a split, the strip in tabs) — command mode
+  // `{` / `}` and the registry chords Ctrl+Shift+PageUp / PageDown (app.js)
+  registerCommand({
+    id: 'chain.moveTabLeft', title: 'Move tab left',
+    run: (c) => { if (!groupOf(c.app)) return needGroup(); c.app.wm.moveActiveTab(-1); },
+  });
+  registerCommand({
+    id: 'chain.moveTabRight', title: 'Move tab right',
+    run: (c) => { if (!groupOf(c.app)) return needGroup(); c.app.wm.moveActiveTab(1); },
   });
   // ctx.partnerId = the window to show on the right of the active one (a plugin row / palette)
   registerCommand({
@@ -212,6 +223,9 @@ export class CommandMode {
         // v = side by side on / off for the active tab group, V (shift+v) = swap left and right
         case 'v': runCommand('chain.toggleSplit', cctx); this.exit(); break;
         case 'V': runCommand('chain.swapSides', cctx); this.exit(); break;
+        // { / } = move the active tab left / right within its list (split tabs v2)
+        case '{': runCommand('chain.moveTabLeft', cctx); break; // stay in command mode: a tab often moves several places
+        case '}': runCommand('chain.moveTabRight', cctx); break;
         default: this.exit(); break;
       }
     }, true); // capture phase
@@ -225,7 +239,7 @@ export class CommandMode {
     clearTimeout(this._cmdDigitTimer);
     this._cmdIndicator.classList.add('active');
     // Show the available keys while armed — command mode was undiscoverable
-    this._cmdIndicator.textContent = '[CMD] ←↑↓→ snap · m max · w close · Tab cycle · v split · f free · g grid · n new · s sidebar';
+    this._cmdIndicator.textContent = '[CMD] ←↑↓→ snap · m max · w close · Tab cycle · v split · {} move tab · f free · g grid · n new · s sidebar';
     this._resetTimer();
   }
 

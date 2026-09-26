@@ -206,15 +206,22 @@ function usableNodes(nodes) {
   }
   return n;
 }
+/** The longest probe reason a `why` carries (a helper's stderr tail can be long; the sentence stays one line). */
+const REASON_MAX = 240;
 /**
  * The mode a verb runs under. `mode` = the share's (auto | tree | pixels); `probe` = what one snapshot saw
- * (`{a11yOk, nodes, usable, unreadable}`) — only `auto` reads it. → `{ mode: 'tree'|'pixels', why }`.
+ * (`{a11yOk, nodes, usable, unreadable, reason}`) — only `auto` reads it. → `{ mode: 'tree'|'pixels', why }`.
+ * Mirror red on 2.369.181: an unreachable tree resolves to pixels WHATEVER the reason (no interpreter, no binding, no
+ * bus, a helper that died) — the reason (`probe.reason`, `<code>: <why>`) is NAMED in the sentence, the mode is one.
  */
 function resolveMode({ mode = 'auto', probe = null } = {}) {
   if (mode === 'tree') return { mode: 'tree', why: 'the user shared it with its accessibility tree' };
   if (mode === 'pixels') return { mode: 'pixels', why: 'the user shared it in pixel mode' };
   if (!probe) return { mode: null, why: 'not resolved yet — attach resolves it' };
-  if (probe.a11yOk === false) return { mode: 'pixels', why: 'the accessibility bus is unreachable here — pixel mode' };
+  if (probe.a11yOk === false) {
+    const reason = String(probe.reason || '').replace(/\s+/g, ' ').trim();
+    return { mode: 'pixels', why: reason ? `the accessibility tree is unreachable here (${reason.length > REASON_MAX ? reason.slice(0, REASON_MAX - 1) + '…' : reason}) — pixel mode` : 'the accessibility bus is unreachable here — pixel mode' };
+  }
   const nodes = Number(probe.nodes) || 0;
   const usable = probe.usable != null ? Number(probe.usable) || 0 : 0;
   if (!nodes) return { mode: 'pixels', why: 'no accessibility tree — pixel mode' };
@@ -451,7 +458,7 @@ module.exports = {
   LEVELS, RANK, PRINCIPAL_KINDS, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
   sessionKeyOf, callerKeys, normPrincipal, principalKey,
   emptyRecord, normRecord, grant, revoke, setMode, openerGrant, reachFor, isExposed,
-  usableNodes, resolveMode, verbGate,
+  usableNodes, resolveMode, REASON_MAX, verbGate,
   pixelPlan, visibilityVerdict, mapPoint,
   requestText, viewOf, shareSummary, pickerModel, proposalOf, setProposal, launchShare, launchSummary, principalsNow, rememberedCount, normShare,
   REACHED_STATES, reachedState, launchCounts,

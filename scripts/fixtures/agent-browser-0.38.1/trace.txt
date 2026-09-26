@@ -1,0 +1,19 @@
+agent-browser trace - Record execution trace
+
+Usage: agent-browser trace start
+       agent-browser trace stop [path]
+
+Record a Chrome DevTools trace for debugging.
+
+Operations:
+  start                Start recording trace
+  stop [path]          Stop recording and save trace
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser trace start
+  agent-browser trace stop
+  agent-browser trace stop ./debug-trace.json

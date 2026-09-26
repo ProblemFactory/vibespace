@@ -1,0 +1,16 @@
+agent-browser errors - View page errors
+
+Usage: agent-browser errors [--clear]
+
+View JavaScript errors and uncaught exceptions.
+
+Options:
+  --clear              Clear error buffer
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser errors
+  agent-browser errors --clear

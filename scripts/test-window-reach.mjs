@@ -216,6 +216,15 @@ console.log('§5 THE MODE TABLE (D7)');
   ok(c.mode === 'pixels' && /closed \(4 nodes/.test(c.why), `Chrome without its switch (4 frames) ⇒ pixels: "${c.why}"`);
   ok(tr.mode === 'tree' && /answers/.test(tr.why) && bus.mode === 'pixels' && /unreachable/.test(bus.why), 'a usable tree ⇒ tree; the bus unreachable ⇒ pixels (said)');
   ok(R.resolveMode({ mode: 'tree' }).mode === 'tree' && R.resolveMode({ mode: 'pixels' }).mode === 'pixels' && R.resolveMode({ mode: 'auto' }).mode === null, 'tree / pixels need no probe; auto without one is unresolved (null)');
+  // mirror red on 2.369.181: an unreachable tree is pixels WHATEVER the reason — the reason is named, the mode is one
+  {
+    const reasons = ['python3_missing: python3 is not on PATH', "a11y_unavailable: python3 gi Atspi not importable: No module named 'gi'", 'helper_error: the helper answered nothing parseable (exit 134): dbind-ERROR **: AT-SPI: Couldn\'t connect to accessibility bus', 'helper_missing: window-targets-helper.py is not on disk'];
+    const rs = reasons.map((reason) => R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason } }));
+    ok(rs.every((v, i) => v.mode === 'pixels' && v.why.includes(`unreachable here (${reasons[i]})`) && / — pixel mode$/.test(v.why)), `four reasons, ONE resolution (pixels), each reason named: "${rs[1].why}"`);
+    const long = R.resolveMode({ mode: 'auto', probe: { a11yOk: false, reason: `helper_error: ${'x'.repeat(2000)}\nsecond line` } });
+    ok(long.mode === 'pixels' && long.why.length < R.REASON_MAX + 80 && !long.why.includes('\n') && long.why.includes('…'), `a long helper reason is clipped to one line (${long.why.length} chars)`);
+    ok(R.resolveMode({ mode: 'tree', probe: { a11yOk: false, reason: 'python3_missing: x' } }).mode === 'tree', 'an explicit tree share never reads the probe (the reason changes nothing)');
+  }
   // the gate, over every mode × resolution × verb × ref
   const VERBS = [['snapshot', false], ['click', true], ['click', false], ['type', true], ['type', false], ['key', false], ['scroll', false], ['screenshot', false]];
   const want = (mode, resolved, verb, ref) => {

@@ -1,0 +1,28 @@
+agent-browser click - Click an element
+
+Usage: agent-browser click <selector> [--new-tab] [--human]
+
+Clicks on the specified element. The selector can be a CSS selector,
+XPath, or an element reference from snapshot (e.g., @e1).
+
+If another element covers the click point, agent-browser reports the
+covering element instead of dispatching a click to the wrong target.
+
+Options:
+  --new-tab            Open link in a new tab instead of navigating current tab.
+                       The new tab inherits session setup before its first load.
+                       Only works on elements with an href attribute.
+  --human              Approach along a reproducible eased curve
+                       Starts at the last pointer or element interaction
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser click "#submit-button"
+  agent-browser click @e1
+  agent-browser click "button.primary"
+  agent-browser click "//button[@type='submit']"
+  agent-browser click @e3 --new-tab
+  agent-browser click @e3 --human

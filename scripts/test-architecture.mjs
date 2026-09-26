@@ -2137,5 +2137,127 @@ console.log('§58 every UI_ICONS / FILE_ICONS name a module spells exists in ico
   ok(planted.length === 2 && planted.every((p) => p.startsWith('src/lib/browser-live-window.js:')), `§58 NEGATIVE CONTROL: the shipped miss (UI_ICONS.web) and a bracket miss planted into a patched listing are both caught (${planted.join(' | ')})`);
 }
 
+// §59 ONE OUTSIDE-PRESS CLOSER (lane M, inc-muhms5kt-0ejl — the owner: "vibespace中的悬浮菜单，不相应在app画面里的点击
+// 自动隐藏"). Every floating menu / popover / popup closed on a document `mousedown`, and an app's picture cancels its
+// `pointerdown` — which suppresses the compatibility mousedown in EVERY phase (measured in Chrome: pointerdown 1×,
+// click 1×, mousedown 0×) — so no menu ever closed on a press into the picture. The ONE closer is utils.js
+// `onOutsidePress` (capture-phase pointerdown). GREP-DERIVED over every client module (comments stripped):
+//  (a) no document / window / documentElement / body-level `mousedown` or `click` listener (addEventListener or an
+//      on<event> property) outside a CLOSED allow-list of interaction MODES that are not closers — each row must still
+//      match (a dead row fails);
+//  (b) every document-level `pointerdown` listener is CAPTURE-phase (a bubble one is blind to a pane that stops it);
+//  (c) the helper's own body arms `pointerdown` capture+passive and never calls preventDefault / stopPropagation.
+// Planted negative controls for (a) and (b).
+console.log('§59 one outside-press closer: no document mousedown/click closer, every document pointerdown in the capture phase');
+{
+  const ALLOW = [
+    // move mode (taskbar → Move): a full-screen overlay takes every press, the capture mousedown PLACES the window and
+    // swallows the press (preventDefault + stopImmediatePropagation) — an interaction mode, not a closer
+    { file: 'src/lib/window.js', re: /document\.addEventListener\('mousedown', onClick, true\)/, why: 'move mode places the window' },
+    // customize mode's width pick: window-capture handlers PREEMPT drag/toggle handlers while picking (each click ADDS a width)
+    { file: 'src/lib/customize-mode.js', re: /window\.addEventListener\('mousedown', onDown, true\)/, why: 'width-pick swallows the press' },
+    { file: 'src/lib/customize-mode.js', re: /window\.addEventListener\('click', onClick, true\)/, why: 'width-pick adds a width per click' },
+  ];
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const files = ['src/client.js', ...fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f)];
+  const code = Object.fromEntries(files.map((f) => [f, strip(read(f))]));
+  const RECV = String.raw`(?:\bdocument|\bwindow|\bglobalThis|\bself|\bownerDocument|\bdocumentElement|document\.body)`;
+  const PRESS = new RegExp(RECV + String.raw`\s*\??\.\s*addEventListener\(\s*['"\x60](mousedown|click)['"\x60]`, 'g');
+  const PROP = new RegExp(RECV + String.raw`\s*\.\s*on(mousedown|click)\s*=(?!=)`, 'g');
+  const PDOWN = new RegExp(RECV + String.raw`\s*\??\.\s*addEventListener\(\s*['"\x60]pointerdown['"\x60]`, 'g');
+  const argsAt = (t, i) => { let d = 0, j = i; for (; j < t.length; j++) { const c = t[j]; if (c === '(') d++; else if (c === ')' && --d === 0) break; } return t.slice(i, j + 1); };
+  const census = (tx) => {
+    const press = [], bubble = [];
+    for (const [f, t] of Object.entries(tx)) {
+      for (const re of [PRESS, PROP]) for (const m of t.matchAll(re)) {
+        const line = t.slice(t.lastIndexOf('\n', m.index) + 1, t.indexOf('\n', m.index) < 0 ? t.length : t.indexOf('\n', m.index));
+        if (!ALLOW.some((a) => a.file === f && a.re.test(line))) press.push(`${f}: ${line.trim().slice(0, 90)}`);
+      }
+      for (const m of t.matchAll(PDOWN)) {
+        const call = argsAt(t, t.indexOf('(', m.index));
+        // capture = a trailing `true` argument or an options object carrying `capture: true` (the helper's own named
+        // options `o` — pinned by (c) — is admitted in utils.js only)
+        if (!/,\s*true\s*\)$/.test(call) && !/\bcapture\s*:\s*true\b/.test(call) && !(f === 'src/lib/utils.js' && /,\s*o\s*\)$/.test(call))) bubble.push(`${f}: ${call.slice(0, 90)}`);
+      }
+    }
+    return { press, bubble };
+  };
+  const real = census(code);
+  ok(real.press.length === 0, `§59a no document/window-level mousedown or click listener outside the ${ALLOW.length}-row mode allow-list${real.press.length ? ' — ' + real.press.join(' | ') : ''}`);
+  const dead = ALLOW.filter((a) => !a.re.test(code[a.file] || ''));
+  ok(dead.length === 0, `§59a every allow-list row still names a live listener (no dead rows)${dead.length ? ' — dead: ' + dead.map((a) => a.file + ' ' + a.why).join(' | ') : ''}`);
+  ok(real.bubble.length === 0, `§59b every document-level pointerdown listener is capture-phase${real.bubble.length ? ' — ' + real.bubble.join(' | ') : ''}`);
+  // (c) the helper: capture + passive pointerdown, the options object `o` is { capture: true, passive: true, … }, and
+  // its body never cancels or stops anything (the press must still reach the app)
+  const U = code['src/lib/utils.js'];
+  const h0 = U.indexOf('export function onOutsidePress('), h1 = U.indexOf('export function attachPopoverClose(');
+  const helper = h0 >= 0 && h1 > h0 ? U.slice(h0, h1) : '';
+  ok(!!helper && /const o = \{ capture: true, passive: true, signal: ctl\.signal \};/.test(helper) && /document\.addEventListener\('pointerdown', \(e\) => \{/.test(helper), '§59c onOutsidePress arms document pointerdown with { capture: true, passive: true, signal } (the `o` the (b) rule admits)');
+  ok(!!helper && !/preventDefault|stopPropagation|stopImmediatePropagation/.test(helper), '§59c …and its body calls neither preventDefault nor stopPropagation (the press still reaches the app)');
+  const apc = (() => { const a = U.indexOf('export function attachPopoverClose('); const b = a >= 0 ? U.indexOf('\n}\n', a) : -1; return a >= 0 && b > a ? U.slice(a, b) : ''; })();
+  ok(/export function attachPopoverClose\(popover, \.\.\.excludeEls\) \{/.test(apc) && /const dispose = onOutsidePress\(popover, \(\) => popover\.remove\(\), \{ exclude: excludeEls \}\);/.test(apc) && /return dispose;/.test(apc) && !/addEventListener|setTimeout/.test(apc), '§59c attachPopoverClose (createPopover / showContextMenu / the hand-built menus) is the helper, not a second closer (it only stamps lane K\'s ownership fields — `_closeExclude` the live list the helper reads, `_closeCtl` the disposer)');
+  const users = files.filter((f) => f !== 'src/lib/utils.js' && /\bonOutsidePress\(/.test(code[f])).sort();
+  const WANT = ['src/lib/chat-input.js', 'src/lib/chat-renderers.js', 'src/lib/chat-status-bar.js', 'src/lib/chat-view.js', 'src/lib/customize-mode.js', 'src/lib/mobile-nav.js', 'src/lib/usage-meter.js', 'src/lib/user-todos-panel.js'];
+  ok(WANT.every((f) => users.includes(f)), `§59 the eight hand-built closers route through it (${users.map((f) => f.replace('src/lib/', '')).join(' ')})`);
+  // NEGATIVE CONTROLS over a patched listing (nothing written): the pre-lane closer shapes are caught
+  const plant = (f, add) => census({ ...code, [f]: code[f] + '\n' + add });
+  const c1 = plant('src/lib/chat-status-bar.js', "setTimeout(() => document.addEventListener('mousedown', close), 0);");
+  const c2 = plant('src/lib/usage-meter.js', "document.addEventListener(\n  'click', (e) => { if (!popup.contains(e.target)) popup.classList.add('hidden'); });");
+  const c3 = plant('src/lib/mobile-nav.js', "setTimeout(() => document.addEventListener('pointerdown', onTap), 0);");
+  const c4 = plant('src/lib/chat-view.js', "document.onmousedown = close;");
+  const c5 = plant('src/lib/window.js', "document.addEventListener('mousedown', onOther, true);");
+  const c6 = plant('src/lib/chat-view.js', "const o = {}; document.addEventListener('pointerdown', close, o);");
+  ok(c1.press.length === 1 && c2.press.length === 1 && c4.press.length === 1 && c5.press.length === 1 && c3.bubble.length === 1 && c3.press.length === 0 && c6.bubble.length === 1,
+    `§59 NEGATIVE CONTROL: a planted document mousedown closer (the pre-lane shape), a multi-line click closer, an onmousedown property, a second capture mousedown in an allow-listed file, a bubble-phase pointerdown closer and a named-options one outside the helper are each caught (${[c1, c2, c4, c5].map((c) => c.press.length).join('/')} press, ${c3.bubble.length}/${c6.bubble.length} bubble)`);
+}
+
+// §60 THE BROWSER TOOL'S WRITE FENCE IS THE SESSION'S DIRECTORY, AND NO BROWSER DAEMON RUNS IN THE CHECKOUT
+// (lane L r5 — the round-3 adversarial verify on 33781ed1: F1 CRITICAL, a relative write target was judged in the
+// CLI's frame and WRITTEN in the daemon's, whose cwd was the launcher's — the keeper's execFile named none, so the
+// SERVER's = the checkout, and `pdf ./data/bin/vibespace-hook.mjs` overwrote a hook every session runs; F3 MAJOR, the
+// fence was the invoking shell's cwd because NO spawn path exported VIBESPACE_SESSION_CWD). Numbered 60 at the 2.369.182 integration: master holds
+// §56–§58, lane M §59. DERIVED, each with a negative control:
+//   a. every spawn path exports the session's own cwd — the LOCAL argv (`r6Argv`, which the dtach spawn AND the R6
+//      daemon pipe both run) carries `VIBESPACE_SESSION_CWD=${spawnCwd}`; every REMOTE builder composes
+//      buildRemoteExec (five), whose output carries the export (run, not grepped); ws-create spells the name once;
+//   b. the CLI's fence reads ONLY that variable (`sessionRoot()` names no process.cwd()), the binary is handed the
+//      IN-FRAME argv and spawned with the private cwd;
+//   c. the server tree launches the browser CLI only through browser-facts' runtime, whose execFile names the cwd
+//      `runDir()` chose — and `runDir` refuses the checkout even when a caller injects it.
+console.log('§60 the browser tool writes in the session\'s frame; no browser daemon runs in the checkout');
+{
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const wc = read('src/ws-create.js');
+  const r6Block = (src) => { const a = src.indexOf('const r6Argv = ['); const b = a < 0 ? -1 : src.indexOf('spawnCmd, ...spawnArgs,', a); return a >= 0 && b > a ? src.slice(a, b) : ''; };
+  const judgeLocal = (src) => /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(r6Block(src)) && /openPipeSession\(\{[^}]*args: r6Argv\.slice\(1\)/.test(src) && /pty\.spawn\(DTACH_CMD, \[[^\]]*\.\.\.r6Argv\]/.test(src);
+  ok(judgeLocal(wc), '§60a the LOCAL argv (r6Argv — run by the dtach spawn AND the R6 daemon pipe) exports VIBESPACE_SESSION_CWD=${spawnCwd}');
+  ok(!judgeLocal(wc.replace('`VIBESPACE_SESSION_CWD=${spawnCwd}`', '`VIBESPACE_SESSION_CWDX=${spawnCwd}`')) && !judgeLocal(wc.replace('args: r6Argv.slice(1)', 'args: otherArgv.slice(1)')), '§60a NEGATIVE CONTROL: a local argv without the pair, or an R6 pipe that stops running r6Argv, is caught');
+  const RS = req('../src/remote-shell.js');
+  const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
+  const exported = (line) => line.includes(`VIBESPACE_SESSION_CWD=${shq('/w x')}; export VIBESPACE_SESSION_CWD; `) && line.indexOf('VIBESPACE_SESSION_CWD=') < line.indexOf('exec env ');
+  const line = RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['a'] });
+  ok(exported(line) && exported(RS.buildRemoteExec({ cwd: '/w x', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' })), '§60a buildRemoteExec (every remote builder) exports the session cwd before the exec — the tail (keeper) form too');
+  ok(!exported(line.replace(RS.sessionCwdExport('/w x', shq), '')), '§60a NEGATIVE CONTROL: the pre-r5 remote line (no export) is caught');
+  ok((wc.match(/buildRemoteExec\(\{/g) || []).length === 5 && (wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1, `§60a all five remote builders compose buildRemoteExec and ws-create spells the variable once — the local pair (${(wc.match(/buildRemoteExec\(\{/g) || []).length} builders, ${(wc.match(/VIBESPACE_SESSION_CWD=/g) || []).length} spelling)`);
+  const cli = read('data/bin/vibespace-browser');
+  const fnBody = (src, name) => { const a = src.indexOf(`function ${name}(`); if (a < 0) return ''; let d = 0; for (let i = src.indexOf('{', a); i >= 0 && i < src.length; i++) { if (src[i] === '{') d++; else if (src[i] === '}' && --d === 0) return src.slice(a, i + 1); } return ''; };
+  const judgeCli = (src) => { const sr = fnBody(src, 'sessionRoot'); return sr.includes('process.env.VIBESPACE_SESSION_CWD') && !/process\.cwd\(\)/.test(sr) && /spawn\(bin\.path, argv, \{[^}]*\bcwd: runCwd\.dir/.test(src) && /const argv = closeAllScoped \? framed\.argv\.filter\(\(x\) => x !== '--all'\) : \[\.\.\.framed\.argv\];/.test(src) && /writeRefusal\(framed\.writes\)/.test(src); };
+  ok(judgeCli(cli), '§60b the CLI fences writes to VIBESPACE_SESSION_CWD only (never process.cwd()), re-judges and hands the IN-FRAME argv, and spawns the binary in the private cwd');
+  ok(!judgeCli(cli.replace('const v = process.env.VIBESPACE_SESSION_CWD;', 'const v = process.env.VIBESPACE_SESSION_CWD || process.cwd();')) && !judgeCli(cli.replace('{ stdio, env, cwd: runCwd.dir }', '{ stdio, env }')) && !judgeCli(cli.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];")), '§60b NEGATIVE CONTROL: the r4 fence (the shell\'s cwd), a spawn with no cwd, and the r4 hand-over (words as typed — lane H\'s close --all filter over `rest`) are each caught');
+  const bf = read('src/browser-facts.js');
+  const judgeRt = (src) => /execFileImpl\(bin, args, \{[^}]*\bcwd: dc\.dir \}/.test(src) && /const dc = runDir\(daemonCwd\);/.test(src);
+  const srcJs = [];
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) walk(r); else if (/\.js$/.test(e.name)) srcJs.push(r); } };
+  walk('src');
+  const runtimes = srcJs.filter((f) => /\bcreateBrowserRuntime\s*\(/.test(read(f)) && f !== 'src/browser-facts.js');
+  ok(judgeRt(bf) && runtimes.length >= 2 && runtimes.every((f) => /\bF\.createBrowserRuntime\(/.test(read(f))), `§60c every browser-CLI launch from the server tree is browser-facts' runtime (${runtimes.join(' ')}), and its execFile names the cwd runDir() chose`);
+  ok(!judgeRt(bf.replace('maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }', 'maxBuffer: 4 * 1024 * 1024 }')), '§60c NEGATIVE CONTROL: the pre-r5 runtime (an execFile with no cwd — the SERVER\'s, the checkout) is caught');
+  const F = req('../src/browser-facts.js');
+  const refusedCheckout = F.runDir(() => ({ ok: true, dir: REPO }));
+  const chosen = F.runDir();
+  ok(refusedCheckout.ok === false && refusedCheckout.code === 'daemon_cwd_refused' && chosen.ok && chosen.dir !== REPO && !chosen.dir.startsWith(REPO + '/') && !REPO.startsWith(chosen.dir + '/'), `§60c runDir refuses the checkout even when injected, and chooses ${chosen.dir} (outside it)`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

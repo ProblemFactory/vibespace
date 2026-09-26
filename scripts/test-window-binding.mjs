@@ -18,8 +18,9 @@
 //      keep the two panes together (one window; the split survives each);
 //   ④ closing the browser pane collapses to tabs WITHOUT moving the chat
 //      window (the chat rect before == after); the three-tab case: a third tab
-//      replaces the non-anchor pane (D19 a), and closing the CHAT (the host)
-//      leaves `layout === 'tabs'` with no dangling id;
+//      joins the right side and is shown (split tabs v2; D19 a retired), and
+//      closing the CHAT (the host — the only tab of its side) leaves
+//      `layout === 'tabs'` with no dangling id;
 //   ⑤ layouts persistence carries layout + split; a PHONE client boots on
 //      that state, renders tabs (one pane displayed, no divider) with the
 //      split still in its model, and its own save leaves the split in
@@ -318,7 +319,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     ok(opens.lives.length === 1 && opens.opens.length === 1, 'exactly ONE browser-live window exists after the close + re-open (no unasked re-creation)', JSON.stringify(opens));
     liveId = await ev(A, 'return live().id;'); // a fresh window, a fresh id
     const third = await ev(A, `const w = app.openBrowser('about:blank'); const c = chat(); wm.addToTabChain(c._tabChain, w); const ch = c._tabChain; return { id: w.id, tabs: ch.tabs.length, pair: ch.split && ch.split.pair, active: ch.tabs[ch.active], layout: ch.layout, chatShown: !c.content.classList.contains('tab-hidden'), liveShown: !live().content.classList.contains('tab-hidden'), thirdShown: !w.content.classList.contains('tab-hidden') };`);
-    ok(third.tabs === 3 && third.layout === 'split' && third.pair[0] === chatId && third.pair[1] === third.id && third.active === third.id && third.chatShown && third.thirdShown && !third.liveShown, 'D19 (a): a THIRD tab dropped in replaces the NON-ANCHOR pane — the chat stays put, the split is [chat, third], the live view is a tab', JSON.stringify(third));
+    ok(third.tabs === 3 && third.layout === 'split' && third.pair[0] === chatId && third.pair[1] === third.id && third.active === third.id && third.chatShown && third.thirdShown && !third.liveShown, 'a THIRD tab dropped in joins the RIGHT side and is shown there (split tabs v2 — D19 (a) retired, the same outcome here) — the chat stays put, the split is [chat, third], the live view waits in the right half', JSON.stringify(third));
     const backToLive = await ev(A, `const c = chat(); const ch = c._tabChain; wm.switchTab(ch, ch.tabs.indexOf(live().id)); return { pair: ch.split.pair, active: ch.tabs[ch.active], liveShown: !live().content.classList.contains('tab-hidden') };`);
     ok(backToLive.pair[1] === liveId && backToLive.active === liveId && backToLive.liveShown, 'clicking the live tab swaps it back into the pane', JSON.stringify(backToLive));
     // close the CHAT — the host — of the three-tab split chain

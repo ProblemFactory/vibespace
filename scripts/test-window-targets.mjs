@@ -73,6 +73,22 @@
 //      BEFORE anything lands; F4 `list` re-asks reach after its last await — a §5 leg + the census's 15th site
 //      (`stillListed`, neutered = the rows decided before the await); F5 the launch audit counts a group row a throwing
 //      store could not decide as `undecided`, never `unmatched` (CONTROL: the r2 fold).
+//   MIRROR RED ON 2.369.181 (2026-09-26): the Actions mirror (ubuntu-latest — no gi binding, no a11y bus, no xdotool, no
+//      DISPLAY) went 259/2/3 on two legs this box passed: the refusal's CODE depended on which capability was missing
+//      (a @ref before any snapshot answered mode_pixels there — the auto probe ran first — and an auto snapshot answered
+//      the helper's a11y_unavailable). Now: §2 pins the env-keyed probe memo (control: the memo keyed by nothing) and the
+//      TREE_UNREACHABLE census (runHelper's own refusals + the helper's import refusal, grep-derived); §4 counts the
+//      probes (the ref precondition spawns none); §4r CONSTRUCTS the runner's shape on every box — PATH empty, DISPLAY
+//      and the buses unset, the tree unreachable four ways (no python3 / no gi / libatspi dying / no helper file), the
+//      evidence line proving each — and asserts ONE code per call (ref_unknown, mode_pixels) with the reason varying;
+//      the pre-fix order in a patched copy is the NEGATIVE CONTROL (it answers the machine: the mirror's red); §5's
+//      no-tree window sits on a pid no box can hand out, so its mode legs run everywhere (no more `if (!real)`); a SKIP
+//      names what is missing (§3's reason reaches §4's and §5's skips; the xdotool half of a control is skipped by name).
+//   §6 WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test: a PNG landed in the production checkout): the
+//      shipped CLI against a stub route from a cwd that must stay empty — no --out ⇒ <tmpdir>/vibespace-window/ (0700), a
+//      relative --out ⇒ VIBESPACE_SESSION_CWD (else that temp dir), ~/.ssh / a home dot-entry / a symlinked `..` into one /
+//      a final-component link / VibeSpace's data dir refused by name BEFORE any request; CONTROL: the old default in a
+//      patched copy writes into the cwd.
 // No fixed display, no fixed port, no fixed /tmp name (scripts/scratch.mjs).
 // Run: node scripts/test-window-targets.mjs
 import fs from 'node:fs';
@@ -211,6 +227,36 @@ console.log('§2 the bounded subprocess (fake helpers driven by node as the "int
   ok(!h.ok && h.code === 'helper_missing', 'a missing helper file ⇒ helper_missing');
   ok(fs.existsSync(WT.HELPER_PATH) && /Atspi\.set_timeout/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8')) && /budget/.test(fs.readFileSync(WT.HELPER_PATH, 'utf8')), 'the shipped helper sets libatspi\'s per-call timeout and walks under a node budget (grep pin)');
   ok(WT.TRAVERSAL_LIMITS.WALL_MS > WT.TRAVERSAL_LIMITS.CALL_TIMEOUT_MS && WT.TRAVERSAL_LIMITS.SNAPSHOT_MAX_BUDGET >= WT.TRAVERSAL_LIMITS.NODE_BUDGET, 'the wall outlives one call; the ceiling is above the default budget');
+  // MIRROR RED ON 2.369.181 (a) — a remembered YES belongs to the ENVIRONMENT it was asked in: the memo was keyed 'a11y'
+  // alone, so once this box's real bus answered, a caller asking from the runner's shape (§4r) heard that YES
+  {
+    const busHelper = fake('bus-gated.js', `process.stdout.write(JSON.stringify(process.env.DBUS_SESSION_BUS_ADDRESS ? { ok: true, apps: 1 } : { ok: false, code: 'a11y_unavailable', why: 'no bus (constructed)' }) + '\\n');`);
+    const withBus = { PATH: path.join(dir, 'no-bin'), DBUS_SESSION_BUS_ADDRESS: 'unix:path=/nonexistent/vs-bus' }, noBus = { PATH: path.join(dir, 'no-bin') };
+    const probeBoth = async (W) => { W.resetProbeMemo(); const y = await W.probeA11y({ env: withBus, python: process.execPath, helper: busHelper }); const n = await W.probeA11y({ env: noBus, python: process.execPath, helper: busHelper }); W.resetProbeMemo(); return { y, n }; };
+    const { y, n } = await probeBoth(WT);
+    ok(y.ok && !n.ok && n.code === 'a11y_unavailable', `a YES remembered in one environment is never the answer in another (with a bus: ${y.ok ? 'YES' : y.code}, then without one: ${n.ok ? 'YES (the memo)' : n.code})`);
+    const srcW = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
+    const flat = srcW.replace(/const key = `a11y[^\n]*;/, "const key = 'a11y';");
+    ok(flat !== srcW, 'control: the patch applies (the pre-fix memo key — no environment in it)');
+    const c = await probeBoth(require(MUTW.write('src/window-targets.js', flat, 'flatmemo')));
+    ok(c.y.ok && c.n.ok === true, `NEGATIVE CONTROL: the memo keyed by nothing hands the bus-less caller the other environment's YES (${c.n.ok ? 'YES' : c.n.code}) — the leg above is what catches it`);
+  }
+  // MIRROR RED ON 2.369.181 (b) — THE CENSUS of "this machine cannot read a tree": every refusal runHelper itself answers
+  // (interpreter, helper file, wall, garbage) + the helper's own import refusal (no gi binding) must be in
+  // TREE_UNREACHABLE — an auto share folds exactly that set into mode_pixels; a new failure road outside it would leak
+  // its machine-specific code through the snapshot again
+  {
+    const srcW = fs.readFileSync(require.resolve('../src/window-targets.js'), 'utf8');
+    const at = srcW.indexOf('function runHelper(');
+    const body = srcW.slice(at, srcW.indexOf('\n}\n', at));
+    const fromRunner = [...new Set([...body.matchAll(/refuse\('([a-z0-9_-]+)'/g)].map((m) => m[1]))];
+    const pySrc = fs.readFileSync(WT.HELPER_PATH, 'utf8');
+    const imp = pySrc.slice(pySrc.indexOf('    import gi'), pySrc.indexOf('sys.exit(3)'));
+    const fromImport = [...imp.matchAll(/"code": "([a-z0-9_-]+)"/g)].map((m) => m[1]);
+    console.log(`    runHelper's own refusals (grep-derived): ${fromRunner.join(', ')}; the helper's import refusal: ${fromImport.join(', ')}; TREE_UNREACHABLE = ${WT.TREE_UNREACHABLE.join(', ')}`);
+    ok(fromRunner.length >= 4 && fromImport.length === 1 && [...fromRunner, ...fromImport].every((c) => WT.TREE_UNREACHABLE.includes(c)), 'every way the helper can fail to REACH a tree is in TREE_UNREACHABLE (the census found them — a census that finds none judges nothing)');
+    ok(WT.TREE_UNREACHABLE.every((c) => WT.REFUSALS.includes(c)) && !WT.TREE_UNREACHABLE.includes('bad-request') && !WT.TREE_UNREACHABLE.includes('ref_stale'), 'TREE_UNREACHABLE ⊆ the closed refusal set, and a caller\'s error (bad-request) or a stale ref is never read as "no tree here"');
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,10 +346,14 @@ const py = await run('python3', ['-c', "import gi; gi.require_version('Atspi','2
 const xvfbBin = D.binOnPath('Xvfb', { env: base });
 const a11y = py.err ? null : await WT.probeA11y({ env: base, wallMs: 10000 });
 let real = null; // { pid, xenv, display, snapshot, refs, bins }
-if (py.err) skip(`python3 gi Atspi/Gtk not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
-else if (!xvfbBin) skip('Xvfb not on PATH');
-else if (!base.DBUS_SESSION_BUS_ADDRESS && !base.XDG_RUNTIME_DIR) skip('no session bus in this environment (DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR unset) — the a11y bus is unreachable');
-else if (!a11y || !a11y.ok) skip(`the accessibility bus did not answer: ${a11y && a11y.why}`);
+// mirror red on 2.369.181: WHAT is missing when §3 cannot build its fixture is carried to every later SKIP that needs it
+// (§4's tree legs, §5's pixel road) — a skip names the missing capability, never just "needs §3"
+let realMissing = 'the fixture never came up (see §3 above)';
+const skip3 = (why) => { realMissing = why; skip(why); };
+if (py.err) skip3(`python3 gi Atspi/Gtk not importable: ${(py.stderr || py.err.message).trim().split('\n').pop()}`);
+else if (!xvfbBin) skip3('Xvfb not on PATH');
+else if (!base.DBUS_SESSION_BUS_ADDRESS && !base.XDG_RUNTIME_DIR) skip3('no session bus in this environment (DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR unset) — the a11y bus is unreachable');
+else if (!a11y || !a11y.ok) skip3(`the accessibility bus did not answer: ${a11y && a11y.why}`);
 else {
   console.log(`  a11y probe: ${a11y.apps} apps on the bus in ${a11y.ms} ms`);
   // an X server of our own, on a number -displayfd hands us
@@ -313,7 +363,7 @@ else {
   const xv = spawn(xvfbBin, ['-displayfd', '3', '-screen', '0', '800x600x24', '-nolisten', 'tcp', '-auth', authFile], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] });
   children.add(xv);
   const display = await new Promise((res) => { let s = ''; xv.stdio[3].on('data', (d) => { s += d; if (/\n/.test(s)) res(':' + s.trim()); }); setTimeout(() => res(null), 10000); });
-  if (!display) skip('Xvfb did not answer -displayfd within 10 s');
+  if (!display) skip3('Xvfb did not answer -displayfd within 10 s');
   else {
     D.writeXauthority(authFile, [{ display: '0', cookieHex: cookie }, { display, cookieHex: cookie }]);
     const xenv = D.x11Env(base, { display, authFile });
@@ -321,7 +371,7 @@ else {
     children.add(app);
     let appErr = ''; app.stderr.on('data', (d) => { appErr = (appErr + d).slice(-2000); });
     const pid = await new Promise((res) => { let s = ''; app.stdout.on('data', (d) => { s += d; const m = /READY (\d+)/.exec(s); if (m) res(Number(m[1])); }); setTimeout(() => res(null), 15000); });
-    if (!pid) skip(`the GTK fixture did not map within 15 s: ${appErr.trim().split('\n').pop() || 'no stderr'}`);
+    if (!pid) skip3(`the GTK fixture did not map within 15 s: ${appErr.trim().split('\n').pop() || 'no stderr'}`);
     else {
       // wait for the app on the a11y bus
       let onBus = false;
@@ -496,8 +546,8 @@ console.log('§4 the engine over a fake keeper + the routes');
     registry: () => [{ id: 'gedit', label: 'gedit', exec: 'gedit', args: [], available: true, reason: null }, { id: 'chromium', label: 'Google Chrome', exec: 'google-chrome', args: [], category: 'browser', browser: 'chromium', available: true, reason: null }, { id: 'vs-browser', label: 'Fake browser', exec: 'vs-fake', args: [], category: 'browser', browser: 'firefox', available: true, reason: null }],
   };
   const sessions = new Map([['s1', { agentToken: 'vsst_aaaa', _browserKey: 'bk-11111111', name: 'alpha' }], ['s2', { agentToken: 'vsst_bbbb', _browserKey: 'bk-22222222', name: 'beta' }]]);
-  let helperCalls = 0;
-  const wt = { ...WT, actOnNode: (o) => { helperCalls++; return WT.actOnNode(o); } };
+  let helperCalls = 0, probeCalls = 0;
+  const wt = { ...WT, actOnNode: (o) => { helperCalls++; return WT.actOnNode(o); }, probeA11y: (o) => { probeCalls++; return WT.probeA11y(o); }, snapshotTarget: (o) => { probeCalls++; return WT.snapshotTarget(o); } };
   // takeover r2: the engine reads the RUNNING app's own executable — only for pids this suite owns (a fake
   // record's pid 4242 may be anybody's process on the box, a browser included)
   const ownedPids = new Set(real ? [real.pid] : []);
@@ -573,12 +623,19 @@ console.log('§4 the engine over a fake keeper + the routes');
   }
   ok((await err(() => engine.act('da-one', f1, { verb: 'key', chord: 'ctrl+s; x' }))).code === 'bad_chord', 'a bad chord is refused before any backend is consulted');
   ok((await err(() => engine.act('da-one', f1, { verb: 'click' }))).code === 'bad-request' && (await err(() => engine.act('da-one', f1, { verb: 'dance' }))).code === 'bad-request', 'click without a ref or --at, or an unknown verb ⇒ bad-request');
-  ok((await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' }))).code === 'ref_unknown', 'a ref before any snapshot ⇒ ref_unknown (snapshot first)');
+  {
+    // mirror red on 2.369.181: the ref precondition used to FOLLOW the auto probe — ref_unknown on this box (the fixture's
+    // tree answered), mode_pixels on the runner (no tree reachable). It is checked before any probe now: zero spawns.
+    const p0 = probeCalls;
+    const rc = await err(() => engine.act('da-one', f1, { verb: 'click', ref: '@e1' }));
+    const rt = await err(() => engine.act('da-one', f1, { verb: 'type', ref: '@e1', text: 'x' }));
+    ok(rc && rc.code === 'ref_unknown' && rt && rt.code === 'ref_unknown' && probeCalls === p0 && /no snapshot yet/.test(rc.message), `a ref before any snapshot ⇒ ref_unknown (snapshot first) — click and type, BEFORE any probe (${rc && rc.code} / ${rt && rt.code}, probes spawned: ${probeCalls - p0})`);
+  }
   const w = engine.watch('da-one', f1);
   ok(w.openSpec.action === 'openDesktopApp' && w.openSpec.id === 'da-one' && /Desktop-app window/.test(w.note), 'watch names the Desktop-app window (the whole private display) honestly');
   ok(engine.dropSession('s2') === 1 && engine.leases().length === 1, 'the kill path drops a session\'s leases');
 
-  if (!real) skip('no real display/tree — the engine\'s tree legs (snapshot / click / type / injection / audit content) need §3');
+  if (!real) skip(`no real display/tree — the engine's tree legs (snapshot / click / type / injection / audit content) need §3's fixture, and here: ${realMissing}`);
   else {
     const snap = await engine.snapshot('da-one', f1);
     ok(snap.nodes.length > 0 && snap.census && snap.nodes.every((n) => n.path === undefined), 'engine.snapshot returns agent views (no paths) with the census');
@@ -590,7 +647,9 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(r.ok && r.did.by === 'node' && r.did.action === 'click' && helperCalls === before + 1, 'click @ref acts on the node through the helper');
     const noact = await err(() => engine.act('da-one', f1, { verb: 'click', ref: fake.ref }));
     ok(noact && noact.code === 'node_has_no_action' && helperCalls === before + 1 && /never degraded/.test(noact.message) && /--at/.test(noact.message), 'THE LAW: a node without Action is refused by the ENGINE before any helper call — the refusal names the bounds and the audited point path as the agent\'s own decision');
-    ok(real.hasInjection ? noact.code === 'node_has_no_action' : true, `negative control: the refusal holds ${real.hasInjection ? 'WITH an injection backend present (xdotool)' : '(no backend here — the rule is about the node, the column is irrelevant)'}`);
+    // mirror red on 2.369.181 (never a silent pass): the "WITH a backend" half is asserted only where one exists, else SKIPPED by name
+    if (real.hasInjection) ok(noact.code === 'node_has_no_action', 'negative control: the refusal holds WITH an injection backend present (xdotool)');
+    else skip('xdotool not on PATH — the "refusal holds WITH an injection backend present" control needs one (the rule itself is asserted just above)');
     const typed = await engine.act('da-one', f1, { verb: 'type', ref: entry.ref, text: 'engine text' });
     ok(typed.ok && typed.did.chars === 11 && typed.did.ref === entry.ref, 'type @ref inserts through EditableText');
     const bad = await err(() => engine.act('da-one', f1, { verb: 'type', ref: fake.ref, text: 'x' }));
@@ -768,6 +827,80 @@ console.log('§4 the engine over a fake keeper + the routes');
     keeper.registry = saved;
   }
 
+  // ── §4r THE ACTIONS RUNNER'S SHAPE, CONSTRUCTED ON EVERY BOX (mirror red on 2.369.181) ──
+  // The mirror (ubuntu-latest: no gi binding, no a11y bus, no xdotool, no DISPLAY) answered two legs with codes this box
+  // never produced: the refusal's CODE depended on WHICH capability was missing. Here the runner's environment is built
+  // deliberately — PATH = an empty dir, DISPLAY / WAYLAND_DISPLAY / the session bus / XDG_RUNTIME_DIR unset — and the tree
+  // made unreachable four ways (the reason varies per shape; the evidence line proves each shape is what it says). The two
+  // mirror legs must answer ONE code in all four, with no probe for the precondition. A patched copy restoring the pre-fix
+  // order (the ref check after the probe, the helper's code passed through) is the NEGATIVE CONTROL: it answers the machine.
+  console.log('§4r the Actions runner\'s shape, constructed here (PATH empty, DISPLAY and the buses unset, the tree unreachable four ways)');
+  {
+    const emptyBin = path.join(dir, 'runner-shape-bin'); fs.mkdirSync(emptyBin, { recursive: true });
+    const runnerEnv = { HOME: dir, LANG: 'C.UTF-8', PATH: emptyBin }; // no DISPLAY, no WAYLAND_DISPLAY, no DBUS_SESSION_BUS_ADDRESS, no XDG_RUNTIME_DIR
+    const fakeR = (name, body) => { const p = path.join(dir, name); fs.writeFileSync(p, body); return p; };
+    const SHAPES = [
+      { name: 'no python3 on PATH', python: 'python3', helper: undefined, code: 'python3_missing' },
+      { name: 'python3 without the gi binding (the helper\'s own import refusal, as on ubuntu-latest)', python: process.execPath, helper: fakeR('rs-nogi.js', `process.stdout.write(JSON.stringify({ ok: false, code: 'a11y_unavailable', why: "python3 gi Atspi not importable: No module named 'gi' (constructed)" }) + '\\n'); process.exit(3);`), code: 'a11y_unavailable' },
+      { name: 'libatspi dying with no accessibility bus (dbind abort, exit 134)', python: process.execPath, helper: fakeR('rs-abort.js', `process.stderr.write("dbind-ERROR **: AT-SPI: Couldn't connect to accessibility bus. Is at-spi-bus-launcher running? (constructed)\\n"); process.exit(134);`), code: 'helper_error' },
+      { name: 'the helper file missing', python: process.execPath, helper: path.join(dir, 'rs-no-such-helper.py'), code: 'helper_missing' },
+    ];
+    records.set('da-rs', mk('da-rs', { label: 'Runner shape', pids: { app: 2 ** 22 + 44, x: null, server: null, wm: null }, startedAt: 1 }));
+    records.set('da-rs2', mk('da-rs2', { label: 'Runner shape 2', pids: { app: 2 ** 22 + 45, x: null, server: null, wm: null }, startedAt: 1 }));
+    /** One shape through an engine (`M` = the engine module: the real one, or the control's copy). */
+    const runShape = async (M, sh, tag) => {
+      let spawns = 0;
+      const count = (fn) => (...a) => { spawns++; return fn(...a); };
+      const wtR = { ...WT, probeA11y: count(WT.probeA11y), snapshotTarget: count(WT.snapshotTarget), runHelper: count(WT.runHelper), actOnNode: count(WT.actOnNode), focusedNode: count(WT.focusedNode) };
+      const eR = M.create({ keeper, dataDir: path.join(dir, `runner-shape-${tag}`), env: () => runnerEnv, activeSessions: sessions, wt: wtR, bins: { xdotool: null, gdbus: null }, python: sh.python, ...(sh.helper !== undefined ? { helper: sh.helper } : {}), log: { warn() { }, log() { } }, modeProbeMs: 0 });
+      eR.grantReach('da-rs', { kind: 'session', id: 's1' }); eR.grantReach('da-rs2', { kind: 'session', id: 's2' });
+      eR.attach('da-rs', f1);
+      const s0 = spawns;
+      const click = await err(() => eR.act('da-rs', f1, { verb: 'click', ref: '@e1' }));
+      const type = await err(() => eR.act('da-rs', f1, { verb: 'type', ref: '@e3', text: 'x' }));
+      const preSpawns = spawns - s0;
+      const snap = await err(() => eR.snapshot('da-rs', f1));
+      const am = await eR.attachWithMode('da-rs2', f2);
+      const mi = eR.modeInfo('da-rs');
+      eR.shutdown();
+      return { click, type, preSpawns, snap, am, mi };
+    };
+    const outs = [];
+    for (const sh of SHAPES) {
+      const pr = await WT.probeA11y({ env: runnerEnv, python: sh.python, ...(sh.helper !== undefined ? { helper: sh.helper } : {}) });
+      ok(!pr.ok && pr.code === sh.code, `shape "${sh.name}": evidence — the probe, asked in this environment, answers ${pr.ok ? 'YES' : pr.code} (${String(pr.why || '').slice(0, 110)})`);
+      const o = await runShape(ENGINE, sh, sh.code);
+      outs.push(o);
+      ok(o.click && o.click.code === 'ref_unknown' && o.type && o.type.code === 'ref_unknown' && o.preSpawns === 0, `  ${sh.code}: click @e1 / type @e3 before any snapshot ⇒ ref_unknown with NO probe spawned (${o.click && o.click.code} / ${o.type && o.type.code}, spawns ${o.preSpawns})`);
+      ok(o.snap && o.snap.code === 'mode_pixels' && o.snap.resolvedMode === 'pixels' && o.snap.reason && o.snap.reason.code === sh.code && String(o.snap.message).includes(`unreachable here (${sh.code}:`) && o.mi.resolved === 'pixels' && o.mi.why.includes(sh.code), `  ${sh.code}: the auto snapshot ⇒ mode_pixels naming the reason it saw, the resolution recorded (${o.snap && o.snap.code}: ${o.snap && String(o.snap.message).slice(0, 120)})`);
+      ok(o.am.mode.resolved === 'pixels' && o.am.mode.why.includes(`(${sh.code}:`) && /^vibespace-window screenshot /.test(o.am.next), `  ${sh.code}: attach resolves auto to pixels naming the reason, and points at screenshot (${o.am.mode.why.slice(0, 110)})`);
+    }
+    const codes = new Set(outs.flatMap((o) => [o.click && o.click.code, o.type && o.type.code, o.snap && o.snap.code]));
+    const reasons = new Set(outs.map((o) => o.snap && o.snap.reason && o.snap.reason.code));
+    ok(codes.size === 2 && codes.has('ref_unknown') && codes.has('mode_pixels') && reasons.size === SHAPES.length, `THE LAW: ${SHAPES.length} different missing capabilities, ONE code per call (${[...codes].join(', ')}); the reasons differ (${[...reasons].join(', ')})`);
+    // a caller's error is never folded: a helper answering bad-request under auto passes its own code through
+    {
+      const badReq = fakeR('rs-badreq.js', `process.stdout.write(JSON.stringify({ ok: false, code: 'bad-request', why: 'constructed caller error' }) + '\\n');`);
+      const eB = ENGINE.create({ keeper, dataDir: path.join(dir, 'runner-shape-badreq'), env: () => runnerEnv, activeSessions: sessions, wt: WT, bins: { xdotool: null, gdbus: null }, python: process.execPath, helper: badReq, log: { warn() { }, log() { } }, modeProbeMs: 0 });
+      eB.grantReach('da-rs', { kind: 'session', id: 's1' }); eB.attach('da-rs', f1);
+      const bq = await err(() => eB.snapshot('da-rs', f1));
+      ok(bq && bq.code === 'bad-request', `the fold is bounded to TREE_UNREACHABLE: a helper's bad-request under auto stays bad-request (${bq && bq.code})`);
+      eB.shutdown();
+    }
+    // NEGATIVE CONTROL: the pre-fix order in a patched copy (outside the tree) answers the MACHINE in the same shapes
+    {
+      const srcE = fs.readFileSync(require.resolve('../src/server/window-targets-engine.js'), 'utf8');
+      const pre = srcE.replace(/\n[^\n]*refEntry\(\); \/\/ PRECONDITION-BEFORE-PROBE\n/, '\n').replace("reachRecord(rec.id).mode === 'auto' && WT.treeUnreachable(r)) {", "reachRecord(rec.id).mode === 'auto' && false) {");
+      ok(pre !== srcE && !/PRECONDITION-BEFORE-PROBE/.test(pre) && /mode === 'auto' && false\) \{/.test(pre), 'control: the patch applies (the ref check back after the probe, the helper\'s code passed through)');
+      const Mpre = require(MUTW.write('src/server/window-targets-engine.js', pre, 'prefix-order'));
+      const ctl = [];
+      for (const sh of SHAPES) ctl.push({ sh, o: await runShape(Mpre, sh, `ctl-${sh.code}`) });
+      const said = ctl.map(({ sh, o }) => `${sh.code}: click ${o.click && o.click.code} (spawns ${o.preSpawns}), snapshot ${o.snap && o.snap.code}`).join('; ');
+      ok(ctl.every(({ o }) => o.click && o.click.code === 'mode_pixels' && o.preSpawns > 0) && ctl.every(({ sh, o }) => o.snap && o.snap.code === sh.code), `NEGATIVE CONTROL: the pre-fix order answers the machine — the mirror's red reproduced (${said})`);
+    }
+    for (const id of ['da-rs', 'da-rs2']) records.delete(id);
+  }
+
   const express = require('express');
   // ── §5 LANE E: reach, the mode, the pixel road, the request, the human routes ──
   console.log('§5 LANE E — reach + the share mode + the pixel road + the request + the human routes');
@@ -778,7 +911,10 @@ console.log('§4 the engine over a fake keeper + the routes');
     const e5 = ENGINE.create({ keeper, dataDir: path.join(dir, 'lane-e'), env: () => base, activeSessions: sess5, wt, bins: real ? real.bins : { xdotool: null, gdbus: null }, log: { warn() { }, log() { } }, procExe: procExeOwned, groupsOf: (s, id) => groupsOfMap[id] || [], broadcast: (m) => bc5.push(m), modeProbeMs: 400 });
     const a = e5.factsForToken('vsst_aaaa'), b = e5.factsForToken('vsst_bbbb');
     records.set('da-e1', mk('da-e1', { label: 'Notes E', startedAt: 1 }));
-    records.set('da-e2', mk('da-e2', { label: 'Other E', pids: { app: 4243, x: null, server: null, wm: null }, startedAt: 1 }));
+    // mirror red on 2.369.181: a pid NO box can hand out (Linux pid_max ≤ 2^22) — the old 4243 may be any process here,
+    // an app on this desktop's bus included, so the mode legs below could only run where §3 had no fixture (`!real`)
+    const NO_SUCH_PID = 2 ** 22 + 43;
+    records.set('da-e2', mk('da-e2', { label: 'Other E', pids: { app: NO_SUCH_PID, x: null, server: null, wm: null }, startedAt: 1 }));
     // a Task Group joined LATER reaches the window (membership is asked at every verb — D2)
     e5.grantReach('da-e1', { kind: 'group', id: 'task-ops', name: 'Ops' });
     ok((await err(() => e5.attach('da-e1', b))).code === 'not_exposed', 'a group row: a session NOT in the group is refused not_exposed');
@@ -816,8 +952,12 @@ console.log('§4 the engine over a fake keeper + the routes');
     e5.setShareMode('da-e1', 'auto');
     const am = await e5.attachWithMode('da-e2', b);
     const e2resolved = am.mode.resolved;
-    ok(am.mode.mode === 'auto' && (real ? true : e2resolved === 'pixels' && /no accessibility tree|unreachable/.test(am.mode.why)), `attach resolves AUTO by a probe of the app's tree and says why (${e2resolved}: ${am.mode.why})`);
-    if (!real) ok((await err(() => e5.snapshot('da-e2', b))).code === 'mode_pixels', 'an auto window with no tree: the snapshot (the probe) is refused mode_pixels naming why');
+    ok(am.mode.mode === 'auto' && e2resolved === 'pixels' && /no accessibility tree|unreachable here/.test(am.mode.why), `attach resolves AUTO by a probe of the app's tree and says why (${e2resolved}: ${am.mode.why})`);
+    // mirror red on 2.369.181: this leg ran only without §3's fixture, and there the helper's own code leaked through
+    // (a11y_unavailable on the runner). It runs on EVERY box now: the reason differs (no app on this bus / the tree
+    // unreachable there), the code does not
+    const sn2 = await err(() => e5.snapshot('da-e2', b));
+    ok(sn2 && sn2.code === 'mode_pixels' && sn2.resolvedMode === 'pixels' && String(sn2.message).startsWith(e5.modeInfo('da-e2').why) && /no accessibility tree|unreachable here/.test(sn2.message), `an auto window with no tree: the snapshot (the probe) is refused mode_pixels naming why (${sn2 && sn2.code}: ${sn2 && String(sn2.message).slice(0, 160)})`);
     // the scroll verb's refusals (no backend here, or a bad direction)
     const sc = await err(() => e5.act('da-e2', b, { verb: 'scroll', direction: 'sideways' }));
     ok(sc && ['bad-request', 'no_injection_backend'].includes(sc.code), `scroll: a bad direction / no backend is refused by name (${sc && sc.code})`);
@@ -831,7 +971,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(!argv.includes('--sync') && argv.join(' ').includes('mousemove 5 6 click 1') && argv.join(' ').includes('mousemove 1 2 key --clearmodifiers Return'), 'M9: no `--sync` on any pointer move (a move to the CURRENT point waited 7 s, and the second key in a row failed)');
     ok(argv.join(' ').includes('key --clearmodifiers ctrl+a type --clearmodifiers --delay 12 -- --help me') && argv.join(' ').includes('mousemove 3 4 click --repeat 2 --delay 20 5'), 'type is ONE argv item after `--` (never read as an option), --replace selects first; scroll = button 5 × N at the point');
     // the pixel road on the REAL fixture window: a keeper that names its windows ⇒ screenshot in WINDOW coordinates, --at mapped
-    if (!real) skip('the pixel-road legs on a real window need §3\'s fixture display');
+    if (!real) skip(`the pixel-road legs on a real window need §3's fixture display, and here: ${realMissing}`);
     else {
       const DD = require('../src/desktop-display.js');
       const kWin = { ...keeper, windows: async (id) => { const x = keeper.x11EnvFor(id); const r = await DD.enumerateWindows({ display: x.DISPLAY, authFile: x.XAUTHORITY, env: x }); return { ok: r.ok, windows: (r.windows || []).filter((w) => w.mapped !== false && w.w > 1 && w.h > 1).map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth })) }; } };
@@ -1281,6 +1421,91 @@ console.log('§4 the engine over a fake keeper + the routes');
   ok(uncovered.length === 0, `every typed refusal has a status (${uncovered.join(', ') || 'none uncovered'}) — a 500 for a typed refusal would be a silent failure`);
   ok(!Object.values(ROUTES.STATUS).includes(500), 'no typed code maps to 500');
   srv.close();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §6 WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test): `vibespace-window screenshot <h>` with no
+// --out wrote `window-<h>-<ts>.png` into the SHELL's cwd — the session stood in the production checkout, so the PNG
+// landed in the repo. The shipped CLI against a stub screenshot route, run from a cwd that must stay EMPTY: no --out ⇒
+// <os.tmpdir()>/vibespace-window/ (0700); a relative --out ⇒ under VIBESPACE_SESSION_CWD when set, else that temp dir;
+// `~/.ssh/x.png`, a home dot-entry, a symlinked `..` into one, a final-component link and VibeSpace's own data dir are
+// refused BY NAME before any request (the stub counts them). CONTROL: a patched copy (scripts/mutant-copy.mjs) with the
+// old default writes into the cwd.
+{
+  console.log('\n§6 where a screenshot lands (never the shell\'s cwd, never a credential store)');
+  const http = await import('node:http');
+  const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000020000000208060000007b1a43ad0000000d4944415478da63f8ffff3f0005fe02fea72b8a4a0000000049454e44ae426082', 'hex');
+  let shots = 0;
+  const stub = http.createServer((req, res) => {
+    if (req.method === 'GET' && req.url.startsWith('/api/agent/window/screenshot?')) {
+      shots++;
+      res.writeHead(200, { 'Content-Type': 'image/png', 'X-Window-Shot': JSON.stringify({ handle: 'da-shot', w: 2, h: 2, originX: 0, originY: 0, coords: 'window', scale: 1, blank: false }) });
+      res.end(PNG); return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'not here', code: 'not-found' }));
+  });
+  await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+  const API6 = `http://127.0.0.1:${stub.address().port}`;
+  const root6 = path.join(dir, 'shot');
+  const cwd6 = path.join(root6, 'cwd'), tmp6 = path.join(root6, 'tmp'), home6 = path.join(root6, 'home'), proj6 = path.join(root6, 'proj');
+  for (const d of [cwd6, tmp6, path.join(home6, '.ssh'), path.join(home6, '.config', 'app'), path.join(proj6, 'shots')]) fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(home6, '.ssh', 'authorized_keys'), 'ssh-ed25519 AAAA keep-me\n');
+  fs.symlinkSync(path.join(home6, '.config', 'app'), path.join(proj6, 'cfg'));                    // cfg/.. = ~/.config physically, proj6 lexically
+  fs.symlinkSync(path.join(home6, '.ssh', 'authorized_keys'), path.join(proj6, 'link.png'));      // a final-component link
+  const CLI6 = path.join(repo, 'data/bin/vibespace-window');
+  const cli6 = (file, a, extra = {}, cwd = cwd6) => new Promise((resolve) => execFile(process.execPath, [file, ...a], {
+    cwd, encoding: 'utf8', timeout: 20000,
+    env: { PATH: process.env.PATH, HOME: home6, TMPDIR: tmp6, VIBESPACE_API: API6, VIBESPACE_SESSION_TOKEN: 'vsst_shot', ...extra },
+  }, (e, stdout, stderr) => resolve({ status: e ? e.code : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
+  const ls = (d) => { try { return fs.readdirSync(d); } catch { return null; } };
+  const isPng = (f) => { try { return fs.readFileSync(f).subarray(0, 8).toString('hex') === '89504e470d0a1a0a'; } catch { return false; } };
+  const shotDir6 = path.join(tmp6, 'vibespace-window');
+
+  const a = await cli6(CLI6, ['screenshot', 'da-shot']);
+  const aPath = a.stdout.split(' (')[0].trim();
+  const aMode = (() => { try { return fs.statSync(shotDir6).mode & 0o777; } catch { return null; } })();
+  ok(a.status === 0 && path.dirname(aPath) === shotDir6 && /^da-shot-\d+\.png$/.test(path.basename(aPath)) && isPng(aPath) && /the window's own pixels/.test(a.stdout), `no --out ⇒ the PNG lands under <tmpdir>/vibespace-window/ and its path is printed (${a.stdout.trim().slice(0, 140)})`, a.stderr);
+  ok(aMode === 0o700, `…the directory is made private (0700; got ${aMode == null ? 'none' : aMode.toString(8)})`);
+  ok(JSON.stringify(ls(cwd6)) === '[]', `…and the shell's cwd gains NO file (${JSON.stringify(ls(cwd6))})`);
+
+  const b = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'shots/b.png'], { VIBESPACE_SESSION_CWD: proj6 });
+  ok(b.status === 0 && isPng(path.join(proj6, 'shots', 'b.png')) && b.stdout.startsWith(path.join(proj6, 'shots', 'b.png') + ' (') && JSON.stringify(ls(cwd6)) === '[]', 'a relative --out with VIBESPACE_SESSION_CWD set lands under the SESSION\'s directory (never the shell\'s cwd)', b.stdout + b.stderr);
+  const c = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'c.png']);
+  ok(c.status === 0 && isPng(path.join(shotDir6, 'c.png')) && !fs.existsSync(path.join(cwd6, 'c.png')), 'a relative --out with NO session directory lands in the temp screenshot directory, not the shell\'s cwd', c.stdout + c.stderr);
+  const abs = path.join(root6, 'abs.png');
+  const d0 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', abs]);
+  ok(d0.status === 0 && isPng(abs), 'an absolute --out outside every store is written as named', d0.stdout + d0.stderr);
+
+  const before = shots;
+  const r1 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', '~/.ssh/x.png']);
+  ok(r1.status === 1 && /\[write_path_refused\]/.test(r1.stderr) && r1.stderr.includes('is under ~/.ssh') && !fs.existsSync(path.join(home6, '.ssh', 'x.png')), '`--out ~/.ssh/x.png` is refused BY NAME (write_path_refused, "under ~/.ssh") and nothing lands there', r1.stderr);
+  const r2 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', path.join(home6, '.bashrc')]);
+  ok(r2.status === 1 && r2.stderr.includes('is under ~/.bashrc') && !fs.existsSync(path.join(home6, '.bashrc')), 'an absolute --out on a home dot-entry (~/.bashrc) is refused by name', r2.stderr);
+  const r3 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'cfg/../x.png'], { VIBESPACE_SESSION_CWD: proj6 });
+  ok(r3.status === 1 && r3.stderr.includes('is under ~/.config') && !fs.existsSync(path.join(home6, '.config', 'x.png')) && !fs.existsSync(path.join(proj6, 'x.png')), '`cfg/../x.png` (cfg → ~/.config/app) is judged PHYSICALLY: ~/.config, refused — the lexical <project>/x.png would have passed', r3.stderr);
+  const r4 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', 'link.png'], { VIBESPACE_SESSION_CWD: proj6 });
+  ok(r4.status === 1 && /\[out_unusable\]/.test(r4.stderr) && /symbolic link/.test(r4.stderr) && fs.readFileSync(path.join(home6, '.ssh', 'authorized_keys'), 'utf8') === 'ssh-ed25519 AAAA keep-me\n', 'a final-component symlink (link.png → ~/.ssh/authorized_keys) is refused and its target is untouched', r4.stderr);
+  const dataProbe = path.join(repo, 'data', `vs-shot-probe-${process.pid}.png`);
+  try {
+    const r5 = await cli6(CLI6, ['screenshot', 'da-shot', '--out', dataProbe]);
+    ok(r5.status === 1 && r5.stderr.includes('is under <VibeSpace data>') && !fs.existsSync(dataProbe), 'an --out inside VibeSpace\'s own data directory (its tools run in every session) is refused by name', r5.stderr);
+  } finally { try { fs.rmSync(dataProbe, { force: true }); } catch { } }
+  ok(shots === before, `every refused --out was decided BEFORE the request — nothing was captured (${shots - before} request(s))`);
+  ok(JSON.stringify(ls(cwd6)) === '[]', 'after every leg the shell\'s cwd is still empty');
+
+  // CONTROL: the pre-fix default (the shell's cwd) in a patched copy outside the tree — the pins above must be able to fail
+  const src6 = fs.readFileSync(CLI6, 'utf8');
+  const NEW_DEFAULT = "if (want === undefined) { const sd = ensureShotDir(); return sd.code ? sd : { path: path.join(sd.dir, stamp), fresh: true }; }";
+  const OLD_DEFAULT = "if (want === undefined) return { path: path.join(process.cwd(), `window-${h}-${Date.now()}.png`), fresh: false };";
+  const patched6 = src6.replace(NEW_DEFAULT, OLD_DEFAULT);
+  ok(src6.includes(NEW_DEFAULT) && patched6 !== src6, 'control: the default line is found and patched back to the old one');
+  const cwdC = path.join(root6, 'cwd-control'); fs.mkdirSync(cwdC, { recursive: true });
+  const mutC = MUTW.write('data/bin/vibespace-window', patched6, 'oldshotdefault');
+  const k = await cli6(mutC, ['screenshot', 'da-shot'], {}, cwdC);
+  const leaked = (ls(cwdC) || []).filter((f) => /^window-da-shot-\d+\.png$/.test(f));
+  ok(k.status === 0 && leaked.length === 1 && isPng(path.join(cwdC, leaked[0])), `control: the old default writes window-<h>-<ts>.png INTO the shell's cwd (${JSON.stringify(ls(cwdC))}) — the §6 "cwd gains no file" pin is not vacuous`, k.stdout + k.stderr);
+  for (const r of copiesCensus(MUTW.files, MUTW.dir, repo, { minCopies: 1 })) ok(r.pass, '§6 tree: ' + r.name, r.pass ? undefined : r.detail);
+  stub.close();
 }
 
 console.log(`\n${pass} passed, ${fail} failed, ${skipped} skipped`);

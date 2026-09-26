@@ -31,6 +31,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
 if (!API || !TOKEN) { console.error('vibespace-window: not inside a VibeSpace session (VIBESPACE_API / VIBESPACE_SESSION_TOKEN missing)'); process.exit(2); }
@@ -50,7 +51,10 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
   vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]
                                                  THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot
   vibespace-window screenshot <handle> [--out <file.png>]
-                                                 the window's OWN pixels (its size + origin printed): the pixel-mode read; --at x,y is a pixel of it
+                                                 the window's OWN pixels (its size + origin printed): the pixel-mode read; --at x,y is a pixel of it.
+                                                 It lands in <temp dir>/vibespace-window/ (the path is printed), never in your current directory;
+                                                 a relative --out is under the session's directory (else that temp dir); ~/.ssh, any ~/.<dir>
+                                                 and VibeSpace's own data are refused write_path_refused
   vibespace-window click <handle> @e7 [--action <name>]
                                                  act on a NODE (its own declared action; --action picks one by name)
   vibespace-window click <handle> --at <x>,<y> [--button 1|2|3]
@@ -104,6 +108,7 @@ function printRefusal(r, status) {
   else if (r.code === 'window_not_visible') console.error('  nobody has this window open, so it has no pixels — ask the user to open it (`vibespace-window watch <handle>` says where), or use the tree');
   else if (r.code === 'outside_window') console.error('  --at is a pixel of `vibespace-window screenshot <handle>` (x from the left, y from the top of that image) — take one and pick the point there');
   else if (r.code === 'reach_unreadable') console.error('  the Task Group store could not be read — try again in a moment; nothing was done and your lease (if you hold one) is kept');
+  else if (r.code === 'write_path_refused' || r.code === 'out_unusable' || r.code === 'shot_dir_unsafe') console.error('  ' + (r.remedy || 'leave --out off: the image goes to the temp directory and its path is printed'));
   else if (r.code === 'no_utf8_locale') console.error('  nothing was typed: this machine has no UTF-8 locale, so a non-ASCII character cannot be typed as keys — type the ASCII part, or `type <handle> @ref "…"` on a field with a text interface (the tree takes any text), or ask the user to install a UTF-8 locale (C.UTF-8)');
   // lane E verify r2 (L5) / r3 (F2): an injection the user's takeover, a revoke or its own time limit cut short — part of it may already have landed
   if (r.did && r.did.partial) {
@@ -113,6 +118,105 @@ function printRefusal(r, status) {
   }
 }
 const usageOf = (line) => { console.error('usage: ' + line); process.exit(2); };
+
+// ── WHERE A SCREENSHOT LANDS (2026-09-26, the owner's pixel-mode test) ──────
+/** `screenshot` with no `--out` wrote `window-<h>-<ts>.png` into the invoking
+ *  SHELL's directory — the session's cwd was the production checkout, so the
+ *  PNG landed in the repo. Now:
+ *    · no `--out` ⇒ `<os.tmpdir()>/vibespace-window/<handle>-<ts>.png` (the
+ *      directory made 0700; refused `shot_dir_unsafe` when it is not a real
+ *      directory this uid owns — a shared /tmp can hold another user's link);
+ *    · a relative `--out` is resolved against the SESSION's directory
+ *      (VIBESPACE_SESSION_CWD, exported by the spawn) when there is one, else
+ *      against that temp directory — NEVER against this shell's cwd;
+ *    · wherever it resolves, the target is judged PHYSICALLY (the parent's
+ *      realpath — a symlink is followed before any `..` after it; a final
+ *      component that is a link is refused, and the file is opened O_NOFOLLOW)
+ *      by `shotOutVerdict`, the credential-store rule of the browser CLI's write
+ *      containment (lane L, src/browser-verbs.js `writePathVerdict`) — COPIED,
+ *      not imported: this file ships alone (AGENT_TOOLS).
+ *  Everything is decided BEFORE the request: a refused `--out` captures nothing. */
+const SHOT_SECRET_COMPONENTS = Object.freeze(['.ssh', '.claude', '.codex', '.vibespace', '.git']);
+/** PURE. `paths` = every spelling of the target (lexical, physical — the LAST is
+ *  where the kernel writes); `homes` / `dataDirs` = every spelling of each home
+ *  and of VibeSpace's data dir; `roots` = directories chosen FOR the agent (the
+ *  session's, the temp one): a root that itself sits inside a home dot-entry
+ *  wins for its own subtree (a project in ~/.config/nvim writes there), a NAMED
+ *  store never does. → null (write it) | {code:'write_path_refused', error, remedy}. */
+function shotOutVerdict(file, paths, { homes = [], dataDirs = [], roots = [] } = {}) {
+  const norm = (d) => { let s = String(d || '').replace(/\/{2,}/g, '/'); while (s.length > 1 && s.endsWith('/')) s = s.slice(0, -1); return s; };
+  const under = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + '/');
+  const abs = (list) => (Array.isArray(list) ? list : []).map(norm).filter((d) => d[0] === '/' && d !== '/');
+  const H = abs(homes), DD = abs(dataDirs), RT = abs(roots);
+  const storeOf = (p) => {
+    if (DD.some((d) => under(p, d))) return '<VibeSpace data>';
+    for (const h of H) {
+      if (p === h || !under(p, h)) continue;
+      const seg = p.slice(h.length + 1).split('/')[0];
+      if (!seg || seg[0] !== '.') continue;
+      if (SHOT_SECRET_COMPONENTS.includes(seg)) return `~/${seg}`;
+      if (RT.some((r) => under(r, `${h}/${seg}`) && under(p, r))) continue;
+      return `~/${seg}`;
+    }
+    const named = p.split('/').find((c) => SHOT_SECRET_COMPONENTS.includes(c));
+    return named ? `a ${named} directory` : null;
+  };
+  for (const p of abs(paths).reverse()) {
+    const s = storeOf(p);
+    if (s) return { code: 'write_path_refused', error: `\`${String(file).slice(0, 120)}\` is under ${s} — a screenshot never lands in your logins, keys, credentials, config or VibeSpace's own data; nothing was captured or written`, remedy: 'leave --out off (the image goes to the temp directory and its path is printed), or name a file under the project or /tmp' };
+  }
+  return null;
+}
+const spellingsOf = (d) => { let r = null; try { r = fs.realpathSync.native(d); } catch { r = null; } return r && r !== d ? [d, r] : [d]; };
+const SHOT_HOMES = [...new Set([process.env.HOME, (() => { try { return os.userInfo().homedir; } catch { return null; } })(), os.homedir()]
+  .filter((h) => typeof h === 'string' && h[0] === '/').flatMap(spellingsOf))];
+const SHOT_DATA_DIRS = spellingsOf(path.join(__dirname, '..'));
+const shotDirPath = () => path.join(os.tmpdir(), 'vibespace-window');
+/** The default directory, made private: → {dir} | a refusal. */
+function ensureShotDir() {
+  const d = shotDirPath();
+  try { fs.mkdirSync(d, { mode: 0o700 }); } catch (e) { if (e.code !== 'EEXIST') return { code: 'shot_dir_unsafe', error: `the screenshot directory ${d} could not be made (${e.code || e.message}); nothing was captured`, remedy: 'name the file with --out <path> under the project' }; }
+  let st = null; try { st = fs.lstatSync(d); } catch { st = null; }
+  const mine = st && (typeof process.getuid !== 'function' || st.uid === process.getuid());
+  if (!st || st.isSymbolicLink() || !st.isDirectory() || !mine) return { code: 'shot_dir_unsafe', error: `${d} is not a private directory of yours (a symbolic link, a file, or another user's); nothing was captured`, remedy: 'name the file with --out <path> under the project' };
+  if ((st.mode & 0o077) !== 0) { try { fs.chmodSync(d, 0o700); } catch { } }
+  return { dir: d };
+}
+/** VIBESPACE_SESSION_CWD when the spawn exported an absolute one, else null. */
+function sessionDir() {
+  const v = process.env.VIBESPACE_SESSION_CWD;
+  return typeof v === 'string' && v[0] === '/' && v !== '/' ? v : null;
+}
+/** → {path, fresh} | a refusal ({code, error, remedy}). Decided before any request. */
+function shotTarget(h) {
+  const want = flag('--out');
+  const stamp = `${String(h).replace(/[^\w.-]/g, '_')}-${Date.now()}.png`;
+  if (want === undefined) { const sd = ensureShotDir(); return sd.code ? sd : { path: path.join(sd.dir, stamp), fresh: true }; }
+  if (!want || want.startsWith('-')) usageOf('vibespace-window screenshot <handle> [--out <file.png>]');
+  const home = os.homedir();
+  const spelled = want === '~' || want.startsWith('~/') ? home + want.slice(1) : want;
+  let base = null;
+  if (spelled[0] !== '/') {
+    base = sessionDir();
+    if (!base) { const sd = ensureShotDir(); if (sd.code) return sd; base = sd.dir; }
+  }
+  const raw = spelled[0] === '/' ? spelled : `${base}/${spelled}`;
+  const k = raw.lastIndexOf('/');
+  const name = raw.slice(k + 1);
+  const parentRaw = raw.slice(0, k) || '/';
+  const bad = (why) => ({ code: 'out_unusable', error: `\`${String(want).slice(0, 120)}\` ${why}; nothing was captured`, remedy: 'leave --out off (the image goes to the temp directory and its path is printed), or name a new file in an existing directory' });
+  if (!name || name === '.' || name === '..') return bad('names a directory, not a file');
+  let parent;
+  try { parent = fs.realpathSync.native(parentRaw); } catch (e) { return bad(`is in a directory that does not exist (${e.code || e.message})`); }
+  const physical = parent === '/' ? '/' + name : `${parent}/${name}`;
+  const roots = [...(sessionDir() ? spellingsOf(sessionDir()) : []), ...spellingsOf(shotDirPath())];
+  const v = shotOutVerdict(want, [path.resolve(raw), physical], { homes: SHOT_HOMES, dataDirs: SHOT_DATA_DIRS, roots });
+  if (v) return v;
+  let st = null; try { st = fs.lstatSync(physical); } catch { st = null; }
+  if (st && st.isSymbolicLink()) return bad('is a symbolic link — a screenshot never writes through one');
+  if (st && !st.isFile()) return bad('names something that is not a regular file');
+  return { path: physical, fresh: false };
+}
 const handleArg = (usage) => { const h = args[1]; if (!h || h.startsWith('-') || h.startsWith('@')) usageOf(usage); return h; };
 
 function printNode(n) {
@@ -184,10 +288,15 @@ function printNode(n) {
 
   if (verb === 'screenshot') {
     const h = handleArg('vibespace-window screenshot <handle> [--out <file.png>]');
+    const target = shotTarget(h);
+    if (target.code) { printRefusal(target); process.exit(1); }
     const res = await call('GET', '/api/agent/window/screenshot?handle=' + encodeURIComponent(h), undefined, { raw: true });
-    const out = flag('--out') || path.join(process.cwd(), `window-${h}-${Date.now()}.png`);
+    const out = target.path;
     const buf = Buffer.from(await res.arrayBuffer());
-    fs.writeFileSync(out, buf);
+    const C = fs.constants;
+    let fd;
+    try { fd = fs.openSync(out, C.O_WRONLY | C.O_CREAT | C.O_TRUNC | (C.O_NOFOLLOW || 0), target.fresh ? 0o600 : 0o666); } catch (e) { printRefusal({ code: 'out_unusable', error: `\`${out}\` could not be written (${e.code || e.message}); the capture was discarded`, remedy: 'leave --out off, or name a new file in an existing directory' }); process.exit(1); }
+    try { fs.writeFileSync(fd, buf); } finally { fs.closeSync(fd); }
     let meta = null; try { meta = JSON.parse(res.headers.get('x-window-shot') || 'null'); } catch { }
     const where = meta ? (meta.coords === 'window' ? `, ${meta.w}x${meta.h} — the window's own pixels (origin ${meta.originX},${meta.originY} on its display${meta.scale && meta.scale !== 1 ? `, scale ${meta.scale}×` : ''}); \`click ${h} --at x,y\` takes a pixel of THIS image` : `, ${meta.w}x${meta.h}${meta.cropped ? ', the window\'s frame' : ', the whole display'} (display coordinates)`) : '';
     console.log(`${out} (${buf.length} bytes${where})${meta && meta.blank ? ' — the image is BLANK (the window drew nothing yet)' : ''}`);

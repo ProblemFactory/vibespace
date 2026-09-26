@@ -1,6 +1,6 @@
 import { workflowNameFromAck, shortWorkflowName } from '../workflow-name.js';
 import { parseSetModelEcho } from '../model-echo.js'; // the ONE /model echo parser (shared with the server's lock repin)
-import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu } from './utils.js';
+import { copyText, escHtml, showToast, showConfirmDialog, collectDroppedFiles, showImageOverlay, fetchJson, showContextMenu, onOutsidePress } from './utils.js';
 import { installChatSeek } from './chat-view-seek.js';
 import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
@@ -449,6 +449,7 @@ class ChatView {
     // Renderers (extracted rendering methods)
     this._renderers = new ChatRenderers({
       getSessionCtx: () => this._getSessionIds(), // view-only/terminated windows keep host+cwd via openSpec
+      getSourceWinId: () => this.winInfo?.id || null, // split tabs v2 (F2): a path opened here is born beside THIS window — never the active one
       // In-chat ACTION buttons (Compact now): product-authored text, so the
       // send owns neither the draft slot nor the store — `carriesUserText`
       // stays false EXPLICITLY (round-8: the flag is the difference between
@@ -2106,8 +2107,8 @@ class ChatView {
     // conversation re-reads with a "rolled back to here" notice) and the
     // `opencode-updated` broadcast tells every other client.
     this._addOpencodeRevertActions(pop, msg);
-    const close = (e) => { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('mousedown', close, true); } };
-    document.addEventListener('mousedown', close, true);
+    // an outside press closes it (utils.js onOutsidePress — the ONE closer; armed at once, as before)
+    onOutsidePress(pop, () => pop.remove(), { nested: false });
     // Billing-account row (2.266.1, user request): resolved async from the
     // ledger by requestId — with the pool switching accounts mid-conversation,
     // "which account served THIS message" is per-message truth only the

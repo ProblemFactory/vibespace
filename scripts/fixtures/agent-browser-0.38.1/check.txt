@@ -1,0 +1,13 @@
+agent-browser check - Check a checkbox
+
+Usage: agent-browser check <selector>
+
+Checks a checkbox element. If already checked, no action is taken.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser check "#terms-checkbox"
+  agent-browser check @e7

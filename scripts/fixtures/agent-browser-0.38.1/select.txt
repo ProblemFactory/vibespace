@@ -1,0 +1,15 @@
+agent-browser select - Select a dropdown option
+
+Usage: agent-browser select <selector> <value...>
+
+Selects one or more options in a <select> dropdown by value or visible label.
+Label matching normalizes whitespace such as non-breaking spaces.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser select "#country" "US"
+  agent-browser select @e5 "option2"
+  agent-browser select "#menu" "opt1" "opt2" "opt3"

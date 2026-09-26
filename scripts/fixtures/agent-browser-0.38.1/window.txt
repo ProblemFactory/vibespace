@@ -1,0 +1,15 @@
+agent-browser window - Manage browser windows
+
+Usage: agent-browser window <operation>
+
+Manage browser windows.
+
+Operations:
+  new                  Open new browser window
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser window new

@@ -73,7 +73,11 @@ export function setupDirAutocomplete(input, dropdown, { onNavigate, endpoint, pr
     else if (e.key === 'Tab' || e.key === 'Enter') {
       if (activeIdx >= 0) { e.preventDefault(); pick(items[activeIdx]); }
       else if (e.key === 'Tab' && items.length === 1) { e.preventDefault(); pick(items[0]); }
-    } else if (e.key === 'Escape') { hide(); }
+    } else if (e.key === 'Escape') {
+      // lane L: an open suggestion list owns its Escape — the dialog around it
+      // (the New Session dialog's global Esc) reads defaultPrevented and stays
+      hide(); e.preventDefault();
+    }
   });
 
   input.addEventListener('blur', () => setTimeout(hide, 200));

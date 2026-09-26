@@ -1,0 +1,21 @@
+agent-browser clipboard - Read and write clipboard
+
+Usage: agent-browser clipboard <operation> [text]
+
+Read from or write to the browser clipboard.
+
+Operations:
+  read                 Read text from clipboard
+  write <text>         Write text to clipboard
+  copy                 Copy current selection (simulates Ctrl+C)
+  paste                Paste from clipboard (simulates Ctrl+V)
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser clipboard read
+  agent-browser clipboard write "Hello, World!"
+  agent-browser clipboard copy
+  agent-browser clipboard paste

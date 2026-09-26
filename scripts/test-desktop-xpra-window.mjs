@@ -95,6 +95,13 @@
 //     tab-strip drag moves our window by the gesture, Chrome's own □ / restore / ─ / ✕ act on OUR window. SKIPPED by
 //     name without a chromium-family binary. CONTROL (one copy for both) = the floor knobs + no relaunch fit + no
 //     seeding: 2× → 1.5× halves the column in a window that kept its size; Chrome stays SSD with both bars stacked.
+//   • §17 (lane M, inc-muhms5kt-0ejl — "vibespace中的悬浮菜单，不相应在app画面里的点击自动隐藏") A PRESS INTO THE PICTURE
+//     CLOSES OUR FLOATING MENUS: on a live GNOME Calculator the ⚙ menu with its Appearance flyout, the title bar's window
+//     menu, the ⋯ menu with Scale ▸ open, the taskbar window list and the For-you popup each close on ONE trusted click
+//     into the picture while the calculator takes the digit (its own copy reads the digits back); the mechanism measured
+//     on the pane (the document sees pointerdown and click, never mousedown); a finger drag across the picture is not a
+//     tap (the menu stays), a finger tap closes it. CONTROL = a copy whose onOutsidePress is the pre-lane closer (a
+//     bubble-phase document mousedown): every surface stays open over the same clicks, the digits still land.
 // SKIPs with evidence without chrome / xpra / xauth / xterm; the xclip legs
 // SKIP without xclip; the plain-http leg SKIPs when the hostname does not
 // resolve. Worktree-isolated (own data/, scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1),
@@ -217,6 +224,7 @@ const cleanup = () => {
   try { fs.rmSync(scratch('deskxpra-a2ctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-seamctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(scratch('deskxpra-dctl-home'), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(scratch('deskxpra-mctl-home'), { recursive: true, force: true }); } catch {}
   try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}
 };
 process.on('exit', cleanup);
@@ -2646,6 +2654,213 @@ try {
       finally { for (const [o, id] of ids14.splice(0)) await fetch(`${o}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {}); await sleep(1500); }
     }
     try { sd.kill('SIGKILL'); } catch {}
+  }
+  // ── §17 LANE M — A PRESS INTO THE PICTURE CLOSES OUR FLOATING MENUS (inc-muhms5kt-0ejl, the owner: "vibespace中的悬浮菜单，
+  // 不相应在app画面里的点击自动隐藏"). The xpra pane cancels its pointerdown (the app gets the press, the browser neither
+  // selects nor drags) and a cancelled pointerdown has no compatibility mousedown — every closer listened for one. On a
+  // live GNOME Calculator: the ⚙ menu (a createPopover, its Appearance flyout open when hover is emulated), the title
+  // bar's window menu (showContextMenu), the ⋯ menu with Scale ▸ open, the taskbar window list (a createPopover) and the
+  // For-you popup (persistent) — each open, then ONE trusted click on a calculator digit key: the surface is GONE and the
+  // calculator took the digit (its own Ctrl+C copy reads the digits back). The mechanism measured on the real pane (the
+  // document saw pointerdown and click, never mousedown). CONTROL = a copy of this tree whose onOutsidePress is patched
+  // back to the pre-lane closer (a bubble-phase document mousedown): every surface stays OPEN over the same clicks while
+  // the digits still land ──
+  console.log('§17 lane M — a press into the picture closes the ⚙ menu, the window menu, ⋯ Scale ▸, the window list and the For-you popup; the app still gets it');
+  const CALC13 = bin('gnome-calculator');
+  if (!CALC13) skip('§17 the outside-press legs', 'gnome-calculator not on PATH');
+  else {
+    const O13 = `http://127.0.0.1:${PORT}`;
+    const ids13 = [];
+    let A = null;
+    // the five surfaces: how each opens (trusted input) and how the page says it is open
+    const SURF = {
+      gear: { open: `#btn-global-settings`, shown: `!!document.querySelector('.global-settings-popover')` },
+      winmenu: { shown: `!!document.querySelector('.taskbar-context-menu')` },
+      scale: { open: `.desktop-app-more`, shown: `!!document.querySelector('.context-menu')` },
+      winlist: { open: `#taskbar-status`, shown: `!!document.querySelector('.overlap-switcher')` },
+      foryou: { open: `#taskbar-user-todos`, shown: `(() => { const p = document.getElementById('user-todos-popup'); return !!p && !p.classList.contains('hidden'); })()` },
+    };
+    const centerOf = async (P, sel) => P.evalJs(`(() => { const el = [...document.querySelectorAll(${JSON.stringify(sel)})].find((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden'; }); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    /** open one surface with trusted input; returns what the page shows (and, for the gear, whether the flyout opened) */
+    const openSurface = async (P, id, which) => {
+      if (which === 'winmenu') {
+        // right of the title's middle (the window menu then opens away from the keypad), left of the ─ □ ✕ controls
+        const tb = await P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)}); const r = w.titleBar.getBoundingClientRect(); return { x: r.x + r.width * 0.7, y: r.y + r.height / 2, h: r.height }; })()`);
+        await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: tb.x, y: tb.y });
+        await P.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: tb.x, y: tb.y, button: 'right', buttons: 2, clickCount: 1 });
+        await P.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tb.x, y: tb.y, button: 'right', buttons: 0, clickCount: 1 });
+      } else {
+        const c = await centerOf(P, SURF[which].open);
+        if (!c) return { shown: false, why: `${SURF[which].open} not visible` };
+        await trustedClickAt(P, c.x, c.y);
+      }
+      const shown = await until(() => P.evalJs(SURF[which].shown), 4000, 100);
+      let extra = null;
+      if (shown && which === 'gear') {
+        // the Appearance head's flyout (desktop mode) — or the accordion (hover: none) — opened by hovering / clicking the head
+        const head = await P.evalJs(`(() => { const h = [...document.querySelectorAll('.global-settings-popover .gs-menu-item.has-sub')][0]; if (!h) return null; const r = h.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+        if (head) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: head.x, y: head.y }); await sleep(300); }
+        extra = await P.evalJs(`({ flyout: !!document.querySelector('.gs-flyout.open'), accordion: !!document.querySelector('.global-settings-popover .gs-acc-open, .global-settings-popover .gs-sub.open') })`);
+      }
+      if (shown && which === 'scale') {
+        const row = await P.evalJs(`(() => { const r = [...document.querySelectorAll('.context-menu > .context-menu-item')].find((e) => /^Scale/.test(e.textContent)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.x + 20, y: b.y + b.height / 2 }; })()`);
+        if (row) { await P.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: row.x, y: row.y }); await sleep(250); }
+        extra = await P.evalJs(`({ scaleSub: [...document.querySelectorAll('.context-menu .context-menu')].some((s) => s.style.display !== 'none' && s.getBoundingClientRect().height > 0) })`);
+      }
+      return { shown: !!shown, extra };
+    };
+    /** the calculator's digit keys, as page points (R2 + DIGITS7 — §6/§7's own finder, the canvas backing read) */
+    const digitPoints = async (P, id) => {
+      const s = await P.evalJs(R2(id));
+      const rows = await P.evalJs(DIGITS7(id));
+      const order = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['0']];
+      const at = {};
+      if (rows.length === 4) for (let i = 0; i < 4; i++) for (let j = 0; j < order[i].length; j++) { const q = rows[i][j]; if (q) at[order[i][j]] = { x: s.pane.x + s.offset.x + (q.cx / s.ratio) * s.scale, y: s.pane.y + s.offset.y + (q.cy / s.ratio) * s.scale }; }
+      return at;
+    };
+    /** the owner's ⚙ menu is the desktop FLYOUT (the ring: .gs-flyout.open) — headless chrome answers hover: none, and
+     *  CDP cannot emulate the hover media feature (test-gear-menu launches chrome with --blink-settings instead): THIS page
+     *  answers the one query gearMenuMode asks with a hover-capable device; nothing else changes, nothing is persisted */
+    const flyoutMode = (P) => P.evalJs(`(() => { const mm = window.matchMedia.bind(window); window.matchMedia = (q) => (q === '(hover: none)' ? Object.assign(mm('(max-width: 0px)'), {}) : mm(q)); return window.matchMedia('(hover: none)').matches === false; })()`);
+    /** one calculator in the given page: launched, opened, active, sized, seamless OFF (the title bar + ⋯ visible), painted */
+    const calcIn = async (P, origin) => {
+      const lc = await launchOn(P, { appId: 'gnome-calculator' });
+      const rc = lc && lc.id && await readyOn(P, lc.id);
+      if (!rc) return { err: lc };
+      await flyoutMode(P);
+      await P.evalJs(`app.openDesktopApp(${JSON.stringify(rc.id)}); true`);
+      await ensureActive(P, rc.id);
+      await sizeWinOn(P, rc.id, 760, 640);
+      const up = await until(async () => { const v = await P.evalJs(R2(rc.id)); return v && v.status === 'Connected' && v.main ? v : null; }, 40000, 250);
+      await sleep(1500); // the first full paint
+      const pts = up ? await until(async () => { const d = await digitPoints(P, rc.id); return Object.keys(d).length === 10 ? d : null; }, 15000, 500) : null;
+      void origin;
+      return { id: rc.id, up: !!up, pts };
+    };
+    /** the five legs on one page: open → one trusted click on a digit key → is the surface still shown? digits read back */
+    const legs = async (P, id, pts, { tag, closeAfter }) => {
+      const out = [];
+      const order = ['gear', 'winmenu', 'scale', 'winlist', 'foryou'];
+      const digits = ['7', '8', '9', '4', '5'];
+      // start from a clean display (Escape = the calculator's clear; the pane has focus after a click)
+      const first = pts['1'];
+      await trustedClickAt(P, first.x, first.y); await sleep(300);
+      await P.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await P.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+      await sleep(300);
+      for (let i = 0; i < order.length; i++) {
+        const which = order[i], d = digits[i];
+        const o = await openSurface(P, id, which);
+        // the mechanism, on the real pane: what the document sees of the ONE click (capture listeners — nothing can hide them)
+        await P.evalJs(`(() => { window.__m13 = { pointerdown: 0, mousedown: 0, click: 0 }; if (!window.__m13armed) { window.__m13armed = true; for (const k of ['pointerdown', 'mousedown', 'click']) document.addEventListener(k, () => { window.__m13[k]++; }, true); } return true; })()`);
+        await trustedClickAt(P, pts[d].x, pts[d].y);
+        await sleep(600);
+        const still = await P.evalJs(SURF[which].shown);
+        const seen = await P.evalJs('window.__m13');
+        out.push({ which, digit: d, opened: o.shown, extra: o.extra, still, seen });
+        console.log(`  §17 ${tag} ${which}: opened ${o.shown}${o.extra ? ' ' + JSON.stringify(o.extra) : ''}${o.why ? ' (' + o.why + ')' : ''}; after one click on the '${d}' key: ${still ? 'STILL OPEN' : 'closed'}; the document saw ${JSON.stringify(seen)}`);
+        if (still && closeAfter) {
+          // the control: close it by hand (Escape = the [data-popover] protocol / the For-you popup's own Esc) before the next leg
+          await P.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await P.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+          await sleep(200);
+          if (await P.evalJs(SURF[which].shown)) { const far = await P.evalJs(`(() => { const r = document.getElementById('toolbar').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`); await trustedClickAt(P, far.x, far.y); await sleep(200); }
+          // Escape went to the app too (the pane had focus): it cleared the calculator — re-enter the digits so far
+          for (const x of digits.slice(0, i + 1)) { await trustedClickAt(P, pts[x].x, pts[x].y); await sleep(250); }
+        }
+      }
+      // TOUCH on the real pane (the helper judges a finger only as a TAP): the ⚙ menu open, a finger DRAG across the
+      // picture (90 px, the pane is touch-action: none — the app's drag, not a scroll) is not a tap: the menu STAYS; then
+      // a TAP on the '6' key: closed, and the app took the 6
+      const typed = [...digits];
+      const touchLeg = { opened: (await openSurface(P, id, 'gear')).shown };
+      const t0 = pts['1'];
+      await P.cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t0.x, y: t0.y }] });
+      for (let k = 1; k <= 9; k++) { await P.cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: t0.x + 10 * k, y: t0.y }] }); await sleep(20); }
+      await P.cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await sleep(500);
+      touchLeg.afterDrag = await P.evalJs(SURF.gear.shown);
+      await P.evalJs(`(() => { window.__m13 = { pointerdown: 0, mousedown: 0, click: 0 }; window.__m13type = ''; if (!window.__m13t) { window.__m13t = true; document.addEventListener('pointerdown', (e) => { window.__m13type = e.pointerType; }, true); } return true; })()`);
+      const t6 = pts['6'];
+      await P.cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: t6.x, y: t6.y }] });
+      await sleep(60);
+      await P.cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await sleep(600);
+      touchLeg.afterTap = await P.evalJs(SURF.gear.shown);
+      touchLeg.seen = await P.evalJs('({ ...window.__m13, pointerType: window.__m13type })');
+      typed.push('6');
+      console.log(`  §17 ${tag} touch: the ⚙ menu opened ${touchLeg.opened}; after a 90 px finger drag across the picture: ${touchLeg.afterDrag ? 'still open' : 'CLOSED'}; after a finger TAP on the '6' key: ${touchLeg.afterTap ? 'STILL OPEN' : 'closed'}; the document saw ${JSON.stringify(touchLeg.seen)}`);
+      if (touchLeg.afterTap && closeAfter) {
+        await P.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await P.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        await sleep(200);
+        for (const x of typed) { await trustedClickAt(P, pts[x].x, pts[x].y); await sleep(250); }
+      }
+      const prev = (await P.evalJs(R2(id))).lastReceived;
+      const got = await copyBack7(P, id, prev);
+      return { out, touch: touchLeg, got, want: typed.join('') };
+    };
+    try {
+      await p1.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
+      A = await mkPage(O13, { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false });
+      await A.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`); await openPage(A.p, O13);
+      await A.p.cdp('Page.bringToFront');
+      await A.p.evalJs(`app.settings.set('desktop.seamless', 'off'); true`); // the title bar + the ⋯ are the surfaces under test
+      const C = await calcIn(A.p, O13);
+      if (C.id) ids13.push(C.id);
+      check('§17: GNOME Calculator reaches ready, connects and its ten digit keys are found in the picture', !!C.id && C.up && !!C.pts, C.err || { up: C.up, pts: C.pts });
+      if (C.id && C.pts) {
+        const R = await legs(A.p, C.id, C.pts, { tag: 'ours', closeAfter: true });
+        const byW = Object.fromEntries(R.out.map((r) => [r.which, r]));
+        check(`§17 (1) the ⚙ menu opened with its Appearance FLYOUT open (${JSON.stringify(byW.gear.extra)} — the owner's desktop mode) and ONE click on a calculator key CLOSED both`, byW.gear.opened && !!(byW.gear.extra && byW.gear.extra.flyout) && !byW.gear.still && !(await A.p.evalJs(`!!document.querySelector('.gs-flyout')`)), byW.gear);
+        check('§17 (2) the title bar\'s window menu (showContextMenu) opened and the click into the picture CLOSED it', byW.winmenu.opened && !byW.winmenu.still, byW.winmenu);
+        check(`§17 (3) the ⋯ menu opened with Scale ▸ expanded (${JSON.stringify(byW.scale.extra)}) and the click CLOSED it`, byW.scale.opened && !!(byW.scale.extra && byW.scale.extra.scaleSub) && !byW.scale.still, byW.scale);
+        check('§17 (4) the taskbar window list (a createPopover) opened and the click CLOSED it', byW.winlist.opened && !byW.winlist.still, byW.winlist);
+        check('§17 (5) the For-you popup (a persistent element) opened and the click HID it', byW.foryou.opened && !byW.foryou.still, byW.foryou);
+        check(`§17 (6) the app still got every press: the calculator's own copy reads "${R.got}" (want "${R.want}") — the closer never cancels or stops the press`, R.got === R.want, R);
+        const m = R.out.map((r) => r.seen);
+        check(`§17 (7) THE MECHANISM on the real pane: each click into the picture reached the document as pointerdown ×1 and click ×1 and NEVER as mousedown (${JSON.stringify(m)})`, m.every((s) => s.pointerdown === 1 && s.click === 1 && s.mousedown === 0), m);
+        check(`§17 (8) TOUCH: a 90 px finger drag across the picture is not a tap — the ⚙ menu stays open (${R.touch.afterDrag}); a finger TAP on the '6' key closes it (${!R.touch.afterTap}) as a ${R.touch.seen && R.touch.seen.pointerType} pointer, and the app took the 6 (the read-back above)`, R.touch.opened && R.touch.afterDrag === true && R.touch.afterTap === false && R.touch.seen && R.touch.seen.pointerType === 'touch', R.touch);
+      }
+      // (8) CONTROL — the pre-lane closer: a copy of this tree whose onOutsidePress listens for a BUBBLE-phase document
+      // mousedown (the shape every closer had before the lane), bundle rebuilt, its own server + calculator
+      const wtm = scratch('deskxpra-mctl');
+      try { execSync(`git worktree remove --force ${wtm}`, { cwd: repo, stdio: 'ignore' }); } catch {}
+      execSync(`git worktree add --detach ${wtm} HEAD`, { cwd: repo, stdio: 'ignore' }); worktrees.push(wtm);
+      for (const f of ['src', 'public', 'server.js', 'scripts', 'package.json']) execSync(`rm -rf ${wtm}/${f} && cp -r ${wt}/${f} ${wtm}/${f}`);
+      fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wtm, 'node_modules'));
+      fs.mkdirSync(path.join(wtm, 'data'), { recursive: true });
+      const uSrc = fs.readFileSync(path.join(wtm, 'src/lib/utils.js'), 'utf8');
+      const EV = "document.addEventListener('pointerdown', (e) => {\n    const opening = began(e) === 'before';";
+      const OPTS = 'const o = { capture: true, passive: true, signal: ctl.signal };';
+      check('CONTROL: the helper\'s event and phase are each spelled exactly once (the control replaces exactly them)', uSrc.split(EV).length === 2 && uSrc.split(OPTS).length === 2);
+      fs.writeFileSync(path.join(wtm, 'src/lib/utils.js'), uSrc.replace(EV, EV.replace("'pointerdown'", "'mousedown'")).replace(OPTS, 'const o = { capture: false, passive: true, signal: ctl.signal }; // CONTROL: the pre-lane closer'));
+      execFileSync(path.join(repo, 'node_modules/.bin/esbuild'), ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify'], { cwd: wtm, stdio: 'ignore' });
+      const [PORTM] = await freePorts(1);
+      const homeM = scratchHome('deskxpra-mctl-home', fs);
+      const sm = spawn(process.execPath, ['server.js'], { cwd: wtm, env: { ...srvEnv, PORT: String(PORTM), HOME: homeM }, stdio: 'ignore' }); ctlServers.push(sm);
+      let upM = false; for (let i = 0; i < 80 && !upM; i++) { try { await fetch(`http://127.0.0.1:${PORTM}/api/home`); upM = true; } catch { await sleep(250); } }
+      check('CONTROL: the pre-lane-closer copy boots', upM);
+      if (upM) {
+        const OM = `http://127.0.0.1:${PORTM}`;
+        await A.p.cdp('Page.navigate', { url: 'about:blank' }).catch(() => {});
+        await A.p.evalJs(`localStorage.removeItem('vibespace.uiScale'); true`).catch(() => {});
+        await openPage(A.p, OM);
+        await A.p.evalJs(`app.settings.set('desktop.seamless', 'off'); true`);
+        const CM = await calcIn(A.p, OM);
+        if (CM.id && CM.pts) {
+          const RM = await legs(A.p, CM.id, CM.pts, { tag: 'CONTROL', closeAfter: true });
+          const openAll = RM.out.filter((r) => r.opened && r.still).map((r) => r.which);
+          check(`CONTROL: on the pre-lane closer EVERY surface stays OPEN after the click into the picture (${openAll.join(', ')} of ${RM.out.map((r) => r.which).join(', ')}) — the owner's report, on the real rung`, openAll.length === RM.out.length, RM.out);
+          check(`CONTROL: …and a finger TAP into the picture leaves the ⚙ menu open too (${RM.touch.afterTap})`, RM.touch.opened && RM.touch.afterTap === true, RM.touch);
+          check(`CONTROL: …while the calculator took the digits there too ("${RM.got}")`, RM.got === RM.want, RM);
+          await fetch(`${OM}/api/desktop/apps/${CM.id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+        } else check('CONTROL: the calculator reaches ready on the copy and its digit keys are found', false, CM.err || { up: CM.up });
+      }
+      try { sm.kill('SIGKILL'); } catch {}
+    } catch (e) { failed++; console.error('  ✗ §17 threw:', e.stack || e.message); }
+    finally {
+      for (const id of ids13) await fetch(`${O13}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
+      await A?.p?.evalJs?.(`app.settings.set('desktop.seamless', 'auto'); true`).catch(() => {});
+      await dropPage(A);
+    }
   }
 } catch (e) {
   failed++; console.error('  ✗ threw:', e.stack || e.message);

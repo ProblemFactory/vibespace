@@ -351,6 +351,33 @@ async function markedBrowsers(value, { procRoot = '/proc', batch = 64 } = {}) {
   });
 }
 
+/** lane L r5 F1 (b) — THE DIRECTORY A DAEMON RUNS IN (verify r3 F1: the keeper
+ *  launched every managed daemon with no `cwd`, so it inherited the SERVER's —
+ *  `WorkingDirectory=<repo>` — and resolved a relative `pdf ./data/bin/vibespace-
+ *  hook.mjs` there). The checkout is the directory holding server.js above this
+ *  file (src/ in a checkout, data/bin/ in the agentd bundle; none on a paired
+ *  machine's ~/.vibespace/bin). `runDir(inject)` → `{ok, dir}`: the injected
+ *  answer (the gate's) or the verb table's private `<tmp>/vibespace-browser-cwd-
+ *  <uid>`, then — whichever it is — `daemonCwdVerdict` against the checkout and
+ *  this process's cwd: a daemon never runs in the checkout. */
+const CHECKOUT = (() => {
+  let d = __dirname;
+  for (let i = 0; i < 3; i++) { if (fs.existsSync(path.join(d, 'server.js')) && fs.existsSync(path.join(d, 'package.json'))) return d; d = path.dirname(d); }
+  return null;
+})();
+const serverCwd = () => { try { return process.cwd(); } catch { return null; } };
+function runDir(inject = null) {
+  const os = require('os');
+  const got = typeof inject === 'function' ? inject() : VERBS.ensureDaemonCwd({ fs, tmpdirs: [os.tmpdir(), '/tmp'], uid: typeof process.getuid === 'function' ? process.getuid() : null, checkout: CHECKOUT, serverCwd: serverCwd() });
+  if (!got || !got.ok) return got && got.code ? got : { ok: false, code: 'daemon_cwd_unavailable', error: 'no directory to run the browser daemon in' };
+  let real = got.dir;
+  try { real = fs.realpathSync(got.dir); } catch { /* judged as given */ }
+  let co = CHECKOUT;
+  try { co = CHECKOUT ? fs.realpathSync(CHECKOUT) : null; } catch { /* as found */ }
+  const v = VERBS.daemonCwdVerdict(real, { checkout: co, serverCwd: serverCwd() });
+  return v ? { ok: false, ...v } : { ok: true, dir: real };
+}
+
 /**
  * THE FOUR CALLS a profile browser's lifecycle needs, each an `execFile` of
  * the CLI under ONE namespace with ONE sanitised environment:
@@ -360,15 +387,20 @@ async function markedBrowsers(value, { procRoot = '/proc', batch = 64 } = {}) {
  *   closeAll(ns)           `close --all`          — the CLI's own stop
  * `execFileImpl` is injectable; the fast gate drives a FAKE binary on PATH.
  */
-function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null } = {}) {
+function createBrowserRuntime({ cmd = 'agent-browser', execFileImpl = execFile, env = process.env, log = null, daemonCwd = null } = {}) {
   const base = sanitizeProbeEnv(env);
   const binOf = execFileImpl === execFile ? binaryResolver(cmd, env) : () => cmd;
   const run = (args, extra, { timeout = 15000 } = {}) => new Promise((resolve) => {
     const e = { ...base, ...extra, AGENT_BROWSER_JSON: '1' };
     const bin = binOf();
     if (!bin) { resolve({ ok: false, code: 'ENOENT', stdout: '', stderr: '', json: null, error: 'binary_absent: the browser CLI is not installed on this machine (only the VibeSpace shim is on PATH, or nothing)' }); return; }
+    // lane L r5 F1 (b): EVERY call runs in the private directory (any call may START the daemon — `open`,
+    // `stream status` … — and the daemon keeps the cwd it was started in); a checkout directory is refused
+    // even when injected, so the refusal is the runtime's, not the default's
+    const dc = runDir(daemonCwd);
+    if (!dc.ok) { resolve({ ok: false, code: dc.code, stdout: '', stderr: '', json: null, error: `${dc.code}: ${dc.error}` }); return; }
     try {
-      execFileImpl(bin, args, { timeout, encoding: 'utf8', env: e, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFileImpl(bin, args, { timeout, encoding: 'utf8', env: e, maxBuffer: 4 * 1024 * 1024, cwd: dc.dir }, (err, stdout, stderr) => {
         let json = null;
         try { json = JSON.parse(String(stdout || '').trim().split('\n').filter(Boolean).pop() || ''); } catch { json = null; }
         resolve({ ok: !err, code: err ? (err.code || err.status || 1) : 0, stdout: String(stdout || ''), stderr: String(stderr || ''), json, error: err ? String(err.message || err) : null });
@@ -445,4 +477,6 @@ module.exports = { createBrowserFacts, binaryResolver, sanitizeProbeEnv, VERSION
   // lane H verify r4: a process's ancestors (a wrapper between daemon and Chrome), every browser carrying a launch mark
   ancestorsOf, markedBrowsers,
   // lane H verify r5: the directory's launch stamp (did a browser come up on it during a launch)
-  dirLaunchStamp, launchStampMoved };
+  dirLaunchStamp, launchStampMoved,
+  // lane L r5 F1 (b): the directory every daemon launch runs in (never the checkout)
+  CHECKOUT, runDir };

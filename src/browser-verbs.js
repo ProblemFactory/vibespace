@@ -343,6 +343,65 @@ function nounAt(body, i) {
   return null;
 }
 
+// ── lane L r4: a WRITE names its output path ───────────────────────────────
+/** The verbs that WRITE a file to a path the caller chooses (measured on the
+ *  0.32.0/0.38.1 `--help` + `skills get core --full`): where the path stands is
+ *  the ONLY difference. A `positional` writer's path is a positional after the
+ *  verb (`download <sel> <path>`, `pdf <path>`, `screenshot [sel] [path]`); a
+ *  `subs` writer's after a writing sub (`state save <path>`, `record
+ *  start|restart <path> [url]`, `trace stop [path]`, `profiler stop [path]`);
+ *  `har` is `network har stop [path]`; a `flags` writer's path is the value of
+ *  ITS OWN option (r6, verify r4 F-A: `wait --download [path]` — "Wait for a
+ *  download to complete (optionally save to path)", 0.38.1 — was judged nowhere
+ *  and handed relative). EVERY writer is here — the census (test-browser-verbs)
+ *  holds this table against the help's `<path>` / `[path]` command signatures
+ *  AND, since r6, against every OPTION line of every verb's own `--help`
+ *  (scripts/fixtures/agent-browser-0.38.1/<verb>.txt): a path-shaped option is a
+ *  write slot here, a read slot (`READ_FLAGS`), refused wholesale, or on
+ *  `PATH_OPTION_ALLOW` with its reason — so a writer a newer build adds, as a
+ *  command or as an option, cannot pass unclassified. */
+const WRITE_VERBS = Object.freeze({
+  download: { positional: true }, pdf: { positional: true }, screenshot: { positional: true },
+  state: { subs: ['save'] }, record: { subs: ['start', 'restart'] },
+  trace: { subs: ['stop'] }, profiler: { subs: ['stop'] }, network: { har: ['stop'] },
+  wait: { flags: ['--download'] },
+});
+/** An OWN property of a table, never an inherited one (`constructor`, `toString`
+ *  are words an agent can type). */
+const own = (o, k) => (k != null && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null);
+/** Value flags whose value is a write target, wherever they sit (`diff
+ *  screenshot -o/--output <file>`, `--screenshot-dir <dir>` for `screenshot`).
+ *  `--download-path` is already a refused LAUNCH flag; it never reaches here. */
+const WRITE_FLAGS = Object.freeze(['-o', '--output', '--screenshot-dir']);
+const WRITE_FLAG_SET = new Set(WRITE_FLAGS);
+const firstNonFlagFrom = (body, i) => { while (i < body.length) { if (body[i] === '--') { i++; continue; } if (!isFlag(body[i])) return i; i++; } return -1; };
+/** Every word of `body` that is (or may be) a write target of the verb at `vi`:
+ *  the positionals of a whole-verb writer / after a writing sub, and the value
+ *  of a write-target flag anywhere. Over-naming is safe — a selector or a URL
+ *  resolves inside the project and passes the containment check, and a word that
+ *  is not a writer's target is never named. */
+function writeTargetsAt(body, vi) {
+  const out = [];
+  const verb = vi >= 0 && vi < body.length ? body[vi] : null;
+  const spec = own(WRITE_VERBS, verb);
+  const verbFlags = new Set(spec && spec.flags ? spec.flags : []);
+  const pushPos = (from) => { for (let i = from; i < body.length; i++) { const t = body[i]; if (t === '--' || isFlag(t)) continue; out.push(t); } };
+  if (spec) {
+    if (spec.positional) pushPos(vi + 1);
+    else if (spec.subs) { const si = firstNonFlagFrom(body, vi + 1); if (si >= 0 && spec.subs.includes(body[si])) pushPos(si + 1); }
+    else if (spec.har) { const hi = body.indexOf('har', vi + 1); if (hi >= 0) { const oi = firstNonFlagFrom(body, hi + 1); if (oi >= 0 && spec.har.includes(body[oi])) pushPos(oi + 1); } }
+  }
+  for (let i = 0; i < body.length; i++) {
+    const t = body[i]; if (typeof t !== 'string' || !isFlag(t)) continue;
+    const eq = t.indexOf('=');
+    const name = eq > 0 ? t.slice(0, eq) : t;
+    if (!WRITE_FLAG_SET.has(name) && !verbFlags.has(name)) continue;
+    if (eq > 0) out.push(t.slice(eq + 1));
+    else if (i + 1 < body.length && !isFlag(body[i + 1])) out.push(body[i + 1]);
+  }
+  return [...new Set(out)];
+}
+
 /**
  * Judge a page-side argv (no `--profile` of ours left in it): the flag rules
  * first, then the verb table. `escape` = it came after `--` (an unknown verb
@@ -351,6 +410,31 @@ function nounAt(body, i) {
  * nested batch).
  */
 function judge(body, opts = {}) {
+  const r = judgeReadings(body, opts);
+  if (r.kind === 'refused') return r;
+  const extra = {};
+  // lane L r2 — AN UPLOAD NAMES ITS FILES. `upload <sel> <files…>` hands every
+  // file to a page, so the CLI checks each against the credential stores
+  // (`uploadPathVerdict`) before anything runs. Reading-independent: when the
+  // word `upload` stands anywhere in the argv (a flag of unknown arity may move
+  // the verb onto it), EVERY positional word after it is named — the selector
+  // and a flag's value too; a word that is not a path under a store never
+  // refuses, so this only ever over-names.
+  const at = body.indexOf('upload');
+  if (at >= 0) {
+    const files = body.slice(at + 1).filter((t) => !isFlag(t));
+    if (files.length) extra.uploadFiles = [...(r.uploadFiles || []), ...files];
+  }
+  // lane L r4 — A WRITE NAMES ITS OUTPUT PATH. Every verb that writes a file to
+  // a chosen path (`WRITE_VERBS`, `WRITE_FLAGS`) names it, and the CLI confines
+  // the write to the project / temp / ~/Downloads (`writePathVerdict`) before
+  // /resolve and before the binary — the write-direction twin of the upload
+  // guard. A batch collects them from every line (below), like `stateFiles`.
+  const wf = writeTargetsAt(body, verbAt(body));
+  if (wf.length) extra.writeFiles = [...(r.writeFiles || []), ...wf];
+  return Object.keys(extra).length ? { ...r, ...extra } : r;
+}
+function judgeReadings(body, opts = {}) {
   const drift = opts.drift || null;
   const primary = judgeAt(body, verbAt(body), null, opts);
   // r3: a flag of UNKNOWN arity makes the parse ambiguous — the binary may
@@ -443,6 +527,8 @@ function judgeAt(body, vi, ni, { escape = false, profile = null, inBatch = false
       cmds = p.commands; nums = p.numbers; stdinJson = p.json; label = p.form === 'json' ? 'command' : 'line';
     } else return { kind: 'page', verb, sub: null, argv: body, profile, escape, needsStdin: true };
     const stateFiles = [];
+    const uploadFiles = [];
+    const writeFiles = [];
     for (let i = 0; i < cmds.length; i++) {
       const c = cmds[i];
       if (typeof c === 'string' && (!c || c.startsWith('#'))) continue;
@@ -454,8 +540,10 @@ function judgeAt(body, vi, ni, { escape = false, profile = null, inBatch = false
           r.remedy || 'fix or drop that line'), { line: nums[i], lineCode: r.code });
       }
       if (r.stateFiles) stateFiles.push(...r.stateFiles);
+      if (r.uploadFiles) uploadFiles.push(...r.uploadFiles);
+      if (r.writeFiles) writeFiles.push(...r.writeFiles);
     }
-    return { kind: 'page', verb, sub: null, argv: body, profile, escape, lines: cmds.length, ...(stdinJson != null ? { stdinJson } : {}), ...(stateFiles.length ? { stateFiles } : {}) };
+    return { kind: 'page', verb, sub: null, argv: body, profile, escape, lines: cmds.length, ...(stdinJson != null ? { stdinJson } : {}), ...(stateFiles.length ? { stateFiles } : {}), ...(uploadFiles.length ? { uploadFiles } : {}), ...(writeFiles.length ? { writeFiles } : {}) };
   }
   if (verb === 'state' && sub === 'load') {
     // the file is a positional word after `load` (the binary reads it relative to the cwd) — every one is
@@ -468,6 +556,321 @@ function judgeAt(body, vi, ni, { escape = false, profile = null, inBatch = false
   if (escape && !inBatch) return { kind: 'escape', verb, sub, argv: body, profile, escape: true };
   return refused(base, R('unknown_verb', `"${verb}" is not a browser verb this VibeSpace knows`,
     '`vibespace-browser help` lists the verbs; a verb newer than that list runs as `vibespace-browser -- <verb> …` (the same flag rules apply)'));
+}
+
+// ── lane L r2: an UPLOAD never takes a credential store ────────────────────
+/** The directories an upload is refused from, BY NAME (lane L r2 — the
+ *  verifier's upload finding): with `claude.allowAgentTools` on, a page verb
+ *  runs with no permission card, so `upload @ref ~/.ssh/id_rsa` would hand a
+ *  private key to any site. Typing what the agent can read into a page stays
+ *  the accepted trade-off (documented); a FILE from the stores below never
+ *  goes: claude's config + credentials, ssh keys, VibeSpace's own per-machine
+ *  store, codex's login, and the account stores in VibeSpace's data dir. */
+const SECRET_HOME_DIRS = Object.freeze(['.claude', '.ssh', '.vibespace', '.codex']);
+const SECRET_DATA_DIRS = Object.freeze(['subs', 'codex-subs']);
+/** → `[{dir, shown}]` for every home (the account's passwd home AND $HOME —
+ *  both are refused) and the data dir; `shown` is how a refusal names it. */
+function secretUploadRoots({ homes = [], dataDir = null } = {}) {
+  const out = []; const seen = new Set();
+  const add = (dir, shown) => { const d = normDir(dir); if (d && d !== '/' && !seen.has(d)) { seen.add(d); out.push({ dir: d, shown }); } };
+  for (const h of homes) { if (!h || h[0] !== '/') continue; for (const n of SECRET_HOME_DIRS) add(`${h}/${n}`, `~/${n}`); }
+  if (dataDir && dataDir[0] === '/') for (const n of SECRET_DATA_DIRS) add(`${dataDir}/${n}`, `<VibeSpace data>/${n}`);
+  return out;
+}
+/** `candidates` = `[{file, paths:[absolute spellings: as resolved, and its
+ *  realpath when it exists]}]`; `roots` = `secretUploadRoots(…)` (each root
+ *  also in its realpath spelling, the caller's job). → the refusal for the
+ *  first file under a root, or null. */
+function uploadPathVerdict(candidates, roots) {
+  const under = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + '/');
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    for (const p of c.paths || []) {
+      const n = normDir(p);
+      const hit = (roots || []).find((r) => under(n, r.dir));
+      if (hit) {
+        return R('upload_secret_refused',
+          `\`${clip(c.file)}\` is under ${hit.shown} — an upload hands the file to the page, and VibeSpace never uploads from ${[...SECRET_HOME_DIRS.map((d) => '~/' + d), 'its account stores'].join(', ')} (logins, keys, credentials); nothing ran`,
+          'upload a file of the task (copy what the page needs out of it yourself, never a key or a login); if the user wants that very file sent, they upload it themselves');
+      }
+    }
+  }
+  return null;
+}
+
+// ── lane L r4: a WRITE stays inside the project (or /tmp, ~/Downloads) ──────
+/** An allow rule on `vibespace-browser` is a grant on EVERY path its writing
+ *  verbs can write, so `download`/`pdf`/`screenshot`/`state save`/`record`/… —
+ *  which the CLI's own Write tool would ASK to write out of cwd — could
+ *  silently overwrite `~/.ssh/authorized_keys` or `~/.claude/settings.json`
+ *  (measured on the real 0.38.1: an `open data:text/html,<a download>` page +
+ *  `download` wrote an arbitrary abs path verbatim, `pdf` a %PDF). CONTAINMENT,
+ *  not a name list: every write target is resolved PHYSICALLY (`physicalPath`,
+ *  r5) and ALLOWED only under the SESSION's project directory (`sessionRoot` —
+ *  the wrapper-exported VIBESPACE_SESSION_CWD, never the invoking shell's cwd;
+ *  r5 F3), the OS temp dir or ~/Downloads (`allow`); anything else is
+ *  `write_path_refused`. Unconditionally, and whatever the root:
+ *    · a NAMED store as any component — `.ssh` / `.claude` / `.codex` /
+ *      `.vibespace` (keys, logins, and the settings whose hooks run commands —
+ *      a PROJECT's `.claude/settings.json` too) and `.git` (the hooks git runs)
+ *      (r5; r4 knew them only directly under a home);
+ *    · VibeSpace's own data dir (`dataDir`: its account stores `subs` /
+ *      `codex-subs`, its tools in `bin` that run in every session, its logins —
+ *      r5, the F1 impact list: `data/bin/vibespace-hook.mjs` is RCE);
+ *    · any dot-entry directly under a home (`~/.bashrc`, `~/.config`, ANY
+ *      `~/.x`) — EXCEPT (r5 F6) inside the session root when that root itself
+ *      sits in the dot-entry (a project in `~/.config/nvim` writes under
+ *      `~/.config/nvim`, never beside it); the named stores above still refuse.
+ *  `candidates` = `[{file, paths:[…]}]` (the lexical spelling and the physical
+ *  one); the store rules run on every spelling, the allow-list on the LAST
+ *  (the physical path — the one handed to the binary). */
+const SECRET_COMPONENTS = Object.freeze(['.ssh', '.claude', '.codex', '.vibespace', '.git']);
+function writePathVerdict(candidates, { allow = [], homes = [], dataDir = null, sessionRoot = null } = {}) {
+  const under = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + '/');
+  const root = typeof sessionRoot === 'string' && sessionRoot[0] === '/' && normDir(sessionRoot) !== '/' ? normDir(sessionRoot) : null;
+  const allowRoots = [...(Array.isArray(allow) ? allow : []), ...(root ? [root] : [])].map(normDir).filter((d) => d && d[0] === '/');
+  const homeRoots = (Array.isArray(homes) ? homes : []).map(normDir).filter((d) => d && d[0] === '/' && d !== '/');
+  // `dataDir`: one directory or several spellings of it (as installed, and its realpath)
+  const dataRoots = (Array.isArray(dataDir) ? dataDir : [dataDir]).filter((d) => typeof d === 'string' && d[0] === '/' && normDir(d) !== '/')
+    .flatMap((d) => [...SECRET_DATA_DIRS.map((n) => ({ dir: normDir(`${d}/${n}`), shown: `<VibeSpace data>/${n}` })), { dir: normDir(d), shown: '<VibeSpace data>' }]);
+  const storeHit = (p) => {
+    for (const r of dataRoots) if (under(p, r.dir)) return r.shown;
+    for (const h of homeRoots) {
+      if (p === h || !under(p, h)) continue;
+      const seg = p.slice(h.length + 1).split('/')[0];
+      if (!seg || seg[0] !== '.') continue;
+      if (SECRET_COMPONENTS.includes(seg)) return `~/${seg}`;
+      // F6: the session root wins for its own subtree when the root itself sits inside this dot-entry
+      if (root && under(root, `${h}/${seg}`) && under(p, root)) continue;
+      return `~/${seg}`;
+    }
+    const named = p.split('/').find((c) => SECRET_COMPONENTS.includes(c));
+    return named ? `a ${named} directory` : null;
+  };
+  for (const c of Array.isArray(candidates) ? candidates : []) {
+    const paths = (c.paths || []).map(normDir).filter(Boolean);
+    // the physical spelling (the last) first — the refusal names where the write would really land
+    for (const p of paths.slice().reverse()) { const s = storeHit(p); if (s) return R('write_path_refused', `\`${clip(c.file)}\` is under ${s} — a browser command never writes into your logins, keys, credentials, config or VibeSpace's own data; nothing ran`, 'save under the project, /tmp or ~/Downloads'); }
+    const resolved = paths.length ? paths[paths.length - 1] : null;
+    if (resolved != null && !allowRoots.some((d) => under(resolved, d))) {
+      return R('write_path_refused', root
+        ? `\`${clip(c.file)}\` is outside the places a browser command may write — the project directory (${clip(root, 80)}), /tmp or ~/Downloads; nothing ran`
+        : `\`${clip(c.file)}\` is outside the places a browser command may write — no session directory is known here (VIBESPACE_SESSION_CWD is not set: a shell outside a VibeSpace session, or a session started before this VibeSpace version), so only /tmp or ~/Downloads; nothing ran`,
+      root ? 'save under the project, /tmp or ~/Downloads' : 'save under /tmp or ~/Downloads; a session started before this version writes into its project again once it is restarted');
+    }
+  }
+  return null;
+}
+
+// ── lane L r5: a path is judged and WRITTEN in the SAME frame ───────────────
+/** THE FRAME RULE (verify r3 F1, CRITICAL). The binary hands a relative path to
+ *  its DAEMON, which resolves it against ITS OWN cwd — the cwd of whatever
+ *  launched it (measured on 0.38.1: daemon started in A, `pdf ./out.pdf` from B
+ *  wrote A/out.pdf; the keeper launched every managed daemon from the SERVER's
+ *  cwd = the repo checkout, so `pdf ./data/bin/vibespace-hook.mjs` overwrote a
+ *  hook that runs in every session). So the CLI never hands the binary a path it
+ *  judged in another frame: every path WORD the binary will read or write is
+ *  resolved here (`physicalPath`) and handed over ABSOLUTE (`pathSlots` names
+ *  exactly those words). Judging still OVER-names (`writeTargetsAt`); rewriting
+ *  is EXACT — rewriting a selector or a URL would change what the command does.
+ *
+ *  `pathSlots(words)` → `[{i, kind:'write'|'read', prefix, word}]` for ONE
+ *  command, MEASURED on the real 0.38.1 (daemon in A, CLI in B):
+ *    download <sel> <path>      the words after the selector (a 3rd word is
+ *                               ignored by the binary: `download #k d1 d2`
+ *                               saved d1 — every one is handed absolute)
+ *    screenshot [sel] [path]    two words ⇒ the second (and any after it); ONE
+ *                               word is a PATH only when it ends .png/.jpg/.jpeg/
+ *                               .webp, or holds a `/` and does not start like a
+ *                               selector (`loneShotIsPath`: `x.png`, `./noext`,
+ *                               `sub/noext`, `[href="/login"]` wrote files;
+ *                               `noext`, `.btn`, `a.b`, `x.gif`, `x.pdf`, and —
+ *                               r6, verify r4 F-B — `.x[href="/login"]`, `.x/y`,
+ *                               `@e1/x`, `#d/y` were SELECTORS; image extensions
+ *                               case-insensitive here, a superset)
+ *    pdf <path>                 every word (pdf never creates a directory)
+ *    state save|load <path>     the words after the sub (load: a READ)
+ *    record start|restart <path> [url]   the FIRST word after the sub only
+ *    trace|profiler stop [path] · network har stop [path]   the words after
+ *    upload <sel> <files…>      the words after the selector (READS)
+ *    wait --download [path]     its value (WRITE, r6; the value is optional)
+ *    -o/--output, --screenshot-dir  their value (WRITE, any verb, like r4);
+ *    open --init-script, cookies --curl, diff -b/--baseline  their value (READ)
+ *  A verb's own value flags (`screenshot --threshold <n>`, `record --fps <n>`,
+ *  `--contact-sheet-threshold <n>`, diff's `-b`/`-o`/`--threshold`) and the
+ *  measured global value flags take the next word, never a slot. */
+const IMAGE_PATH_RE = /\.(?:png|jpe?g|webp)$/i;
+const VERB_VALUE_FLAGS = Object.freeze({ screenshot: ['--threshold'], record: ['--fps', '--contact-sheet-threshold'], diff: ['-b', '--baseline', '-o', '--output', '--threshold'] });
+const READ_FLAGS = Object.freeze({ open: ['--init-script'], goto: ['--init-script'], navigate: ['--init-script'], cookies: ['--curl'], diff: ['-b', '--baseline'] });
+/** (2.369.182 integration: `--ca-cert <path>` is no row here — lane H's measured 0.38.1 table refuses it as a
+ *  LAUNCH flag (which CAs the browser trusts is VibeSpace's launch decision), so the census counts it `refused`.)
+ *  r6 — the OPTIONS the help census (test-browser-verbs) reads as path-shaped
+ *  (a `<path>`/`<file>`/`<dir>` placeholder, or save/write/path/file/dir/output
+ *  in the description) that are NOT a file slot this table must judge, each with
+ *  its reason. Keyed `<verb> <flag>`; `*` = a global option (any verb). A row
+ *  the help does not document fails the census (no dead rows). */
+const PATH_OPTION_ALLOW = Object.freeze({
+  '* --json': 'stdout format ("Output as JSON") — writes no file',
+  '* --content-boundaries': 'wraps what is printed on stdout in boundary markers — writes no file',
+  '* --max-output': 'truncates what is printed on stdout to N characters — writes no file',
+  '* --debug': 'debug lines on the terminal ("Debug output") — writes no file',
+  '* --verbose': 'the verbosity of `chat` (refused by name) — writes no file',
+  '* --profile': 'VibeSpace\'s own handle flag: stripped before the binary outside a batch, refused as an identity flag inside one — the binary never sees it',
+  'cookies --path': 'a cookie\'s URL path (`--path /api`), never a file',
+  'mouse --seed': 'a number seeding the pointer\'s movement path, never a file',
+  'screenshot --if-changed': 'a boolean ("skip unchanged images to save tokens") — the image goes where the screenshot\'s own path slot says',
+  'record --contact-sheet': 'a boolean: the PNGs are written BESIDE the video, whose path is the judged, absolute slot of `record start|restart`',
+  'webmcp --params': 'a READ of `@file` resolved in the daemon\'s private cwd (verify r4 Low) — `webmcp` is not in the page table, reachable only through `--`',
+});
+/** r6 (verify r4 F-B) — ONE screenshot word is a path when it ends in an image
+ *  extension, or holds a `/` and does not start like a selector: `#`, `@`, or
+ *  `.` not followed by `/` / `../` (measured on 0.38.1: the binary reads
+ *  `.x[href="/login"]`, `.x/y`, `@e1/x`, `#d/y` as selectors, `[href="/login"]`,
+ *  `a[href="/login"]`, `./c.png`, `sub/noext` as paths; `.shots/a.png` it reads
+ *  as a selector and saves to its temp dir — handed absolute it lands where the
+ *  agent named it). */
+function loneShotIsPath(w) {
+  if (IMAGE_PATH_RE.test(w)) return true;
+  if (!w.includes('/')) return false;
+  if (w[0] === '#' || w[0] === '@') return false;
+  return !(w[0] === '.' && !w.startsWith('./') && !w.startsWith('../'));
+}
+function positionalsFrom(body, from, local = []) {
+  const lv = new Set(local); const out = [];
+  for (let i = from; i < body.length; i++) {
+    const t = body[i];
+    if (t === '--') continue;
+    if (isFlag(t)) { if (!t.includes('=') && lv.has(t)) { i++; continue; } i = flagEnd(body, i) - 1; continue; }
+    out.push(i);
+  }
+  return out;
+}
+function pathSlots(words) {
+  const body = (Array.isArray(words) ? words : []).map(String);
+  const vi = verbAt(body);
+  const verb = vi < body.length ? body[vi] : null;
+  const slots = [];
+  const add = (i, kind, prefix = '') => { if (i >= 0 && i < body.length && !slots.some((x) => x.i === i)) slots.push({ i, kind, prefix, word: prefix ? body[i].slice(prefix.length) : body[i] }); };
+  if (verb != null) {
+    const pos = positionalsFrom(body, vi + 1, own(VERB_VALUE_FLAGS, verb) || []);
+    const w = (k) => (k < pos.length ? body[pos[k]] : null);
+    const all = (from, kind) => pos.slice(from).forEach((i) => add(i, kind));
+    if (verb === 'download') all(1, 'write');
+    else if (verb === 'pdf') all(0, 'write');
+    else if (verb === 'screenshot') { if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && loneShotIsPath(w(0))) add(pos[0], 'write'); }
+    else if (verb === 'upload') all(1, 'read');
+    else if (verb === 'state') { if (w(0) === 'save') all(1, 'write'); else if (w(0) === 'load') all(1, 'read'); }
+    else if (verb === 'record') { if ((w(0) === 'start' || w(0) === 'restart') && pos.length > 1) add(pos[1], 'write'); }
+    else if (verb === 'trace' || verb === 'profiler') { if (w(0) === 'stop') all(1, 'write'); }
+    else if (verb === 'network') { if (w(0) === 'har' && w(1) === 'stop') all(2, 'write'); }
+  }
+  const readFlags = new Set(own(READ_FLAGS, verb) || []);
+  const verbWrites = new Set((own(WRITE_VERBS, verb) || {}).flags || []);
+  for (let i = 0; i < body.length; i++) {
+    const t = body[i];
+    if (!isFlag(t) || t === '--') continue;
+    const name = flagName(t);
+    const kind = WRITE_FLAG_SET.has(name) || verbWrites.has(name) ? 'write' : (readFlags.has(name) ? 'read' : null);
+    if (!kind) continue;
+    if (t.includes('=')) add(i, kind, name + '=');
+    else if (i + 1 < body.length && !isFlag(body[i + 1])) { add(i + 1, kind); i++; }
+  }
+  return slots.sort((a, b) => a.i - b.i);
+}
+/** → a copy of `words` with every slot's word replaced by `abs(slot)` (the
+ *  prefix of a `--flag=value` form kept). `abs` returns the absolute path. */
+function rewriteSlots(words, slots, abs) {
+  const out = (Array.isArray(words) ? words : []).map(String);
+  for (const s of slots || []) out[s.i] = (s.prefix || '') + abs(s);
+  return out;
+}
+
+/** r5 F2 (verify r3 MAJOR): THE PHYSICAL PATH — `..` after a symlink steps up
+ *  from where the LINK POINTS, never from its spelling. r4 collapsed `..`
+ *  lexically (`path.resolve`) and then realpath'd the existing ancestor, so
+ *  with `l -> ~/.ssh`, `l/../.ssh/authorized_keys` was judged `<cwd>/.ssh/…`
+ *  while the kernel wrote `~/.ssh/authorized_keys` (measured: a 6603-byte %PDF).
+ *  Here every component is walked in order: an existing symlink is replaced by
+ *  its target (relative to the link's directory; ≤ `maxLinks` hops, then an
+ *  error), `..` pops the path RESOLVED SO FAR, a component that does not exist
+ *  is kept as spelled. A literal `~` / `~/…` is the home (the binary does NOT
+ *  expand it — measured: `pdf '~/x.pdf'` looked for a directory named `~`);
+ *  `~user` stays literal (so does the binary). The result is the absolute path
+ *  whose existing components are all real directories — the one judged AND the
+ *  one handed to the binary. `lstat` / `readlink` are injected (this file
+ *  imports nothing). → `{ok:true, path}` | `{ok:false, error}`. */
+function physicalPath(word, { base = '/', home = '', lstat, readlink, maxLinks = 40 } = {}) {
+  const s = String(word == null ? '' : word);
+  if (s.includes('\0')) return { ok: false, error: 'the path holds a NUL byte' };
+  let spelled = s;
+  if (typeof home === 'string' && home[0] === '/' && (s === '~' || s.startsWith('~/'))) spelled = home + s.slice(1);
+  let cur = spelled.startsWith('/') ? '/' : normDir(base);
+  if (!cur || cur[0] !== '/') return { ok: false, error: 'no absolute directory to resolve a relative path against' };
+  const parent = (d) => { const k = d.lastIndexOf('/'); return k <= 0 ? '/' : d.slice(0, k); };
+  const todo = spelled.split('/');
+  let hops = 0;
+  while (todo.length) {
+    const c = todo.shift();
+    if (c === '' || c === '.') continue;
+    if (c === '..') { cur = parent(cur); continue; }
+    const next = cur === '/' ? '/' + c : cur + '/' + c;
+    let st = null;
+    try { st = lstat(next); } catch { st = null; }
+    if (st && typeof st.isSymbolicLink === 'function' && st.isSymbolicLink()) {
+      if (++hops > maxLinks) return { ok: false, error: 'too many levels of symbolic links' };
+      let t;
+      try { t = String(readlink(next)); } catch (e) { return { ok: false, error: `a symbolic link could not be read (${e && e.code || e})` }; }
+      if (t.startsWith('/')) cur = '/';
+      todo.unshift(...t.split('/'));
+      continue;
+    }
+    cur = next;
+  }
+  return { ok: true, path: cur };
+}
+
+/** r5 F1 (b) — DEFENSE IN DEPTH: THE DIRECTORY A BROWSER DAEMON RUNS IN. A
+ *  daemon resolves every relative path it is handed against its own cwd, which
+ *  it inherits from whatever launched it; the keeper launched from the SERVER's
+ *  cwd (the checkout). So every launch — the keeper's runtime, the paired
+ *  machine's, the CLI's own spawn (which starts the daemon when none runs) —
+ *  names a private, EMPTY directory: `<tmp>/vibespace-browser-cwd-<uid>` (0700,
+ *  a real directory this uid owns, never a symlink), and `daemonCwdVerdict`
+ *  refuses a directory that is the checkout, inside it, an ancestor of it (from
+ *  `/tmp` a `./<checkout>/data/bin/…` reaches a checkout that lives under /tmp),
+ *  or the server's own cwd. `fs` is injected (this file imports nothing). */
+const DAEMON_CWD_PREFIX = 'vibespace-browser-cwd-';
+function daemonCwdVerdict(dir, { checkout = null, serverCwd = null } = {}) {
+  const under = (p, d) => p === d || p.startsWith(d === '/' ? '/' : d + '/');
+  const d = normDir(dir);
+  const refuse = (why) => R('daemon_cwd_refused', `a browser daemon would run in ${d || '(nothing)'}, ${why} — it resolves every relative path it is handed from there, so nothing was launched`, 'tell the user (the OS temp directory must be a directory outside the VibeSpace checkout)');
+  if (!d || d[0] !== '/' || d === '/') return refuse('which is not a private directory');
+  const co = checkout ? normDir(checkout) : null;
+  if (co && co[0] === '/' && under(d, co)) return refuse(`inside the VibeSpace checkout ${co}`);
+  if (co && co[0] === '/' && under(co, d)) return refuse(`an ancestor of the VibeSpace checkout ${co}`);
+  if (serverCwd && normDir(serverCwd) === d) return refuse('the server\'s own working directory');
+  return null;
+}
+/** → `{ok:true, dir}` (the realpath) | `{ok:false, code, error, remedy}`: the
+ *  first of `tmpdirs` whose `<tmp>/vibespace-browser-cwd-<uid>` can be made or
+ *  reused as a private directory and passes `daemonCwdVerdict`. */
+function ensureDaemonCwd({ fs, tmpdirs = [], uid = null, checkout = null, serverCwd = null } = {}) {
+  let last = null;
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+  const co = checkout ? (real(checkout) || checkout) : null;
+  for (const t of [...new Set((Array.isArray(tmpdirs) ? tmpdirs : []).filter((x) => typeof x === 'string' && x[0] === '/'))]) {
+    const base = real(t);
+    if (!base) continue;
+    const dir = `${normDir(base)}/${DAEMON_CWD_PREFIX}${Number.isInteger(uid) ? uid : 'u'}`;
+    try { fs.mkdirSync(dir, { mode: 0o700 }); } catch (e) { if (!e || e.code !== 'EEXIST') continue; }
+    let st = null;
+    try { st = fs.lstatSync(dir); } catch { st = null; }
+    if (!st || st.isSymbolicLink() || !st.isDirectory() || (Number.isInteger(uid) && st.uid !== uid)) continue;
+    if ((st.mode & 0o077) !== 0) { try { fs.chmodSync(dir, 0o700); } catch { continue; } }
+    const v = daemonCwdVerdict(dir, { checkout: co, serverCwd });
+    if (v) { last = v; continue; }
+    return { ok: true, dir };
+  }
+  return { ok: false, ...(last || R('daemon_cwd_unavailable', 'no private directory could be made for the browser daemon to run in (the OS temp directory is missing, not writable, or somebody else owns the name) — nothing was launched', 'tell the user')) };
 }
 
 /**
@@ -644,7 +1047,11 @@ function sanctionedConfig({ user = null, project = null, deny = [] } = {}) {
  *  these — r4: never AGENT_BROWSER_CONFIG, which `needsConfig` composes); every
  *  launch / CDP / state twin still goes. */
 const ENV_PREFIX = 'AGENT_BROWSER_';
-const ENV_PASS = Object.freeze(['AGENT_BROWSER_JSON', 'AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_COLOR', 'AGENT_BROWSER_ANNOTATE', 'AGENT_BROWSER_MAX_OUTPUT', 'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_DIR', 'AGENT_BROWSER_SCREENSHOT_FORMAT', 'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_DEFAULT_TIMEOUT']);
+// lane L r5 (verify r3 F5): AGENT_BROWSER_SCREENSHOT_DIR is NOT output shape — it is a WRITE TARGET (the directory a
+// path-less `screenshot` writes into), the env twin of `--screenshot-dir`, which the write guard judges and hands over
+// absolute. An env value would reach the binary unjudged and relative to the daemon's frame, so it is dropped like every
+// other twin (said by name); `--screenshot-dir <dir>` on the command is the road
+const ENV_PASS = Object.freeze(['AGENT_BROWSER_JSON', 'AGENT_BROWSER_DEBUG', 'AGENT_BROWSER_COLOR', 'AGENT_BROWSER_ANNOTATE', 'AGENT_BROWSER_MAX_OUTPUT', 'AGENT_BROWSER_CONTENT_BOUNDARIES', 'AGENT_BROWSER_SCREENSHOT_FORMAT', 'AGENT_BROWSER_SCREENSHOT_QUALITY', 'AGENT_BROWSER_DEFAULT_TIMEOUT']);
 const SOCKET_KEY = 'AGENT_BROWSER_SOCKET_DIR';
 const RUNTIME_KEY = 'XDG_RUNTIME_DIR';
 // r4 (takeover finding 4): AGENT_BROWSER_CONFIG is NOT kept on the legacy path either — the r3 rule is that
@@ -715,4 +1122,10 @@ module.exports = {
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
+  // lane L r2
+  SECRET_HOME_DIRS, SECRET_DATA_DIRS, secretUploadRoots, uploadPathVerdict,
+  // lane L r4
+  WRITE_VERBS, WRITE_FLAGS, READ_FLAGS, PATH_OPTION_ALLOW, writeTargetsAt, writePathVerdict,
+  // lane L r5: the frame rule (exact path slots, the physical path, the daemon's directory)
+  SECRET_COMPONENTS, IMAGE_PATH_RE, pathSlots, rewriteSlots, physicalPath, DAEMON_CWD_PREFIX, daemonCwdVerdict, ensureDaemonCwd, verbAt,
 };

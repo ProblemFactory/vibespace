@@ -1149,13 +1149,13 @@ console.log('\n⑭ the remote rung: a shell fragment the host runs (r3)');
   // wiring: the ONE composition carries it, at every remote site
   const rs2 = read('src/remote-shell.js');
   ok(/browser = ''/.test(rs2) && /\+ pre \+ browser \+ resolve \+/.test(rs2), 'buildRemoteExec has a NAMED `browser` slot placed after `pre` and before `resolve`');
-  const { buildRemoteExec, AMBIENT_OAT_UNSET } = require('../src/remote-shell.js');
+  const { buildRemoteExec, AMBIENT_OAT_UNSET, sessionCwdExport } = require('../src/remote-shell.js');
   const shq = (x) => `'${String(x).replace(/'/g, `'"'"'`)}'`;
   const line = buildRemoteExec({ cwd: '/w', shq, pre: 'PRE; ', browser: frag, parts: [shq('AGENT_BROWSER_SESSION=vs-' + KEY), 'agent-browser'] });
   ok(line.indexOf("cd '/w'") < line.indexOf('PRE; ') && line.indexOf('PRE; ') < line.indexOf('vs_ab_d=') && line.indexOf('vs_ab_d=') < line.indexOf('exec env'),
     'the fragment lands after the cd (so ./agent-browser.json is the session dir) and after the prelude, before exec env');
-  ok(buildRemoteExec({ cwd: '/w', shq, parts: ['x'] }) === "cd '/w' 2>/dev/null; " + AMBIENT_OAT_UNSET + 'exec env x',
-    'an empty `browser` changes nothing (every non-browser caller is byte-identical to round 2\'s composition)');
+  ok(buildRemoteExec({ cwd: '/w', shq, parts: ['x'] }) === "cd '/w' 2>/dev/null; " + sessionCwdExport('/w', shq) + AMBIENT_OAT_UNSET + 'exec env x',
+    'an empty `browser` changes nothing (every non-browser caller is byte-identical to round 2\'s composition + lane L r5\'s session-cwd export)');
   const ws = read('src/ws-create.js');
   const sites = (ws.match(/buildRemoteExec\(\{/g) || []).length;
   const wired = (ws.match(/browser: spawnBrowserPre/g) || []).length;

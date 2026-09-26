@@ -1,0 +1,7 @@
+{
+  "version": "0.38.1",
+  "captured": "2026-09-26",
+  "how": "`<verb> --help` for every verb the table can hand the binary (PAGE_VERBS + the help's command words that are not refused by name), launch-free, in a scratch HOME / XDG_RUNTIME_DIR / TMPDIR / socket dir with no inherited AGENT_BROWSER_*; `_top.txt` is the bare `--help`",
+  "generic": ["addinitscript", "pushstate", "react", "removeinitscript", "vitals", "webmcp"],
+  "genericWhy": "these verbs' `--help` prints the top-level help byte-for-byte, so their options are read from its command rows (`_top.txt`)"
+}

@@ -1,0 +1,13 @@
+agent-browser pdf - Save page as PDF
+
+Usage: agent-browser pdf <path>
+
+Saves the current page as a PDF file.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser pdf ./page.pdf
+  agent-browser pdf ~/Documents/report.pdf

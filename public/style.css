@@ -1863,6 +1863,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .overlap-switcher-item:hover { background: var(--accent-dim); }
+/* the grouped taskbar button's chooser (lane K): the tab on show is marked, a keyboard row lit, the button focusable */
+.taskbar-group-chooser .overlap-switcher-item.active { box-shadow: inset 2px 0 0 var(--accent); }
+.taskbar-group-chooser .overlap-switcher-item:focus-visible { outline: none; background: var(--accent-dim); }
+.taskbar-group:focus-visible { outline: 1px solid var(--border-active); outline-offset: 1px; }
 
 /* Pin-to-bottom scroll button */
 .term-scroll-btn {
@@ -4808,7 +4812,39 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .tab-split-btn.pulse { animation: tab-split-pulse 1.2s ease-out 1; color: var(--accent); }
 @keyframes tab-split-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent); } 70% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--accent) 0%, transparent); } 100% { box-shadow: 0 0 0 0 transparent; } }
 @media (prefers-reduced-motion: reduce) { .tab-split-btn.pulse { animation: none; } }
-.window-titlebar.split-btn-hidden .tab-split-btn { display: none; } /* a host narrower than 260 px (a ResizeObserver in tab-group.js sets the class) */
+.window-titlebar.split-btn-hidden .tab-split-btn { display: none; } /* a host narrower than 260 px, or a split's right column too narrow for the badge + a tab (tab-group.js _fitSplitTail, from a ResizeObserver) */
+/* SPLIT TABS v2 (docs/design-split-ux.zh.md §8, inc-muhfb5al-jzk6): the strip is TWO HALVES on the panes' own
+   columns. The host's title bar becomes a SUBGRID of the host grid (it already spans 1 / -1), so its three
+   tracks ARE the pane / divider / pane columns splitColumns() writes on the host — the halves follow a divider
+   drag with no JS. .tab-bar-split dissolves (display: contents) into: the left half (column 1), the glyph
+   (column 2 = over the divider), the right half (column 3); the ⫿ badge and the window controls share column 3,
+   pinned to its end — the right half reserves them (--split-ctl = the controls' width, published by the
+   title-bar ResizeObserver; --split-btn = the badge + its margins, 0 when a narrow host hides it). Any other
+   title-bar child (a standalone owner badge) rides its tab while grouped and is not drawn here. */
+.window.tab-split > .window-titlebar { display: grid; grid-template-columns: subgrid; grid-template-rows: minmax(0, 1fr); column-gap: 0; align-items: stretch; }
+.window.tab-split > .window-titlebar > *, .window.tab-split > .window-titlebar > .tab-bar-split > * { grid-row: 1; }
+.window.tab-split > .window-titlebar > :not(.tab-bar-tabs):not(.tab-split-btn):not(.window-controls) { display: none !important; }
+.window.tab-split > .window-titlebar > .tab-bar-tabs.tab-bar-split { display: contents; }
+.tab-strip-half { display: flex; align-items: flex-end; min-width: 0; height: 100%; overflow-x: auto; scrollbar-width: none; padding: 0 2px; }
+.tab-strip-half::-webkit-scrollbar { display: none; }
+.window.tab-split > .window-titlebar > .tab-bar-split > .tab-strip-half[data-side="left"] { grid-column: 1; }
+/* the tail is reserved with a MARGIN, never a padding (v2 verify r1 ②): a scroll box paints its overflow into its
+   own padding, so on a narrow right column the padding-reserved half drew its tab UNDER the controls — the margin
+   ends the half's box (and its clip) before them. A column too narrow for the badge + a tab hides the badge
+   (tab-group.js _fitSplitTail sets .split-btn-hidden). */
+.window.tab-split > .window-titlebar > .tab-bar-split > .tab-strip-half[data-side="right"] { grid-column: 3; margin-right: calc(var(--split-ctl, 89px) + var(--split-btn, 30px)); }
+.window.tab-split > .window-titlebar > .tab-bar-split > .tab-split-glyph { grid-column: 2; justify-self: center; align-self: center; margin: 0; }
+.window.tab-split > .window-titlebar > .tab-split-btn { grid-column: 3; justify-self: end; align-self: center; margin: 0 calc(var(--split-ctl, 89px) + 4px) 0 2px; }
+.window.tab-split > .window-titlebar > .window-controls { grid-column: 3; justify-self: end; align-self: center; }
+.window.tab-split > .window-titlebar.split-btn-hidden { --split-btn: 0px; }
+.tab-bar-tabs.tab-wrap .tab-strip-half { flex-wrap: wrap; overflow-x: visible; align-content: flex-end; height: auto; }
+/* each side's SHOWN tab reads as a selected tab of ITS half (the focused one is also .active + .tab-split-focus) */
+.tab-item.tab-pane { background: var(--bg-window); color: var(--text-secondary); box-shadow: -1px 0 0 var(--border), 1px 0 0 var(--border); }
+.tab-item.tab-pane:not(.waiting)::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 1px; background: var(--bg-window); } /* never over a waiting blink (the shared ::after) */
+.tab-item.tab-pane.active { color: var(--text); }
+/* the tab drag's REORDER (split tabs v2): the insertion marker (a body child — fixed, positioned in layout px) and the dragged tab */
+.tab-insert-marker { position: fixed; z-index: 999999; width: 2px; border-radius: 1px; background: var(--accent); pointer-events: none; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+.tab-item.tab-reordering { opacity: 0.45; }
 /* the ownership badge (§4.6): one dot per owner session, names in the title */
 .win-owner-badge { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex-shrink: 0; }
 .tab-item .win-owner-badge { margin-left: 2px; }
@@ -4844,6 +4880,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .window.tab-split > .tab-split-divider { display: none !important; }
   .window.tab-split > .window-content.tab-split-pane.tab-split-focus { box-shadow: none; }
   .tab-split-btn, .tab-split-glyph { display: none !important; }
+  /* R6 (split tabs v2): ONE strip, left then right — the title bar is a flex row again, the halves dissolve */
+  .window.tab-split > .window-titlebar { display: flex; }
+  .window.tab-split > .window-titlebar > .tab-bar-tabs.tab-bar-split { display: flex; }
+  .tab-strip-half { display: contents; }
+  .tab-item.tab-pane:not(.active) { background: transparent; box-shadow: none; color: var(--text-dim); }
+  .tab-item.tab-pane:not(.active):not(.waiting)::after { content: none; }
 }
 /* backlog priority chip (Task Group log → Backlog): high = accent, low = muted, normal = none */
 .bl-prio { flex-shrink: 0; font-size: 9px; line-height: 14px; padding: 0 5px; border-radius: var(--radius-sm); border: 1px solid transparent; }

@@ -1,0 +1,14 @@
+agent-browser drag - Drag and drop
+
+Usage: agent-browser drag <source> <target> [--human]
+
+Drags an element from source to target location.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser drag "#draggable" "#drop-zone"
+  agent-browser drag @e1 @e2
+  agent-browser drag @e1 @e2 --human

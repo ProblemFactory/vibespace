@@ -31,6 +31,7 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
   ok(!src.includes(LIT_PRE), `${f} has no inlined prelude copy (must import REMOTE_PRELUDE)`);
   ok(!src.includes(LIT_NF), `${f} has no inlined node finder (must import nodeFinder)`);
 }
+const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VIBESPACE_SESSION_CWD=') < l.indexOf('exec env ');
 // ── buildRemoteExec (2.279.0): the five spawn builders collapsed to one ──
 {
   const { buildRemoteExec, AMBIENT_OAT_UNSET } = require('../src/remote-shell.js');
@@ -40,12 +41,37 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
     tokenAssign: 'T="$(cat /x)" ', acctEnv: 'A="$(cat /y)" ',
     parts: ['K=v', shq('claude'), shq('--resume')],
   });
-  ok(line.startsWith("cd '/home/u/my dir' 2>/dev/null; PRE; RES; "), 'composition order: cd → pre → resolve');
+  ok(line.startsWith("cd '/home/u/my dir' 2>/dev/null; VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; PRE; RES; "), 'composition order: cd → the session cwd export (lane L r5) → pre → resolve');
   ok(line.includes(AMBIENT_OAT_UNSET), 'ambient oat strip present STRUCTURALLY (was five hand-edits in 2.267.0)');
   ok(line.indexOf(AMBIENT_OAT_UNSET) < line.indexOf('T="$(cat /x)"'), 'strip runs BEFORE the deliberate token assign (never unsets it)');
   ok(line.endsWith(`exec env K=v 'claude' '--resume'`), 'exec env carries pre-quoted parts verbatim');
   const hostile = buildRemoteExec({ cwd: `/tmp/$(rm -rf ~)'x`, shq, parts: ['a'] });
   ok(!hostile.includes('$(rm') || hostile.includes(`'/tmp/$(rm`), 'hostile cwd stays inside quotes');
+  // ── lane L r5 F3: the SESSION's directory is exported beside the `cd`, STRUCTURALLY (all five builders compose
+  // buildRemoteExec — the count below), so a remote agent's `vibespace-browser` fences its writes to the session's
+  // project and never to wherever its shell has `cd`ed. The value is the `cd`'s own, quoted by the same shq.
+  const { sessionCwdExport } = require('../src/remote-shell.js');
+  ok(line.includes(sessionCwdExport('/home/u/my dir', shq)) && sessionCwdExport('/home/u/my dir', shq) === "VIBESPACE_SESSION_CWD='/home/u/my dir'; export VIBESPACE_SESSION_CWD; ", 'lane L r5 F3: buildRemoteExec exports VIBESPACE_SESSION_CWD = the cd\'s own quoted cwd');
+  ok(hostile.split(`'/tmp/$(rm -rf ~)'"'"'x'`).length === 3, 'lane L r5 F3: …a hostile cwd is quoted in the export exactly as in the cd (both occurrences inside quotes)');
+  ok(tailLineHas(buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' })), 'lane L r5 F3: …the keeper tail form carries it too (the keeper hands its env to the detached CLI)');
+  {
+    // a REAL sh runs the composed line: the exported value reaches the exec'd command; a hostile cwd runs nothing
+    const { execFileSync } = await import('node:child_process');
+    const pth = (await import('node:path')).default;
+    const dir = (await import('./scratch.mjs')).scratch('remote-shell-cwd'); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+    const weird = pth.join(dir, `a b'c`); fs.mkdirSync(weird);
+    const probe = [shq('sh'), shq('-c'), shq('printf %s "$VIBESPACE_SESSION_CWD|$PWD"')];
+    try {
+      const got = execFileSync('sh', ['-c', buildRemoteExec({ cwd: weird, shq, parts: probe })], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir } });
+      ok(got === `${weird}|${weird}`, `lane L r5 F3: a real sh — the exec'd command sees VIBESPACE_SESSION_CWD = the session's cwd (a space and a quote in it) = its PWD (${JSON.stringify(got)})`);
+      const pre = buildRemoteExec({ cwd: weird, shq, parts: probe }).replace(sessionCwdExport(weird, shq), '');
+      const bad = execFileSync('sh', ['-c', pre], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir } });
+      ok(bad === `|${weird}`, `lane L r5 F3 NEGATIVE CONTROL: the pre-r5 line (no export) leaves the command with no session cwd — the leg above can go red (${JSON.stringify(bad)})`);
+      const pwn = pth.join(dir, 'pwned');
+      execFileSync('sh', ['-c', buildRemoteExec({ cwd: `${dir}/$(touch ${pwn})'x`, shq, parts: probe })], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: dir } });
+      ok(!fs.existsSync(pwn), 'lane L r5 F3: a hostile cwd in the export runs nothing (no $(…) expanded)');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  }
   const tailLine = buildRemoteExec({ cwd: '/w', shq, parts: ['K=v'], tail: ' node keeper run sid 0 --' });
   ok(tailLine.endsWith('exec env K=v node keeper run sid 0 --'), 'tail form (keeper runTail) appends verbatim');
   // drift guard: ws-handler must never hand-assemble a spawn line again
@@ -54,6 +80,7 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
   const handRolled = (ws.match(/exec env `/g) || []).length + (ws.match(/`exec env/g) || []).length;
   ok(handRolled === 0, `no hand-assembled 'exec env' spawn lines left in ws-handler (found ${handRolled})`);
   ok((ws.match(/buildRemoteExec\(\{/g) || []).length === 5, 'all five builders route through buildRemoteExec');
+  ok((ws.match(/VIBESPACE_SESSION_CWD=/g) || []).length === 1 && /`VIBESPACE_SESSION_CWD=\$\{spawnCwd\}`/.test(ws), 'lane L r5 F3 drift guard: ws-create spells VIBESPACE_SESSION_CWD ONCE — the LOCAL argv pair; every remote builder gets it from buildRemoteExec, never a hand-written copy');
 
   // ── PER-SESSION GIT WORKTREE reaches a REMOTE spawn (owner ruling 9) ──
   // The flag is not a special case anywhere in the transport: the ADAPTER
@@ -88,7 +115,11 @@ for (const f of ['src/hosts.js', 'src/ws-handler.js', 'src/ws-create.js']) {
   // — like --worktree — it rides every remote builder through `spawnArgs.map(shq)`
   // with no transport branch. Driven with the REAL adapter + the REAL builder:
   const acLine = remoteLine({});
-  ok(acLine.includes(`'--settings' '{"autoContinueAtUsageLimit":false}'`), 'a remote claude spawn carries --settings autoContinueAtUsageLimit:false, quoted like every other arg', acLine.slice(-160));
+  // (lane L: the same flag also carries the agent-tool allow rules — read the quoted JSON by CONTENT)
+  const acJson = (() => { const m = /'--settings' '(\{[^']*\})'/.exec(acLine); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } })();
+  ok(!!acJson && acJson.autoContinueAtUsageLimit === false, 'a remote claude spawn carries --settings autoContinueAtUsageLimit:false, quoted like every other arg', acLine.slice(-160));
+  ok(!!acJson && Array.isArray(acJson.permissions?.allow) && acJson.permissions.allow.includes('Bash(vibespace-browser:*)'), 'lane L: …and the SAME quoted flag carries the agent-tool allow rules to the remote CLI (no transport branch)');
+  ok(!/permissions/.test(remoteLine({ settings: { allowAgentTools: false } })), 'lane L NEGATIVE CONTROL: the row off ⇒ the remote line carries no allow rules');
   ok(!remoteLine({ settings: { autoContinueAtUsageLimit: true } }).includes('autoContinueAtUsageLimit'), 'NEGATIVE CONTROL: the row ON ⇒ the remote line carries nothing (the leg above can say no)');
   const termSpec = ad.buildSessionArgs({ cwd: '/home/u/proj', mode: 'terminal' });
   ok(termSpec.args.includes('--settings') && JSON.parse(termSpec.args[termSpec.args.indexOf('--settings') + 1]).autoContinueAtUsageLimit === false, 'a terminal-mode spec (ssh terminal / dial pty / local dtach) carries it too');

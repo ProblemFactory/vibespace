@@ -1,0 +1,13 @@
+agent-browser uncheck - Uncheck a checkbox
+
+Usage: agent-browser uncheck <selector>
+
+Unchecks a checkbox element. If already unchecked, no action is taken.
+
+Global Options:
+  --json               Output as JSON
+  --session <name>     Use specific session
+
+Examples:
+  agent-browser uncheck "#newsletter-opt-in"
+  agent-browser uncheck @e8

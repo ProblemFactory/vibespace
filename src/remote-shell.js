@@ -90,8 +90,22 @@ const AMBIENT_OAT_UNSET = 'unset CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN
  *  - tail:       verbatim suffix instead of argv (the keeper runTail)
  */
 function buildRemoteExec({ cwd, shq, pre = '', browser = '', resolve = '', tokenAssign = '', acctEnv = '', parts = [], tail = '' }) {
-  return `cd ${shq(cwd)} 2>/dev/null; ` + pre + browser + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
+  return `cd ${shq(cwd)} 2>/dev/null; ` + sessionCwdExport(cwd, shq) + pre + browser + resolve + AMBIENT_OAT_UNSET + tokenAssign + acctEnv
     + 'exec env ' + parts.join(' ') + tail;
 }
 
-module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET };
+/** lane L r5 F3 — THE SESSION'S DIRECTORY, EXPORTED beside the `cd` (the
+ *  browser tool's write fence: `vibespace-browser` confines a file write to
+ *  VIBESPACE_SESSION_CWD, /tmp and ~/Downloads, and with the variable absent
+ *  only to the last two — the invoking shell's cwd is where the agent stands,
+ *  never what the session is). The value is the session's OWN cwd field — the
+ *  one this line `cd`s into, host label already stripped by ws-create —, spelled
+ *  as the `cd` spells it (quoted by the caller's shq; a `cd` that fails leaves a
+ *  fence on a directory that does not exist, which admits nothing). Structural:
+ *  all five remote builders compose this function, so no transport can omit it
+ *  (the local twin rides ws-create's r6Argv — test-architecture §59). */
+function sessionCwdExport(cwd, shq) {
+  return `VIBESPACE_SESSION_CWD=${shq(cwd)}; export VIBESPACE_SESSION_CWD; `;
+}
+
+module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET, sessionCwdExport };

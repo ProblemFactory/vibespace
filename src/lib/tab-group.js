@@ -4,7 +4,7 @@ import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { inboxCountText } from './title-chips.js'; // lane G: the inbox chip never grows past icon + '99+'
 import { showWindowContextMenu } from './taskbar.js';
-import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColumns, paneMinPx, pairFor, visualTabOrder, swappedPair, splitPartner, ownerColor, SPLIT_RATIO_DEFAULT } from './chain-layout.js';
+import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers } from './chain-layout.js';
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -36,12 +36,28 @@ import { normalizeChain, displayedPanes, splitReplaceable, clampRatio, splitColu
  * The strip is drawn in VISUAL order (the left pane's tab on the left), each
  * pane tab underlined in its owner colour, a glyph between them; every
  * announced split can be undone for 5 s (`undoSplit`).
+ *
+ * SPLIT TABS v2 (docs/design-split-ux.zh.md §8, inc-muhfb5al-jzk6 — the owner:
+ * "the tabs all sit on the left, I can't drag to reorder, I can only change the
+ * right side"): every tab of a split belongs to a SIDE (PURE chain-layout.js:
+ * `split.left` / `split.right`), the strip is TWO HALVES laid on the same grid
+ * columns as the panes (the title bar is a CSS subgrid of the host — the halves
+ * follow the divider with no per-frame JS), a tab click shows it on ITS side,
+ * and a horizontal tab drag REORDERS (crossing the halves' boundary MOVES the
+ * tab to the other side — never a new split). Every structural change goes
+ * through ONE path: a PURE verb → _normalizeChain → _applyChainLayout →
+ * _renderTabBar → _notify (the layout save + the multi-client key).
  */
 
 // Window-kind icons live in the WINDOW-TYPE REGISTRY (window-types.js, Plugin
 // Ph1): each owning module registers its kind + icon there; TYPE_ICONS is the
 // live compatibility view over it (kept for pre-registry importers).
 export { TYPE_ICONS } from './window-types.js';
+
+// The right column's tail (v2 verify r1 ②, _fitSplitTail): the badge's reservation (style.css `--split-btn`
+// default = its 24 px + margins) and the least room a tab of the right half keeps beside it.
+const SPLIT_BTN_RESERVE_PX = 30;
+const SPLIT_TAIL_TAB_PX = 40;
 
 /**
  * Install tab group methods onto a WindowManager instance.
@@ -63,7 +79,7 @@ const tabGroupMethods = {
       if (!chain || chain.tabs[0] !== id) continue; // hosts only
       const bar = win.titleBar?.querySelector('.tab-bar-tabs');
       if (!bar) continue;
-      for (const tab of bar.children) {
+      for (const tab of bar.querySelectorAll('.tab-item')) { // the halves (split tabs v2) nest the tabs one level down
         const tw = this.windows.get(tab.dataset?.winId);
         if (tw) tab.classList.toggle('waiting', tw.element.classList.contains('window-waiting'));
       }
@@ -111,7 +127,7 @@ const tabGroupMethods = {
     const icon = winInfo.iconWrap || winInfo.iconSpan;
     if (!icon) return;
     let mouseDown = false, dragging = false, ghost = null, startX, startY;
-    let targetWin = null;
+    let targetWin = null, fromRect = null; // fromRect = where the window stood before the drag (F3's Undo puts it back)
 
     icon.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
@@ -127,6 +143,7 @@ const tabGroupMethods = {
       if (!dragging) {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         dragging = true;
+        fromRect = this._rectSnap(winInfo);
         // Hide source window during icon drag — the ghost represents it
         prevVisibility = winInfo.element.style.visibility;
         winInfo.element.style.visibility = 'hidden';
@@ -156,7 +173,7 @@ const tabGroupMethods = {
       raf = requestAnimationFrame(() => { raf = 0; const ev = pendingEv; pendingEv = null; if (ev && mouseDown) processMove(ev); });
     };
 
-    const onUp = () => {
+    const onUp = (e) => {
       if (raf) { cancelAnimationFrame(raf); raf = 0; pendingEv = null; }
       if (!mouseDown) return;
       mouseDown = false;
@@ -172,9 +189,7 @@ const tabGroupMethods = {
       if (targetWin && targetWin.id !== winInfo.id) {
         if (winInfo._tabChain && winInfo._tabChain === targetWin._tabChain) return;
         if (winInfo._tabChain) this._detachFromChain(winInfo._tabChain, winInfo.id);
-        if (targetWin._tabChain) this.addToTabChain(targetWin._tabChain, winInfo);
-        else this.createTabChain(targetWin, winInfo);
-        this._afterUserMerge(winInfo._tabChain); // the bridge to the explicit second step (never from restore / sync)
+        this._mergeDrop(targetWin, winInfo, { x: e.clientX, y: e.clientY, from: fromRect }); // the ONE merge-drop body (the bridge to the explicit second step)
       }
       targetWin = null;
     };
@@ -203,20 +218,19 @@ const tabGroupMethods = {
     this._notify();
   },
 
-  addToTabChain(chain, guestWin, insertIndex) {
-    let insertedAt;
-    if (insertIndex != null && insertIndex >= 0 && insertIndex < chain.tabs.length) {
-      insertedAt = insertIndex + 1;
-      chain.tabs.splice(insertedAt, 0, guestWin.id); // insert after the tab at insertIndex
-    } else {
-      chain.tabs.push(guestWin.id);
-      insertedAt = chain.tabs.length - 1;
-    }
-    guestWin._tabChain = chain;
+  /** Add `guestWin` to `chain` and show it. `placement` (optional) = where it
+   *  lands in the strip: `{ afterId }` (right after that tab — on its side in a
+   *  split), `{ side, index }` (a slot of a half / the strip, the merge drop's
+   *  `_dropSlot`), or a legacy CHAIN index n (= after tabs[n]). A split with no
+   *  placement puts it at the end of the RIGHT side (PURE insertTab). */
+  addToTabChain(chain, guestWin, placement) {
     const hostWin = this.windows.get(chain.tabs[0]);
+    guestWin._tabChain = chain;
     // Enforce same desktop
     if (hostWin?._desktopId) guestWin._desktopId = hostWin._desktopId;
     if (!hostWin) return;
+    const where = typeof placement === 'number' ? { afterId: chain.tabs[placement] ?? null } : (placement || {});
+    insertTab(chain, guestWin.id, where);
     guestWin.content.classList.add('tab-hidden');
     hostWin.element.appendChild(guestWin.content);
     guestWin.element.style.display = 'none';
@@ -225,7 +239,7 @@ const tabGroupMethods = {
     this._renderTabBar(chain);
     // Activate the tab that was just dropped — not the last one (dropping
     // between tabs used to light up an unrelated trailing tab)
-    this.switchTab(chain, insertedAt);
+    this.switchTab(chain, chain.tabs.indexOf(guestWin.id));
     this._notify();
   },
 
@@ -276,7 +290,7 @@ const tabGroupMethods = {
     win.element.classList.remove('tab-split', 'split-resizing');
     win.titleBar?.querySelector(':scope > .tab-split-btn')?.remove();
     win.titleBar?.classList.remove('split-btn-hidden');
-    if (win.titleBar) this._titleRO?.unobserve(win.titleBar);
+    if (win.titleBar) { this._titleRO?.unobserve(win.titleBar); if (win.titleBar._vsTailHalf) { this._titleRO?.unobserve(win.titleBar._vsTailHalf); win.titleBar._vsTailHalf = null; } }
     win.element.style.gridTemplateColumns = '';
     win.element.querySelector(':scope > .tab-split-divider')?.remove();
     win.content.classList.remove('tab-split-pane', 'tab-split-focus');
@@ -331,17 +345,24 @@ const tabGroupMethods = {
       if (e.button !== 0 || chain.layout !== 'split') return;
       e.preventDefault(); e.stopPropagation();
       end(); ctl = new AbortController();
+      const startRatio = chain.split.ratio;
       divider.classList.add('dragging'); host()?.element.classList.add('split-resizing');
       try { divider.setPointerCapture(e.pointerId); } catch { /* optional */ }
       const onMove = (ev) => { pending = ev; if (raf) return; raf = requestAnimationFrame(() => { raf = 0; const x = pending; pending = null; if (x) apply(x); }); };
-      const onUp = () => { const h = host(); end(); divider.classList.remove('dragging'); h?.element.classList.remove('split-resizing'); this._resizePanes(chain); this._notify(); };
+      // a drag that MOVED the divider holds its ratio until a save carries it (verify r1 ①: a record held for this
+      // pointerup must not overwrite it — PURE holdRatio / heldRatio)
+      const onUp = () => { const h = host(); end(); divider.classList.remove('dragging'); h?.element.classList.remove('split-resizing'); if (chain.layout === 'split' && chain.split && Math.abs(chain.split.ratio - startRatio) > 0.005) this._holdSplitRatio(chain); this._resizePanes(chain); this._notify(); };
       document.addEventListener('pointermove', onMove, { signal: ctl.signal });
       document.addEventListener('pointerup', onUp, { signal: ctl.signal });
       document.addEventListener('pointercancel', onUp, { signal: ctl.signal });
     });
-    divider.addEventListener('dblclick', (e) => { e.stopPropagation(); this.setSplitRatio(chain, SPLIT_RATIO_DEFAULT); });
+    divider.addEventListener('dblclick', (e) => { e.stopPropagation(); const r0 = chain.split ? chain.split.ratio : null; this.setSplitRatio(chain, SPLIT_RATIO_DEFAULT); if (chain.split && r0 !== null && Math.abs(chain.split.ratio - r0) > 0.005) this._holdSplitRatio(chain); });
     divider.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this._showSplitMenu(chain, e.clientX, e.clientY); });
   },
+
+  /** A USER's divider act (the drag's release, the double-click) — the one stamp site (a method so a chrome
+   *  control can neuter it). Released by layout.js when the save carrying it leaves. */
+  _holdSplitRatio(chain) { holdRatio(chain, Date.now()); },
 
   setSplitRatio(chain, ratio, { notify = true } = {}) {
     if (!chain || chain.layout !== 'split' || !chain.split) return;
@@ -352,28 +373,50 @@ const tabGroupMethods = {
     else if (!this._splitResizeRaf) this._splitResizeRaf = requestAnimationFrame(() => { this._splitResizeRaf = 0; this._resizePanes(chain); });
   },
 
+  /** Where a window stands NOW, as the undo snapshots record it: the element's
+   *  inline rect + z + gridBounds + its snap memory (a snapped window restored
+   *  by rect alone would forget it was snapped). */
+  _rectSnap(w) {
+    if (!w) return null;
+    return { id: w.id, left: w.element.style.left, top: w.element.style.top, width: w.element.style.width, height: w.element.style.height, z: w.element.style.zIndex, gridBounds: w.gridBounds ? { ...w.gridBounds } : null, isSnapped: !!w._isSnapped, preSnapBounds: w._preSnapBounds || null };
+  },
+
+  /** A deep copy of the chain's persisted layout (the undo snapshots' `chainBefore`). */
+  _chainLayoutSnap(chain) {
+    const sp = chain.split;
+    return { layout: chain.layout, order: [...(chain.order || chain.tabs)], split: sp ? { pair: [...sp.pair], ratio: sp.ratio, left: [...(sp.left || [])], right: [...(sp.right || [])] } : null, activeId: chain.tabs[chain.active] };
+  },
+
   /** BIND: show `guestWin` beside `anchorWin` in ONE chain (the anchor's chain
-   *  wins; the guest leaves its own). `side` is where the guest lands — named by
-   *  the CALLER's verb, never by a pointer position (split UX R2). `announce`
-   *  (a user's explicit act) snapshots BEFORE the mutation and offers Undo for
-   *  5 s (R5); the programmatic bind (`createWindow({intoChain})`) stays silent.
-   *  `focus: 'anchor'` keeps the focus on the window the user ACTED ON — every
-   *  user verb passes it (the strip's button, the window menu's "Beside {name}",
-   *  command mode's splitBeside; split r1); the default 'guest' is the
-   *  programmatic bind's and the live view's (whose guest IS the acted-on window). */
-  bindSplit(anchorWin, guestWin, { side = 'right', announce = false, focus = 'guest' } = {}) {
+   *  wins; the guest leaves its own). `side` is where the guest lands on a
+   *  TABS chain — named by the CALLER's verb, never by a pointer position
+   *  (split UX R2); on a chain that is ALREADY split the anchor keeps its side
+   *  and the guest goes to the other one (PURE enterSplit — "beside" never
+   *  covers the anchor). `announce` (a user's explicit act) snapshots BEFORE
+   *  the mutation and offers Undo for 5 s (R5); the programmatic bind
+   *  (`createWindow({intoChain})`) stays silent. `focus: 'anchor'` keeps the
+   *  focus on the window the user ACTED ON — every user verb passes it (the
+   *  strip's button, the window menu's "Beside {name}", command mode's
+   *  splitBeside; split r1); the default 'guest' is the programmatic bind's and
+   *  the live view's (whose guest IS the acted-on window). `freeRect` (F3, a
+   *  merge that lands side by side) = where the guest stood BEFORE the merge:
+   *  the snapshot treats it as a free window, so Undo puts it back there;
+   *  `unsplitAction` adds the toast's second button (Unsplit — stay grouped);
+   *  `unsplitOrder` (the merge's strip order at the drop) is where that Unsplit
+   *  puts the tabs back — the slot the window was DROPPED on, the tabs
+   *  setting's own result (v2 verify r1 ③) — while nothing else has moved. */
+  bindSplit(anchorWin, guestWin, { side = 'right', announce = false, focus = 'guest', freeRect = null, unsplitAction = false, unsplitOrder = null } = {}) {
     if (!anchorWin || !guestWin || anchorWin.id === guestWin.id) return null;
     let snap = null;
     if (announce) {
       // the element that SHOWS a window right now: a chain guest is drawn by its host
       const shownBy = (w) => (w._tabChain ? this.windows.get(w._tabChain.tabs[0]) || w : w);
-      const rectOf = (w) => (w ? { id: w.id, left: w.element.style.left, top: w.element.style.top, width: w.element.style.width, height: w.element.style.height, z: w.element.style.zIndex, gridBounds: w.gridBounds ? { ...w.gridBounds } : null } : null);
       const ac = anchorWin._tabChain;
-      const guestWasFree = !(ac && guestWin._tabChain === ac); // free, or in ANOTHER chain (it comes back out free where that group stood)
+      const guestWasFree = !!freeRect || !(ac && guestWin._tabChain === ac); // free, or in ANOTHER chain (it comes back out free where that group stood)
       snap = {
         anchorId: anchorWin.id, guestId: guestWin.id, guestWasFree,
-        guestRect: rectOf(shownBy(guestWin)), hostRect: rectOf(shownBy(anchorWin)),
-        chainBefore: guestWasFree ? null : { layout: ac.layout, split: ac.split ? { pair: [...ac.split.pair], ratio: ac.split.ratio } : null, activeId: ac.tabs[ac.active] },
+        guestRect: freeRect || this._rectSnap(shownBy(guestWin)), hostRect: this._rectSnap(shownBy(anchorWin)),
+        chainBefore: guestWasFree ? null : this._chainLayoutSnap(ac),
       };
     }
     if (guestWin._tabChain && guestWin._tabChain !== anchorWin._tabChain) this._detachFromChain(guestWin._tabChain, guestWin.id);
@@ -382,8 +425,7 @@ const tabGroupMethods = {
     else if (!chain.tabs.includes(guestWin.id)) this.addToTabChain(chain, guestWin);
     if (!chain) return null;
     this._withdrawMergeToast(chain); // the bridge's offer is taken — by this act, whichever entry made it
-    chain.layout = 'split';
-    chain.split = { pair: pairFor({ anchorId: anchorWin.id, guestId: guestWin.id, side }), ratio: chain.split ? chain.split.ratio : SPLIT_RATIO_DEFAULT, dir: 'row' };
+    enterSplit(chain, { anchorId: anchorWin.id, guestId: guestWin.id, side });
     const focusWin = focus === 'anchor' ? anchorWin : guestWin;
     chain.active = Math.max(0, chain.tabs.indexOf(focusWin.id));
     this._normalizeChain(chain);
@@ -395,15 +437,24 @@ const tabGroupMethods = {
     if (snap && chain.layout === 'split') {
       snap.chain = chain; snap.pairAfter = [...chain.split.pair];
       const nameOf = (id) => String(this.windows.get(id)?.title || id);
-      showToast(t('Side by side: {left} | {right}', { left: nameOf(chain.split.pair[0]), right: nameOf(chain.split.pair[1]) }), { action: { label: t('Undo'), run: () => this.undoSplit(snap) } });
+      const actions = [{ label: t('Undo'), run: () => this.undoSplit(snap) }];
+      // F3's second button: stay grouped, as tabs (never silent when the split is already gone) — at the drop slot
+      // while the strip is still the one this bind made (a later reorder is the user's and stays)
+      const stripAfter = [...chain.order];
+      const untouched = () => chain.order.length === stripAfter.length && chain.order.every((id, i) => id === stripAfter[i]);
+      if (unsplitAction) actions.push({ label: t('Unsplit'), run: () => (chain.layout === 'split' ? this.unbindSplit(chain, { order: Array.isArray(unsplitOrder) && untouched() ? unsplitOrder : null }) : showToast(t('Not shown side by side'))) });
+      showToast(t('Side by side: {left} | {right}', { left: nameOf(chain.split.pair[0]), right: nameOf(chain.split.pair[1]) }), { actions });
     }
     return chain;
   },
 
-  /** UNBIND: back to tabs; nothing leaves the chain, nothing moves. */
-  unbindSplit(chain) {
+  /** UNBIND: back to tabs; nothing leaves the chain, nothing moves (the strip
+   *  keeps "left then right" — the order normalize already holds). `order`
+   *  (the merge-as-split toast's Unsplit only) = the strip to return to. */
+  unbindSplit(chain, { order = null } = {}) {
     if (!chain || chain.layout !== 'split') return;
     chain.layout = 'tabs'; delete chain.split;
+    if (Array.isArray(order)) chain.order = order.map(String); // normalize keeps it only as a permutation of the members
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
@@ -411,17 +462,50 @@ const tabGroupMethods = {
     this._notify();
   },
 
-  /** "Swap left and right": the pair reversed (the sync key carries the order —
-   *  other clients rebuild the pair; the ratio stays the ratio). */
+  /** "Swap left and right": the SIDE LISTS change places with the pair (PURE
+   *  swapSides; the sync key carries the cut and the pair order — other
+   *  clients rebuild; the ratio stays the ratio). */
   swapSplit(chain) {
-    const pair = swappedPair(chain);
-    if (!pair) return;
-    chain.split.pair = pair;
+    if (!chain || chain.layout !== 'split') return;
+    swapSides(chain);
     this._normalizeChain(chain);
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
     requestAnimationFrame(() => this._resizePanes(chain));
     this._notify();
+  },
+
+  /** THE ONE PATH FOR A STRIP MOVE (split tabs v2): the tab drag's drop, the
+   *  keyboard move, a plugin. PURE moveTab (a reorder; crossing the boundary
+   *  moves the tab to the other side, an emptied side ends the split — never a
+   *  new split) → normalize → re-derive → notify. Returns whether anything
+   *  changed (the structural key moved); a drop on its own slot is a no-op. */
+  moveTabInChain(chain, id, { side = null, index = null } = {}) {
+    if (!chain || !Array.isArray(chain.tabs) || !chain.tabs.includes(id)) return false;
+    const before = chainSyncKey(chain);
+    moveTab(chain, id, { side, index });
+    this._normalizeChain(chain);
+    if (chainSyncKey(chain) === before) return false;
+    this._applyChainLayout(chain);
+    this._renderTabBar(chain);
+    if (this.activeWindowId && !chain.tabs.includes(this.activeWindowId)) this.activeWindowId = chain.tabs[chain.active];
+    requestAnimationFrame(() => this._resizePanes(chain));
+    this._notify();
+    return true;
+  },
+
+  /** Ctrl+Shift+PageUp / PageDown (and command mode `{` / `}`): move the ACTIVE
+   *  window's tab one place left / right WITHIN ITS OWN LIST (its side in a
+   *  split, the strip in tabs). At the list's edge nothing moves (false). */
+  moveActiveTab(dir) {
+    const w = this.windows.get(this.activeWindowId);
+    const chain = w && w._tabChain;
+    if (!chain || chain.tabs.length < 2) return false;
+    this._normalizeChain(chain);
+    const list = chain.layout === 'split' ? (chain.split.left.includes(w.id) ? chain.split.left : chain.split.right) : chain.order;
+    const at = list.indexOf(w.id) + (dir < 0 ? -1 : 1);
+    if (at < 0 || at >= list.length) return false;
+    return this.moveTabInChain(chain, w.id, { side: chain.layout === 'split' ? (chain.split.left.includes(w.id) ? 'left' : 'right') : null, index: at });
   },
 
   /** The strip's button in the tabs state: the ACTIVE tab on the left, the
@@ -439,7 +523,8 @@ const tabGroupMethods = {
    *  touched the group since (same chain object, still split, same pair, both
    *  windows alive and in it); otherwise SAY so (never a silent no-op). A guest
    *  that was free comes back out at its own rect, the host at its rect; a guest
-   *  that was already a tab goes back to the chain's previous layout, nothing moves. */
+   *  that was already a tab goes back to the chain's previous layout — its side
+   *  lists and strip order too — nothing moves. */
   undoSplit(snap) {
     const chain = snap && snap.chain;
     const anchor = snap && this.windows.get(snap.anchorId), guest = snap && this.windows.get(snap.guestId);
@@ -453,27 +538,38 @@ const tabGroupMethods = {
       w.element.style.left = r.left; w.element.style.top = r.top; w.element.style.width = r.width; w.element.style.height = r.height;
       if (r.z) w.element.style.zIndex = r.z;
       w.gridBounds = r.gridBounds ? { ...r.gridBounds } : null;
+      if ('isSnapped' in r) { w._isSnapped = !!r.isSnapped; w._preSnapBounds = r.preSnapBounds || null; }
     };
     if (snap.guestWasFree) {
-      this._detachFromChain(chain, guest.id); // normalizes: a pair member left ⇒ tabs; a one-tab chain ungroups
+      this._detachFromChain(chain, guest.id); // normalizes: a side left empty ⇒ tabs; a one-tab chain ungroups
       put({ ...snap.guestRect, id: guest.id });
       const host = this.windows.get(chain.tabs[0]) || anchor;
       put({ ...snap.hostRect, id: host.id });
+      // a window dropped onto a chain ALREADY split (v2 verify r1 ④): the split goes back to its sides, order and
+      // pair from BEFORE the drop — the detach alone would show the neighbour of the slot it left
+      const b = snap.chainBefore;
+      if (b && chain.tabs.length >= 2 && Array.isArray(b.order) && b.order.length === chain.tabs.length && b.order.every((id) => chain.tabs.includes(id))) this._restoreChainLayout(chain, b);
       this._normalizeChain(chain);
       requestAnimationFrame(() => { if (guest.onResize) guest.onResize(); this._resizePanes(chain); });
     } else {
-      const b = snap.chainBefore || { layout: 'tabs' };
-      chain.layout = b.layout === 'split' && b.split ? 'split' : 'tabs';
-      if (chain.layout === 'split') chain.split = { pair: [...b.split.pair], ratio: b.split.ratio, dir: 'row' }; else delete chain.split;
-      const ai = chain.tabs.indexOf(b.activeId);
-      if (ai >= 0) chain.active = ai;
-      this._normalizeChain(chain);
-      this._applyChainLayout(chain);
-      this._renderTabBar(chain);
-      requestAnimationFrame(() => this._resizePanes(chain));
+      this._restoreChainLayout(chain, snap.chainBefore || { layout: 'tabs' });
     }
     this._notify();
     return true;
+  },
+
+  /** Put a chain back to a `_chainLayoutSnap` (the undo snapshots): layout, strip order, sides + pair + ratio,
+   *  the active tab — over the SAME members. */
+  _restoreChainLayout(chain, b) {
+    chain.layout = b.layout === 'split' && b.split ? 'split' : 'tabs';
+    if (Array.isArray(b.order)) chain.order = [...b.order];
+    if (chain.layout === 'split') chain.split = { pair: [...b.split.pair], ratio: b.split.ratio, dir: 'row', left: [...(b.split.left || [])], right: [...(b.split.right || [])] }; else delete chain.split;
+    const ai = chain.tabs.indexOf(b.activeId);
+    if (ai >= 0) chain.active = ai;
+    this._normalizeChain(chain);
+    this._applyChainLayout(chain);
+    this._renderTabBar(chain);
+    requestAnimationFrame(() => this._resizePanes(chain));
   },
 
   /** The two verbs of a split (the badge click and the divider's right-click). */
@@ -486,12 +582,25 @@ const tabGroupMethods = {
   },
 
   /** The bridge between the two steps (R1): called ONLY by the three user merge
-   *  drops (icon drag / tab drag / title-bar drag) — never by restore, a remote
-   *  sync or a programmatic chain. The button pulses once (1.2 s; none under
-   *  prefers-reduced-motion) and a toast offers the second step in one click. */
-  _afterUserMerge(chain) {
-    if (!chain || !Array.isArray(chain.tabs) || chain.tabs.length < 2 || chain.layout === 'split') return;
+   *  drops (icon drag / tab drag / title-bar drag, through their one body
+   *  `_mergeDrop`) — never by restore, a remote sync or a programmatic chain.
+   *  A target that was ALREADY split (either setting) ⇒ `_announceSplitJoin`
+   *  (say so + Undo — v2 verify r1 ④). `window.mergeDropLayout` is read HERE,
+   *  at the drop (split tabs v2, F3): 'split' lands the merge side by side at
+   *  once — the dragged window on the RIGHT, the tab it joined on the left —
+   *  with a toast offering Undo (the dragged window back where it stood,
+   *  `from`) and Unsplit (stay grouped as tabs, at the drop slot — r1 ③); the
+   *  default 'tabs' keeps the two steps: the button pulses once (1.2 s; none
+   *  under prefers-reduced-motion) and a toast offers the second step. */
+  _afterUserMerge(chain, { dragged = null, from = null, before = null } = {}) {
+    if (!chain || !Array.isArray(chain.tabs) || chain.tabs.length < 2) return;
     if (typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches) return; // the phone shows one pane — nothing to offer
+    const draggedWin = dragged && chain.tabs.includes(dragged.id) ? dragged : this.windows.get(chain.tabs[chain.active]);
+    if (chain.layout === 'split') { this._announceSplitJoin(chain, { dragged: draggedWin, from, before }); return; } // the target was ALREADY split (either setting)
+    if ((this._settings?.get('window.mergeDropLayout') ?? 'tabs') === 'split' && draggedWin) {
+      const anchor = this.windows.get(splitPartner({ ...chain, active: chain.tabs.indexOf(draggedWin.id) }, chain.recent));
+      if (anchor && anchor !== draggedWin) { this.bindSplit(anchor, draggedWin, { side: 'right', announce: true, focus: 'guest', freeRect: from || null, unsplitAction: true, unsplitOrder: [...chain.order] }); return; }
+    }
     chain._pulseUntil = Date.now() + 1200;
     const host = this.windows.get(chain.tabs[0]);
     const btn = host?.titleBar.querySelector(':scope > .tab-split-btn');
@@ -508,6 +617,33 @@ const tabGroupMethods = {
       if (chain.layout === 'split') return showToast(t('Already shown side by side'));
       this.splitActive(chain, { announce: true });
     } } });
+  },
+
+  /** THE THREE USER MERGE DROPS' ONE BODY (icon drag, tab drag, title-bar drag): the dragged window joins the
+   *  target's chain at the slot under the pointer (a new chain when the target has none), then the bridge
+   *  (_afterUserMerge) runs ONCE with the target chain's layout from BEFORE the drop (the undo of a drop onto a
+   *  chain that was already split puts that layout back — v2 verify r1 ④). */
+  _mergeDrop(targetWin, win, { x, y, from = null } = {}) {
+    const tc = targetWin._tabChain;
+    const before = tc ? this._chainLayoutSnap(tc) : null;
+    if (tc) this.addToTabChain(tc, win, this._dropSlot(targetWin, x, y)); // the strip slot under the pointer (in a split: its half)
+    else this.createTabChain(targetWin, win);
+    this._afterUserMerge(win._tabChain, { dragged: win, from, before }); // never from restore / sync; F3 may land it side by side
+  },
+
+  /** A USER merge onto a chain that was ALREADY split (v2 verify r1 ④ — as shipped it was silent, under either
+   *  setting): the dragged window joined the half under the pointer and is SHOWN there. Say so, naming the new
+   *  pair, and offer Undo: the window back where it stood before the drag (`from`), the split back to its layout
+   *  before the drop (`before`). The ordinary undo guards hold (the pair unchanged since, both alive). */
+  _announceSplitJoin(chain, { dragged = null, from = null, before = null } = {}) {
+    if (!dragged || !from || chain.layout !== 'split' || !chain.split) return;
+    const si = chain.split.pair.indexOf(dragged.id);
+    const other = si < 0 ? null : this.windows.get(chain.split.pair[1 - si]);
+    const host = this.windows.get(chain.tabs[0]);
+    if (!other || !host) return;
+    const snap = { chain, anchorId: other.id, guestId: dragged.id, guestWasFree: true, guestRect: from, hostRect: this._rectSnap(host), chainBefore: before && before.layout === 'split' ? before : null, pairAfter: [...chain.split.pair] };
+    const nameOf = (id) => String(this.windows.get(id)?.title || id);
+    showToast(t('Side by side: {left} | {right}', { left: nameOf(chain.split.pair[0]), right: nameOf(chain.split.pair[1]) }), { actions: [{ label: t('Undo'), run: () => this.undoSplit(snap) }] });
   },
 
   /** Remove the post-merge toast of `chain` (if it is still up). */
@@ -582,6 +718,7 @@ const tabGroupMethods = {
   _renderTabBar(chain) {
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
+    this._normalizeChain(chain); // the halves read the side lists (a pre-v2 record is repaired by rule — idempotent)
     this._notifyChainChange([...chain.tabs]);
     // Rebuilding the tab DOM destroys per-tab auth badges — re-apply them
     // after this render instead of waiting for the next identity broadcast.
@@ -613,18 +750,14 @@ const tabGroupMethods = {
     if (wrap) tabBar.classList.add('tab-wrap');
     hostWin.element.classList.toggle('tab-wrap-mode', !!wrap);
 
-    // split UX R3: the strip in VISUAL order — [left pane, glyph, right pane, …the rest]
     const isSplit = chain.layout === 'split' && chain.split && Array.isArray(chain.split.pair);
-    const order = visualTabOrder(chain);
-    const activeId = chain.tabs[chain.active];
-    for (const tabWinId of order) {
+    const makeTab = (tabWinId) => {
       const tabWin = this.windows.get(tabWinId);
-      if (!tabWin) continue;
+      if (!tabWin) return null;
 
       const tab = document.createElement('div');
       tab.className = 'tab-item';
       tab.dataset.winId = tabWinId;
-      if (tabWinId === activeId) tab.classList.add('active');
 
       const iconWrap = document.createElement('span');
       iconWrap.className = 'tab-icon-wrap';
@@ -652,19 +785,12 @@ const tabGroupMethods = {
       // A grouped guest's own titlebar is hidden — the tab carries its
       // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).
       if (tabWin.element.classList.contains('window-waiting')) tab.classList.add('waiting');
-      // §4.6: a pane of the split is marked; the OWNERSHIP badge (the session's
-      // own colour + name) rides the tab because the guest's title bar is hidden
-      const paneIdx = isSplit ? chain.split.pair.indexOf(tabWinId) : -1;
-      if (paneIdx >= 0) {
-        tab.classList.add('split-member', 'tab-pane');
-        tab.classList.toggle('tab-split-focus', tabWinId === activeId);
-        tab.style.setProperty('--pane-color', this._paneColorOf(tabWin));
-        tab.title = t('Shown side by side');
-      }
       tab.append(iconWrap, label);
+      // §4.6: the OWNERSHIP badge (the session's own colour + name) rides the tab because the guest's title bar is hidden
       if (tabWin._ownerBadge && tabWin._ownerBadge.dots && tabWin._ownerBadge.dots.length) tab.appendChild(this._ownerBadgeEl(tabWin._ownerBadge));
       if (tabWin._inboxBadge && tabWin._inboxBadge.count) tab.appendChild(this._inboxBadgeEl(tabWinId, tabWin._inboxBadge));
       tab.appendChild(closeBtn);
+      // a press SHOWS the tab — on its own side in a split (both halves switchable, split tabs v2)
       tab.addEventListener('mousedown', (e) => {
         if (e.target.closest('.tab-close')) return;
         e.stopPropagation();
@@ -678,15 +804,34 @@ const tabGroupMethods = {
         showWindowContextMenu(this._app, tabWinId, e.clientX, e.clientY, { switchSubmenu: true });
       });
       this._setupTabDrag(tab, tabWinId, chain);
-      tabBar.appendChild(tab);
-      if (paneIdx === 0) {
-        // the divider's mirror between the two pane tabs — paint, not a node
-        const glyph = document.createElement('span');
-        glyph.className = 'tab-split-glyph';
-        glyph.setAttribute('aria-hidden', 'true');
-        tabBar.appendChild(glyph);
+      return tab;
+    };
+
+    if (isSplit) {
+      // SPLIT TABS v2: TWO HALVES, one per side, on the same grid columns as the
+      // panes (the title bar is a subgrid of the host — style.css), the glyph on
+      // the boundary over the divider. ≤768px the halves dissolve into ONE strip
+      // (left then right) and the glyph hides (R6).
+      tabBar.classList.add('tab-bar-split');
+      for (const side of ['left', 'right']) {
+        const half = document.createElement('div');
+        half.className = 'tab-strip-half';
+        half.dataset.side = side;
+        for (const id of chain.split[side]) { const tab = makeTab(id); if (tab) half.appendChild(tab); }
+        tabBar.appendChild(half);
+        if (side === 'left') {
+          // the divider's mirror on the halves' boundary — paint, not a node
+          const glyph = document.createElement('span');
+          glyph.className = 'tab-split-glyph';
+          glyph.setAttribute('aria-hidden', 'true');
+          tabBar.appendChild(glyph);
+        }
       }
+    } else {
+      // tabs: ONE strip in the chain's strip order (PURE visualTabOrder)
+      for (const id of visualTabOrder(chain)) { const tab = makeTab(id); if (tab) tabBar.appendChild(tab); }
     }
+    this._markStrip(chain, tabBar);
 
     const controls = titleBar.querySelector('.window-controls');
     titleBar.insertBefore(tabBar, controls);
@@ -709,11 +854,29 @@ const tabGroupMethods = {
         else this.splitActive(chain, { announce: true });
       });
       titleBar.insertBefore(btn, controls);
-      // a very narrow host (< 260 px) hides the button — one observer for every host title bar
+      // ONE observer for every host title bar: a < 260 px host hides the button; the CONTROLS' width is published
+      // as --split-ctl (the right half's tail, the right column's floor); v2 verify r1 ②: the RIGHT HALF too — its
+      // width follows the divider — and _fitSplitTail hides the badge while that column cannot hold it beside a tab
       if (typeof ResizeObserver === 'function') {
-        this._titleRO = this._titleRO || new ResizeObserver((entries) => { for (const en of entries) en.target.classList.toggle('split-btn-hidden', en.contentRect.width < 260); });
+        this._titleRO = this._titleRO || new ResizeObserver((entries) => {
+          const bars = new Set();
+          for (const en of entries) {
+            const el = en.target;
+            if (el.classList.contains('window-controls')) (el.closest('.window') || el.parentElement)?.style.setProperty('--split-ctl', el.offsetWidth + 'px'); // on the HOST: its grid's right-column floor reads it too (splitColumns), the title bar inherits it
+            else if (el.classList.contains('window-titlebar')) el._vsNarrow = en.contentRect.width < 260;
+            const tb = el.classList.contains('window-titlebar') ? el : el.closest('.window-titlebar');
+            if (tb) bars.add(tb);
+          }
+          for (const tb of bars) this._fitSplitTail(tb);
+        });
         this._titleRO.observe(titleBar);
+        if (controls) this._titleRO.observe(controls);
+        const right = tabBar.querySelector(':scope > .tab-strip-half[data-side="right"]');
+        if (titleBar._vsTailHalf && titleBar._vsTailHalf !== right) this._titleRO.unobserve(titleBar._vsTailHalf);
+        titleBar._vsTailHalf = right || null;
+        if (right) this._titleRO.observe(right);
       }
+      this._fitSplitTail(titleBar); // a render that left the split (or entered it) re-decides without waiting for a resize
     }
   },
 
@@ -730,25 +893,65 @@ const tabGroupMethods = {
     btn.setAttribute('aria-label', label);
   },
 
+  /** THE RIGHT COLUMN'S TAIL (v2 verify r1 ②). The ⫿ badge and the window
+   *  controls share column 3 with the right half (style.css reserves them with
+   *  a MARGIN — a padding would let the half paint its tabs under them). When
+   *  that half — the room left for tabs — would be narrower than a tab with the
+   *  badge beside it, the badge steps aside (`.split-btn-hidden`, the < 260 px
+   *  host rule's class; the divider's right-click keeps Unsplit / Swap).
+   *  Hysteresis for free: hidden, the half is the badge's reservation wider, so
+   *  it returns only when the badge fits back beside a tab. Decided on the NEXT
+   *  frame: the class resizes an observed element (the half), and deciding
+   *  inside the observer's own delivery would loop it. */
+  _fitSplitTail(tb) {
+    if (!tb || tb._vsFitRaf) return;
+    tb._vsFitRaf = requestAnimationFrame(() => {
+      tb._vsFitRaf = 0;
+      const half = tb.isConnected ? tb.querySelector(':scope > .tab-bar-split > .tab-strip-half[data-side="right"]') : null;
+      const hidden = tb.classList.contains('split-btn-hidden');
+      const tight = !!half && half.getClientRects().length > 0 && half.clientWidth - (hidden ? SPLIT_BTN_RESERVE_PX : 0) < SPLIT_TAIL_TAB_PX;
+      tb.classList.toggle('split-btn-hidden', !!tb._vsNarrow || tight);
+    });
+  },
+
+  /** The strip's PER-TAB state, in place, by window id (never by position —
+   *  the strip is in visual order): `.active` = the focused tab; in a split
+   *  each side's SHOWN tab is a `.tab-pane` (the old `.split-member` too) with
+   *  its owner colour underline, the focused one also `.tab-split-focus`. The
+   *  structure (which half, which order) is _renderTabBar's; a switch only
+   *  re-marks — a press never rebuilds the strip under the pointer. */
+  _markStrip(chain, bar) {
+    if (!chain || !bar) return;
+    const isSplit = chain.layout === 'split' && chain.split && Array.isArray(chain.split.pair);
+    const activeId = chain.tabs[chain.active];
+    for (const tab of bar.querySelectorAll('.tab-item')) {
+      const id = tab.dataset.winId;
+      const shown = isSplit && chain.split.pair.includes(id);
+      tab.classList.toggle('active', id === activeId);
+      tab.classList.toggle('split-member', shown);
+      tab.classList.toggle('tab-pane', shown);
+      tab.classList.toggle('tab-split-focus', shown && id === activeId);
+      if (shown) { tab.style.setProperty('--pane-color', this._paneColorOf(this.windows.get(id))); tab.title = t('Shown side by side'); }
+      else { tab.style.removeProperty('--pane-color'); tab.removeAttribute('title'); }
+    }
+  },
+
   switchTab(chain, index) {
     if (index < 0 || index >= chain.tabs.length) return;
     const hostWin = this.windows.get(chain.tabs[0]);
     if (!hostWin) return;
     this._normalizeChain(chain);
     const targetId = chain.tabs[index];
-    let pairChanged = false;
-    if (chain.layout === 'split' && chain.split && !chain.split.pair.includes(targetId)) {
-      // D19 (a): a THIRD tab of a split chain replaces the NON-ANCHOR pane in
-      // place — the binding survives (the pane the browser is bound TO stays
-      // put), and the pane that changes is the one that was not the anchor.
-      const out = splitReplaceable(chain);
-      const i = chain.split.pair.indexOf(out);
-      if (i >= 0) { chain.split.pair[i] = targetId; pairChanged = true; }
-    }
-    const prevWin = this.windows.get(chain.tabs[chain.active]);
-    if (prevWin) prevWin.content.classList.add('tab-hidden');
-    // the recent tabs (most recent first) = the default side-by-side partner (local, never persisted)
     const prevId = chain.tabs[chain.active];
+    const shownBefore = displayedPanes(chain).join('|');
+    // SPLIT TABS v2: the target is shown on ITS OWN side (PURE showTab) — a tab
+    // of the left half on the left, of the right half on the right; the side's
+    // previous pane stays in its list. (The retired D19 (a) replaced only the
+    // non-anchor pane: the owner "can only change the right side".)
+    showTab(chain, targetId);
+    const prevWin = this.windows.get(prevId);
+    if (prevWin && prevId !== targetId && !displayedPanes(chain).includes(prevId)) prevWin.content.classList.add('tab-hidden'); // a pane that stays shown never flaps hidden (its view would suspend)
+    // the recent tabs (most recent first) = the default side-by-side partner (local, never persisted)
     chain.recent = [targetId, ...(prevId && prevId !== targetId ? [prevId] : []), ...(Array.isArray(chain.recent) ? chain.recent : []).filter((x) => x !== targetId && x !== prevId && chain.tabs.includes(x))].slice(0, 16);
     chain.active = index;
     const newWin = this.windows.get(chain.tabs[index]);
@@ -760,31 +963,82 @@ const tabGroupMethods = {
       // and chat both read/toggle it directly), so clearing here is consistent.
       newWin.element.classList.remove('window-waiting');
     }
-    // the strip is in VISUAL order — mark by window id, never by strip index
-    const tabs = hostWin.titleBar.querySelectorAll('.tab-item');
-    tabs.forEach((t) => { t.classList.toggle('active', t.dataset.winId === targetId); t.classList.toggle('tab-split-focus', t.classList.contains('tab-pane') && t.dataset.winId === targetId); });
+    // the strip is in VISUAL order — re-mark by window id, in place (never a rebuild under the pointer)
+    this._markStrip(chain, hostWin.titleBar.querySelector('.tab-bar-tabs'));
     this._fitChipsSoon?.(hostWin); // the active tab's label is drawn bolder — its billing chip re-decides (lane G: the title wins)
     this.activeWindowId = chain.tabs[index];
     this.syncHiddenViews?.(); // the guest's content just flipped display (inc-mu6bfv1t-4drq)
     this._applyChainLayout(chain); // re-derives every pane's display (a split keeps its pair shown) and syncs again
-    if (pairChanged) this._renderTabBar(chain);
-    else this._labelSplitBtn(chain, hostWin.titleBar.querySelector(':scope > .tab-split-btn')); // `recent` moved ⇒ so did the default partner
-    requestAnimationFrame(() => this._resizePanes(chain));
+    this._labelSplitBtn(chain, hostWin.titleBar.querySelector(':scope > .tab-split-btn')); // `recent` moved ⇒ so did the default partner
+    if (displayedPanes(chain).join('|') !== shownBefore) requestAnimationFrame(() => this._resizePanes(chain));
     this._notify();
   },
 
+  /** The strip SLOT under a pointer — `{ side, index, tabs, container }`: in a
+   *  split the HALF the pointer is over (left / right of the glyph's centre =
+   *  the divider's), else the one strip (side null); `index` = how many of that
+   *  list's tabs (other than `excludeId`) come before the pointer — row-aware,
+   *  so a wrapped strip (window.tabWrap) counts every row above as before. The
+   *  merge drop (_dropSlot) and the tab-drag reorder share it. */
+  _stripSlot(hostWin, clientX, clientY, excludeId = null) {
+    const bar = hostWin?.titleBar.querySelector('.tab-bar-tabs');
+    const chain = hostWin?._tabChain;
+    if (!bar || !chain) return { side: null, index: null, tabs: [], container: null };
+    let side = null, container = bar;
+    if (chain.layout === 'split' && bar.classList.contains('tab-bar-split')) {
+      const right = bar.querySelector('.tab-strip-half[data-side="right"]');
+      const g = bar.querySelector('.tab-split-glyph')?.getBoundingClientRect();
+      const cut = g && g.width > 0 ? g.left + g.width / 2 : (right ? right.getBoundingClientRect().left : Infinity);
+      side = clientX < cut ? 'left' : 'right';
+      container = bar.querySelector(`.tab-strip-half[data-side="${side}"]`) || bar;
+    }
+    const tabs = [...container.querySelectorAll('.tab-item')].filter((el) => el.dataset.winId !== excludeId);
+    const cr = container.getBoundingClientRect();
+    const y = cr.height > 2 ? Math.min(Math.max(clientY, cr.top + 1), cr.bottom - 1) : clientY;
+    let index = 0;
+    for (const el of tabs) { const r = el.getBoundingClientRect(); if (r.bottom <= y || (r.top <= y && r.left + r.width / 2 < clientX)) index++; }
+    return { side, index, tabs, container };
+  },
+
+  /** Where a MERGE drop lands in a target chain's strip (the three user merge
+   *  drops): the half and the slot under the pointer. */
+  _dropSlot(targetWin, clientX, clientY) {
+    const s = this._stripSlot(targetWin, clientX, clientY);
+    return s.index === null ? {} : { side: s.side, index: s.index };
+  },
+
+  /** Is a horizontal tab drag a REORDER here? Not ≤768px (R6: the phone's one
+   *  strip keeps today's gestures). */
+  _stripReorderable() {
+    return !(typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches);
+  },
+
+  /** THE TAB DRAG. The first 8 px of movement decide ONCE (split tabs v2):
+   *  mostly HORIZONTAL = a REORDER inside the strip (an insertion marker,
+   *  rAF-coalesced, the drop = moveTabInChain; crossing the halves' boundary
+   *  MOVES the tab to the other side; Esc cancels; never a split, never a
+   *  detach later in the same drag), otherwise the pre-v2 DETACH path verbatim
+   *  (|dy| > 30 pulls the tab out as a window: move / snap / merge). Every
+   *  listener lives on a PER-DRAG AbortController (a per-render one would die
+   *  mid-drag), and the reorder re-reads the strip by window id each frame. */
   _setupTabDrag(tabEl, winId, chain) {
     let mouseDown = false, startX = 0, startY = 0, detached = false;
+    let mode = null; // null until the first 8 px: 'reorder' | 'detach'
     let mergeTarget = null;
     let mergeGhost = null;
     let savedBounds = null;
     let dragCtl = null;
+    let marker = null;
     const endDrag = () => { if (dragCtl) { dragCtl.abort(); dragCtl = null; } };
+    const endReorder = () => {
+      if (marker) { marker.remove(); marker = null; }
+      document.querySelectorAll('.tab-item.tab-reordering').forEach((el) => el.classList.remove('tab-reordering'));
+    };
 
     tabEl.addEventListener('mousedown', (e) => {
       if (e.target.closest('.tab-close') || e.button !== 0) return;
       if (chain.tabs.length <= 1) return;
-      mouseDown = true; detached = false; mergeTarget = null;
+      mouseDown = true; detached = false; mergeTarget = null; mode = null;
       startX = e.clientX; startY = e.clientY;
       // Drag listeners live on a per-drag controller, NOT chain._tabCtl:
       // detaching re-renders the tab bar (which aborts _tabCtl) MID-DRAG, which
@@ -794,11 +1048,50 @@ const tabGroupMethods = {
       dragCtl = new AbortController();
       document.addEventListener('mousemove', onMove, { signal: dragCtl.signal });
       document.addEventListener('mouseup', onUp, { signal: dragCtl.signal });
+      document.addEventListener('keydown', onKey, { signal: dragCtl.signal, capture: true });
       e.preventDefault();
     });
 
+    // Esc cancels a REORDER (nothing moved yet — the move happens on the drop)
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || mode !== 'reorder' || !mouseDown) return;
+      e.preventDefault(); e.stopPropagation();
+      mouseDown = false;
+      if (moveRaf) { cancelAnimationFrame(moveRaf); moveRaf = 0; pendingEv = null; }
+      endReorder(); endDrag();
+    };
+
+    const reorderMove = (e) => {
+      const host = this.windows.get(chain.tabs[0]);
+      if (!host || host._tabChain !== chain || !chain.tabs.includes(winId)) { mouseDown = false; endReorder(); endDrag(); return; }
+      const slot = this._stripSlot(host, e.clientX, e.clientY, winId);
+      if (!slot.container) return;
+      host.titleBar.querySelector(`.tab-item[data-win-id="${CSS.escape(winId)}"]`)?.classList.add('tab-reordering');
+      if (!marker) {
+        marker = document.createElement('div');
+        marker.className = 'tab-insert-marker';
+        marker.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(marker);
+      }
+      const ref = slot.tabs[slot.index], last = slot.tabs[slot.tabs.length - 1];
+      const r = ref ? ref.getBoundingClientRect() : last ? last.getBoundingClientRect() : slot.container.getBoundingClientRect();
+      const x = ref ? r.left : last ? r.right : r.left + 2;
+      // a body child under the DPI zoom: viewport px ÷ uiScale (the ghost's rule)
+      marker.style.left = ((x - 1) / uiScale()) + 'px';
+      marker.style.top = ((r.top + 2) / uiScale()) + 'px';
+      marker.style.height = (Math.max(12, r.height - 4) / uiScale()) + 'px';
+      marker.dataset.side = slot.side || '';
+      marker.dataset.index = String(slot.index);
+    };
+
     const processMove = (e) => {
       if (!mouseDown) return;
+      if (!mode) {
+        const dx0 = e.clientX - startX, dy0 = e.clientY - startY;
+        if (Math.max(Math.abs(dx0), Math.abs(dy0)) < 8) return;
+        mode = Math.abs(dx0) > Math.abs(dy0) && this._stripReorderable() ? 'reorder' : 'detach';
+      }
+      if (mode === 'reorder') { reorderMove(e); return; }
       if (!detached && Math.abs(e.clientY - startY) > 30) {
         detached = true;
         this._detachFromChain(chain, winId);
@@ -885,6 +1178,14 @@ const tabGroupMethods = {
       endDrag();
       if (!mouseDown) return;
       mouseDown = false;
+      if (mode === 'reorder') {
+        // THE DROP: the slot under the pointer, through the ONE mutation path
+        const host = this.windows.get(chain.tabs[0]);
+        const slot = host && host._tabChain === chain ? this._stripSlot(host, e.clientX, e.clientY, winId) : null;
+        endReorder();
+        if (slot && slot.index !== null && chain.tabs.includes(winId)) this.moveTabInChain(chain, winId, { side: slot.side, index: slot.index });
+        return;
+      }
       if (!detached) return;
       const win = this.windows.get(winId);
       if (!win) return;
@@ -899,9 +1200,8 @@ const tabGroupMethods = {
         if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
         // Window still display:none from merge zone — addToTabChain/createTabChain
         // will manage it as a tab guest, so no need to restore.
-        if (mergeTarget._tabChain) this.addToTabChain(mergeTarget._tabChain, win);
-        else this.createTabChain(mergeTarget, win);
-        this._afterUserMerge(win._tabChain); // the bridge to the explicit second step
+        const fromRect = savedBounds ? { ...this._rectSnap(win), ...savedBounds } : this._rectSnap(win); // where the torn-out tab stood before the merge zone took it
+        this._mergeDrop(mergeTarget, win, { x: e.clientX, y: e.clientY, from: fromRect }); // the ONE merge-drop body (F3 may land it side by side)
         mergeTarget = null;
         savedBounds = null;
         this._clearGridHighlight();
@@ -973,18 +1273,15 @@ const tabGroupMethods = {
       newHost.gridBounds = hostWin.gridBounds ? { ...hostWin.gridBounds } : null;
       newHost.isMaximized = hostWin.isMaximized;
       newHost.prevBounds = hostWin.prevBounds;
-      chain.tabs.splice(idx, 1);
-      if (chain.active >= chain.tabs.length) chain.active = chain.tabs.length - 1;
-      if (chain.active < 0) chain.active = 0;
-    } else {
-      if (hostWin && hostWin.element.contains(win.content)) {
-        hostWin.element.removeChild(win.content);
-        win.element.appendChild(win.content);
-      }
-      chain.tabs.splice(idx, 1);
-      if (chain.active >= chain.tabs.length) chain.active = chain.tabs.length - 1;
-      if (chain.active < 0) chain.active = 0;
+    } else if (hostWin && hostWin.element.contains(win.content)) {
+      hostWin.element.removeChild(win.content);
+      win.element.appendChild(win.content);
     }
+    // PURE removeTab (split tabs v2): tabs[1] becomes the host when the host
+    // leaves (the splice it always was); a shown pane is replaced ON ITS SIDE by
+    // its neighbour, a side left empty ends the split, `active` stays on the
+    // same window (a bare splice slid it onto the next one)
+    removeTab(chain, winId);
 
     win.content.classList.remove('tab-hidden');
     win._tabChain = null;
@@ -1074,11 +1371,51 @@ const tabGroupMethods = {
     requestAnimationFrame(() => { if (lastWin.onResize) lastWin.onResize(); });
   },
 
-  restoreTabChain(tabIds, activeIndex, { layout, split } = {}) {
+  /** ANOTHER CLIENT changed only this chain's LAYOUT — the strip order, the
+   *  sides, the pair, split ↔ tabs — over the same members and host (layout.js
+   *  matched them): apply it IN PLACE, no re-parenting of any content (a
+   *  rebuild reloads iframes and re-fits terminals for a tab click). `active`
+   *  stays this client's (focus is per client) unless the new layout hides it,
+   *  then the pane shown on its side takes it. Never notifies (the remote
+   *  apply's user-dirty gate owns what leaves this client).
+   *  THE RATIO (v2 verify r1 ①): a local divider drag the record could not
+   *  have known — the record was held for that drag's pointerup — keeps its
+   *  ratio (PURE heldRatio); every other local ratio yields to the record's.
+   *  Returns true when a kept ratio differs from the record's: layout.js then
+   *  re-arms ONE save, so the drag reaches the other clients and the disk. */
+  applyChainRecord(chain, rec) {
+    if (!chain || !rec) return false;
+    const list = (a) => (Array.isArray(a) ? a.map(String) : undefined);
+    const hadFocus = this.activeWindowId === chain.tabs[chain.active];
+    const held = chain.layout === 'split' && rec.layout === 'split' ? heldRatio(chain, Date.now()) : null;
+    chain.order = list(rec.order);
+    chain.layout = rec.layout === 'split' ? 'split' : 'tabs';
+    if (chain.layout === 'split' && rec.split) chain.split = { pair: Array.isArray(rec.split.pair) ? rec.split.pair.map(String) : [], ratio: held !== null ? held : rec.split.ratio, dir: 'row', left: list(rec.split.left), right: list(rec.split.right) };
+    else delete chain.split;
+    this._normalizeChain(chain);
+    const kept = held !== null && chain.layout === 'split' && ratioDiffers(chain, rec);
+    if (!kept) releaseRatio(chain); // the record already carries it, or the split it belonged to is gone
+    if (chain.layout === 'split' && !chain.split.pair.includes(chain.tabs[chain.active])) {
+      const id = chain.tabs[chain.active];
+      chain.active = chain.tabs.indexOf(chain.split.pair[chain.split.left.includes(id) ? 0 : 1]);
+    }
+    if (hadFocus) this.activeWindowId = chain.tabs[chain.active];
+    this._applyChainLayout(chain);
+    this._renderTabBar(chain);
+    requestAnimationFrame(() => this._resizePanes(chain));
+    return kept;
+  },
+
+  /** Rebuild a chain from a persisted / remote record: `order` (the strip) and
+   *  `split.left` / `split.right` (the sides) are copied as given — a record
+   *  written before split tabs v2 has neither and normalize repairs it by rule;
+   *  a member whose window did not come back simply drops out of every list. */
+  restoreTabChain(tabIds, activeIndex, { layout, split, order } = {}) {
     if (!tabIds || tabIds.length < 2) return;
     const hostWin = this.windows.get(tabIds[0]);
     if (!hostWin) return;
-    const chain = { tabs: [], active: activeIndex || 0, layout: layout === 'split' ? 'split' : 'tabs', split: split ? { pair: Array.isArray(split.pair) ? [...split.pair] : [], ratio: split.ratio, dir: 'row' } : undefined };
+    const list = (a) => (Array.isArray(a) ? a.map(String) : undefined);
+    const chain = { tabs: [], active: activeIndex || 0, layout: layout === 'split' ? 'split' : 'tabs', order: list(order), split: split ? { pair: Array.isArray(split.pair) ? [...split.pair] : [], ratio: split.ratio, dir: 'row', left: list(split.left), right: list(split.right) } : undefined };
     chain.tabs.push(hostWin.id);
     hostWin._tabChain = chain;
     for (let i = 1; i < tabIds.length; i++) {
@@ -1097,5 +1434,11 @@ const tabGroupMethods = {
     this._normalizeChain(chain); // a persisted pair whose member did not come back ⇒ tabs
     this._applyChainLayout(chain);
     this._renderTabBar(chain);
+    // like every other chain mutation: the taskbar (one GROUPED button, the
+    // guests off it) re-derives now — a reload used to show the restored group
+    // as separate single buttons until the first window event (lane K verify r1).
+    // Silent inside a restore batch (wm._restoring); the autosave it schedules is
+    // gated by the layout manager's own restore / anti-echo guards.
+    this._notify();
   },
 };
