@@ -2217,16 +2217,19 @@ console.log('— ⑧ MULTIVIEW: the real keeper — the per-conversation cap (he
   k5.noteViewers(KEY_R, null, 1); k5.noteViewers(h2, null, 1);
   const tk = k5.takeover({ browserKey: h1, profileId: null, viewerId: 7, sessionId: 'sess-r' });
   ok(tk.ok, 'the user takes over helper 1\'s browser; live views watch the own browser and helper 2\'s');
-  OFF += 20000; k5.sweepIdleReleases(Date.now() + OFF);
-  for (let i = 0; i < 60 && k5.browserOf(idOf(h3)).state !== 'stopped'; i++) await new Promise((r) => setTimeout(r, 50));
-  ok(k5.browserOf(idOf(h3)).state === 'stopped' && k5.browserOf(idOf(h3)).stoppedBy === 'turn-idle', 'past 3 min: helper 3\'s browser (nobody on it) is RELEASED', k5.browserOf(idOf(h3)));
+  // a release is a fire-and-forget stop: every state below is read after the stops THIS sweep started settled (the
+  // sweep returns them — the 2.369.187 mirror red's sample rule), never after a poll window on one of them
+  const settleRel = (rels) => Promise.race([Promise.all(rels.map((r) => r.settled)).then(() => 'settled'), new Promise((r) => setTimeout(() => r('timeout'), 30000))]);
+  OFF += 20000; const rel3 = k5.sweepIdleReleases(Date.now() + OFF);
+  const rel3Settled = await settleRel(rel3);
+  ok(rel3Settled === 'settled' && rel3.map((r) => r.profileId).join() === idOf(h3) && k5.browserOf(idOf(h3)).state === 'stopped' && k5.browserOf(idOf(h3)).stoppedBy === 'turn-idle', 'past 3 min: helper 3\'s browser (nobody on it) is RELEASED — the one release that sweep started', { rel: rel3.map((r) => r.profileId), rec: k5.browserOf(idOf(h3)) });
   ok(k5.browserOf(own).state === 'ready' && k5.browserOf(idOf(h2)).state === 'ready', '…the WATCHED ones are kept (the browser the user looks at is never taken away)');
   ok(k5.browserOf(idOf(h1)).state === 'ready', '…and the one the user DRIVES is kept');
   k5.noteViewers(KEY_R, null, 0);
-  k5.sweepIdleReleases(Date.now() + OFF);
-  for (let i = 0; i < 60 && k5.browserOf(own).state !== 'stopped'; i++) await new Promise((r) => setTimeout(r, 50));
+  const relOwn = k5.sweepIdleReleases(Date.now() + OFF);
+  const relOwnSettled = await settleRel(relOwn);
   const recOwn = k5.browserOf(own);
-  ok(recOwn.state === 'stopped' && recOwn.stoppedBy === 'turn-idle' && /released after the turn ended/.test(recOwn.note || '') && !recOwn.lastError, 'the view closed: the own browser is RELEASED at the next sweep (stopped by turn-idle, no error)', recOwn);
+  ok(relOwnSettled === 'settled' && relOwn.map((r) => r.profileId).join() === own && recOwn.state === 'stopped' && recOwn.stoppedBy === 'turn-idle' && /released after the turn ended/.test(recOwn.note || '') && !recOwn.lastError, 'the view closed: the own browser is RELEASED at the next sweep (stopped by turn-idle, no error)', { rel: relOwn.map((r) => r.profileId), rec: recOwn });
   ok(k5._reg().profiles.some((x) => x.id === own) && k5._reg().leases.some((l) => l.profileId === own), '…the record and its lease stay (the tab stays, hollow)');
   const row = S.browserListFor(k5.statusFor(KEY_R)).find((r) => r.ref === S.EPHEMERAL_REF);
   ok(row && row.state === 'released', 'the strip row reads RELEASED (hollow — "the next command starts it again")', row);
@@ -2336,7 +2339,17 @@ console.log('— ⑧ r2: the release needs a KNOWN turn (the wiring\'s own facts
   const GATE = 'TF.turnKnown(s) ? TF.turnOf(s) : null';
   const lifted = liftFacts(WSRC);
   ok(!!lifted && lifted.includes(GATE), 'F1 setup: the wiring\'s conversationFacts is found and answers through turnKnown', lifted);
-  const runF1 = async (factsText, tag) => {
+  // THE SAMPLE (the 2.369.187 mirror red, a 2-vCPU runner): a release is a fire-and-forget `stop()` whose record reads
+  // `ready` until its `close --all`, the daemon's exit and the orphan reap have run (≥ one 100 ms pid poll), and the old
+  // sample was taken at the FIRST stop observed — the runner finished the own browser's stop first and read the
+  // helper's, started by the SAME t+181 s sweep and still in flight, as "kept" ({own stopped, helper ready}). Both
+  // clocks were identical by construction (both `turnIdleSince` stamps = the first sweep's own `t`); what raced was
+  // the sample against the second stop. Now each sweep RETURNS the releases it started and the sample is taken after
+  // every one of them settled — a deadline (30 s) only for a stop that never ends, never a sample instant; and the
+  // "kept" legs read the sweep's own decision (it released nothing of theirs), not a window with nothing observed.
+  const SETTLE_MS = 30000;
+  const settle = (rels) => Promise.race([Promise.all(rels.map((r) => r.settled)).then(() => 'settled'), sleepMs(SETTLE_MS).then(() => 'timeout')]);
+  const runF1 = async (factsText, tag, { holdHelperClose = false } = {}) => {
     const KEY_T = 'bk-000000b1', KEY_C = 'bk-000000b2';
     for (const x of [KEY_T, KEY_C]) live.add(x);
     const DD = path.join(ROOT, 'data-r2-' + tag); fs.mkdirSync(DD, { recursive: true });
@@ -2345,7 +2358,15 @@ console.log('— ⑧ r2: the release needs a KNOWN turn (the wiring\'s own facts
       ['sess-c', { mode: 'chat', _browserKey: KEY_C, _isStreaming: true, name: 'chat agent' }],
     ]);
     let OFF = 0;
-    const kk = mkKeeper({ dataDir: DD, serverSetting: (x) => setR2[x], now: () => Date.now() + OFF, tickMs: 3600e3, conversationFacts: factsOf(factsText, sessions) });
+    // THE RUNNER'S ORDER BY CONSTRUCTION (`holdHelperClose`): the helper's `close --all` is HELD until the pre-fix
+    // sample has been read — its release is started by the t+181 s sweep and cannot finish before the own's, on any
+    // machine at any load (a 2-vCPU runner finished it later by scheduling luck)
+    const realRt = F.createBrowserRuntime({ env: rtEnv });
+    let openHelperClose = () => { };
+    const helperHeld = holdHelperClose ? new Promise((r) => { openHelperClose = r; }) : null;
+    const closes = [];
+    const rt = { ...realRt, closeAll: async (ns, o) => { const who = String((o && o.extraEnv && o.extraEnv.AGENT_BROWSER_SESSION) || ''); if (helperHeld && /\.\d+$/.test(who)) await helperHeld; const r = await realRt.closeAll(ns, o); closes.push({ who, at: Date.now() }); return r; } };
+    const kk = mkKeeper({ dataDir: DD, serverSetting: (x) => setR2[x], now: () => Date.now() + OFF, tickMs: 3600e3, conversationFacts: factsOf(factsText, sessions), runtime: rt });
     const pT = pairsFor(KEY_T), pC = pairsFor(KEY_C);
     await kk.ensureEphemeral({ browserKey: KEY_T, sessionId: 'sess-t', envPairs: pT, sessionName: 't' });
     const hT = kk.newChild({ browserKey: KEY_T }).handle;
@@ -2353,31 +2374,49 @@ console.log('— ⑧ r2: the release needs a KNOWN turn (the wiring\'s own facts
     await kk.ensureEphemeral({ browserKey: KEY_C, sessionId: 'sess-c', envPairs: pC, sessionName: 'c' });
     const id = (k0) => kk.ephemeralFor(k0).profileId;
     const st = (k0) => { const b = kk.browserOf(id(k0)); return { state: b.state, stoppedBy: b.stoppedBy || null }; }; // a SNAPSHOT (browserOf is the live record)
-    const sweep = () => kk.sweepIdleReleases(Date.now() + OFF);
-    sweep(); OFF += 170000; sweep(); OFF += 11000; sweep(); // t, t+170 s, t+181 s — the verifier's timeline
-    await waitFor(() => [KEY_T, hT, KEY_C].some((k0) => st(k0).state === 'stopped'), 1500);
-    const at181 = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C) };
+    const nameOf = { [id(KEY_T)]: 'own', [id(hT)]: 'helper', [id(KEY_C)]: 'chat' };
+    const names = (rels) => rels.map((r) => nameOf[r.profileId] || r.profileId).sort();
+    const sweep = () => kk.sweepIdleReleases(Date.now() + OFF); // → the releases THIS sweep started
+    const r0 = sweep(); OFF += 170000; const r170 = sweep(); OFF += 11000; const r181 = sweep(); // t, t+170 s, t+181 s — the verifier's timeline
+    let preFixSample = null;
+    if (holdHelperClose) {
+      // the PRE-FIX sample, kept as the construction's own control: the first stop observed (its 1.5 s window widened
+      // to a deadline — the own's stop is not held, so it ends; the helper's cannot end before the hold opens)
+      await waitFor(() => [KEY_T, hT, KEY_C].some((k0) => st(k0).state === 'stopped'), SETTLE_MS);
+      preFixSample = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C) };
+      openHelperClose();
+    }
+    const settled181 = await settle([...r0, ...r170, ...r181]);
+    const at181 = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C), released: { t: names(r0), t170: names(r170), t181: names(r181) }, settled: settled181 };
     // the POSITIVE control: the chat session's turn ENDS ⇒ released 3 min later (its turn is a fact the wiring can read)
     sessions.get('sess-c')._isStreaming = false;
-    sweep(); OFF += 181000; sweep();
-    await waitFor(() => st(KEY_C).state === 'stopped', 3000);
-    await waitFor(() => st(KEY_T).state === 'stopped' || st(hT).state === 'stopped', 600);
-    const after = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C) };
+    const a0 = sweep(); OFF += 181000; const a181 = sweep();
+    const settledAfter = await settle([...a0, ...a181]);
+    const after = { own: st(KEY_T), helper: st(hT), chat: st(KEY_C), released: { t: names(a0), t181: names(a181) }, settled: settledAfter };
+    const closeOrder = closes.map((c) => (/\.\d+$/.test(c.who) ? 'helper' : c.who === 'vs-' + KEY_T ? 'own' : c.who === 'vs-' + KEY_C ? 'chat' : c.who));
     for (const e of kk.ephemerals()) await kk.stop(e.profileId).catch(() => { });
     kk.shutdown();
     for (const x of [KEY_T, KEY_C]) live.delete(x);
-    return { at181, after };
+    return { at181, after, preFixSample, closeOrder };
   };
+  const none = (rel) => Object.values(rel).every((xs) => xs.length === 0);
   if (lifted) {
     const r = await runF1(lifted, 'f1');
-    ok(r.at181.own.state === 'ready' && r.at181.helper.state === 'ready', 'F1: a TERMINAL session (its mode publishes no turn facts) — its browser AND its helper\'s are KEPT 3 min 1 s after the last verb (the turn is unknown, never idle)', r.at181);
-    ok(r.at181.chat.state === 'ready', 'F1: a CHAT session mid-turn (_isStreaming) is kept', r.at181.chat);
-    ok(r.after.chat.state === 'stopped' && r.after.chat.stoppedBy === 'turn-idle', 'F1 POSITIVE CONTROL: the chat session\'s turn ENDS ⇒ its browser is released 3 min later (stopped by turn-idle) — the same facts, the same sweep', r.after.chat);
-    ok(r.after.own.state === 'ready' && r.after.helper.state === 'ready', 'F1: …and the terminal session\'s browsers are still kept (never released on a turn the keeper cannot read)', r.after);
+    ok(r.at181.settled === 'settled' && none(r.at181.released) && r.at181.own.state === 'ready' && r.at181.helper.state === 'ready', 'F1: a TERMINAL session (its mode publishes no turn facts) — its browser AND its helper\'s are KEPT 3 min 1 s after the last verb (the turn is unknown, never idle): the t / t+170 s / t+181 s sweeps release nothing', r.at181);
+    ok(r.at181.chat.state === 'ready' && !r.at181.released.t181.includes('chat'), 'F1: a CHAT session mid-turn (_isStreaming) is kept', r.at181.chat);
+    ok(r.after.settled === 'settled' && r.after.released.t181.join() === 'chat' && r.after.chat.state === 'stopped' && r.after.chat.stoppedBy === 'turn-idle', 'F1 POSITIVE CONTROL: the chat session\'s turn ENDS ⇒ the sweep 3 min later releases it (stopped by turn-idle, sampled after its stop settled) — the same facts, the same sweep', r.after);
+    ok(r.after.own.state === 'ready' && r.after.helper.state === 'ready' && !r.after.released.t.concat(r.after.released.t181).some((x) => x === 'own' || x === 'helper'), 'F1: …and the terminal session\'s browsers are still kept (never released on a turn the keeper cannot read)', r.after);
     // NEGATIVE CONTROL (the wiring text in memory, the gate reverted — the pre-fix answer `{ turn: turnOf(s) }`):
     const pre = lifted.replace(GATE, 'TF.turnOf(s)');
+    const released181 = (x) => x.at181.settled === 'settled' && x.at181.released.t.length === 0 && x.at181.released.t170.length === 0 && x.at181.released.t181.join() === 'helper,own'
+      && x.at181.own.state === 'stopped' && x.at181.own.stoppedBy === 'turn-idle' && x.at181.helper.state === 'stopped' && x.at181.helper.stoppedBy === 'turn-idle' && x.at181.chat.state === 'ready';
     const rc = await runF1(pre, 'f1-ctl');
-    ok(pre !== lifted && rc.at181.own.state === 'stopped' && rc.at181.own.stoppedBy === 'turn-idle' && rc.at181.helper.state === 'stopped' && rc.at181.helper.stoppedBy === 'turn-idle' && rc.at181.chat.state === 'ready', 'F1 NEGATIVE CONTROL: conversationFacts answering turnOf unconditionally releases the terminal session\'s own browser and its helper\'s at t+181 s MID-WORK (the chat one mid-turn kept) — the legs above are red on it', rc.at181);
+    ok(pre !== lifted && released181(rc), 'F1 NEGATIVE CONTROL: conversationFacts answering turnOf unconditionally releases the terminal session\'s own browser and its helper\'s at t+181 s MID-WORK — the t+181 s sweep (never an earlier one) releases both, both stopped by turn-idle once their stops settled (the chat one mid-turn kept) — the legs above are red on it', rc.at181);
+    // THE 2.369.187 MIRROR RED, CONSTRUCTED: the same control with the helper's release held in flight past the own's
+    const rs = await runF1(pre, 'f1-ctl-slow', { holdHelperClose: true });
+    const ps = rs.preFixSample || {};
+    ok(ps.own && ps.own.state === 'stopped' && ps.own.stoppedBy === 'turn-idle' && ps.helper.state === 'ready' && ps.helper.stoppedBy === null && ps.chat.state === 'ready', 'SAMPLE CONTROL (the 2.369.187 mirror red, by construction): the helper\'s release held in flight past the own\'s — the PRE-FIX sample (the first stop observed) reads the runner\'s exact shape {own stopped, helper ready} — the construction reaches the mechanism', ps);
+    ok(released181(rs) && rs.closeOrder.slice(0, 2).join() === 'own,helper', '…and the sample past every release the t+181 s sweep started reads BOTH stopped by turn-idle on that same order (own closed first, the helper after) — the negative control no longer depends on which stop the machine finishes first', { at181: rs.at181, closeOrder: rs.closeOrder });
   }
 
   // ─ F2: THE SLOW-LAUNCH FAKE — a shim in front of the fake whose `open` takes 600 ms and which logs every call in

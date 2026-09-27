@@ -60,6 +60,19 @@ export function rebaseEsm(src, origAbs) {
     .replace(/\bimport\.meta\.url\b/g, JSON.stringify(base.href));
 }
 
+// ONE exit handler for every scratch dir this process made (2.369.187 mirror log): a
+// listener per `mutantCopies()` call put a suite with eleven controls past Node's
+// ten-listener warning (`MaxListenersExceededWarning: 11 exit listeners`) — noise
+// on every run, and a real leak for a suite that makes copies in a loop.
+const MUT_DIRS = new Set();
+let mutExitHooked = false;
+function removeOnExit(dir) {
+  MUT_DIRS.add(dir);
+  if (mutExitHooked) return;
+  mutExitHooked = true;
+  process.on('exit', () => { for (const d of MUT_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
+}
+
 /** One per suite: `const M = mutantCopies('spend', REPO)`.
  *  M.write(origRel, src, tag?) → absolute path of the copy (CJS or ESM by the
  *  original's syntax: `esm: true` forces ESM). M.load(...) → require()d module
@@ -67,7 +80,7 @@ export function rebaseEsm(src, origAbs) {
 export function mutantCopies(name, repo) {
   const dir = scratch(name + '-mut');
   fs.mkdirSync(dir, { recursive: true });
-  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
+  removeOnExit(dir);
   const files = [];
   let seq = 0;
   /** `name` (optional) = the copy's file name inside `dir` without extension,

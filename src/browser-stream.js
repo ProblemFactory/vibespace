@@ -619,7 +619,11 @@ function browserListFor(status, { activity = null, helpers = null } = {}) {
   for (const a of Array.isArray(status.attachments) ? status.attachments : []) {
     if (!isObj(a) || typeof a.profileId !== 'string' || !a.profileId) continue;
     const l = leases.find((x) => x.profileId === a.profileId && String(x.browserKey || '') === bk) || null;
-    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: drivenByUser(bk, a.profileId) ? 'you' : 'agent', isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
+    // owner ruling A (2): a SHARED profile's browser is driven by ONE conversation at a time — another one's agent
+    // ('other', `driverKey` names it) or the user from another conversation's live view ('other-user')
+    const dk = l && isObj(l.driver) && typeof l.driver.browserKey === 'string' ? l.driver.browserKey : null;
+    const other = dk && dk.split('.')[0] !== bk ? (l.driver.by === 'user' ? 'other-user' : 'other') : null;
+    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: drivenByUser(bk, a.profileId) ? 'you' : (other || 'agent'), driverKey: other ? dk : null, isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
   }
   const e = isObj(status.ephemeral) ? status.ephemeral : null;
   if (e && !e.child && String(e.browserKey || '') === bk && typeof e.profileId === 'string') {

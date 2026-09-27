@@ -98,16 +98,36 @@ export function stampText(ts, { locale = undefined } = {}) {
 // never disagree with the gate. This only picks the words.
 // Returns null when there is nothing to say ('no' AND 'unknown' — ignorance is
 // not a claim), so a caller can `if (chip)`.
-export function overageChip(state, { t = (s) => s } = {}) {
+//
+// A MONEY ICON, NOT A SENTENCE (2.369.189, the owner on the Agents roster,
+// looking at a row that read "正在使用付费溢出额度" beside its next-usable column:
+// "这啥玩意啊 不如显示个钱的图标"). Both states draw the SAME compact chip —
+// UI_ICONS.money + ONE short word (`label`: Credits / 按量 / 従量) — and the
+// whole sentence moves into `tip` (the chip's title AND aria-label, so a screen
+// reader and the incident bundle still get the words, never only a colour):
+//   kind 'inUse'   — fresh evidence that money is being spent NOW (warning tone)
+//   kind 'credits' — the org merely ALLOWS it past 100 % (dim; the pool ranks
+//                    such a member last — account-pool-auto `creditsIds`)
+// `money` = the period's spend when the payload has it ('' otherwise); it rides
+// the tip, never the chip. The HTML is `creditsChipHtml` below — ONE builder
+// for every surface (the roster rows, the usage popup).
+// the default `t` fills {params} like the real one (the tip carries `{money}`)
+const tIdent = (s, p) => (p ? String(s).replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);
+export function overageChip(state, { t = tIdent } = {}) {
   if (!state) return null;
   if (state.inUse === 'yes') {
     const money = state.spend
-      ? ` — $${state.spend.used.toFixed(2)}${state.spend.limit ? ` / $${state.spend.limit.toFixed(2)}` : ''}`
+      ? `$${state.spend.used.toFixed(2)}${state.spend.limit ? ` / $${state.spend.limit.toFixed(2)}` : ''}`
       : '';
     return {
-      kind: 'inUse',
-      label: t('paid overage in use') + money,
-      tip: t('Automatic turns are refused on this account while it bills paid overage (Settings → Spending).'),
+      kind: 'inUse', dim: false,
+      label: t('Credits'),
+      money,
+      tip: [
+        t('Using paid overage credits — this account’s subscription quota is spent and its requests are billed pay-per-use.'),
+        money ? t('Spent this period: {money}.', { money }) : '',
+        t('Automatic turns are refused on this account while it bills paid overage (Settings → Spending).'),
+      ].filter(Boolean).join(' '),
     };
   }
   // USAGE CREDITS, VISIBLE BEFORE THEY ARE SPENT (B-ad05): an org whose extra
@@ -118,11 +138,32 @@ export function overageChip(state, { t = (s) => s } = {}) {
   if (state.mode === 'allowed') {
     return {
       kind: 'credits', dim: true,
-      label: t('credits'),
+      label: t('Credits'),
+      money: '',
       tip: t('Extra usage is enabled on this org: requests past 100 % are billed pay-per-use. The pool moves conversations onto it only when no member has quota left.'),
     };
   }
   return null;
+}
+
+/** The chip's state word for `data-credits` (a machine-readable fact on the
+ *  element: the incident bundle and the suites read it, never the colour). */
+export function creditsState(chip) {
+  return !chip ? '' : chip.kind === 'inUse' ? 'in-use' : 'allowed';
+}
+
+// the local escaper — this module imports nothing; a caller passes its own
+// `escHtml` (utils.js) and this default is the same strict set, never identity
+const escLocal = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/** THE ONE credits chip, as HTML ('' when there is nothing to say). `icon` is
+ *  UI_ICONS.money (injected: this module imports nothing). role="img" +
+ *  aria-label = the WHOLE sentence is what assistive tech reads; the word is
+ *  paint for the sighted. A live surface must PATCH an existing chip from
+ *  these same fields (manage-agents.js `patchCreditsSlot`), never re-create it. */
+export function creditsChipHtml(chip, { esc = escLocal, icon = '' } = {}) {
+  if (!chip) return '';
+  return `<span class="credits-chip" data-credits="${esc(creditsState(chip))}" role="img" aria-label="${esc(chip.tip)}" title="${esc(chip.tip)}">${icon}<span class="credits-chip-word">${esc(chip.label)}</span></span>`;
 }
 
 // ── SPEND CONTROL (the §1.4 row's THIRD field, r4) ──────────────────────────

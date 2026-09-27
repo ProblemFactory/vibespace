@@ -705,12 +705,17 @@ function pinForCreate({ explicit, prior, forkParent, taskGroup, instanceDefault,
   const conversation = fork ? forkParent : (resume ? prior : '');
   return pinPick({ explicit, conversation, taskGroup, instanceDefault });
 }
-/** What a mid-session pin can honestly promise (§3.2.5's "which sentence
- *  depends on whether a lease exists right now, a fact that can be looked up"). */
-function pinApplyNotice({ liveBrowser = false } = {}) {
-  return liveBrowser
-    ? `applies on your next \`vibespace-browser\` command, which RELAUNCHES the running browser on the new profile — pages open in it are lost (close it first to keep them)`
-    : `applies from your next \`vibespace-browser\` command (the browser launches on it)`;
+/** What a mid-session pin can honestly promise. OWNER RULING A (2026-09-26): a pin is this conversation's DEFAULT
+ *  ATTACHMENT, never a directory — the next command OPENS the profile through the keeper (joining its browser when
+ *  another conversation already runs it), and nothing is relaunched: the temporary browser the conversation has now is
+ *  left as it is. (The P1 sentence said the next command "RELAUNCHES the running browser on the new profile" — that
+ *  relaunch was a second Chrome on the profile's directory, the study's exit-21 SingletonLock.) `label` = the pin's
+ *  name; none ⇒ the unpin sentence. */
+function pinApplyNotice({ liveBrowser = false, label = '' } = {}) {
+  if (!label) return liveBrowser
+    ? 'applies from your next `vibespace-browser` command: a temporary browser of this conversation (the profile\'s own browser keeps running for the conversations that use it)'
+    : 'applies from your next `vibespace-browser` command: a temporary browser of this conversation';
+  return `applies from your next \`vibespace-browser\` command, which opens "${label}" (its own browser, shared with your other conversations — joined when it is already running, never relaunched)${liveBrowser ? '; the browser you have now is left as it is' : ''}`;
 }
 
 // ═══ P1 — THE REGISTRY, THE LEASE AND THE KEEPER'S VERDICTS (§3.3–§3.5) ════
@@ -1074,7 +1079,7 @@ function validateProfileInput(input = {}, { existing = [], control = null, media
 /** `dir` is null for a row that owns no directory (`cdp`) and for a profile
  *  on a PAIRED machine (the device composes and owns its directory — the hub
  *  records what the device answered on the BROWSER record, never here). */
-function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null, ephemeral = false } = {}) {
+function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null, notes = '', record = false, fingerprintSeed = null, owner = null, legacy = false, now = 0, host = null, cdpPort = null, defaultBackend = null, sharing = null, ephemeral = false, createdBy = null } = {}) {
   // takeover C3 (design-browser-takeover §5.1): a MANAGED EPHEMERAL record is
   // owned by its CONVERSATION (kind 'conversation', id = the browser key — a
   // child key included) and by nothing else: never mediated, never legacy,
@@ -1091,12 +1096,16 @@ function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null,
       createdAt: Number(now) || 0, lastUsedAt: 0, notes: '',
     };
   }
+  // OWNER RULING A (2026-09-26, "A吧"): a named profile is usable by ALL of the owner's conversations unless the user's
+  // panel switch says otherwise — no owner given ⇒ instance; `createdBy` = the conversation that made it (display and the
+  // switch's "Only …" option), never an admission fact
   const o = owner && OWNER_KINDS.includes(owner.kind) ? { kind: owner.kind, id: owner.id == null ? null : String(owner.id) } : { kind: 'instance', id: null };
+  const by = createdBy == null ? null : parentKeyOf(String(createdBy));
   return {
     id: String(id), label: cleanLabel(label), dir: dir == null ? null : String(dir), provider: String(provider),
     fingerprintSeed: fingerprintSeed == null ? null : fingerprintSeed, proxy: proxy || null, host: host == null || host === '' ? null : String(host),
     cdpPort: Number.isInteger(cdpPort) ? cdpPort : null,
-    allowedDomains: null, owner: o, sharing: legacy ? 'instance' : (sharing === 'instance' ? 'instance' : 'owner'), record: !!record,
+    allowedDomains: null, owner: o, createdBy: by && isBrowserKey(by) ? by : null, sharing: legacy ? 'instance' : (sharing === 'instance' ? 'instance' : 'owner'), record: !!record,
     lastChromiumMajor: null, lastBackend: null, legacy: !!legacy,
     // §7.4: "this profile is for that kind of work" — a per-profile DEFAULT
     // backend, said once; null = the instance's plain chromium
@@ -1267,21 +1276,113 @@ function ephemeralDirOf(pairs) {
   for (const s of Array.isArray(pairs) ? pairs : []) if (typeof s === 'string' && s.startsWith('AGENT_BROWSER_PROFILE=')) return s.slice('AGENT_BROWSER_PROFILE='.length) || null;
   return null;
 }
+// ── OWNER RULING A (2026-09-26, after two naive-user studies failed the same task — "A吧"): a named profile is USABLE
+// BY ALL of the owner's conversations by default. WHO MAY USE a profile is ONE field, `owner` (instance = "All my
+// conversations", session = "Only <that conversation>", task = "Only Task Group …"); `sharing` is NOT it — `instance`
+// there is the P6 TAB ISOLATION (each conversation sees only its own tabs through the mediating proxy), an opt-in knob.
+// The study's path A died on a record whose two fields contradicted each other (owner session + sharing instance) —
+// the admission read one, the recreate wrote the other. One field, one reader.
+/** The closed set of scopes the panel's "Who can use it" speaks (a task-owned record reads 'task'; nothing creates one). */
+const SCOPES = Object.freeze(['all', 'one', 'task']);
+/** WHO MAY USE this record, derived from `owner` alone (never stored twice): 'all' | 'one' | 'task'; an ephemeral
+ *  record is its conversation's ('one'); null for no record. The legacy shared record is always 'all'. */
+function scopeOf(p) {
+  if (!p) return null;
+  if (isEphemeralProfile(p)) return 'one';
+  if (p.legacy) return 'all';
+  const o = p.owner || { kind: 'instance' };
+  if (o.kind === 'instance') return 'all';
+  if (o.kind === 'task') return 'task';
+  return 'one';
+}
 /**
- * Ownership is COOPERATIVE and it is by CONVERSATION (the browserKey), never
- * by webui session id, which churns on every resume. `instance`-owned (and
- * the migration's legacy shared record) admit any session on this instance;
- * `task`-owned admit the sessions bound to that Task Group; `session`-owned
- * admit the conversation that created it.
+ * The refusal an agent gets for a profile the user kept to ANOTHER conversation — it names the BUTTON the user presses,
+ * never a command line (the study's Ask-user card offered `vibespace-browser new work --sharing instance`, which made a
+ * second contradictory record and still did not work). An agent relays it; it never proposes a recreate.
  */
-function mayAttach(profile, { browserKey, taskIds = [] } = {}) {
+function notOwnerRefusal({ label = '', kind = 'session', taskId = null } = {}) {
+  const who = `"${label || 'this profile'}"`;
+  const set = kind === 'task' ? `set to "only Task Group ${taskId || '?'}"` : 'set to "only its own conversation"';
+  return {
+    ok: false, code: 'not_owner',
+    error: `profile ${who} is ${set} — ask the user to switch it to "All my conversations" in the Agent browser panel (its row's "Who can use it"), or to pick ${who} for this conversation in Session properties → Agent browser; or pick another profile. Never create a second profile with the same login.`,
+    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → All my conversations`,
+  };
+}
+/**
+ * Ownership is COOPERATIVE and it is by CONVERSATION (the browserKey), never by webui session id, which churns on every
+ * resume. Admitted: every conversation when the scope is 'all' (instance-owned, legacy); the conversation it is kept to
+ * (its children included); the conversations of its Task Group; AND — owner ruling A (4) — a conversation whose PIN the
+ * USER chose names it (`pinned`: the New Session dialog, Session properties, a Task-Group / instance default the user
+ * configured — the user's choice IS the authorization), and any attach the USER makes (`by:'user'`, the UI's attach).
+ * An AGENT's own pin is not the user's choice and never admits (the keeper passes `pinned` only for a user pin).
+ */
+function mayAttach(profile, { browserKey, taskIds = [], pinned = false, by = 'agent' } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
+  if (scopeOf(profile) === 'all') return { ok: true };
   const o = profile.owner || { kind: 'instance' };
-  if (o.kind === 'instance' || profile.legacy) return { ok: true };
   const parent = isChildKey(browserKey) ? parentKeyOf(browserKey) : browserKey;
-  if (o.kind === 'session') return o.id === parent ? { ok: true } : { ok: false, code: 'not_owner', error: `profile "${profile.label}" belongs to another conversation` };
-  if (o.kind === 'task') return (taskIds || []).includes(o.id) ? { ok: true } : { ok: false, code: 'not_owner', error: `profile "${profile.label}" belongs to Task Group ${o.id}, which this session is not bound to` };
-  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${o.kind})` };
+  if (o.kind === 'session' && o.id === parent) return { ok: true };
+  if (o.kind === 'task' && (taskIds || []).includes(o.id)) return { ok: true };
+  if (pinned) return { ok: true, via: 'pin' };
+  if (by === 'user') return { ok: true, via: 'user' };
+  if (o.kind === 'task') return notOwnerRefusal({ label: profile.label, kind: 'task', taskId: o.id });
+  if (o.kind === 'session') return notOwnerRefusal({ label: profile.label, kind: 'session' });
+  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${o.kind}) — ask the user to set it to "All my conversations" in the Agent browser panel` };
+}
+/**
+ * Does a conversation's PIN authorize it on this profile (mayAttach's `pinned`)? Only a pin the USER made (never an
+ * agent's own), naming this profile, and — THE USER'S LATEST CHOICE WINS — made no earlier than the profile's last "Who
+ * can use it" change (`scopeAt`): narrowing a profile to one conversation takes it from every other one, a pinned one
+ * included; picking it for a conversation again afterwards gives it back.
+ */
+function userPinAuthorizes({ pin = null, profile = null } = {}) {
+  if (!pin || !profile || pin.profileId !== profile.id || pin.by === 'agent') return false;
+  return (Number(pin.at) || 0) >= (Number(profile.scopeAt) || 0);
+}
+/**
+ * The panel switch (PATCH `{scope, conversation?}` — a USER act): the owner a scope change writes. 'all' ⇒ instance;
+ * 'one' ⇒ the named conversation (a parent browser key; required). The legacy shared record and an ephemeral one have
+ * no switch. → `{ok, owner}` | a typed refusal.
+ */
+function scopePatchVerdict({ profile, scope, conversation = null } = {}) {
+  if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
+  if (isEphemeralProfile(profile)) return { ok: false, code: 'not_editable', error: `"${profile.label}" is a conversation's own temporary browser — it has no "Who can use it"` };
+  if (profile.legacy) return { ok: false, code: 'bad-request', error: 'the legacy shared profile is always usable by every conversation — adopt it as a new profile to keep it to one' };
+  const s = String(scope == null ? '' : scope);
+  if (s === 'all') return { ok: true, owner: { kind: 'instance', id: null } };
+  if (s === 'one') {
+    const bk = conversation == null ? '' : parentKeyOf(String(conversation));
+    if (!isBrowserKey(bk)) return { ok: false, code: 'bad-request', error: '"Only one conversation" needs that conversation (its browser key)' };
+    return { ok: true, owner: { kind: 'session', id: bk } };
+  }
+  return { ok: false, code: 'bad-request', error: `scope "${s}" is not a value — one of all, one` };
+}
+/**
+ * The migration `2026-09-browser-profiles-all-conversations` (PURE over the registry document): every NAMED record that
+ * is not legacy and not ephemeral and is owned by ONE conversation (kind 'session') becomes {kind:'instance'}, the old
+ * owner kept as `createdBy`. HOW "explicitly only this conversation" is told: it cannot have been — before this ruling
+ * `new --sharing` took owner|instance (the P6 mediation knob) and 'owner' was ALSO the default, so no record carries an
+ * explicit "only this conversation"; every session-owned record was made by an agent's `new`/`--adopt` or the card's
+ * adopt. A task-owned record (nothing ever created one) is an explicit Task-Group scope and is left alone. Idempotent:
+ * a second pass finds nothing. → `{migrated:[{id,label,from}], kept:[{id,label,why}]}` (the doc is reshaped IN PLACE).
+ */
+function migrateScopeAll(doc) {
+  const out = { migrated: [], kept: [] };
+  const list = doc && Array.isArray(doc.profiles) ? doc.profiles : [];
+  for (const p of list) {
+    if (!p || typeof p !== 'object' || !isProfileId(p.id)) continue;
+    if (p.ephemeral) { out.kept.push({ id: p.id, label: p.label, why: 'ephemeral (its conversation\'s own)' }); continue; }
+    if (p.legacy) { out.kept.push({ id: p.id, label: p.label, why: 'legacy (already every conversation)' }); continue; }
+    const o = p.owner && typeof p.owner === 'object' ? p.owner : null;
+    if (!o || o.kind === 'instance') { if (!o) p.owner = { kind: 'instance', id: null }; out.kept.push({ id: p.id, label: p.label, why: 'already every conversation' }); continue; }
+    if (o.kind !== 'session') { out.kept.push({ id: p.id, label: p.label, why: `owner kind ${o.kind} (an explicit scope)` }); continue; }
+    const from = o.id == null ? null : String(o.id);
+    p.owner = { kind: 'instance', id: null };
+    if (!p.createdBy && from && isBrowserKey(parentKeyOf(from))) p.createdBy = parentKeyOf(from);
+    out.migrated.push({ id: p.id, label: p.label, from });
+  }
+  return out;
 }
 
 // ── §3.4 the lease ─────────────────────────────────────────────────────────
@@ -1299,8 +1400,8 @@ function findLease(leases, profileId, browserKey) {
  * rewrites `sessionId` IN PLACE; it never creates a second lease. `input` has
  * exactly one holder (`agent` at attach; the live view flips it, P2).
  */
-function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [] } = {}) {
-  const may = mayAttach(profile, { browserKey, taskIds });
+function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], pinned = false, by = 'agent' } = {}) {
+  const may = mayAttach(profile, { browserKey, taskIds, pinned, by });
   if (!may.ok) return may;
   if (!isBrowserKey(browserKey) && !isChildKey(browserKey)) return { ok: false, code: 'bad-request', error: 'a lease needs a browser key' };
   const existing = findLease(leases, profile.id, browserKey);
@@ -1364,6 +1465,83 @@ function browserIdle(rec, leases, now, idleMs) {
   const idle = Math.max(0, now - since);
   const limit = Number(idleMs) > 0 ? Number(idleMs) : 0;
   return { leased, idleMs: idle, limit, expired: !leased && !!limit && idle >= limit };
+}
+// ── OWNER RULING A (1): ONE BROWSER PER PROFILE — a conversation JOINS the running one ──
+/**
+ * What a start of a profile's browser does, given its record: a live record ('starting' | 'ready') is JOINED (the
+ * caller gets that browser — the same process, the same CDP endpoint, the same stream target; never a second launch on
+ * its directory, which is Chrome's exit 21 SingletonLock — study path B), a start already in flight is WAITED on, and
+ * only a record that is absent / stopped / failed LAUNCHES (after the lane-H lock judgement). → 'join' | 'wait' | 'launch'.
+ */
+function joinOrLaunch({ record = null, starting = false } = {}) {
+  if (isLiveBrowser(record) && !(record.state === 'starting' && starting)) return 'join';
+  if (starting) return 'wait';
+  return 'launch';
+}
+// ── OWNER RULING A (2): ONE DRIVER AT A TIME on a profile's browser ──
+/** How long a conversation keeps DRIVING a shared profile's browser after its last command when its turn is not known
+ *  to have ended (a terminal-mode session publishes no turn). Its turn ending releases it at once. */
+const DRIVE_HOLD_MS = 90 * 1000;
+/**
+ * May THIS conversation act on a profile's browser now? The lease says who holds a TAB; the DRIVE says who acts at this
+ * moment (owner ruling A (2): one holder). `drive` = the current claim `{browserKey, at, since}` (null = nobody),
+ * `holder` = facts about the claimant (`leased`: it still holds a lease on this profile; `turn`: its turn —
+ * 'idle' | 'running' | 'waiting' | null unknown), `userDriving` = a conversation whose live view the USER has taken this
+ * browser over from (null = none; the asker's OWN takeover is `browser_paused`, judged before this).
+ *   ok (claim)          nobody drives / the asker already does / the claimant let go (no lease, its turn ended, or
+ *                       `holdMs` without a command) — the asker becomes the driver
+ *   browser_busy        another conversation's agent is mid-work on it (or the user drives it from another
+ *                       conversation's live view) — named, with an upper bound to wait; NEVER a queue (a queue needs a
+ *                       wake, a billed turn nobody typed — spend-authorizer territory)
+ */
+function driveVerdict({ drive = null, browserKey, holder = {}, userDriving = null, now = 0, holdMs = DRIVE_HOLD_MS } = {}) {
+  const me = parentKeyOf(String(browserKey || ''));
+  const t = Number(now) || 0;
+  if (userDriving && userDriving.browserKey && parentKeyOf(userDriving.browserKey) !== me) {
+    return { ok: false, code: 'browser_busy', by: 'user', holderKey: parentKeyOf(userDriving.browserKey), retryAfterMs: null };
+  }
+  const claim = { browserKey: me, at: t, since: drive && parentKeyOf(drive.browserKey) === me ? (Number(drive.since) || t) : t };
+  if (!drive || !drive.browserKey || parentKeyOf(drive.browserKey) === me) return { ok: true, claim, why: drive ? 'already driving' : 'nobody drives' };
+  const h = holder || {};
+  const quietMs = t - (Number(drive.at) || 0);
+  if (h.leased === false) return { ok: true, claim, why: 'the previous driver let go (no lease)' };
+  if (h.turn === 'idle') return { ok: true, claim, why: 'the previous driver\'s turn ended' };
+  if (quietMs >= Number(holdMs)) return { ok: true, claim, why: `the previous driver sent no command for ${Math.round(quietMs / 1000)} s` };
+  return { ok: false, code: 'browser_busy', by: 'agent', holderKey: parentKeyOf(drive.browserKey), retryAfterMs: Math.max(1000, Number(holdMs) - quietMs) };
+}
+/**
+ * The words of a `browser_busy` refusal. It NAMES the other conversation — the owner's ruling (2) says the second
+ * conversation "is told so by name"; this is the ONE deliberate exception to B-325a (another session's name never
+ * reaches an agent through the cap refusals), because here the agent must be able to tell the user WHICH chat to wait
+ * for or take over from. A refusal names a button or a wait, never a command line.
+ */
+function browserBusyRefusal({ label = '', holderName = '', by = 'agent', retryAfterMs = null } = {}) {
+  const who = `"${label || 'this profile'}"`;
+  const other = holderName ? `"${holderName}"` : 'another conversation';
+  const secs = Number.isFinite(Number(retryAfterMs)) && retryAfterMs !== null ? Math.max(1, Math.ceil(Number(retryAfterMs) / 1000)) : null;
+  if (by === 'user') {
+    return { ok: false, code: 'browser_busy', by: 'user', holder: holderName || null, retryAfterMs: null,
+      error: `${who} is being driven by the user right now (from the live view of ${other}) — your command did NOT run; one driver at a time on a shared browser. Wait until the user hands it back, then run the command again — never in a loop`,
+      remedy: 'wait for the user to hand the browser back (or ask them)' };
+  }
+  return { ok: false, code: 'browser_busy', by: 'agent', holder: holderName || null, retryAfterMs: secs === null ? null : secs * 1000,
+    error: `${other} is using ${who} right now — your command did NOT run; one conversation drives a shared browser at a time. Wait${secs ? ` (at most ${secs} s — until its turn ends or it goes quiet)` : ''}, then run the command again; or the user can take over from ${other}'s live view`,
+    remedy: `run the same command again once ${other} is done${secs ? ` (at most ${secs} s)` : ''} — once, never in a loop; or ask the user` };
+}
+// ── OWNER RULING A (3): the CAP of a shared browser ──
+/** Is this live browser record THIS conversation's? Its own ephemeral / a helper's, or a profile it (or a helper) holds a
+ *  lease on — so a SHARED profile's browser counts once in EACH conversation that holds a lease on it (the per-
+ *  conversation cap is that conversation's own property: the browser is one of its strip tabs), and once on the machine. */
+function ownsLiveBrowser({ profile = null, leases = [], browserKey } = {}) {
+  if (!profile) return false;
+  const bk = parentKeyOf(String(browserKey || ''));
+  if (isEphemeralProfile(profile)) return parentKeyOf(profile.owner.id) === bk;
+  return (leases || []).some((l) => l && l.profileId === profile.id && parentKeyOf(l.browserKey) === bk);
+}
+/** How many LIVE browsers a conversation holds (the strip chip's numerator; the per-conversation cap's count). */
+function conversationOwnCount({ browsers = {}, profiles = [], leases = [], browserKey } = {}) {
+  const byId = new Map((Array.isArray(profiles) ? profiles : []).filter(Boolean).map((p) => [p.id, p]));
+  return Object.values(browsers || {}).filter((r) => isLiveBrowser(r) && ownsLiveBrowser({ profile: byId.get(r.profileId) || null, leases, browserKey })).length;
 }
 /** The concurrency ceiling (§3.2.3/§3.5): shared with every keeper through
  *  src/keeper-limits.js. Refused LOUDLY, naming the holders and who leases them.
@@ -1614,6 +1792,19 @@ function profileLockedRefusal({ label = '', dir = '', verdict = {} } = {}) {
       : `${who}'s profile directory ${dir} is held by another browser process (pid ${v.pid}${v.host ? ' on ' + v.host : ''}) — ${v.why || 'not provably VibeSpace\'s'}. VibeSpace does not end it; once it has exited (stop it from the Browser panel if it is VibeSpace's), run the command again`;
   return { code: 'profile_locked', error, holderPid: Number.isInteger(v.pid) ? v.pid : null };
 }
+/**
+ * OWNER RULING A — the pre-upgrade case: a conversation PINNED to a profile before this version was handed the
+ * profile's DIRECTORY, so its own temporary browser may hold the directory's lock right now (its launch mark names the
+ * conversation's browser key, not the profile). The keeper never ends it by itself (a used browser is never killed); the
+ * refusal names the BUTTON — and that it also stops by itself a few minutes after that conversation's turn ends (the
+ * B-325a release). `holderKey` = the browser key the holder's mark names.
+ */
+function ephemeralHolderRefusal({ label = '', holderPid = null, holderName = '' } = {}) {
+  const who = `"${label || 'this profile'}"`;
+  const conv = holderName ? `the conversation "${holderName}"` : 'a conversation';
+  return { code: 'profile_locked', holderPid: Number.isInteger(holderPid) ? holderPid : null,
+    error: `${who} is open in ${conv}'s own browser (a pin from before this version handed it this profile's folder, or the folder was adopted while that browser ran) — ask the user to press Stop on that browser in the Agent browser panel (Ephemeral browsers), then run the command again; it also stops by itself a few minutes after that conversation's turn ends` };
+}
 // ── LANE H VERIFY r5 (2026-09-25) MAJOR 1: A HEAL IS EVIDENCE-BOUND AND BUDGETED ──
 // r4's heal (the keeper's own `get cdp-url` relaunching a closed profile browser in its live daemon) remembered nothing but
 // the failed-heal gate, and cleared its evidence after every answer: a Chrome that died ~1 s after every relaunch was
@@ -1823,7 +2014,10 @@ function attachmentsFor({ leases = [], profiles = [], browserKey, pin = null, ch
     taken.push(alias);
     return { profileId: p.id, alias, label: p.label, dir: p.dir, since: Number(l.since) || 0, isDefault: false };
   });
-  const pinId = pin && pin.profileId ? String(pin.profileId) : '';
+  const pinId0 = pin && pin.profileId ? String(pin.profileId) : '';
+  // owner ruling A: the pin is this conversation's DEFAULT ATTACHMENT — `pinId` names it when it is a live record (a
+  // pin on a profile that is gone names nothing: the dangling-pin half is lane S2's), attached or not yet
+  const pinId = pinId0 && byId.has(pinId0) ? pinId0 : '';
   let defaultId = null;
   if (pinId && attachments.some((a) => a.profileId === pinId)) defaultId = pinId;
   else if (attachments.length === 1) defaultId = attachments[0].profileId;
@@ -1835,7 +2029,7 @@ function attachmentsFor({ leases = [], profiles = [], browserKey, pin = null, ch
     ...attachments.map((a) => ({ handle: a.alias, profileId: a.profileId, label: a.label, isDefault: a.isDefault, kind: 'attachment' })),
     ...kids.map((c) => ({ handle: c.handle, profileId: null, label: 'child (own ephemeral browser)', isDefault: false, kind: 'child' })),
   ];
-  return { browserKey: bk, attachments, children: kids, defaultId, fingerprint, handles };
+  return { browserKey: bk, attachments, children: kids, defaultId, fingerprint, handles, pinId: pinId || null };
 }
 /** The one-line spelling of a handle list, for refusals and answers. */
 function handlesText(handles) {
@@ -1848,6 +2042,11 @@ function handlesText(handles) {
  * WHICH browser does this command act on. `handle` is the `--profile` value
  * (or `VIBESPACE_BROWSER`), or nothing for a bare command.
  *
+ *   ok, kind 'pin'         owner ruling A: a bare command with NO attachment, and this conversation's PIN names a
+ *                          profile ⇒ the caller attaches it THROUGH THE KEEPER (joining its running browser — never a
+ *                          directory handed to this session, the study's path B) and it becomes the one attachment; an
+ *                          attachment the agent made itself is never displaced (the pin's move detaches only the lease
+ *                          the pin made — the route's rule)
  *   ok, kind 'none'        no attachment at all ⇒ the session's OWN ephemeral browser (§3.2)
  *   ok, kind 'attachment'  one attachment resolved (the default, or the named one)
  *   ok, kind 'child'       a child handle (its own ephemeral browser, §3.7 / D23)
@@ -1876,6 +2075,7 @@ function resolveHandle({ set, handle = '', subagent = false } = {}) {
     if (hits.length > 1) return { ok: false, code: 'ambiguous', handles, error: `${JSON.stringify(h)} names ${hits.length} attachments (${hits.map((a) => a.alias).join(', ')}) — use the alias or the id` };
     return { ok: false, code: 'not_attached', handles, error: `this session is not attached to ${JSON.stringify(h)} — attach first: \`vibespace-browser use ${h}\` (attached: ${handlesText(handles)})` };
   }
+  if (!S.attachments.length && S.pinId) return { ok: true, kind: 'pin', profileId: S.pinId, handle: null, handles };
   if (!S.attachments.length) return { ok: true, kind: 'none', handle: null, handles };
   if (S.attachments.length === 1) return { ok: true, kind: 'attachment', handle: S.attachments[0].alias, attachment: S.attachments[0], handles };
   const d = S.attachments.find((a) => a.isDefault);
@@ -2030,7 +2230,12 @@ function adoptDirVerdict({ dir, homeDir = null, dataDir = null, existing = null,
   if (!roots.length) return { ok: false, code: 'adopt_failed', error: 'no adoptable roots are configured on this instance' };
   if (!roots.some((r) => d.startsWith(r + '/'))) return { ok: false, code: 'adopt_outside_roots', error: `${raw} is outside the adoptable roots (${roots.join(', ')}) — a profile a session owns lives under ~/.agent-browser/; a browser directory of the user's own is theirs to keep, never a session's to register` };
   if (homeDir && d === normAbsPath(homeDir) + '/.agent-browser/default-profile') return { ok: false, code: 'adopt_legacy_refused', error: `${raw} is the legacy shared profile — the migration's "Shared (legacy)" record, never a session's; \`vibespace-browser use "Shared (legacy)"\` attaches it` };
-  if (existing && !(existing.owner && existing.owner.kind === 'session' && browserKey && existing.owner.id === browserKey)) return { ok: false, code: 'adopt_registered', error: `${raw} is already registered as "${existing.label}" (${existing.id}), owned by ${existing.owner ? existing.owner.kind : 'somebody'} — \`vibespace-browser use ${existing.id}\` attaches it; it is not yours to adopt` };
+  // owner ruling A: THIS conversation's own adopt (it is the record's creator, or the one it is kept to) is idempotent; a
+  // directory registered by anybody else is theirs — attach it by handle (it is usable by every conversation unless the
+  // user kept it to one)
+  const bk = browserKey ? parentKeyOf(String(browserKey)) : '';
+  const mine = !!(existing && bk && ((existing.owner && existing.owner.kind === 'session' && existing.owner.id === bk) || existing.createdBy === bk));
+  if (existing && !mine) return { ok: false, code: 'adopt_registered', error: `${raw} is already registered as "${existing.label}" (${existing.id}) — \`vibespace-browser use ${existing.id}\` attaches it; it is not yours to adopt again` };
   return { ok: true, code: null, error: null, dir: d };
 }
 
@@ -2133,4 +2338,7 @@ module.exports = {
   ALIAS_RE, aliasFor, isAlias, childHandleFor, looksLikePath, attachmentsFor, handlesText, resolveHandle,
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,
   toldView, blindnessVerdict, nextChildN, childEnvFor, childPairsOver, adoptDirVerdict, normAbsPath,
+  // OWNER RULING A (2026-09-26): who may use a profile (one field), one browser per profile, one driver at a time, the cap
+  SCOPES, scopeOf, notOwnerRefusal, scopePatchVerdict, migrateScopeAll, userPinAuthorizes, joinOrLaunch, DRIVE_HOLD_MS, driveVerdict, browserBusyRefusal,
+  ownsLiveBrowser, conversationOwnCount, ephemeralHolderRefusal,
 };

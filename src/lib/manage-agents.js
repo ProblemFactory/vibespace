@@ -31,7 +31,7 @@ import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one con
 // like search-card.js): the menu can only offer what the server will run, and
 // a rejected candidate is NAMED here rather than silently missing.
 import { oraclesFor, rejectedFor, blockingRejectionsFor } from '../local-oracles.js';
-import { overageChip, spendControlChip } from './usage-source.js';
+import { overageChip, spendControlChip, creditsChipHtml, creditsState } from './usage-source.js';
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
@@ -195,6 +195,36 @@ export function rosterUsageSnapshot(stamp, maps) {
   return u ? { u, est } : null;
 }
 
+// ── THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标") ────────────
+// An account billing paid overage (kind 'inUse') or whose org allows it past
+// 100 % (kind 'credits', B-ad05) wears ONE compact chip on its identity line —
+// UI_ICONS.money + one short word, the sentence in title + aria-label — in the
+// row's `.acct-credits-slot` (beside the name, like the reset chip: never the
+// usage cell, whose right edge the donut / next-usable columns align on — the
+// in-use SENTENCE used to sit there and push the 12.5ch column left). The 8 s
+// poll PATCHES the chip in place (`patchCreditsSlot`, from `_repaintRosterUsage`
+// and the ⟳ path): same node, attributes and word updated, removed when the
+// state ends — never an innerHTML swap of a chip that is already there.
+export function creditsChipFor(u) { return u ? overageChip(overageState(u), { t }) : null; }
+const creditsSlotHtml = (u) => `<span class="acct-credits-slot">${creditsChipHtml(creditsChipFor(u), { esc: escHtml, icon: UI_ICONS.money })}</span>`;
+/** Bring `slot`'s chip to `chip` (null = no chip). Returns true when anything
+ *  changed. An existing chip is PATCHED (same element); only a missing one is
+ *  created, only an ended state removes it. Exported for the suite. */
+export function patchCreditsSlot(slot, chip) {
+  if (!slot) return false;
+  const cur = slot.querySelector ? slot.querySelector('.credits-chip') : null;
+  if (!chip) { if (!cur) return false; slot.innerHTML = ''; return true; }
+  if (!cur) { slot.innerHTML = creditsChipHtml(chip, { esc: escHtml, icon: UI_ICONS.money }); return true; }
+  let changed = false;
+  const set = (attr, v) => { if (cur.getAttribute(attr) !== v) { cur.setAttribute(attr, v); changed = true; } };
+  set('data-credits', creditsState(chip));
+  set('title', chip.tip);
+  set('aria-label', chip.tip);
+  const word = cur.querySelector ? cur.querySelector('.credits-chip-word') : null;
+  if (word && word.textContent !== chip.label) { word.textContent = chip.label; changed = true; }
+  return changed;
+}
+
 // ── THE RESET CHIP (design-reset-credits §5, p2) ─────────────────────────────
 // A row's stored reset credits ride its identity line (like the credits tag —
 // never the usage cell, whose right edge the donut columns align on): the
@@ -241,6 +271,9 @@ export function installManageAgents(App, ctx = {}) {
       if (!snap) continue;
       const html = this._acctUsageHtml(snap.u, snap.est);
       if (cell.innerHTML !== html) { cell.innerHTML = html; n++; const list = cell.closest && cell.closest('.acct-list'); if (list) lists.add(list); }
+      // …and the row's CREDITS CHIP from the SAME snapshot, patched in place
+      const row = cell.closest && cell.closest('.acct-key-row');
+      if (row && patchCreditsSlot(row.querySelector('.acct-credits-slot'), creditsChipFor(snap.u))) n++;
     }
     for (const list of lists) markSoonRows(list);
     // …and the RESET CHIP beside each capable row's name (p2): the count moves
@@ -918,16 +951,14 @@ export function installManageAgents(App, ctx = {}) {
     // PAID OVERAGE (design §1.4 + D3): this roster is where the owner picks a
     // switch target, and an overage member's donuts are the friendliest ones on
     // the row while every token it serves is billed pay-per-use.
-    const ovc = overageChip(overageState(u), { t });
-    // …and the harness's own refusal fact (§1.4's third field): nothing marks a
-    // window spent for it, so this row's donuts stay the friendliest ones here.
+    // Both credits states (in use / allowed) are drawn by the row's CREDITS
+    // CHIP on its identity line (`creditsSlotHtml`, patched by the poll), NOT
+    // here: a sentence beside the donut cluster pushed the next-usable column
+    // (2.369.189, the owner's screenshot: "正在使用付费溢出额度").
+    // …the harness's own refusal fact (§1.4's third field) stays: nothing marks
+    // a window spent for it, so this row's donuts stay the friendliest ones here.
     const scc = spendControlChip(spendControlState(u), { t });
-    // The DIM credits chip (B-ad05, kind 'credits') is NOT rendered here: a
-    // chip beside the donut cluster shifts that row's right edge (the 2.245.2
-    // alignment invariant test-roster-reset-eta measures), so it rides the
-    // row's identity tail instead — see creditsTag in the roster row.
-    const ovHtml = (ovc && ovc.kind !== 'credits' ? `<span class="acct-usage-overage" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>` : '')
-      + (scc ? `<span class="acct-usage-overage" title="${escHtml(scc.tip)}">${escHtml(scc.label)}</span>` : '');
+    const ovHtml = scc ? `<span class="acct-usage-overage" title="${escHtml(scc.tip)}">${escHtml(scc.label)}</span>` : '';
     return `<span class="acct-usage">${parts.join('')}<span class="acct-usage-age" title="${escHtml(ageTitle)}"><span>${ageLabel}</span></span>${nextLabelHtml(next)}</span>${ovHtml}${mini}`;
   },
   // Re-spell every per-account countdown under `root` from its stamped instant
@@ -1030,7 +1061,7 @@ export function installManageAgents(App, ctx = {}) {
         else if (tg.body.host) u = this._hostOwnUsage?.[tg.body.host]?.fiveHour ? this._hostOwnUsage[tg.body.host] : null;
         else if (tg.body.account === '__global__') { u = this._rateLimit; est = this._usageEstimates?.__global__; }
         else { u = this._accountUsage?.[tg.body.account]; est = this._usageEstimates?.[tg.body.account]; }
-        if (u) { cell.innerHTML = this._acctUsageHtml(u, est); markSoonRows(cell.closest('.acct-list')); }
+        if (u) { cell.innerHTML = this._acctUsageHtml(u, est); markSoonRows(cell.closest('.acct-list')); patchCreditsSlot(row.querySelector('.acct-credits-slot'), creditsChipFor(u)); }
         // B-855a: which RUNG answered (the account's own isolated /usage panel
         // or a live session's CLI) and whether the identity was VERIFIED —
         // on the cell's tooltip always, as an inline note when it was not
@@ -1106,7 +1137,7 @@ export function installManageAgents(App, ctx = {}) {
       ? `<button class="acct-icon acct-menu" title="${t('More actions')}">${DOTS}</button>` : '';
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__codex_global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
-      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && gLoggedIn ? resetSlot('__global_codex__') : ''}</span></span>
+      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && gLoggedIn ? creditsSlotHtml(this._codexAccountUsage?.['__global_codex__']) + resetSlot('__global_codex__') : ''}</span></span>
       <span class="acct-usage-cell"${!selectedHost && gLoggedIn ? ' data-usage-src="codex" data-usage-key="__global_codex__"' : ''}>${!selectedHost && gLoggedIn ? usageHtml(this._codexAccountUsage?.['__global_codex__']) : ''}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
@@ -1152,7 +1183,7 @@ export function installManageAgents(App, ctx = {}) {
       // Redesign (2.178.0): star + ⋯ menu, same as the Anthropic roster
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}"${blocked ? ' data-blocked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : CROWN}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${(isPool ? a.current : a.loggedIn) ? creditsSlotHtml(this._codexAccountUsage?.[isPool ? a.current : a.id]) : ''}${!isPool && a.loggedIn ? resetSlot(a.id) : ''}</span></span>
         <span class="acct-usage-cell"${isPool ? (a.current ? ` data-usage-src="codex" data-usage-key="${escHtml(a.current)}"` : '') : (a.loggedIn ? ` data-usage-src="codex" data-usage-key="${escHtml(a.id)}"` : '')}>${usageCell}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
@@ -2111,7 +2142,7 @@ export function installManageAgents(App, ctx = {}) {
     }
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
-      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span></span></span>
+      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && sub.loggedIn ? creditsSlotHtml(this._rateLimit) : selectedHost ? creditsSlotHtml(this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null) : ''}</span></span>
       <span class="acct-usage-cell"${!selectedHost && sub.loggedIn ? ' data-usage-src="global" data-usage-key="__global__"' : (selectedHost ? ` data-usage-src="host-own" data-usage-key="${escHtml(selectedHost)}"` : '')}>${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
         : (selectedHost && this._hostOwnUsage?.[selectedHost]?.fiveHour ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">
@@ -2245,13 +2276,12 @@ export function installManageAgents(App, ctx = {}) {
         : (selectedHost && v?.how === 'host-held') ? { src: 'host-account', key: selectedHost + ':' + a.id }
         : (a.loggedIn || a.oat) ? { src: 'accounts', key: a.id } : null;
       const usageStampAttrs = usageStamp ? ` data-usage-src="${usageStamp.src}" data-usage-key="${escHtml(usageStamp.key)}"` : '';
-      // USAGE CREDITS, VISIBLE BEFORE THEY ARE SPENT (B-ad05): the org bills
-      // pay-per-use past 100 % — a DIM tag on the identity line (inline, so it
-      // neither adds a row line nor shifts the donut cluster); the in-use chip
-      // stays in the usage cell as before. Same PURE rule as the popup.
-      const creditsChip = rowSnap ? overageChip(overageState(rowSnap.u), { t }) : null;
-      const creditsTag = creditsChip && creditsChip.kind === 'credits'
-        ? ` <span class="acct-linked-hint acct-usage-credits" title="${escHtml(creditsChip.tip)}">· ${escHtml(creditsChip.label)}</span>` : '';
+      // THE CREDITS CHIP (B-ad05 + 2.369.189): paid overage in use OR usage
+      // credits allowed — the money icon + one word on the identity line
+      // (inline, so it neither adds a row line nor shifts the donut cluster /
+      // next-usable columns), from the SAME `rowSnap` as the cell. The slot is
+      // rendered whenever the cell is stamped, so the poll can fill it later.
+      const creditsTag = (rowSnap || usageStamp) ? creditsSlotHtml(rowSnap ? rowSnap.u : null) : '';
       // THE RESET CHIP (p2): Claude Code has no reset interface VibeSpace can
       // drive (`resetCredit:false` — the CLI offers only the interactive
       // /limit-reset), so a row speaks only when a PASSIVE grant sample exists

@@ -173,13 +173,13 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
 ## 3. Named profiles — a login that survives
 
 ```
-vibespace-browser profiles                      what exists, who owns it, who is attached
+vibespace-browser profiles                      what exists, who may use it, who is attached
 vibespace-browser new <label> [--proxy <url>] [--notes <text>] [--adopt <dir>]
                      [--provider <id>] [--host <machine>] [--cdp-port <n>] [--sharing owner|instance]
 vibespace-browser use <label|id> [--alias <h>]  attach this conversation to it (handle = alias or the label's slug)
 vibespace-browser status                        which browser a bare verb lands on; handles, children, pin
 vibespace-browser detach [--profile <handle>]   drop my lease
-vibespace-browser pin <handle|label|id> | --none   this conversation's DEFAULT for its next launches
+vibespace-browser pin <handle|label|id> | --none   this conversation's DEFAULT browser (your next bare command opens it)
 vibespace-browser new-child                     a browser of its own for a SUB-AGENT
 vibespace-browser providers [--host <machine>]  which providers can run here (or there) — and why not
 vibespace-browser backend [<name>] [--confirm-downgrade]   which backend; PROPOSE a switch
@@ -191,9 +191,25 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   command. A profile runs ONE browser and you get your own TAB in it (a
   *lease*), which belongs to your conversation and survives a Terminate →
   Resume.
-* **Ownership is by conversation.** A profile you create with `new` admits
-  your conversation (and its sub-agents); an instance profile admits anyone.
-  Attaching to a profile you do not own answers `not_owner`.
+* **A named profile is usable by ALL the user's conversations** (the owner's
+  ruling, 2026-09-26). A profile you create with `new` (or `--adopt`) can be
+  used by every other conversation of the user's too — the login you make in
+  it is theirs as well. It runs ONE browser: a second conversation that uses
+  it JOINS that browser in its own tab; it is never started twice.
+* **The user can keep a profile to one conversation** (the Agent browser
+  panel's "Who can use it"). Using one kept to ANOTHER conversation answers
+  `not_owner` with the button to press: relay that sentence to the user — ask
+  them to set it to "All my conversations" in the Agent browser panel, or to
+  pick it for this conversation in Session properties → Agent browser. Never
+  propose a command line to them, and never create a second profile for the
+  same login (a copy does not share the login and still is not theirs).
+* **One conversation drives a shared browser at a time.** While another
+  conversation's agent is working in it (its turn is running and it sent a
+  command in the last ~90 s), your command answers `browser_busy`, naming
+  that conversation and how long at most to wait; while the USER drives it
+  from another conversation's live view, `browser_busy` says so. Your command
+  did not run: wait, then run it again ONCE — never in a loop; or tell the
+  user (they can take over from that conversation's live view).
 * **`close --all` on an attached profile closes only YOUR session** — your
   connection to the profile's browser, then your lease (the note says
   `[close_all_scoped]`); the profile's one browser keeps running for the keeper
@@ -242,10 +258,18 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   tell the user, wait for them to close it, then run the command again; do not
   try to close it yourself. (A `profile_locked` naming "another VibeSpace
   browser" or "a live browser daemon" is VibeSpace's own and clears when that
-  one stops.)
-* **A pin is a preference for the NEXT launch.** Mid-session it applies from
-  your next command, which relaunches the browser (open pages are lost).
-  `--none` goes back to ephemeral.
+  one stops; one naming "a conversation's own browser" clears when the user presses
+  Stop on it, or by itself a few minutes after that conversation's turn
+  ends.)
+* **A pin is this conversation's DEFAULT browser.** When you have no
+  attachment, your next bare command OPENS the pinned profile (joining its
+  browser if another conversation already runs it) — nothing is relaunched,
+  and the browser you had keeps its pages. A pin the USER chose (New Session,
+  Session properties) works even on a profile kept to another conversation —
+  their choice is the permission. If the pinned profile cannot open, your
+  command is refused with the reason and `pinned profile: …` — nothing else
+  is opened instead: tell the user. `--none` goes back to your own temporary
+  browser.
 * **`--profile` takes a handle (an alias or a `bp-…` id), never a directory.**
   A path is refused `profile_path_refused` with the one command that turns a
   directory into a profile (`new <label> --adopt <dir>`).
@@ -261,8 +285,9 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   when you are the only session attached and nobody drives; otherwise it
   becomes a "For you" item for the user. While a switch restarts the browser,
   commands answer `browser_restarting` — retry in a moment, never in a loop.
-* **An instance-shared profile** (`new <label> --sharing instance`) confines
-  every attached session to its own tabs through a mediated connection: `tab
+* **Separate tabs** (`new <label> --sharing instance`) is an ISOLATION option,
+  not "who may use it": it confines every attached session to its own tabs
+  through a mediated connection: `tab
   list` is yours alone, another session's tab answers `target_out_of_scope`,
   and while the user drives your tab every input and page-navigation COMMAND
   is refused `browser_paused` while reads (`get title`, a snapshot) still
@@ -310,7 +335,13 @@ default with `*`.
 * **Never echo a cookie, a token or an `Authorization` header** into your reply
   or into a file. The OUTPUT of `cookies get`, `state save` and `storage` is a
   secret; so are screenshots of logged-in pages and HAR captures.
-* **`browser_paused` is never retried in a loop.** Wait for the handback.
+* **`browser_paused` is never retried in a loop.** Wait for the handback. The
+  same for `browser_busy` (another conversation drives a shared browser): run
+  the command again once, after the wait it names — or tell the user.
+* **A refusal that names a button is the user's to press.** Relay it in your
+  own words ("switch 'work' to All my conversations in the Agent browser
+  panel"); never offer the user a `vibespace-browser` command line, and never
+  create a second profile to get around a refusal.
 * **A login or a captcha is the user's.** Tell them which page needs them and
   stop; continue after the handback.
 * **Never look for another road to a browser** — not the user's own desktop
@@ -339,7 +370,9 @@ default with `*`.
   machine's ceiling (shared with other conversations and desktop apps, your own
   ephemeral browser included): `use` answers `cap`, your first page verb
   `browser_cap`, both naming only YOUR browsers and counting the rest —
-  detach one of yours, wait for an idle-out, or ask the user to stop one.
+  detach one of yours, wait for an idle-out, or ask the user to stop one. A
+  shared profile's browser counts once in YOUR limit when you hold it (joining
+  a running one never trips the machine's ceiling).
 * **Your own ephemeral browser is not CDP-mediated** — it has one conversation.
   While the user drives it, your verbs are refused at the server
   (`browser_paused`) before they run; there is no second fence inside it.

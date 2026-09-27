@@ -1,4 +1,5 @@
 // Taskbar quota pies + usage popup + on-demand quota refresh (mixin split from app.js, 2.82.0 audit seam).
+import { UI_ICONS } from './icons.js'; // the credits chip's money glyph (2.369.189)
 import { createBackendIconHtml } from './agent-meta.js';
 import { t, tc } from './i18n.js';
 import { anchorFixedPopup, escHtml, estDisplayPair, fetchJson, onOutsidePress, showConfirmDialog, showToast } from './utils.js';
@@ -7,7 +8,7 @@ import { backendFeatureCaps } from './agent-meta.js';
 // panel's latest number, and — for a member that can no longer produce one at
 // all — how old the last REAL reading is. DOM-free so scripts/test-readings-
 // attribution.mjs pins it in node.
-import { corroborationNote, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows } from './usage-source.js';
+import { corroborationNote, creditsChipHtml, overageChip, readingSource, spendControlChip, stampText, staleSince, windowNotStarted, windowNote, limitRows } from './usage-source.js';
 // The ONE overage verdict (PURE, CJS — the same function the spend
 // authorizer and the pool's voluntary-target rule read).
 import { overageState, spendControlState } from '../spend-authorizer.js';
@@ -305,10 +306,12 @@ export function installUsageMeter(App, ctx = {}) {
       // REAL MONEY, said where the number is read. An account billing paid
       // overage keeps a utilization under 100% while every token costs, so the
       // donut alone is the most misleading thing on this panel.
-      const ovc = overageChip(overageState(snap), { t });
       // …or the DIM credits chip (B-ad05): extra usage is enabled on this org,
-      // so past 100 % it bills pay-per-use instead of stopping.
-      if (ovc) parts.push(`<span class="usage-src usage-overage${ovc.kind === 'credits' ? ' usage-credits' : ''}" title="${escHtml(ovc.tip)}">${escHtml(ovc.label)}</span>`);
+      // so past 100 % it bills pay-per-use instead of stopping. Both are THE
+      // credits chip (2.369.189: the money icon + one word, the sentence in
+      // title + aria-label) — the same builder the Agents roster rows use.
+      const ovc = overageChip(overageState(snap), { t });
+      if (ovc) parts.push(creditsChipHtml(ovc, { esc: escHtml, icon: UI_ICONS.money }));
       // …and the harness's own "this account is refusing requests" fact, which
       // leaves the donut friendly (nothing marks a window spent for it).
       const scc = spendControlChip(spendControlState(snap), { t });

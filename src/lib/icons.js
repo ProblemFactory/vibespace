@@ -71,6 +71,11 @@ export const UI_ICONS = {
   block:     _s('<circle cx="8" cy="8" r="6"/><path d="M3.8 3.8l8.4 8.4"/>'),
   check:     _s('<path d="M3 8.5l3.5 3.5L13 4.5"/>'),
   coin:      _s('<circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.5"/>'),
+  // MONEY (2.369.189, owner on the Agents roster: "这啥玩意啊 不如显示个钱的图标"): a coin
+  // with a dollar sign = "this account bills paid overage / usage credits" — the ONE glyph
+  // every surface that draws the credits state uses (src/lib/usage-source.js creditsChipHtml).
+  // Deliberately not `coin` above, which is the chat status bar's budget-limited mark.
+  money:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M10.1 6c-.3-.7-1.1-1.2-2.1-1.2-1.2 0-2.1.6-2.1 1.5 0 2.1 4.2 1.2 4.2 3.3 0 .9-.9 1.6-2.1 1.6-1.1 0-1.9-.5-2.2-1.2M8 3.6v1.2M8 11.2v1.2"/>'),
   circle:    _s('<circle cx="8" cy="8" r="6"/>'),
   bolt:      _s('<path d="M9 1.2L3.8 9.2H7l-0.9 5.6L12.4 6.6H8.6z"/>', { fill: true }),
   // close/dismiss (§17: an SVG glyph, not the ✕ character) — queue strip rows

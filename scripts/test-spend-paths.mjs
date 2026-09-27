@@ -1928,13 +1928,17 @@ console.log('\n§7 paid overage: refused for unattended spend, visible where the
     // `spendControlState` beside it, and a pin on the whole line makes adding
     // the next PURE verdict look like a regression
     /import \{[^}]*\boverageState\b[^}]*\} from '\.\.\/spend-authorizer\.js'/.test(um) && /overageChip\(overageState\(snap\)/.test(um));
-  ok('§7 PANEL: Manage Agents — where the owner picks a switch target — renders it too (design §1.4: provenance reached one panel of four)',
-    /overageChip\(overageState\(u\)/.test(ma) && /acct-usage-overage/.test(ma));
+  ok('§7 PANEL: Manage Agents — where the owner picks a switch target — renders it too (design §1.4: provenance reached one panel of four; since 2.369.189 as the credits chip on the row\'s identity line)',
+    /overageChip\(overageState\(u\)/.test(ma) && /creditsSlotHtml\(/.test(ma));
   const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
-  ok('§7 the chip says nothing when overage is DISABLED or unknown, and says the money when it is on (an ENABLED-but-idle org gets the dim credits chip — §7c)',
+  // 2.369.189 (owner: "这啥玩意啊 不如显示个钱的图标"): the chip's face is the money icon + ONE
+  // word; the sentence and the money moved into its tip (title + aria-label)
+  const inUseChip = chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() }, spend: { used: 4.25, limit: 20 } }));
+  ok('§7 the chip says nothing when overage is DISABLED or unknown, and says the money when it is on — in its tip, the face is one word (an ENABLED-but-idle org gets the dim credits chip — §7c)',
     chip.overageChip(A.overageState({ overage: { inUse: false, status: 'rejected', disabledReason: 'org_level_disabled_until' } })) === null
     && chip.overageChip(A.overageState({})) === null
-    && /paid overage in use — \$4\.25 \/ \$20\.00/.test(chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() }, spend: { used: 4.25, limit: 20 } })).label));
+    && inUseChip.label === 'Credits' && inUseChip.money === '$4.25 / $20.00'
+    && /^Using paid overage credits — .*billed pay-per-use\. Spent this period: \$4\.25 \/ \$20\.00\. Automatic turns are refused/.test(inUseChip.tip), JSON.stringify(inUseChip));
   ok('§7 …and it never claims "in use" about a record that stopped being refreshed (that chip tip promises a refusal that no longer happens) — only the dim credits chip, whose tip promises none',
     chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } }))?.kind === 'credits'
     && !/refused/.test(chip.overageChip(A.overageState({ overage: { inUse: true, asOf: Date.now() - A.OVERAGE_STALE_MS - 1 } })).tip));
@@ -1968,7 +1972,7 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
   const chip = require(path.join(REPO, 'src/lib/usage-source.js'));
   const cr = chip.overageChip(A.overageState(allowed));
   ok('§7c the chip: a DIM "credits" chip for an allowed org (kind credits), today\'s chip for inUse, nothing for disabled / unknown',
-    cr?.kind === 'credits' && cr.dim === true && cr.label === 'credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(cr.tip)
+    cr?.kind === 'credits' && cr.dim === true && cr.label === 'Credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(cr.tip)
     && chip.overageChip(A.overageState({ overage: { inUse: true, asOf: now } }, { now }))?.kind === 'inUse'
     && chip.overageChip(A.overageState(disabled)) === null && chip.overageChip(A.overageState({})) === null, JSON.stringify(cr));
   // SPEND-GUARD UNCHANGED (pinned): a credits-allowed member changes no verdict
@@ -2009,8 +2013,9 @@ console.log('\n§7c usage credits: a dim chip before the bill, a last-resort ran
     && w3.noticeKeys.some((k) => k === `pool-credits-${w3.P}-${w3.M2}-${Math.floor(Date.now() / (6 * 3600e3))}`), JSON.stringify(w3.notices));
   // the panels render the chip from the same PURE rule
   const ma2 = read('src/lib/manage-agents.js'), um2 = read('src/lib/usage-meter.js');
-  ok('§7c PANEL: the roster renders the credits chip as a dim tag (acct-usage-credits) and the popup beside the provenance line (usage-credits)',
-    /acct-usage-credits/.test(ma2) && /usage-credits/.test(um2));
+  ok('§7c PANEL: the roster renders the credits chip on the identity line (creditsSlotHtml → creditsChipHtml) and the popup beside the provenance line (the same creditsChipHtml, the money icon)',
+    /const creditsSlotHtml = \(u\) => `<span class="acct-credits-slot">\$\{creditsChipHtml\(creditsChipFor\(u\), \{ esc: escHtml, icon: UI_ICONS\.money \}\)\}<\/span>`/.test(ma2)
+    && /if \(ovc\) parts\.push\(creditsChipHtml\(ovc, \{ esc: escHtml, icon: UI_ICONS\.money \}\)\);/.test(um2));
   // THE ORG FACTS SURVIVE THE IDENTITY REPAIR (final verifier, the fail-closed
   // census): repairSidecarsByApiPhase rebuilds a cache whose 7d contradicts the
   // account's API phase — and used to rebuild it WITHOUT `overage`/`spend`, so

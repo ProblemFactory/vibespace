@@ -275,6 +275,38 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-browser-profiles-all-conversations',
+      note: "owner ruling A (2026-09-26, \"A吧\" — after two naive-user studies failed the same task): a NAMED browser profile is usable by ALL of the owner's conversations by default; only the user's panel switch keeps one to a single conversation. Every named record in data/browser-profiles.json owned by ONE conversation (owner kind 'session' — made by an agent's `vibespace-browser new` / `new --adopt` or the card's adopt) becomes usable by all conversations (owner kind 'instance'), the old owner kept as `createdBy`. None of them can have been an explicit \"only this conversation\": before the ruling `--sharing` took owner|instance (the P6 tab-isolation knob) and 'owner' was also the default, so the registry cannot tell and the ruling's default applies. Ephemeral records (a conversation's own temporary browser), the legacy shared record and a task-owned record (an explicit Task-Group scope; nothing ever created one) are left alone; `sharing` (tab isolation) is never touched. Through the live keeper when there is one, else the file (atomic, its mode kept); a missing file is not a failure.",
+      run() {
+        const B = require('../browser-profiles.js');
+        const file = path.join(dataDir, 'browser-profiles.json');
+        // VERIFY S5 (2026-09-26): only a MISSING file is "nothing to migrate" — an unreadable or unparsable one FAILS BY
+        // NAME (the runner records the failure and retries at the next boot, never stamping the ledger): a torn or
+        // unreadable registry marked "applied" would never be migrated once it is whole again
+        let disk = null, missing = false;
+        try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); }
+        catch (e) { if (e && e.code === 'ENOENT') missing = true; else throw new Error(`${path.basename(file)} could not be read (${e && e.code ? e.code : 'unparsable JSON'}: ${e && e.message}) — not migrated; retried at the next boot`); }
+        if (missing) { const rep = { file: path.basename(file), via: 'none', migrated: [], kept: [] }; console.log('[migrate] browser-profiles-all-conversations:', JSON.stringify(rep)); return rep; }
+        if (!disk || typeof disk !== 'object') throw new Error(`${path.basename(file)} is not a registry document (${JSON.stringify(disk)}) — not migrated; retried at the next boot`);
+        const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper;
+        let r, via;
+        if (k && typeof k.reshapeStore === 'function') { r = k.reshapeStore((doc) => B.migrateScopeAll(doc)); via = 'keeper'; }
+        else {
+          r = B.migrateScopeAll(disk); via = 'file';
+          if (r.migrated.length) {
+            let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+            const tmp = `${file}.${process.pid}.tmp`;
+            fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
+            fs.renameSync(tmp, file);
+          }
+        }
+        const rep = { file: path.basename(file), via, migrated: r.migrated, kept: r.kept.length };
+        // Say what happened even when it is nothing — a repair nobody can see ran is a repair nobody can verify ran.
+        console.log('[migrate] browser-profiles-all-conversations:', JSON.stringify(rep));
+        return rep;
+      },
+    },
+    {
       id: '2026-09-channel-credential-key',
       note: "the Communication panel manages ACCOUNTS like the storage mounts do (owner 2026-09-22): every channel adapter record carries `credentialKey` — `cluster:<presetKey>` or `own` — naming the OAuth client / tenant app its token was minted under, so a change of the integration's default pick never refreshes an existing token with another client (Google answers invalid_client; §14.2 'never a silent swap'). A record from before the model is stamped ONCE through the engine's own serialized writer with the client its OWN TOKEN names when this instance still offers it (a Gmail token records the preset key it was exchanged under — the honest reading of what minted it, whatever the row's pick says now), else with the integration's CURRENT pick (what refreshed it until now); the report names the evidence per record. A record whose token names nothing offered and whose integration resolves to nothing is left unstamped and keeps following the row's pick, as before.",
       run() {

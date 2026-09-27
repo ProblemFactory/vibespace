@@ -1188,6 +1188,83 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const M = require('../src/desktop-apps.js');
     ok(M.newRecord({ id: 'da-n', label: 'n', exec: '/x', source: 'adhoc', backend: 'xpra', now: 1 }).hostId === 'local', 'a NEW record is born with hostId: local (M.newRecord)');
   }
+  // ── 2026-09-browser-profiles-all-conversations (owner ruling A, 2026-09-26: "A吧") ──
+  // A NAMED profile is usable by ALL of the owner's conversations; before the ruling an agent's `new` made one owned by
+  // its conversation (owner kind 'session'), and the study's path A died on it (`use work` from the next chat ⇒ not_owner,
+  // then a recreate with `--sharing instance` that still said not_owner — owner and sharing contradicting each other).
+  {
+    console.log('2026-09-browser-profiles-all-conversations');
+    const ID = '2026-09-browser-profiles-all-conversations';
+    const BP = require('../src/browser-profiles.js');
+    const mkInst = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    // the pre-ruling registry fixture: an agent's `new work` (session-owned), the study's path-A record (session-owned AND
+    // sharing:'instance'), a UI-made one (instance), the legacy record, an ephemeral one, a task-owned one, a child-key owner
+    const KA = 'bk-0000a001', KB = 'bk-0000a002';
+    const fixture = () => ({ version: 1, profiles: [
+      { id: 'bp-0000a001', label: 'work', dir: '/x/w', provider: 'chromium', owner: { kind: 'session', id: KA }, sharing: 'owner' },
+      { id: 'bp-0000a002', label: 'work-shared', dir: '/x/ws', provider: 'chromium', owner: { kind: 'session', id: KB }, sharing: 'instance' },
+      { id: 'bp-0000a003', label: 'Team', dir: '/x/t', provider: 'chromium', owner: { kind: 'instance', id: null }, sharing: 'owner' },
+      { id: 'bp-0000a004', label: 'Shared (legacy)', dir: '/x/l', provider: 'chromium', owner: { kind: 'instance', id: null }, sharing: 'instance', legacy: true },
+      { id: 'bp-0000a005', label: '(ephemeral) chat', dir: null, provider: 'chromium', owner: { kind: 'conversation', id: KA }, sharing: 'owner', ephemeral: true },
+      { id: 'bp-0000a006', label: 'Group', dir: '/x/g', provider: 'chromium', owner: { kind: 'task', id: 'T-1' }, sharing: 'owner' },
+      { id: 'bp-0000a007', label: 'helper-made', dir: '/x/h', provider: 'chromium', owner: { kind: 'session', id: KA + '.2' }, sharing: 'owner' },
+    ], leases: [], browsers: {}, pins: { [KB]: { profileId: 'bp-0000a001', origin: 'chosen', at: 1 } } });
+    // PURE first: the table
+    const doc = fixture();
+    const rp = BP.migrateScopeAll(doc);
+    const byId = Object.fromEntries(doc.profiles.map((p) => [p.id, p]));
+    ok(rp.migrated.map((m) => m.id).join(',') === 'bp-0000a001,bp-0000a002,bp-0000a007' && byId['bp-0000a001'].owner.kind === 'instance' && byId['bp-0000a001'].createdBy === KA && byId['bp-0000a002'].createdBy === KB && byId['bp-0000a007'].createdBy === KA, 'PURE: every session-owned NAMED record becomes all-conversations (owner instance), its old owner kept as createdBy (a helper\'s child key → its conversation)', rp);
+    ok(byId['bp-0000a002'].sharing === 'instance' && byId['bp-0000a001'].sharing === 'owner', '…`sharing` (the tab-isolation knob) is never touched');
+    ok(byId['bp-0000a005'].owner.kind === 'conversation' && byId['bp-0000a006'].owner.kind === 'task' && byId['bp-0000a004'].legacy === true && rp.kept.length === 4, 'the ephemeral record, the task-owned record (an explicit scope) and the legacy one are left alone; the UI-made one already is all', rp.kept);
+    ok(doc.profiles.filter((p) => !p.ephemeral).every((p) => p.owner.kind !== 'session') && BP.migrateScopeAll(doc).migrated.length === 0, 'idempotent: a second pass migrates nothing');
+    ok(BP.mayAttach(byId['bp-0000a002'], { browserKey: 'bk-0000a0ff' }).ok && BP.mayAttach(byId['bp-0000a001'], { browserKey: KB }).ok, 'the study\'s path-A records now admit another conversation');
+    // (a) the FILE path
+    const r1 = mkInst('bpall-file');
+    const f1 = path.join(r1, 'data', 'browser-profiles.json');
+    fs.writeFileSync(f1, JSON.stringify(fixture()), { mode: 0o600 });
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID), 'registered as a ledger-keyed one-shot');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
+    ok(res1 && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 3 && d1.profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance' && d1.pins[KB].profileId === 'bp-0000a001', 'the file is reshaped (3 migrated, the report names them); pins are untouched', res1.report);
+    ok((fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'atomic tmp+rename, browser-profiles.json stays 0600, no temp left');
+    ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) no store ⇒ ran, nothing created
+    const r2 = mkInst('bpall-none');
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store on disk ⇒ ran, nothing created (a missing file is not a failure)', res2);
+    // (c) THROUGH THE LIVE KEEPER (its in-memory registry is what it saves next)
+    const r3 = mkInst('bpall-keeper');
+    const f3 = path.join(r3, 'data', 'browser-profiles.json');
+    fs.writeFileSync(f3, JSON.stringify(fixture()), { mode: 0o600 });
+    const Kp = require('../src/server/browser-keeper.js').create({ dataDir: path.join(r3, 'data'), homeDir: scratchHomeDir, install: false, log: { log() { }, warn() { }, error() { } } });
+    Kp.list(); // loaded
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
+    ok(res3.status === 'ran' && res3.report.via === 'keeper' && Kp.profile('bp-0000a001').owner.kind === 'instance' && Kp.profile('bp-0000a001').createdBy === KA && JSON.parse(fs.readFileSync(f3, 'utf-8')).profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance', 'with a live keeper the IN-MEMORY record is reshaped and the keeper\'s own save puts it on disk', res3.report);
+    ok(Kp.list().profiles.find((p) => p.id === 'bp-0000a001').scope === 'all', '…and the digest says every conversation can use it (scope all)');
+    Kp.shutdown();
+    // (e) VERIFY S5 (2026-09-26): a CORRUPT / unreadable registry FAILS BY NAME — the ledger is not stamped, the file is
+    // not touched, and the next run (the file whole again) migrates it; only a MISSING file is "nothing to migrate"
+    const r5 = mkInst('bpall-corrupt');
+    const f5 = path.join(r5, 'data', 'browser-profiles.json');
+    const torn = '{"version":1,"profiles":[{"id":"bp-0000a001","label":"work"';
+    fs.writeFileSync(f5, torn, { mode: 0o600 });
+    const mm5 = create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } });
+    const res5 = runOnly(mm5, r5).find((x) => x.id === ID);
+    let led5 = null; try { led5 = JSON.parse(fs.readFileSync(path.join(r5, 'data', 'migrations.json'), 'utf-8')); } catch { led5 = null; }
+    ok(res5 && res5.status !== 'ran' && res5.status !== 'already' && /browser-profiles\.json could not be read/.test(String(res5.error || '')) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), `a torn registry: the run FAILS by name (${res5 && res5.status}), the file is untouched, the ledger is NOT stamped`, res5);
+    fs.writeFileSync(f5, JSON.stringify(fixture()), { mode: 0o600 });
+    const res5b = runOnly(mm5, r5).find((x) => x.id === ID);
+    ok(res5b && res5b.status === 'ran' && res5b.report.via === 'file' && res5b.report.migrated.length === 3, 'the file whole again ⇒ the next run migrates it (never blocked, never skipped)', res5b);
+    fs.writeFileSync(f5, 'null', { mode: 0o600 });
+    const r6 = mkInst('bpall-null'); fs.writeFileSync(path.join(r6, 'data', 'browser-profiles.json'), 'null');
+    const res6 = runOnly(create({ rootDir: r6, homeDir: scratchHomeDir, serverNotice: () => { } }), r6).find((x) => x.id === ID);
+    ok(res6 && res6.status !== 'ran' && /not a registry document/.test(String(res6.error || '')), 'a file holding `null` is not a registry — fails by name too', res6);
+    // (d) CONTROL: the pre-ruling registry refuses the study's path A — what the migration exists for
+    const pre = fixture();
+    ok(BP.mayAttach(pre.profiles[0], { browserKey: KB }).code === 'not_owner' && BP.mayAttach(pre.profiles[1], { browserKey: 'bk-0000a0ff' }).code === 'not_owner', 'CONTROL: before the migration both path-A records refuse another conversation (not_owner) — the legs above can go red');
+  }
   // ── 2026-09-channels-aggregated-im (lane R2 verify, 2026-09-26) ──
   // The runner is SYNCHRONOUS and the engine's edits land through the index's
   // promise chain: the report used to be filled INSIDE that chain, so the

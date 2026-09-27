@@ -1068,10 +1068,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // The keeper answers lazily (null before wiring ⇒ ephemeral); the
             // ORIGIN is stated by the ladder and recorded beside the value.
             let pin = { profileId: '', dir: null, origin: 'harness' };
+            let forkParentKey = ''; // VERIFY S5: the fork's copy of the parent's pin needs the parent's KEY below
             try {
               const kp = require('./server/browser-keeper.js').keeper();
               if (kp && integrationOn) {
-                const forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
+                forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
                 const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
@@ -1088,8 +1089,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 }
               }
             } catch (e) { console.warn('[browser] pin ladder unavailable — ' + (e && e.message)); }
+            // OWNER RULING A (2026-09-26): the pin is the conversation's DEFAULT ATTACHMENT, opened through the keeper by
+            // its first bare browser command (the profile's ONE browser, joined when another conversation runs it) —
+            // the spawn is NEVER handed the profile's directory (`pinnedDir: null` always). The study's path B: a pinned
+            // conversation's own browser launched a second Chrome on the directory the keeper's held — exit 21
+            // SingletonLock in the live view, then a silent fall-back to a temporary browser.
             const be = be0 ? be0.envFor({
-              browserKey: bk.key, integrationOn, remote: !!data.hostId, cwd, pinnedDir: pin.dir,
+              browserKey: bk.key, integrationOn, remote: !!data.hostId, cwd, pinnedDir: null,
             }) : { pairs: [], remotePrelude: '', variant: null };
             if (be.variant) {
               // The key and the rung are recorded even for `none` (nothing
@@ -1110,6 +1116,12 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // stick to the fork, not to its parent).
               if (pin.profileId && pin.origin !== 'conversation') {
                 try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin }); } catch { }
+              } else if (pin.profileId && data.fork && forkParentKey && forkParentKey !== bk.key) {
+                // VERIFY S5 (2026-09-26) MAJOR: a FORK's key is NEW and the 'conversation' rung above is the PARENT's pin —
+                // copied into the keeper under the fork's key (the parent's `by`/`at` verbatim: no laundering), else the
+                // fork's Session properties say "Pinned: work" while its bare commands open a temporary browser (the pin
+                // is the default ATTACHMENT now, carried by the keeper's record alone — no directory rides the spawn env)
+                try { require('./server/browser-keeper.js').keeper()?.copyPin(forkParentKey, bk.key); } catch (e) { console.warn(`[browser] ${id}: the fork's pin was not copied — ${e && e.message}`); }
               }
               if (pin.profileId) console.log(`[browser] ${id}: pinned to profile ${pin.profileId} "${pin.label}" (${pin.origin})${be.pinRefused ? ' — REFUSED at the browser layer: ' + be.pinRefused.why : ''}`);
               // MULTIVIEW D4 (design-browser-multiview): the conversation's OWN browser cap — kept per conversation by the

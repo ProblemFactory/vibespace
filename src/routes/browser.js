@@ -106,7 +106,8 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // P10 (§7.6 tier 3, D27 (b)): the consent gate on the local-window row, and "tier 3 is not a profile"
   provider_needs_consent: 403, tier3_is_a_window_target: 409, cdp_unreachable: 502, host_needs_daemon: 409, host_unavailable: 503, op_failed: 502, no_cdp: 502, stop_failed: 502,
   // P6 (§6.2 / §6.5): a mediated profile with no proxy in this process / a browser that answered no CDP url
-  mediation_unavailable: 503, mediation_no_cdp: 502, pin_refused: 409, pinned: 409,
+  // owner ruling A: a pin is an attachment default now — P6's `pin_refused` is gone; one driver at a time on a shared browser
+  mediation_unavailable: 503, mediation_no_cdp: 502, pinned: 409, browser_busy: 409,
   // §3.7 / §3.8 — the handle refusals are typed so the CLI prints the code and the agent can read why
   profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
   // P3 (§4.3): the user drives ⇒ the agent's command is refused typed; the control verbs' own refusals
@@ -132,10 +133,17 @@ function fail(res, e) {
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
     ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}),
     // lane H verify r2: a thrown `browser_paused` (an agent's detach while the user drives) carries when, like a resolve's; `profile_locked` names the holder pid
-    ...(Number.isInteger(e?.takenAt) && e.takenAt > 0 ? { takenAt: e.takenAt, lastUserInputAt: e.lastUserInputAt || 0 } : {}), ...(Number.isInteger(e?.holderPid) ? { holderPid: e.holderPid } : {}) });
+    ...(Number.isInteger(e?.takenAt) && e.takenAt > 0 ? { takenAt: e.takenAt, lastUserInputAt: e.lastUserInputAt || 0 } : {}), ...(Number.isInteger(e?.holderPid) ? { holderPid: e.holderPid } : {}),
+    ...rulingExtras(e) });
+}
+/** Owner ruling A: the extras a refusal on the sharing paths carries — `browser_busy`'s holder (a NAME: the ruling's "told
+ *  so by name") + who drives + the bound to wait; a pin that did not open says `pinned` and which profile. */
+function rulingExtras(v) {
+  return { ...(v && v.holder !== undefined && v.holder !== null ? { holder: v.holder } : {}), ...(v && (v.by === 'user' || v.by === 'agent') && v.code === 'browser_busy' ? { by: v.by } : {}),
+    ...(v && Number.isFinite(v.retryAfterMs) ? { retryAfterMs: v.retryAfterMs } : {}), ...(v && v.pinned ? { pinned: true, pinnedProfile: v.pinnedProfile || null } : {}) };
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
-function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}) }); }
+function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...rulingExtras(v) }); }
 /** P3 (§4.3): resolve the browser a takeover/handback/confirm names — a handle,
  *  a profile id, or (nothing) the set's default / only member / the ephemeral one. */
 function inputTargetFor(k, f, ref) {
@@ -226,6 +234,7 @@ router.post('/api/browser/profiles', (req, res) => {
   // keeper whether the id names a paired machine; both refuse by name, so
   // this route does not pre-refuse it (the registry itself is the hub's)
   const k = keeperOr503(res); if (!k) return;
+  // owner ruling A: a named profile is usable by ALL of the owner's conversations by default (the row's switch narrows it)
   try { res.json({ profile: k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null } }) }); } catch (e) { fail(res, e); }
 });
 /** P4 (§7.1): the provider rows with their capability cells, each with the
@@ -270,7 +279,8 @@ router.post('/api/browser/attach', async (req, res) => {
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   try {
     const was = spellSet(k.setFor(f.browserKey));
-    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, alias: req.body?.alias });
+    // owner ruling A (4): the USER's attach is the authorization — a profile kept to another conversation is attached too
+    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, alias: req.body?.alias, by: 'user' });
     const set = k.setFor(f.browserKey);
     if (r.created) noteChange(f, { kind: 'browser-profile', was, now: spellSet(set), handles: set.handles.map((h) => h.handle) });
     res.json({ ...attachAnswer(r), attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
@@ -288,8 +298,11 @@ router.post('/api/browser/detach', (req, res) => {
     res.json({ ...r, attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
   } catch (e) { fail(res, e); }
 });
-/** §3.2.5 "New persistent profile from this session's current browser" = ADOPT. */
-router.post('/api/browser/adopt', (req, res) => {
+/** §3.2.5 "New persistent profile from this session's current browser" = ADOPT. Owner ruling A: the new profile is
+ *  usable by ALL of the owner's conversations (`createdBy` = this one), and on rung C the conversation's own browser is
+ *  STOPPED before its directory moves — its Chrome holds the lock under a mark that names the conversation, and the
+ *  keeper's launch on the adopted directory would be refused `profile_locked` (never a raw kill of a used browser). */
+router.post('/api/browser/adopt', async (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
@@ -298,18 +311,20 @@ router.post('/api/browser/adopt', (req, res) => {
     const variant = f.session._browserVariant || null;
     const be = ctx.browserEnv?.() || null;
     let profile, adopted = false, note;
+    const all = { owner: { kind: 'instance', id: null }, createdBy: f.browserKey };
     if (variant === B.VARIANTS.C && be) {
       // the symlink's target IS the browserKey-named scratch directory
       const dir = be.resolvedProfileDir(f.browserKey);
       if (!dir) throw Object.assign(new Error('this session\'s browser directory could not be read back off its indirection'), { code: 'adopt_failed' });
-      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, owner: { kind: 'session', id: f.browserKey } });
+      if (typeof k.stopEphemeralOf === 'function') { try { await k.stopEphemeralOf(f.browserKey); } catch (e) { console.warn(`[browser] ${f.browserKey}: its own browser did not stop before the adopt — ${e && e.message}`); } }
+      profile = k.adoptScratch({ label: req.body?.label, scratchDir: dir, ...all });
       adopted = true;
-      note = 'the login that exists in this browser right now is kept: its directory was moved under ~/.agent-browser/ and registered';
+      note = 'the login that exists in this browser right now is kept: its directory was moved under ~/.agent-browser/ and registered — every conversation of yours can use it';
     } else {
       // rung D (no directory to adopt — that is the point of D), N, none, H:
       // the honest form is an EMPTY profile, said plainly (§3.2.5)
-      profile = k.createProfile({ label: req.body?.label }, { owner: { kind: 'session', id: f.browserKey } });
-      note = 'this session\'s browser had no directory of its own to adopt (rung ' + (variant || 'none') + '), so an EMPTY persistent profile was created — the login you just completed was NOT saved; the browser reopens on the new profile and you log in once more';
+      profile = k.createProfile({ label: req.body?.label }, all);
+      note = 'this session\'s browser had no directory of its own to adopt (rung ' + (variant || 'none') + '), so an EMPTY persistent profile was created — the login you just completed was NOT saved; the next browser command opens the new profile and you log in once more';
     }
     const pin = pinAnswer(k, f, profile.id, { by: 'user' });
     res.json({ profile, adopted, note, ...pin });
@@ -489,12 +504,34 @@ router.post('/api/browser/install', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   try { res.json(await k.installCloak()); } catch (e) { fail(res, e); }
 });
+/** OWNER RULING A: a pin never hands a directory. A session pinned BEFORE the ruling may still have its indirection (rung
+ *  D's generated config / rung C's symlink) naming a registered profile's directory — the next launch of its OWN
+ *  browser would open a second Chrome there (exit 21, the study's path B). That indirection is put back on the
+ *  conversation's own (repointPin(key, null)) — only when it names a profile's directory; never otherwise. */
+function clearPinnedDir(k, f) {
+  let be = null; try { be = ctx.browserEnv?.() || null; } catch { be = null; }
+  if (!be || typeof be.resolvedProfileDir !== 'function' || typeof be.repointPin !== 'function') return null;
+  let dir = null; try { dir = be.resolvedProfileDir(f.browserKey); } catch { dir = null; }
+  if (!dir) return null;
+  const B = require('../browser-profiles.js');
+  let profiles = []; try { profiles = k.list().profiles || []; } catch { profiles = []; }
+  const hit = profiles.find((x) => x && x.dir && B.sameDir(x.dir, dir));
+  if (!hit) return null;
+  let r = null; try { r = be.repointPin(f.browserKey, null); } catch (e) { r = { ok: false, why: String(e && e.message) }; }
+  console.log(`[browser] ${f.browserKey}: its indirection named profile ${hit.id}'s directory (a pin from before owner ruling A) — ${r && r.ok ? 'put back on its own browser' : 'NOT put back: ' + (r && r.why)}`);
+  return r;
+}
 /** ONE pin implementation for both surfaces: resolve the profile (id, label
- *  or this session's HANDLE), record the pin on the CONVERSATION, re-point
- *  the running session's indirection (browser-env.repointPin), persist it to
- *  the session's meta (a restart keeps it), say honestly when it applies —
- *  and, for a USER's pin, queue the zero-billed `browser-pin` notice (§3.8
- *  layer ②; the agent's own pin needs no notice: its answer IS the telling). */
+ *  or this session's HANDLE), record the pin on the CONVERSATION (who pinned it:
+ *  a USER pin is an authorization, owner ruling A (4)), persist it to the
+ *  session's meta (a restart keeps it), say honestly when it applies — and,
+ *  for a USER's pin, queue the zero-billed `browser-pin` notice (§3.8 layer
+ *  ②; the agent's own pin needs no notice: its answer IS the telling).
+ *  OWNER RULING A: the pin is the conversation's DEFAULT ATTACHMENT — its next
+ *  bare command opens the profile through the keeper (joined when running);
+ *  NOTHING is re-pointed at the profile's directory any more. A pin that MOVES
+ *  (or an unpin) detaches exactly the lease the previous pin MADE (`via:'pin'`),
+ *  never an attachment the agent made itself. */
 function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   const B = require('../browser-profiles.js');
   let p = null;
@@ -506,19 +543,112 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   }
   const before = k.setFor(f.browserKey);
   const prevPin = k.pinFor(f.browserKey);
-  const pin = k.setPin(f.browserKey, p ? p.id : null, { origin: 'chosen' });
+  const pin = k.setPin(f.browserKey, p ? p.id : null, { origin: 'chosen', by: by === 'user' ? 'user' : 'agent' });
   if (f.session) { f.session._browserProfileId = p ? p.id : null; f.session._browserPinOrigin = p ? 'chosen' : 'harness'; }
   try { ctx.persistPin?.(f.session, p ? p.id : null, p ? 'chosen' : 'harness'); } catch (e) { console.warn('[browser] pin not persisted to session meta — ' + (e && e.message)); }
-  let repoint = null;
-  try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }
-  const liveBrowser = k.leasesFor(f.browserKey).length > 0;
+  // the pin moved off a profile whose lease the PIN made ⇒ that lease goes (never one the agent attached itself)
+  let detached = null;
+  if (prevPin && (!p || prevPin.profileId !== p.id)) {
+    const l = k.leasesFor(f.browserKey).find((x) => x.profileId === prevPin.profileId && x.via === 'pin');
+    if (l) { try { k.detach({ profileId: prevPin.profileId, browserKey: f.browserKey, by: by === 'user' ? 'user' : 'agent' }); detached = prevPin.profileId; } catch (e) { console.warn(`[browser] ${f.browserKey}: the lease the previous pin made on ${prevPin.profileId} stays — ${e && e.message}`); } }
+  }
+  const repoint = clearPinnedDir(k, f);
+  const liveBrowser = k.leasesFor(f.browserKey).length > 0 || !!(typeof k.ephemeralFor === 'function' && k.ephemeralFor(f.browserKey) && k.ephemeralFor(f.browserKey).live);
   const after = k.setFor(f.browserKey);
   // a USER pin that moved the pin says so, once; one that re-chose the current pin (the ticked row) moved nothing and says nothing
   const moved = (prevPin ? prevPin.profileId : null) !== (p ? p.id : null);
   if (by === 'user') { if (moved) noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) }); }
   else k.tell(f.browserKey);
   try { ctx.onPinChanged?.(f.sessionId, f.session, pin); } catch { /* optional */ }
-  return { pin, repoint, appliesFrom: B.pinApplyNotice({ liveBrowser }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved };
+  return { pin, repoint, detached, appliesFrom: B.pinApplyNotice({ liveBrowser, label: p ? p.label : '' }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved };
+}
+/** OWNER RULING A: a pinned conversation's first bare command with NO attachment opens its pin THROUGH THE KEEPER (the
+ *  profile's one browser, joined when another conversation runs it) — then it resolves again as that attachment (every
+ *  check an attachment gets: paused, busy). A pin that does not open is a TYPED refusal naming the pin (`pinned:true`),
+ *  recorded for the conversation's facts — NEVER a silent fall-back to a temporary browser (the study's path B). A
+ *  remote session (rung H) never had a pin applied here: it keeps its own browser, as before. */
+async function attachPin(k, f, v) {
+  const B = require('../browser-profiles.js');
+  const s = f.session || {};
+  if (s._browserVariant === B.VARIANTS.H || s.hostId || s.host) return { ...v, kind: 'none' };
+  const p = k.profile(v.profileId);
+  const label = p ? p.label : v.profileId;
+  try {
+    await k.attach({ profileId: v.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, by: 'pin' });
+  } catch (e) {
+    try { k.notePinFailure?.(f.browserKey, { profileId: v.profileId, code: e && e.code, error: e && e.message }); } catch { /* optional */ }
+    console.warn(`[browser] ${f.browserKey}: its pinned profile ${v.profileId} "${label}" did not open — ${e && (e.code || '')} ${e && e.message}`);
+    return { ok: false, code: (e && e.code) || 'launch_failed', pinned: true, pinnedProfile: { id: v.profileId, label },
+      error: `your pinned profile "${label}" did not open: ${String((e && e.message) || e)} — tell the user; nothing else was opened instead`,
+      ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && Number.isInteger(e.holderPid) ? { holderPid: e.holderPid } : {}), handles: v.handles || [] };
+  }
+  try { k.clearPinFailure?.(f.browserKey); } catch { /* optional */ }
+  k.tell(f.browserKey); // the verb's own set change never earns it a one-time profile_changed
+  return k.resolveFor({ browserKey: f.browserKey, handle: '', subagent: sidechainOpen(f.session) });
+}
+/** Lane S2's seam name (the dangling-pin half, `routes/browser.js` beside the pin route): the conversations whose pin
+ *  names `profileId` — the keeper's pins and a live session's own record — with the live ones' names. */
+function pinHoldersOf(profileId) {
+  const k = ctx && ctx.keeper;
+  const out = new Map();
+  if (k && typeof k.pinnedBy === 'function') for (const x of k.pinnedBy(profileId)) out.set(x.browserKey, { browserKey: x.browserKey, name: '', sessionId: null });
+  for (const [id, s] of (ctx?.activeSessions || new Map())) {
+    if (!s || !s._browserKey) continue;
+    const hit = out.get(s._browserKey) || (s._browserProfileId === profileId ? { browserKey: s._browserKey, name: '', sessionId: null } : null);
+    if (!hit) continue;
+    hit.sessionId = id; hit.name = String(s.webuiName || s.name || '');
+    out.set(s._browserKey, hit);
+  }
+  return [...out.values()];
+}
+/** Lane S2's seam name: clear every pin naming `profileId` BEFORE its record goes — a live conversation through THE pin
+ *  implementation (its session record + meta, the agent's zero-billed notice), a stopped one in the keeper. Never throws.
+ *  (Owner ruling A's Delete… calls it; when lane S2 lands its richer version — the cleared MARK the browser fact reads —
+ *  that one replaces this body under the same name.) */
+function unpinProfile(profileId) {
+  const k = ctx && ctx.keeper;
+  if (!k) return { cleared: 0, sessions: [] };
+  const p = k.profile(profileId);
+  const label = p ? p.label : '';
+  let cleared = 0; const sessions = [];
+  for (const h of pinHoldersOf(profileId)) {
+    try {
+      const s = h.sessionId ? ctx.activeSessions.get(h.sessionId) : null;
+      if (s) { pinAnswer(k, { session: s, sessionId: h.sessionId, browserKey: h.browserKey, taskIds: [] }, null, { by: 'user' }); sessions.push(h.sessionId); }
+      if (typeof k.clearPin === 'function') k.clearPin(h.browserKey);
+      cleared++;
+    } catch (e) { console.warn(`[browser] ${h.browserKey}: pin not cleared before deleting ${profileId} — ${e && e.message}`); }
+  }
+  if (cleared) console.log(`[browser] profile ${profileId}${label ? ' "' + label + '"' : ''}: ${cleared} conversation pin(s) cleared before its removal (${sessions.length} live)`);
+  return { cleared, sessions };
+}
+/** Owner ruling A (6): Delete… releases the profile first — every conversation's lease detached BY THE USER (each live
+ *  one hears it on its next message: layer ②'s zero-billed notice) and its browser stopped. */
+async function releaseProfile(profileId) {
+  const k = ctx && ctx.keeper;
+  if (!k || typeof k.releaseAll !== 'function') return { detached: [], stopped: false };
+  const p = k.profile(profileId);
+  const r = await k.releaseAll(profileId);
+  for (const d of r.detached) {
+    const s = d.sessionId ? ctx.activeSessions?.get?.(d.sessionId) : null;
+    if (!s) continue;
+    const set = k.setFor(d.browserKey);
+    noteChange({ session: s, sessionId: d.sessionId, browserKey: d.browserKey }, { kind: 'browser-profile', was: p ? p.label : profileId, now: spellSet(set), handles: set.handles.map((h) => h.handle) });
+  }
+  return r;
+}
+/** Owner ruling A — the boot conversion: every live session whose indirection still names a profile's directory (a pin
+ *  from before the ruling) is put back on its own browser; the pin itself stays (it is the default attachment now). */
+function convertPinnedDirs() {
+  const k = ctx && ctx.keeper;
+  if (!k) return 0;
+  let n = 0;
+  for (const [id, s] of (ctx.activeSessions || new Map())) {
+    if (!s || !s._browserKey) continue;
+    const r = clearPinnedDir(k, { session: s, sessionId: id, browserKey: s._browserKey });
+    if (r) n++;
+  }
+  return n;
 }
 
 // ── AGENT (the CLI) ──
@@ -622,7 +752,9 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   const B = require('../browser-profiles.js');
   try {
-    const v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session) });
+    let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session) });
+    // owner ruling A: a pin is this conversation's DEFAULT ATTACHMENT, opened through the keeper — never a directory
+    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v);
     if (!v.ok) return failVerdict(res, v);
     if (v.kind === 'none') {
       // D7 (design-browser-takeover §5.3): a session on the SHARED rung (isolation
@@ -725,11 +857,14 @@ router.post('/api/agent/browser/new', (req, res) => {
       let existing = null; try { existing = (k.list().profiles || []).find((p) => p && p.dir === adoptDir) || null; } catch { existing = null; }
       const v = B.adoptDirVerdict({ dir: adoptDir, homeDir: roots.homeDir || null, dataDir: roots.dataDir || null, existing, browserKey: f.browserKey });
       if (!v.ok) return res.status(v.code === 'adopt_failed' ? 409 : 403).json({ error: v.error, code: v.code });
-      const a = k.adoptDirectory({ label: req.body?.label, dir: adoptDir, owner: { kind: 'session', id: f.browserKey } });
+      // owner ruling A: usable by ALL of the owner's conversations (`createdBy` = this one); the user's panel switch narrows it
+      const a = k.adoptDirectory({ label: req.body?.label, dir: adoptDir, owner: { kind: 'instance', id: null }, createdBy: f.browserKey });
       if (!a.profile) return res.status(409).json({ error: a.why || 'cannot adopt that directory', code: 'adopt_failed' });
       return res.json({ profile: a.profile, adopted: true, created: a.created });
     }
-    res.json({ profile: k.createProfile(req.body || {}, { owner: { kind: 'session', id: f.browserKey } }) });
+    // owner ruling A ("A吧"): an agent's `new` makes a profile EVERY conversation of the owner can use — the study's path A
+    // (`new work` in one chat, `use work` in the next ⇒ not_owner) is gone; only the user's row switch keeps one to one chat
+    res.json({ profile: k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey }) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/detach', (req, res) => {
@@ -804,4 +939,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup };
+module.exports = { router, setup, unpinProfile, pinHoldersOf, releaseProfile, convertPinnedDirs }; // owner ruling A: Delete…'s release + lane S2's unpin seam; the boot conversion of pre-ruling pins

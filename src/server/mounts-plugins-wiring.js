@@ -666,12 +666,14 @@ function createSessionMessages(session, sessionId) {
       // construction, which released its browser (and its helpers') 3 min after
       // the last verb MID-WORK; null = unknown = never released (the CLI's own
       // idle timeout still ends a browser nobody uses). Pinned: test-architecture §57.
+      // owner ruling A (2): + the conversation's NAME — a `browser_busy` refusal names the conversation that drives a
+      // shared browser (the ruling's "told so by name"; the one deliberate exception to B-325a)
       conversationFacts: (bk) => {
         let s = null;
         for (const x of activeSessions.values()) if (x && x._browserKey === bk) { s = x; break; }
-        if (!s) return { turn: null };
+        if (!s) return { turn: null, name: null };
         const TF = require('./turn-facts.js');
-        return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null };
+        return { turn: TF.turnKnown(s) ? TF.turnOf(s) : null, name: String(s.webuiName || s.name || '') || null };
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
@@ -779,6 +781,9 @@ function createSessionMessages(session, sessionId) {
       browserKeeper.boot()
         .then((r) => { if (r && (r.droppedLeases || r.browsers)) console.log(`[browser] boot: ${r.droppedLeases} orphaned lease(s) dropped, ${r.browsers} browser(s) adopted`); })
         .catch((e) => console.warn('[browser] boot reconciliation failed:', e && e.message))
+        // owner ruling A: a live session pinned BEFORE the ruling still has its indirection naming the profile's directory —
+        // put back on its own browser (the pin stays: it is the default attachment now, opened through the keeper)
+        .then(() => { try { const n = require('../routes/browser').convertPinnedDirs(); if (n) console.log(`[browser] boot: ${n} session(s) pinned before owner ruling A no longer hand their own browser the profile's directory`); } catch (e) { console.warn('[browser] pin conversion failed:', e && e.message); } })
         .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }); // P5: the recorder taps only browsers the keeper has judged
     } catch (e) { console.warn('[browser] boot reconciliation failed:', e && e.message); }
   }
@@ -805,7 +810,12 @@ function createSessionMessages(session, sessionId) {
       const { router: traceRouter, setup: setupTraceRoutes } = require('../routes/browser-trace');
       // the bindings READER: a stopped conversation's trace is found through the key its CLI id was bound to (P0 r5/r7's store, read off the file per ask — a human's click)
       let bindings = null; try { bindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser-trace] bindings reader unavailable — ' + (e && e.message)); }
-      setupTraceRoutes({ keeper: browserKeeper, trace: browserTrace, activeSessions, bindings });
+      // owner ruling A (6): the row's Delete… = release every lease + stop, clear every pin (lane S2's `unpinProfile` seam —
+      // ONE implementation, in routes/browser.js beside the pin route), then set aside
+      setupTraceRoutes({ keeper: browserKeeper, trace: browserTrace, activeSessions, bindings,
+        releaseProfile: (id) => require('../routes/browser').releaseProfile(id), unpinProfile: (id) => require('../routes/browser').unpinProfile(id),
+        // a narrowing's detached conversation hears it on its next message (§3.8 layer ②, the same queue as the pin's)
+        notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); } });
       app.use(traceRouter);
     }
   } catch (e) { browserTrace = null; console.warn('[browser-trace] recorder unavailable — ' + (e && e.message)); }

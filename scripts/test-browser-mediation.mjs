@@ -530,17 +530,20 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   const legacy = keeper.adoptDirectory({ label: 'Shared (legacy)', dir: legacyDir, legacy: true, owner: { kind: 'instance', id: null } });
   refused = null; try { keeper.updateProfile(legacy.profile.id, { sharing: 'owner' }); } catch (e) { refused = e; }
   ok(legacy.profile.sharing === 'instance' && legacy.profile.mediated === false && refused && refused.code === 'bad-request' && /legacy/.test(refused.message), 'the legacy record: sharing:instance, NOT mediated, and its sharing cannot be edited (adopt it as a new profile instead)');
-  // ─ the pin: a mediated profile is attached, never pinned (a pin hands the next launch a DIRECTORY)
-  refused = null; try { keeper.setPin(KEY_C, team.id); } catch (e) { refused = e; }
-  ok(refused && refused.code === 'pin_refused' && /use bp-/.test(refused.message), 'pinning a conversation to a mediated profile is refused by name (attach it with `use`)');
+  // ─ OWNER RULING A (2026-09-26): a pin is a DEFAULT ATTACHMENT, never a directory — so a mediated profile is pinned like
+  // any other (P6 refused it only because a pin used to hand the next launch the profile's DIRECTORY); the pin's first
+  // bare command attaches it through the keeper, which hands the lease its own scoped url
+  refused = null; let pinned0 = null; try { pinned0 = keeper.setPin(KEY_C, team.id); } catch (e) { refused = e; }
+  ok(!refused && pinned0 && pinned0.profileId === team.id && keeper.setFor(KEY_C).pinId === team.id, 'owner ruling A: pinning a conversation to a mediated profile is ACCEPTED (the pin names the profile; nothing hands out its directory)', refused && refused.message);
   settings['browser.defaultProfile'] = team.id;
   const pick = keeper.pinForCreate({});
-  ok(pick.profileId === '' && pick.origin === 'harness' && /shared instance-wide/.test(pick.refused) && /instance default/.test(pick.refused), 'an instance default naming a mediated profile is SKIPPED at spawn with its reason (the spawn env never carries a shared browser\'s directory)');
+  ok(pick.profileId === team.id && pick.origin === 'instance' && !pick.refused, 'owner ruling A: an instance default naming a mediated profile is HONOURED at spawn (the spawn gets no directory — ws-create hands pinnedDir null)');
   delete settings['browser.defaultProfile'];
-  ok(keeper.pinForCreate({ taskGroupDefault: team.id }).refused && /taskGroup|task/.test(keeper.pinForCreate({ taskGroupDefault: team.id }).refused), 'a Task-Group default naming one is skipped the same way');
+  { const tg = keeper.pinForCreate({ taskGroupDefault: team.id }); ok(tg.profileId === team.id && tg.origin === 'task-group' && !tg.refused, 'owner ruling A: a Task-Group default naming one is honoured the same way'); }
   keeper.setPin(KEY_C, solo.id);
   refused = null; try { keeper.updateProfile(solo.id, { sharing: 'instance' }); } catch (e) { refused = e; }
-  ok(refused && refused.code === 'pinned' && new RegExp(KEY_C).test(refused.message), 'a profile that is somebody\'s pin cannot become instance-shared (unpin first — named)');
+  ok(!refused && keeper.profile(solo.id).sharing === 'instance', 'owner ruling A: a profile that is somebody\'s pin MAY become separate-tabs (mediated) — the pin is an attachment default, so there is no directory to protect', refused && refused.message);
+  keeper.updateProfile(solo.id, { sharing: 'owner' });
   keeper.setPin(KEY_C, null);
   // ─ detach revokes: A's connection closes 1008 and A's tab is closed in the browser
   keeper.detach({ profileId: team.id, browserKey: KEY_A });

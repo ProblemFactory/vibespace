@@ -530,7 +530,12 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
     return String(r.label || r.alias || r.ref) + (r.isDefault ? ' ' + t('(default)') : '');
   };
-  const driverText = (r) => (r.driver === 'you' ? t('you') : r.kind === 'child' ? '' : t('agent'));
+  // owner ruling A (2): a shared profile's browser names the OTHER conversation driving it (its name from this client's rows)
+  const keyName = (k) => { const s = (app.sidebar?._allSessions || []).find((x) => x && x.browserKey === k); return s ? (s.webuiName || s.name || '') : ''; };
+  const driverText = (r) => (r.driver === 'you' ? t('you')
+    : r.driver === 'other' ? t('{name} drives', { name: keyName(r.driverKey) || t('another chat') })
+      : r.driver === 'other-user' ? t('you, in {name}', { name: keyName(r.driverKey) || t('another chat') })
+        : r.kind === 'child' ? '' : t('agent'));
   // lane P verify (finding 6): the words come from the PURE rowStateWords — a released own browser beside an attachment is
   // never promised "the next command" (a bare command lands on the attachment); one sentence per code
   const STATE_WORDS = {
@@ -579,7 +584,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     const chip = chipNow();
     // ≥2 browsers ⇒ the strip (one browser keeps the single-browser look) — and a conversation AT its cap
     // shows the strip too, so the red own/cap chip the agent's refusal points at is there to click
-    const show = st.rows.length >= 2 || (st.rows.length >= 1 && chip.full);
+    // owner ruling A (2): …and a SHARED profile's browser (another conversation holds it too) shows the strip, so its tab says
+    // who drives it right now
+    const show = st.rows.length >= 2 || (st.rows.length >= 1 && (chip.full || st.rows.some((r) => r.kind === 'attachment' && r.owners > 0)));
     strip.style.display = show ? '' : 'none';
     stripTabs.replaceChildren();
     if (!show) { stripMoreBtn.style.display = 'none'; return; }

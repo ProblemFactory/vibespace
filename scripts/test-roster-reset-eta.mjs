@@ -23,6 +23,13 @@
 // .usage-acct-soon, the column alignment of the labels, and the 30 s tick
 // driven with an injected clock (a passed countdown goes blank and drops
 // out of the highlight).
+// 2.369.189 (the owner, on a row reading "正在使用付费溢出额度" beside its next-usable
+// column: "这啥玩意啊 不如显示个钱的图标"): §1c now reads THE CREDITS CHIP — the money
+// icon + one word on the identity line, the sentence in title + aria-label — on D
+// (usage credits allowed, dim) and E (paid overage IN USE, warning tone, the spend in
+// the tip), proves it never sits in the usage cell nor pushes the next-usable column,
+// §1d proves the 8 s poll PATCHES the chip (same node, new tip) and §5 renders the
+// roster in zh (按量) and measures the chip's rect inside the row.
 // VS_UI_SHOTS_DIR=<dir> saves PNGs of both viewports there.
 // NETWORK SAFETY: every fabricated credential is EXPIRED — nothing here can
 // contact a vendor. Worktree-isolated (own data/, a scratch HOME,
@@ -130,10 +137,14 @@ fs.writeFileSync(path.join(cacheDir, AD.id + '.json'), JSON.stringify(snap({
   overage: { inUse: false, status: 'allowed', asOf: seedAt },
 })));
 // E: BLOCKED — 7d SPENT (100 %, resets in 20 h) while its 5h (10 %) resets in 30 min: the row label must count to the 7d reset (that is when E is usable), so E is NOT among the two soonest
+// …and E is BILLING PAID OVERAGE right now (a dated, fresh `inUse:true` + the period's spend — the
+// owner's screenshot shape, 2.369.189): its credits chip is the warning-tone one, the money in its tip
 fs.writeFileSync(path.join(cacheDir, AE.id + '.json'), JSON.stringify(snap({
   fiveHour: { utilization: 0.1, status: 'allowed', resetsAt: sec(seedAt + 30 * M), state: 'running' },
   sevenDay: { utilization: 1, status: 'allowed', resetsAt: sec(seedAt + 20 * H), state: 'running' },
   scopedWeekly: [],
+  overage: { inUse: true, status: 'allowed', asOf: seedAt },
+  spend: { used: 12.5, limit: 50 },
 })));
 // F: BLOCKED for DAYS — 7d spent (100 %, resets in 6 d 14 h) with a 5h that is fresh (0 %, EMPTY): the row label is the WIDEST shape
 // the roster prints (`6d14h0m` — 2026-09-16, owner: 排版非常歪: a long token used to widen its own cell and shove that row's donuts left)
@@ -181,8 +192,8 @@ const ROWS = (root) => `(() => {
       miniVisible: vis(mini), miniText: mini ? mini.textContent : null, miniTitle: mini ? mini.title : null,
       next: (() => { const n = row.querySelector('.acct-usage-next'); return n ? { present: true, text: n.textContent.trim(), ms: n.dataset.nextMs ? Number(n.dataset.nextMs) : null, blocked: n.dataset.blocked === '1', title: n.title || '', visible: vis(n), minW: getComputedStyle(n).minWidth, right: R(n).right, hasIcon: !!n.querySelector('svg'), font: getComputedStyle(n).fontSize } : null; })(),
       soon: row.classList.contains('usage-acct-soon'), rowBg: getComputedStyle(row).backgroundColor,
-      credits: (() => { const c = row.querySelector('.acct-key-line > .acct-usage-credits'); return c ? { text: c.textContent.trim(), title: c.title, visible: vis(c), color: getComputedStyle(c).color, tailLine: Math.abs(R(c).top - R(row.querySelector('.acct-key-name')).top) < 4 } : null; })(),
-      inUseChip: !!row.querySelector('.acct-usage-overage'), extraLine: !!row.querySelector('.acct-key-extra'), nameColor: getComputedStyle(row.querySelector('.acct-key-name')).color,
+      credits: (() => { const c = row.querySelector('.acct-key-line > .acct-credits-slot > .credits-chip'); if (!c) return null; const nm = row.querySelector('.acct-key-name'), cell = row.querySelector('.acct-usage-cell'), mid = (el) => (R(el).top + R(el).bottom) / 2; return { word: c.querySelector('.credits-chip-word')?.textContent || '', wordVisible: vis(c.querySelector('.credits-chip-word')), text: c.textContent.trim(), title: c.title, aria: c.getAttribute('aria-label'), role: c.getAttribute('role'), state: c.dataset.credits, hasIcon: !!c.querySelector('svg'), iconW: c.querySelector('svg') ? R(c.querySelector('svg')).width : 0, visible: vis(c), color: getComputedStyle(c).color, bg: getComputedStyle(c).backgroundColor, tailLine: Math.abs(mid(c) - mid(nm)) < 4, left: R(c).left, right: R(c).right, top: R(c).top, bottom: R(c).bottom, w: R(c).width, h: R(c).height, cellLeft: cell ? R(cell).left : null, rowL: R(row).left, rowR: R(row).right, rowT: R(row).top, rowB: R(row).bottom }; })(),
+      inUseChip: !!row.querySelector('.acct-usage-cell .credits-chip, .acct-usage-overage'), extraLine: !!row.querySelector('.acct-key-extra'), nameColor: getComputedStyle(row.querySelector('.acct-key-name')).color,
       resetLine: !!row.querySelector('.acct-reset-eta'), ageText: age ? age.textContent : null, ageMinW: age ? getComputedStyle(age).minWidth : null, ageLines: age ? age.children.length : null,
       donutTops: [...row.querySelectorAll('.acct-donut-col .acct-usage-donut')].map((d) => R(d).top - R(row).top), ageRight: age ? R(age).right : null, iconLeft: (() => { const i = row.querySelector('.acct-usage-next svg'); return i ? R(i).left : null; })(), nextW: (() => { const n = row.querySelector('.acct-usage-next'); return n ? R(n).width : null; })(),
       cols: [...row.querySelectorAll('.acct-donut-col')].map((col) => { const d = col.querySelector('.acct-usage-donut'), e = col.querySelector('.acct-donut-eta'), slot = col.querySelector('.acct-donut-eta-slot'); return { label: d?.querySelector('span')?.textContent, eta: e ? e.textContent : null, slotH: slot ? R(slot).height : null, etaColor: e ? e.style.color : null, etaFont: e ? getComputedStyle(e).fontSize : null, etaBelow: e ? R(e).top >= R(d).bottom - 0.5 : null, etaCentred: e ? Math.abs((R(e).left + R(e).right) / 2 - (R(d).left + R(d).right) / 2) <= 1.5 : null, colH: R(col).height, colW: R(col).width, tip: d?.title || '' }; }),
@@ -246,11 +257,14 @@ try {
   check('a highlighted row\'s tooltip says why; an unhighlighted one\'s does not', /closest to a reset/.test(a.next.title) && /closest to a reset/.test(d.next.title) && !/closest to a reset/.test(e.next.title), [a.next.title, d.next.title, e.next.title]);
   check('the highlight is a RENDERED background (a highlighted row differs from a plain one)', d.rowBg !== c.rowBg, [d.rowBg, c.rowBg]);
   // ── B-ad05 (2026-09-17): USAGE CREDITS ARE VISIBLE BEFORE THEY ARE SPENT ──
-  console.log('§1c the dim "credits" tag on the member whose org bills pay-per-use past 100 %');
-  check('Member D (overage present, not in use, vendor status not a rejection): the identity tail carries the dim "· credits" tag with the pay-per-use tooltip', !!d.credits && d.credits.visible && d.credits.text === '· credits' && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
-  check(`…it is INLINE on the identity line (same top as the name), adds no extra row line, and is not the in-use chip (rowH ${d.rowH && d.rowH.toFixed(1)}, clusterRight ${d.clusterRight}, tailLine ${d.credits && d.credits.tailLine}, font ${await evalJs('getComputedStyle(document.body).fontFamily')})`, !!d.credits && d.credits.tailLine === true && d.extraLine === false && d.inUseChip === false, d);
-  check('Member C (overage rejected / org_level_disabled) and every other row carry no credits tag', !c.credits && rows.filter((r) => r.credits).length === 1, rows.map((r) => [r.name, !!r.credits]));
-  check('the tag is dim: its colour differs from the name colour (text-secondary, not the name text)', !!d.credits && d.credits.color !== d.nameColor, [d.credits && d.credits.color, d.nameColor]);
+  console.log('§1c THE CREDITS CHIP — the money icon + one word — on the member whose org bills pay-per-use past 100 % (dim) and the one billing it NOW (warning)');
+  check('Member D (overage present, not in use, vendor status not a rejection): the chip = the money icon + "Credits", dim state, the pay-per-use sentence in title AND aria-label (role img)', !!d.credits && d.credits.visible && d.credits.hasIcon && d.credits.iconW >= 8 && d.credits.word === 'Credits' && d.credits.text === 'Credits' && d.credits.state === 'allowed' && d.credits.role === 'img' && d.credits.aria === d.credits.title && /Extra usage is enabled on this org: requests past 100 % are billed pay-per-use/.test(d.credits.title), d.credits);
+  check('Member E (paid overage IN USE, $12.50 of $50 spent): the chip = the money icon + "Credits", in-use state, the sentence AND the money in title + aria-label — never on its face', !!e.credits && e.credits.visible && e.credits.hasIcon && e.credits.word === 'Credits' && e.credits.state === 'in-use' && e.credits.aria === e.credits.title && /^Using paid overage credits — /.test(e.credits.title) && /\$12\.50 \/ \$50\.00/.test(e.credits.title) && !/\$/.test(e.credits.text), e.credits);
+  check(`…each is INLINE on the identity line (centred on the name), adds no extra row line, and NOTHING credits-shaped sits in the usage cell (rowH ${d.rowH && d.rowH.toFixed(1)}, clusterRight ${d.clusterRight}, tailLine ${d.credits && d.credits.tailLine}/${e.credits && e.credits.tailLine}, font ${await evalJs('getComputedStyle(document.body).fontFamily')})`, !!d.credits && !!e.credits && d.credits.tailLine === true && e.credits.tailLine === true && d.extraLine === false && e.extraLine === false && rows.every((r) => r.inUseChip === false), [d, e]);
+  check('the chip\'s rect lies INSIDE its row and LEFT of the usage cell — it cannot push the donut / next-usable columns', [d, e].every((r) => r.credits && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.top >= r.credits.rowT - 0.5 && r.credits.bottom <= r.credits.rowB + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5), [d.credits, e.credits]);
+  check('Member C (overage rejected / org_level_disabled) and every other row carry no chip', !c.credits && rows.filter((r) => r.credits).length === 2, rows.map((r) => [r.name, !!r.credits]));
+  check('tone: the allowed chip is dim (its colour is not the name colour) and the in-use chip wears a DIFFERENT colour (the warning tone)', !!d.credits && !!e.credits && d.credits.color !== d.nameColor && e.credits.color !== d.credits.color && e.credits.bg !== d.credits.bg, [d.credits && d.credits.color, e.credits && e.credits.color, d.nameColor]);
+  check('E\'s credits chip does not make it a soon row (the green highlight is the two-soonest-reset mark, a different fact)', !e.soon && d.soon);
   const nextRights = usageRows.map((r) => r.next.right);
   check(`the labels form a straight column: right edges aligned ±1px (spread ${(Math.max(...nextRights) - Math.min(...nextRights)).toFixed(1)}px over ${nextRights.length} rows)`, Math.max(...nextRights) - Math.min(...nextRights) <= 1);
   check('the label cell keeps a fixed min-width (≥ 30px) and the 9px roster font', usageRows.every((r) => parseFloat(r.next.minW) >= 30 && /^(8|9|10)px$/.test(r.next.font)), usageRows.map((r) => [r.next.minW, r.next.font]));
@@ -292,6 +306,19 @@ try {
     cur.fiveHour.utilization = 0.42; cur.fetchedAt = Date.now(); fs.writeFileSync(aFile, JSON.stringify(cur));
     const restored = await until(async () => { const r = await evalJs(ROWS(LOCAL)); const aa = r && byId(r, A.id); return aa && /: 42%/.test(aa.cols?.[0]?.tip || '') ? r : null; }, 25000, 500);
     check('…and moves back when the disk does (the poll is the source, not a one-shot)', !!restored);
+    // THE CREDITS CHIP IS PATCHED, NEVER RE-CREATED (2.369.189): mark E's chip node, move E's spend AND
+    // its 5h on disk, and read the SAME node with the new money after the poll repainted the row's cell
+    const eChipSel = `document.querySelector('.agents-machine-sec[data-host=""] .acct-key-row[data-id="${AE.id}"] .acct-credits-slot > .credits-chip')`;
+    const marked = await evalJs(`(() => { const c = ${eChipSel}; if (!c) return false; c.__vsMark = 'kept'; return true; })()`);
+    const eFile = path.join(cacheDir, AE.id + '.json');
+    const eCur = JSON.parse(fs.readFileSync(eFile, 'utf8'));
+    eCur.spend = { used: 20, limit: 50 }; eCur.fiveHour = { ...eCur.fiveHour, utilization: 0.35 }; eCur.fetchedAt = Date.now();
+    fs.writeFileSync(eFile, JSON.stringify(eCur));
+    const patched = await until(async () => evalJs(`(() => { const c = ${eChipSel}; const cell = document.querySelector('.agents-machine-sec[data-host=""] .acct-key-row[data-id="${AE.id}"] .acct-usage-cell'); return c && /\\$20\\.00/.test(c.title) && /: 35%/.test(cell?.innerHTML || '') ? { mark: c.__vsMark || null, title: c.title, aria: c.getAttribute('aria-label') } : null; })()`), 25000, 500);
+    check('the open roster PATCHES E\'s credits chip from the poll: the same node (marked before the repaint) now says $20.00 in title + aria-label, while the cell beside it repainted', marked && !!patched && patched.mark === 'kept' && patched.aria === patched.title, { marked, patched });
+    eCur.spend = { used: 12.5, limit: 50 }; eCur.fiveHour.utilization = 0.1; eCur.fetchedAt = Date.now(); fs.writeFileSync(eFile, JSON.stringify(eCur));
+    const eBack = await until(async () => evalJs(`(() => { const c = ${eChipSel}; return c && /\\$12\\.50/.test(c.title) ? 1 : 0; })()`), 25000, 500);
+    check('…and back to $12.50 when the disk does', !!eBack);
   }
 
   // ── the ≤340px pill: the tightest bucket's percentage + ITS compact eta ──
@@ -385,12 +412,35 @@ try {
     const wrows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, AD.id)?.clusterVisible ? r : null; }, 20000, 300); // the same readiness §1 waits for (A has three donuts, D two): donut mode + laid out (a credits tag exists before the panel has any geometry)
     if (!wrows) { const dbg = await evalJs(`(() => { const sec = ${LOCAL}; const r = (${ROWS(LOCAL)}); return { sec: !!sec, secW: sec && sec.clientWidth, isMobile: app.isMobile, sidebarW: app.sidebar.el.getBoundingClientRect().width, rows: r && r.map((x) => [x.name, x.cols.length, x.clusterVisible, x.miniVisible]) }; })()`); console.log('  §4 DEBUG: ' + JSON.stringify(dbg)); }
     const wd = wrows && byId(wrows, AD.id);
-    check(`wide font: Member D's credits tag is still INLINE with the name (rowH ${wd && wd.rowH && wd.rowH.toFixed(1)}, clusterRight ${wd && wd.clusterRight}, tailLine ${wd && wd.credits && wd.credits.tailLine})`, !!wd && !!wd.credits && wd.credits.visible && wd.credits.tailLine === true && wd.extraLine === false, wd);
+    const we = wrows && byId(wrows, AE.id);
+    check(`wide font: Members D and E keep their credits chip INLINE with the name and left of the usage cell (rowH ${wd && wd.rowH && wd.rowH.toFixed(1)}, clusterRight ${wd && wd.clusterRight}, tailLine ${wd && wd.credits && wd.credits.tailLine})`, [wd, we].every((r) => !!r && !!r.credits && r.credits.visible && r.credits.tailLine === true && r.extraLine === false && r.credits.right <= r.credits.cellLeft + 0.5), [wd, we]);
     const wsec = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? { scrollW: sec.scrollWidth, clientW: sec.clientWidth } : null; })()`);
     check(`wide font: the roster section has no sideways overflow (${wsec && wsec.scrollW}/${wsec && wsec.clientW})`, !!wsec && wsec.clientW > 100 && wsec.scrollW <= wsec.clientW + 1, wsec);
     await shot('roster-1200x800-wide-font.png');
     await cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: wide.identifier });
   } else console.log('  SKIP: §4 needs DejaVu Sans on this machine (fc-list)');
+  // ── §5 THE CREDITS CHIP IN zh (2.369.189 — the owner's language): 按量 + the icon, the zh sentence
+  // in title + aria-label, the chip's rect inside the row, the next-usable columns still straight ──
+  console.log('§5 the roster in zh — the credits chip reads 按量 beside the money icon, inside the row, the columns intact');
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1200, height: 800, deviceScaleFactor: 2, mobile: false });
+  await openPage();
+  await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
+  await openPage();
+  check('the page is in zh', await evalJs(`document.querySelector('.rail-item[data-rail="agents"]') ? true : false`) && await evalJs(`localStorage.getItem('vibespace.lang') === 'zh'`));
+  await evalJs(`(() => { app.sidebar.toggle(true); return 1; })()`);
+  for (let i = 0; i < 4; i++) { const w = await evalJs(`(() => { const sec = ${LOCAL}; return sec ? sec.clientWidth : 0; })()`); if (w > 0) break; await evalJs(`(() => { const it = document.querySelector('.rail-item[data-rail="agents"]'); if (!it) throw new Error('no agents rail item'); it.click(); return 1; })()`); await sleep(400); }
+  await evalJs(`(() => { app.sidebar.el.style.width = '504px'; app.sidebar._applySidebarLayoutWidth?.(); return 1; })()`);
+  const zrows = await until(async () => { const r = await evalJs(ROWS(LOCAL)); return r && byId(r, A.id)?.cols?.length === 3 && byId(r, AE.id)?.credits && byId(r, AD.id)?.clusterVisible ? r : null; }, 20000, 300);
+  const zd = zrows && byId(zrows, AD.id), ze = zrows && byId(zrows, AE.id);
+  check('zh: D and E wear the chip with the money icon and the word 按量 (never the old sentence 正在使用付费溢出额度 / 按量信用额度)', !!zd && !!ze && [zd, ze].every((r) => r.credits.hasIcon && r.credits.word === '按量' && r.credits.text === '按量') && !zrows.some((r) => /正在使用付费溢出额度|按量信用额度/.test(r.credits ? r.credits.text : '')), zrows && zrows.map((r) => [r.name, r.credits && r.credits.text]));
+  check('zh: E\'s title AND aria-label = the zh sentence with the money; D\'s = the zh pay-per-use sentence', !!ze && /^正在使用付费溢出额度——/.test(ze.credits.title) && /\$12\.50 \/ \$50\.00/.test(ze.credits.title) && ze.credits.aria === ze.credits.title && !!zd && /^此组织已启用额外用量/.test(zd.credits.title) && zd.credits.aria === zd.credits.title, [ze && ze.credits.title, zd && zd.credits.title]);
+  check('zh: each chip lies inside its row, centred on the name line and LEFT of the usage cell', [zd, ze].every((r) => r && r.credits.left >= r.credits.rowL - 0.5 && r.credits.right <= r.credits.rowR + 0.5 && r.credits.right <= r.credits.cellLeft + 0.5 && r.credits.tailLine), [zd && zd.credits, ze && ze.credits]);
+  const zu = (zrows || []).filter((r) => r.cols.length > 0);
+  const zNext = zu.map((r) => r.next.right), zAge = zu.map((r) => r.ageRight);
+  check(`zh: the next-usable column is not pushed — the label cells' right edges (spread ${zNext.length ? (Math.max(...zNext) - Math.min(...zNext)).toFixed(1) : '?'}px) and the age cells' (spread ${zAge.length ? (Math.max(...zAge) - Math.min(...zAge)).toFixed(1) : '?'}px) are aligned ±1px over ${zu.length} rows, E's included`, zu.length === 6 && Math.max(...zNext) - Math.min(...zNext) <= 1 && Math.max(...zAge) - Math.min(...zAge) <= 1, zu.map((r) => [r.name, r.next.right, r.ageRight]));
+  if (SHOTS && ze) { const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, ze.credits.rowL - 4), y: Math.max(0, ze.credits.rowT - 60), width: Math.min(560, ze.credits.rowR - ze.credits.rowL + 8), height: 150, scale: 1 } }); fs.writeFileSync(path.join(SHOTS, 'roster-zh-credits-rows.png'), Buffer.from(r.data, 'base64')); }
+  await shot('roster-1200x800-zh.png');
+  await evalJs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
   const realErrors = jsErrors.filter((e) => !/favicon|net::|Failed to load resource/.test(e));
   check('no JS errors', realErrors.length === 0, realErrors.slice(0, 5));
 } catch (e) {

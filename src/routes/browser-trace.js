@@ -20,9 +20,16 @@
  *                                                 trace digest, the adoptable orphans (§8 step 3), the forgotten ledger,
  *                                                 the last sweep, the limits — NOTHING here is a deletion
  *   POST   /api/browser/housekeeping/sweep        run the retention sweep now; answers what it removed and why
- *   PATCH  /api/browser/profiles/:id              { record?, label?, notes? } — the editable fields; anything else refused by name
- *   POST   /api/browser/profiles/:id/forget       archive-THEN-remove (the dir is moved beside itself, a ledger row is filed
- *                                                 BEFORE the record goes); 409 leased / running; 400 not_ours by provider row
+ *   PATCH  /api/browser/profiles/:id              { record?, label?, notes?, sharing?, scope?, conversation? } — the editable
+ *                                                 fields; owner ruling A: `scope` 'all' | 'one' (+ `conversation` = a browser
+ *                                                 key) = the row's "Who can use it" (narrowing detaches every other
+ *                                                 conversation's lease the new scope no longer admits — a pinned one keeps it,
+ *                                                 each detached live one hears it on its next message); anything else refused by name
+ *   POST   /api/browser/profiles/:id/forget       { release?, unpin? } archive-THEN-remove (the dir is moved beside itself, a
+ *                                                 ledger row is filed BEFORE the record goes); 409 leased / running; 400 not_ours
+ *                                                 by provider row. Owner ruling A (6): the row's Delete… sends release + unpin —
+ *                                                 every lease detached by the user and the browser stopped first, then every pin
+ *                                                 naming it cleared (lane S2's `unpinProfile` seam), then the set-aside
  *   POST   /api/browser/orphans/adopt             { dir, label }   label an unregistered directory in place
  *   POST   /api/browser/orphans/forget            { dir }          move an orphan aside + ledger row (never deleted by itself)
  *   POST   /api/browser/forgotten/:fid/delete     THE one permanent deletion — a human's click on a forgotten row
@@ -54,7 +61,7 @@ const STATUS = {
   // housekeeping (§7.1 / §8 / D8): the sweep's scope, the archive-before-remove rule
   not_ours: 400, leased: 409, running: 409, forget_failed: 500, delete_failed: 500, adopt_failed: 409, label_required: 400, label_taken: 409,
   // P6 (§6.2): `sharing` edits through PATCH — refused by the verdict (no proxy / paired machine / unknown value)
-  sharing_refused: 400, pinned: 409,
+  sharing_refused: 400, pinned: 409, not_editable: 409,
   // recording (D7)
   recording_off: 409, recording_floor: 409, recording_not_ours: 400, recording_not_local: 400, record_failed: 502, not_recording: 409, dir_unwritable: 500,
 };
@@ -133,10 +140,45 @@ router.get('/api/browser/actions/:id/frame/:which', (req, res) => {
 });
 
 // ── housekeeping (§6.4 / §7.1 / §8 step 3 / D8) ──
+/** Owner ruling A: the panel names WHO USES each profile (the live conversations holding a lease or pinning it — the
+ *  Delete… warning's count and the "Who can use it" options) and lists every live conversation that has a browser key
+ *  (an "Only …" choice). Names are the user's own conversations — the panel is the user's, never an agent's. */
+function conversationRows() {
+  const out = [];
+  for (const [id, s] of (ctx?.activeSessions || new Map())) {
+    if (!s || !B.isBrowserKey(s._browserKey)) continue;
+    out.push({ browserKey: s._browserKey, sessionId: id, name: String(s.webuiName || s.name || id), pinned: s._browserProfileId || null, lastActive: Number(s.createdAt || 0) || 0 });
+  }
+  return out.sort((a, b) => b.lastActive - a.lastActive);
+}
+function usedByOf(profileId, convs) {
+  const k = ctx?.keeper || null;
+  const byKey = new Map(convs.map((c) => [c.browserKey, c]));
+  const out = new Map();
+  const add = (bk, what) => { const c = byKey.get(bk) || null; const r = out.get(bk) || { browserKey: bk, sessionId: c ? c.sessionId : null, name: c ? c.name : null, leased: false, pinned: false }; r[what] = true; out.set(bk, r); };
+  if (k) {
+    for (const l of (typeof k.leasesOn === 'function' ? k.leasesOn(profileId) : [])) add(B.parentKeyOf(l.browserKey), 'leased');
+    for (const x of (typeof k.pinnedBy === 'function' ? k.pinnedBy(profileId) : [])) add(x.browserKey, 'pinned');
+  }
+  for (const c of convs) if (c.pinned === profileId) add(c.browserKey, 'pinned');
+  return [...out.values()];
+}
 router.get('/api/browser/housekeeping', async (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
-  try { res.json(await tr.housekeeping()); } catch (e) { fail(res, e); }
+  try {
+    const h = await tr.housekeeping();
+    const convs = conversationRows();
+    const k = ctx?.keeper || null;
+    for (const r of h.profiles || []) {
+      const p = k && typeof k.profile === 'function' ? k.profile(r.id) : null;
+      r.scope = p ? B.scopeOf(p) : null;
+      r.scopeConversation = p && p.owner && p.owner.kind === 'session' ? p.owner.id : null;
+      r.createdBy = p ? p.createdBy || null : null;
+      r.usedBy = usedByOf(r.id, convs);
+    }
+    res.json({ ...h, conversations: convs.map(({ pinned, lastActive, ...c }) => c) });
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/housekeeping/sweep', (req, res) => {
   if (refuseHost(req, res)) return;
@@ -150,13 +192,31 @@ router.patch('/api/browser/profiles/:id', (req, res) => {
   if (!PROFILE_ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   if (typeof k.updateProfile !== 'function') return res.status(503).json({ error: 'this keeper cannot edit a profile', code: 'unavailable' });
   const { host, ...patch } = req.body || {};
-  try { res.json(k.updateProfile(req.params.id, patch)); } catch (e) { fail(res, e); }
+  try {
+    const r = k.updateProfile(req.params.id, patch);
+    // owner ruling A: a narrowing's detached conversations each hear it on their next message (layer ②, zero billed turns)
+    for (const d of r.detached || []) {
+      const s = d.sessionId ? ctx?.activeSessions?.get?.(d.sessionId) : null;
+      if (!s || typeof ctx?.notice !== 'function') continue;
+      try { ctx.notice(d.sessionId, s, { ...B.profileChangeNotice({ was: r.profile.label, now: '', by: 'user', handles: [] }), kind: 'browser-profile' }); } catch { /* optional */ }
+    }
+    res.json(r);
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/profiles/:id/forget', async (req, res) => {
   if (refuseHost(req, res)) return;
   const tr = traceOr503(res); if (!tr) return;
   if (!PROFILE_ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
-  try { res.json(await tr.forgetProfile(req.params.id)); } catch (e) { fail(res, e); }
+  const release = req.body?.release === true, unpin = req.body?.unpin === true;
+  try {
+    // owner ruling A (6): Delete… — release every lease + stop the browser, clear every pin naming it (lane S2's seam),
+    // THEN the set-aside (archive-before-remove, unchanged); without the flags the old refusals stand (leased / running)
+    let released = null, unpinned = null;
+    if (release && typeof ctx?.releaseProfile === 'function') released = await ctx.releaseProfile(req.params.id);
+    if (unpin && typeof ctx?.unpinProfile === 'function') unpinned = ctx.unpinProfile(req.params.id);
+    const r = await tr.forgetProfile(req.params.id);
+    res.json({ ...r, ...(released ? { detached: released.detached.length, stopped: released.stopped } : {}), ...(unpinned ? { unpinned: unpinned.cleared } : {}) });
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/orphans/adopt', (req, res) => {
   if (refuseHost(req, res)) return;

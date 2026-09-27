@@ -415,6 +415,34 @@ export function agoText(ms) {
   if (s < 172800) return t('{n} h ago', { n: Math.round(s / 3600) });
   return t('{n} d ago', { n: Math.round(s / 86400) });
 }
+// ── OWNER RULING A (2026-09-26): WHO CAN USE a profile — the row's switch, Rename…, Delete… ──
+/**
+ * The "Who can use it" options of ONE profile row, DOM-free: "All my conversations" first, then "Only <name>" for the
+ * conversation it is kept to (when it is), the one that made it, the ones using it (a lease or a pin), then every
+ * other live conversation, most recent first — each at most once. `value` = 'all' | 'one:<browserKey>'; `selected` marks
+ * the current scope. A conversation no live row names is "Only the conversation that made it" / "Only one conversation".
+ */
+export function scopeOptions(row, conversations = []) {
+  const r = row || {};
+  const convs = Array.isArray(conversations) ? conversations : [];
+  const nameOf = (bk) => { const c = convs.find((x) => x && x.browserKey === bk); return c && c.name ? String(c.name) : ''; };
+  const out = [{ value: 'all', label: t('All my conversations'), selected: r.scope === 'all' || !r.scope }];
+  const seen = new Set();
+  const add = (bk, fallback) => {
+    if (!bk || seen.has(bk)) return;
+    seen.add(bk);
+    const n = nameOf(bk);
+    out.push({ value: 'one:' + bk, label: n ? t('Only {name}', { name: n }) : fallback, selected: r.scope === 'one' && r.scopeConversation === bk });
+  };
+  if (r.scope === 'task') out.push({ value: 'task', label: t('Only a Task Group'), selected: true }); // nothing creates one; shown as it is, never mislabelled "all"
+  if (r.scope === 'one' && r.scopeConversation) add(r.scopeConversation, r.scopeConversation === r.createdBy ? t('Only the conversation that made it') : t('Only one conversation (not running now)'));
+  if (r.createdBy) add(r.createdBy, t('Only the conversation that made it'));
+  for (const u of Array.isArray(r.usedBy) ? r.usedBy : []) if (u && u.browserKey) add(u.browserKey, t('Only one conversation (not running now)'));
+  for (const c of convs) if (c && c.browserKey) add(c.browserKey, t('Only one conversation (not running now)'));
+  return out;
+}
+/** The live conversations that USE a profile (a lease or a pin) — the Delete… warning's and the narrowing's count. */
+export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.usedBy : []).filter((u) => u && (u.leased || u.pinned)); }
 /** A user-action call: fetchJson never throws, so `{error}` IS the failure and must reach the user. */
 async function act(url, init, what) {
   const r = await fetchJson(url, init);
@@ -462,8 +490,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const ident = el('div', 'bprof-ident');
     ident.appendChild(el('span', 'bprof-label', String(r.label || r.id)));
     if (r.legacy) ident.appendChild(el('span', 'bprof-chip', t('legacy')));
-    // P6 (§6.2): an instance-shared profile is MEDIATED — every session on it sees and drives only its own tabs
-    if (r.mediated) { const c = el('span', 'bprof-chip', t('shared')); c.title = t('Shared with every session on this instance: each one sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.'); ident.appendChild(c); }
+    // P6 (§6.2): a MEDIATED profile — every conversation on it sees and drives only its own tabs (owner ruling A: "shared"
+    // now means WHO MAY USE it — the switch below — so the isolation chip says what it is)
+    if (r.mediated) { const c = el('span', 'bprof-chip', t('separate tabs')); c.title = t('Each conversation sees and drives only its own tabs through a mediated CDP endpoint; while you drive, its input and navigation are refused.'); ident.appendChild(c); }
     if (r.host) ident.appendChild(el('span', 'bprof-chip', String(r.host)));
     const chip = app.browserChipFor ? app.browserChipFor(r.id) : null;
     ident.appendChild(el('span', 'browser-chip', chip || String(r.provider || '')));
@@ -486,7 +515,10 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     recWrap.title = ours ? t('Record this profile\'s screen (30 fps WebM, needs agent-browser ≥ {floor}) whenever its browser is live — a video of a logged-in profile is a secret with a storage bill', { floor: String(v?.limits?.recordingFloor || '0.37.0') }) : String(r.why || '');
     cb.onchange = async () => { st.busy = true; cb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { record: cb.checked }), t('Could not change recording')); st.busy = false; if (!ok) cb.checked = !cb.checked; load(); };
     recWrap.append(cb, document.createTextNode(' ' + t('record')));
-    row.appendChild(recWrap);
+    // owner ruling A: the row's controls live in ONE wrapping cell (record · who can use it · stop · rename · delete)
+    const actions = el('div', 'bprof-actions');
+    row.appendChild(actions);
+    actions.appendChild(recWrap);
     // lane H verify r5: a live NAMED profile's browser can be stopped here — the remedy the "keeps closing" notice names
     // (a Stop ends the record and its restart count); its logins stay in the profile, the next command starts it again
     if (r.live && !r.host) {
@@ -494,19 +526,70 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       stop.disabled = st.busy;
       stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
       stop.onclick = async () => { stop.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
-      row.appendChild(stop);
+      actions.appendChild(stop);
     }
-    const forget = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Set aside'));
-    forget.disabled = !r.canForget || st.busy;
-    forget.title = r.canForget ? t('Move this profile\'s directory beside itself and remove the record — nothing is deleted until you click Delete permanently below') : String(r.why || '');
-    forget.onclick = async () => {
-      const yes = await showConfirmDialog({ title: t('Set aside {label}?', { label: String(r.label || r.id) }), message: t('The directory is moved beside itself (…forgotten-<time>) and listed under "Set aside" below; the profile disappears from every picker. Nothing is deleted until you click Delete permanently.'), confirmText: t('Set aside') });
-      if (!yes) return;
-      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/forget`, jsonInit('POST'), t('Could not set aside'));
-      if (res) showToast(t('Set aside: {from} → {to}', { from: String(res.from || ''), to: String(res.to || '') }), { duration: 7000 });
+    // OWNER RULING A (3): "Who can use it" — All my conversations (the default) / Only <a conversation>; narrowing takes it
+    // from every other conversation that uses it (the user's latest choice wins over an earlier pin), said first
+    if (!r.legacy) {
+      const wrap = el('label', 'bprof-scope');
+      wrap.appendChild(document.createTextNode(t('Who can use it') + ' '));
+      const sel = document.createElement('select'); sel.className = 'bprof-scope-select';
+      const opts = scopeOptions(r, v?.conversations || []);
+      for (const o of opts) { const op = document.createElement('option'); op.value = o.value; op.textContent = o.label; if (o.selected) op.selected = true; sel.appendChild(op); }
+      sel.disabled = st.busy || r.state === 'not-ours';
+      wrap.title = r.scope === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Other conversations can\'t use it unless you pick it for them (New Session or Session properties).');
+      const cur = (opts.find((o) => o.selected) || opts[0]).value;
+      sel.onchange = async () => {
+        const val = sel.value;
+        if (val === cur) return;
+        const body = val === 'all' ? { scope: 'all' } : { scope: 'one', conversation: val.slice(4) };
+        if (val !== 'all') {
+          const keep = val.slice(4);
+          const others = usersOf(r).filter((u) => u.browserKey !== keep);
+          if (others.length) {
+            const name = (opts.find((o) => o.value === val) || {}).label || '';
+            const yes = await showConfirmDialog({ title: t('Keep {label} to one conversation?', { label: String(r.label || r.id) }), message: t('{n} other conversation(s) are using it; they lose it now (their pages in it close). To give it back to one, pick it for that conversation again in Session properties.', { n: others.length }) + ' (' + name + ')', confirmText: t('Keep it to one') });
+            if (!yes) { sel.value = cur; return; }
+          }
+        }
+        st.busy = true; sel.disabled = true;
+        const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', body), t('Could not change who can use it'));
+        st.busy = false;
+        if (!ok) sel.value = cur;
+        else if (ok.detached && ok.detached.length) showToast(t('{n} other conversation(s) no longer use {label}', { n: ok.detached.length, label: String(r.label || r.id) }), { duration: 6000 });
+        load();
+      };
+      wrap.appendChild(sel);
+      actions.appendChild(wrap);
+    }
+    // Rename… — validated like a new profile's name (unique, a human name, never a path)
+    const rename = el('button', 'file-tool-btn bprof-btn bprof-rename', t('Rename…'));
+    rename.disabled = st.busy;
+    rename.onclick = async () => {
+      const name = await showInputDialog({ title: t('Rename {label}', { label: String(r.label || r.id) }), label: t('Name'), value: String(r.label || ''), confirmText: t('Rename') });
+      if (name === null || name === undefined || !String(name).trim() || String(name).trim() === String(r.label || '')) return;
+      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { label: String(name).trim() }), t('Could not rename'));
+      if (res) showToast(t('Renamed to {label}', { label: String(res.profile?.label || name) }), { duration: 4000 });
       load();
     };
-    row.appendChild(forget);
+    actions.appendChild(rename);
+    // Delete… — the existing two steps (set aside now, "Delete permanently" below later), and it no longer waits for you to
+    // detach anything: every conversation using it is told, loses it, and its pin is cleared (owner ruling A (6))
+    const forget = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Delete…'));
+    const notOurs = r.state === 'not-ours';
+    forget.disabled = notOurs || st.busy;
+    forget.title = notOurs ? String(r.why || '') : t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below');
+    forget.onclick = async () => {
+      const users = usersOf(r);
+      const names = users.map((u) => u.name).filter(Boolean);
+      const warn = users.length ? t('{n} conversation(s) use it — they go back to a temporary browser.', { n: users.length }) + (names.length ? ' (' + names.slice(0, 8).join(', ') + ')' : '') + ' ' : '';
+      const yes = await showConfirmDialog({ title: t('Delete {label}?', { label: String(r.label || r.id) }), message: warn + t('Its logins are kept aside under “Deleted profiles” until you press Delete permanently there.'), confirmText: t('Delete'), danger: users.length > 0 });
+      if (!yes) return;
+      const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/forget`, jsonInit('POST', { release: true, unpin: true }), t('Could not delete'));
+      if (res) showToast(t('Deleted {label} — kept aside until you delete it permanently', { label: String(r.label || r.id) }) + (res.detached || res.unpinned ? ' · ' + t('{n} conversation(s) no longer use it', { n: Math.max(Number(res.detached) || 0, Number(res.unpinned) || 0) }) : ''), { duration: 7000 });
+      load();
+    };
+    actions.appendChild(forget);
     return row;
   }
   /** takeover C3 (design-browser-takeover §5.3): one managed EPHEMERAL browser —
@@ -543,7 +626,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     };
     const aside = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Set aside')); aside.title = t('Move it beside itself and list it below — nothing is deleted until you click Delete permanently');
     aside.onclick = async () => {
-      const yes = await showConfirmDialog({ title: t('Set aside {name}?', { name: String(o.name || '') }), message: t('The directory is moved beside itself (…forgotten-<time>) and listed under "Set aside" below. Nothing is deleted until you click Delete permanently.'), confirmText: t('Set aside') });
+      const yes = await showConfirmDialog({ title: t('Set aside {name}?', { name: String(o.name || '') }), message: t('The directory is moved beside itself (…forgotten-<time>) and listed under “Deleted profiles (kept aside)” below. Nothing is deleted until you click Delete permanently.'), confirmText: t('Set aside') });
       if (!yes) return;
       const res = await act('/api/browser/orphans/forget', jsonInit('POST', { dir: o.dir }), t('Could not set aside'));
       if (res) showToast(t('Set aside: {from} → {to}', { from: String(res.from || ''), to: String(res.to || '') }), { duration: 7000 });
@@ -593,7 +676,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     if (v.orphansWhy) orph.appendChild(el('div', 'bprof-empty chat-status-dim', String(v.orphansWhy)));
     else if (!(v.orphans || []).length) orph.appendChild(el('div', 'bprof-empty chat-status-dim', t('None — every profile directory here is named by a record.')));
     for (const o of v.orphans || []) orph.appendChild(orphanRow(o));
-    const fg = section(t('Set aside'), t('moved beside themselves, never deleted by a sweep — only by your click'));
+    const fg = section(t('Deleted profiles (kept aside)'), t('moved beside themselves, never deleted by a sweep — only by your click'));
     if (!(v.forgotten || []).length) fg.appendChild(el('div', 'bprof-empty chat-status-dim', t('Nothing set aside.')));
     for (const f of v.forgotten || []) fg.appendChild(forgottenRow(f));
     const sw = section(t('Sweep'), '');

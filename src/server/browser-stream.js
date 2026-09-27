@@ -71,6 +71,16 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       applyInputState(r, ev.state, ev.cause || (ev.kind === 'takeover' ? 'takeover' : 'handback'));
     }
   }) : null;
+  // VERIFY S5 (2026-09-26): a NAMED profile's lease that goes (the user's "Only <other chat>" narrowing, a Delete…, an
+  // agent's detach, the carrier grace) ends every live view this conversation had on that browser — typed `ended`, so
+  // the window says why instead of showing a picture of a browser the conversation no longer holds (and cannot take over)
+  const unsubLease = keeper && typeof keeper.onLease === 'function' ? keeper.onLease((ev) => {
+    if (!ev || (ev.kind !== 'detach' && ev.kind !== 'lease-dropped') || !ev.profileId || ev.ephemeral) return;
+    for (const r of [...relays.values()]) {
+      if (r.browserKey !== ev.browserKey || (r.target.profileId || null) !== ev.profileId) continue;
+      endRelay(r, 1000, ev.kind === 'detach' ? 'this conversation no longer holds that browser profile' : 'the lease on that browser profile was dropped');
+    }
+  }) : null;
   const unsubConfirm = keeper && typeof keeper.onConfirmation === 'function' ? keeper.onConfirmation((ev) => {
     for (const r of relays.values()) {
       if (r.browserKey !== ev.browserKey || (r.target.profileId || null) !== (ev.profileId || null)) continue;
@@ -480,7 +490,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       ...r.stats,
     }));
   }
-  function shutdown() { for (const r of [...relays.values()]) endRelay(r, 1001, 'the server is restarting'); try { unsubInput?.(); unsubConfirm?.(); } catch { /* */ } }
+  function shutdown() { for (const r of [...relays.values()]) endRelay(r, 1001, 'the server is restarting'); try { unsubInput?.(); unsubConfirm?.(); unsubLease?.(); } catch { /* */ } }
 
   return { handleUpgrade, closeForSession, viewerCount, stats, shutdown, STREAM_PATH: S.STREAM_PATH, _relays: relays,
     tap, broadcastTo, TAP_FPS }; // P5: the recorder's seam

@@ -207,7 +207,9 @@ out({ success: false, error: 'fake: unknown ' + a }); process.exit(1);
   ok(be.resolvedProfileDir(KEY) === '' && !/browser profile changed/.test(p0) && !/browser profile changed/.test(prompt()), 'before the pin: the config names no profile and no prompt carries a browser notice');
   const r = await j('POST', '/api/browser/pin', { sessionId: 'sess-9', profile: 'Work' });
   ok(r.status === 200 && r.json.pin.profileId === work.id && /applies/.test(r.json.appliesFrom), 'the USER pins Work mid-task through the UI route');
-  ok(be.resolvedProfileDir(KEY) === work.dir && session._browserProfileId === work.id && persisted[0].id === work.id, 'NO RESTART: the same browserKey\'s config now names Work\'s dir, the live session is stamped, the meta write was asked');
+  // OWNER RULING A (2026-09-26): the pin is the DEFAULT ATTACHMENT — the config is NOT re-pointed at Work's directory (a
+  // second Chrome there dies on SingletonLock — the study's path B); the set's default is Work, reached through the keeper
+  ok(be.resolvedProfileDir(KEY) === '' && k.setFor(KEY).defaultId === work.id && session._browserProfileId === work.id && persisted[0].id === work.id, 'NO RESTART: the same browserKey\'s config names NO profile (never the directory), the set\'s default is Work, the live session is stamped, the meta write was asked');
   ok(sessionStatus.pendingNotices(sessionStatusKey(session, 'sess-9')).length === 1 && sessionStatus.pendingNotices(sessionStatusKey(session, 'sess-9'))[0].kind === 'browser-pin', 'ONE typed browser-pin notice is queued in the REAL session-status store');
   const c = prompt();
   ok(/browser profile changed: ephemeral \(no profile\) → Work \(by user\)/.test(c) && /Attached now: work, personal/.test(c) && (c.match(/<system-reminder>/g) || []).length === 1, 'the user\'s next prompt carries the notice as one <system-reminder> naming the set — zero billed turns (it rides the user\'s own message)');

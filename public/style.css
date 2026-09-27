@@ -449,11 +449,11 @@ html, body {
 .usage-hour[data-h]::after { content: attr(data-h); position: absolute; bottom: -13px; left: 0; font-size: 8px; color: var(--text-dim); }
 .usage-footer { display: flex; flex-direction: column; gap: 3px; font-size: 9px; color: var(--text-dim); padding: 8px 2px 2px; border-top: 1px solid var(--border); margin-top: 6px; }
 .acct-key-main { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap; row-gap: 0; }
-/* The identity LINE (name · ident · the dim credits tag) never wraps: under a
+/* The identity LINE (name · ident · the credits chip) never wraps: under a
    wide UI font (the Actions runner resolves system-ui to DejaVu Sans, ~10 %
    wider than Noto/Cantarell) the tail used to drop under the name and the
-   "· credits" tag left the identity line (2.369.125 r8). The name and the
-   ident ellipsize under pressure; the tag is its own flex item and never
+   credits tag left the identity line (2.369.125 r8). The name and the
+   ident ellipsize under pressure; the chip's slot is its own flex item and never
    shrinks or clips; .acct-key-extra still wraps to its own line below. */
 .acct-key-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex: 1 1 100%; white-space: nowrap; }
 /* SHRINK PRIORITY (2.369.129, owner: "完全看不到账号名称了" — .128 gave the NAME the
@@ -461,15 +461,19 @@ html, body {
    the ident (an email) ellipsizes FIRST — a huge shrink weight — and the name yields
    only once the ident is already gone. */
 .acct-key-name { font-weight: 500; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
-.acct-key-line > .acct-usage-credits { flex: none; }
+.acct-key-line > .acct-credits-slot { flex: none; display: inline-flex; align-items: center; align-self: center; }
+.acct-credits-slot:empty { display: none; }
 /* TWO LINES where the row already has the height (2.369.131, owner: "名字之间空白很大…把 email 放到第二行"):
    a row that carries a usage cell is ~41 px tall because of the donut column, so its
    identity cell has room for the NAME on line 1 (the credits tag beside it) and the
    ident on line 2 — no truncated names, no dead space, no taller rows. Rows without
    a usage cell (CLI login, API keys) keep the single line. */
-.acct-key-row:has(.acct-usage-cell) .acct-key-line { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; row-gap: 0; align-items: baseline; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 0; row-gap: 0; align-items: baseline; }
 .acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-key-name { grid-column: 1; grid-row: 1; }
-.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-usage-credits { grid-column: 2; grid-row: 1; justify-self: start; }
+/* THE CREDITS CHIP's slot (2.369.189) beside the name, then the reset slot: three
+   columns, the 6px gap carried by the slots themselves so an EMPTY slot (display:none)
+   adds no gap — column-gap would leave 12px around an empty track. */
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-credits-slot { grid-column: 2; grid-row: 1; justify-self: start; margin-left: 6px; }
 .acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-key-tail { grid-column: 1 / -1; grid-row: 2; }
 .acct-key-tail { color: var(--text-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1000 auto; }
 .acct-usage-cell { display: flex; justify-content: flex-end; }
@@ -516,9 +520,15 @@ html, body {
 .acct-key-row.usage-acct-soon .acct-usage-next { color: var(--green, var(--accent)); }
 .acct-key-row.usage-acct-soon .acct-usage-next svg { opacity: 1; }
 .acct-linked-hint { color: var(--accent); opacity: 0.85; }
-/* usage credits (B-ad05): a DIM tag — the org bills pay-per-use past 100 %; nothing is being spent yet */
-.acct-linked-hint.acct-usage-credits { color: var(--text-secondary); opacity: 0.8; }
-.usage-src.usage-credits { opacity: 0.7; }
+/* THE CREDITS CHIP (2.369.189, owner: "这啥玩意啊 不如显示个钱的图标"): UI_ICONS.money +
+   ONE short word, the whole sentence in title + aria-label (src/lib/usage-source.js
+   creditsChipHtml) — the Agents roster's identity line and the usage popup. In use
+   (money spent NOW) = the theme's warning tone; allowed (B-ad05: the org bills
+   pay-per-use past 100 %, nothing spent yet) = dim. Never a colour alone: the state
+   rides data-credits and the sentence rides aria-label. */
+.credits-chip { display: inline-flex; align-items: center; gap: 2px; flex: none; padding: 0 4px; border-radius: var(--radius-sm); font-size: 9px; font-weight: 600; font-style: normal; line-height: 14px; white-space: nowrap; vertical-align: middle; cursor: default; color: var(--warn-text); background: color-mix(in srgb, var(--yellow, var(--accent)) 16%, transparent); }
+.credits-chip svg { width: 10px; height: 10px; flex: none; }
+.credits-chip[data-credits="allowed"] { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
 /* provenance/note line under the account identity (2.202.0 — inline tags
    squeezed the tail into an ellipsis mush; flex-basis:100% wraps the flex row) */
 .acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3933,6 +3943,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 @container (max-width: 340px) {
   .acct-key-row .acct-usage { display: none; }
   .acct-key-row .acct-usage-mini { display: inline-flex; }
+  /* the credits chip keeps its icon (the sentence stays in its aria-label/title) */
+  .acct-key-row .credits-chip-word { display: none; }
+  .acct-key-row .credits-chip { padding: 0 3px; }
 }
 
 /* intrinsic-width breakers (2.179.1 screenshot audit): nowrap name/email and
@@ -4799,7 +4812,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof-section-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; padding: 6px 0 4px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .bprof-section-title { font-weight: 600; }
 .bprof-section-sub { font-size: 11px; }
-.bprof-row { display: grid; grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) 90px minmax(120px, 1fr) minmax(120px, 1fr) auto auto; gap: 8px; align-items: center; padding: 5px 4px; border-bottom: 1px solid var(--border); border-radius: var(--radius-sm); }
+.bprof-row { display: grid; grid-template-columns: minmax(160px, 1.4fr) minmax(120px, 1fr) 90px minmax(120px, 1fr) minmax(120px, 1fr) auto; gap: 8px; align-items: center; padding: 5px 4px; border-bottom: 1px solid var(--border); border-radius: var(--radius-sm); }
 .bprof-row.bprof-orphan { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto auto; }
 .bprof-row.bprof-forgotten { grid-template-columns: minmax(200px, 2fr) 90px minmax(120px, 1fr) auto; }
 .bprof-row.bprof-ephemeral-browser { grid-template-columns: minmax(180px, 1.6fr) minmax(120px, 1fr) minmax(90px, .8fr) minmax(100px, .8fr) auto; } /* takeover C3: the managed ephemeral browsers */
@@ -4820,6 +4833,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .bprof-rec-refused { margin-left: 6px; color: var(--yellow, #e5c07b); font-size: 10px; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
 .bprof-record input { margin: 0; }
+.bprof-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; } /* owner ruling A: record · who can use it · stop · rename · delete */
+.bprof-scope { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--text-secondary); font-size: 11px; }
+.bprof-scope-select { max-width: 220px; font-size: 11px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 4px; }
 .file-tool-btn.bprof-forget { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); } /* lane I: (0,2,0) — the tie with viewers.css's `.file-tool-btn` */
 .file-tool-btn.bprof-forget:disabled { color: var(--text-dim); border-color: var(--border); }
 .file-tool-btn.bprof-delete { color: var(--red, #e55); border-color: var(--red, #e55); }
@@ -4937,12 +4953,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .task-log-edit-prio { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
 /* THE RESET CHIP (design-reset-credits p2): a row's stored reset credits on its
    identity line — the dim count + a compact "Use…" button. Beside the name
-   (grid column 2 on two-line rows, like the credits tag), never in the usage
+   (grid column 3 on two-line rows, after the credits chip), never in the usage
    cell whose right edge the donut columns align on; the button is sized to the
    line so the row keeps its height. A disabled button still carries its reason
    in the title (Claude: the interactive /limit-reset only). */
 .acct-key-line > .acct-reset-slot { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; overflow: hidden; }
-.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-reset-slot { grid-column: 2; grid-row: 1; justify-self: start; max-width: 100%; }
+.acct-key-row:has(.acct-usage-cell) .acct-key-line > .acct-reset-slot { grid-column: 3; grid-row: 1; justify-self: start; max-width: calc(100% - 6px); margin-left: 6px; }
 /* the count yields (ellipsis) before the button does — the button is the control */
 .acct-linked-hint.acct-reset-chip { color: var(--text-secondary); opacity: 0.85; font-size: 10px; min-width: 0; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
 .acct-reset-slot > .acct-reset-use { flex: none; }

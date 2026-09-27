@@ -469,6 +469,11 @@ VibeSpace 得知这个 profile 存在的方式。
 
 #### 3.2.5 钉住 (pin)：一个会话怎么拿到一个持久 profile，以及那个选择怎么活下去
 
+> **owner 裁定 A（2026-09-26，§3.2.6）改写了本节的机制：钉子是这个对话的默认附着，绝不是一个目录。** 下文"把会话的
+> 间接层（变体 D 的生成配置 / 变体 C 的符号链接）重新指向 profile 目录"的做法已退役 —— 它在 keeper 的 Chrome 占着的目录上
+> 又起一个 Chrome（exit 21 SingletonLock，研究路径 B）。梯级、origin 词表、钉子跟着对话走（resume / fork）都不变；
+> `repointPin` 机制只留给启动时把旧版会话的间接层放回（`convertPinnedDirs`）。
+
 （Owner 问题 Q1。）§3.2 的默认值是**易逝的**，这是对的：绝大多数浏览要的就是"打开、读、扔掉"。
 但有一类会话不是 —— 一个要登录供应商后台、要守着一个工作账号的会话，它每次都需要**同一个**
 cookie 罐。这一节说：用户怎么用最少的动作把这件事说出来，以及那句话怎么活过 resume、fork 和重启。
@@ -572,6 +577,65 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
 逐字不变，这也是绝大多数会话的形状。集合有两个及以上元素时，§3.7 接管：命令必须点名 handle，而钉住
 （`pin`）改的只是那个**默认**。这不是把本节推翻，而是把它一直隐含的那个量词写出来。
 
+#### 3.2.6 一个有名字的 profile 给我的所有对话用 —— owner 裁定 A（2026-09-26，"A吧"）
+
+**为什么。** 两轮 naive-user 研究在同一个任务上失败（`SharedContext/vibespace-naive-study-2.md` 的 T4/T5）。
+**路径 A**：对话 1 的 agent `new work` 并登录；对话 2 被要求用 work ⇒ `not_owner`，Ask-user 卡片唯一能用的选项是一条
+CLI 命令（`vibespace-browser new work --sharing instance`）；照做之后的记录是"owner = 会话、sharing = instance"——
+两个字段互相矛盾，准入只读前一个，对话 3 仍然 `not_owner`。**路径 B**：在会话属性里把 work 钉给对话 2 ⇒ 它自己的
+浏览器被交了 work 的**目录**，在 keeper 的 Chrome 占着的目录上又起一个 Chrome ⇒ exit 21 SingletonLock，实时视图一片红；
+agent 于是自己建了一个多余的 profile，最后静默退回一个临时浏览器，没有一个字说钉子没生效。
+
+**裁定与实现（逐条）：**
+
+1. **谁可以用 = 一个字段 `owner`。** `instance` = "我的所有对话"（**默认**：UI 新建、agent 的 `new` / `new --adopt`、
+   卡片的 adopt 全是它）；`session` = "只给 <那个对话>"（只有面板行的开关写它）；`task` = 只给某个岗位（没有任何东西创建
+   它，迁移也不碰它）。`createdBy` 记录创建它的对话，只用于显示和开关的"Only …"选项，从不参与准入。`sharing` 不再回答
+   "谁可以用"：`instance` 只是 P6 的**标签隔离**（每个对话只看得到、只驱动得了自己的标签页），一个 opt-in 旋钮 —— 不把它
+   设成默认的理由：中介代理在接管期间连用户自己的输入也拒绝（S2 实测，研究 T4-30）；配对机器上的 profile 不能中介；翻转
+   它要求没有租约。PURE `scopeOf(p)` 是唯一的读者（digest 的 `scope`，从不第二次存储）。
+2. **一个 profile 一个浏览器；第二个对话 JOIN。** keeper 仍是唯一启动者（naive study 2）；`joinOrLaunch`：活着的记录被
+   **加入**（同一进程、同一 CDP 端点、同一流目标）、在途的启动被**等待**（两个对话同时的第一条命令过去会拿到半启动的
+   记录然后 `browser_no_cdp`）、只有死的记录才**启动**（启动前照旧做 lane H 的锁判定）。
+3. **钉子是这个对话的默认附着，绝不是一个目录。** ws-create 交 `pinnedDir: null`；pin 路由不再 `repointPin(dir)`；
+   钉住的对话在**没有附着**时的第一条裸命令经 keeper 附着它（`resolveHandle` 的 `kind:'pin'` → `attachPin`，随后按
+   附着再解析一次，所以 paused / busy 照常判定）；agent 自己建的附着从不被挤掉。打不开 ⇒ 带 `pinned:true` 的具名拒绝
+   （"your pinned profile … did not open: … — tell the user; nothing else was opened instead"），并记在对话的
+   `pinFailure` 里（lane S2 的浏览器事实读它），**绝不**静默退回临时浏览器。pin 移动 / 取消只解除 pin 自己建的租约
+   （`via:'pin'`）。裁定之前留下的、指向目录的间接层在启动时（`convertPinnedDirs`）和下一次 pin 时被放回；一个旧版
+   对话**自己的**浏览器仍占着目录（它的启动标记是那个对话的 browserKey）⇒ `profile_locked` 点名那个对话和 Stop 按钮，
+   keeper 绝不结束它（它会在那个对话回合结束几分钟后自己释放）。卡片的 adopt 在移动 scratch 目录**之前**停掉这个对话
+   自己的浏览器。
+4. **用户的选择就是授权；最新的选择胜出。** 用户的 pin（新建会话、会话属性、用户配置的岗位 / 实例默认）与用户在 UI 上
+   的 attach 放行一个只给别的对话的 profile；agent 自己的 pin 不是授权（`setPin(by:'agent')` 先过准入）。一个 pin 只在
+   它**不早于**该 profile 最近一次"谁能使用"更改（`scopeAt`）时授权（PURE `userPinAuthorizes`）：把 profile 收窄给一个
+   对话会从其它**每一个**对话手里拿走它 —— 钉住它的也一样；之后在会话属性里再选一次就还回去。（偏离读者建议 C6 "钉住的
+   对话保留" 的理由：否则开关没法从一个钉住它的对话手里拿走它，而且被拒绝的那个对话听到的按钮 —— "在会话属性里为这个
+   对话选它" —— 会原地打转。）
+5. **一次一个驾驶者。** 租约说谁持有一个**标签页**；drive 说**此刻**谁在操作（keeper 的 `drivers`，内存态）。另一个对话
+   的 agent 正在它的回合里用它（且 `DRIVE_HOLD_MS` = 90 s 内发过命令），或者用户正从另一个对话的实时视图接管着它 ⇒
+   `browser_busy`，**点名**那个对话（或"用户，在 X 的实时视图里"）并给出等待上界；它的回合结束 / 90 s 无命令 / 不再持有
+   租约 ⇒ 释放，下一条命令接手（PURE `driveVerdict`，11 行表）。**不排队**：队列需要一次唤醒，而唤醒就是一个没人打字的
+   计费回合（spend-authorizer 的领地）。用户从任何实时视图的接管照 `browser-takeover.js`：被接管的那一对 `browser_paused`，
+   其它对话 `browser_busy`。点名另一个对话是 B-325a（"另一个会话的名字不经上限拒绝到达 agent"）的**唯一明确例外** ——
+   裁定原话是 "is told so by name"；digest 只带 browserKey（它也到达 agent），名字在客户端从自己的会话行得出。条带的标签
+   页写出谁在开（`{name} drives` / `you, in {name}`），一个共享浏览器即使是这个对话唯一的浏览器也显示条带。
+6. **上限。** 一个共享浏览器在**每个**持有它租约的对话里各算一个（每对话上限是那个对话自己的属性：它是那个对话条带上的
+   一个标签、一个句柄 —— PURE `conversationOwnCount`），在机器上只算**一个**（一个进程）。join 永远不触发机器上限（`start`
+   在 `ceilingNow` 之前返回活着的记录），只在那个对话自己满了时触发它的 `browser_cap`（scope conversation）。
+7. **面板行**（⚙ → Tools → Agent browser…）：`谁能使用` 下拉（我的所有对话 / 仅 <每个对话>，收窄前先确认会被拿走的对话数）、
+   `重命名…`（和 `new` 一样校验）、`删除…`（现有的两步：先"删除"= 搁置、在"已删除的配置（保留中）"里"永久删除"；警告
+   N 个对话在用；释放每个租约 + 停浏览器 + 清掉每个 pin —— lane S2 的 `unpinProfile` 接缝，同名 —— 再搁置）。
+8. **措辞。** 每个拒绝点名一个按钮或一个等待，绝不给命令行（`not_owner`：在 Agent browser 面板把它设成"All my
+   conversations"，或在会话属性里为这个对话选它；绝不再建第二个同登录的 profile）。
+9. **迁移** `2026-09-browser-profiles-all-conversations`：每个 `owner.kind === 'session'` 的有名字记录 → `instance`，旧
+   owner 进 `createdBy`。怎么分辨"显式只给这个对话"：分辨不了也不需要 —— 裁定之前 `--sharing` 取 owner|instance
+   （P6 的隔离旋钮），而 `owner` 同时是默认值，所以没有任何记录带着一个显式的"只给这个对话"。临时、legacy、task 记录不动；
+   `sharing` 从不被碰。
+
+门禁：`test-browser-share-model`（fast，70）+ `test-browser-share`（heavy，真 0.38.1 + 真 Chrome，21）+ `test-migrations`
+的迁移腿 + 翻转过的 `test-browser-pin` / `-handles` / `-mediation` / `test-profile-blindness` 断言。
+
 ### 3.3 profile 注册表
 
 `data/browser-profiles.json`，经 `writeJsonAtomic`（tmp+rename）写入，并且像其它每个 store 一样
@@ -592,8 +656,10 @@ profile 并**重开**这个浏览器"，菜单里就得这么写，而不是让�
     "proxy": null,                          // proxy URL; the SECRET half never leaves the server
     "host": null,                           // null = this machine; else a hostId (ssh host / device)
     "allowedDomains": null,                 // see §6.3 — refused on a persistent profile
-    "owner": { "kind": "task|session|instance", "id": "…" },
-    "sharing": "owner",                     // owner | instance (§6.2)
+    "owner": { "kind": "task|session|instance", "id": "…" }, // WHO MAY USE IT (§3.2.6): instance = all my conversations (the default)
+    "createdBy": "bk-…",                    // §3.2.6: the conversation that made it (display only, never an admission fact)
+    "scopeAt": 0,                           // §3.2.6: the last "Who can use it" change — an older USER pin no longer authorizes
+    "sharing": "owner",                     // owner | instance = TAB ISOLATION only (§6.2, §3.2.6), never who may use it
     "record": false,                        // per-profile screencast opt-in
     "lastChromiumMajor": null,              // §7.4's version ladder — the highest major that has written `dir`
     "lastBackend": null,                    // which provider wrote it last (forensics beside the major)
@@ -1670,6 +1736,10 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 
 ### 6.2 谁可以 attach 到一个 profile
 
+> **owner 裁定 A（2026-09-26，§3.2.6）取代了本节的第一段。** "谁可以用"只由 `owner` 回答：默认 `instance` = 我的所有
+> 对话，面板开关可以把它收窄给一个对话；用户的 pin / UI attach 是授权。`sharing` 只剩下标签隔离的意思（`instance` =
+> 每个对话只看得到自己的标签页，经中介代理），它从不决定谁可以用。下面的原文保留为历史。
+
 `sharing: "owner"`（默认）= 只有拥有它的那个任务的会话。`sharing: "instance"` = 这个实例上的任何
 会话。没有跨实例共享：一个 profile 就是活的凭据，它只以一次显式的、人驱动的导出的形式移动。
 
@@ -2456,6 +2526,12 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 序列里：它们回答的是另一个问题（§4.7、§4.9），而它们的区间说明了我们对它们了解得有多少。
 
 ## 11. 需要 OWNER 决定的事项
+
+> **裁定日志 2026-09-26 — 裁定 A（"A吧"）**：有名字的 profile 默认给所有对话用（§3.2.6）。定案随之落地的实现选择：
+> 一次一个驾驶者（`browser_busy` 点名，不排队）；共享浏览器在每个持有它的对话里各算一次上限；最新的用户选择胜出（收窄
+> 会拿走钉住它的对话，之后再钉即还回）。仍待 owner：(a) 有名字的 profile 要不要也在回合结束后释放（B-325a 今天只释放
+> 临时浏览器，一个共享浏览器会一直开着，直到最后一个租约空闲超时）；(b) 有头 Chrome 里另一个对话的标签在前台时，后台
+> 标签的截屏流会不会被节流 —— 未测量。
 
 | # | 决定 | 选项 | 建议 |
 |---|---|---|---|
