@@ -1052,7 +1052,9 @@ owner 原话: "抓取这个如果 API 允许 callback 之类的不主动 polling
 `Content-Disposition: attachment` (绝不执行、绝不在我们的源里渲染), 只有 png / jpeg / gif / webp
 可以 `?inline=1` 内联 (svg 永远不内联 —— 它是脚本)。窗口里图片是缩略图 (经 `img.src` 指向这条
 路由, 点开走 `showImageOverlay`), 其它附件是一枚 chip (名字、大小、下载)。Lark 的富文本里的图片
-与视频现在也记成附件 (`image_key` / `file_key`); Gmail 没有文件名的内联图片 (`cid:`) 也记。
+与视频现在也记成附件 (`image_key` / `file_key`); Gmail 没有文件名的内联图片 (`cid:`) 也记。**R3 (§23.1)**: 抓取顺序是 PURE 的
+(`fetchVerdict`: 缓存优先、记住的拒绝、只抓我们的、合流、退避、预算), `retry=1` 是人按的 Retry, 拒绝一律 `no-store`
+(vendor 限流 = 429 带等待), 画不出来的缩略图说出原因并给 Retry, 不再悄悄变成 chip。
 
 **搜索** —— `GET /api/channels/search?adapter=<id>&q=…`: 读本地日志, 异步分块读、有字节上限
 (一次最多扫 64 MB / 结果最多 100 条), 结果按时间倒序, 超出上限就说 `truncated`, 绝不占住事件循环。
@@ -3164,3 +3166,67 @@ owner 原话 (摘): "我不太需要一个 agent 订阅另一个 agent 的消息
 
 ### 22.4 归属
 B-afa0 (改写为本节); 前置 B-f0a2 (账号); 不动 §7/§8/§9 的机制, 只改它们在界面里的位置与 composer 的语义。
+
+## 23. R3 (2026-09-26): 图片就是图片; 第一屏只放要紧的
+
+owner 看 2.369.185 (聚合 IM) 时的两句话, 原文:
+
+1. "lark图像不能预览吗？" —— 一条带图的飞书消息在窗口里是文字 "[image]" 加一枚 "image ⬇" chip, 没有缩略图。
+2. "开头不要把所有消息都放进来，很多是没用的，建议只放重要消息/conversation（比如推送给agent了的，或者某个agent刚刚读取了的），并展示一个小tag表示状态。" —— 第一屏是 "879 个群 · 0 条未读", 按时间列出每一个会话 (Gmail 账单、销售表单、每个飞书群)。
+
+### 23.1 图片 (原因 + 修法)
+
+记录、按需抓取、缓存、我们自己的路由 —— 这条链 2.369.185 就有 (§6.5)。owner 看到的 chip 是 `img.onerror` 的**兜底**: 任何失败 (那一分钟的预算被首次遍历用光、会话已解散、合并转发里的图、非栅格类型) 都被悄悄变成 "image ⬇", 原因被扔掉 —— 违反"失败必须说出来"。修法:
+
+- **记录**: 飞书图片消息与富文本里的 `img` / `media` 是 `image/*` / `video/*` 附件, id = `image_key` / `file_key`, 抓取句柄 = (message_id, key); 附件带 `placeholder` = 文本里为它写的那个记号 (`[image]` / `[video]`), 不再编造英文名字 (名字由窗口按设备语言说 "图片", 缓存存资源自己的文件名)。包在语言键 (`zh_cn`) 里的富文本, 文字与附件读同一个 body (原来两边不一致)。
+- **抓取裁决 (PURE `src/channel-attachments.js` `fetchVerdict`)**, 按顺序: ① 缓存优先 (预算用尽/退避/账号停用都照样出图) ② 记住的拒绝 (vendor 拒过的, 永久类 10 分钟、临时类按它自己的等待, 期间不再发请求; 人按 Retry 跳过这层记忆, 但绝不跳过预算) ③ 只抓我们记录里有的 id (先按 `?msg` 直接找那条消息 —— `store.findRecord`, 再看最新 5000 条) ④ 能力行 `fetch` ⑤ 账号启用 ⑥ 同一张图正在抓 ⇒ **合流** (一个请求一次计费) ⑦ 不在 vendor 退避期 (整轮失败的退避, 或某张图吃到的限流 —— 限流属于**账号**, 同批其他图一起等) ⑧ 不超本分钟预算 ⑨ 才抓。只有附件路由会触发它 (窗口画到这张图、人点了它), 摄入从不抓字节。
+- **窗口**: 缩略图画出后, 它的 placeholder 从文字行里去掉一次 (`bodyShown`; 记录的 `text` 不变, agent 与搜索照读)。画不出来时, 再问一次路由 (被记住的拒绝不花 vendor 请求), PURE `thumbVerdict` 决定: 等就能好 (预算、退避、限流) ⇒ "N 秒后重试" 并自己重载 (最多两次, 只在窗口还显示它时); 等也没用 ⇒ chip **说出原因** (额度已用完 / 被禁止 / 未找到 / 未缓存 / 平台错误 …, 整句在 title) 并给 Retry; 文件在但不是栅格图 (HEIC) ⇒ 下载 chip, 标 "无法预览"。每次失败进 telemetry `chan-attachment-failed`。
+- **ledger**: 缓存命中只动 LRU 的时间戳, 合并写 (每账号 5 s 一次, 关机 flush), 不再每张缩略图一次同步原子写。
+- **白名单**: 这是窗口能引起的唯一一种 vendor 请求, 在 `scripts/test-vendor-whitelist.mjs` §7 **有意登记**并点名三道门 (按需 / 缓存优先 / 计预算), 普查是源码的函数, 四个无门的 patched copy 各自把它打红。
+
+### 23.2 "要紧"的规则
+
+一个会话出现在第一屏 (注意力列表), 当且仅当下列任一成立 (PURE `src/lib/channel-focus.js` `statusTag` ≠ null):
+
+| 事实 | 来源 (rowView 的 `outbox` / `assignment` / `touch`) | 时间窗 |
+|---|---|---|
+| agent 的草稿等你批准, 或一次发送结果未知 | outbox.awaiting / outbox.unknown | — |
+| **单独**交给了 agent / Task Group (会话粒度 —— 它自己的指派) | assignment, `source: 'conversation'` | — |
+| 按规则或整个账号交出去, **且**这次交接已经作用到它: 一次唤醒**真的送达**了 agent (`touch.wake.ok === true`, lane ≠ `none`), 或它的唤醒被暂存 (琥珀) | assignment `source: 'pattern' / 'account'` + `touch.wake` / 暂存 | 送达: 24 h, 边界不含; 暂存: 7 天 |
+| 有 agent 读过它 | `agentReads` (agent 路由的 readFor 盖章: 谁、何时、读到哪一条) | 24 h, 边界**不含** |
+| 一次唤醒被暂存 | pending > 0、最后一次唤醒 lane `none` 未送达、或最后一次拒绝晚于最后一次唤醒 (**暂存到下一轮不算**) | 7 天 (唤醒台账自己的窗) |
+| 你在里面回复过 | `selfAt` = vendor 标成你的消息 (`isSelf`) 或你自己从这里发出的 | 24 h, 边界不含 |
+
+未归档的 agent 群永远在 (你的显式动作, D1)。顺序与全列表相同 (按活动)。按规则或整个账号交出去的会话, 在唤醒送达或暂存之前不因交接本身上第一屏 —— 照常往下走 (读过 / 暂存 / 回复过 / 不在); 上了第一屏时 tag 带 `grain`, tooltip 说 "整个账号已交给 …" / "按匹配它的规则交给了 …", 可见的词仍是 "→ Agent"。
+
+**D4 (集成者裁定, 2026-09-27)**: 按账号或按规则交接**不**把这个账号的每个会话放回第一屏 (owner 的工作邮箱有 824 个线程, 整个交给 agent 就会把 824 个全放回来, 正是 owner 要我们停止的事); 只有这些事实让一个会话上第一屏: 单个会话的指派、24 h 内真的送达了 agent 的唤醒、24 h 内 agent 读过、7 天内被暂存的唤醒、你 24 h 内的回复、等批准的提案 / 结果未知的发送。
+
+### 23.3 一个 tag, 优先级
+
+`awaiting › unknown › assigned › read | new-since-read › held › replied` —— 第一个命中的那个:
+
+| code | en | zh | ja | 语气 |
+|---|---|---|---|---|
+| awaiting | N to approve | N 条待批准 | N 件承認待ち | 需要你 (accent 描边) |
+| unknown | send unknown | 结果未知 | 結果不明 | 没送到 (琥珀) |
+| assigned | → Agent | → Agent | → Agent | 事实 (中性); 唤醒被暂存时琥珀 + 警示图标 (规则 / 账号粒度只在送达或暂存后出现, D4) |
+| read | Agent read 5m ago | Agent 5分钟前读过 | Agent 5分前に既読 | 事实 |
+| new-since-read | New since Agent | Agent 读后有新 | Agent 既読後に新着 | 需要你 |
+| held | last wake held | 上次唤醒被暂存 | 前回の起動は保留 | 没送到 |
+| replied | replied 3h ago | 你3小时前回复过 | 3時間前に返信済み | 事实 |
+
+`read` 与 `new-since-read` 是**同一个事实**按"读之后有没有新消息" (`lastAt > upTo`) 拆开, 永不竞争。assigned 高于 held, 所以被暂存的唤醒骑在 "→ Agent" 上 (琥珀) 而不是被它藏掉。tag 在第 2 行 (所有宽度下都在标题**下面**) 占来源 chip 的位置 (来源进 tooltip); agent 名字是单独一段 (`.chan-tag-who`, i18n 普查的数据路径), 空间不够时它让, 词永远完整 —— 宽度预算在词里: 第 2 行的 75 %、给名字留 ≥ 18 px, en/zh/ja × 本机字体与 DejaVu Sans 实测 (test-channels-e2e ⑰)。
+
+### 23.4 表头、全部、搜索
+
+表头是二选一开关 "N 需关注 | 全部 879" (Outbox 窗口的 chan-seg 语法, 占满整行), 默认是注意力列表, 选择按页面会话保留; 第二行是筛选框 (标题 / 来源 / 末行, 不分大小写) + 新建群 + 发件箱 (从表头挪下来: 188 px 栏里挤在它们旁边时开关被截成 "1 需…" | "全…")。注意力视图里, 匹配但不在列表里的给一行 "「全部」里还有 N 个" (点一下切到全部, 词保留); 两个字以上的词还给 "搜索消息 "…"" —— 所有已连接账号的本地日志搜索 (原来的每账号搜索对话框, 现在接受多个账号)。全部视图保留首屏 60 行 + "显示全部"。
+
+### 23.5 服务器补的事实 (都走 rowView 的 `touch`, 没碰过的行 `touch: null`)
+
+- `agentReads` (≤ 5 个主体, 最新在前) 由 **agent 路由的 readFor** 在 reach 检查**之后**盖 (隐藏的读 = 统一 not-found, 不留痕), 同一主体同一尾巴 60 s 内不重盖 (agent 的读循环不是广播循环), 走索引唯一的门 (去抖落盘), 一次 partial 广播只带这一行。
+- 唤醒台账条目多带 `name` (唤醒到了谁)。
+- `selfAt`: 摄入 / 推送时从 `isSelf` 记录盖; outbox 里你自己起草并已发出的提案也算 (vendor 回显之前); 启动后对最近两天活跃、从没盖过的行, 从日志尾巴推导一次 (`healSelfAt`, 一轮事件循环一个会话, 盖 0 的不再读)。
+
+门: test-channels-images (fast) · test-channels-focus (fast) · test-channels-lark-shape ⑨ · test-vendor-whitelist §7 · test-channels-groups-ui · heavy: test-channels-aggregate-ui ②b · test-channels-groups-e2e ⑨ · test-channels-e2e ⑰ · test-channels-i18n。
+
+**要 owner 拍板的 (默认已按下面实现, 一个设置都没加)**: D1 @你 的消息算不算"要紧" (今天没算; 飞书里 18 个会话 @ 过你); D2 排序保持活动顺序, 还是需要你的排前面; D3 给窗口里的图片在 vendor 预算里留一块 owner 保留额 (今天图片与定时遍历共用每分钟预算; 被拒时图会自己等一分钟再试, 不再沉默)。

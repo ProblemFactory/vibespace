@@ -559,6 +559,48 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     return out.slice(-want);
   }
 
+  /**
+   * ONE record by its `vendorId` (R3 §23 — the attachment route names the
+   * message that carries the picture): the same backward window walk as
+   * `readTail`, but it stops at the FIRST window that holds the id and parses
+   * only the line whose bytes name it — so a picture in the visible tail
+   * costs one window, and one older than the newest 5000 records is still
+   * found. `null` when no line names it (or the log is unreadable: a reader).
+   */
+  function findRecord(adapterId, convId, vendorId) {
+    const id = String(vendorId || '');
+    if (!id) return null;
+    const needle = Buffer.from(`"vendorId":${JSON.stringify(id)}`, 'utf-8');
+    const fp = logPath(adapterId, convId);
+    let fd;
+    try { fd = fs.openSync(fp, 'r'); } catch { return null; }
+    try {
+      const size = fs.fstatSync(fd).size;
+      let end = size;
+      let carry = Buffer.alloc(0);
+      while (end > 0) {
+        const start = Math.max(0, end - TAIL_BYTES);
+        const buf = Buffer.allocUnsafe(end - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        let chunk = carry.length ? Buffer.concat([buf, carry]) : buf;
+        if (start > 0) {
+          const nl = chunk.indexOf(0x0a);
+          carry = nl < 0 ? chunk : chunk.subarray(0, nl);
+          chunk = nl < 0 ? Buffer.alloc(0) : chunk.subarray(nl + 1);
+        } else carry = Buffer.alloc(0);
+        let at = chunk.lastIndexOf(needle);
+        while (at >= 0) {
+          const ls = chunk.lastIndexOf(0x0a, at) + 1;
+          let le = chunk.indexOf(0x0a, at); if (le < 0) le = chunk.length;
+          try { const r = JSON.parse(chunk.subarray(ls, le).toString('utf-8')); if (r && String(r.vendorId) === id) return r; } catch {}
+          at = ls > 0 ? chunk.lastIndexOf(needle, ls - 1) : -1;
+        }
+        end = start;
+      }
+    } catch { return null; } finally { try { fs.closeSync(fd); } catch {} }
+    return null;
+  }
+
   /** How many records in the log are newer than `sinceAt` (the unread
    *  re-derivation — invariant 7: cached in the index, never only there). */
   function countSince(adapterId, convId, sinceAt) {
@@ -693,8 +735,26 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     return l;
   }
   function lruSave(adapterId) {
+    lruDirty.delete(adapterId);
     fs.mkdirSync(path.join(attRoot, safeSeg(adapterId)), { recursive: true, mode: 0o700 });
     writeJsonAtomic(lruFile(adapterId), lruOf(adapterId), { mode: 0o600 });
+  }
+  /** A cache HIT only moves a recency stamp (R3 §23): the ledger is written
+   *  COALESCED — once per LRU_TOUCH_MS per account, and on close — never once
+   *  per thumbnail drawn (a window of 40 pictures was 40 sync atomic writes on
+   *  data/, which may sit on a slow mount). A lost stamp costs only eviction
+   *  order, never a file. */
+  const LRU_TOUCH_MS = 5000;
+  const lruDirty = new Set();
+  let lruTimer = null;
+  function lruFlush() {
+    if (lruTimer) { clearTimeout(lruTimer); lruTimer = null; }
+    for (const id of [...lruDirty]) { try { lruSave(id); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }
+  }
+  function lruTouch(adapterId) {
+    lruDirty.add(adapterId);
+    if (closed) { lruFlush(); return; }
+    if (!lruTimer) { lruTimer = setTimeout(lruFlush, LRU_TOUCH_MS); if (lruTimer.unref) lruTimer.unref(); }
   }
   /** A cached attachment: `{file, meta}` or null. A hit refreshes its LRU stamp. */
   function attachmentGet(adapterId, convId, attId) {
@@ -706,7 +766,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     try { fs.statSync(file); } catch { return null; }
     const l = lruOf(adapterId);
     const k = `${safeSeg(convId)}/${h}`;
-    if (l.items[k]) { l.items[k].usedAt = now(); try { lruSave(adapterId); } catch (e) { warn('[channels] attachment LRU write failed:', (e && e.message) || e); } }
+    if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }
     return { file, meta };
   }
   /** Store ONE attachment (0600, beside its meta) and evict the account's
@@ -905,6 +965,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     if (interval) { clearInterval(interval); interval = null; }
     flush();
     paceFlush();
+    lruFlush();
   }
 
   return {
@@ -919,6 +980,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
     appendRecords, readTail, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage,
+    // R3 (§23): one record by its vendorId (the attachment's owner), the LRU ledger's coalesced flush
+    findRecord, lruFlush,
   };
 }
 

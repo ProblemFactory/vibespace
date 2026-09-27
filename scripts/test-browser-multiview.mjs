@@ -102,6 +102,7 @@ if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws:/
 if (a === 'stream' && b === 'status') { const port = ports[ns] || null; if (!port) { out({ success: false, data: null, error: 'no fake upstream for ' + ns }); process.exit(1); } out({ success: true, data: { enabled: true, connected: true, port, screencasting: true } }); process.exit(0); }
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed: 1, failed: [], sessions: [] } }); process.exit(0); }
+if (a === 'set' && b === 'viewport') { out({ success: true, data: {} }); process.exit(0); } // lane S4: the live view sizes the page to its pane (\`set viewport W H\`) — the fake answers it; its frames keep their size (the view letterboxes, as before)
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
   const PORT = await freePort(), CDP = await freePort();
@@ -316,8 +317,12 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     await send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' });
     if (ok(await boot(`http://127.0.0.1:${PORT}/?m=1`), 'the app booted at 390×844')) {
       await until(() => ev(`const A = chat(${S(SIDS.A)}); return !!(A && A._tabChain && live(${S(SIDS.A)}));`), 20000);
-      const ph = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const vis = ch.tabs.filter((id) => { const c = wm.windows.get(id).content; return !c.classList.contains('tab-hidden') && getComputedStyle(c).display !== 'none' && c.getBoundingClientRect().width > 0; }); const rightBefore = ch.split ? ch.split.pair[1] : null; wm.switchTab(ch, ch.tabs.indexOf(${S(ids.A)})); await new Promise((r) => setTimeout(r, 300)); return { vis: vis.length, rightBefore, rightAfter: ch.split ? ch.split.pair[1] : null, layout: ch.layout };`);
-      ok(ph.vis === 1, 'the phone shows ONE pane of the group', S(ph));
+      // S4 verify r1: the phone displays ONLY the active window (a split host no longer shows unless it is the one on screen —
+      // before, EVERY split host was displayed and this leg passed with the last-created live view on screen too) ⇒ the group
+      // is brought on screen the way a user does, through the ONE door (goToWinId), before its panes are counted
+      await ev(`app.goToWinId(${S(ids.A)}); return true;`); await sleep(400);
+      const ph = await ev(`const ch = chat(${S(SIDS.A)})._tabChain; const shownWins = [...wm.windows.values()].filter((w) => getComputedStyle(w.element).display !== 'none').map((w) => w.id); const vis = ch.tabs.filter((id) => { const c = wm.windows.get(id).content; return !c.classList.contains('tab-hidden') && getComputedStyle(c).display !== 'none' && c.getBoundingClientRect().width > 0; }); const rightBefore = ch.split ? ch.split.pair[1] : null; wm.switchTab(ch, ch.tabs.indexOf(${S(ids.A)})); await new Promise((r) => setTimeout(r, 300)); return { vis: vis.length, rightBefore, rightAfter: ch.split ? ch.split.pair[1] : null, layout: ch.layout, shownWins, host: ch.tabs[0] };`);
+      ok(ph.vis === 1 && ph.shownWins.length === 1 && ph.shownWins[0] === ph.host, 'the phone shows ONE pane of the group — and the group\'s host is the ONE window displayed (S4 verify r1: never an inactive split host beside it)', S(ph));
       ok(ph.layout === 'split' && ph.rightAfter === ph.rightBefore, 'switching to Alpha on the phone does NOT make the other side follow (the model keeps the desktop\'s right side)', S(ph));
     }
     try { cdp.close(); } catch { }

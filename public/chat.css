@@ -1185,6 +1185,12 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
   .chat-status-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; }
   .chat-status-bar::-webkit-scrollbar { display: none; }
   .chat-status-bar > * { flex-shrink: 0; }
+  /* lane S4 (naive study 2 — the phone's ONLY way to the live view sat entirely off-screen at x≈403 of 390): the
+     "Agent browser" chip never scrolls out of the bar — sticky at BOTH edges of the swipe scroller (at rest it is
+     pinned to the right edge when its place is further right; swiped past, to the left edge), opaque over the chips
+     that slide under it, its words cut to fit (the full sentence is its tooltip and its menu) */
+  .chat-status-bar > .chat-status-browser { position: sticky; left: 0; right: 0; z-index: 2; background: var(--bg-taskbar); max-width: 46vw; box-shadow: -6px 0 6px -4px var(--bg-taskbar), 6px 0 6px -4px var(--bg-taskbar); }
+  .chat-status-bar > .chat-status-browser .chat-status-browser-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Per-message hover buttons (open-in-editor / fork, 21×16 px) sat ON the
      message text at 390 px (measured: 18 of 18 intersected). The long-press
      message menu carries the same verbs there (design-mobile-gaps #5). */

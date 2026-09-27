@@ -11,7 +11,7 @@
  *     author:      { id, name, isSelf, isBot },
  *     text,                        // ALWAYS plain text — the only thing v1 renders
  *     mentions:    [{ id, name }], // RESOLVED names, never raw @_user_N placeholders
- *     attachments: [{ id, name, bytes, mime }],
+ *     attachments: [{ id, name, bytes, mime, placeholder? }],
  *     replyTo, threadKey,
  *     raw:         { bounded, adapter-specific, NEVER rendered } }
  *
@@ -179,7 +179,16 @@ function makeRecord(input, opts = {}) {
   const mentions = (Array.isArray(r.mentions) ? r.mentions : []).slice(0, MAX_MENTIONS)
     .map((m) => ({ id: peerText(m && m.id, 256), name: peerText(m && m.name, 200) }));
   const attachments = (Array.isArray(r.attachments) ? r.attachments : []).slice(0, MAX_ATTACHMENTS)
-    .map((x) => ({ id: peerText(x && x.id, 256), name: peerText(x && x.name, 256), bytes: Number.isFinite(Number(x && x.bytes)) ? Number(x.bytes) : null, mime: peerText(x && x.mime, 128) }));
+    .map((x) => {
+      const out = { id: peerText(x && x.id, 256), name: peerText(x && x.name, 256), bytes: Number.isFinite(Number(x && x.bytes)) ? Number(x.bytes) : null, mime: peerText(x && x.mime, 128) };
+      // R3 (2026-09-26): the token the adapter wrote into `text` FOR this
+      // attachment (Lark's "[image]") — the window drops one occurrence once
+      // the picture is drawn; `text` itself never changes. Present only when
+      // the adapter declared one (every older record keeps the 4-field shape).
+      const ph = peerText(x && x.placeholder, 32);
+      if (ph) out.placeholder = ph;
+      return out;
+    });
 
   // `text` resolves its ordinals FIRST (rule 2) and is neutered after, so a
   // mention name cannot smuggle a frame in through the substitution either.

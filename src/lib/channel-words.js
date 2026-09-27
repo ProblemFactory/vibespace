@@ -13,6 +13,10 @@
 // DOM-free; `t` is the real translator so every literal below is a key the
 // build's i18n scan finds.
 import { t, tc } from './i18n.js';
+/** The device's translator — R3's tag words take an injected `t` (the
+ *  freshnessText pattern) so the width census can word them in every language
+ *  from one process; the literals stay `t('…')` for the extractor. */
+const tDevice = t;
 import * as chanCaps from '../channel-caps.js';
 import * as F from '../channel-filter.js';
 import { wakeCount } from './channel-groups-view.js';
@@ -189,4 +193,71 @@ export function wakeEchoText(r) {
   if (w.refused) parts.push(t('{n} wake(s) refused by the spend guard (not billed — they get it next turn)', { n: w.refused }));
   if (w.later) parts.push(t('{n} will read it on their next turn', { n: w.later }));
   return parts.join(' · ');
+}
+
+// ── R3 (2026-09-26, design §23): THE FIRST SCREEN'S TAG and A PICTURE'S REFUSAL ──
+
+/** The placeholder the agent's name travels through `t()` in (a template may
+ *  put the name first or last — zh "{agent} 读过", en "→ {agent}"). */
+const WHO = '\u0001';
+function around(text, who) {
+  const i = text.indexOf(WHO);
+  return i < 0 ? { before: text, who: '', after: '' } : { before: text.slice(0, i), who: String(who || ''), after: text.slice(i + WHO.length) };
+}
+
+/** An instant's age in the TAG's compact words (the tag's width budget lives in
+ *  its words — test-channels-e2e ⑰): just now / Nm ago / Nh ago. */
+export function agoText(at, now = Date.now(), opts = {}) { return agoWords(at, now, opts); }
+function agoWords(at, now = Date.now(), { t = tDevice } = {}) {
+  const s = Math.max(0, Math.round((now - Number(at || 0)) / 1000));
+  if (s < 60) return t('just now');
+  if (s < 3600) return t('{m}m ago', { m: Math.floor(s / 60) });
+  return t('{h}h ago', { h: Math.floor(s / 3600) });
+}
+
+/**
+ * THE ONE TAG a first-screen row wears (`statusTag`'s structure, src/lib/
+ * channel-focus.js) in the device's words: `{before, who, after, tone, icon,
+ * title}`. `who` is the agent's name — a DATA part (drawn in its own
+ * `.chan-tag-who` span, the part that yields when the tag is tight) — and
+ * the words around it are chrome. `tone`: `attn` = it needs YOU (accent
+ * outline), `warn` = something did not get through (amber), `neutral` = a fact.
+ */
+export function statusTagParts(tag, { now = Date.now(), t = tDevice } = {}) {
+  if (!tag) return null;
+  // never a raw id (r-verify): a principal / a reader that arrived without a display name is worded by its kind
+  const who = tag.name || (tag.kind === 'group' ? t('a Task Group') : t('an agent'));
+  const agoText = (at) => agoWords(at, now, { t });
+  switch (tag.code) {
+    case 'awaiting': return { ...around(t('{n} to approve', { n: tag.n || 1 }), ''), tone: 'attn', icon: 'check', title: t('An agent\'s draft here waits for your approval — open the conversation to approve, edit or reject it') };
+    case 'unknown': return { ...around(t('send unknown'), ''), tone: 'warn', icon: 'alert', title: t('A send from here lost its answer — open the conversation to check whether it landed') };
+    case 'assigned': {
+      const grain = tag.grain === 'account' ? t('Handed to {agent} with the whole account', { agent: who }) : tag.grain === 'pattern' ? t('Handed to {agent} by a rule that matches it', { agent: who }) : t('Handed to {agent}', { agent: who });
+      return { ...around(t('→ {agent}', { agent: WHO }), who), tone: tag.held ? 'warn' : 'neutral', icon: tag.held ? 'alert' : null, title: tag.held ? `${grain} · ${t('last wake held')}` : grain };
+    }
+    case 'read': return { ...around(t('{agent} read {ago}', { agent: WHO, ago: agoText(tag.at) }), who), tone: 'neutral', icon: null, title: t('{agent} read this conversation {ago}', { agent: who, ago: agoText(tag.at) }) };
+    case 'new-since-read': return { ...around(t('New since {agent}', { agent: WHO }), who), tone: 'attn', icon: null, title: t('New messages arrived after {agent} read this conversation ({ago})', { agent: who, ago: agoText(tag.at) }) };
+    case 'held': return { ...around(t('last wake held'), ''), tone: 'warn', icon: 'alert', title: t('A wake for this conversation is held — its messages wait for the agent\'s next turn') };
+    case 'replied': return { ...around(t('replied {ago}', { ago: agoText(tag.at) }), ''), tone: 'neutral', icon: null, title: t('You wrote in this conversation {ago}', { ago: agoText(tag.at) }) };
+    default: return null;
+  }
+}
+
+/** The first screen's two switch labels (the header). */
+export function viewSwitchText({ focus = 0, all = 0 } = {}, { t = tDevice } = {}) {
+  return { focus: t('{n} need attention', { n: focus }), all: t('All {n}', { n: all }) };
+}
+
+/** A picture's refusal as the CHIP's one word (R3 §23): why the thumbnail is
+ *  a chip. The whole sentence (`routeErrorText`) rides the chip's title. */
+export function attachmentReasonText(code, { t = tDevice } = {}) {
+  switch (String(code || '')) {
+    case 'vendor-budget': return t('budget spent');
+    case 'backoff': case 'rate-limited': return t('rate limited');
+    case 'not-supported': return t('not cached');
+    case 'disabled': return t('account disabled');
+    case 'no-preview': return t('no preview');
+    case 'unreachable': return t('server unreachable');
+    default: return chanCaps.errorCodeText(code || 'vendor-error', { t });
+  }
 }

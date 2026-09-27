@@ -542,6 +542,15 @@ const SETTINGS_SCHEMA = {
     description: t('ON (default): when a session attaches a browser profile and its window is open on the desktop you are looking at, the live view opens bound beside it — two panes in one window, so the browser never loses its owner. OFF: open it yourself (session menu → Agent browser — live view) and bind it with "Snap beside" (or group it with the session\'s window as tabs, then choose "Show side by side"). An ephemeral browser (no profile) is never auto-opened.'),
     category: t('Agent browser'), liveApply: true,
   },
+  'browser.fitPageToView': {
+    // lane S4 (naive study 2, 2026-09-26 — "实况画面只占窗格上面一截" + the phone's desktop-width strip): default ON —
+    // the page is laid out at the live view's size (src/browser-fit.js). OFF = the pre-S4 view: the page keeps its own
+    // size and the picture is scaled into the pane.
+    type: 'boolean', default: true,
+    label: t('Lay the agent’s page out at the live view’s size'),
+    description: t('ON (default): while a live view is open, the agent’s page takes the size of the view’s pane — the picture fills the pane, and a phone sees the page at phone width. With several views, the one driving decides, else the largest on screen; when nobody has watched for 5 seconds the page goes back to its own size. A size the agent chose itself (set viewport / set device) is never overridden — the view scales it and offers “Fit the page to the window”. OFF: the page keeps its own size and the view scales the picture.'),
+    category: t('Agent browser'), liveApply: true,
+  },
   // ── MULTIVIEW (docs/design-browser-multiview.zh.md D4 / B-325a) ──────────
   // D4: the cap is a CONVERSATION's property — this is only its default (a
   // Task Group's default beats it; the conversation's own value, set from the

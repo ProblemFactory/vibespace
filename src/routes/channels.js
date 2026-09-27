@@ -337,7 +337,8 @@ function readerAnswer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   // r5: `refresh-queue-full` (the request set's cap) is a 429 with its wait; `account-changed` (the account rebuilt / removed while the refresh waited) a 409 like `disabled`; `stopped` (the engine stopping) a 503
-  const status = code === 'not-found' ? 404 : code === 'refresh-queue-full' || code === 'vendor-budget' || code === 'refresh-floor' || code === 'backoff' ? 429 : code === 'not-supported' ? 501 : code === 'too-large' ? 413 : code === 'bad-request' ? 400 : code === 'disabled' || code === 'account-changed' ? 409 : code === 'stopped' ? 503 : 502;
+  // R3: a vendor's own rate limit on an attachment is a 429 with its wait too (the thumbnail retries after it)
+  const status = code === 'not-found' ? 404 : code === 'rate-limited' || code === 'refresh-queue-full' || code === 'vendor-budget' || code === 'refresh-floor' || code === 'backoff' ? 429 : code === 'not-supported' ? 501 : code === 'too-large' ? 413 : code === 'bad-request' ? 400 : code === 'disabled' || code === 'account-changed' ? 409 : code === 'stopped' ? 503 : 502;
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
 }
@@ -381,8 +382,11 @@ const INLINE_IMAGE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/web
 router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) => {
   try {
     forHost(req);
-    const r = await engine().attachment(req.params.adapterId, req.params.convId, req.params.id, { msg: req.query.msg ? String(req.query.msg) : null });
-    if (!r || !r.ok) return readerAnswer(res, r);
+    // R3 (§23): `retry=1` = the person's Retry on a refused picture — it skips the REMEMBERED refusal
+    // (never the budget, never the back-off); a refusal is never cached by the browser (`no-store`), so
+    // the thumbnail's own retry asks the server again instead of replaying a 429 from its cache
+    const r = await engine().attachment(req.params.adapterId, req.params.convId, req.params.id, { msg: req.query.msg ? String(req.query.msg) : null, retry: String(req.query.retry || '') === '1' });
+    if (!r || !r.ok) { res.setHeader('Cache-Control', 'no-store'); return readerAnswer(res, r); }
     const meta = r.meta || {};
     const mime = String(meta.mime || '').toLowerCase().split(';')[0].trim();
     const raster = INLINE_IMAGE.has(mime);

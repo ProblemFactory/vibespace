@@ -66,6 +66,7 @@ export function positionKindText(position) {
   if (k === 'keys') return t('keys');
   if (k === 'scroll') return t('scroll');
   if (k === 'navigation') return t('navigate to');
+  if (k === 'viewport') return t('page size'); // lane S4 verify r1 F6: the live view's own resize
   return t('input');
 }
 /** hh:mm:ss for a row. */

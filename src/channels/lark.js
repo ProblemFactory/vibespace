@@ -174,7 +174,21 @@ function parseContent(raw) {
 /** A `post` (rich text) body: `content` is an array of lines, each an array
  *  of `{tag, text|user_name|href|image_key…}` elements. Flattened to text;
  *  an `at` element becomes `@<name>` (it is not an ordinal placeholder). */
-function postText(c) {
+/** The tokens `textOf` writes for a picture / a video (R3: also the
+ *  attachment's `placeholder`, so the two can never spell it differently). */
+const IMAGE_TOKEN = '[image]';
+const VIDEO_TOKEN = '[video]';
+/** A post's body: `{title, content}` at the top (the `im/v1` list answer) or
+ *  under a locale key (`zh_cn` / `en_us` — the event and some older answers).
+ *  ONE reader for the text AND the attachments (R3: the two used to disagree
+ *  about the wrapper, so a wrapped post named "[image]" with no attachment). */
+function postBody(c) {
+  if (c && Array.isArray(c.content)) return c;
+  for (const k of ['zh_cn', 'en_us', 'ja_jp']) if (c && c[k] && Array.isArray(c[k].content)) return c[k];
+  return { title: (c && c.title) || '', content: [] };
+}
+function postText(c0) {
+  const c = postBody(c0);
   const lines = Array.isArray(c && c.content) ? c.content : [];
   const out = [];
   if (c && c.title) out.push(String(c.title));
@@ -186,8 +200,8 @@ function postText(c) {
         case 'text': return String(el.text || '');
         case 'a': return `${el.text || ''}${el.href ? ` (${el.href})` : ''}`;
         case 'at': return `@${el.user_name || el.user_id || ''}`;
-        case 'img': return '[image]';
-        case 'media': return '[video]';
+        case 'img': return IMAGE_TOKEN;
+        case 'media': return VIDEO_TOKEN;
         case 'emotion': return `[${el.emoji_type || 'emoji'}]`;
         case 'code_block': return String(el.text || '');
         case 'hr': return '—';
@@ -205,7 +219,7 @@ function textOf(item) {
   switch (item.msg_type) {
     case 'text': return String((c && c.text) || '');
     case 'post': return postText(c);
-    case 'image': return '[image]';
+    case 'image': return IMAGE_TOKEN;
     case 'file': return `[file: ${(c && c.file_name) || 'file'}]`;
     case 'audio': return '[audio]';
     case 'media': return `[video${c && c.file_name ? `: ${c.file_name}` : ''}]`;
@@ -222,20 +236,24 @@ function textOf(item) {
 }
 /** Attachments a message carries (2026-09-26: FETCHED on demand through
  *  `fetchAttachment`): an image's `image_key`, a file / media / audio's
- *  `file_key`, and — new — every image and video INSIDE a rich-text `post`
- *  (`img.image_key`, `media.file_key`), which the text only named
- *  "[image]". `mime` 'image/*' is what `type=image` is asked with. */
+ *  `file_key`, and every image and video INSIDE a rich-text `post`
+ *  (`img.image_key`, `media.file_key`). `mime` 'image/*' is what
+ *  `type=image` is asked with (the resource endpoint answers the concrete
+ *  type, which the cache stores). R3 (2026-09-26, "lark图像不能预览吗？"): an
+ *  image carries `placeholder: '[image]'` — the token `textOf` wrote for it —
+ *  so the window can drop that line once the picture itself is drawn — and NO
+ *  invented name (the vendor gives a picture none: the window says "image" in
+ *  the device's language, the cache keeps the resource's own file name). */
 function attachmentsOf(item) {
   const c = parseContent(item.body && item.body.content) || {};
-  if (item.msg_type === 'image' && c.image_key) return [{ id: c.image_key, name: 'image', bytes: null, mime: 'image/*' }];
+  if (item.msg_type === 'image' && c.image_key) return [{ id: c.image_key, name: null, bytes: null, mime: 'image/*', placeholder: IMAGE_TOKEN }];
   if ((item.msg_type === 'file' || item.msg_type === 'media' || item.msg_type === 'audio' || item.msg_type === 'folder') && c.file_key) return [{ id: c.file_key, name: c.file_name || item.msg_type, bytes: null, mime: item.msg_type === 'media' ? 'video/*' : item.msg_type === 'audio' ? 'audio/*' : null }];
   if (item.msg_type === 'post') {
     const out = [];
-    const lines = Array.isArray(c.content) ? c.content : (c.zh_cn && Array.isArray(c.zh_cn.content) ? c.zh_cn.content : (c.en_us && Array.isArray(c.en_us.content) ? c.en_us.content : []));
-    for (const line of lines) for (const el of Array.isArray(line) ? line : []) {
+    for (const line of postBody(c).content) for (const el of Array.isArray(line) ? line : []) {
       if (!el || typeof el !== 'object') continue;
-      if (el.tag === 'img' && el.image_key) out.push({ id: String(el.image_key), name: 'image', bytes: null, mime: 'image/*' });
-      else if (el.tag === 'media' && el.file_key) out.push({ id: String(el.file_key), name: el.file_name || 'video', bytes: null, mime: 'video/*' });
+      if (el.tag === 'img' && el.image_key) out.push({ id: String(el.image_key), name: null, bytes: null, mime: 'image/*', placeholder: IMAGE_TOKEN });
+      else if (el.tag === 'media' && el.file_key) out.push({ id: String(el.file_key), name: el.file_name || 'video', bytes: null, mime: 'video/*', placeholder: VIDEO_TOKEN });
     }
     return out;
   }

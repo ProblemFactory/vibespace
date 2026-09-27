@@ -15,19 +15,28 @@
 //     the full view says it, a SECOND client's row says it, a reload keeps it
 //   ⑤ the account ⋯ 交给一个 agent… hands the whole account to a Task Group
 //     through the one editor, and every row then wears the INHERITED chip
-//     "（账号）"; the conversation window's chip says it too
+//     "（账号）"; the conversation window's chip says it too; D4 (2026-09-27):
+//     the account's conversations do NOT join the first screen for that
+//     alone — one joins once an agent READS it (a stub agent session's own
+//     agent route), wearing the read tag
 //   ⑥ zero Latin-only "Track"/"tracked" words on the panel and the window
 //   ⑦ (hotfix 2026-09-26, the owner's toast "请求被拒绝: mode 'filtered' needs a
 //     filterId") the owner's EXACT dialog: 组 · 工作, 匹配过滤器的消息 with two
 //     time-window rules, 每个窗口一份摘要 9999, cap 9999, 起草 ⇒ 保存 closes with
 //     NO error toast, the account line says it, the wire holds the minted
 //     filter id, and re-opening prefills the two rules and saves again
+//   ②b R3 (2026-09-26, "lark图像不能预览吗？"): a LARK-SHAPED picture (`image/*`, no name, text "[image]")
+//     is drawn and its "[image]" line leaves; a click opens the shared overlay; a picture the vendor
+//     rate-limits once draws on its own retry; a refused one is the chip that NAMES the reason (zh) with a
+//     Retry that asks again
 //
 // Per-pid scratch (scripts/scratch.mjs); the server gets vncEnv() (§57), a
 // scratch HOME, VIBESPACE_CHANNELS_FAKE=1 and VIBESPACE_CHANNELS_FAKE_CONVS=3
-// (the fake world's synthetic rooms carry attachments). Zero vendor calls.
+// (the fake world's synthetic rooms carry attachments), and ONE stub agent
+// session (a dtach socket + meta with its vsst_ token, the groups-e2e
+// fixture's shape) for ⑤'s agent read. Zero vendor calls.
 // Run: node scripts/test-channels-aggregate-ui.mjs   (SKIPs without chrome)
-import { execSync, spawn } from 'node:child_process';
+import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +65,33 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${JSON.stringify(require(path.join(repo, 'package.json')).version)};\n`);
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
 
+// ── D4 (2026-09-27): ONE stub agent session — a dtach socket + its meta (vsst_ token) — so ⑤ can READ a conversation
+//    through the agent's own route (the one door that stamps an agent read). Without dtach that one leg SKIPs, by name.
+const HAVE_DTACH = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e.code !== 'ENOENT'; } })();
+const STUB = path.join(wt, 'stub-cli.cjs');
+const SOCK_DIR = path.join(wt, 'data/sockets');
+// a plain uuid like groups-e2e's stubs (never the fixtureSid family: that class writes a transcript into the server's
+// home and is censused by test-fixture-isolation (c); this stub only publishes ~/.claude/sessions/<pid>.json)
+const READER = { cid: 'a99e0001-0000-4000-8000-00000000000c', name: 'reader', token: 'vsst_' + 'e2eaggregatereader00000000000001', sockName: `cw-1-${Date.now()}` };
+if (HAVE_DTACH) {
+  fs.writeFileSync(STUB, `'use strict';
+// a STUB agent CLI: publishes this process in the CLI session registry of $HOME and stays alive
+const fs = require('fs'), path = require('path');
+const [cid, name] = process.argv.slice(2);
+const dir = path.join(process.env.HOME, '.claude', 'sessions');
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: cid, name }));
+setInterval(() => {}, 1 << 30);
+`);
+  const META_DIR = path.join(wt, 'data/session-meta');
+  fs.mkdirSync(SOCK_DIR, { recursive: true }); fs.mkdirSync(META_DIR, { recursive: true });
+  fs.writeFileSync(path.join(META_DIR, READER.sockName + '.json'), JSON.stringify({
+    webuiSessionId: 'sess-agg-reader', sockName: READER.sockName, claudeSessionId: READER.cid, backendSessionId: READER.cid,
+    name: READER.name, mode: 'chat', backend: 'claude', cwd: wt, createdAt: Date.now(), agentToken: READER.token,
+  }));
+  execFileSync('dtach', ['-n', path.join(SOCK_DIR, READER.sockName), '-E', '-z', process.execPath, STUB, READER.cid, READER.name], { env: { ...process.env, HOME: fakeHome } });
+}
+
 let srv = null;
 const bootServer = () => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
@@ -68,6 +104,8 @@ const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_P
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { srv && srv.kill('SIGKILL'); } catch {}
+  // the fixture's dtach master + stub CLI are THIS suite's processes — ended by evidence (their argv names this scratch tree)
+  if (HAVE_DTACH) { try { execFileSync('pkill', ['-KILL', '-f', STUB], { stdio: 'ignore' }); } catch {} try { execFileSync('pkill', ['-KILL', '-f', SOCK_DIR], { stdio: 'ignore' }); } catch {} }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   for (const d of [chromeDir, fakeHome]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
@@ -176,6 +214,64 @@ if (win.chips && win.chips[0]) {
 }
 ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tracking');
 
+// ── ②b R3 (2026-09-26, the owner: "lark图像不能预览吗？" — he saw "[image]" and a bare "image ⬇" chip) ──
+//    A LARK-SHAPED picture (text "[image]", a generic `image/*` attachment, no name) is DRAWN through our
+//    route and its "[image]" line leaves; a click opens THE shared overlay; a picture the vendor rate-limits
+//    once retries ITSELF and draws; a picture the vendor refuses becomes the chip that NAMES the reason
+//    (in zh) with a Retry that asks again — never a silent "image ⬇".
+{
+  const lark1 = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-room-1');
+    const img = w.content.querySelector('img.chanmsg-thumb[data-channel-image="fake-poll-room-1-img0"]');
+    if (!img) return { fail: 'no Lark-shaped thumbnail' };
+    for (let i = 0; i < 40 && !img.dataset.drawn; i++) await new Promise((r) => setTimeout(r, 150));
+    const row = img.closest('.chanmsg');
+    const body = row.querySelector('.chanmsg-body');
+    const out = { drawn: img.dataset.drawn === '1', w: img.naturalWidth, src: img.getAttribute('src'), bodyText: body.textContent, bodyShown: getComputedStyle(body).display !== 'none', alt: img.alt };
+    img.click();
+    await new Promise((r) => setTimeout(r, 100));
+    const ov = document.querySelector('.chat-img-overlay img');
+    out.overlay = ov ? ov.getAttribute('src') : null;
+    if (ov) ov.parentElement.click();
+    out.overlayGone = !document.querySelector('.chat-img-overlay');
+    return out;
+  })()`);
+  ok(!lark1.fail && lark1.drawn && lark1.w === 8 && /\/attachment\/fake-poll-room-1-img0\?msg=[^&]+&inline=1$/.test(lark1.src), 'a LARK-SHAPED picture (`image/*`, no name) is DRAWN — fetched on demand through OUR route and decoded', JSON.stringify(lark1));
+  ok(lark1.bodyText === '' && !lark1.bodyShown, '…and its "[image]" text line LEAVES once the picture is drawn (the record keeps it for agents and search)', JSON.stringify(lark1));
+  ok(lark1.alt === '图片', 'the picture is named in the device\'s language (图片), never the adapter\'s English', lark1.alt);
+  ok(!!lark1.overlay && lark1.overlay.endsWith(lark1.src) && lark1.overlayGone, 'a click opens THE shared image overlay on the same route (and a click closes it)', JSON.stringify(lark1));
+  const refused = await p1.evaljs(`(async () => {
+    const w = window.app.openChannel('fake-poll', 'fake-poll-room-2');
+    for (let i = 0; i < 80; i++) {
+      const gone = w.content.querySelector('.chanmsg-att-failed[data-channel-image="fake-poll-room-2-gone"]');
+      const flaky = w.content.querySelector('img.chanmsg-thumb[data-channel-image="fake-poll-room-2-flaky"]');
+      if (gone && flaky && flaky.dataset.drawn === '1') {
+        const row = flaky.closest('.chanmsg');
+        return { gone: { text: gone.textContent, title: gone.title, why: gone.querySelector('.chanmsg-att-why').textContent, retry: !!gone.querySelector('[data-channel-retry]'), refused: gone.dataset.refused }, flaky: { w: flaky.naturalWidth, src: flaky.getAttribute('src') }, body: row.querySelector('.chanmsg-body').textContent, sawWait: !!window.__sawWait };
+      }
+      if (w.content.querySelector('.chanmsg-att-wait')) window.__sawWait = w.content.querySelector('.chanmsg-att-wait').textContent;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'the refused / retried pictures never settled', html: [...w.content.querySelectorAll('.chanmsg-atts')].map((x) => x.textContent).join(' | ') };
+  })()`);
+  ok(!refused.fail && refused.flaky.w === 8 && /&n=1$/.test(refused.flaky.src), 'a picture the vendor RATE-LIMITED once waits the vendor\'s time and draws on its own retry (`&n=1`)', JSON.stringify(refused));
+  ok(!refused.fail && refused.gone.refused === 'forbidden' && refused.gone.why === '被禁止' && refused.gone.retry && /图片加载失败/.test(refused.gone.title) && /图片/.test(refused.gone.text), 'a picture the vendor REFUSES is the chip that NAMES the reason in zh (图片 · 被禁止, the sentence in its title) with a Retry — never a bare "image ⬇"', JSON.stringify(refused.gone));
+  ok(!refused.fail && refused.body === '[image]', '…and the message keeps ONE "[image]" line — for the picture that did not draw', JSON.stringify(refused.body));
+  const retried = await p1.evaljs(`(async () => {
+    const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-room-2');
+    w.content.querySelector('[data-channel-retry="fake-poll-room-2-gone"]').click();
+    const saw = { img: false };
+    for (let i = 0; i < 40; i++) {
+      if (w.content.querySelector('img.chanmsg-thumb[data-channel-image="fake-poll-room-2-gone"]')) saw.img = true;
+      const chip = w.content.querySelector('.chanmsg-att-failed[data-channel-image="fake-poll-room-2-gone"]');
+      if (saw.img && chip) return { ...saw, why: chip.querySelector('.chanmsg-att-why').textContent };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return { ...saw, fail: 'no second verdict' };
+  })()`);
+  ok(!retried.fail && retried.img && retried.why === '被禁止', 'Retry asks AGAIN (a new thumbnail, `retry=1` past the remembered refusal) and a refusal that stands is said again', JSON.stringify(retried));
+}
+
 // ── ③ scroll up into the vendor's older history ──
 const older = await p1.evaljs(`(async () => {
   const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-ops') || window.app.openChannel('fake-poll', 'fake-poll-ops');
@@ -267,6 +363,28 @@ const win2 = await p1.evaljs(`(async () => {
   return { fail: 'no inherited chip on the window' };
 })()`);
 ok(!win2.fail && win2.inherited && /（账号）/.test(win2.chip), 'the conversation window\'s chip says the assignment is inherited from the account', JSON.stringify(win2));
+// R3 (§23) + D4 (2026-09-27, the integrator's ruling — "handing the whole account to an agent would put all 824
+// back on the first screen, the exact thing the owner asked us to stop"): handed over at the ACCOUNT grain, the
+// account's conversations do NOT join the attention list for that alone. One joins once an agent READ it (a wake
+// DELIVERED to the agent would too — the fake world never grows a message, so the read is the leg), wearing the
+// read tag: the account grain is never the reason by itself.
+const FOCUS_POLL = `(() => { const g = document.querySelector('.rail-panel-channels .chan-groups'); const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow')].filter((r) => (r.dataset.grow || '').startsWith('fake-poll/')); return { view: g ? g.dataset.view : null, rows: rows.map((r) => { const tg = r.querySelector('.chan-grow-tag'); const who = r.querySelector('.chan-tag-who'); return { key: r.dataset.grow, tag: tg ? tg.dataset.tag : null, text: tg ? tg.textContent : null, who: who ? who.textContent : null }; }) }; })()`;
+let off = null;
+for (let i = 0; i < 12; i++) { off = await p1.evaljs(FOCUS_POLL); if (off.rows.length) break; await sleep(250); }
+ok(off.view === 'focus' && off.rows.length === 0, 'D4: handed over at the ACCOUNT grain, NONE of the account\'s 5 conversations joins the attention list for that alone (no wake delivered, no agent read — watched 3 s)', JSON.stringify(off));
+const allView = await p1.evaljs(`(async () => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); await new Promise((r) => setTimeout(r, 300)); const f = ${FOCUS_POLL}; document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]').click(); await new Promise((r) => setTimeout(r, 300)); return f; })()`);
+ok(allView.view === 'all' && allView.rows.length === 5 && allView.rows.every((r) => r.tag === null), '…"全部" still lists all 5 — untagged: an account-grain hand-over is not a reason to be on the first screen', JSON.stringify(allView));
+if (!HAVE_DTACH) console.log('  SKIP: the agent-read leg needs dtach for its stub agent session (no dtach on PATH)');
+else {
+  const RCONV = 'fake-poll-room-3';
+  const reach = await api('PUT', `/api/channels/fake-poll/${RCONV}/reach`, { principal: { kind: 'agent', id: READER.cid, name: READER.name }, level: 'visible' });
+  ok(reach.status === 200, `FIXTURE: ${READER.name} may see fake-poll/${RCONV}`, JSON.stringify(reach.json).slice(0, 200));
+  const rd = await fetch(`http://127.0.0.1:${PORT}/api/agent/channels/read?conv=${encodeURIComponent('fake-poll/' + RCONV)}`, { headers: { Authorization: 'Bearer ' + READER.token } }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => ({})) }));
+  ok(rd.status === 200 && rd.body.ok && (rd.body.records || []).length > 0, `FIXTURE: ${READER.name} READS fake-poll/${RCONV} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
+  let on = null;
+  for (let i = 0; i < 40; i++) { on = await p1.evaljs(FOCUS_POLL); if (on.rows.length) break; await sleep(250); }
+  ok(on.rows.length === 1 && on.rows[0].key === `fake-poll/${RCONV}` && on.rows[0].tag === 'read' && on.rows[0].who === READER.name && /读过/.test(on.rows[0].text || ''), `the agent's READ lists that ONE conversation, tagged "${on && on.rows[0] ? on.rows[0].text : ''}" (the read tag, never "→ Ops desk"); the other 4 stay off`, JSON.stringify(on));
+}
 const acl = await api('GET', '/api/channels');
 ok((acl.json.conversations || []).filter((c) => c.adapterId === 'fake-poll').every((c) => c.assignment && c.assignment.source === 'account'), 'the wire agrees: every row\'s effective assignment comes from the account grain');
 

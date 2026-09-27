@@ -1359,6 +1359,29 @@ unknown openSpec action is loud instead of silently vanishing).
   before/after on the real rung (test-browser-live ⑤, a click on grid cell (10,5) = page
   (525,275), DPR 2/1 × UI scale 100/125 % × a 1400×800 and a 700×900 window): 71 px off headless
   and 132 px off or dropped headed before; 0 px after, every combination.
+* **The page is the pane's size (lane S4, 2026-09-26, naive-user study 2 — "实况画面只占窗格上面一截", "手机上的
+  实况窗口", all three testers).** Each view reports its pane (the canvas in CSS px at net zoom 1 — never × DPR: a DPR-3
+  phone asks for a 390-wide page, not 1170) as `fit`; the bridge sets the page to the RULING pane with the daemon's own
+  `set viewport W H` — the HOLDER's while somebody drives, else the LARGEST visible one, a hidden view never votes; the
+  others get the same frame letterboxed by its own aspect (never stretched) and a chip "Sized for another window".
+  Measured on 0.38.1: a set viewport makes every frame W×H (headless; headed ≥ 500 wide); a device scale factor never
+  enlarges the frame (the stream caps at the CSS viewport) and a factor change on a static page produced NO frame ⇒ the
+  factor stays 1; a headed window narrower than 500 px returns the page SCALED (390×760 ⇒ a 390×593 frame) ⇒ read off
+  the picture, re-fitted at a 500 px floor with the pane's aspect. The AGENT's own `set viewport` / `set device` (read
+  off the stream's command mirror — the bridge's own set is recognised by the size it asked for and dropped) is a flag on
+  the target: never overridden, the view letterboxes and says "Agent's size W×H", and "Fit the page to the window" is
+  the one act that takes it back. Nobody watching for 5 s ⇒ the page goes back to the size it had before the first fit.
+  Setting `browser.fitPageToView` (default on). THE BLANK PICTURE: each viewer's frame gate DROPPED a frame inside its
+  fps gap with no trailing send while Chrome screencasts only on damage — a page that paints twice within 16 ms (a
+  white commit, then the page) and sits still lost its last paint for good (white picture, loaded URL); the gate now
+  hands the latest frame over the moment it opens. A same-document navigation measured a url and zero frames ⇒ the
+  bridge asks the page for a fresh picture (CDP `Page.captureScreenshot`, server-side) when none followed within 1 s,
+  and the view says "Waiting for a picture…" at 2 s (the old picture dimmed) and "No picture came in 10 s" with a
+  Reconnect at 10 s. THE PHONE: the live view opens BY ITSELF (full screen, "Back to the chat" in the toast) when the
+  agent starts browsing in the conversation on screen; two fingers pinch-zoom the picture in watch mode (a transform,
+  origin top-left, 1–4×, one finger pans, a double tap 2×), taps map through it in takeover (a second finger is refused
+  with a hint); the status bar's "Agent browser" chip is sticky at both ends of its swipe scroller. Gates:
+  test-browser-fit (fast) + test-browser-live-fit (heavy — the real 0.38.1, a desktop and a phone client).
 * **XSS:** page titles and URLs are page-controlled strings that sync to every client. They go
   through `escHtml`, never `innerHTML`, and the frame is drawn to a `<canvas>` / `<img>` via the
   `.src` property — never interpolated markup (the image-overlay law).

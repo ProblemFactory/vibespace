@@ -18,6 +18,9 @@
  * (`pickViewportTarget`, `frameGeometry`).
  * Gate: scripts/test-browser-takeover.mjs (fast — a fake CDP endpoint) +
  * scripts/test-browser-live.mjs ⑤ (heavy — a real chromium).
+ * lane S4: `captureFrame` — a FRESH picture of the active tab when the stream
+ * sent none after a navigation (scripts/test-browser-fit.mjs, fast — a fake CDP
+ * endpoint; scripts/test-browser-live-fit.mjs, heavy — the real rung).
  */
 const http = require('http');
 const { WebSocket } = require('ws');
@@ -59,6 +62,60 @@ function pageCommand(wsUrl, method, params, timeoutMs, WebSocketImpl) {
   });
 }
 
+/** Several CDP commands, IN ORDER, over ONE fresh page socket, bounded as a whole; closed either way.
+ *  → { ok:true, results:[…] } | { ok:false, error } (the first error ends it). */
+function pageCommands(wsUrl, cmds, timeoutMs, WebSocketImpl) {
+  return new Promise((resolve) => {
+    let done = false, ws = null, i = 0;
+    const results = [];
+    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); try { ws && ws.close(); } catch { /* */ } resolve(r); };
+    const timer = setTimeout(() => { try { ws && ws.terminate(); } catch { /* */ } fin({ ok: false, error: `${(cmds[i] || {}).method || 'cdp'} timed out` }); }, timeoutMs);
+    const next = () => { if (i >= cmds.length) { fin({ ok: true, results }); return; } try { ws.send(JSON.stringify({ id: i + 1, method: cmds[i].method, params: cmds[i].params || {} })); } catch (e) { fin({ ok: false, error: e.message }); } };
+    try { ws = new WebSocketImpl(wsUrl, { maxPayload: 64 * 1024 * 1024, handshakeTimeout: timeoutMs }); } catch (e) { fin({ ok: false, error: e.message }); return; }
+    ws.on('open', next);
+    ws.on('message', (d) => { let m = null; try { m = JSON.parse(String(d)); } catch { return; } if (!m || m.id !== i + 1) return; if (m.error) { fin({ ok: false, error: String(m.error.message || 'cdp error') }); return; } results.push(m.result || {}); i++; next(); });
+    ws.on('error', (e) => fin({ ok: false, error: e && e.message }));
+    ws.on('close', () => fin({ ok: false, error: 'closed before the answer' }));
+  });
+}
+
+/** The page target a reading / a capture is about (the stream's ACTIVE tab by url). */
+async function targetOf(cdpUrl, activeUrl, timeoutMs) {
+  const h = hostPortOf(cdpUrl);
+  if (!h) return { ok: false, error: 'no CDP endpoint' };
+  const list = await getJson(h, '/json/list', timeoutMs);
+  if (!list.ok) return { ok: false, error: list.error };
+  const t = S.pickViewportTarget(list.json, { activeUrl });
+  return t ? { ok: true, target: t } : { ok: false, error: 'the browser has no page target' };
+}
+const cssSizeOf = (metrics) => {
+  const lv = (metrics && (metrics.cssLayoutViewport || metrics.layoutViewport)) || null;
+  const cw = lv ? Number(lv.clientWidth) : 0, ch = lv ? Number(lv.clientHeight) : 0;
+  return cw > 0 && ch > 0 ? { clientWidth: cw, clientHeight: ch } : null;
+};
+
+/**
+ * lane S4 (naive study 2 — the blank picture): A FRESH FRAME of the stream's
+ * active tab, asked of the PAGE (the screencast only sends on damage — a hash
+ * navigation measured 0 frames on 0.38.1): the layout metrics, then ONE
+ * `Page.captureScreenshot` (jpeg, of the visible viewport — the same picture the
+ * screencast draws), over one page socket, bounded. → `{ok:true, data (base64
+ * jpeg), clientWidth, clientHeight, targetId}` | `{ok:false, error}`; never throws.
+ */
+async function captureFrame(cdpUrl, { activeUrl = '', quality = 80, timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  const t = await targetOf(cdpUrl, activeUrl, timeoutMs);
+  if (!t.ok) return { ok: false, error: t.error };
+  const r = await pageCommands(t.target.webSocketDebuggerUrl, [
+    { method: 'Page.getLayoutMetrics' },
+    { method: 'Page.captureScreenshot', params: { format: 'jpeg', quality: Math.max(10, Math.min(100, Math.round(Number(quality) || 80))), fromSurface: true, captureBeyondViewport: false } },
+  ], timeoutMs, WebSocketImpl);
+  if (!r.ok) return { ok: false, error: r.error };
+  const size = cssSizeOf(r.results[0]);
+  const data = r.results[1] && typeof r.results[1].data === 'string' ? r.results[1].data : '';
+  if (!data) return { ok: false, error: 'the page answered no picture' };
+  return { ok: true, data, clientWidth: size ? size.clientWidth : 0, clientHeight: size ? size.clientHeight : 0, targetId: t.target.id || null };
+}
+
 async function readViewport(cdpUrl, { activeUrl = '', timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
   const h = hostPortOf(cdpUrl);
   if (!h) return { ok: false, error: 'no CDP endpoint' };
@@ -74,4 +131,4 @@ async function readViewport(cdpUrl, { activeUrl = '', timeoutMs = READ_MS, WebSo
   return { ok: true, clientWidth: cw, clientHeight: ch, targetId: t.id || null };
 }
 
-module.exports = { readViewport, READ_MS };
+module.exports = { readViewport, captureFrame, READ_MS };

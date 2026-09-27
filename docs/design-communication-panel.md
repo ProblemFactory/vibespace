@@ -1462,7 +1462,11 @@ be `?inline=1` (svg never — it is script). The window shows images as thumbnai
 (`img.src` to this route; a click opens `showImageOverlay`) and every other
 attachment as a chip (name, size, download). Images and videos inside a Lark rich
 text are now attachments too (`image_key` / `file_key`), and so are Gmail inline
-images without a filename (`cid:`).
+images without a filename (`cid:`). **R3 (§23.1)**: the fetch's order is PURE
+(`fetchVerdict`: cache first, a remembered refusal, ours only, joined, back-off,
+budget), `retry=1` is the person's Retry, a refusal is `no-store` (a vendor rate
+limit a 429 with its wait), and a thumbnail that did not draw names its reason
+with a Retry instead of silently becoming a chip.
 
 **Search** — `GET /api/channels/search?adapter=<id>&q=…`: the local logs, read
 asynchronously in chunks with a byte cap (at most 64 MB scanned, at most 100
@@ -3995,3 +3999,96 @@ One fence first (money): in an agent group every agent message would wake the ot
 ### 22.4 Ownership
 
 B-afa0 (rewritten as this section); prerequisite B-f0a2 (accounts). §7/§8/§9's mechanisms are unchanged — only their place in the UI and the composer's semantics change.
+
+## 23. R3 (2026-09-26): a picture is a picture; the first screen lists what matters
+
+The owner's two sentences on 2.369.185 (the aggregated IM), verbatim:
+
+1. "lark图像不能预览吗？" ("can't Lark images be previewed?") — a Lark message with a picture showed as the text "[image]" plus an "image ⬇" chip; no thumbnail.
+2. "开头不要把所有消息都放进来，很多是没用的，建议只放重要消息/conversation（比如推送给agent了的，或者某个agent刚刚读取了的），并展示一个小tag表示状态。" ("Don't put every message on the first screen — most are useless. Show only the important messages / conversations (e.g. those pushed to an agent, or that an agent just read), each with a small tag showing its state.") — the first screen was "879 groups · 0 unread", every conversation by time.
+
+### 23.1 Pictures (cause + fix)
+
+The record → on-demand fetch → cache → our own route chain existed since 2.369.185 (§6.5). The chip the owner saw was `img.onerror`'s FALLBACK: every failure (the minute's budget spent by the first walk, a dissolved chat, a picture inside a forwarded bundle, a non-raster type) silently became "image ⬇" with its reason thrown away — a silent failure. The fix:
+
+- **The record.** A Lark image message and every `img` / `media` inside a rich text become an `image/*` / `video/*` attachment. Its id is the `image_key` / `file_key` and its fetch handle is (message_id, key). It carries `placeholder`, the token the text wrote for it (`[image]` / `[video]`), and no invented English name: the window says "image" in the device's language, and the cache keeps the resource's own file name. A rich text wrapped in a locale key (`zh_cn`) now gives its text and its attachments from the same body.
+- **The fetch verdict** (PURE `src/channel-attachments.js` `fetchVerdict`), in order:
+  1. The cache is checked first: a cached picture is served even when the budget is spent, the vendor is backing off or the account is disabled.
+  2. A remembered refusal answers without a vendor call — 10 min for a refusal waiting cannot fix, the vendor's own wait for a transient one. The person's Retry skips the memory but never the budget.
+  3. Only an id one of our records names is fetched: first the record the route names (`?msg`, `store.findRecord`), then the newest 5000 records.
+  4. The capability row says `fetch`.
+  5. The account is enabled.
+  6. A fetch already in flight for the same picture is JOINED: one request, one charge.
+  7. Not inside the vendor's back-off. That is either a failed pass or a rate limit one picture hit — the account's, so the rest of the render waits too.
+  8. Within the minute's budget.
+  9. Only then, fetch.
+
+  The attachment route is the only caller (a thumbnail the window drew, a click). Ingest never fetches bytes.
+- **The window.** Once a picture is drawn, its placeholder leaves the text line once (`bodyShown`; the record's `text` is unchanged for agents and search). A picture that did not draw asks the route once more (a remembered refusal costs no vendor call), and PURE `thumbVerdict` decides:
+  - If waiting fixes it (budget, back-off, rate limit), the chip says "retrying in N s" and the picture reloads itself — at most twice, and only while the window shows it.
+  - If waiting does not, the chip NAMES the reason (budget spent / forbidden / not found / not cached / vendor error …) with the whole sentence in its title, plus a Retry.
+  - A file that is there but no raster (HEIC) is the download chip, marked "no preview".
+
+  Every failure goes to telemetry (`chan-attachment-failed`).
+- **The ledger.** A cache hit only moves an LRU stamp. The ledger is written coalesced (once per 5 s per account, and on close), no longer once per thumbnail.
+- **The allowlist.** This is the one vendor call a window can cause. It is allowlisted deliberately in `scripts/test-vendor-whitelist.mjs` §7 with its three gates named (on demand, cache first, budget-charged). The census is a function of the source, and four ungated patched copies each turn it red.
+
+### 23.2 The "matters" rule
+
+A conversation is on the first screen (the attention list) exactly when one of these holds (PURE `src/lib/channel-focus.js`: `statusTag` ≠ null):
+
+| Fact | Source (rowView's `outbox` / `assignment` / `touch`) | Window |
+|---|---|---|
+| an agent's draft awaits your approval, or a send's outcome is unknown | outbox.awaiting / outbox.unknown | — |
+| handed to an agent / a Task Group ON ITS OWN (the conversation grain — its own assignment) | the assignment, `source: 'conversation'` | — |
+| handed over by a rule or with its whole account, AND that hand-over acted on it: a wake was DELIVERED to the agent (`touch.wake.ok === true`, a lane other than `none`), or its wake is held (amber) | the assignment `source: 'pattern' / 'account'` + `touch.wake` / held | delivered: 24 h, edge exclusive; held: 7 days |
+| an agent read it | `agentReads` (stamped by the agent route's readFor: who, when, up to which record) | 24 h, edge EXCLUSIVE |
+| a wake for it is held | any of: hits pending; the last wake went nowhere (lane `none`); the last refusal is newer than the last wake. A wake stashed for the agent's next turn is NOT held | 7 days (the wake ledger's own) |
+| you replied in it | `selfAt` = a record the vendor marks as yours (`isSelf`), or your own send from here | 24 h, edge exclusive |
+
+Non-archived agent groups are always listed (your explicit act, D1). The order is the full list's (activity). A conversation handed over by a rule or with its whole account is NOT listed for the hand-over alone until a wake is delivered or held — it falls through to read / held / replied / nothing like any other row. When listed, its tag carries `grain`; the tooltip says "Handed to … with the whole account" / "… by a rule that matches it", and the visible words stay "→ Agent".
+
+**D4 (the integrator's ruling, 2026-09-27)**: an account-grain or pattern-grain hand-over does NOT put every conversation of that account on the attention list (the owner's work mailbox has 824 threads; handing the whole account to an agent would put all 824 back on the first screen — the exact thing the owner asked us to stop); only these facts list a conversation: a single-conversation assignment, a wake actually delivered to an agent within 24 h, an agent read within 24 h, a held wake within 7 days, your own reply within 24 h, an outbox proposal awaiting approval / an unknown outcome.
+
+### 23.3 One tag, by priority
+
+`awaiting › unknown › assigned › read | new-since-read › held › replied` — the first match wins:
+
+| code | en | zh | ja | tone |
+|---|---|---|---|---|
+| awaiting | N to approve | N 条待批准 | N 件承認待ち | needs you (accent outline) |
+| unknown | send unknown | 结果未知 | 結果不明 | did not get through (amber) |
+| assigned | → Agent | → Agent | → Agent | a fact (neutral); amber + the alert glyph when its wake is held (a rule / account grain appears only once delivered or held, D4) |
+| read | Agent read 5m ago | Agent 5分钟前读过 | Agent 5分前に既読 | a fact |
+| new-since-read | New since Agent | Agent 读后有新 | Agent 既読後に新着 | needs you |
+| held | last wake held | 上次唤醒被暂存 | 前回の起動は保留 | did not get through |
+| replied | replied 3h ago | 你3小时前回复过 | 3時間前に返信済み | a fact |
+
+- `read` and `new-since-read` are ONE fact, split by whether anything arrived after the read (`lastAt > upTo`), so they never compete.
+- `assigned` ranks above `held`, so a held wake shows on the "→ Agent" tag (amber) instead of being hidden by it.
+- The tag sits on line 2, under the title at every width, in the source chip's slot; the source moves to the tooltip.
+- The agent's name is its own part (`.chan-tag-who`, a data path for the i18n census). When space is tight the name yields and the words stay whole.
+- The width budget lives in the words: 75 % of line 2, with ≥ 18 px left for a name. This is measured in en/zh/ja under this box's face and DejaVu Sans (test-channels-e2e ⑰).
+
+### 23.4 The header, All, search
+
+- The header is a two-way switch, "N need attention | All 879" (the Outbox window's chan-seg grammar), across the whole bar. The attention list is the default, and the choice holds for the page session.
+- The second row holds a **Filter** box (title / source / last line, case-insensitive), New group and Outbox. The two buttons moved down from the header: beside them at the 188 px rail, the switch was cut to "1 需…" | "全…".
+- In the attention view, matches outside the list are offered as "N more in All"; clicking it switches views and keeps the words.
+- Two characters or more also offer "Search messages for "…"" — a search of every connected account's local logs (the per-account search dialog, now given several accounts).
+- The All view keeps its first-screen cap of 60 rows plus "Show all".
+
+### 23.5 The server's new facts (all on rowView's `touch`; an untouched row carries `touch: null`)
+
+- `agentReads` (≤ 5 principals, newest first) is stamped by the **agent route's readFor**, AFTER the reach check: a hidden read is the uniform not-found and leaves no trace. The same principal re-reading the same tail within 60 s is not re-stamped (an agent's read loop is not a broadcast loop). The stamp goes through the index's one door (debounced flush) and one partial broadcast of that row.
+- A wake ledger entry now carries `name` (whom it reached).
+- `selfAt` is stamped from `isSelf` records at ingest and push. A sent proposal you drafted counts too, before the vendor echoes it. After boot it is derived once from the log tail for rows active in the last two days and never stamped (`healSelfAt`: one conversation per event-loop turn; a row stamped 0 is never re-read).
+
+Gates:
+- Fast: test-channels-images, test-channels-focus, test-channels-lark-shape ⑨, test-vendor-whitelist §7, test-channels-groups-ui.
+- Heavy: test-channels-aggregate-ui ②b, test-channels-groups-e2e ⑨, test-channels-e2e ⑰, test-channels-i18n.
+
+**For the owner (built at these defaults; no setting added):**
+- **D1** — does a message that @mentions you count as mattering? Today it does not; 18 Lark conversations @-mention you.
+- **D2** — keep the activity order, or put the needs-you rows first?
+- **D3** — should window pictures get an owner reserve inside the vendor budget? Today pictures share the per-minute budget with the timed walk; a refused picture now waits a minute and retries by itself, never silently.

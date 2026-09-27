@@ -2243,6 +2243,9 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   transform: translateX(-50%); z-index: 100000;
   display: flex; flex-direction: column; gap: 6px; align-items: center;
   pointer-events: none;
+  /* lane S4: as wide as its widest toast — a `left: 50%` box shrink-fits into the HALF of the viewport right of its
+     left edge, so on a 390 px phone every toast with an action was squeezed into ~195 px (one word per line) */
+  width: max-content; max-width: calc(94vw / var(--ui-scale, 1));
 }
 #global-toasts.gt-anchored { align-items: flex-end; }
 .global-toast {
@@ -4373,6 +4376,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
    the word cannot share the line (the 260px default sidebar = 172px of bar) */
 @container chan-panel (max-width: 200px) {
   .chan-outbox-label { display: none; }
+  /* R3: the filter row shares the line — New group keeps its glyph (its words ride the title) */
+  .chan-newgroup-label { display: none; }
 }
 /* g3 (design §22): THE GROUP LIST — the first screen. One row per agent group or
    tracked conversation, sorted by activity: glyph · name · time / source chip ·
@@ -4393,6 +4398,26 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-grow-sub { display: flex; align-items: center; gap: 5px; min-width: 0; margin-top: 2px; font-size: 10px; color: var(--text-dim); }
 .chan-src-chip { flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; font-weight: 600; padding: 0 6px; line-height: 15px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
 .chan-grow-last { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* R3 (design §23): the first screen is the ATTENTION list — the header is a two-way switch
+   ("{n} need attention" | "All {n}", the Outbox's chan-seg grammar) across the WHOLE bar, a second row with
+   the filter + New group + Outbox, and ONE small tag per
+   row on line 2 (under the title at every width) in the source chip's slot. The tag takes at most 75 % of line 2
+   (the last line yields first): its WORDS are drawn whole — their width budget lives in the words, measured per
+   face × language by test-channels-e2e ⑰ — and the agent's NAME (.chan-tag-who, a data path) is the part that yields. One colour per meaning (ui §4.3): needs you =
+   accent outline, did not get through = amber, a fact = neutral tint. */
+.chan-summary .chan-view-seg { display: flex; min-width: 0; width: 100%; }
+.chan-view-seg .chan-view-btn { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; padding: 3px 6px; text-align: center; font-variant-numeric: tabular-nums; }
+.chan-find { display: flex; align-items: center; gap: 6px; padding: 0 2px 8px; }
+.chan-find-input { flex: 1 1 auto; min-width: 0; box-sizing: border-box; font: inherit; font-size: 11px; padding: 3px 7px; height: 24px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); }
+.chan-find-input:focus { outline: none; border-color: var(--accent); }
+.chan-grow-tag { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 3px; max-width: 75%; min-width: 0; box-sizing: border-box; overflow: hidden; font-size: 9px; font-weight: 600; padding: 0 6px; line-height: 13px; border-radius: 999px; border: 1px solid transparent; }
+.chan-grow-tag .chan-ic { font-size: 9px; flex-shrink: 0; }
+.chan-tag-words { white-space: pre; flex-shrink: 0; }
+.chan-tag-who { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-tag-neutral { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 12%, transparent); }
+.chan-tag-attn { color: var(--attn-text); border-color: var(--accent-dim); background: transparent; }
+.chan-tag-warn { color: var(--warn-text); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); }
+.chan-focus-empty { font-size: 10px; }
 .chan-grow-unread { flex-shrink: 0; font-size: 10px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); font-variant-numeric: tabular-nums; }
 .chan-archived-toggle { display: flex; align-items: center; gap: 5px; padding: 3px 6px; font-size: 10px; color: var(--text-dim); cursor: pointer; border-radius: var(--radius-sm); }
 .chan-archived-toggle:hover { background: var(--bg-hover); }
@@ -4482,6 +4507,15 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chanmsg-att:hover { border-color: var(--accent); }
 .chanmsg-att-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .chanmsg-att-size { color: var(--text-dim); white-space: nowrap; }
+/* R3 (design §23): a picture that did not draw SAYS WHY — the reason word (dim, or amber on a refusal), a
+   Retry, and a "retrying in N s" wait while a budget / back-off runs out; the "[image]" line leaves once drawn */
+.chanmsg-att-why { color: var(--text-dim); white-space: nowrap; }
+.chanmsg-att-failed { border-color: color-mix(in srgb, var(--yellow, #e5c07b) 45%, var(--border)); }
+.chanmsg-att-failed .chanmsg-att-why { color: var(--warn-text); }
+.chanmsg-att-wait { color: var(--text-secondary); }
+.chanmsg-att-retry { font: inherit; font-size: 10px; padding: 0 6px; line-height: 15px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-input); color: var(--accent); cursor: pointer; }
+.chanmsg-att-retry:hover { border-color: var(--accent); }
+.chanmsg-body.chanmsg-body-empty { display: none; }
 .chanwin-start { padding: 6px; text-align: center; color: var(--text-dim); font-size: 10px; }
 .chanwin-outbox { margin-top: 6px; border-top: 1px solid var(--border); padding-top: 8px; display: flex; flex-direction: column; gap: 6px; }
 .chanwin-outbox-head { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-dim); }
@@ -4711,6 +4745,14 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .file-tool-btn.browser-live-confirm-btn { width: auto; height: 22px; padding: 0 10px; font-size: 10px; white-space: nowrap; flex: 0 0 auto; color: var(--green, #7fc47f); border-color: var(--green, #7fc47f); }
 .file-tool-btn.browser-live-confirm-btn.deny { color: var(--red, #e55); border-color: var(--red, #e55); }
 .chat-status-browser.driving { color: var(--yellow, #e5c07b); }
+/* lane S4 (naive study 2): the page is the pane's size — the chip speaks only when it is NOT (the agent chose the size /
+   another window's pane rules / a headed browser's narrowest / not settable); a picture no frame followed is dimmed while
+   the view waits for one; the canvas takes the phone's pinch (touch-action none — the app never page-zooms under it) */
+.browser-live-canvas { touch-action: none; }
+.browser-live.picture-stale .browser-live-img { opacity: 0.45; filter: grayscale(0.6); }
+.browser-live-bar > .file-tool-btn.browser-live-fit { color: var(--text-secondary); border-color: var(--border); }
+.browser-live-bar > .file-tool-btn.browser-live-fit.actionable { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.browser-live.zoomed .browser-live-img { will-change: transform; }
 @media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } } /* lane I: the recording chip folds into ⋯ like any item (its old display:none here lost to .file-tool-btn's display:flex anyway) */
 
 /* ── agent browser P4 (§7.4): the backend chip, the blocked-claim banner, the switcher dialog ── */
@@ -4932,9 +4974,12 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-strip-owners { display: inline-flex; align-items: center; gap: 2px; margin-left: 2px; }
 .browser-live-strip-owners .win-owner-dot { width: 7px; height: 7px; }
 .file-tool-btn.browser-live-bind.bound { color: var(--accent); }
-/* ≤768px: TABS ONLY (D19's measurement) — the model keeps the split, the phone shows the focused pane */
+/* ≤768px: TABS ONLY (D19's measurement) — the model keeps the split, the phone shows the focused pane.
+   lane S4 verify r1: the ACTIVE split host only — unscoped, every split host was displayed (2 classes beat the phone's
+   `.window { display:none !important }`) and, the phone's windows being `position: relative`, the active window flowed
+   BELOW an earlier split host: a second browsing conversation's live view opened at y = 844 on an 844 px phone. */
 @media (max-width: 768px) {
-  .window.tab-split { display: flex !important; }
+  .window.tab-split.window-active { display: flex !important; }
   .window.tab-split > .window-content.tab-split-pane:not(.tab-split-focus) { display: none !important; }
   .window.tab-split > .tab-split-divider { display: none !important; }
   .window.tab-split > .window-content.tab-split-pane.tab-split-focus { box-shadow: none; }

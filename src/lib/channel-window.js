@@ -64,7 +64,10 @@ import { showAssignFilterDialog, assignmentSummary } from './channel-filter-edit
 // one store, two places, §9.2).
 import { renderInlineProposals, reasonLabel } from './channel-outbox.js';
 // a3 i18n: a route failure is worded by its CODE, never by the engine's sentence.
-import { routeErrorText } from './channel-words.js';
+import { routeErrorText, attachmentReasonText } from './channel-words.js';
+// R3 (§23): a picture's next step (retry / the named chip) and the text line its placeholder leaves — PURE, shared with the engine
+import * as Att from '../channel-attachments.js';
+import { track } from './telemetry-client.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
@@ -111,12 +114,31 @@ function sizeText(n) {
 }
 /** A message's ATTACHMENTS (2026-09-26): an image is a thumbnail through OUR
  *  route (never a vendor URL, never innerHTML — `img.src` only), the rest a
- *  chip with name · size and a download link. A thumbnail the route will not
- *  serve inline (not a raster image) falls back to the chip. */
-function renderAttachments(rec, base) {
+ *  chip with name · size and a download link.
+ *
+ *  R3 (2026-09-26, the owner: "lark图像不能预览吗？" — he saw "[image]" and a
+ *  bare "image ⬇" chip): A THUMBNAIL THAT DID NOT DRAW SAYS WHY. The route's
+ *  answer is asked again ONCE (a remembered refusal costs no vendor call) and
+ *  PURE `thumbVerdict` decides: a wait fixes it (the minute's budget, the
+ *  vendor's back-off / rate limit) ⇒ a "retrying in N s" chip and the picture
+ *  loads itself again (twice at most, only while the window shows it); it
+ *  does not ⇒ the chip NAMES the reason (budget spent / not found / not
+ *  cached / vendor error …, the whole sentence in its title) with a Retry that
+ *  asks past the remembered refusal. A file that is there but is no raster
+ *  picture (HEIC …) becomes the download chip, said as "no preview". The
+ *  record's placeholder ("[image]") leaves the text line once its picture is
+ *  drawn (PURE `bodyShown`; the record itself is untouched). */
+function renderAttachments(rec, base, { body = null } = {}) {
   const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id) : [];
   if (!list.length || !base) return null;
   const box = el('div', 'chanmsg-atts');
+  const drawn = [];   // the placeholders of the pictures that DREW (bodyShown's input)
+  const syncBody = () => {
+    if (!body) return;
+    const shown = Att.bodyShown(rec.text || '', drawn);
+    body.textContent = shown;
+    body.classList.toggle('chanmsg-body-empty', !shown);
+  };
   for (const a of list) {
     const url = `${base}/attachment/${encodeURIComponent(a.id)}?msg=${encodeURIComponent(rec.vendorId || '')}`;
     const chipOf = () => {
@@ -134,20 +156,77 @@ function renderAttachments(rec, base) {
       c.title = t('Download {name} — it is saved, never opened here', { name: a.name || t('attachment') });
       return c;
     };
-    if (/^image\//.test(String(a.mime || ''))) {
-      const img = document.createElement('img');
-      img.className = 'chanmsg-thumb';
-      img.alt = a.name || t('image');
-      img.loading = 'lazy';
-      img.dataset.channelImage = a.id;
-      img.onerror = () => { if (img.isConnected) img.replaceWith(chipOf()); };
-      img.onclick = () => showImageOverlay(img.src);
-      img.title = t('Open the image');
-      img.src = `${url}&inline=1`;   // OUR route, as a property — never markup
-      box.appendChild(img);
-    } else box.appendChild(chipOf());
+    if (Att.isImage(a)) box.appendChild(thumbOf(a, url, { attempt: 0, chipOf, onDrawn: () => { if (a.placeholder) { drawn.push(a.placeholder); syncBody(); } } }));
+    else box.appendChild(chipOf());
   }
   return box;
+}
+
+/** ONE picture: the thumbnail, its retry, its named refusal (see above). */
+function thumbOf(a, url, { attempt = 0, retry = false, chipOf, onDrawn }) {
+  const img = document.createElement('img');
+  img.className = 'chanmsg-thumb';
+  img.alt = a.name || t('image');
+  img.loading = 'lazy';
+  img.dataset.channelImage = a.id;
+  img.onload = () => { if (img.naturalWidth > 0) { img.dataset.drawn = '1'; onDrawn && onDrawn(); } };
+  img.onerror = () => { thumbFailed(img, a, url, attempt, { chipOf, onDrawn }).catch(() => {}); };
+  img.onclick = () => showImageOverlay(img.src);
+  img.title = t('Open the image');
+  // OUR route, as a property — never markup; a retry is a NEW url (a refusal is `no-store`, but a
+  // browser that kept it must not replay it) and the person's Retry asks past a remembered refusal
+  img.src = `${url}&inline=1${attempt || retry ? `&n=${attempt}${retry ? '&retry=1' : ''}` : ''}`;
+  return img;
+}
+async function thumbFailed(img, a, url, attempt, ctx) {
+  if (!img.isConnected) return;
+  let answer = null;
+  try {
+    const res = await fetch(`${url}&inline=1&n=${attempt}q`, { headers: { Accept: 'application/json' } });
+    if (res.ok) { answer = { ok: true, mime: (res.headers.get('content-type') || '').split(';')[0].trim() }; try { await res.body?.cancel(); } catch {} }
+    else { let j = {}; try { j = await res.json(); } catch {} answer = { ok: false, code: j.code || (res.status === 429 ? 'vendor-budget' : 'vendor-error'), retryAfterSec: j.retryAfterSec || Number(res.headers.get('retry-after')) || null, error: j.error || null, raw: j }; }
+  } catch { answer = null; }
+  if (!img.isConnected) return;
+  const v = Att.thumbVerdict(answer, attempt);
+  if (v.kind === 'retry') {
+    const wait = waitChip(a, v.afterSec);
+    img.replaceWith(wait);
+    setTimeout(() => { if (wait.isConnected) wait.replaceWith(thumbOf(a, url, { ...ctx, attempt: attempt + 1 })); }, v.afterSec * 1000);
+    return;
+  }
+  const chip = v.download ? ctx.chipOf() : refusedChip(a, url, v.code, answer, ctx);
+  if (v.download) { chip.classList.add('chanmsg-att-nopreview'); chip.appendChild(el('span', 'chanmsg-att-why', attachmentReasonText('no-preview'))); }
+  chip.dataset.refused = v.code;
+  img.replaceWith(chip);
+  // a picture that did not draw is REPORTED, never only drawn as a chip (the no-silent-failures law)
+  try { track('event', 'chan-attachment-failed', { code: v.code }); } catch {}
+}
+/** "Loading the image — retrying in N s": the wait a budget / a back-off needs, said. */
+function waitChip(a, sec) {
+  const c = el('span', 'chanmsg-att chanmsg-att-wait');
+  c.dataset.channelImage = a.id;
+  c.appendChild(icon('hourglass', 11));
+  c.appendChild(el('span', 'chanmsg-att-name', a.name || t('image')));
+  c.appendChild(el('span', 'chanmsg-att-why', t('retrying in {s} s', { s: sec })));
+  c.title = t('Loading the image — retrying in {s} s', { s: sec });
+  return c;
+}
+/** The picture could not be fetched: its name, the reason in one word, the
+ *  whole sentence in the title, and a Retry that asks past the remembered refusal. */
+function refusedChip(a, url, code, answer, ctx) {
+  const c = el('span', 'chanmsg-att chanmsg-att-failed');
+  c.dataset.channelImage = a.id;
+  c.appendChild(icon('image', 11));
+  c.appendChild(el('span', 'chanmsg-att-name', a.name || t('image')));
+  c.appendChild(el('span', 'chanmsg-att-why', attachmentReasonText(code)));
+  const why = answer && !answer.ok ? routeErrorText({ code, error: answer.error, retryAfterSec: answer.retryAfterSec }) : attachmentReasonText(code);
+  c.title = t('The image could not be loaded: {why}', { why });
+  const again = el('button', 'chanmsg-att-retry', t('Retry'));
+  again.type = 'button';
+  again.dataset.channelRetry = a.id;
+  again.onclick = (ev) => { ev.stopPropagation(); c.replaceWith(thumbOf(a, url, { ...ctx, attempt: 0, retry: true })); };
+  c.appendChild(again);
+  return c;
 }
 
 /** ONE row. EVERYTHING is textContent — see rule 1. `cont` = a continuation
@@ -172,8 +251,9 @@ function renderRecord(rec, { cont = false, base = null } = {}) {
     }
     row.appendChild(head);
   }
-  row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
-  const atts = renderAttachments(rec, base);
+  const body = el('div', 'chanmsg-body', rec.text || '');
+  row.appendChild(body);
+  const atts = renderAttachments(rec, base, { body });
   if (atts) row.appendChild(atts);
   return row;
 }

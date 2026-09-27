@@ -235,6 +235,7 @@ if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws:/
 if (a === 'stream' && b === 'status') { const port = ports[ns] || ports['*'] || null; if (!port) { out({ success: false, data: null, error: 'fake: no stream for ' + ns }); process.exit(1); } out({ success: true, data: { connected: true, enabled: true, port, screencasting: false } }); process.exit(0); }
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed: 1, failed: [], sessions: [] } }); process.exit(0); }
+if (a === 'set' && b === 'viewport') { out({ success: true, data: {} }); process.exit(0); } // lane S4: the live view sizes the page to its pane (\`set viewport W H\`) — the fake answers it; its frames keep their size (the view letterboxes, as before)
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `, { mode: 0o755 });
   const rememberPids = () => { try { for (const l of fs.readFileSync(path.join(AB_STATE, 'pids'), 'utf8').trim().split('\n')) { const pid = Number(l); if (pid) procs.add({ kill: () => process.kill(pid, 'SIGKILL') }); } } catch { } };

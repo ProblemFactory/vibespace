@@ -86,6 +86,23 @@
 //     open on this desktop, the live view is BORN inside that chain
 //     (createWindow's intoChain — never created-then-merged) under a
 //     deterministic syncId so two clients never open two.
+//   · lane S4 — THE PAGE IS THE PANE'S SIZE (naive study 2: "实况画面只占窗格上面一截",
+//     the phone's desktop-width strip, the blank-white picture): the view REPORTS
+//     its pane (`fit`: the canvas's box in CSS px at net zoom 1 — never device px,
+//     so a DPR-3 phone asks for a 390-wide page — plus whether it is on screen),
+//     settled by a ResizeObserver; the bridge sizes the page to the ruling pane
+//     (src/browser-fit.js: the driver's, else the largest visible) and says so
+//     (`{type:'fit'}`); the FIT CHIP (bar item `fit`) speaks only when the page is
+//     NOT this pane's size — the agent chose it ("Fit to this window" is the one
+//     act that takes it back), another window's pane rules, a headed browser's
+//     narrowest, or the size could not be set. PICTURE CLOCKS: no frame 2 s after
+//     the stream opened / after a navigation ⇒ "Waiting for a picture…" (the stale
+//     picture dimmed, a `refresh` asked once), 10 s ⇒ said with a Reconnect —
+//     never a blank picture under a URL that says loaded. THE PHONE'S PINCH (watch
+//     mode): two fingers zoom the picture (a transform, origin top-left, 1–4×), one
+//     finger pans a zoomed one, a double tap toggles 2×; taps map through the
+//     transform (the pointer reads the transformed rect); in takeover a pinch is
+//     refused with a hint.
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
 import { t } from './i18n.js';
@@ -104,6 +121,7 @@ import { claimKeyboard, releaseKeyboard, keyboardOwner, keyboardOwned } from './
 import { createTraceTimeline } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the Actions pane
 import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's never-fold badge words (the full sentence is its tooltip)
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
+import { fitChipState, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
 
 const CONSOLE_CAP = 200;
 const RECONNECT_MAX = 5;
@@ -122,7 +140,9 @@ export const URL_MIN_PX = 120;
 /*  2.369.180 (lanes I + J integrated): lane J r2's two driving-only items fold like the rest — the "Typing goes to
    *  the browser" chip with bind/viewers/recording (3; folded, its words are an info row of the ⋯), the "input sent · n"
    *  echo first (5; a transient count — the page itself shows what the input did). */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, badge: 1, url: 2, open: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, backend: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+/*  lane S4: the FIT chip (shown only when the page is NOT this pane's size — the agent chose it, another pane rules …)
+   *  folds with bind/viewers/recording (3); folded, its words and its act are a ⋯ row. */
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, badge: 1, url: 2, open: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, fit: 3, backend: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
 const RIPPLE_MS = 650;
@@ -228,6 +248,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     you: null, mine: false, modeSince: 0, modeCause: null, cursor: null, confirmations: new Map(), confirmTimer: null, lastMoveAt: 0, buttonsDown: 0,
     // lane J r2: input feedback + the keyboard — acts sent this takeover, the last ripples, the user's mapped pointer, the echo timer
     sent: 0, ripples: [], youPt: null, echoTimer: null, lastReclaimHintAt: 0, reclaims: 0, composing: false, claimed: false,
+    // lane S4: the bridge's last `fit` record, the report last sent, the picture clocks, the pinch transform + its touches
+    fit: null, fitSent: null, fitTimer: null, lastFrameAt: 0, navAt: 0, openAt: 0, pictureTimer: null, refreshSent: false, picture: 'ok', pictureStale: false,
+    zoom: { ...ZOOM_NONE }, touches: new Map(), pinch: null, pan: null, lastTap: null, lastPinchHintAt: 0,
   };
   const row = () => sessionRow(app, sessionId);
 
@@ -273,7 +296,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   kbdChip.innerHTML = KBD_SVG; { const w = document.createElement('span'); w.textContent = t('Typing goes to the browser'); kbdChip.appendChild(w); }
   kbdChip.title = t('While you drive, every key goes to the page — nothing reaches a chat box. Hand back to type anywhere else (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
   const echoEl = document.createElement('span'); echoEl.className = 'browser-live-echo'; echoEl.style.display = 'none'; echoEl.setAttribute('aria-live', 'polite');
-  bar.append(modeBadge, takeBtn, handBtn, kbdChip, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, backendBtn, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
+  // lane S4: the FIT chip — the page's size when it is NOT this pane's (words by kind; click = "Fit to this window" when the agent chose it)
+  const fitChip = document.createElement('button'); fitChip.className = 'file-tool-btn browser-live-fit'; fitChip.style.display = 'none';
+  bar.append(modeBadge, takeBtn, handBtn, kbdChip, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, backendBtn, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
   // …and the same act on the TITLE BAR of the standalone window (the design's affordance; hidden with the title bar once grouped)
   const titleBind = document.createElement('button'); titleBind.className = 'win-btn win-bind'; titleBind.innerHTML = BIND_SVG;
   { const controls = winInfo.titleBar?.querySelector('.window-controls'); if (controls) controls.insertBefore(titleBind, controls.firstChild); }
@@ -288,6 +313,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   // of this element mixes viewport px with layout px. var()-reactive.
   canvas.style.zoom = COUNTER_ZOOM;
   const img = document.createElement('img'); img.className = 'browser-live-img'; img.alt = ''; img.draggable = false;
+  img.style.transformOrigin = '0 0'; // lane S4: the pinch transform's origin (src/browser-fit.js zoomedRect spells the same)
   const statusEl = document.createElement('div'); statusEl.className = 'browser-live-status'; statusEl.textContent = t('Connecting…');
   // P3: the labelled AGENT cursor — a child of the same net-zoom-1 canvas as the picture, so its layout px are the picture's
   const cursorEl = document.createElement('div'); cursorEl.className = 'browser-live-agent-cursor'; cursorEl.style.display = 'none';
@@ -723,7 +749,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
 
   // ── lane I: THE FOLD — every item keeps its words on one line; what the bar has no room for goes into ⋯ by
   // LIVE_BAR_PRIORITY (PURE barLayout; the ruler + observers + rAF live in bar-fold.js, bound to this window's signal) ──
-  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, kbd: kbdChip, echo: echoEl, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, backend: backendBtn, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
+  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, kbd: kbdChip, echo: echoEl, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
   const fold = createBarFold(bar, {
     more: moreBtn,
     items: () => Object.entries(barItems).map(([key, el]) => ({ key, el, priority: LIVE_BAR_PRIORITY[key], flexMin: key === 'url' ? URL_MIN_PX : undefined })),
@@ -752,6 +778,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       else if (key === 'open') { if (!out.includes('url')) rows.push({ label: t('Open this URL in a web view'), disabled: !st.url, action: () => openBtn.onclick() }); }
       else if (key === 'viewers') rows.push({ label: viewersEl.textContent, title: viewersEl.title, disabled: true });
       else if (key === 'rec') rows.push({ label: recEl.textContent, title: recEl.title, action: () => recEl.onclick() });
+      else if (key === 'fit') { const c = fitChipNow(); rows.push(c.act ? { label: t('Fit the page to the window'), title: fitChip.title, action: () => fitChip.onclick() } : { label: fitChip.textContent, title: fitChip.title, disabled: true }); } // lane S4
       else if (key === 'backend') rows.push({ label: backendBtn.textContent, title: backendBtn.title, action: () => backendBtn.onclick() });
       else if (key === 'tabs') rows.push({ label: check('tabs', tabsBtn), action: () => tabsBtn.onclick() });
       else if (key === 'console') rows.push({ label: check('console', consBtn), action: () => consBtn.onclick() });
@@ -813,6 +840,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (st.reconnectTimer) { clearTimeout(st.reconnectTimer); st.reconnectTimer = null; }
     try { st.ws?.close(); } catch { /* */ }
     st.connected = false; st.error = null; st.hollow = false;
+    st.openAt = 0; st.navAt = 0; st.picture = 'ok'; st.pictureStale = false; st.refreshSent = false; st.fitSent = null; root.classList.remove('picture-stale'); // lane S4
     setStatus(t('Connecting…'));
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const q = new URLSearchParams({ session: sessionId });
@@ -842,6 +870,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.viewers = m.viewers || 1; st.target = m.target || null;
         st.you = m.you || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0;
         renderMode(); renderViewers(); renderTitle(); renderStrip(); renderBackend(); renderRec(); syncTrace(); renderOwner(); renderBind();
+        st.fitSent = null; reportFit(); renderFit(); // lane S4: this viewer's pane, at once (the bridge sizes the page to the ruling pane)
         break;
       // P3 (§4.3): the bridge's answer to a takeover/handback — ours or anybody's
       case 'mode': {
@@ -885,7 +914,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
           setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
         } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
-        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); }
+        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); }
         else if (m.state === 'upstream-closed') { st.connected = false; setStatus(t('Stream ended'), { error: true, reconnect: true }); }
         else if (m.state === 'ended') { st.error = m; if (/session ended/.test(String(m.error || ''))) st.sessionEnded = true; setStatus(String(m.error || t('Stream ended')), { error: true, reconnect: true }); }
         else if (m.connected !== undefined) { // the upstream's own status record
@@ -896,7 +925,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         const data = typeof m.data === 'string' ? m.data : '';
         if (!data) break;
         st.frames++;
-        if (!st.connected) { st.connected = true; st.reconnects = 0; } // a LATE viewer of a relay already open (a tap kept it) hears no upstream-open — its first frame is the proof
+        st.lastFrameAt = Date.now(); st.refreshSent = false; // lane S4: the picture clocks restart
+        if (st.picture !== 'ok' || st.pictureStale) { st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); if (!st.error && !st.stopped) setStatus('', { hide: true }); }
+        if (!st.connected) { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); } // a LATE viewer of a relay already open (a tap kept it) hears no upstream-open — its first frame is the proof
         const md = m.metadata || {};
         if (Number(md.deviceWidth) > 0 && Number(md.deviceHeight) > 0) st.meta = { width: Number(md.deviceWidth), height: Number(md.deviceHeight) }; // lane J: every frame's claim, both sides
         img.src = 'data:image/jpeg;base64,' + data; // .src, never markup (the image-overlay law)
@@ -908,7 +939,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         { const act = st.tabs.find((x) => x.active); if (act && act.url && !st.url) { st.url = act.url; renderUrl(); } }
         renderTabs();
         break;
-      case 'url': st.url = String(m.url || ''); renderUrl(); break;
+      case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); break; } // lane S4: a navigation starts the picture clock
+      // lane S4: the page's size and whose pane it follows (the bridge's ruling; replayed to a late viewer)
+      case 'fit': st.fit = { state: m.state, width: Number(m.width) || 0, height: Number(m.height) || 0, viewerId: m.viewerId ?? null, rule: m.rule || null, drawScale: Number(m.drawScale) || 1, floor: m.floor || null, device: m.device || null, error: m.error || null, why: m.why || null }; renderFit(); break;
       // lane J: the page's own layout viewport (the bridge reads it over CDP on the first frame, a picture/tab change and a takeover)
       case 'viewport': if (m.ok && Number(m.clientWidth) > 0 && Number(m.clientHeight) > 0) { st.page = { clientWidth: Number(m.clientWidth), clientHeight: Number(m.clientHeight) }; renderCursor(); } break;
       case 'console':
@@ -937,12 +970,133 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     st.error = null; st.target = null; // the next hello names the pane (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
     st.frames = 0; st.url = ''; st.tabs = []; st.console = []; st.running = false; st.reconnects = 0;
+    st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds
     renderUrl(); renderTabs(); renderConsole();
     try { winInfo._openSpec = { action: 'openBrowserLive', sessionId, profileId: st.profileRef || null }; app.wm._notify?.(); } catch { /* optional */ }
     renderStrip();
     connect();
+  }
+
+  // ── lane S4: THE PAGE IS THE PANE'S SIZE — report the pane, speak when the page is not ours ──
+  /** Is this view on screen (its window displayed — not another desktop, not a hidden tab, not minimized) in a visible document? */
+  const onScreen = () => { try { if (document.hidden || !root.isConnected) return false; if (typeof root.checkVisibility === 'function') return root.checkVisibility({ visibilityProperty: true }); return root.getClientRects().length > 0; } catch { return false; } };
+  /** The pane = the canvas's box in viewport px — at NET zoom 1 that IS its CSS px (never device px: a DPR-3 phone asks for a 390-wide page). */
+  function paneNow() { const r = canvas.getBoundingClientRect(); return { width: Math.round(r.width), height: Math.round(r.height) }; }
+  function reportFit({ force = false } = {}) {
+    if (st.closed || !(st.ws && st.ws.readyState === 1)) return;
+    const p = paneNow();
+    // `browser.fitPageToView` OFF: this view never votes (a view that had voted says it is gone — the page goes back after the grace)
+    const allowed = app.settings?.get('browser.fitPageToView') !== false;
+    const vis = allowed && onScreen() && p.width >= 1 && p.height >= 1;
+    const last = st.fitSent;
+    const width = vis ? p.width : (last ? last.width : Math.max(1, p.width)), height = vis ? p.height : (last ? last.height : Math.max(1, p.height));
+    if (!force && last && last.width === width && last.height === height && last.visible === vis) return;
+    st.fitSent = { width, height, visible: vis };
+    send({ type: 'fit', width: Math.max(1, width), height: Math.max(1, height), dpr: Number(window.devicePixelRatio) || 1, visible: vis, force });
+  }
+  const scheduleReport = () => { if (st.fitTimer) clearTimeout(st.fitTimer); st.fitTimer = setTimeout(() => { st.fitTimer = null; reportFit(); }, FIT_REPORT_MS); };
+  if (typeof ResizeObserver === 'function') { const cro = new ResizeObserver(() => { scheduleReport(); if (isZoomed(st.zoom)) setZoom(st.zoom); }); cro.observe(canvas); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => cro.disconnect()); }
+  document.addEventListener('visibilitychange', scheduleReport, { signal: winInfo._listenerCtl?.signal });
+  // verify r1: a DESKTOP SWITCH (and the stage) hide a window with `visibility:hidden` WRITTEN ON ITS ELEMENT'S STYLE — no
+  // resize, no visibilitychange — so the view kept voting from another desktop (its pane still ruled the page, the restore
+  // never came). Every hider that writes the element's style/class is watched; the report re-reads onScreen() itself.
+  if (typeof MutationObserver === 'function' && winInfo.element) { const mo = new MutationObserver(scheduleReport); mo.observe(winInfo.element, { attributes: true, attributeFilter: ['style', 'class'] }); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => mo.disconnect()); }
+  { const onFitSetting = () => scheduleReport(); app.settings?.on?.('browser.fitPageToView', onFitSetting); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => app.settings?.off?.('browser.fitPageToView', onFitSetting)); }
+  const fitChipNow = () => fitChipState({ fit: st.fit, you: st.you });
+  // the chip's words by kind (English keys — t() needs the literals)
+  const FIT_WORDS = {
+    agent: (c) => ({ text: t('Agent’s size {w}×{h}', { w: c.width, h: c.height }), title: (c.device ? t('The agent set this page to a {device} ({w}×{h}) itself', { device: c.device, w: c.width, h: c.height }) : t('The agent set this page to {w}×{h} itself', { w: c.width, h: c.height })) + ' — ' + t('the picture is scaled to your window. Click to fit the page to the window again.') }),
+    other: (c) => ({ text: t('Sized for another window'), title: t('The page is {w}×{h} — sized for {who}; this window shows it scaled.', { w: c.width, h: c.height, who: c.rule === 'holder' ? t('the window of whoever is driving') : t('the largest window watching it') }) }),
+    floor: (c) => ({ text: t('Page {w} px wide', { w: c.width }), title: t('This browser’s window cannot be narrower than {w} px, so the page is that wide and scaled to fit this window', { w: c.width }) }),
+    unavailable: (c) => ({ text: t('Page {w}×{h}', { w: c.width, h: c.height }), title: t('The page could not be sized to this window: {why}', { why: String(c.error || '') }) }),
+  };
+  function renderFit() {
+    const c = fitChipNow();
+    fitChip.style.display = c.show ? '' : 'none';
+    fitChip.dataset.kind = c.kind || '';
+    if (!c.show) return;
+    const w = FIT_WORDS[c.kind](c);
+    fitChip.textContent = w.text; fitChip.title = w.title; fitChip.setAttribute('aria-label', w.title);
+    fitChip.classList.toggle('actionable', !!c.act);
+  }
+  fitChip.onclick = () => {
+    const c = fitChipNow();
+    if (c.act !== 'force') { showToast(fitChip.title, { duration: 5000 }); return; }
+    reportFit({ force: true }); // the user's explicit act: the page follows the window again (the agent's size is set aside; the rule picks the pane)
+    showToast(t('Fitting the page to the window — the agent’s own size is set aside'), { duration: 3500 });
+  };
+  // ── lane S4: THE PICTURE CLOCKS — never a blank picture under a URL that says loaded ──
+  function pictureTick() {
+    if (st.closed) return;
+    const ps = pictureState({ connected: st.connected, frames: st.frames, lastFrameAt: st.lastFrameAt, navAt: st.navAt, openAt: st.openAt, now: Date.now() });
+    const blocking = !!(st.error || st.stopped || st.hollow);
+    if (ps.state === 'ok' || blocking) {
+      // only OUR words are taken back (a lost connection / an error / a stopped browser keep theirs)
+      if ((st.picture !== 'ok' || st.pictureStale) && !blocking && st.connected && st.frames) setStatus('', { hide: true });
+      root.classList.remove('picture-stale');
+      st.picture = 'ok'; st.pictureStale = false;
+      return;
+    }
+    if (!st.refreshSent) { st.refreshSent = true; send({ type: 'refresh' }); } // ask once for a fresh picture of this page (the bridge takes it from the page itself)
+    st.pictureStale = ps.stale;
+    root.classList.toggle('picture-stale', ps.stale);
+    if (ps.state === 'waiting' && st.picture !== 'waiting') setStatus(ps.stale ? t('Waiting for a picture of the new page…') : t('Waiting for a picture…'));
+    if (ps.state === 'none' && st.picture !== 'none') setStatus(ps.stale ? t('No picture of the new page came in 10 s — the browser’s stream sent none. Reconnect to ask again.') : t('No picture came in 10 s — the browser’s stream sent none. Reconnect to ask again.'), { error: true, reconnect: true });
+    st.picture = ps.state;
+  }
+  st.pictureTimer = setInterval(pictureTick, 500);
+  // ── lane S4: THE PHONE'S PINCH — a transform on the picture in WATCH mode; taps map through it ──
+  const boxOf = () => ({ width: canvas.clientWidth, height: canvas.clientHeight });
+  const localOf = (e) => { const r = canvas.getBoundingClientRect(); const kx = r.width ? canvas.clientWidth / r.width : 1, ky = r.height ? canvas.clientHeight / r.height : 1; return { x: (e.clientX - r.left) * kx, y: (e.clientY - r.top) * ky }; };
+  function setZoom(z) {
+    st.zoom = zoomClamp(z, boxOf());
+    img.style.transform = transformCss(st.zoom);
+    root.classList.toggle('zoomed', isZoomed(st.zoom));
+    renderCursor(); renderYou();
+  }
+  const pinchHint = () => { const n = Date.now(); if (n - st.lastPinchHintAt > HINT_EVERY_MS) { st.lastPinchHintAt = n; showToast(t('Pinch-zoom works while you watch — hand back to zoom the picture'), { duration: 3500 }); } };
+  /** Handles a touch pointer for the pinch / pan / double tap; true = consumed (never forwarded, never a watch hint). */
+  function touchDown(e) {
+    if (e.pointerType !== 'touch') return false;
+    if (driving()) {
+      // takeover: the FIRST finger is the page's (forwarded as touch records, mapped through the transform); a second is refused with a hint
+      if (st.touches.size >= 1) { st.touches.set(e.pointerId, { refused: true }); pinchHint(); return true; }
+      st.touches.set(e.pointerId, { forwarded: true }); return false;
+    }
+    st.touches.set(e.pointerId, { ...localOf(e), t: Date.now(), moved: false });
+    try { img.setPointerCapture(e.pointerId); } catch { /* optional */ }
+    if (st.touches.size === 2) { const [a, b] = [...st.touches.values()]; st.pinch = { z0: { ...st.zoom }, a0: { x: a.x, y: a.y }, b0: { x: b.x, y: b.y } }; st.pan = null; }
+    else if (st.touches.size === 1 && isZoomed(st.zoom)) { const a = st.touches.get(e.pointerId); st.pan = { z0: { ...st.zoom }, x0: a.x, y0: a.y }; }
+    return true;
+  }
+  function touchMove(e) {
+    if (e.pointerType !== 'touch' || !st.touches.has(e.pointerId)) return false;
+    const rec = st.touches.get(e.pointerId);
+    if (rec.refused) return true;
+    if (rec.forwarded) return false;
+    const p = localOf(e);
+    if (Math.hypot(p.x - rec.x, p.y - rec.y) > 8) rec.moved = true;
+    rec.cx = p.x; rec.cy = p.y;
+    if (st.pinch && st.touches.size >= 2) { const [a, b] = [...st.touches.values()]; setZoom(pinchStep(st.pinch.z0, st.pinch.a0, st.pinch.b0, { x: a.cx ?? a.x, y: a.cy ?? a.y }, { x: b.cx ?? b.x, y: b.cy ?? b.y }, boxOf())); }
+    else if (st.pan) setZoom(panStep(st.pan.z0, p.x - st.pan.x0, p.y - st.pan.y0, boxOf()));
+    return true;
+  }
+  function touchUp(e) {
+    if (e.pointerType !== 'touch' || !st.touches.has(e.pointerId)) return false;
+    const rec = st.touches.get(e.pointerId); st.touches.delete(e.pointerId);
+    if (rec.refused) return true;
+    if (rec.forwarded) return false;
+    if (st.touches.size < 2) st.pinch = null;
+    if (!st.touches.size) st.pan = null;
+    // a TAP (no move, short): a double tap toggles 2× at the finger; a single tap is the watch hint (as a click is)
+    if (!rec.moved && Date.now() - rec.t < 350) {
+      const lt = st.lastTap, n = Date.now();
+      if (lt && n - lt.at < 350 && Math.hypot(lt.x - rec.x, lt.y - rec.y) < 30) { st.lastTap = null; setZoom(isZoomed(st.zoom) ? ZOOM_NONE : zoomAt(st.zoom, ZOOM_DOUBLE_TAP, rec.x, rec.y, boxOf())); }
+      else { st.lastTap = { at: n, x: rec.x, y: rec.y }; if (n - st.lastHintAt > HINT_EVERY_MS) { st.lastHintAt = n; showToast(t('Watch mode — the agent is driving; pinch to zoom, press Take over to send input'), { duration: 3500 }); } }
+    }
+    return true;
   }
 
   // ── chrome actions ──
@@ -964,6 +1118,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const driving = () => st.mode === 'takeover' && st.mine;
   const sig = { signal: winInfo._listenerCtl?.signal };
   img.addEventListener('pointerdown', (e) => {
+    if (touchDown(e)) { e.preventDefault(); return; } // lane S4: the pinch / pan / double tap (watch), a refused second finger (takeover)
     const p = pointerAt(e);
     if (!driving()) {
       const now = Date.now();
@@ -978,6 +1133,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (rec && sendInput(rec, true)) { ripple(p); st.youPt = p; renderYou(); }
   }, sig);
   img.addEventListener('pointermove', (e) => {
+    if (touchMove(e)) { e.preventDefault(); return; } // lane S4
     if (!driving()) return;
     const now = Date.now();
     if (now - st.lastMoveAt < MOVE_EVERY_MS) return;
@@ -989,6 +1145,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   }, sig);
   img.addEventListener('pointerleave', () => { if (!st.buttonsDown) { st.youPt = null; renderYou(); } }, sig);
   const up = (e) => {
+    if (touchUp(e)) return; // lane S4
     if (!driving()) return;
     const p = pointerAt(e);
     st.buttonsDown = Math.max(0, st.buttonsDown - 1);
@@ -1083,6 +1240,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     st.closed = true;
     releaseKeyboard(winInfo.id); st.claimed = false; // lane J r2: a closed view never owns the keyboard (its listeners die with the window's AbortController)
     if (st.echoTimer) { clearTimeout(st.echoTimer); st.echoTimer = null; }
+    if (st.pictureTimer) { clearInterval(st.pictureTimer); st.pictureTimer = null; } // lane S4
+    if (st.fitTimer) { clearTimeout(st.fitTimer); st.fitTimer = null; }
     if (foldRaf) { cancelAnimationFrame(foldRaf); foldRaf = 0; }
     try { app.wm.setOwnerBadge?.(winInfo.id, null); } catch { /* window gone */ }
     if (st.confirmTimer) { clearInterval(st.confirmTimer); st.confirmTimer = null; }
@@ -1112,8 +1271,12 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent, echo: echoEl.style.display === 'none' ? null : echoEl.textContent, ripples: st.ripples.map((r) => ({ ...r })), youPt: st.youPt ? { ...st.youPt } : null, youShown: youEl.style.display !== 'none', reclaims: st.reclaims, align: LIVE_ALIGN,
       // MULTIVIEW (design-browser-multiview §2 / D3 / D4) — the STRIP's folds are `stripFolded` (`folded` is lane I's bar)
       currentRef: curRef(), rows: st.rows.map((r) => ({ ...r, text: rowLabel(r), name: rowName(r) })), order: st.order.slice(), stripFolded: st.folded.slice(), stripShown: strip.style.display !== 'none', capText: capBtn.textContent, capFull: capBtn.classList.contains('full'), machineFull: capBtn.classList.contains('machine-full'), sessionEnded: st.sessionEnded, released: !!(st.error && st.hollow), notStarted: !!(st.error && st.error.browserState === 'not-started'), statusText: statusEl ? statusEl.textContent : null,
-      bar: fold.last(), folded: fold.folded(), foldedRows: foldedRows().map((r) => ({ label: r.label, disabled: !!r.disabled })) }), // lane I: the census re-runs barLayout on `bar`
+      bar: fold.last(), folded: fold.folded(), foldedRows: foldedRows().map((r) => ({ label: r.label, disabled: !!r.disabled })), // lane I: the census re-runs barLayout on `bar`
+      // lane S4: the page's size vs this pane, the chip, the picture clocks, the pinch
+      fit: st.fit ? { ...st.fit } : null, fitSent: st.fitSent ? { ...st.fitSent } : null, fitChip: fitChip.style.display === 'none' ? null : { kind: fitChip.dataset.kind, text: fitChip.textContent }, pane: paneNow(),
+      picture: st.picture, pictureStale: st.pictureStale, zoom: { ...st.zoom } }),
     layoutBar: () => fold.layoutNow(), // lane I: the census asks for the verdict NOW (never waiting a frame)
+    reportFit, setZoom, // lane S4: the suite re-reports the pane / sets a zoom through the view's own path
   };
 }
 
@@ -1204,7 +1367,7 @@ registerLiveViewMenus(); // end registerLiveViewMenus
 export function autoBindLiveViews(app, prev, digest) {
   if (!prev || !digest || !Array.isArray(digest.leases)) return [];             // the first digest is a snapshot, not an event
   if (app.settings?.get('browser.autoBindLiveView') === false) return [];
-  if (app.isMobile) return [];                                                   // a phone renders tabs only; the desktop client binds and the layout syncs
+  if (app.isMobile) return autoOpenOnPhone(app, prev, digest);                   // lane S4: the phone opens it too — full screen, one tap back
   const before = new Set((prev.leases || []).map((l) => l && `${l.profileId}|${l.sessionId}`));
   const opened = [];
   for (const l of digest.leases) {
@@ -1223,6 +1386,40 @@ export function autoBindLiveViews(app, prev, digest) {
     const intoChain = place.mode === 'split' ? { hostId: host.id, split: true, side: 'right' } : { hostId: host.id, quiet: true, side: place.side };
     const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain });
     if (w) opened.push(w.id);
+  }
+  return opened;
+}
+/**
+ * lane S4 (naive study 2 — "助手开始浏览时实况窗口不会自己弹出来", the phone): the PHONE auto-opens the live view as the
+ * desktop does — the same NEW holder row, the same deterministic `win-blive-<session>` (two clients converge on one
+ * window), born in the chat's chain as its split partner (the model the desktop keeps; ≤768 px shows ONE pane, the
+ * .183 rule) — but only when that conversation's window is the one ON SCREEN (the phone's analogue of "open on the
+ * desktop you are looking at": a phone never jumps away from another conversation). The live view is focused (full
+ * screen) and a toast offers "Back to the chat" — the switcher lists both. A view that already exists is brought
+ * forward (and reconnected when it is not connected).
+ */
+export function autoOpenOnPhone(app, prev, digest) {
+  const before = new Set((prev.leases || []).map((l) => l && `${l.profileId}|${l.sessionId}`));
+  const opened = [];
+  for (const l of digest.leases) {
+    if (!l || !l.sessionId || !l.profileId || l.child || before.has(`${l.profileId}|${l.sessionId}`)) continue;
+    const host = sessionWindowFor(app, l.sessionId);
+    if (!host || host._hiddenByDesktop || host.isMinimized) continue;
+    const active = app.wm.activeWindowId;
+    const onScreen = active === host.id || !!(host._tabChain && active && host._tabChain.tabs && host._tabChain.tabs.includes(active) && app.wm.windows.get(active)?.type !== 'browser-live');
+    if (!onScreen) continue;                                                     // another conversation is on screen: never jump away from it
+    const back = () => { try { app.goToWinId?.(host.id); } catch { /* window gone */ } }; // goToWinId IS the door (§62)
+    const toast = () => showToast(t('The agent opened its browser — it is shown here'), { duration: 6000, action: { label: t('Back to the chat'), run: back } });
+    const existing = [...app.wm.windows.values()].find((w) => w.type === 'browser-live' && w._browserLive && w._browserLive.state().sessionId === l.sessionId);
+    if (existing) {
+      try { if (!existing._browserLive.state().connected) existing._browserLive.reconnect(); } catch { /* window going */ }
+      app.goToWinId?.(existing.id);
+      toast(); opened.push(existing.id); continue;
+    }
+    const syncId = 'win-blive-' + l.sessionId;
+    if (app.wm.windows.has(syncId)) continue;
+    const w = openBrowserLive(app, { sessionId: l.sessionId, profileId: l.ephemeral ? EPHEMERAL_REF : l.profileId, syncId, intoChain: { hostId: host.id, split: true, side: 'right' } });
+    if (w) { app.goToWinId?.(w.id); toast(); opened.push(w.id); }
   }
   return opened;
 }

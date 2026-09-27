@@ -111,6 +111,12 @@ const quiet = { log() {}, warn() {}, error() {} };
 }
 
 // ── ① auth.state through the REAL store on the TWO-PRESET env ──
+// EVERY exit path removes this run's scratch (ok, a failed assert, an uncaught throw, a signal — a signal
+// exits through the handlers too): the engine is stopped FIRST (its close() flushes, and the attachment
+// ledger's flush mkdirs — a removal before it would re-create the tree), then ROOT goes. `eng` is declared
+// below; before it exists the reference throws and is caught. 245 `vs-chan-gmail-<pid>` dirs had piled up.
+process.on('exit', () => { try { eng.stop(); } catch {} try { fs.rmSync(ROOT, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch {} });
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => process.exit(143));
 const presetsHolder = { list: PRESETS.slice() };
 const storeDir = path.join(ROOT, 'store'); fs.mkdirSync(storeDir, { recursive: true });
 const integrations = STORE.create({ dataDir: storeDir, env: {}, now, broadcast: () => {}, drivePresets: () => presetsHolder.list, log: quiet });

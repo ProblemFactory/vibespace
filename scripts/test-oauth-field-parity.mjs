@@ -146,6 +146,7 @@ export const PANEL_CONTROL_OWNERS = {
   showSearchDialog: 'the account\'s message search box (2026-09-26) — a query over the logs, not an account field',
   showOptionsDialog: 'the adapter-declared options editor (after connect) — not the OAuth client or the sign-in',
   showPushDialog: 'the push-lane claim — its own dialog, not an account field',
+  filterBox: 'the first screen\'s conversation filter (R3, 2026-09-26) — a query over the rows the panel already holds, not an account field',
 };
 export function formControls(text) {
   const out = [];

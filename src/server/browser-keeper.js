@@ -2877,15 +2877,18 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  target and forgotten on the first failure (a restarted browser has a new
    *  port), then asked once more. Never throws: `{ok, clientWidth, clientHeight}`. */
   const vpUrls = new Map();
-  async function viewportFor(target, { activeUrl = '' } = {}) {
-    ensureLoaded();
-    if (!target || !target.ok) return { ok: false, error: 'no target' };
+  /** The target's CDP endpoint, remembered per target and forgotten on the first failure (a restarted browser has a
+   *  new port), then asked once more — shared by the viewport reading (lane J) and the fresh frame (lane S4). lane S4:
+   *  a HELPER's browser (kind 'child') resolves under its own recorded pairs (it had no endpoint before: 'p:undefined'). */
+  async function withCdpUrl(target, fn) {
     const S = require('../browser-stream.js');
-    const VP = require('./browser-viewport.js');
-    const key = target.kind === 'ephemeral' ? 'eph:' + String(target.sessionName || '') : 'p:' + String(target.profileId || '');
+    const key = target.kind === 'ephemeral' ? 'eph:' + String(target.sessionName || '') : target.kind === 'child' ? 'child:' + String(target.handle || '') : 'p:' + String(target.profileId || '');
     const resolveUrl = async () => {
-      if (target.kind === 'ephemeral') {
-        const r = await rt.cdpUrl(null, { extraEnv: S.pairsToEnv(target.envPairs) });
+      if (target.kind === 'ephemeral' || target.kind === 'child') {
+        const e = target.kind === 'child' ? ephemeralFor(String(target.handle || '')) : null;
+        const pairs = target.kind === 'child' ? (e && e.state === 'ready' ? pairsOf(e.profileId) : null) : target.envPairs;
+        if (!Array.isArray(pairs) || !pairs.length) return null;
+        const r = await rt.cdpUrl(null, { extraEnv: S.pairsToEnv(pairs) });
         return r.ok ? r.url : null;
       }
       const rec = reg.browsers[target.profileId];
@@ -2896,12 +2899,100 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const cached = !!url;
       if (!url) { try { url = await resolveUrl(); } catch { url = null; } }
       if (!url) return { ok: false, error: 'no CDP endpoint for this browser' };
-      const v = await VP.readViewport(url, { activeUrl });
+      const v = await fn(url);
       if (v.ok) { vpUrls.set(key, url); return v; }
       vpUrls.delete(key);
       if (!cached) return v;
     }
     return { ok: false, error: 'unreachable' };
+  }
+  async function viewportFor(target, { activeUrl = '' } = {}) {
+    ensureLoaded();
+    if (!target || !target.ok) return { ok: false, error: 'no target' };
+    const VP = require('./browser-viewport.js');
+    return withCdpUrl(target, (url) => VP.readViewport(url, { activeUrl }));
+  }
+
+  /** lane S4 (naive study 2 — "实况画面只占窗格上面一截" + the phone's desktop-width strip): SIZE THE PAGE TO THE PANE.
+   *  `set viewport W H` under the target's OWN session (the daemon that streams it is the one writer of its viewport —
+   *  the agent's `set viewport` goes the same way, and new tabs inherit it: measured on 0.38.1), routed like a
+   *  confirmation: an ephemeral / a helper's browser by its spawn pairs, an attachment under the lease's session over
+   *  the keeper browser's CDP url (never the directory), a mediated lease in its own namespace. A VIEW NEVER STARTS A
+   *  BROWSER: the target must be running per the keeper's own record (a `set` under the pairs of a daemon that is not
+   *  up would launch one). Never throws: `{ok, code, error}`. */
+  async function setViewportFor(target, { width, height, scale, device } = {}) {
+    ensureLoaded();
+    const FIT = require('../browser-fit.js');
+    const argv = FIT.viewportArgv({ width, height, scale, device }); // verify r1: also the agent's own choice put back (its factor / `set device NAME`)
+    if (!argv) return { ok: false, code: 'bad-request', error: 'a viewport needs a width and a height (or a device name)' };
+    if (!target || !target.ok) return { ok: false, code: 'bad-request', error: 'no target' };
+    const S = require('../browser-stream.js');
+    let r;
+    if (target.kind === 'ephemeral' || target.kind === 'child') {
+      const bk = target.kind === 'child' ? String(target.handle || '') : String(target.ns || target.sessionName || '').replace(/^vs-/, '');
+      const e = bk ? ephemeralFor(bk) : null;
+      // a MANAGED ephemeral must be running; an unmanaged one (a pre-C3 session) is asked only under its own pairs
+      if (e && (e.state !== 'ready' || starting.has(e.profileId) || stopping.has(e.profileId))) return { ok: false, code: 'browser_stopped', error: 'the browser is not running — its size is set when it runs again' };
+      const pairs = target.kind === 'child' ? (e ? pairsOf(e.profileId) : null) : target.envPairs;
+      if (!Array.isArray(pairs) || !pairs.length) return { ok: false, code: 'not_managed', error: 'this browser has no recorded pairs on this server' };
+      if (!e) { // no record of ours: only a daemon that already runs under these pairs is asked (the launch-free `session info` first — lane P verify's rule)
+        let info = null; try { info = typeof rt.info === 'function' ? await rt.info(null, { extraEnv: S.pairsToEnv(pairs) }) : null; } catch { info = null; }
+        if (!info || !info.active) return { ok: false, code: 'browser_stopped', error: 'the browser is not running — its size is set when it runs again' };
+      }
+      r = await rt.exec(null, argv, { extraEnv: S.pairsToEnv(pairs), timeout: 15000 });
+    } else {
+      const p = profile(target.profileId);
+      if (!p) return { ok: false, code: 'not-found', error: `no profile ${target.profileId}` };
+      const rec = reg.browsers[p.id];
+      if (!rec || rec.state !== 'ready' || starting.has(p.id) || stopping.has(p.id)) return { ok: false, code: 'browser_stopped', error: `"${p.label}"'s browser is not running` };
+      if (p.host || !(B.providerRow(p.provider) || {}).starts) return { ok: false, code: 'stream_unavailable', error: `"${p.label}" is ${p.host ? 'on ' + p.host : 'an external browser over CDP'} — its page size is its own` };
+      const bk = String(target.sessionName || '').replace(/^vs-/, '');
+      if (isMediated(p)) {
+        const url = mediator && mediationOn() ? mediator.urlFor(p.id, bk) : null;
+        if (!url) return { ok: false, code: 'no-browser', error: `"${p.label}" holds no mediated url for this conversation` };
+        r = await rt.exec(M.mediatedNamespace(p.id, bk), argv, { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) }, timeout: 15000 });
+      } else {
+        const o = await leaseCliOpts(p.id, bk);
+        if (!o) return { ok: false, code: 'browser_no_cdp', error: noCdpError(p) };
+        r = await rt.exec(nsOf(p.id), argv, { ...o, timeout: 15000 });
+      }
+    }
+    const j = r && r.json;
+    if (r && r.ok && !(j && j.success === false)) return { ok: true, code: null, error: null };
+    return { ok: false, code: 'viewport_failed', error: String((j && j.error) || (r && (r.stderr || r.error)) || 'the browser CLI failed').trim().slice(0, 300) };
+  }
+  /** verify r1: the browser record a target's PAGE-SIZE NOTE lives on — `rec.viewport` = {agent, applied, baseline, floorW, at}
+   *  (src/browser-fit.js fitNoteOf). The record is REPLACED at every launch (a relaunched browser has its own size), so the
+   *  note dies with the browser it describes and a server restart still knows the agent chose the size / what to restore. */
+  function viewportRecOf(target) {
+    ensureLoaded();
+    if (!target || !target.ok) return null;
+    if (target.kind === 'ephemeral' || target.kind === 'child') {
+      const bk = target.kind === 'child' ? String(target.handle || '') : String(target.ns || target.sessionName || '').replace(/^vs-/, '');
+      const e = bk ? ephemeralFor(bk) : null;
+      return e ? (reg.browsers[e.profileId] || null) : null;
+    }
+    return target.profileId ? (reg.browsers[target.profileId] || null) : null;
+  }
+  function viewportNoteFor(target) { const rec = viewportRecOf(target); return rec && rec.viewport && typeof rec.viewport === 'object' ? { ...rec.viewport } : null; }
+  function noteViewport(target, note) {
+    const rec = viewportRecOf(target);
+    if (!rec) return false;
+    const next = note && typeof note === 'object' ? { ...note } : null;
+    const same = JSON.stringify(rec.viewport ? { ...rec.viewport, at: 0 } : null) === JSON.stringify(next ? { ...next, at: 0 } : null);
+    if (same) return true;
+    rec.viewport = next ? { ...next, at: now() } : null;
+    save(); // no notify: the note is the bridge's, not a roster change
+    return true;
+  }
+  /** lane S4 (the blank picture): a FRESH frame of the target's active tab, asked of the page over CDP (server-side;
+   *  the raw endpoint never leaves it — lane J's rule) when the stream sent none after a navigation. The endpoint
+   *  resolves exactly like `viewportFor`'s (remembered per target, forgotten on the first failure). */
+  async function freshFrameFor(target, { activeUrl = '' } = {}) {
+    ensureLoaded();
+    if (!target || !target.ok) return { ok: false, error: 'no target' };
+    const VP = require('./browser-viewport.js');
+    return withCdpUrl(target, (url) => VP.captureFrame(url, { activeUrl }));
   }
 
   const api = {
@@ -2920,6 +3011,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
     ephemeralPairsFor: (browserKey) => { ensureLoaded(); const p = reg.profiles.find((x) => isEph(x) && x.owner.id === String(browserKey || '')); return p ? (pairsOf(p.id) || null) : null; }, // naive study 2 (finding 4): a sub-agent browser's OWN pairs — the recorder's tap on it
     viewportFor, // lane J: the page's own viewport (the live view's input space)
+    setViewportFor, freshFrameFor, // lane S4: size the page to the pane (never starting a browser) + a fresh frame after a navigation
+    viewportNoteFor, noteViewport, // verify r1: the page-size note on the browser's own record (agent choice / applied / baseline / floor)
     // MULTIVIEW D4 / B-325a: the per-conversation cap, the own count, the release after the turn, the viewers the bridge reports
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
     pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)

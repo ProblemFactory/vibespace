@@ -731,7 +731,8 @@ export class ChatStatusBar {
       const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts + '\n' + running;
       // the three browser faces (design-browser-faces direction B): the chip names WHOSE browser this is — the agent's — on its window-with-a-dot glyph (the globe is the web view's); the tooltip's first line carries the same prefix
       const face = t('Agent browser') + ' · ';
-      chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} ${escHtml(face + String(shown || ''))}`);
+      // lane S4: the words sit in their own span so the phone's sticky chip can cut them to fit (chat.css ≤768px)
+      chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} <span class="chat-status-browser-text">${escHtml(face + String(shown || ''))}</span>`);
     }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down

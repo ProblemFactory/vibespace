@@ -32,6 +32,10 @@
 //      OFF (instance default), turning a channel's on is audited, and a
 //      user's own draft carries no sender-line note; the reconciled proposal
 //      survives the restart in ③
+//   ⑰ R3 (2026-09-26, design §23): the first screen's ATTENTION TAG at the 188 px rail — every tag word
+//      (TAG_ORDER × variants × the longest ages) fits 75 % of line 2 with room for a name, in en / zh / ja,
+//      under this box's face and DejaVu Sans; a name too long for any row yields while the words stay
+//      whole; control: words that may shrink are cut
 //
 // Everything is per-pid (scripts/scratch.mjs) — no machine-global port and no
 // fixed /tmp path — and the server gets a NAMED scratch HOME, because a server
@@ -1087,6 +1091,94 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   console.log(`    CONTROL, this box's own face: the pre-fix product draws "refresh paused" ${cd && cd.whole ? 'WHOLE' : 'CUT'} in a plain row (${cd && cd.w}/${cd && cd.natural} px)${cd && cd.whole ? ' — why the local gate stayed green on .185' : ''}`);
   if (hasDejaVu) ok(!!cv && cv.whole === false && cv.natural > cv.w, `CONTROL: under DejaVu Sans the pre-fix product cuts it (${cv && cv.w} of ${cv && cv.natural} px — the .185 mirror measured 82 px, fits:false) — the leg above reddens on the pre-fix product HERE`, JSON.stringify(cv));
   for (const x of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 2 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── ⑰ R3 (2026-09-26, design §23): THE ATTENTION TAG — ITS WORDS ARE DRAWN WHOLE, ITS AGENT'S NAME YIELDS.
+//    The first screen's tag sits on line 2 of a row at the default rail's panel (188 px): it may take
+//    TAG_SHARE (75 %) of the line and the last line yields to it. Every word `statusTagParts` can draw
+//    (a census over TAG_ORDER × its variants × the longest ages: 59m / 23h / just now), in en, zh AND ja,
+//    under this box's face AND 'DejaVu Sans' (the runner's — the ⑯ lesson), is measured in a synthetic row
+//    built with the product's classes inside the real panel: the words alone fit TAG_SHARE of the line
+//    with ≥ NAME_MIN px left for a name; with a name too long for any row the words stay WHOLE, the name
+//    shows ≥ NAME_MIN px and ellipsizes, and the tag stays inside its row.
+//    CONTROL: a stylesheet where the words may shrink (and the name may not) cuts the words — the leg's
+//    "words whole" reddens on it (checked under this box's face, en). ──
+{
+  const TAG_SHARE = 0.75, NAME_MIN = 18;
+  const LONG = 'an agent session name far too long for any row';
+  const Wd = await import(new URL(`file://${path.join(wt, 'src/lib/channel-words.js')}`).href);
+  const Fo = await import(new URL(`file://${path.join(wt, 'src/lib/channel-focus.js')}`).href);
+  const dictsT = { en: {} };
+  for (const l of ['zh', 'ja']) dictsT[l] = (await import(new URL(`file://${path.join(wt, `src/lib/i18n-${l}.js`)}`).href)).default;
+  const tForT = (lang) => (str, params) => { let x = (dictsT[lang] && dictsT[lang][str]) || str; if (params) x = x.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m)); return x; };
+  const NOWT = Date.now();
+  const CASES = [];
+  for (const code of Fo.TAG_ORDER) {
+    const ages = code === 'read' || code === 'new-since-read' || code === 'replied' ? [NOWT - 10e3, NOWT - 59 * 60e3, NOWT - 23 * 3600e3] : [NOWT];
+    for (const at of ages) for (const held of code === 'assigned' ? [false, true] : [false]) CASES.push({ code, n: 99, at, held, name: 'X' });
+  }
+  ok(CASES.length >= 12 && Fo.TAG_ORDER.every((c) => CASES.some((x) => x.code === c)), `CENSUS: every tag code of TAG_ORDER is in the width census (${CASES.length} cases: ${Fo.TAG_ORDER.join(', ')})`);
+  const partsFor = (lang) => CASES.map((c) => { const p = Wd.statusTagParts(c, { now: NOWT, t: tForT(lang) }); return { code: c.code, named: !!p.who, before: p.before, after: p.after, icon: !!p.icon, tone: p.tone }; });
+  const PROBE_TAGS = (list, who) => `(() => {
+    const host = document.querySelector('.rail-panel-channels .chan-groups');
+    if (!host) return { fail: 'no first-screen list' };
+    const out = [];
+    for (const c of ${JSON.stringify(list)}) {
+      const row = document.createElement('div'); row.className = 'chan-grow'; row.dataset.grow = 'vs-tag-probe';
+      const line = document.createElement('div'); line.className = 'chan-grow-line';
+      const ti = document.createElement('span'); ti.className = 'chan-grow-title'; ti.textContent = 'A conversation title'; line.appendChild(ti);
+      const at = document.createElement('span'); at.className = 'chan-grow-at'; at.textContent = '12:00'; line.appendChild(at);
+      const sub = document.createElement('div'); sub.className = 'chan-grow-sub';
+      const tag = document.createElement('span'); tag.className = 'chan-grow-tag chan-tag-' + c.tone;
+      if (c.icon) { const ic = document.createElement('span'); ic.className = 'chan-ic'; ic.style.fontSize = '9px'; ic.innerHTML = '<svg viewBox="0 0 16 16" width="1em" height="1em"><circle cx="8" cy="8" r="6"/></svg>'; tag.appendChild(ic); }
+      const words = [];
+      if (c.before) { const w = document.createElement('span'); w.className = 'chan-tag-words'; w.textContent = c.before; tag.appendChild(w); words.push(w); }
+      let whoEl = null;
+      if (c.named && ${JSON.stringify(who)}) { whoEl = document.createElement('span'); whoEl.className = 'chan-tag-who'; whoEl.textContent = ${JSON.stringify(who)}; tag.appendChild(whoEl); }
+      if (c.after) { const w = document.createElement('span'); w.className = 'chan-tag-words'; w.textContent = c.after; tag.appendChild(w); words.push(w); }
+      const last = document.createElement('span'); last.className = 'chan-grow-last'; last.textContent = 'the last line of the conversation';
+      sub.append(tag, last); row.append(line, sub); host.appendChild(row);
+      const tr = tag.getBoundingClientRect(), sr = sub.getBoundingClientRect(), rr = row.getBoundingClientRect();
+      out.push({ code: c.code, text: tag.textContent, natural: tag.scrollWidth, w: Math.round(tr.width * 10) / 10, line: Math.round(sr.width * 10) / 10, wordsWhole: words.every((w) => w.scrollWidth <= w.clientWidth + 0.5), who: whoEl ? { shown: Math.round(whoEl.clientWidth), cut: whoEl.scrollWidth > whoEl.clientWidth + 0.5 } : null, inside: tr.right <= rr.right + 0.5 });
+      row.remove();
+    }
+    return { rows: out };
+  })()`;
+  const OPEN_T = `(async () => {
+    const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
+    for (let i = 0; i < 80; i++) { if (document.querySelector('.rail-panel-channels .chan-groups')) break; await new Promise((r) => setTimeout(r, 250)); }
+    return !!document.querySelector('.rail-panel-channels .chan-groups');
+  })()`;
+  const hasDejaVuT = (() => { try { return /DejaVu Sans/.test(execSync('fc-list : family', { encoding: 'utf8' })); } catch { return false; } })();
+  if (!hasDejaVuT) console.log("  SKIP: the runner-face pass of the tag census needs DejaVu Sans on this machine (fc-list : family)");
+  for (const FACE of hasDejaVuT ? [null, 'DejaVu Sans'] : [null]) {
+    const tag = FACE ? `[${FACE}] ` : '';
+    const reg = FACE ? await p1.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body { font-family: '${FACE}', sans-serif !important; }"; document.head.appendChild(st); });` }) : null;
+    for (const lang of ['zh', 'ja', 'en']) {
+      await p1.evaljs(`(() => { ${lang === 'en' ? "localStorage.removeItem('vibespace.lang')" : `localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)})`}; return 1; })()`);
+      ok(await p1.load(), `${tag}page 1 reloaded in ${lang} (⑰)`);
+      ok(await p1.evaljs(OPEN_T), `${tag}${lang}: the first screen's list is in the rail panel`);
+      const parts = partsFor(lang);
+      const bare = await p1.evaljs(PROBE_TAGS(parts, ''));
+      const worst = (bare.rows || []).reduce((a, x) => (x.natural > (a ? a.natural : -1) ? x : a), null);
+      const badBare = (bare.rows || []).filter((x) => !x.wordsWhole || x.natural > TAG_SHARE * x.line - (parts.find((p) => p.code === x.code).named ? NAME_MIN : 0));
+      console.log(`    ${tag}${lang} tag words @ line ${bare.rows && bare.rows[0] && bare.rows[0].line}px: ` + (bare.rows || []).map((x) => `"${x.text}" ${x.natural}`).join(' | '));
+      ok(!bare.fail && bare.rows.length === parts.length && !badBare.length, `${tag}${lang}: every tag's WORDS fit ${Math.round(TAG_SHARE * 100)} % of line 2, leaving ≥ ${NAME_MIN} px for a name (widest "${worst && worst.text}" ${worst && worst.natural} px)`, JSON.stringify(bare.fail || badBare));
+      const named = parts.filter((p) => p.named);
+      const lng = await p1.evaljs(PROBE_TAGS(named, LONG));
+      const badLong = (lng.rows || []).filter((x) => !x.wordsWhole || !x.who || !x.who.cut || x.who.shown < NAME_MIN || !x.inside || x.w > TAG_SHARE * x.line + 1);
+      ok(!lng.fail && lng.rows.length === named.length && !badLong.length, `${tag}${lang}: with a name too long for any row the words stay WHOLE, the name yields (≥ ${NAME_MIN} px shown, ellipsized) and the tag stays inside its row (${named.length} named tags)`, JSON.stringify(lng.fail || badLong));
+      if (lang === 'en' && !FACE) {
+        // THE CONTROL: words that may shrink, a name that may not
+        await p1.evaljs(`(() => { const st = document.createElement('style'); st.id = 'vs-tag-control'; st.textContent = '.chan-tag-words { flex-shrink: 1 !important; overflow: hidden !important; text-overflow: ellipsis !important; min-width: 0 !important; white-space: nowrap !important; } .chan-tag-who { flex-shrink: 0 !important; }'; document.head.appendChild(st); return 1; })()`);
+        const ctl = await p1.evaljs(PROBE_TAGS(named, LONG));
+        await p1.evaljs(`(() => { document.getElementById('vs-tag-control').remove(); return 1; })()`);
+        ok((ctl.rows || []).some((x) => !x.wordsWhole), `CONTROL: a stylesheet whose words may shrink cuts them behind a long name — "words whole" reddens on it (${(ctl.rows || []).filter((x) => !x.wordsWhole).length} of ${(ctl.rows || []).length} cut)`, JSON.stringify(ctl));
+      }
+    }
+    if (reg && reg.result) await p1.cdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: reg.result.identifier });
+  }
+  await p1.evaljs(`(() => { localStorage.removeItem('vibespace.lang'); return 1; })()`);
 }
 
 // ── the routes' host parameter is a PARAMETER with a named refusal ──

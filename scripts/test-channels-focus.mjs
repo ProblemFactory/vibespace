@@ -1,0 +1,453 @@
+#!/usr/bin/env node
+// THE FIRST SCREEN LISTS WHAT MATTERS (R3, 2026-09-26 — the owner on the
+// aggregated-IM release, "879 个群 · 0 条未读": "开头不要把所有消息都放进来，很多是
+// 没用的，建议只放重要消息/conversation（比如推送给agent了的，或者某个agent刚刚读取
+// 了的），并展示一个小tag表示状态。"; design docs/design-communication-panel.zh.md §23;
+// gate row `test-channels-focus`, fast).
+//
+//   ① PURE src/lib/channel-focus.js over a fixture index: every "matters" rule
+//     (awaiting · unknown · assigned on its OWN · a pattern / account grain only
+//     once a wake was DELIVERED in 24 h or is held (D4, 2026-09-27) · read in
+//     24 h · new since the read · held · replied in 24 h), the ONE-tag priority
+//     table, the 24 h edge (exclusive), the held window (the wake ledger's 7
+//     days; a STASHED wake is not held), agent groups always / archived never,
+//     the header's two counts, the filter and "{n} more in All"
+//   ② THE SPEC'S FIXTURE through the REAL engine: 50 conversations, 5
+//     hand-overs — 3 of ONE conversation each, the whole ACCOUNT and a RULE
+//     (11 conversations) — 3 read by an agent through the agent route's
+//     readFor, 1 proposal awaiting the owner ⇒ EXACTLY 7 on the first screen
+//     (the 47 conversations the account / the rule cover are NOT listed);
+//     one DELIVERED wake at each scope grain ⇒ 9, "9 need attention" / "All 50"
+//   ③ THE SERVER'S FACTS: the agent read is STAMPED (who / when / up to which
+//     record) in the index, said in ONE partial broadcast of that row, never
+//     for a hidden read, re-stamped at most once a minute for the same tail,
+//     five principals at most; the wake names whom it reached (and a held one
+//     says so); the owner's own newest message (a record `isSelf`, a sent
+//     proposal of the owner's, the one-shot derivation for rows that predate
+//     the field); an untouched row stays slim (`touch: null`)
+//   ④ THE WORDS in en / zh / ja (an injected translator, the e2e's `tFor`):
+//     the header, every tag — the agent's name a SEPARATE part — and its tone
+//   ⑤ NEGATIVE CONTROLS (scripts/mutant-copy.mjs, scratch copies): an
+//     inclusive 24 h edge, "read" ranked above "assigned", a focus list that
+//     keeps every row, a rule with the GRAIN check removed (every conversation
+//     of a handed-over account returns), a delivered wake with no window, an
+//     engine that stamps BEFORE the reach check
+//   ⑥ WIRING PINS: the panel draws firstScreen + statusTag + statusTagParts,
+//     the tag through channel-chrome's el() (no innerHTML), the header switch
+//     and the filter; the agent route's readFor is the stamp's only door
+//
+// Zero vendor calls; per-pid scratch dirs (scripts/scratch.mjs).
+// Run: node scripts/test-channels-focus.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const FOCUS_PATH = path.join(REPO, 'src/lib/channel-focus.js');
+const Fo = await import(pathToFileURL(FOCUS_PATH).href);
+const V = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-groups-view.js')).href);
+const Wd = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
+const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+const CH = require(path.join(REPO, 'src/channels/index.js'));
+const fake = require(path.join(REPO, 'src/channels/fake.js'));
+const REC = require(path.join(REPO, 'src/channel-record.js'));
+const FOCUS_SRC = fs.readFileSync(FOCUS_PATH, 'utf-8');
+const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+
+const ROOT = scratch('chan-focus');
+const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+fs.rmSync(ROOT, { recursive: true, force: true });
+fs.mkdirSync(ROOT, { recursive: true });
+const quiet = { log() {}, warn() {}, error() {} };
+const MUT = mutantCopies('chan-focus', REPO);
+
+const NOW = Date.UTC(2026, 8, 26, 12, 0, 0);
+const H = 3600e3, D = 24 * H;
+const ADAPTERS = [{ id: 'lark', kind: 'lark', label: 'Lark' }, { id: 'gmail', kind: 'gmail', label: 'Gmail' }, { id: 'agents', kind: 'agents', label: 'Agents', builtin: true }];
+/** A digest row as rowView sends it (only the fields the first screen reads). */
+const row = (id, extra = {}) => ({ key: `lark/${id}`, id, adapterId: 'lark', adapterLabel: 'Lark', title: `Room ${id}`, lastAt: NOW - 5 * 60e3, lastText: 'hi', unread: 0, outbox: { awaiting: 0, unknown: 0 }, assignment: null, touch: null, ...extra });
+const principal = (name, source = 'conversation') => ({ principal: { kind: 'agent', id: `cid-${name}`, name }, source });
+
+// ═══ ① PURE ═══════════════════════════════════════════════════════════════
+console.log('① channel-focus (PURE): the rules, the ONE tag, the edges');
+/** THE FIXTURE INDEX: one row per rule (+ the controls), [row, expected tag code | null]. */
+const FIXTURE = [
+  [row('awaiting', { outbox: { awaiting: 2, unknown: 0 } }), 'awaiting'],
+  [row('unknown', { outbox: { awaiting: 0, unknown: 1 } }), 'unknown'],
+  [row('conv-grain', { assignment: principal('Alpha') }), 'assigned'],
+  // D4 (2026-09-27): a SCOPE grain lists a conversation only once it acted on it — a wake DELIVERED within 24 h, or a held one
+  ...['account', 'pattern'].flatMap((g) => {
+    const who = g === 'account' ? 'Ops desk' : 'Beta';
+    return [
+      [row(`${g}-no-wake`, { assignment: principal(who, g) }), null],
+      [row(`${g}-held`, { assignment: principal(who, g), touch: { pending: 2 } }), 'assigned'],
+      [row(`${g}-refused`, { assignment: principal(who, g), touch: { wake: { at: NOW - H, ok: false, lane: 'none', n: 1, name: who } } }), 'assigned'],
+      [row(`${g}-woke-1h`, { assignment: principal(who, g), touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 1, name: who } } }), 'assigned'],
+      [row(`${g}-woke-25h`, { assignment: principal(who, g), touch: { wake: { at: NOW - 25 * H, ok: true, lane: 'message', n: 1, name: who } } }), null],
+      [row(`${g}-woke-edge`, { assignment: principal(who, g), touch: { wake: { at: NOW - D, ok: true, lane: 'message', n: 1, name: who } } }), null],
+      [row(`${g}-stashed`, { assignment: principal(who, g), touch: { wake: { at: NOW - H, ok: false, lane: 'stash', n: 1, name: who } } }), null],
+      [row(`${g}-read`, { assignment: principal(who, g), touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW } } }), 'read'],
+    ];
+  }),
+  [row('read-1h', { touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 5 * 60e3 } } }), 'read'],
+  [row('new-since', { lastAt: NOW - 60e3, touch: { read: { id: 'cid-g', name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H } } }), 'new-since-read'],
+  [row('read-edge-in', { touch: { read: { name: 'Gamma', at: NOW - D + 1, upTo: NOW } } }), 'read'],
+  [row('read-edge-out', { touch: { read: { name: 'Gamma', at: NOW - D, upTo: NOW } } }), null],
+  [row('held-pending', { touch: { pending: 3 } }), 'held'],
+  [row('held-wake-none', { touch: { wake: { at: NOW - 2 * D, ok: false, lane: 'none', n: 1, name: 'Alpha' } } }), 'held'],
+  [row('held-refusal', { touch: { wake: { at: NOW - 3 * D, ok: true, lane: 'message' }, refusalAt: NOW - D } }), 'held'],
+  [row('stashed-not-held', { touch: { wake: { at: NOW - H, ok: false, lane: 'stash', n: 1, name: 'Alpha' } } }), null],
+  [row('held-too-old', { touch: { refusalAt: NOW - 8 * D } }), null],
+  [row('delivered-wake-only', { touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 2, name: 'Alpha' } } }), null],
+  [row('replied', { touch: { selfAt: NOW - 3 * H } }), 'replied'],
+  [row('replied-edge-out', { touch: { selfAt: NOW - D } }), null],
+  [row('untouched'), null],
+  [row('unread-only', { unread: 7 }), null],
+];
+{
+  for (const [r, want] of FIXTURE) {
+    const got = Fo.statusTag({ kind: 'conv', conv: r }, NOW);
+    ok((got ? got.code : null) === want, `statusTag ${r.id} → ${want || 'none (not on the first screen)'}`, JSON.stringify(got));
+  }
+  // THE PRIORITY: a row that holds EVERY fact, then each dropped in turn
+  const all = { outbox: { awaiting: 1, unknown: 1 }, assignment: principal('Alpha'), lastAt: NOW, touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H }, pending: 2, selfAt: NOW - H } };
+  const steps = [];
+  let cur = row('everything', JSON.parse(JSON.stringify(all)));
+  const peel = [(x) => { x.outbox.awaiting = 0; }, (x) => { x.outbox.unknown = 0; }, (x) => { x.assignment = null; }, (x) => { x.lastAt = NOW - 3 * H; }, (x) => { x.touch.read = null; }, (x) => { x.touch.pending = 0; }, (x) => { x.touch.selfAt = 0; }];
+  steps.push(Fo.statusTag(cur, NOW).code);
+  for (const p of peel) { p(cur); const t2 = Fo.statusTag(cur, NOW); steps.push(t2 ? t2.code : null); }
+  const WANT = ['awaiting', 'unknown', 'assigned', 'new-since-read', 'read', 'held', 'replied', null];
+  ok(JSON.stringify(steps) === JSON.stringify(WANT), `THE ONE TAG, by priority: ${WANT.map(String).join(' › ')}`, JSON.stringify(steps));
+  ok(JSON.stringify(Fo.TAG_ORDER) === JSON.stringify(['awaiting', 'unknown', 'assigned', 'read', 'new-since-read', 'held', 'replied']), 'TAG_ORDER is the documented table (read / new-since-read are ONE fact split by what arrived after it)');
+  const heldAssigned = Fo.statusTag(row('x', { assignment: principal('Alpha'), touch: { pending: 1 } }), NOW);
+  ok(heldAssigned.code === 'assigned' && heldAssigned.held === true && heldAssigned.name === 'Alpha', 'an ASSIGNED row whose wake is held keeps its "→ Alpha" tag, flagged held (amber) — so the held fact is never hidden by the higher tag');
+  const woke = (g) => Fo.statusTag(row('x', { assignment: principal('Ops desk', g), touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 1 } } }), NOW);
+  ok(woke('account').grain === 'account' && woke('pattern').grain === 'pattern' && woke('account').held === false, 'a woken scope-grain row\'s tag knows the grain it came from (the tooltip says "with the whole account" / "by a rule")');
+  ok(Fo.statusTag(row('x', { assignment: principal('Ops desk', 'account'), touch: { pending: 1 } }), NOW).held === true, '…and a held one is the amber "→ Ops desk", as for a conversation of its own');
+  ok(Fo.statusTag(row('x', { assignment: principal('Ops desk', 'account'), touch: { wake: { at: NOW - H, ok: true, lane: 'message' }, read: { name: 'Gamma', at: NOW - 2 * H, upTo: NOW } } }), NOW).code === 'assigned' && Fo.statusTag(row('x', { assignment: principal('Ops desk', 'account'), touch: { wake: { at: NOW - 25 * H, ok: true, lane: 'message' }, read: { name: 'Gamma', at: NOW - 2 * H, upTo: NOW } } }), NOW).code === 'read', 'an account-grain row an agent read wears "→ Ops desk" while its delivered wake is inside the day, then falls through to the read tag');
+  // the list: groups always, archived never; the conversations that wear a tag
+  const groups = [{ id: 'g-00000001', name: 'lane', lastAt: NOW - 10 * D, members: [{ member: 'a' }, { member: 'b' }] }, { id: 'g-00000002', name: 'old', lastAt: NOW - 20 * D, archivedAt: NOW - 19 * D, members: [] }];
+  const { rows } = V.groupListRows({ groups, conversations: FIXTURE.map(([r]) => r), adapters: ADAPTERS });
+  const focus = Fo.focusRows(rows, NOW);
+  const want = new Set(['groups/g-00000001', ...FIXTURE.filter(([, w]) => w).map(([r]) => r.key)]);
+  ok(focus.length === want.size && focus.every((r) => want.has(r.key)), `focusRows = every non-archived agent group + every conversation wearing a tag (${focus.length} of ${rows.length})`, JSON.stringify(focus.map((r) => r.key)));
+  ok(focus.map((r) => r.key).join() === rows.filter((r) => want.has(r.key)).map((r) => r.key).join(), '…in the SAME activity order as the full list (the IM order)');
+  const fs1 = Fo.firstScreen(rows, { view: 'focus', now: NOW });
+  ok(fs1.focus === want.size && fs1.all === rows.length && fs1.shown.length === want.size && fs1.view === 'focus', 'firstScreen: the default view is the attention list; the header counts are the two WHOLE lists');
+  const fs2 = Fo.firstScreen(rows, { view: 'all', now: NOW });
+  ok(fs2.shown.length === rows.length && fs2.focus === fs1.focus, 'the All view is the whole list; the counts do not change with the view');
+  const fs3 = Fo.firstScreen(rows, { view: 'focus', q: 'room un', now: NOW });
+  ok(fs3.shown.map((r) => r.id).join() === 'unknown' && fs3.moreInAll === 2 && fs3.focus === fs1.focus, 'the filter narrows the view (title / source / last line) and the focus view counts the matches OUTSIDE it ("2 more in All": untouched, unread-only)', JSON.stringify({ shown: fs3.shown.map((r) => r.id), more: fs3.moreInAll }));
+  const fs4 = Fo.firstScreen(rows, { view: 'all', q: 'LARK', now: NOW });
+  ok(fs4.shown.length === FIXTURE.length && fs4.moreInAll === 0, 'the filter matches the source label, case-insensitively; the All view never offers "more in All"');
+  ok(Fo.focusRows(rows, NOW).every((r) => !r.archived), 'an archived group never reaches the attention list');
+}
+
+// ═══ ② the spec's fixture through the real engine ═════════════════════════
+console.log('② 50 conversations, 5 hand-overs (3 of one conversation, the account, a rule), 3 read, 1 awaiting ⇒ 7; one delivered wake per scope grain ⇒ 9');
+let clock = NOW;
+const now = () => clock;
+function worldModule(kind, W) {
+  return {
+    kind,
+    caps: { ...fake.fakePoll.caps, receive: 'poll', attachments: 'fetch', olderHistory: 'page', budget: { unit: 'request', default: 100000, settingKey: null, metered: true } },
+    create(record, deps) {
+      const meter = deps.meter || (() => {});
+      const rec = (id, m) => REC.makeRecord({ adapterId: record.id, convId: id, vendorId: m.vendorId, at: m.at, author: m.author, text: m.text, attachments: [], threadKey: id, raw: {} });
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
+        async listConversations() { meter(1); return { conversations: [...W.convs.values()].map((x) => REC.makeConversation({ id: x.id, title: x.title, kind: 'group', lastAt: x.recs.length ? x.recs[x.recs.length - 1].at : null })), cursor: null, complete: true }; },
+        async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
+        async history(id, { anchor = null, limit = 50 } = {}) {
+          meter(1);
+          const x = W.convs.get(id);
+          const idx = anchor ? x.recs.findIndex((m) => m.vendorId === anchor) + 1 : 0;
+          const pending = x.recs.slice(idx), page = pending.slice(0, limit), drained = page.length === pending.length;
+          return { records: page.map((m) => rec(id, m)), anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
+        },
+        async older() { meter(1); return { records: [], exhausted: true }; },
+      };
+    },
+  };
+}
+function makeWorld(n) {
+  const convs = new Map();
+  for (let i = 0; i < n; i++) {
+    const id = `c${String(i).padStart(2, '0')}`;
+    convs.set(id, { id, title: `Room ${i}`, recs: [0, 1].map((k) => ({ vendorId: `${id}-m${k}`, at: clock - (i + 1) * 60e3 + k * 1000, author: { id: 'u1', name: 'Ada', isSelf: false, isBot: false }, text: `line ${k} of ${i}` })) });
+  }
+  return { convs };
+}
+function seed(dataDir, id, kind) {
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id, kind, label: id, enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] }));
+}
+async function engine(name, W, { engineMod = ENG, deliver = null, sessions = [] } = {}) {
+  const registry = CH.createChannelRegistry();
+  registry.register(worldModule('im', W));
+  const dataDir = path.join(ROOT, name);
+  seed(dataDir, 'im', 'im');
+  const events = [];
+  const eng = engineMod.create({ dataDir, registry, env: {}, now, broadcast: (m) => events.push(m), serverSetting: () => undefined, liveSessions: () => sessions, deliver, log: quiet });
+  await eng.pass('im', { force: true });
+  return { eng, events, dataDir };
+}
+const agent = (id, name) => ({ kind: 'agent', id, name, groups: [], msgLevelFor: () => 'none' });
+/** Wait for the stamp's index write (fire-and-forget) — the index's ONE door is a promise chain. */
+const drainIndex = async (eng) => { await eng.store.index.update(() => {}); await sleep(5); };
+/** ②'s digest rows at ②'s clock — ⑤'s grain control re-reads the SAME rows through its patched copy. */
+let SPEC = null;
+{
+  const W = makeWorld(50);
+  const delivered = [];
+  const deliver = { async deliverToConversation(cid, text, opts) { delivered.push({ cid, text, opts }); return { ok: true, lane: 'message' }; } };
+  const sessions = [{ cid: 'cid-ops', name: 'Ops desk', groups: [] }, { cid: 'cid-beta', name: 'Beta', groups: [] }];
+  const { eng } = await engine('fifty', W, { deliver, sessions });
+  const ids = [...W.convs.keys()];
+  // FIVE HAND-OVERS: three conversations of their own …
+  const assigned = [ids[3], ids[11], ids[20]];
+  for (const [k, id] of assigned.entries()) {
+    const r = await eng.setAssignment('im', id, { principal: { kind: 'agent', id: `cid-a${k}`, name: `Agent ${k}` }, mode: 'all' });
+    if (!r.ok) console.log('    setAssignment', JSON.stringify(r));
+  }
+  // … the whole ACCOUNT, and a RULE (title contains "Room 4": Room 4 + Room 40–49 = 11 conversations)
+  const ra = await eng.setScopeAssignment('im', { kind: 'account' }, { principal: { kind: 'agent', id: 'cid-ops', name: 'Ops desk' }, mode: 'all', notify: 'wake' });
+  const rp = await eng.setScopeAssignment('im', { kind: 'pattern' }, { principal: { kind: 'agent', id: 'cid-beta', name: 'Beta' }, mode: 'all', notify: 'wake', pattern: { match: 'any', rules: [{ kind: 'title', value: 'Room 4' }] } });
+  ok(ra.ok && rp.ok, 'FIXTURE: the account and the rule are handed over (setScopeAssignment)', JSON.stringify({ ra: ra.ok || ra, rp: rp.ok || rp }));
+  const readers = [ids[5], ids[15], ids[25]];
+  const R = agent('cid-reader', 'Reader');
+  for (const id of readers) await eng.setReach('im', id, { principal: { kind: 'agent', id: 'cid-reader', name: 'Reader' }, level: 'visible' });
+  for (const id of readers) ok(eng.readFor(R, 'im', id, {}).ok, `FIXTURE: the agent reads ${id} through readFor (the agent route's door)`);
+  await drainIndex(eng);
+  const awaitingId = ids[40];
+  await eng.store.outbox.update((ob) => { ob.proposals = ob.proposals || {}; ob.proposals['p-fixture'] = { id: 'p-fixture', key: `im/${awaitingId}`, adapterId: 'im', convId: awaitingId, state: 'awaiting-approval', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-a9' }, at: clock, updatedAt: clock }; });
+  const screen = () => {
+    const d = eng.digest();
+    const { rows } = V.groupListRows({ groups: [], conversations: d.conversations, adapters: d.adapters });
+    return { d, rows, fs: Fo.firstScreen(rows, { now: clock }) };
+  };
+  const tagsOf = (fs0) => Object.fromEntries(fs0.shown.map((r) => [r.id, Fo.statusTag(r, clock)]));
+  const { d, fs: fs1 } = screen();
+  ok(d.conversations.length === 50, 'the digest lists all 50 conversations');
+  const grains = d.conversations.reduce((m, c) => { const g = c.assignment ? c.assignment.source : 'none'; m[g] = (m[g] || 0) + 1; return m; }, {});
+  ok(grains.conversation === 3 && grains.pattern === 11 && grains.account === 36 && !grains.none, `every one of the 50 is handed over: 3 on their own, 11 by the rule, 36 by the account (${JSON.stringify(grains)})`);
+  const got = tagsOf(fs1);
+  const want = { ...Object.fromEntries(assigned.map((id) => [id, 'assigned'])), ...Object.fromEntries(readers.map((id) => [id, 'read'])), [awaitingId]: 'awaiting' };
+  ok(fs1.shown.length === 7 && Object.keys(want).every((id) => got[id] && got[id].code === want[id]), `EXACTLY 7 on the first screen — 3 handed over on their own, 3 read, 1 awaiting (${fs1.shown.length}: ${Object.entries(got).map(([k, v]) => `${k}=${v.code}`).join(' ')})`);
+  ok(fs1.focus === 7 && fs1.all === 50 && d.conversations.filter((c) => c.assignment && c.assignment.source !== 'conversation' && !got[c.id]).length === 43, 'D4: the 47 conversations the ACCOUNT and the RULE cover are NOT listed for that alone (43 of them nowhere; the 3 read + 1 awaiting are listed for their OWN fact)');
+  ok(assigned.every((id, k) => got[id].name === `Agent ${k}`) && readers.every((id) => got[id].name === 'Reader'), '…each tag naming its agent (→ Agent k / Reader read …)');
+  // ONE DELIVERED WAKE at each scope grain: a new message in Room 30 (the account's) and Room 44 (the rule's)
+  const woken = [ids[30], ids[44]];
+  clock += 31e3;
+  for (const id of woken) W.convs.get(id).recs.push({ vendorId: `${id}-news`, at: clock - 500, author: { id: 'u2', name: 'Brook', isSelf: false, isBot: false }, text: 'news' });
+  for (const id of woken) await eng.refresh('im', id);
+  await eng.settleWakes();
+  const { d: d2, rows, fs: fs2 } = screen();
+  const got2 = tagsOf(fs2);
+  const w30 = d2.conversations.find((c) => c.id === ids[30]), w44 = d2.conversations.find((c) => c.id === ids[44]);
+  ok(delivered.length === 2 && w30.touch.wake.ok === true && w30.touch.wake.lane === 'message' && w44.touch.wake.ok === true, `FIXTURE: both wakes were DELIVERED by the ladder (${delivered.length}: ${delivered.map((x) => x.cid).join(', ')})`, JSON.stringify([w30.touch, w44.touch]));
+  ok(fs2.shown.length === 9 && got2[ids[30]] && got2[ids[30]].code === 'assigned' && got2[ids[30]].grain === 'account' && got2[ids[30]].name === 'Ops desk' && got2[ids[44]] && got2[ids[44]].code === 'assigned' && got2[ids[44]].grain === 'pattern' && got2[ids[44]].name === 'Beta', `a DELIVERED wake lists its conversation: 9 — "→ Ops desk" (account) on Room 30, "→ Beta" (rule) on Room 44 (${Object.entries(got2).map(([k, v]) => `${k}=${v.code}${v.grain && v.grain !== 'conversation' ? `/${v.grain}` : ''}`).join(' ')})`);
+  ok(fs2.focus === 9 && fs2.all === 50, `the header: "${Wd.viewSwitchText(fs2, { t: (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => p[k]) }).focus}" / "${Wd.viewSwitchText(fs2, { t: (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => p[k]) }).all}"`);
+  ok(Fo.firstScreen(rows, { view: 'all', now: clock }).shown.length === 50, 'the All switch shows all 50');
+  // 25 h later the reads AND the delivered wakes have left; the 3 hand-overs of their own and the proposal stay
+  const later = Fo.firstScreen(rows, { now: clock + 25 * H });
+  ok(later.focus === 4 && [...readers, ...woken].every((id) => !later.shown.some((r) => r.id === id)), 'a day later the three agent reads and the two delivered wakes have left the attention list; the 3 conversations handed over on their own and the awaiting proposal stay (4)', String(later.focus));
+  const slim = d2.conversations.filter((c) => ![...readers, ...woken].includes(c.id));
+  ok(slim.length === 45 && slim.every((c) => c.touch === null), 'every untouched row carries `touch: null` — the 45 rows nothing touched stay the slim row (a hand-over is not a touch)');
+  SPEC = { rows, clock };
+  eng.stop();
+}
+
+// ═══ ③ the server's facts ═════════════════════════════════════════════════
+console.log('③ the stamp, the wake\'s name, the owner\'s own message');
+{
+  const W = makeWorld(3);
+  // the owner's own message in c01 (isSelf) — a record the vendor marks as the authorizing user's
+  const SELF_AT = clock - 30e3;
+  W.convs.get('c01').recs.push({ vendorId: 'c01-self', at: SELF_AT, author: { id: 'me', name: 'Me', isSelf: true, isBot: false }, text: 'on it' });
+  const delivered = [];
+  const deliver = { async deliverToConversation(cid, text, opts) { delivered.push({ cid, text, opts }); return W.refuse ? { ok: false, reason: 'the spend guard said no', refused: 'spend' } : { ok: true, lane: 'message' }; } };
+  const { eng, events } = await engine('facts', W, { deliver, sessions: [{ cid: 'cid-alpha', name: 'Alpha', groups: [] }] });
+  const K = 'im/c00';
+  // the stamp
+  await eng.setReach('im', 'c00', { principal: { kind: 'agent', id: 'cid-r1', name: 'Reader One' }, level: 'visible' });
+  const e0 = events.length;
+  const r1 = eng.readFor(agent('cid-r1', 'Reader One'), 'im', 'c00', {});
+  await drainIndex(eng);
+  const en = eng.store.index.peek(K);
+  const newest = eng.store.readTail('im', 'c00', { limit: 1 })[0];
+  ok(r1.ok && Array.isArray(en.agentReads) && en.agentReads.length === 1 && en.agentReads[0].id === 'cid-r1' && en.agentReads[0].name === 'Reader One' && en.agentReads[0].at === clock && en.agentReads[0].upTo === newest.at, 'readFor STAMPS the read in the index: who, when, and up to which record (the tail\'s newest)', JSON.stringify(en.agentReads));
+  const bc = events.slice(e0).filter((m) => m.type === 'channels-updated');
+  ok(bc.length === 1 && bc[0].partial === true && JSON.stringify(bc[0].changedKeys) === JSON.stringify([K]) && bc[0].digest.conversations.length === 1 && bc[0].digest.conversations[0].touch.read.name === 'Reader One', 'ONE partial broadcast of THAT row carries it (the panel repaints with no fetch)', JSON.stringify(bc.map((m) => m.changedKeys)));
+  const e1 = events.length;
+  eng.readFor(agent('cid-r1', 'Reader One'), 'im', 'c00', { since: newest.at });
+  await drainIndex(eng);
+  ok(events.length === e1 && eng.store.index.peek(K).agentReads[0].at === clock, 'the SAME tail read again inside a minute is not news: no write, no broadcast (an agent\'s read loop is not a broadcast loop)');
+  clock += 61e3;
+  eng.readFor(agent('cid-r1', 'Reader One'), 'im', 'c00', {});
+  await drainIndex(eng);
+  ok(events.length === e1 + 1 && eng.store.index.peek(K).agentReads[0].at === clock, '…past the minute it is re-stamped (a new "read N min ago")');
+  const hidden = eng.readFor(agent('cid-stranger', 'Stranger'), 'im', 'c00', {});
+  await drainIndex(eng);
+  ok(hidden.code === 'not-found' && !eng.store.index.peek(K).agentReads.some((r) => r.id === 'cid-stranger'), 'a HIDDEN read never stamps (the uniform not-found leaves no trace)');
+  for (let k = 0; k < 7; k++) { await eng.setReach('im', 'c00', { principal: { kind: 'agent', id: `cid-p${k}`, name: `P${k}` }, level: 'visible' }); clock += 1000; eng.readFor(agent(`cid-p${k}`, `P${k}`), 'im', 'c00', {}); await drainIndex(eng); }
+  const five = eng.store.index.peek(K).agentReads;
+  ok(five.length === 5 && five[0].id === 'cid-p6' && five.every((r, i) => i === 0 || five[i - 1].at >= r.at), 'at most FIVE principals are kept, newest first', JSON.stringify(five.map((r) => r.id)));
+  const onDisk = () => { eng.store.index.flush(); return JSON.parse(fs.readFileSync(path.join(eng.store.dir, 'index.json'), 'utf-8')).conversations[K].agentReads; };
+  ok(onDisk().length === 5, 'the stamp is PERSISTED through the index\'s door (it survives a restart)');
+  // the wake names whom it reached
+  await eng.setAssignment('im', 'c02', { principal: { kind: 'agent', id: 'cid-alpha', name: 'Alpha' }, mode: 'all', notify: 'wake' });
+  W.convs.get('c02').recs.push({ vendorId: 'c02-news', at: clock + 500, author: { id: 'u2', name: 'Brook', isSelf: false, isBot: false }, text: 'news' });
+  clock += 31e3;
+  await eng.refresh('im', 'c02');
+  await eng.settleWakes();
+  const lw = eng.store.index.peek('im/c02').stats.wakes.slice(-1)[0];
+  const rowC2 = eng.digest().conversations.find((c) => c.id === 'c02');
+  ok(delivered.length >= 1 && lw && lw.name === 'Alpha' && lw.ok === true && rowC2.touch.wake.name === 'Alpha' && rowC2.touch.wake.ok === true, 'the wake NAMES whom it reached (the ledger entry and the row\'s touch)', JSON.stringify(lw));
+  W.refuse = true;
+  W.convs.get('c02').recs.push({ vendorId: 'c02-news2', at: clock + 500, author: { id: 'u2', name: 'Brook', isSelf: false, isBot: false }, text: 'more news' });
+  clock += 31e3;
+  await eng.refresh('im', 'c02');
+  await eng.settleWakes();
+  const rowHeld = eng.digest().conversations.find((c) => c.id === 'c02');
+  const tagHeld = Fo.statusTag(rowHeld, clock) || {};
+  ok(rowHeld.touch.wake.ok === false && rowHeld.touch.wake.lane === 'none' && rowHeld.touch.pending >= 1 && tagHeld.code === 'assigned' && tagHeld.held === true, 'a wake the ladder refused (no stash) is HELD: the row says so and its tag turns amber', JSON.stringify(rowHeld.touch));
+  W.refuse = false;
+  // the owner's own newest message
+  const rowC1 = eng.digest().conversations.find((c) => c.id === 'c01');
+  ok(rowC1.touch && rowC1.touch.selfAt === SELF_AT, 'a record the vendor marks as the OWNER\'s (`isSelf`) is the row\'s `selfAt`', JSON.stringify(rowC1.touch));
+  ok(Fo.statusTag(rowC1, clock).code === 'replied', '…and the row is on the first screen as "You replied …"');
+  await eng.store.outbox.update((ob) => { ob.proposals = ob.proposals || {}; ob.proposals['p-own'] = { id: 'p-own', key: 'im/c00', adapterId: 'im', convId: 'c00', state: 'sent', text: 'mine', draftedBy: { kind: 'user' }, at: clock - 10e3, updatedAt: clock - 9e3, result: { at: clock - 9e3 } }; });
+  const rowC0 = eng.digest().conversations.find((c) => c.id === 'c00');
+  ok(rowC0.touch.selfAt === clock - 9e3, 'the owner\'s OWN send from here (a sent proposal the owner drafted) counts before the vendor echoes it back', JSON.stringify(rowC0.touch.selfAt));
+  // the one-shot derivation for rows that predate the field
+  await eng.store.index.update(() => { const e2 = eng.store.index.entry('im', 'c01', { create: false }); delete e2.selfAt; });
+  const h1 = await eng.healSelfAt();
+  const h2 = await eng.healSelfAt();
+  ok(h1.found === 1 && eng.store.index.peek('im/c01').selfAt > 0 && h2.planned === 0, `the one-shot derivation reads a pre-field row's tail ONCE (planned ${h1.planned}, found ${h1.found}; then nothing is planned)`);
+  eng.stop();
+}
+
+// ═══ ④ the words ══════════════════════════════════════════════════════════
+console.log('④ the words: en / zh / ja, the agent\'s name a separate part');
+const dicts = { en: {} };
+for (const l of ['zh', 'ja']) dicts[l] = (await import(pathToFileURL(path.join(REPO, `src/lib/i18n-${l}.js`)).href)).default;
+const tFor = (lang) => (str, params) => { let x = (dicts[lang] && dicts[lang][str]) || str; if (params) x = x.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m)); return x; };
+{
+  const TAGS = [
+    [{ code: 'awaiting', n: 2 }, { en: '2 to approve', zh: '2 条待批准', ja: '2 件承認待ち' }, 'attn', ''],
+    [{ code: 'unknown', n: 1 }, { en: 'send unknown', zh: '结果未知', ja: '結果不明' }, 'warn', ''],
+    [{ code: 'assigned', name: 'Ops desk', held: false }, { en: '→ Ops desk', zh: '→ Ops desk', ja: '→ Ops desk' }, 'neutral', 'Ops desk'],
+    [{ code: 'assigned', name: 'Ops desk', held: true }, { en: '→ Ops desk', zh: '→ Ops desk', ja: '→ Ops desk' }, 'warn', 'Ops desk'],
+    [{ code: 'read', name: 'Gamma', at: NOW - 5 * 60e3 }, { en: 'Gamma read 5m ago', zh: 'Gamma 5分钟前读过', ja: 'Gamma 5分前に既読' }, 'neutral', 'Gamma'],
+    [{ code: 'new-since-read', name: 'Gamma', at: NOW - H }, { en: 'New since Gamma', zh: 'Gamma 读后有新', ja: 'Gamma 既読後に新着' }, 'attn', 'Gamma'],
+    [{ code: 'held', n: 3 }, { en: 'last wake held', zh: '上次唤醒被暂存', ja: '前回の起動は保留' }, 'warn', ''],
+    [{ code: 'replied', at: NOW - 3 * H }, { en: 'replied 3h ago', zh: '你3小时前回复过', ja: '3時間前に返信済み' }, 'neutral', ''],
+  ];
+  for (const lang of ['en', 'zh', 'ja']) {
+    for (const [tag, words, tone, who] of TAGS) {
+      const p = Wd.statusTagParts(tag, { now: NOW, t: tFor(lang) });
+      const text = p.before + p.who + p.after;
+      ok(text === words[lang] && p.tone === tone && p.who === who && p.title && p.title.length > text.length, `${lang} ${tag.code}${tag.held ? ' (held)' : ''}: "${text}" · ${tone}${who ? ` · name "${who}" its own part` : ''}`, JSON.stringify(p));
+    }
+    const h = Wd.viewSwitchText({ focus: 9, all: 879 }, { t: tFor(lang) });
+    const WANT = { en: ['9 need attention', 'All 879'], zh: ['9 需关注', '全部 879'], ja: ['9 要対応', 'すべて 879'] }[lang];
+    ok(h.focus === WANT[0] && h.all === WANT[1], `${lang} header: "${h.focus}" | "${h.all}"`);
+  }
+  // D4: a scope-grain tag (listed only once woken / held) keeps the SAME visible words "→ X"; its tooltip names the grain
+  for (const lang of ['en', 'zh', 'ja']) {
+    const G = { account: { en: 'Handed to Ops desk with the whole account', zh: '整个账号已交给 Ops desk', ja: 'アカウントごと Ops desk に任せています' }, pattern: { en: 'Handed to Ops desk by a rule that matches it', zh: '按匹配它的规则交给了 Ops desk', ja: '一致するルールで Ops desk に任せています' } };
+    for (const g of ['account', 'pattern']) {
+      const tag = Fo.statusTag(row('x', { assignment: principal('Ops desk', g), touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 1 } } }), NOW);
+      const p = Wd.statusTagParts(tag, { now: NOW, t: tFor(lang) });
+      ok(p.before + p.who + p.after === '→ Ops desk' && p.title === G[g][lang] && p.tone === 'neutral', `${lang} a woken ${g}-grain row: "→ Ops desk", its tooltip "${p.title}"`, JSON.stringify(p));
+    }
+  }
+  ok(Wd.statusTagParts(null) === null && Wd.statusTagParts({ code: 'nonsense' }) === null, 'no tag ⇒ no words (a code the words do not know is never guessed)');
+  // r-verify (2026-09-26): NEVER A RAW ID — a reader / a principal that arrived without a display name is
+  // worded by its kind ("an agent" / "a Task Group"); the id is in none of the parts, in every language
+  {
+    const RAW = 'c0ffee00-1234-4bcd-8ef0-0123456789ab';
+    const cases = [
+      ['read', Fo.statusTag(row('anon-read', { touch: { read: { id: RAW, name: null, at: NOW - H, upTo: NOW } } }), NOW)],
+      ['new-since-read', Fo.statusTag(row('anon-new', { lastAt: NOW, touch: { read: { id: RAW, name: null, at: NOW - H, upTo: NOW - 2 * H } } }), NOW)],
+      ['assigned', Fo.statusTag(row('anon-assigned', { assignment: { principal: { kind: 'agent', id: RAW, name: null }, source: 'conversation' } }), NOW)],
+      ['assigned', Fo.statusTag(row('anon-group', { assignment: { principal: { kind: 'group', id: 'T-' + RAW, name: '' }, source: 'account' }, touch: { wake: { at: NOW - H, ok: true, lane: 'message', n: 1 } } }), NOW)],   // an account grain lists only once woken (D4)
+    ];
+    for (const [code, tag] of cases) {
+      ok(tag && tag.code === code && tag.name === '', `NEVER A RAW ID: an unnamed ${tag && tag.kind} ${code} tag carries no name, not the id (${JSON.stringify(tag)})`);
+      for (const lang of ['en', 'zh', 'ja']) {
+        const p = Wd.statusTagParts(tag, { now: NOW, t: tFor(lang) });
+        const all = [p.before, p.who, p.after, p.title].join(' ');
+        ok(!all.includes('c0ffee00') && p.who && p.who === (tag.kind === 'group' ? tFor(lang)('a Task Group') : tFor(lang)('an agent')), `${lang} ${code} (${tag.kind}): worded by its kind, the id nowhere — "${p.before}${p.who}${p.after}"`);
+      }
+    }
+  }
+  ok(Fo.TAG_ORDER.every((c) => Wd.statusTagParts({ code: c, name: 'X', n: 1, at: NOW }, { now: NOW }) !== null), 'CENSUS: every code in TAG_ORDER has its words');
+  for (const lang of ['zh', 'ja']) {
+    const reasons = ['vendor-budget', 'backoff', 'not-supported', 'disabled', 'no-preview', 'unreachable', 'forbidden', 'not-found', 'too-large'].map((c) => Wd.attachmentReasonText(c, { t: tFor(lang) }));
+    ok(reasons.every((w) => w && !/^[\x20-\x7e]+$/.test(w)), `${lang}: every picture-refusal reason word is translated (${reasons.join(' · ')})`);
+  }
+}
+
+// ═══ ⑤ negative controls ══════════════════════════════════════════════════
+console.log('⑤ negative controls (patched copies in this run\'s scratch dir)');
+{
+  const load = async (tag, a, b) => {
+    ok(FOCUS_SRC.includes(a), `CONTROL ${tag}: the edit's anchor is spelled once`);
+    return import(pathToFileURL(MUT.write('src/lib/channel-focus.js', FOCUS_SRC.replace(a, b), tag, { esm: true })).href);
+  };
+  const reds = (F) => FIXTURE.filter(([r, want]) => { const g = F.statusTag({ kind: 'conv', conv: r }, NOW); return (g ? g.code : null) !== want; }).map(([r]) => r.id);
+  const inclusive = await load('inclusive-edge', 'return a > 0 && now - a < win;', 'return a > 0 && now - a <= win;');
+  ok(reds(inclusive).includes('read-edge-out') && reds(inclusive).includes('replied-edge-out'), `CONTROL: an INCLUSIVE 24 h edge keeps a read exactly a day old — the edge rows redden (${reds(inclusive).join(', ')})`);
+  const readFirst = await load('read-first', "  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name)) {", "  const rd0 = touch && touch.read;\n  if (rd0 && within(rd0.at, now, FOCUS_WINDOW_MS)) return { code: 'read', name: rd0.name || '', at: num(rd0.at) };\n  const a = c.assignment;\n  if (a && a.principal && (a.principal.id || a.principal.name)) {");
+  const pr = readFirst.statusTag(row('both', { assignment: principal('Alpha'), touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW } } }), NOW);
+  ok(pr.code === 'read', 'CONTROL: "read" ranked above "assigned" answers read for an assigned row — the priority table reddens on it');
+  // D4 (2026-09-27): the GRAIN check removed — every conversation of a handed-over account / rule is back on the first screen
+  const grainless = await load('grain-dropped', "if (grain === 'conversation' || held || woken) return { code: 'assigned',", "return { code: 'assigned',");
+  const gReds = reds(grainless);
+  const SCOPE_NULLS = FIXTURE.filter(([r, w]) => w === null && r.assignment && r.assignment.source !== 'conversation').map(([r]) => r.id);
+  ok(SCOPE_NULLS.length === 8 && SCOPE_NULLS.every((id) => gReds.includes(id)), `CONTROL: a rule without the grain check lists every scope-grain row — the fixture reddens on all ${SCOPE_NULLS.length} that must stay off, and the 2 read ones lose their read tag (${gReds.join(', ')})`);
+  ok(Fo.firstScreen(SPEC.rows, { now: SPEC.clock }).focus === 9 && grainless.firstScreen(SPEC.rows, { now: SPEC.clock }).focus === 50, `CONTROL: …and on ②'s real rows the first screen is the whole account again — 50, not 9 (the owner's 824 threads)`);
+  const windowless = await load('wake-window-dropped', "w.lane !== 'none' && within(w.at, now, FOCUS_WINDOW_MS)", "w.lane !== 'none'");
+  ok(reds(windowless).includes('account-woke-25h') && reds(windowless).includes('pattern-woke-25h') && windowless.firstScreen(SPEC.rows, { now: SPEC.clock + 25 * H }).focus === 6, 'CONTROL: a delivered wake with NO window keeps a woken scope row for ever — the 25 h rows redden, ②\'s day-later list stays 6, not 4');
+  const keepAll = await load('keep-all', "return (rows || []).filter((r) => r && (r.kind === 'group' && r.group ? !r.archived : !!statusTag(r, now)));", 'return (rows || []).slice();');
+  const { rows } = V.groupListRows({ groups: [], conversations: FIXTURE.map(([r]) => r), adapters: ADAPTERS });
+  ok(keepAll.focusRows(rows, NOW).length === FIXTURE.length && Fo.focusRows(rows, NOW).length < FIXTURE.length, 'CONTROL: a focus list that keeps every row is the old first screen — the membership table reddens on it');
+  // an engine that stamps BEFORE the reach check
+  const STAMP_AT = "    if (!ACL.canSee(reachFor(ctx, rec, en).level)) return ACL.notFound();\n    const n = Math.min(200, Math.max(1, Number(limit) || 50));\n    let records = store.readTail(adapterId, convId, { limit: n });";
+  ok(ENGINE_SRC.includes(STAMP_AT), 'CONTROL setup: readFor\'s reach check is spelled once');
+  const early = MUT.load('src/server/channels-engine.js', ENGINE_SRC.replace(STAMP_AT, "    stampAgentRead(en.key, ctx, 0);\n" + STAMP_AT), 'stamp-first');
+  const W = makeWorld(1);
+  const { eng } = await engine('ctl-stamp', W, { engineMod: early });
+  eng.readFor(agent('cid-stranger', 'Stranger'), 'im', 'c00', {});
+  await drainIndex(eng);
+  ok((eng.store.index.peek('im/c00').agentReads || []).some((r) => r.id === 'cid-stranger'), 'CONTROL: an engine that stamps before the reach check leaves a HIDDEN reader\'s trace — the hidden-read leg reddens on it');
+  eng.stop();
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 6 })) ok(x.pass, 'tree: ' + x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ═══ ⑥ wiring pins ════════════════════════════════════════════════════════
+console.log('⑥ wiring pins');
+{
+  const P = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  const A = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+  ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /const st = r\.kind === 'conv' \? statusTag\(r, now\) : null;/.test(P) && /const tag = statusTagParts\(st, \{ now \}\);/.test(P), 'PIN: the first screen is firstScreen(view, filter); each row asks statusTag and words it with statusTagParts');
+  ok(/chanEl\('span', `chan-grow-tag chan-tag-\$\{tag\.tone\}`\)/.test(P) && /chanEl\('span', 'chan-tag-who', tag\.who\)/.test(P), 'PIN: the tag is built with channel-chrome\'s el() — the name in its own `.chan-tag-who` (a data path), no innerHTML');
+  ok(/let VIEW = 'focus';/.test(P) && /segFocus\.dataset\.view = 'focus'/.test(P) && /segAll\.dataset\.view = 'all'/.test(P) && /input\.dataset\.channelFilter = '1';/.test(P) && /const \{ row: find, input: findInput \} = filterBox\(\(\) => draw\(\)\);/.test(P), 'PIN: the default view is the attention list; the header is the two-way switch; the filter box');
+  ok((ENGINE_SRC.match(/stampAgentRead\(/g) || []).length === 2 && /stampAgentRead\(en\.key, ctx, upTo\);/.test(ENGINE_SRC) && /eng\.readFor\(channelPrincipal\(s, id\)/.test(A), 'PIN: the stamp has ONE door — readFor, the agent route\'s read — and one definition');
+  ok(/touch: touchView\(en, lw, ob\),/.test(ENGINE_SRC) && /name: target\.name \? String\(target\.name\)\.slice\(0, 80\) : null,/.test(ENGINE_SRC), 'PIN: the row carries `touch`; the wake names its target');
+  ok(!/\b(lark|gmail|fake-poll)\b/.test(FOCUS_SRC.replace(/^\s*\/\/.*$/gm, '')), 'channel-focus.js names no adapter id (a fact, never a kind)');
+}
+
+console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

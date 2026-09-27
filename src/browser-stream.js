@@ -80,6 +80,10 @@ const VIEWER_INPUT_TYPES = Object.freeze(['input_mouse', 'input_keyboard', 'inpu
 /** P3 (§4.3): the viewer verbs that change WHO drives, and the answer to a
  *  pending `--confirm-actions` card. None is forwarded upstream as-is. */
 const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', 'pass']); // + lane P verify: `pass` {to} = the holder hands its controls to another view of the same browser (a fold-back)
+/** lane S4 (naive study 2): the VIEW verbs — `fit` {width, height, dpr, visible, force} = this viewer's pane (the bridge
+ *  sizes the page to the ruling pane, src/browser-fit.js), `refresh` = "I have no picture of this page — send a fresh
+ *  one". Answered by the bridge, never forwarded; any viewer may send them (a watcher's pane counts too). */
+const VIEWER_VIEW_TYPES = Object.freeze(['fit', 'refresh']);
 /** CDP's modifier bitmask, the one the stream server expects (measured off
  *  the dashboard's own bundle: alt 1, ctrl 2, meta 4, shift 8). */
 const KEY_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
@@ -264,6 +268,9 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   if (t === 'handback') return { kind: 'handback', forward: false };
   if (t === 'confirm') return { kind: 'confirm', forward: false, id: typeof msg.id === 'string' ? msg.id.slice(0, 80) : '', decision: msg.decision === 'deny' ? 'deny' : 'confirm' };
   if (t === 'pass') return { kind: 'pass', forward: false, to: Number.isInteger(msg.to) ? msg.to : (typeof msg.to === 'string' && msg.to ? msg.to.slice(0, 40) : null) };
+  // lane S4: the view verbs (the bridge sanitizes a `fit` report with src/browser-fit.js fitReport)
+  if (t === 'fit') return { kind: 'fit', forward: false };
+  if (t === 'refresh') return { kind: 'refresh', forward: false };
   return { kind: 'unknown', forward: false, refusal: { type: 'refused', code: 'unknown-type', error: `unknown message type ${JSON.stringify(t).slice(0, 40)}` } };
 }
 
@@ -346,6 +353,21 @@ function frameGate(viewer, now, limits = BACKPRESSURE) {
   return now - last >= minGap - 0.5;
 }
 
+/** lane S4 (naive study 2 — "a live view sometimes stays blank white while the URL bar shows the new page"): how long
+ *  until `frameGate` opens for this viewer again — 0 = now, null = held by its own buffer (asked again when it drains).
+ *  THE TRAILING EDGE of latest-wins: a frame the gate refused is never the viewer's last word. Chrome's screencast sends
+ *  a frame only on DAMAGE, so a page that paints twice inside one gap (a white commit, then the page, 16 ms apart) and
+ *  then sits still had its final picture dropped for good — the viewer kept the white frame while the URL said loaded.
+ *  The bridge hands the viewer the relay's LATEST frame when this says the gate is open again. */
+function frameGateWait(viewer, now, limits = BACKPRESSURE) {
+  if (!viewer) return null;
+  if (Number(viewer.bufferedAmount) > Number(limits.resumeBelow)) return null;
+  const fps = clampFps(viewer.maxFps === undefined ? MAX_FPS_DEFAULT : viewer.maxFps);
+  const minGap = 1000 / fps;
+  const last = Number(viewer.lastFrameAt) || 0;
+  return Math.max(0, Math.ceil(last + minGap - 0.5 - now));
+}
+
 /** The upstream pause/resume decision over every viewer's buffered bytes. */
 function backpressureVerdict(bufferedAmounts, paused, limits = BACKPRESSURE) {
   const arr = (bufferedAmounts || []).map((n) => Number(n) || 0);
@@ -359,7 +381,7 @@ function hello({ viewers = 1, target = null, mode = 'watch', holder = null, upst
   return {
     type: 'hello', viewers: Number(viewers) || 1, mode: MODES.includes(mode) ? mode : 'watch', holder: holder || null,
     target: target && target.ok ? { kind: target.kind, ref: target.ref || null, handle: target.handle || null, profileId: target.profileId || null, alias: target.alias || null, label: target.label || null, isDefault: !!target.isDefault, chosen: target.chosen, ns: target.ns || null } : null, // ns: a stopped view knows which ephemeral it waits for (naive study 2)
-    protocol: { frames: 'latest-wins', ordered: UPSTREAM_TYPES.filter((t) => t !== 'frame'), input: 'holder-only', control: VIEWER_CONTROL_TYPES.slice(), upstreamVersion: upstreamVersion || null },
+    protocol: { frames: 'latest-wins', ordered: UPSTREAM_TYPES.filter((t) => t !== 'frame'), input: 'holder-only', control: VIEWER_CONTROL_TYPES.slice(), view: VIEWER_VIEW_TYPES.slice(), upstreamVersion: upstreamVersion || null },
   };
 }
 
@@ -777,7 +799,8 @@ function helperNames(state) {
 }
 
 module.exports = {
-  STREAM_PATH, BACKPRESSURE, MAX_FPS_DEFAULT, MAX_FPS_CAP, UPSTREAM_TYPES, REPLAYED_TYPES, MODES, VIEWER_INPUT_TYPES, VIEWER_CONTROL_TYPES, KEY_MODIFIERS,
+  STREAM_PATH, BACKPRESSURE, MAX_FPS_DEFAULT, MAX_FPS_CAP, UPSTREAM_TYPES, REPLAYED_TYPES, MODES, VIEWER_INPUT_TYPES, VIEWER_CONTROL_TYPES, VIEWER_VIEW_TYPES, KEY_MODIFIERS,
+  frameGateWait, // lane S4: the trailing edge of the per-viewer frame gate
   EPHEMERAL_REF, sessionNameFor, classifyUpstream, parseStreamStatus, streamPlan, originHeaderFor, streamTargetFor, pairsToEnv,
   // naive study 2: the sub-agent tap ref (finding 4), one view per session (finding 2), a stopped view resumes (finding 3)
   CHILD_REF_PREFIX, childRefFor, childKeyOfRef, liveViewPlan, viewTargetRunning,

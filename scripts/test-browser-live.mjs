@@ -436,6 +436,7 @@ if (a === 'get' && b === 'cdp-url') { out({ success: true, data: { cdpUrl: 'ws:/
 if (a === 'stream' && b === 'status') { fs.appendFileSync(path.join(st, 'stream.log'), JSON.stringify({ ns, session: process.env.AGENT_BROWSER_SESSION || null, profile: process.env.AGENT_BROWSER_PROFILE || null }) + '\\n'); const port = ports[ns] || null; if (!port) { out({ success: false, data: null, error: 'fake: no stream for ' + ns }); process.exit(1); } out({ success: true, data: { connected: true, enabled: true, port, screencasting: false } }); process.exit(0); }
 if (a === 'stream' && b === 'enable') { out({ success: false, data: null, error: 'Streaming is already enabled for this session' }); process.exit(1); }
 if (a === 'close' && b === '--all') { const s = read(); if (s && alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } } try { fs.unlinkSync(f); } catch { } out({ success: true, data: { closed: 1, failed: [], sessions: [] } }); process.exit(0); }
+if (a === 'set' && b === 'viewport') { out({ success: true, data: {} }); process.exit(0); } // lane S4: the live view sizes the page to its pane (\`set viewport W H\`) — the fake answers it; its frames keep their size (the view letterboxes, as before)
 out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.slice(2).join(' ') }); process.exit(1);
 `;
 
@@ -1212,6 +1213,10 @@ await (async () => {
     procs.add(srv); procs5.push(srv);
     srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
     if (!ok(await until(() => journal.includes('Ready.'), 40000, 100), '⑤ the worktree server booted (real agent-browser on its PATH)', journal.slice(-600))) return;
+    // lane S4: ⑤/⑥ judge the LETTERBOX (the picture vs the page — two sizes): the view must not size the page to its pane
+    // (`browser.fitPageToView` off = the page keeps its own size, as for a size the agent chose); the fit is judged by
+    // scripts/test-browser-live-fit.mjs on the same rung
+    { const r = await fetch(`http://127.0.0.1:${PORT5}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'browser.fitPageToView': false }) }); ok(r.ok, '⑤ setup: browser.fitPageToView off for the letterbox legs'); }
     const wsMain = new WebSocket(`ws://127.0.0.1:${PORT5}/ws`);
     const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch { } });
     await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });

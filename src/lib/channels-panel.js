@@ -48,7 +48,7 @@ import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 // the shared chrome primitives (one SVG helper, one textContent element, one house button)
-import { icon, btn, noteLine } from './channel-chrome.js';
+import { icon, btn, noteLine, el as chanEl } from './channel-chrome.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern). THE
 // SENTENCE IS COMPOSED HERE (r2): `freshnessClaim` used to build it server
 // side with no translator, so the chip this feature calls its honesty
@@ -60,9 +60,9 @@ import * as chanCaps from '../channel-caps.js';
 // already in the bundle for the Integrations window).
 import * as R from '../integration-registry.js';
 // a3 i18n: a route failure is worded by its CODE here, never by the engine's sentence.
-import { routeErrorText, groupErrorText } from './channel-words.js';
+import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from './channel-words.js';
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
-import { groupListRows, foldsFrom, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag } from './channel-groups-view.js';
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 // P2: the Assign & filter editor and the one-line summary a row draws.
 import { showAssignFilterDialog, showScopeAssignDialog, assignmentSummary } from './channel-filter-editor.js';
@@ -295,8 +295,11 @@ function openConversationOf(app, convs) {
 /** SEARCH ONE ACCOUNT's messages (2026-09-26, design §6.5): the server reads
  *  the local logs asynchronously with a byte cap; a result opens its
  *  conversation. Every string is vendor text ⇒ textContent only. */
-function showSearchDialog(app, a) {
-  const { body, close } = createModalShell({ id: 'chan-search-dialog', title: t('Search messages — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-search', escapeToClose: true });
+function showSearchDialog(app, a, { q: initial = '' } = {}) {
+  // R3 (§23): the first screen's filter hands its words to EVERY connected account's search (`a` = a list)
+  const accounts = Array.isArray(a) ? a.filter(Boolean) : [a];
+  const title = accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…');
+  const { body, close } = createModalShell({ id: 'chan-search-dialog', title, dialogClass: 'chan-dialog chan-search', escapeToClose: true });
   const row = document.createElement('div');
   row.className = 'chan-search-row';
   const input = document.createElement('input');
@@ -312,10 +315,14 @@ function showSearchDialog(app, a) {
     const q = input.value.trim();
     if (q.length < 2) { status.textContent = t('Type at least 2 characters.'); return; }
     go.disabled = true; status.textContent = t('Searching…');
-    const r = await fetchJson(`/api/channels/search?adapter=${encodeURIComponent(a.id)}&q=${encodeURIComponent(q)}`);
+    const answers = await Promise.all(accounts.map((acc) => fetchJson(`/api/channels/search?adapter=${encodeURIComponent(acc.id)}&q=${encodeURIComponent(q)}`).then((x) => ({ acc, x }))));
     go.disabled = false;
     list.textContent = '';
-    if (!r || r.error) { status.textContent = routeErrorText(r); return; }
+    const bad = answers.find(({ x }) => !x || x.error);
+    if (bad && answers.every(({ x }) => !x || x.error)) { status.textContent = routeErrorText(bad.x); return; }
+    const r = { truncated: answers.some(({ x }) => x && x.truncated), results: [] };
+    for (const { acc, x } of answers) for (const hit of (x && x.results) || []) r.results.push({ ...hit, adapterId: acc.id });
+    r.results.sort((m, n) => (Number(n.record && n.record.at) || 0) - (Number(m.record && m.record.at) || 0));
     status.textContent = r.results.length ? (r.truncated ? t('{n} results — more exist; narrow the words', { n: r.results.length }) : t('{n} results', { n: r.results.length })) : t('No message matches.');
     for (const hit of r.results) {
       const it = document.createElement('div');
@@ -327,12 +334,13 @@ function showSearchDialog(app, a) {
       head.append(ti, who);
       const tx = document.createElement('div'); tx.className = 'chan-search-text'; tx.textContent = String(hit.record.text || '').slice(0, 300);
       it.append(head, tx);
-      it.onclick = () => { close(); app.openChannel(a.id, hit.convId); };
+      it.onclick = () => { close(); app.openChannel(hit.adapterId, hit.convId); };
       list.appendChild(it);
     }
   };
   go.onclick = run;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } });
+  if (initial) { input.value = initial; run(); }
   setTimeout(() => input.focus(), 30);
 }
 
@@ -684,6 +692,11 @@ let ARCHIVED_OPEN = false;
 const FIRST_SCREEN_ROWS = 60;
 const ACCOUNT_ROWS = 30;
 let FIRST_ALL = false;
+/** R3 (2026-09-26, design §23 — the owner: "开头不要把所有消息都放进来 … 只放重要
+ *  消息/conversation … 并展示一个小tag表示状态"): the first screen is the
+ *  ATTENTION list (`focus`, the default) and the whole list is one switch away
+ *  (`all`) — per page session, like the folds. */
+let VIEW = 'focus';
 const ACCOUNT_ALL = new Set();
 
 // ── THE SECONDARY SECTIONS' FOLDS (g3): persisted in user state
@@ -733,6 +746,21 @@ function groupMenu(app, g) {
   return items;
 }
 
+/** THE FIRST SCREEN'S FILTER (R3, design §23.4): one search box over the rows
+ *  the panel already holds (title / source / last line) — a query, never an
+ *  account field (the oauth-field-parity census names this owner). */
+function filterBox(onInput) {
+  const row = chanEl('div', 'chan-find');
+  const input = document.createElement('input');
+  input.type = 'search'; input.className = 'chan-find-input'; input.dataset.channelFilter = '1';
+  input.placeholder = t('Filter…');
+  input.title = t('Filter conversations');
+  input.spellcheck = false;
+  input.addEventListener('input', onInput);
+  row.appendChild(input);
+  return { row, input };
+}
+
 /**
  * Render the rail panel into `c`. THE FIRST SCREEN IS THE GROUP LIST (design
  * §22, the owner's IM model): every agent group and every conversation of a
@@ -763,7 +791,6 @@ export function renderChannelsPanel(app, c) {
   newLabel.className = 'chan-newgroup-label';
   newLabel.textContent = t('New group');
   newBtn.append(icon('plus', 12), newLabel);
-  bar.appendChild(newBtn);
   // P3: the Outbox entry point, with the awaiting count from the digest.
   const outboxBtn = btn('', () => app.openChannelOutbox(), 'chan-outbox-btn');
   outboxBtn.dataset.outboxButton = '1';
@@ -775,10 +802,27 @@ export function renderChannelsPanel(app, c) {
   // the glyph carries the button where the label cannot fit (MEASURED: the
   // 260px sidebar leaves 172px for the bar; the summary + the word do not both fit)
   outboxBtn.append(icon('outbox', 12), outboxLabel);
-  bar.appendChild(outboxBtn);
+  // R3 (§23): THE HEADER IS THE VIEW SWITCH — "{n} need attention" | "All {n}"
+  // (a `chan-seg`, the Outbox window's Awaiting | All grammar) in the summary's
+  // place; a click redraws from the digest already in hand (no fetch)
+  const seg = chanEl('div', 'chan-seg chan-view-seg');
+  const segFocus = chanEl('button', 'jobs-btn chan-view-btn');
+  segFocus.type = 'button'; segFocus.dataset.view = 'focus';
+  const segAll = chanEl('button', 'jobs-btn chan-view-btn');
+  segAll.type = 'button'; segAll.dataset.view = 'all';
+  for (const b of [segFocus, segAll]) b.onclick = (ev) => { ev.stopPropagation(); VIEW = b.dataset.view; draw(); };
+  seg.append(segFocus, segAll);
+  summary.appendChild(seg);
+  // …and the FILTER over the rows the list shows (title / source / last line),
+  // outside the repainted list so a broadcast never eats a keystroke
+  const { row: find, input: findInput } = filterBox(() => draw());
+  // the second row: the filter, then the two actions (New group, Outbox) — the switch
+  // above gets the WHOLE width (measured: beside the two buttons at the 188 px rail it
+  // cut "1 需关注" to "1 需…" and "全部 8" to "全…")
+  find.append(newBtn, outboxBtn);
   const root = document.createElement('div');
   root.className = 'chan-list';
-  c.append(bar, root);
+  c.append(bar, find, root);
 
   /** The two inputs the list is drawn from — each replaced whole by its own broadcast. */
   let digest = null, groups = null;
@@ -837,8 +881,17 @@ export function renderChannelsPanel(app, c) {
     const adapters = (d && d.adapters) || [];
     const convs = (d && d.conversations) || [];
     const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters });
-    const unreadTotal = rows.reduce((s, r) => s + (r.unread || 0), 0);
-    summary.textContent = rows.length ? t('{n} groups · {k} unread', { n: rows.length, k: unreadTotal }) : t('No groups yet');
+    // R3 (§23): the ATTENTION list by default — what matters, one tag each (PURE firstScreen / statusTag)
+    const q = findInput.value || '';
+    const now = Date.now();
+    const fs = firstScreen(rows, { view: VIEW, q, now });
+    const words = viewSwitchText({ focus: fs.focus, all: fs.all });
+    segFocus.textContent = words.focus; segFocus.title = t('What needs you or an agent: handed to an agent, read by one in the last 24 h, awaiting your approval, a held wake, or a reply of yours in the last 24 h');
+    segAll.textContent = words.all; segAll.title = t('Every conversation of every connected account, newest first');
+    segFocus.classList.toggle('chan-seg-on', fs.view === 'focus');
+    segAll.classList.toggle('chan-seg-on', fs.view === 'all');
+    segFocus.setAttribute('aria-pressed', String(fs.view === 'focus'));
+    segAll.setAttribute('aria-pressed', String(fs.view === 'all'));
     const awaiting = Number(d && d.awaitingTotal) || 0;
     outboxCount.textContent = String(awaiting);
     if (awaiting) { if (!outboxCount.isConnected) outboxBtn.appendChild(outboxCount); } else outboxCount.remove();
@@ -860,12 +913,31 @@ export function renderChannelsPanel(app, c) {
     // ── THE FIRST SCREEN: the group list ──
     const list = document.createElement('div');
     list.className = 'chan-groups';
+    list.dataset.view = fs.view;
     if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
+    } else if (fs.view === 'focus' && !fs.focus) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty chan-focus-empty', t('Nothing here needs you or an agent yet. A conversation appears here when you hand it to an agent, an agent reads it, a draft waits for your approval, a wake is held, or you reply in it. Every conversation is under All ({n}).', { n: fs.all })));
+    } else if (!fs.shown.length && q.trim()) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty', t('No conversation matches "{q}".', { q: q.trim() })));
     }
-    const shown = FIRST_ALL ? rows : rows.slice(0, FIRST_SCREEN_ROWS);
-    for (const r of shown) list.appendChild(groupRow(r));
-    if (rows.length > shown.length) list.appendChild(moreToggle(t('Show all {n} conversations', { n: rows.length }), () => { FIRST_ALL = true; draw(); }));
+    // the ALL view keeps its first-page cap (an aggregated account is 800+ rows); the attention list is short by construction
+    const capped = fs.view === 'all' && !q.trim() && !FIRST_ALL;
+    const shown = capped ? fs.shown.slice(0, FIRST_SCREEN_ROWS) : fs.shown;
+    for (const r of shown) list.appendChild(groupRow(r, now));
+    if (fs.shown.length > shown.length) list.appendChild(moreToggle(t('Show all {n} conversations', { n: fs.shown.length }), () => { FIRST_ALL = true; draw(); }));
+    if (fs.moreInAll > 0) {
+      const more = moreToggle(t('{n} more in All', { n: fs.moreInAll }), () => { VIEW = 'all'; draw(); });
+      more.dataset.moreInAll = String(fs.moreInAll);
+      list.appendChild(more);
+    }
+    // a query is also a MESSAGE search: every connected account's local logs, the existing search dialog
+    const accountsToSearch = adapters.filter((a) => !a.builtin);
+    if (q.trim().length >= 2 && accountsToSearch.length) {
+      const sm = moreToggle(t('Search messages for "{q}"', { q: q.trim() }), () => showSearchDialog(app, accountsToSearch, { q: q.trim() }));
+      sm.dataset.searchMessages = '1';
+      list.appendChild(sm);
+    }
     if (archived.length) {
       const tog = document.createElement('div');
       tog.className = 'chan-archived-toggle' + (ARCHIVED_OPEN ? ' chan-archived-open' : '');
@@ -919,7 +991,7 @@ export function renderChannelsPanel(app, c) {
   }
 
   /** ONE row of the first screen: an agent group or a conversation of a linked account. */
-  function groupRow(r) {
+  function groupRow(r, now = Date.now()) {
     const el = document.createElement('div');
     el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '');
     el.dataset.grow = r.key;
@@ -941,11 +1013,27 @@ export function renderChannelsPanel(app, c) {
     el.appendChild(line);
     const sub = document.createElement('div');
     sub.className = 'chan-grow-sub';
-    const src = document.createElement('span');
-    src.className = 'chan-src-chip';
-    src.textContent = r.kind === 'group' ? (r.pair ? t('Direct') : t('Agents')) : r.sourceLabel;
-    src.title = r.kind === 'group' ? (r.pair ? t('A direct conversation between two agents') : t('An agent group · {n} members', { n: r.memberCount })) : t('From your {label} account', { label: r.sourceLabel });
-    sub.appendChild(src);
+    const srcTitle = r.kind === 'group' ? (r.pair ? t('A direct conversation between two agents') : t('An agent group · {n} members', { n: r.memberCount })) : t('From your {label} account', { label: r.sourceLabel });
+    // R3 (§23): ONE small TAG says why the row matters (statusTag's first match, worded by statusTagParts);
+    // it takes the source chip's slot on line 2 — under the title on every width — and the source rides its title
+    const st = r.kind === 'conv' ? statusTag(r, now) : null;
+    const tag = statusTagParts(st, { now });
+    if (tag) {
+      const g = chanEl('span', `chan-grow-tag chan-tag-${tag.tone}`);
+      g.dataset.tag = st.code;
+      if (tag.icon) g.appendChild(icon(tag.icon, 9));
+      if (tag.before) g.appendChild(chanEl('span', 'chan-tag-words', tag.before));
+      if (tag.who) g.appendChild(chanEl('span', 'chan-tag-who', tag.who));
+      if (tag.after) g.appendChild(chanEl('span', 'chan-tag-words', tag.after));
+      g.title = `${tag.title} · ${srcTitle}`;
+      sub.appendChild(g);
+    } else {
+      const src = document.createElement('span');
+      src.className = 'chan-src-chip';
+      src.textContent = r.kind === 'group' ? (r.pair ? t('Direct') : t('Agents')) : r.sourceLabel;
+      src.title = srcTitle;
+      sub.appendChild(src);
+    }
     const last = document.createElement('span');
     last.className = 'chan-grow-last';
     last.textContent = r.lastText || '';

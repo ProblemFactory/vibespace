@@ -1,0 +1,544 @@
+{
+ "binary": "agent-browser 0.38.1",
+ "captured": "2026-09-26",
+ "how": "a scratch VibeSpace instance (headless config), the real binary reached through the keeper (vibespace-browser \u2192 the server), the stream read through the bridge",
+ "mirror": {
+  "set viewport 700 900": [
+   {
+    "action": "launch",
+    "id": "r856241",
+    "params": {
+     "action": "launch",
+     "args": [
+      "--no-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--vibespace-keeper=bk-0000000f"
+     ],
+     "id": "r856241",
+     "noXvfb": false
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "launch",
+    "data": {
+     "launched": true,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": true,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "relaunchedBrowser": false,
+     "reused": true
+    },
+    "duration_ms": 0,
+    "id": "r856241",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   },
+   {
+    "action": "viewport",
+    "id": "r856085",
+    "params": {
+     "action": "viewport",
+     "height": 900,
+     "id": "r856085",
+     "width": 700
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "viewport",
+    "data": {
+     "deviceScaleFactor": 1,
+     "height": 900,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": false,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "mobile": false,
+     "width": 700
+    },
+    "duration_ms": 11,
+    "id": "r856085",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   }
+  ],
+  "set viewport 390 844 2": [
+   {
+    "action": "launch",
+    "id": "r565507",
+    "params": {
+     "action": "launch",
+     "args": [
+      "--no-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--vibespace-keeper=bk-0000000f"
+     ],
+     "id": "r565507",
+     "noXvfb": false
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "launch",
+    "data": {
+     "launched": true,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": true,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "relaunchedBrowser": false,
+     "reused": true
+    },
+    "duration_ms": 2,
+    "id": "r565507",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   },
+   {
+    "action": "viewport",
+    "id": "r565310",
+    "params": {
+     "action": "viewport",
+     "deviceScaleFactor": 2,
+     "height": 844,
+     "id": "r565310",
+     "width": 390
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "viewport",
+    "data": {
+     "deviceScaleFactor": 2,
+     "height": 844,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": false,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "mobile": false,
+     "width": 390
+    },
+    "duration_ms": 9,
+    "id": "r565310",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   }
+  ],
+  "set viewport 0 0": [
+   {
+    "action": "launch",
+    "id": "r258145",
+    "params": {
+     "action": "launch",
+     "args": [
+      "--no-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--vibespace-keeper=bk-0000000f"
+     ],
+     "id": "r258145",
+     "noXvfb": false
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "launch",
+    "data": {
+     "launched": true,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": true,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "relaunchedBrowser": false,
+     "reused": true
+    },
+    "duration_ms": 0,
+    "id": "r258145",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   },
+   {
+    "action": "viewport",
+    "id": "r258019",
+    "params": {
+     "action": "viewport",
+     "height": 0,
+     "id": "r258019",
+     "width": 0
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "viewport",
+    "data": {
+     "deviceScaleFactor": 1,
+     "height": 0,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": false,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "mobile": false,
+     "width": 0
+    },
+    "duration_ms": 2,
+    "id": "r258019",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   }
+  ],
+  "set device iPhone 12": [
+   {
+    "action": "launch",
+    "id": "r933696",
+    "params": {
+     "action": "launch",
+     "args": [
+      "--no-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--vibespace-keeper=bk-0000000f"
+     ],
+     "id": "r933696",
+     "noXvfb": false
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "launch",
+    "data": {
+     "launched": true,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": true,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "relaunchedBrowser": false,
+     "reused": true
+    },
+    "duration_ms": 0,
+    "id": "r933696",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   },
+   {
+    "action": "device",
+    "id": "r933601",
+    "params": {
+     "action": "device",
+     "device": "iPhone 12",
+     "id": "r933601"
+    },
+    "timestamp": 0,
+    "type": "command"
+   },
+   {
+    "action": "device",
+    "data": {
+     "device": "iPhone 12",
+     "deviceScaleFactor": 3,
+     "height": 844,
+     "lifecycle": {
+      "effectiveLaunch": {
+       "browserLaunched": true,
+       "engine": "chrome",
+       "launchHash": 17464286336162804000
+      },
+      "launched": false,
+      "relaunchedBrowser": false,
+      "restartedBackground": false,
+      "restoreStatus": "not_configured",
+      "reused": true,
+      "saveStatus": "not_attempted"
+     },
+     "mobile": true,
+     "width": 390
+    },
+    "duration_ms": 5,
+    "id": "r933601",
+    "success": false,
+    "timestamp": 0,
+    "type": "result"
+   }
+  ]
+ },
+ "frames": {
+  "default": {
+   "page": {
+    "w": 1280,
+    "h": 577,
+    "dpr": 1
+   },
+   "frame": [
+    1280,
+    577
+   ],
+   "metadata": [
+    1280,
+    720
+   ]
+  },
+  "set viewport 700 900": {
+   "ok": true,
+   "page": {
+    "w": 700,
+    "h": 900,
+    "dpr": 1
+   },
+   "frames": [
+    [
+     700,
+     900
+    ]
+   ],
+   "metadata": [
+    700,
+    900
+   ]
+  },
+  "set viewport 390 844 2": {
+   "ok": true,
+   "page": {
+    "w": 390,
+    "h": 844,
+    "dpr": 2
+   },
+   "frames": [
+    [
+     390,
+     844
+    ]
+   ],
+   "metadata": [
+    390,
+    844
+   ]
+  },
+  "set viewport 0 0": {
+   "ok": true,
+   "page": {
+    "w": 390,
+    "h": 844,
+    "dpr": 1
+   },
+   "frames": [
+    [
+     390,
+     844
+    ]
+   ],
+   "metadata": [
+    0,
+    0
+   ]
+  },
+  "set device iPhone 12": {
+   "ok": true,
+   "page": {
+    "w": 390,
+    "h": 844,
+    "dpr": 3
+   },
+   "frames": [
+    [
+     390,
+     844
+    ]
+   ],
+   "metadata": [
+    390,
+    844
+   ]
+  }
+ },
+ "hashNav": {
+  "records": [
+   {
+    "timestamp": 0,
+    "type": "url",
+    "url": "http://127.0.0.1:PORT/page?n=f1#sec2"
+   }
+  ],
+  "upstreamFramesWithin3s": 0,
+  "note": "a same-document (hash) navigation: one `url` record and NO frame for 3 s (measured on the bridge before it asked for fresh frames). After lane S4 the bridge asks the page for a fresh picture FRESH_FRAME_MS after such a url record: Page.captureScreenshot makes the screencast emit its OWN next frame (measured 3/3 at ~1070 ms, a real `seq`, no `fresh` flag) \u2014 the captured picture is only the fallback."
+ },
+ "headed": {
+  "screen": "2560x1440 Xvfb, config headed:true",
+  "default": {
+   "page": [
+    1241,
+    1252
+   ],
+   "frame": [
+    714,
+    720
+   ],
+   "metadata": [
+    1280,
+    720
+   ]
+  },
+  "set viewport": [
+   {
+    "set": [
+     390,
+     760
+    ],
+    "frame": [
+     390,
+     593
+    ],
+    "note": "the page drawn SCALED 0.78 into the left of the frame (a headed window cannot be that narrow)"
+   },
+   {
+    "set": [
+     480,
+     800
+    ],
+    "frame": [
+     480,
+     768
+    ],
+    "note": "scaled 0.96"
+   },
+   {
+    "set": [
+     500,
+     800
+    ],
+    "frame": [
+     500,
+     800
+    ]
+   },
+   {
+    "set": [
+     600,
+     800
+    ],
+    "frame": [
+     600,
+     800
+    ]
+   },
+   {
+    "set": [
+     700,
+     900
+    ],
+    "frame": [
+     700,
+     900
+    ]
+   },
+   {
+    "set": [
+     1000,
+     1300
+    ],
+    "frame": [
+     1000,
+     1300
+    ]
+   },
+   {
+    "set": [
+     1600,
+     900
+    ],
+    "frame": [
+     1600,
+     900
+    ]
+   }
+  ]
+ },
+ "deviceScaleFactor": {
+  "note": "a factor > 1 never enlarges the frame (the stream caps it at the CSS viewport); with AGENT_BROWSER_STREAM_MAX_WIDTH/HEIGHT=4096 a factor change on a static page produced NO frame at all within 4.5 s (4/4), a factor-1 change always one",
+  "static page, set 700 900 2": {
+   "framesWithin4500ms": 0
+  },
+  "static page, set 700 900 1": {
+   "framesWithin4500ms": 1,
+   "frame": [
+    700,
+    900
+   ]
+  }
+ }
+}

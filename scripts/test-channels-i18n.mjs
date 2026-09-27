@@ -92,6 +92,9 @@ export const DATA_PATH_CLASSES = [
   // AGENT / vendor data; so are member names (the detail + the New group picker), an invite's context,
   // a system record's names and an @-autocomplete candidate
   'chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item',
+  // R3 (design §23): the first screen's tag names its AGENT in its own span (the words around it are chrome,
+  // censused); an attachment's name is the vendor's file name
+  'chan-tag-who', 'chanmsg-att-name',
 ];
 // The eight surfaces' shot-name stems; a leak seen ONLY on the house-style
 // reference shots (`house-*`, the full page) is not this feature's to answer for.

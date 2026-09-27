@@ -424,6 +424,20 @@ async function pass({ lang, viewport, theme }) {
     await sleep(250);
     await capture(page, tag, 'panel-02g-adapter-menu', '.context-menu', { pad: 4 });
     await closeDialogs(page);
+    // R3 (2026-09-26, design §23): THE FIRST SCREEN IS THE ATTENTION LIST — one conversation handed to an
+    // agent wears its tag ("→ Scout", the name a data path) in the default view; "All" is the whole list
+    { const r = await api('PUT', '/api/channels/fake-poll/fake-poll-ops/assignment', { assignment: { principal: { kind: 'agent', id: 'cid-scout', name: 'Scout' }, mode: 'all', notify: 'digest', digestMinutes: 60 } });
+      if (r.status !== 200) log('assignment', 'HTTP', r.status, r.text.slice(0, 120)); }
+    await waitFor(page, `!!document.querySelector('.rail-panel-channels .chan-grow-tag')`, 40);
+    await page.evaljs(`(() => { for (let n = document.querySelector('.rail-panel-channels .chan-bar'); n; n = n.parentElement) n.scrollTop = 0; return 1; })()`);
+    await capture(page, tag, 'panel-02h-first-screen', '#sidebar');
+    await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]'); if (b) b.click(); return !!b; })()`);
+    await sleep(200);
+    await page.evaljs(`(() => { for (let n = document.querySelector('.rail-panel-channels .chan-bar'); n; n = n.parentElement) n.scrollTop = 0; return 1; })()`);
+    await capture(page, tag, 'panel-02i-first-screen-all', '#sidebar');
+    await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]'); if (b) b.click(); return !!b; })()`);
+    await api('PUT', '/api/channels/fake-poll/fake-poll-ops/assignment', { assignment: null });
+    await sleep(300);
     // DISABLED adapter
     await api('PUT', '/api/channels/adapters/fake-scan', { enabled: false });
     await sleep(800); await tagSections(page);

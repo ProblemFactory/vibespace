@@ -27,9 +27,14 @@
 //                     (the D2 table the engine applies, through the model's
 //                     own `mentionsIn` — one spelling of what an @ is).
 //   foldsFrom       — the panel's secondary sections' persisted folds.
+//   focusRows / statusTag / firstScreen (R3, 2026-09-26, re-exported from the
+//                     PURE src/lib/channel-focus.js) — the first screen is the
+//                     ATTENTION list: what matters, one tag per row, the full
+//                     list one switch away.
 import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, mentionsIn } from '../channel-groups.js';
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
+export { focusRows, statusTag, filterRows, firstScreen, heldOf, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';
 
 /** Is this (adapterId, convId) pair an agent GROUP rather than a channel
  *  conversation? The group log's namespace (the store files a group's log

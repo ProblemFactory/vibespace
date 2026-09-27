@@ -208,7 +208,7 @@ console.log('§2 the owner\'s own send, the digest\'s last line, the owner\'s re
 
 // ── §3 SOURCE CENSUSES ────────────────────────────────────────────────────
 console.log('§3 censuses: XSS, the composer split, no adapter id, the fold, the i18n data paths');
-const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/lib/channel-group-dialogs.js', 'src/lib/channel-groups-view.js', 'src/lib/channel-words.js'];
+const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/lib/channel-group-dialogs.js', 'src/lib/channel-groups-view.js', 'src/lib/channel-words.js', 'src/lib/channel-focus.js'];
 {
   const strip = (s) => s.replace(/^\s*(\*|\/\/).*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   /** the judge: an innerHTML / insertAdjacentHTML / outerHTML write whose right-hand side is not the icon library or an escHtml'd template */
@@ -223,7 +223,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   };
   const found = {};
   for (const f of CLIENT) found[f] = judge(read(f));
-  ok(Object.values(found).every((b) => b.length === 0), 'XSS: no innerHTML/outerHTML/insertAdjacentHTML write on the five files (every group name, member name, context and last line is textContent)', JSON.stringify(found));
+  ok(Object.values(found).every((b) => b.length === 0), 'XSS: no innerHTML/outerHTML/insertAdjacentHTML write on the six files (every group name, member name, context, last line and — R3 — the tag\'s agent name is textContent)', JSON.stringify(found));
   const planted = read('src/lib/channels-panel.js').replace('title.textContent = r.title;', 'title.innerHTML = r.title;');
   ok(planted !== read('src/lib/channels-panel.js') && judge(planted).length === 1, 'NEGATIVE CONTROL: a planted `title.innerHTML = r.title` (a hostile group name) is FLAGGED by the same judge');
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), D = read('src/lib/channel-group-dialogs.js');
@@ -246,7 +246,7 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   ok(/body: JSON\.stringify\(\{ channelsPanelFolds: FOLDS \}\)/.test(P) && /method: 'PATCH'/.test(P) && /FOLDS = foldsFrom\(/.test(P) && /msg\.type === 'user-state-updated' && msg\.state && msg\.state\.channelsPanelFolds/.test(P), 'the secondary sections\' fold is PATCHed to user state (`channelsPanelFolds`, merge-only), read through foldsFrom, and followed from other clients');
   // the i18n census knows the new data paths
   const I = await import(path.join(REPO, 'scripts/test-channels-i18n.mjs'));
-  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item'];
+  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item', 'chan-tag-who'];
   ok(need.every((c) => I.DATA_PATH_CLASSES.includes(c)), 'the i18n census excuses the NEW data paths (group name / last line / source label / member + picker names / context / system line / mention item) BY PATH', need.filter((c) => !I.DATA_PATH_CLASSES.includes(c)).join(', '));
   const leak = I.census([{ text: 'Members & notifications', paths: ['div.chan-gm-list < div.dialog-body'], surfaces: ['panel-02-tracked'] }]);
   ok(leak.violations.length === 1, 'NEGATIVE CONTROL: a CHROME string on a group surface (not a data path) is still a violation');
@@ -257,6 +257,7 @@ console.log('§4 wiring pins');
 {
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), R = read('src/routes/channels.js'), E = read('src/server/channels-engine.js'), S = read('src/channel-store.js'), GEsrc = read('src/server/groups-engine.js');
   ok(/const \{ rows, archived \} = groupListRows\(\{ groups: groups \|\| \[\], conversations: convs, adapters \}\);/.test(P), 'PIN: the panel\'s first screen is drawn from groupListRows');
+  ok(/const fs = firstScreen\(rows, \{ view: VIEW, q, now \}\);/.test(P) && /export \{ focusRows, statusTag, filterRows, firstScreen,/.test(read('src/lib/channel-groups-view.js')), 'PIN (R3): …and narrowed to the ATTENTION list by firstScreen / focusRows (re-exported from the PURE channel-focus.js) — the full list one switch away');
   ok(/if \(msg\.type === 'channel-groups-updated'\) \{[\s\S]{0,200}groups = msg\.groups;\s*\n\s*draw\(\);/.test(P), 'PIN: the panel repaints the group list from the broadcast\'s list (no fetch)');
   ok(/if \(isGroupConv\(adapterId\)\) \{ root\.classList\.add\('chanwin-group'\); return openGroupWindow\(/.test(W) && /const w = wakePreview\(group, ta\.value\);/.test(W), 'PIN: the window routes a group to openGroupWindow and previews the wake under the box');
   ok(/router\.post\('\/api\/channels\/:adapterId\/:convId\/send'[\s\S]{0,300}direct: true/.test(R) && /router\.get\('\/api\/channel-groups\/roster'/.test(R) && /case 'read': r = await ge\.markRead\(\{ group \}\)/.test(R), 'PIN: the routes expose /send (direct), /channel-groups/roster and the owner\'s /read');

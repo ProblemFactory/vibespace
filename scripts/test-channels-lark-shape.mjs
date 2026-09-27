@@ -28,6 +28,11 @@
 //     left is `detail.lost` while a 403 is a plain refusal; reconcile finds
 //     our text in the chat, re-issues the SAME uuid inside the hour, answers
 //     `landed:false` only on a complete scan past it, `unknown` otherwise
+//   · ⑨ R3 (2026-09-26, "lark图像不能预览吗？"): ONE picture's bytes — the
+//     message's resource, `type=image` for a picture (standalone or inside a
+//     rich text) / `type=file` otherwise, the USER token, the concrete type +
+//     the Content-Disposition name, a JSON answer (even HTTP 200) a typed
+//     refusal, the 100 MB bound, ONE unit metered; no id ⇒ no request
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
@@ -266,7 +271,7 @@ const world = (() => {
   const m9 = by.om_ops_009;
   ok(m9.text === 'Deploy notes\nrolled out build 42 (https://ci.example/42)\n@Ada ok to close?' && m9.replyTo === 'om_ops_007', `a post (rich text) body flattens to text with its links and @names; parent_id ⇒ replyTo (${JSON.stringify(m9.text)})`);
   const m8 = by.om_ops_008;
-  ok(m8.text === '[image]' && m8.attachments.length === 1 && m8.attachments[0].id === 'img_v2_fixture_0008' && m8.attachments[0].mime === 'image/*', 'an image is METADATA only (caps.attachments = metadata): a named placeholder + the image_key');
+  ok(m8.text === '[image]' && m8.attachments.length === 1 && m8.attachments[0].id === 'img_v2_fixture_0008' && m8.attachments[0].mime === 'image/*' && m8.attachments[0].placeholder === '[image]', 'an image is an attachment FETCHED on demand (caps.attachments = fetch): the text\'s "[image]" token + the image_key, the token carried as the attachment\'s placeholder (R3)');
   const m7 = by.om_ops_007;
   ok(m7.author.isBot === true && m7.author.name === 'app' && m7.text === 'the deploy finished, logs look clean', 'sender_type app ⇒ isBot');
   const m6 = by.om_ops_006;
@@ -389,6 +394,53 @@ const world = (() => {
   v.state.sendFail = 'forbidden';
   const rc5 = await a.reconcile(C, { idemKey: 'p-0001', sentAt: T0 + 10 * 60e3, text: 'never landed' });
   ok(rc5.unknown === true && rc5.detail.how === 'reissue-refused' && rc5.detail.code === 'forbidden', 'reconcile ⑤ a re-issue the vendor refuses ⇒ UNKNOWN with the vendor\'s code — the original may still have landed', JSON.stringify(rc5));
+}
+
+// ── ⑨ R3 (2026-09-26 — the owner: "lark图像不能预览吗？"): ONE PICTURE'S BYTES ──
+// `messages/:message_id/resources/:key` with the USER token: `type=image` for an image (standalone or
+// inside a rich text), `type=file` for everything else; the bytes + the concrete type + the name; a JSON
+// answer is the vendor's REFUSAL, typed; the 100 MB bound; ONE unit metered per request.
+{
+  const reg = CH.createChannelRegistry(); reg.register(lark.adapter);
+  const v = mkVendor(); const tokens = mkTokens();
+  tokens.st.token = { access_token: 'u-access-0001', expiresAt: now() + 7200e3, refresh_token: 'ur-refresh-0001', refreshExpiresAt: now() + 2592000e3, scopes: ['im:message'], openId: 'ou_member_a' };
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
+  const res = { mode: 'jpeg' };
+  const got = [];
+  const binRes = (buf, headers, status = 200) => ({ ok: status >= 200 && status < 300, status, headers: { get: (k) => (headers[String(k).toLowerCase()] ?? null) }, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length), json: async () => JSON.parse(buf.toString('utf-8')) });
+  const fetchFn = async (url, init = {}) => {
+    const u = new URL(String(url));
+    const m = /^\/open-apis\/im\/v1\/messages\/([^/]+)\/resources\/([^/]+)$/.exec(u.pathname);
+    if (!m) return v.fetchFn(url, init);
+    got.push({ mid: decodeURIComponent(m[1]), key: decodeURIComponent(m[2]), type: u.searchParams.get('type'), auth: (init.headers || {}).Authorization || null, host: u.hostname });
+    if (res.mode === 'refused') return binRes(Buffer.from(JSON.stringify({ code: 230002, msg: 'the bot is not in the chat' })), { 'content-type': 'application/json; charset=utf-8' }, 400);
+    if (res.mode === 'json200') return binRes(Buffer.from(JSON.stringify({ code: 230001, msg: 'message not found' })), { 'content-type': 'application/json; charset=utf-8' }, 200);
+    if (res.mode === 'huge') return binRes(Buffer.alloc(4), { 'content-type': 'application/octet-stream', 'content-length': String(200 * 1024 * 1024) });
+    return binRes(JPEG, { 'content-type': 'image/jpeg', 'content-length': String(JPEG.length), 'content-disposition': "attachment; filename*=UTF-8''%E5%9B%BE.jpg" });
+  };
+  const metered = [];
+  const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, meter: (n) => metered.push(n), log: { warn() {} } });
+  const C = 'oc_ops_room_0001';
+  const pic = await a.fetchAttachment(C, { messageId: 'om_ops_008', attachmentId: 'img_v2_fixture_0008', mime: 'image/*' });
+  ok(got.length === 1 && got[0].type === 'image' && got[0].mid === 'om_ops_008' && got[0].key === 'img_v2_fixture_0008' && got[0].auth === 'Bearer u-access-0001' && got[0].host === 'open.feishu.cn', 'an IMAGE is asked `type=image` of the message\'s resource, with the USER token, on the brand\'s own host', JSON.stringify(got[0]));
+  ok(Buffer.isBuffer(pic.data) && pic.data.equals(JPEG) && pic.mime === 'image/jpeg' && pic.name === '图.jpg', 'the answer is the BYTES, the vendor\'s CONCRETE type (image/jpeg — the route inlines only a raster type) and the name from Content-Disposition', JSON.stringify({ mime: pic.mime, name: pic.name, n: pic.data.length }));
+  ok(metered.reduce((x, y) => x + y, 0) === 1, `ONE unit metered for the request (the account's budget, in the vendor's unit) — ${metered.join('+')}`);
+  await a.fetchAttachment(C, { messageId: 'om_ops_006', attachmentId: 'file_v2_runbook', mime: null });
+  ok(got[1].type === 'file', 'a FILE (no image mime) is asked `type=file`');
+  await a.fetchAttachment(C, { messageId: 'om_ops_009', attachmentId: 'img_in_post', mime: 'image/*' });
+  ok(got[2].type === 'image' && got[2].mid === 'om_ops_009', 'a picture INSIDE a rich text is the same resource of ITS message, `type=image` (never the tenant-scoped images endpoint)');
+  res.mode = 'refused';
+  const e1 = await threw(() => a.fetchAttachment(C, { messageId: 'om_ops_008', attachmentId: 'img_v2_fixture_0008', mime: 'image/*' }));
+  ok(e1 && e1.code === 'forbidden' && /230002/.test(e1.message), 'a refusal is TYPED from the vendor\'s code (230002 ⇒ forbidden)', e1 && `${e1.code} ${e1.message}`);
+  res.mode = 'json200';
+  const e2 = await threw(() => a.fetchAttachment(C, { messageId: 'om_gone', attachmentId: 'img_x', mime: 'image/*' }));
+  ok(e2 && e2.code === 'not-found', 'a JSON body with HTTP 200 is a refusal too (never served as the picture)', e2 && `${e2.code} ${e2.message}`);
+  res.mode = 'huge';
+  const e3 = await threw(() => a.fetchAttachment(C, { messageId: 'om_big', attachmentId: 'file_big', mime: null }));
+  ok(e3 && e3.code === 'too-large', 'a resource past the 100 MB bound is refused by name before its body is read', e3 && e3.code);
+  const e4 = await threw(() => a.fetchAttachment(C, { messageId: '', attachmentId: 'img_x' }));
+  ok(e4 && e4.code === 'not-found' && got.length === 6, 'no message id ⇒ refused locally, NO request');
+  ok(lark.EGRESS.includes(got[0].host), 'the resource host is one the adapter DECLARES (test-channels-egress judges the file)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

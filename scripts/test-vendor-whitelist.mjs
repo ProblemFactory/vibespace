@@ -17,6 +17,9 @@
 //     HERE deliberately, with its own gate asserts — that is the point.
 //  4. The shipped usage tools (statusline capture + remote scanner) import no
 //     network primitives at all: purely passive by construction.
+//  7. (R3, 2026-09-26) A CHANNEL PICTURE's bytes — the one vendor request a
+//     WINDOW can cause — are fetched ON DEMAND, CACHE-FIRST and BUDGET-CHARGED:
+//     a census of the engine's order, with four ungated copies as controls.
 // Adding a vendor call ANYWHERE else fails this test until it is explicitly
 // allowlisted with its gates. That is the desired friction.
 import fs from 'node:fs';
@@ -290,6 +293,102 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     }
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { }
   }
+}
+
+// ── 7: A CHANNEL PICTURE'S BYTES (R3, 2026-09-26 — docs/design-communication-panel.zh.md §23) ──
+// The owner: "lark图像不能预览吗？". Showing a Lark / Gmail picture needs ONE more vendor request per
+// picture (Lark `messages/:id/resources/:key`, Gmail `attachments.get`) — the only vendor call a WINDOW
+// can cause. It is allowlisted HERE deliberately, with its three gates, and the census below is a
+// FUNCTION of the source text so an UNGATED copy (scripts/mutant-copy.mjs, never src/) turns it red:
+//   ON-DEMAND      the ONLY caller of any adapter's `fetchAttachment` is the engine's `attachment()`,
+//                  and the only caller of THAT is the GET attachment route (a thumbnail the window
+//                  rendered, a person's click) — ingest, timers and agent routes never fetch bytes;
+//   CACHE-FIRST    `attachment()` asks the cache (`store.attachmentGet`) and the PURE verdict first, and
+//                  the verdict serves a cached file whatever the budget / back-off / account say;
+//   BUDGET-CHARGED the fetch runs only on the verdict's `fetch` — after the back-off and `affordable()` —
+//                  through `vendor(rec, e, …)`, where the adapter's meter charges the account's minute.
+{
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
+  /** THE CENSUS: rows [name, pass, detail] over the engine's + the routes' + every server file's text. */
+  const attachmentCensus = (engineSrc, routesSrc, serverTexts) => {
+    const rows = [];
+    const E = strip(engineSrc);
+    const at = E.indexOf('async function attachment(');
+    const end = at < 0 ? -1 : E.indexOf('\n  }\n', at);
+    const body = at < 0 || end < 0 ? '' : E.slice(at, end);
+    const pos = (needle, from = 0) => body.indexOf(needle, from);
+    const cache = pos('store.attachmentGet('), v1 = pos('Att.fetchVerdict('), owner = pos('ownerRecordOf('), v2 = v1 < 0 ? -1 : pos('Att.fetchVerdict(', v1 + 1), gate = pos("case 'fetch': break;"), call = pos('.fetchAttachment(');
+    rows.push(['the engine\'s attachment() exists and fetches through ONE adapter call', !!body && call > 0 && body.split('.fetchAttachment(').length === 2, `body ${body.length} chars, calls ${body.split('.fetchAttachment(').length - 1}`]);
+    rows.push(['CACHE-FIRST: the cache is asked, then the verdict, BEFORE the owner lookup and long before the fetch', cache > 0 && v1 > cache && owner > v1 && call > owner && /Att\.fetchVerdict\(\{ cached: !!hit/.test(body), JSON.stringify({ cache, v1, owner, call })]);
+    const facts = v2 > 0 ? body.slice(v2, body.indexOf('});', v2)) : '';
+    rows.push(['BUDGET-CHARGED: the fetch verdict is asked the back-off AND the minute\'s budget (`affordable(rec, e)`) and a join', /backoff: inBackoff\(e\)/.test(facts) && /affordable: affordable\(rec, e\)/.test(facts) && /inflight: attInflight\.has\(k\)/.test(facts), facts.slice(0, 240)]);
+    rows.push(['…and the fetch runs only on the verdict\'s `fetch` (every other act returns first), charged through vendor(rec, e, …)', gate > v2 && call > gate && /return budgetRefusal\(rec, e\);\s*\n\s*\}/.test(body.slice(v2, call)) && /vendor\(rec, e, \(\) => e\.adapter\.fetchAttachment\(/.test(body), JSON.stringify({ v2, gate, call })]);
+    const callers = [];
+    for (const [rel, text] of Object.entries(serverTexts)) {
+      const code = strip(text);
+      const n = (code.match(/\.fetchAttachment\(/g) || []).length;
+      if (n) callers.push(`${rel}:${n}`);
+    }
+    rows.push(['ON-DEMAND: `.fetchAttachment(` is CALLED from exactly one place in the server tree (the engine\'s attachment())', callers.length === 1 && callers[0] === 'src/server/channels-engine.js:1', callers.join(', ')]);
+    const R = strip(routesSrc);
+    const routeAt = R.indexOf("router.get('/api/channels/:adapterId/:convId/attachment/:id'");
+    const routeBody = routeAt < 0 ? '' : R.slice(routeAt, R.indexOf('\n});', routeAt));
+    // r-verify (2026-09-26): EVERY `.attachment(` in the server tree counts, whatever its receiver is called
+    // (a receiver-name list let a wiring file's `engine.attachment(` through), and inside the engine a bare
+    // `attachment(` occurs ONCE — its definition: an ingest that queued `attachment(rec.id, convId, id)` per
+    // fresh picture on the next tick was GREEN on the receiver list and on a synchronous runtime count
+    const engineCallers = Object.entries(serverTexts).flatMap(([rel, text]) => ((strip(text).match(/\.attachment\(/g) || []).map(() => rel)));
+    rows.push(['ON-DEMAND: the engine\'s attachment() is called ONLY by the GET attachment route (every `.attachment(` in the server tree)', /engine\(\)\.attachment\(/.test(routeBody) && engineCallers.length === 1 && engineCallers[0] === 'src/routes/channels.js', engineCallers.join(', ')]);
+    const bare = E.match(/(?<![.\w$])attachment\(/g) || [];
+    rows.push(['ON-DEMAND: inside the engine `attachment(` is never INVOKED — its definition is the only bare occurrence (no ingest / timer / view prefetches a picture through it)', bare.length === 1 && /async function attachment\(/.test(E), `bare occurrences: ${bare.length}`]);
+    return rows;
+  };
+  const serverTexts = {};
+  for (const f of files) { const rel = path.relative(REPO, f); try { serverTexts[rel] = fs.readFileSync(f, 'utf-8'); } catch { } }
+  const engineRel = 'src/server/channels-engine.js', routesRel = 'src/routes/channels.js';
+  const engineSrc = serverTexts[engineRel], routesSrc = serverTexts[routesRel];
+  for (const [name, pass, detail] of attachmentCensus(engineSrc, routesSrc, serverTexts)) ok(pass, `§7 ${name}`, detail);
+  // the PURE verdict's table — the gate's own semantics, run (not read)
+  const AttSrc = fs.readFileSync(path.join(REPO, 'src/channel-attachments.js'), 'utf-8');
+  const verdictTable = (A) => {
+    const full = { cached: false, remembered: null, owner: true, fetchable: true, enabled: true, inflight: false, backoff: false, affordable: true };
+    return [
+      ['a cached file is served even with the budget spent, the vendor backing off and the account disabled', A.fetchVerdict({ ...full, cached: true, affordable: false, backoff: true, enabled: false }).act === 'serve'],
+      ['a spent budget is refused `vendor-budget` — never a fetch', A.fetchVerdict({ ...full, affordable: false }).act === 'refuse' && A.fetchVerdict({ ...full, affordable: false }).code === 'vendor-budget'],
+      ['the vendor\'s back-off is refused `backoff` — never a fetch', A.fetchVerdict({ ...full, backoff: true }).code === 'backoff'],
+      ['a remembered vendor refusal answers with no fetch (the person\'s Retry skips it)', A.fetchVerdict({ ...full, remembered: { code: 'forbidden' } }).act === 'refuse' && A.fetchVerdict({ ...full, remembered: { code: 'forbidden' }, retry: true }).act === 'fetch'],
+      ['nothing is fetched before the log named the attachment (`lookup`), nor for an id no record carries', A.fetchVerdict({ cached: false }).act === 'lookup' && A.fetchVerdict({ ...full, owner: false }).code === 'not-found'],
+      ['a fetch in flight is JOINED (one charge), a metadata-only adapter is refused', A.fetchVerdict({ ...full, inflight: true }).act === 'join' && A.fetchVerdict({ ...full, fetchable: false }).code === 'not-supported'],
+      ['only every gate open answers `fetch`', A.fetchVerdict(full).act === 'fetch'],
+    ];
+  };
+  for (const [name, pass] of verdictTable(require(path.join(REPO, 'src/channel-attachments.js')))) ok(pass, `§7 verdict: ${name}`);
+  // THE CONTROLS: ungated copies, written by scripts/mutant-copy.mjs into this run's scratch dir
+  const MUT = mutantCopies('vendor-whitelist-att', REPO);
+  const reds = (rows) => rows.filter(([, p]) => !p).map(([n]) => n);
+  const mutEngine = (label, from, to) => {
+    ok(engineSrc.includes(from), `§7 CONTROL ${label}: the edit's anchor is in the engine`);
+    const f = MUT.write(engineRel, engineSrc.replace(from, to), label);
+    return reds(attachmentCensus(fs.readFileSync(f, 'utf-8'), routesSrc, { ...serverTexts, [engineRel]: fs.readFileSync(f, 'utf-8') }));
+  };
+  const noBudget = mutEngine('no-budget', 'affordable: affordable(rec, e),', '');
+  ok(noBudget.length >= 1 && noBudget.some((n) => /BUDGET-CHARGED/.test(n)), `§7 CONTROL: a copy that drops the budget fact is RED (${noBudget.join(' | ')})`);
+  const noCache = mutEngine('no-cache', 'const hit = store.attachmentGet(adapterId, convId, attId);', 'const hit = null;');
+  ok(noCache.some((n) => /CACHE-FIRST/.test(n)), `§7 CONTROL: a copy that never asks the cache is RED (${noCache.join(' | ')})`);
+  const second = mutEngine('ingest-fetch', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts));', 'const r = await vendor(rec, e, () => e.adapter.history(convId, opts)); for (const x of r.records || []) for (const a of x.attachments || []) await e.adapter.fetchAttachment(convId, { messageId: x.vendorId, attachmentId: a.id });');
+  ok(second.some((n) => /ON-DEMAND/.test(n)), `§7 CONTROL: a copy whose INGEST fetches every picture is RED (${second.join(' | ')})`);
+  // r-verify: the two callers the first census missed — an INTERNAL prefetch at ingest, a wiring file's own receiver name
+  const prefetch = mutEngine('ingest-prefetch', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);', 'if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs); for (const x of freshRecs) for (const at of x.attachments || []) setTimeout(() => attachment(rec.id, convId, at.id).catch(() => {}), 0);');
+  ok(prefetch.some((n) => /never INVOKED/.test(n)), `§7 CONTROL: a copy whose INGEST prefetches every picture through the engine's OWN attachment() is RED (${prefetch.join(' | ')})`);
+  const wiringRel = 'src/server/channels-wiring.js';
+  ok(typeof serverTexts[wiringRel] === 'string', '§7 CONTROL wiring-prefetch: the wiring file is in the census');
+  const wf = MUT.write(wiringRel, serverTexts[wiringRel] + '\nfunction prefetchPictures(engine, rows) { for (const r of rows) engine.attachment(r.adapterId, r.id, r.attId).catch(() => {}); }\n', 'wiring-prefetch');
+  const wiring = reds(attachmentCensus(engineSrc, routesSrc, { ...serverTexts, [wiringRel]: fs.readFileSync(wf, 'utf-8') }));
+  ok(wiring.some((n) => /every `\.attachment\(` in the server tree/.test(n)), `§7 CONTROL: a wiring-file copy calling \`engine.attachment(\` (a receiver the old list did not name) is RED (${wiring.join(' | ')})`);
+  const Amut = MUT.load('src/channel-attachments.js', AttSrc.replace("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };", ''), 'no-budget-verdict');
+  ok(AttSrc.includes("if (f.affordable === false) return { act: 'refuse', code: 'vendor-budget' };") && reds(verdictTable(Amut)).length >= 1, `§7 CONTROL: a PURE verdict without its budget gate is RED (${reds(verdictTable(Amut)).join(' | ')})`);
+  for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 6, label: '§7 ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

@@ -124,7 +124,17 @@ function worldFor(kind, { now = Date.now(), days = 1, convs: extra = 0 } = {}) {
       const at = base + Math.floor((i + 1) * ((2 * span) / (count + 1)));
       const m = { vendorId: `${c.id}-m${i}`, at, author: who, text: LINES[Math.floor(r() * LINES.length)] };
       if (c.synthetic && i % 3 === 0) m.attachments = [i % 2 === 0 ? { id: `${c.id}-img${i}`, name: `photo-${i}.png`, bytes: null, mime: 'image/png' } : { id: `${c.id}-file${i}`, name: `notes-${i}.txt`, bytes: null, mime: 'text/plain' }];
+      // R3 (§23): a synthetic room's FIRST message is a picture in LARK'S shape — the text is the
+      // placeholder "[image]", the attachment a generic `image/*` named "image" that says so
+      if (c.synthetic && i === 0) { m.text = '[image]'; m.attachments = [{ id: `${c.id}-img0`, name: null, bytes: null, mime: 'image/*', placeholder: '[image]' }]; }
       records.push(m);
+    }
+    // R3 (§23): room 2 ends with two pictures the fake VENDOR refuses — one for good (`-gone`: forbidden)
+    // and one only the first time (`-flaky`: rate-limited, then served) — the window's named chip and its
+    // own retry, driven end to end
+    if (c.synthetic && /-room-2$/.test(c.id)) {
+      const last = records.length ? records[records.length - 1].at : Math.floor(now / span) * span;
+      records.push({ vendorId: `${c.id}-m-pics`, at: last + 1000, author: PEOPLE[0], text: '[image]\n[image]', attachments: [{ id: `${c.id}-gone`, name: null, bytes: null, mime: 'image/*', placeholder: '[image]' }, { id: `${c.id}-flaky`, name: null, bytes: null, mime: 'image/*', placeholder: '[image]' }] });
     }
     records.sort((a, b) => a.at - b.at);
     out.set(c.id, { meta: c, records });
@@ -187,6 +197,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     let world = null;
     const getWorld = () => (world || (world = worldFor(kind, { now: clock(), convs: extraConvs })));
     const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
+    const refusedOnce = new Set();   // R3: the `-flaky` pictures refused once already
     // THE SCAN SOURCE ARRIVES AS `opts.source` ON EVERY history() CALL — the
     // engine resolves it with `scanState()` and hands it down, and the registry
     // refuses a scan-adapter page that carries none. This module used to keep
@@ -297,6 +308,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         const m = c && c.records.find((x) => x.vendorId === messageId);
         const a = m && Array.isArray(m.attachments) ? m.attachments.find((x) => x.id === attachmentId) : null;
         if (!a) { const { ChannelError } = require('./index.js'); throw new ChannelError('not-found', `fake: no attachment ${attachmentId} on ${messageId}`, { retryable: false }); }
+        // R3 (§23): the fake vendor's two refusals — for good, and only the first time
+        if (/-gone$/.test(a.id)) { const { ChannelError } = require('./index.js'); throw new ChannelError('forbidden', `fake: the vendor refuses ${a.id}`, { retryable: false }); }
+        if (/-flaky$/.test(a.id) && !refusedOnce.has(a.id)) { refusedOnce.add(a.id); const { ChannelError } = require('./index.js'); throw new ChannelError('rate-limited', `fake: rate limited on ${a.id}`, { retryable: true, detail: { retryAfterSec: 2 } }); }
         if (/^image\//.test(a.mime || '')) return { data: fixturePng(a.id), mime: 'image/png', name: a.name };
         return { data: Buffer.from(`fixture attachment ${a.id} of ${messageId}\n`, 'utf-8'), mime: 'text/plain', name: a.name };
       },

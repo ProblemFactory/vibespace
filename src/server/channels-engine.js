@@ -114,6 +114,11 @@ const ACL = require('../channel-acl.js');
 const agents = require('../channels/agents.js');
 // lane R2 verify r9: THE DRAIN'S SCHEDULING DECISION is PURE — every "what next, who is answered, when does the pass end" (src/channel-drain.js); this engine only drives it
 const Drain = require('../channel-drain.js');
+// R3 (2026-09-26, "lark图像不能预览吗？"): THE ONE ORDER an attachment request is
+// judged in — cache first, a remembered refusal, ours only, fetchable, enabled,
+// joined, the back-off, the budget, then the fetch (PURE; the vendor-whitelist
+// census §7 pins that `fetchAttachment` is reached only through its `fetch`).
+const Att = require('../channel-attachments.js');
 
 /** THE REAL ADAPTERS (P1). Each module names its integration row
  *  (`integration`), its Test runner (`integrationTest`), its per-record
@@ -1184,6 +1189,9 @@ function create(deps = {}) {
       // largest synchronous cost at 873 conversations.
       if (freshRecs.length) en.unread = (Number(en.unread) || 0) + freshRecs.filter((r) => Number(r.at) > (Number(en.readAt) || 0)).length;
       if (freshRecs.length) en.authors = mergeAuthors(en.authors, freshRecs);
+      // R3 (§23): the newest message the OWNER wrote here (`author.isSelf` — a reply from the vendor's own app
+      // counts as much as one from our composer): one of the facts the first screen's attention list reads
+      if (freshRecs.length) { const sa = selfAtOf(freshRecs); if (sa > (Number(en.selfAt) || 0)) en.selfAt = sa; }
       // The label is the RESOLVED lane — the one that just carried this
       // batch — never `caps.receive` (r3).
       en.lane = { ...en.lane, via: lane.via };
@@ -1211,6 +1219,12 @@ function create(deps = {}) {
     // the store's.
     if (trimNow) { try { store.trim(rec.id, convId); } catch (err) { console.warn('[channels] trim failed:', err && err.message); } }
     return { appended, duplicates, anchorMoved, complete, judged, missed, readAt };
+  }
+  /** The newest instant among records the OWNER wrote (`author.isSelf`), 0 when none (R3 §23). */
+  function selfAtOf(recs) {
+    let t = 0;
+    for (const r of recs || []) if (r && r.author && r.author.isSelf && Number(r.at) > t) t = Number(r.at);
+    return t;
   }
   /** The distinct authors seen in a conversation, newest first, bounded —
    *  the facts a pattern's `participant` / `from-address` rules match. */
@@ -1275,9 +1289,11 @@ function create(deps = {}) {
     const outbox = new Map();
     for (const p of Object.values(store.outbox.live().proposals || {})) {
       if (!p || !p.key) continue;
-      const c = outbox.get(p.key) || { awaiting: 0, unknown: 0, latestAt: null };
+      const c = outbox.get(p.key) || { awaiting: 0, unknown: 0, latestAt: null, ownSentAt: 0 };
       if (p.state === 'awaiting-approval') c.awaiting++;
       if (p.state === 'unknown') c.unknown++;
+      // R3 (§23): the owner's OWN message that went out from here (a reply the vendor has not echoed back yet)
+      if (p.state === 'sent' && p.draftedBy && p.draftedBy.kind === 'user') { const sa = Number((p.result && p.result.at) || p.updatedAt || p.at) || 0; if (sa > c.ownSentAt) c.ownSentAt = sa; }
       const at = p.updatedAt || p.at || null;
       if (at && (!c.latestAt || at > c.latestAt)) c.latestAt = at;
       outbox.set(p.key, c);
@@ -1313,9 +1329,29 @@ function create(deps = {}) {
       assignment: eff ? effectiveView(rec, en, eff, t) : null,
       held: !!(lw && lw.ok === false),
       outbox: { awaiting: ob.awaiting, unknown: ob.unknown },
+      // R3 (§23, the owner 2026-09-26: "开头不要把所有消息都放进来 … 只放重要消息/conversation"): the FACTS the
+      // first screen's attention list is decided from (PURE src/lib/channel-focus.js) — present only on a row
+      // something touched, so the 800 untouched rows of an aggregated account stay the slim row
+      touch: touchView(en, lw, ob),
       lane: { via: lane.via, why: lane.why || null, source: lane.source || null },
       lastError: en.lane && en.lane.lastError ? { code: en.lane.lastError.code, at: en.lane.lastError.at } : null,
     };
+  }
+  /** WHAT TOUCHED THIS CONVERSATION (R3 §23) — structure, never words: the
+   *  newest AGENT read (`agentReads`, stamped by the agent route's `readFor`),
+   *  the last wake (whom, how, delivered or held), the held hits, the last
+   *  refusal, the owner's own newest message (a record `isSelf` or a sent
+   *  proposal of the owner's). `null` when nothing did. */
+  function touchView(en, lw, ob) {
+    const reads = Array.isArray(en.agentReads) ? en.agentReads : [];
+    let read = null;
+    for (const r of reads) if (r && Number(r.at) > 0 && (!read || Number(r.at) > read.at)) read = { id: r.id || null, name: r.name || null, at: Number(r.at), upTo: Number(r.upTo) || 0 };
+    const wake = lw ? { at: Number(lw.at) || 0, ok: lw.ok !== false, lane: lw.lane || null, n: Number(lw.n) || 0, name: lw.name || null } : null;
+    const pending = (Array.isArray(en.pending) ? en.pending.length : 0) + (Number(en.pendingElided) || 0);
+    const refusalAt = en.stats && en.stats.lastRefusal ? (Number(en.stats.lastRefusal.at) || 0) : 0;
+    const selfAt = Math.max(Number(en.selfAt) || 0, Number(ob && ob.ownSentAt) || 0);
+    if (!read && !wake && !pending && !refusalAt && !selfAt) return null;
+    return { read, wake, pending, refusalAt, selfAt };
   }
   /** The EFFECTIVE assignment as a row reads it: which grain it came from
    *  (`source`), the pattern's summary, authority clamped by THIS
@@ -1701,8 +1737,9 @@ function create(deps = {}) {
    *  ONE broadcast per batch — never per message. */
   function afterPush(rec, e, convId, w) {
     if (!e.pushBatch) e.pushBatch = new Map();
-    const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null, lastText: null, lastTextAt: -Infinity };
+    const b = e.pushBatch.get(convId) || { appended: 0, lastAt: null, lastText: null, lastTextAt: -Infinity, selfAt: 0 };
     b.appended += w.appended;
+    if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh); if (sa > (b.selfAt || 0)) b.selfAt = sa; }
     if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;
     if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = w.lastText; }
     e.pushBatch.set(convId, b);
@@ -1720,6 +1757,7 @@ function create(deps = {}) {
         if (!en) continue;
         if (b.lastAt && (!en.lastAt || b.lastAt > en.lastAt)) en.lastAt = b.lastAt;
         if (typeof b.lastText === 'string' && b.lastTextAt >= (Number(en.lastAt) || 0)) en.lastText = lastTextOf(b.lastText);
+        if (b.selfAt > (Number(en.selfAt) || 0)) en.selfAt = b.selfAt;
         en.unread = store.countSince(rec.id, convId, en.readAt || 0);
         en.lane = { ...(en.lane || {}), via: 'push', lastPushAt: now(), firstSeenTotal: ((en.lane && en.lane.firstSeenTotal) || 0) + b.appended };
         changed.push(`${rec.id}/${convId}`);
@@ -2071,35 +2109,101 @@ function create(deps = {}) {
   }
 
   /**
-   * ONE ATTACHMENT, fetched on demand (design §6.5): the cache first; else
-   * the record that carries it is FOUND in this conversation's log (an id no
-   * record of ours names is refused — the route is not a proxy for arbitrary
-   * vendor keys), the adapter fetches it (charged to the budget) and the
-   * store writes it 0600 into the account's LRU cache, evicting down to
-   * `channels.attachmentBudgetMB`. Serving it — nosniff, sandbox CSP,
-   * `attachment` unless a raster image — is the route's.
+   * ONE ATTACHMENT, fetched on demand (design §6.5; R3 §23): the steps are
+   * PURE `Att.fetchVerdict`'s, asked as the facts are learned —
+   *   1. CACHE FIRST — a cached file is served whatever the budget says;
+   *   2. a REMEMBERED refusal (a vendor answer, `Att.negativeTtlMs`) answers
+   *      with no second vendor call — a window of gone images re-opened is
+   *      not a request per image per open; `retry` (the person's Retry) skips it;
+   *   3. the record that carries it is FOUND in this conversation's log — by
+   *      its message (`msg` = the vendorId, a direct look-up however old)
+   *      first, else in the newest 5000 records; an id no record of ours names
+   *      is refused (the route is not a proxy for arbitrary vendor keys);
+   *   4–8. fetchable (`caps.attachments`), the account enabled, a fetch in
+   *      flight JOINED (single-flight: one vendor call, one charge), never in
+   *      the vendor's back-off (a pass's, or an attachment's own rate limit),
+   *      never past the minute's budget;
+   *   9. the adapter fetches it (charged to the budget) and the store writes
+   *      it 0600 into the account's LRU cache, evicting down to
+   *      `channels.attachmentBudgetMB`.
+   * Serving it — nosniff, sandbox CSP, `attachment` unless a raster image — is
+   * the route's. Every refusal is typed (`code`, `retryAfterSec` where a wait
+   * fixes it) — the window's thumbnail says it, never a silent chip.
    */
-  async function attachment(adapterId, convId, attId, { msg = null } = {}) {
+  const attInflight = new Map();   // `${adapterId}/${convId}/${attId}` -> Promise of the answer
+  const attRefused = new Map();    // same key -> {code, error, retryAfterSec, until} (a VENDOR's refusal, remembered)
+  function rememberedRefusal(k, t = now()) {
+    const r = attRefused.get(k);
+    if (!r) return null;
+    if (r.until <= t) { attRefused.delete(k); return null; }
+    return r;
+  }
+  function ownerRecordOf(adapterId, convId, attId, msg) {
+    const has = (r) => r && Array.isArray(r.attachments) && r.attachments.some((a) => a && String(a.id) === String(attId));
+    if (msg) {
+      const byMsg = typeof store.findRecord === 'function' ? store.findRecord(adapterId, convId, String(msg)) : null;
+      if (byMsg && has(byMsg)) return byMsg;
+    }
+    const recs = store.readTail(adapterId, convId, { limit: 5000 });
+    return recs.find((r) => (!msg || String(r.vendorId) === String(msg)) && has(r)) || null;
+  }
+  async function attachment(adapterId, convId, attId, { msg = null, retry = false } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
+    const k = `${adapterId}/${convId}/${attId}`;
     const hit = store.attachmentGet(adapterId, convId, attId);
-    if (hit) return { ok: true, file: hit.file, meta: hit.meta, cached: true };
-    const recs = store.readTail(adapterId, convId, { limit: 5000 });
-    const owner = recs.find((r) => (!msg || String(r.vendorId) === String(msg)) && Array.isArray(r.attachments) && r.attachments.some((a) => a && String(a.id) === String(attId)));
-    if (!owner) return { ok: false, code: 'not-found', error: 'no message in this conversation carries that attachment' };
-    const att = owner.attachments.find((a) => String(a.id) === String(attId));
-    const c = registry.capsOf(rec.kind);
-    if (c.attachments !== 'fetch') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} can list attachments but not fetch them` };
+    const t = now();
+    const remembered = rememberedRefusal(k, t);
+    let v = Att.fetchVerdict({ cached: !!hit, remembered, retry: !!retry });
+    if (v.act === 'serve') return { ok: true, file: hit.file, meta: hit.meta, cached: true };
+    if (v.act === 'refuse') return { ok: false, code: v.code, error: remembered.error, retryAfterSec: remembered.retryAfterSec ? Math.max(1, Math.ceil((remembered.until - t) / 1000)) : undefined, remembered: true };
+    if (retry) attRefused.delete(k);
+    const owner = ownerRecordOf(adapterId, convId, attId, msg);
     const e = adapterFor(rec);
-    if (!affordable(rec, e)) return budgetRefusal(rec, e);
-    let r;
-    try { r = await vendor(rec, e, () => e.adapter.fetchAttachment(convId, { messageId: owner.vendorId, attachmentId: attId, mime: att.mime || null, name: att.name || null })); }
-    catch (err) { return { ok: false, code: err instanceof ChannelError ? err.code : 'vendor-error', error: String((err && err.message) || err) }; }
-    const data = r && Buffer.isBuffer(r.data) ? r.data : Buffer.from((r && r.data) || '');
-    if (data.length > ATTACHMENT_MAX_BYTES) return { ok: false, code: 'too-large', error: `the attachment is ${Math.round(data.length / 1048576)} MB — larger than ${ATTACHMENT_MAX_BYTES / 1048576} MB` };
-    const put = await store.attachmentPut(adapterId, convId, attId, { data, name: att.name || (r && r.name) || null, mime: (r && r.mime) || att.mime || null }, { budgetBytes: attachmentBudgetBytes() });
-    if (put.evicted.length) log.log(`[channels] ${adapterId}: attachment cache over ${Math.round(attachmentBudgetBytes() / 1048576)} MB — evicted ${put.evicted.length} least-recently-used file(s)`);
-    return { ok: true, file: put.file, meta: put.meta, cached: false, evicted: put.evicted.length };
+    const c = registry.capsOf(rec.kind);
+    v = Att.fetchVerdict({
+      cached: false, remembered: null, owner: !!owner, fetchable: c.attachments === 'fetch', enabled: rec.enabled !== false,
+      inflight: attInflight.has(k), backoff: inBackoff(e) || (Number(e.attBackoffUntil) || 0) > t, affordable: affordable(rec, e),
+    });
+    switch (v.act) {
+      case 'join': return attInflight.get(k);
+      case 'fetch': break;
+      default:
+        if (v.code === 'not-found') return { ok: false, code: 'not-found', error: 'no message in this conversation carries that attachment' };
+        if (v.code === 'not-supported') return { ok: false, code: 'not-supported', error: `${rec.label || rec.id} can list attachments but not fetch them` };
+        if (v.code === 'disabled') return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+        if (v.code === 'backoff') {
+          if (inBackoff(e)) return backoffRefusal(rec, e);
+          const s = Math.max(1, Math.ceil(((Number(e.attBackoffUntil) || 0) - t) / 1000));
+          return { ok: false, code: 'backoff', error: `the vendor rate-limited this account's last attachment fetch — it is tried again in ${s} s`, retryAfterSec: s, lastCode: 'rate-limited' };
+        }
+        return budgetRefusal(rec, e);
+    }
+    const att = owner.attachments.find((a) => String(a.id) === String(attId));
+    const run = (async () => {
+      let r;
+      try { r = await vendor(rec, e, () => e.adapter.fetchAttachment(convId, { messageId: owner.vendorId, attachmentId: attId, mime: att.mime || null, name: att.name || null })); }
+      catch (err) {
+        const code = err instanceof ChannelError ? err.code : 'vendor-error';
+        const retryAfterSec = Number(err && err.detail && err.detail.retryAfterSec) || null;
+        const ttl = Att.negativeTtlMs(code, { retryAfterSec });
+        const error = String((err && err.message) || err);
+        if (ttl) attRefused.set(k, { code, error, retryAfterSec: Att.TRANSIENT.includes(code) || code === 'vendor-error' ? Math.ceil(ttl / 1000) : null, until: now() + ttl });
+        // a rate limit is the ACCOUNT's, not this picture's: the other thumbnails of the render wait it out too
+        if (code === 'rate-limited') e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);
+        return { ok: false, code, error, ...(Att.TRANSIENT.includes(code) || code === 'vendor-error' ? { retryAfterSec: Math.max(1, Math.ceil((ttl || Att.NEGATIVE_TTL.transient) / 1000)) } : {}) };
+      }
+      const data = r && Buffer.isBuffer(r.data) ? r.data : Buffer.from((r && r.data) || '');
+      if (data.length > ATTACHMENT_MAX_BYTES) {
+        attRefused.set(k, { code: 'too-large', error: 'too large', retryAfterSec: null, until: now() + Att.negativeTtlMs('too-large') });
+        return { ok: false, code: 'too-large', error: `the attachment is ${Math.round(data.length / 1048576)} MB — larger than ${ATTACHMENT_MAX_BYTES / 1048576} MB` };
+      }
+      const put = await store.attachmentPut(adapterId, convId, attId, { data, name: att.name || (r && r.name) || null, mime: (r && r.mime) || att.mime || null }, { budgetBytes: attachmentBudgetBytes() });
+      if (put.evicted.length) log.log(`[channels] ${adapterId}: attachment cache over ${Math.round(attachmentBudgetBytes() / 1048576)} MB — evicted ${put.evicted.length} least-recently-used file(s)`);
+      return { ok: true, file: put.file, meta: put.meta, cached: false, evicted: put.evicted.length };
+    })();
+    attInflight.set(k, run);
+    try { return await run; } finally { attInflight.delete(k); }
   }
 
   /** SEARCH one account's local logs (design §6.5) — async, byte-capped. */
@@ -3397,7 +3501,8 @@ function create(deps = {}) {
       const e2 = store.index.entry(rec.id, convId, { create: false });
       if (!e2) return;
       healP2(e2);
-      const wk = { at: t, n, cid: target.cid, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: ok ? null : String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null, whys: whys.slice(0, 8), digest: !!digest, grain: eff.source };
+      // R3 (§23): the wake NAMES whom it reached (the first screen's tag says "→ <name>"), bounded
+      const wk = { at: t, n, cid: target.cid, name: target.name ? String(target.name).slice(0, 80) : null, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: ok ? null : String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null, whys: whys.slice(0, 8), digest: !!digest, grain: eff.source };
       e2.stats.wakes.push(wk);
       e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
       e2.stats.lastRefusal = null;
@@ -4254,8 +4359,43 @@ function create(deps = {}) {
     if (!ACL.canSee(reachFor(ctx, rec, en).level)) return ACL.notFound();
     const n = Math.min(200, Math.max(1, Number(limit) || 50));
     let records = store.readTail(adapterId, convId, { limit: n });
+    // the read is of the TAIL: whatever `since` filters out, the agent has now seen up to the newest record
+    const upTo = records.length ? Number(records[records.length - 1].at) || 0 : 0;
     if (since !== null && Number.isFinite(Number(since))) records = records.filter((r) => Number(r.at) > Number(since));
+    // R3 (§23): the first screen lists a conversation an agent just read — stamped AFTER the reach check
+    // (a hidden read never stamps: the same uniform not-found, no trace), off the answer's path
+    stampAgentRead(en.key, ctx, upTo);
     return { ok: true, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId, polledAt: (en.lane && en.lane.lastPollAt) || null }, records };
+  }
+  /**
+   * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
+   * agentReads` = one row per principal `{id, kind, name, at, upTo}` (the
+   * newest AGENT_READS_MAX principals), persisted through the index's ONE
+   * door (the debounced flush) and said in a PARTIAL broadcast of this one
+   * row. A re-read of the same tail by the same principal inside
+   * AGENT_READ_RESTAMP_MS is not news: no write, no broadcast (an agent's
+   * read loop is not a broadcast loop). Fire-and-forget: the answer never
+   * waits for it, a failed write is logged.
+   */
+  const AGENT_READS_MAX = 5;
+  const AGENT_READ_RESTAMP_MS = 60e3;
+  function stampAgentRead(key, ctx, upTo) {
+    if (!ctx || !ctx.id) return;
+    const t = now();
+    const cur = store.index.peek(key);
+    const mine = cur && Array.isArray(cur.agentReads) ? cur.agentReads.find((r) => r && r.id === ctx.id) : null;
+    if (mine && Number(mine.upTo) === Number(upTo) && t - (Number(mine.at) || 0) < AGENT_READ_RESTAMP_MS) return;
+    let wrote = false;
+    Promise.resolve(store.index.update(() => {
+      const i = key.indexOf('/');
+      const en = store.index.entry(key.slice(0, i), key.slice(i + 1), { create: false });
+      if (!en) return;
+      const rows = (Array.isArray(en.agentReads) ? en.agentReads : []).filter((r) => r && r.id !== ctx.id);
+      rows.unshift({ id: String(ctx.id), kind: ctx.kind || 'agent', name: ctx.name ? String(ctx.name).slice(0, 80) : null, at: t, upTo: Number(upTo) || 0 });
+      rows.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+      en.agentReads = rows.slice(0, AGENT_READS_MAX);
+      wrote = true;
+    })).then(() => { if (wrote && !stopped) notify([key]); }).catch((err) => log.warn(`[channels] ${key}: the agent read was not stamped: ${(err && err.message) || err}`));
   }
   /** Own proposals only — somebody else's id is the same uniform not-found. */
   function statusFor(ctx, proposalId = null) {
@@ -4591,10 +4731,37 @@ function create(deps = {}) {
     }
   }
 
+  /**
+   * THE OWNER'S OWN NEWEST MESSAGE, for rows that predate the field (R3 §23):
+   * `selfAt` is stamped as records arrive; a conversation active in the last
+   * two days that has never been stamped gets it derived ONCE from its log
+   * tail (the owner's reply of this morning must reach the attention list on
+   * the day of the update). One conversation per turn of the event loop,
+   * after boot, never blocking it; a row stamped 0 is never re-read; the rows
+   * that turned out to hold one are said in one partial broadcast.
+   */
+  async function healSelfAt({ windowMs = 48 * 3600e3, tail = 200 } = {}) {
+    const t = now();
+    const plan = Object.values(store.index.live()).filter((en) => en && !('selfAt' in en) && Number(en.lastAt) > t - windowMs).map((en) => en.key);
+    const found = [];
+    for (const key of plan) {
+      if (stopped) break;
+      await new Promise((r) => setImmediate(r));
+      const i = key.indexOf('/');
+      const sa = selfAtOf(store.readTail(key.slice(0, i), key.slice(i + 1), { limit: tail }));
+      try {
+        await store.index.update(() => { const en = store.index.entry(key.slice(0, i), key.slice(i + 1), { create: false }); if (en && !('selfAt' in en)) en.selfAt = sa; });
+      } catch (err) { log.warn(`[channels] selfAt heal stopped: ${(err && err.message) || err}`); break; }
+      if (sa) found.push(key);
+    }
+    if (found.length && !stopped) notify(found);
+    return { planned: plan.length, found: found.length };
+  }
   function start() {
     if (timer || stopped) return;
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
+    healSelfAt().catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
     // P4: a proposal the previous process died on mid-send is `unknown`, not
     // "not sent" — and never re-sent.
@@ -4621,6 +4788,7 @@ function create(deps = {}) {
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
     // override, the agent refresh, the three assignment grains, the migration
     conversationView, setRefresh, refresh, agentRefresh, watch, loadOlder, attachment, search,
+    healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },
     budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || null) : null; },

@@ -37,6 +37,11 @@
 //      row shows 1 unread and the rail's Channels badge counts it; opening the
 //      window marks it read (the owner's act) and the rail badge drops by one
 //   ⑧ the Accounts section's fold is PERSISTED: folded, reloaded, still folded
+//   ⑨ R3 (2026-09-26, design §23): the first screen is the ATTENTION list — the groups and no untouched
+//      conversation; 5 handed to alpha + 3 READ by beta through its own agent route + 1 draft awaiting ⇒
+//      exactly those 9 join, one tag each ("→ alpha" / "beta read …" / "1 to approve"), the header's two
+//      counts, "All" = the whole list, the filter in both views ("{n} more in All" + the message search),
+//      and at 375 px one column with the tag under the title (⑥ reads the list through "All")
 //
 // Everything is per-pid (scripts/scratch.mjs), the server runs under a NAMED
 // scratch HOME, every process this suite starts is ended by it. AUTH IS ON
@@ -116,7 +121,9 @@ const bootServer = () => spawn(process.execPath, ['server.js'], {
   // AUTH ON (r3): the owner's REAL rung — a cookie proves the owner, so the
   // owner's routes are not paced (expectWakes is still required) and no leg
   // has to wait out the 30 s per-target floor (it slept 30 s here before)
-  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD, VIBESPACE_CHANNELS_FAKE: '1' },
+  // R3 (§23): 15 synthetic rooms per fake account (the NAMED seam) — the first screen's attention list is
+  // judged among ~50 conversations, most of which nothing touched
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: PASSWORD, VIBESPACE_CHANNELS_FAKE: '1', VIBESPACE_CHANNELS_FAKE_CONVS: '15' },
 });
 srv = bootServer();
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
@@ -280,6 +287,9 @@ await sleep(1500);
 const second = await api('POST', '/api/channel-groups', { name: 'second lane', members: AGENTS.map((a) => a.cid), quiet: true });
 ok(second.status === 200 && second.body.ok && second.body.woke.length === 0, 'CONTROL: a QUIET create wakes nobody (woke 0)', JSON.stringify(second.body && second.body.woke));
 const armFetch = await p1.evaljs(`(() => { window.__gf = 0; const of = window.fetch; window.__of = of; window.fetch = function (u, ...r) { if (/^\\/api\\/channel-groups(\\?|$)/.test(String(u)) || /^\\/api\\/channels(\\?|$)/.test(String(u))) window.__gf++; return of.call(this, u, ...r); }; return 1; })()`);
+// R3 (§23): the first screen is the ATTENTION list — an untouched conversation is under ALL, one switch away
+// (the switch redraws from the digest in hand: it is inside the zero-fetch window below)
+await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
 const ORDER = `(() => [...document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow')].map((r) => ({ key: r.dataset.grow, at: Number(r.dataset.at) })))()`;
 const A2 = `groups/${second.body.group.id}`, A1 = `groups/${gid}`, CONV = 'fake-poll/fake-poll-ops';
 const sortedByActivity = (o) => o.every((x, i) => i === 0 || o[i - 1].at >= x.at);
@@ -322,6 +332,75 @@ const persisted = await until(`(() => { const p = document.querySelector('.rail-
 ok(persisted && persisted.folded === true && persisted.bodyShown === false, 'after the reload the Accounts section is STILL folded (its body hidden)', JSON.stringify(persisted));
 const watcher = await p1.evaljs(`(() => document.querySelector('.rail-panel-channels .chan-part[data-part="watcher"]').classList.contains('chan-part-collapsed'))()`);
 ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is open — the fold is per section');
+
+// ── ⑨ R3 (2026-09-26, the owner: "开头不要把所有消息都放进来 … 只放重要消息/conversation … 并展示一个小tag表示状态"):
+//    THE FIRST SCREEN IS THE ATTENTION LIST. After the reload the panel opens on it: the two agent groups and NO
+//    untouched conversation; then the owner hands 5 conversations to alpha, beta READS 3 through its own agent
+//    route (a real `vibespace-channels read`), and a draft of the owner's waits for approval on 1 — exactly those
+//    9 join the groups, each with ONE tag, repainted from the broadcasts; "All" is the whole list; the filter
+//    works in both views ("{n} more in All"); at 375 px the tag sits UNDER the title in one column. ──
+{
+  const FOCUS = `(() => { const rows = [...document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow')]; const segs = [...document.querySelectorAll('.rail-panel-channels .chan-view-btn')].map((b) => ({ view: b.dataset.view, text: b.textContent, on: b.classList.contains('chan-seg-on') })); return { view: (document.querySelector('.rail-panel-channels .chan-groups') || {}).dataset?.view, segs, rows: rows.map((r) => ({ key: r.dataset.grow, group: !!r.dataset.group, tag: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').dataset.tag : null, tagText: r.querySelector('.chan-grow-tag') ? r.querySelector('.chan-grow-tag').textContent : null, who: r.querySelector('.chan-tag-who') ? r.querySelector('.chan-tag-who').textContent : null })) }; })()`;
+  const d0 = await api('GET', '/api/channels');
+  const convs = (d0.body.conversations || []).filter((c) => !c.unlisted && !(d0.body.adapters || []).find((a) => a.id === c.adapterId && a.builtin));
+  const groupsNow = (await api('GET', '/api/channel-groups')).body.groups.filter((g) => !g.archivedAt);
+  const ALL = convs.length + groupsNow.length;
+  ok(convs.length >= 45, `FIXTURE: the fake accounts hold ${convs.length} conversations (the attention list is judged among ~50)`);
+  const f0 = await p1.evaljs(FOCUS);
+  ok(f0.view === 'focus' && f0.segs.find((x) => x.view === 'focus').on && f0.rows.length === groupsNow.length && f0.rows.every((r) => r.group), `the panel OPENS on the attention list: the ${groupsNow.length} agent groups and NO untouched conversation (${f0.rows.length} rows)`, JSON.stringify(f0.rows.map((r) => r.key)));
+  ok(f0.segs.map((x) => x.text).join(' | ') === `${groupsNow.length} need attention | All ${ALL}`, `the header is the switch: "${f0.segs.map((x) => x.text).join(' | ')}"`);
+  const ids = convs.filter((c) => c.adapterId === 'fake-poll' && /-room-\d+$/.test(c.id)).map((c) => c.id).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
+  const assigned = ids.slice(0, 5), readByBeta = ids.slice(5, 8), awaitingId = ids[8];
+  // each PUT is the CONVERSATION grain (its own route) — listed on its own; a rule / account grain would list a row only once a wake was delivered or held (D4, 2026-09-27; test-channels-focus ①②⑤, test-channels-aggregate-ui ⑤)
+  for (const id of assigned) { const r = await api('PUT', `/api/channels/fake-poll/${id}/assignment`, { assignment: { principal: { kind: 'agent', id: AGENTS[0].cid, name: 'alpha' }, mode: 'all', notify: 'digest', digestMinutes: 60 } }); ok(r.status === 200, `FIXTURE: ${id} handed to alpha`, JSON.stringify(r.body).slice(0, 200)); }
+  for (const id of readByBeta) {
+    await api('PUT', `/api/channels/fake-poll/${id}/reach`, { principal: { kind: 'agent', id: AGENTS[1].cid, name: 'beta' }, level: 'visible' });
+    const rd = await api('GET', `/api/agent/channels/read?conv=${encodeURIComponent('fake-poll/' + id)}`, undefined, { Authorization: 'Bearer ' + AGENTS[1].token });
+    ok(rd.status === 200 && rd.body.ok && rd.body.records.length > 0, `FIXTURE: beta READS fake-poll/${id} through its own agent route (vibespace-channels read)`, JSON.stringify(rd.body).slice(0, 200));
+  }
+  const prop = await api('POST', `/api/channels/fake-poll/${awaitingId}/propose`, { text: 'a draft that waits for approval' });
+  ok(prop.status === 200 && prop.body && (prop.body.proposal || {}).state === 'awaiting-approval', `FIXTURE: a draft waits for approval on ${awaitingId}`, JSON.stringify(prop.body).slice(0, 200));
+  const want = { ...Object.fromEntries(assigned.map((id) => [`fake-poll/${id}`, 'assigned'])), ...Object.fromEntries(readByBeta.map((id) => [`fake-poll/${id}`, 'read'])), [`fake-poll/${awaitingId}`]: 'awaiting' };
+  const f1 = await until(`(() => { const f = ${FOCUS}; return f.rows.filter((r) => !r.group).length === 9 ? f : null; })()`, 20000);
+  const convRows = f1 ? f1.rows.filter((r) => !r.group) : [];
+  ok(f1 && convRows.length === 9 && convRows.every((r) => want[r.key] === r.tag), `EXACTLY the 9 join the attention list, each with its ONE tag — repainted from the broadcasts (${convRows.map((r) => `${r.key.split('-').pop()}=${r.tag}`).join(' ')})`, JSON.stringify(f1 && f1.rows));
+  ok(convRows.filter((r) => r.tag === 'assigned').every((r) => r.tagText === '→ alpha' && r.who === 'alpha') && convRows.filter((r) => r.tag === 'read').every((r) => /^beta read /.test(r.tagText) && r.who === 'beta') && convRows.filter((r) => r.tag === 'awaiting').every((r) => r.tagText === '1 to approve'), 'the tags say it: "→ alpha", "beta read …" (the name its own part), "1 to approve"', JSON.stringify(convRows.map((r) => r.tagText)));
+  ok(f1 && f1.segs.map((x) => x.text).join(' | ') === `${groupsNow.length + 9} need attention | All ${ALL}`, `the header counts: "${f1 && f1.segs.map((x) => x.text).join(' | ')}"`);
+  // ALL: the whole list, one switch away
+  await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]').click(); return 1; })()`);
+  const fa = await p1.evaljs(FOCUS);
+  ok(fa.view === 'all' && fa.rows.length === ALL && fa.segs.find((x) => x.view === 'all').on, `"All" shows the whole list (${fa.rows.length} of ${ALL}); a tagged row keeps its tag there`, JSON.stringify(fa.rows.length));
+  // THE FILTER, in both views
+  const typeQ = (q) => p1.evaljs(`(() => { const i = document.querySelector('.rail-panel-channels .chan-find-input'); i.value = ${JSON.stringify(q)}; i.dispatchEvent(new Event('input')); return 1; })()`);
+  const one = readByBeta[0];
+  const oneTitle = convs.find((c) => c.id === one).title;
+  await typeQ(oneTitle);
+  const fq = await p1.evaljs(FOCUS);
+  ok(fq.rows.some((r) => r.key === `fake-poll/${one}`) && fq.rows.every((r) => r.key.endsWith(one) || /Room/.test(oneTitle)), `the filter narrows ALL to "${oneTitle}" (${fq.rows.length} rows)`, JSON.stringify(fq.rows.map((r) => r.key)));
+  await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]').click(); return 1; })()`);
+  const untouched = ids[12];
+  const untouchedTitle = convs.find((c) => c.id === untouched).title;
+  await typeQ(untouchedTitle);
+  const fm = await p1.evaljs(`(() => { const f = ${FOCUS}; const more = document.querySelector('.rail-panel-channels [data-more-in-all]'); const sm = document.querySelector('.rail-panel-channels [data-search-messages]'); return { ...f, more: more ? { n: more.dataset.moreInAll, text: more.textContent } : null, search: sm ? sm.textContent : null }; })()`);
+  ok(fm.view === 'focus' && !fm.rows.some((r) => r.key === `fake-poll/${untouched}`) && fm.more && Number(fm.more.n) >= 1 && /more in All/.test(fm.more.text), `in the attention view a match OUTSIDE it is offered, never hidden: "${fm.more && fm.more.text}"`, JSON.stringify(fm));
+  ok(fm.search && /Search messages for "/.test(fm.search), `…and the words are a message search too ("${fm.search}")`);
+  await p1.evaljs(`(() => { document.querySelector('.rail-panel-channels [data-more-in-all]').click(); return 1; })()`);
+  const fm2 = await p1.evaljs(FOCUS);
+  ok(fm2.view === 'all' && fm2.rows.some((r) => r.key === `fake-poll/${untouched}`), '"more in All" switches to All with the words kept — the row is there');
+  await typeQ('');
+  // AT 375 px: one column, the tag UNDER the title
+  await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });
+  ok(await p1.load(), 'page reloaded at 375 × 667 (a phone)');
+  const phone = await until(`(async () => {
+    if (!document.querySelector('.chan-window .chan-groups')) { window.app.openChannels(); await new Promise((r) => setTimeout(r, 300)); }
+    const rows = [...document.querySelectorAll('.chan-window .chan-groups > .chan-grow')].filter((r) => r.querySelector('.chan-grow-tag'));
+    if (rows.length < 9) return null;
+    const list = document.querySelector('.chan-window .chan-groups').getBoundingClientRect();
+    return rows.map((r) => { const ti = r.querySelector('.chan-grow-title').getBoundingClientRect(), tg = r.querySelector('.chan-grow-tag').getBoundingClientRect(), rr = r.getBoundingClientRect(); const words = [...r.querySelectorAll('.chan-tag-words')]; const who = r.querySelector('.chan-tag-who'); return { key: r.dataset.grow, under: tg.top >= ti.bottom - 0.5, tagW: Math.round(tg.width), wordsWhole: words.every((w) => w.scrollWidth <= w.clientWidth + 0.5), whoWhole: !who || who.scrollWidth <= who.clientWidth + 0.5, rowW: Math.round(rr.width), listW: Math.round(list.width) }; });
+  })()`, 20000);
+  ok(Array.isArray(phone) && phone.length === 9 && phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
+  await p1.cdp('Emulation.clearDeviceMetricsOverride');
+}
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
 process.exit(fail ? 1 : 0);

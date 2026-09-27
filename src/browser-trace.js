@@ -92,6 +92,10 @@ const TRACED_ACTIONS = Object.freeze({
   mousemove: 'point', mousedown: 'point', mouseup: 'point', mousewheel: 'point', mouseclick: 'point',
   scroll: 'scroll',
   navigate: 'navigation', open: 'navigation', goto: 'navigation', back: 'navigation', forward: 'navigation', reload: 'navigation', pushstate: 'navigation',
+  // lane S4 verify r1 F6: the LIVE VIEW's own resize of the page (the bridge's `set viewport` for a pane, the restore, the
+  // agent's own size put back) — a name the daemon never mirrors (its verb is `viewport`); only the bridge taps it, so
+  // an agent's clicks before and after a reflow are told apart in the trace
+  'viewer-fit': 'viewport',
 });
 /** The kind for an action name, or null for an observation / unknown. */
 function classifyAction(action) {
@@ -137,6 +141,8 @@ function redactParams(action, params) {
 function commandText(action, redacted) {
   const a = String(action || '');
   const r = redacted && typeof redacted === 'object' ? redacted : {};
+  // verify r1 F6: the live view's own resize is never spelled as an agent command
+  if (a === 'viewer-fit') return `live view: set ${r.device ? `device ${r.device}` : `viewport ${r.width} ${r.height}`}${r.why ? ` (${r.why})` : ''}`;
   const parts = ['agent-browser', a];
   const sel = selectorOf(r);
   if (sel) parts.push(sel);
@@ -165,6 +171,7 @@ function positionOf({ kind, params, box = null, boxWhy = null } = {}) {
   if (kind === 'keys') return { kind: 'keys', keys: String(p.key || p.keys || '') };
   if (kind === 'scroll') return { kind: 'scroll', direction: String(p.direction || 'down'), amount: Number(p.amount) || 0 };
   if (kind === 'navigation') return { kind: 'navigation', url: typeof p.url === 'string' ? p.url.slice(0, 2000) : null };
+  if (kind === 'viewport') return p.device ? { kind: 'viewport', device: String(p.device).slice(0, 80), why: String(p.why || '') } : { kind: 'viewport', width: Math.round(Number(p.width) || 0), height: Math.round(Number(p.height) || 0), why: String(p.why || '') };
   return { kind: 'input', why: 'unknown action kind' };
 }
 /** A result is judged by its ERROR, never by `success` (measured: false on every 0.32.0 result). */
@@ -242,6 +249,7 @@ function timelineLabel(entry) {
   else if (e.position && e.position.kind === 'keys' && e.position.keys) bits.push(e.position.keys);
   else if (e.position && e.position.kind === 'navigation' && e.position.url) bits.push(e.position.url.slice(0, 60));
   else if (e.position && e.position.kind === 'scroll') bits.push(`${e.position.direction} ${e.position.amount}`);
+  else if (e.position && e.position.kind === 'viewport') bits.push(e.position.device || `${e.position.width}×${e.position.height}`);
   return bits.join(' ') + (e.ok === false ? ' ✗' : '');
 }
 /** The tool card's window: the tool call's own ts back 2 s, forward to the next message (+2 s) or now. */
@@ -477,6 +485,7 @@ function positionText(position) {
   if (p.kind === 'keys') return String(p.keys || '');
   if (p.kind === 'scroll') return `${p.direction || ''} ${p.amount || 0}`.trim();
   if (p.kind === 'navigation') return String(p.url || '');
+  if (p.kind === 'viewport') return p.device ? String(p.device) : `${p.width}×${p.height}`;
   return p.why ? String(p.why) : '';
 }
 
