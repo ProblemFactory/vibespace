@@ -3,9 +3,11 @@
 # caught in minutes. Self-hosters see the badge state before pulling an update.
 #
 # TWO JOBS since the fast/heavy split (2026-09-07): `fast` is the one whose red
-# X must arrive quickly (build + every sub-10s suite + the real haiku turn,
-# ~2 min), `heavy` is everything that needs headless chrome, a real worktree
-# server, a real agent CLI or the real opencode binary (~10 min). They run in
+# X must arrive quickly — THE TIER RULE in scripts/ci.mjs (B-f4cb, 2026-09-27):
+# build + PURE / in-process suites under 10 s + the named LAW pins + the one
+# real haiku turn — and `heavy` is everything that boots a scratch server,
+# drives a browser, runs a real agent CLI / X server / dtach / the opencode
+# binary, or takes 10 s or more. They run in
 # PARALLEL — heavy is not a consequence of fast, it is the other half of the
 # same battery, and making it `needs: fast` would only delay the slow signal.
 # The census (`--census`, also asserted inside `npm run build`) is what
@@ -18,7 +20,11 @@ on:
 jobs:
   fast:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 15 again (B-f4cb): 2.369.192 raised it to 30 when the grown fast tier
+    # (184 suites, ~17 min here at 1051 s locally) was cancelled at 15; under
+    # THE TIER RULE it measures ~4 min locally (235–249 s), ~6.5 min at the
+    # runner's ~1.6× plus ~2 min of apt/npm setup — about half this budget.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -36,7 +42,10 @@ jobs:
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
   heavy:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 60 (B-f4cb): the 23 suites THE TIER RULE moved out of fast add ~750 s of
+    # serial work here (~6 min over the runner's two lanes, ~10 min at its
+    # ~1.6×) to a job that measured 32–34 min (.189–.191) against 45.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

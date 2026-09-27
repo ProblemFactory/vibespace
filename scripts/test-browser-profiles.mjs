@@ -49,7 +49,7 @@
 //   · THE INTRO NEVER LIES ABOUT THE RUNG: "close --all closes only yours" is
 //     said only to a session that really has its own browser.
 //
-// FAST TIER: no ports, no fixed /tmp path, no browser. The legs that touch the
+// HEAVY TIER since B-f4cb (the real agent-browser — THE TIER RULE in ci.mjs); still no ports, no fixed /tmp path, no browser. The legs that touch the
 // real binary (⑨) are LAUNCH-FREE (`session info --json` and a refusal that is
 // an argument check, both measured) and SKIP WITH EVIDENCE when the tool is
 // absent. The socket directory this suite makes lives under its OWN scratch

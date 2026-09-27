@@ -139,7 +139,7 @@ for (const f of ['docs/design-browser-faces.zh.md', 'docs/design-browser-faces.m
 }
 
 console.log('⑤ the gate');
-ok(/\{ name: 'test-browser-faces', tier: 'fast' \}/.test(read('scripts/ci.mjs')), 'ci.mjs carries test-browser-faces in the fast tier');
+ok(/\{ name: 'test-browser-faces', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), 'ci.mjs carries test-browser-faces in the fast tier');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

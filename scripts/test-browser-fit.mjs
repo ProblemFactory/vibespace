@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// LANE S4 — THE LIVE VIEW FITS ITS PANE (fast). Naive-user study 2 (2026-09-26,
+// LANE S4 — THE LIVE VIEW FITS ITS PANE (heavy since B-f4cb: 79 s). Naive-user study 2 (2026-09-26,
 // all three testers): "实况画面只占窗格上面一截" — the picture used the top 40–60 %
 // of the pane, black below (the page rendered at the stream's fixed viewport);
 // "手机上的实况窗口" — 390 wide: the page at desktop width shrunk into a ~260 px

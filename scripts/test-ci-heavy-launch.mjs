@@ -6,16 +6,20 @@
 // runs a slice of the heavy tier there, writes data/ci-heavy/<sha>.{green,red},
 // removes its pid file and cleans the worktree up.
 //
-// WHY IT IS IN THE FAST TIER even though it costs a real worktree + build +
-// suite (measured: 5.5 s when written, 11.6 s after round 2's concurrency
-// legs, 16.2 s with round 3's supersede A/B and its retry control, 21.5 s with
-// round 4's crash-verdict and abort-exit-code A/Bs — it drives eight real
-// heavy runs against stub repositories): the launcher is a
-// SILENT-FAILURE path. If
-// detaching breaks, nothing throws and nobody waits — the heavy tier simply
-// never runs again and the only symptom is `npm run ci:status` staying empty,
-// which looks exactly like "nobody has pushed lately". A guard for that has to
-// run on every push, not in the tier it is guarding.
+// WHY IT WAS IN THE FAST TIER, AND WHY IT NO LONGER IS (B-f4cb, 2026-09-27).
+// It costs a real worktree + build + suite per launch (5.5 s when written,
+// 21.5 s after round 4, 131 s by 2.369.192 — it drives eight real heavy runs
+// against stub repositories and this checkout). It was fast because the
+// launcher is a SILENT-FAILURE path: if detaching breaks, nothing throws and
+// nobody waits — the heavy tier simply never runs again and the only symptom
+// is `npm run ci:status` staying empty, which looks exactly like "nobody has
+// pushed lately"; a guard for that has to run on every push, not in the tier
+// it is guarding. That guard still runs on every push: test-ci-gate §10
+// launches the REAL `--heavy-launch` once in a stub repository (a pid file
+// naming a separate child, a green marker naming the sha, pid file and
+// worktree gone — well under a second). THIS suite, the full machinery with
+// its supersede / lock / crash / already-green A/Bs, is HEAVY under THE TIER
+// RULE (ci.mjs, above the table), and the Actions mirror runs it on every push.
 //
 // It runs with --markers pointed at a temp dir, so it never writes a marker
 // that could block a real push, and with --lock pointed at a temp file, so it

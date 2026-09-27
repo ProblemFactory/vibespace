@@ -1047,7 +1047,7 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   ok(found.length === 0, `the engine's pass / request-set region spells NONE of the imperative scheduler (r5–r8's takeTimerTurn, interleave, the front run, the rider lookups, the boundary splices)`, found.join(', '));
   ok(!/\.sort\(/.test(region), 'the engine\'s pass region orders nothing itself (no `.sort(`)');
   const ci = fs.readFileSync(path.join(REPO, 'scripts/ci.mjs'), 'utf8');
-  ok(/\{ name: 'test-channel-drain', tier: 'fast' \}/.test(ci), 'the gate is registered in the FAST tier (scripts/ci.mjs)');
+  ok(/\{ name: 'test-channel-drain', tier: 'fast'(?:,| \})/.test(ci), 'the gate is registered in the FAST tier (scripts/ci.mjs)');
   const arch = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8');
   ok(arch.includes("'src/channel-drain.js'"), 'test-architecture classifies it PURE');
 }

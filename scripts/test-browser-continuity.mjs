@@ -23,7 +23,7 @@
 //     session (`data/browser-env/bindings.json`, written at the ONE meta choke
 //     point), consulted first.
 //
-// FAST TIER, and deterministic: a free port, a scratch worktree with its own
+// HEAVY TIER since B-f4cb (it boots a server — THE TIER RULE in ci.mjs), and deterministic: a free port, a scratch worktree with its own
 // data/, a scratch HOME (a spawned server can only discover what lives under
 // its own home — 2026-09-09's 79,533-row lesson), a FAKE `agent-browser` on
 // PATH that reports 0.30.0 (no browser is ever launched; the floor probe is

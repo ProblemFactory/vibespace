@@ -62,7 +62,8 @@
 //      than the account's is refused by name at the ONE token door (same-client
 //      re-auth, rebind, re-connect after a disconnect), the same person under
 //      another client accepted, a Lark rebind matching on user_id across apps;
-//      the PURE table (src/channel-identity.js). Control: an engine copy
+//      the PURE table (src/channel-identity.js) — since B-f4cb in
+//      test-channels-accounts-model (fast; this suite is heavy at 13 s). Control: an engine copy
 //      without the check stores the stranger's consent
 //
 // Zero vendor calls: every fetch is the fake below; the consent runs against
@@ -808,28 +809,8 @@ console.log('⑫ verify r5: refresh races + the identity door');
     ok(other && other.auth.user === 'intruder@example.com' && other.identity.email === 'intruder@example.com', 'a NEW account connects as the other person — its own record, its own identity');
     e.stop();
   }
-  // (d) the PURE table
-  {
-    const ID = require(path.join(REPO, 'src/channel-identity.js'));
-    const T = [
-      [{ email: 'A@x.com' }, { email: 'a@x.com' }, null, 'the same email, case-folded'],
-      [{ email: 'a@x.com' }, { email: 'b@x.com' }, 'email', 'another email'],
-      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on2', userId: 'u1' }, null, 'lark: a new app, the same tenant user'],
-      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on1', userId: 'u2' }, null, 'lark: the same developer union id'],
-      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on2', userId: 'u2' }, 'openId', 'lark: another person'],
-      [{ openId: 'ou1' }, { email: 'a@x.com' }, null, 'no common key: nothing to judge'],
-      [{}, { email: 'a@x.com' }, null, 'a record with no identity accepts the first'],
-      [{ email: 'a@x.com' }, {}, null, 'a token naming nobody: nothing for identityMismatch to judge (verify r6: the CONSENT rule refuses it upstream — (f))'],
-    ];
-    const bad = T.filter(([h, o, k]) => { const m = ID.identityMismatch(h, o); return k === null ? m !== null : !(m && m.key === k); });
-    ok(bad.length === 0, `the PURE identity table: ${T.length} rows — ${bad.length} wrong`, JSON.stringify(bad.map((r) => r[3])));
-    ok(ID.heldIdentity({ auth: { user: 'Legacy@X.com' } }).email === 'legacy@x.com' && Object.keys(ID.heldIdentity({ auth: { user: 'Member A' } })).length === 0 && ID.heldIdentity({ identity: { email: 'S@x.com' }, auth: { user: 'other@x.com' } }).email === 's@x.com', 'a legacy record (no stamp) is judged by its auth.user only when that is an email; a stamp outranks auth.user');
-    ok(ID.heldIdentity({ auth: { user: 'Member A' } }, { openId: 'ou1', name: 'Member A' }).openId === 'ou1' && ID.heldIdentity({ identity: { email: 'S@x.com' } }, { email: 'o@x.com' }).email === 's@x.com' && ID.heldIdentity({ identity: {}, auth: { user: 'L@x.com' } }, null).email === 'l@x.com' && /did not say which account signed in \(profile: 500\)/.test(ID.namelessSentence('Google', 'profile: 500')), 'verify r6: the held identity is read off the token the record HOLDS when it carries no stamp (a legacy Lark record: its open_id; the display name is never an id); a stamp outranks the token; an empty stamp falls through; the nameless sentence');
-    ok(/connected as a@x\.com; this sign-in is b@x\.com/.test(ID.mismatchSentence('Mail', { key: 'email', held: 'a@x.com', offered: 'b@x.com' })), 'the refusal sentence names both identities');
-    // verify r7: an `email` is an identity only when it LOOKS LIKE AN ADDRESS — a Lark display name with an '@' in it was stamped at boot as an email (a guess), a whitespace / bare-word profile answer bound nothing
-    ok(Object.keys(ID.heldIdentity({ auth: { user: 'Alice @ Sales' } })).length === 0 && Object.keys(ID.heldIdentity({ auth: { user: 'alice@corp' } })).length === 0 && Object.keys(ID.identityOf({ email: '   ' })).length === 0 && Object.keys(ID.identityOf({ email: 'not-an-email' })).length === 0 && ID.identityOf({ email: ' A@X.com ' }).email === 'a@x.com' && ID.looksLikeEmail('a@x.com') && !ID.looksLikeEmail('a @ x.com'), 'verify r7: a display name with an @ / a bare word / whitespace is NOBODY (never a guessed email); an address is trimmed + case-folded');
-    ok(/was cancelled while it was being completed — nothing was connected/.test(ID.cancelledSentence('Gmail', 'cancelled')) && /replaced by a newer sign-in/.test(ID.cancelledSentence('Gmail', 'superseded')) && /past its time limit/.test(ID.cancelledSentence('Gmail', 'timeout')), 'verify r7: the cancelled-consent sentence names the cause');
-  }
+  // (d) the PURE identity table + the door's wiring pins moved to test-channels-accounts-model (fast — the
+  //     credential law's push-blocking half, B-f4cb 2026-09-27); this suite (heavy) keeps the door's behaviour.
   // (e) CONTROL: an engine copy without the identity check stores the stranger's consent (RED as asserted)
   {
     const src = fs.readFileSync(ENGINE_PATH, 'utf-8');

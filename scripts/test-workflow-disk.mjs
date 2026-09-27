@@ -555,7 +555,7 @@ console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site i
     && !/Known limit: the stream tree carries no freshness stamp/.test(kbf) && /the set names a CARD, not a key/.test(kbf)
     && /\*\*Lane Q verify \(2026-09-26, six findings, each reproduced red first\)\.\*\*/.test(kbb) && /no `NOW` line ⇒ `liveness:'unknown'`/.test(read('docs/kb-api.md')));
   const ci = read('scripts/ci.mjs');
-  ok('ci: test-workflow-disk is in the FAST tier', /\{ name: 'test-workflow-disk', tier: 'fast' \}/.test(ci));
+  ok('ci: test-workflow-disk is in the FAST tier', /\{ name: 'test-workflow-disk', tier: 'fast'(?:,| \})/.test(ci));
   ok('architecture: src/workflow-disk.js is classified PURE (it imports nothing)', /'src\/workflow-disk\.js'\]\);/.test(read('scripts/test-architecture.mjs')) && !/require\(|^import /m.test(read('src/workflow-disk.js')));
   const kb11 = read('docs/kb-design-lessons.md');
   ok('docs: CLAUDE.md indexes src/workflow-disk.js; kb §11 no longer calls the journal label-less; kb-bugfix names the invariant',

@@ -227,7 +227,7 @@ function census(dir) {
 }
 
 // ── ⑤ ci.mjs ──
-ok(/\{ name: 'test-ax-paint', tier: 'fast' \}/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-ax-paint in the fast tier');
+ok(/\{ name: 'test-ax-paint', tier: 'fast'(?:,| \})/.test(read('scripts/ci.mjs')), '⑤ ci.mjs carries test-ax-paint in the fast tier');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

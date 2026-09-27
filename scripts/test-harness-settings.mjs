@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // HARNESS SETTINGS (docs/design-harness-settings.zh.md §8, 2026-09-20) — the
-// fast gate for the descriptor-declared settings tables and the CLI-config
+// gate (heavy since B-f4cb: the real-codex load leg) for the descriptor-declared settings tables and the CLI-config
 // plan: checkTable's refusals one fixture each, the DERIVED schema rows
 // field-equal to the pre-derivation snapshot (scripts/fixtures/
 // harness-settings-schema-2.369.120.json, taken once from 2.369.120's

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // AGENT BROWSER P6 — HARD MEDIATION (docs/design-agent-browser-v2.md §6.2 /
-// §6.5 / D6; the §10 P6 row). Fast tier.
+// §6.5 / D6; the §10 P6 row). Heavy tier since B-f4cb (10 s — THE TIER RULE in ci.mjs).
 //
 //   ① the §6.2 SHARING verdict (PURE, src/browser-profiles.js): `owner` always,
 //      `instance` only where a mediating proxy exists AND on this machine —

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A LINKED ACCOUNT IS AN AGGREGATED IM (owner ruling 2026-09-26; design
 // docs/design-communication-panel.zh.md §5 invariant 6 as rewritten, §6.2,
-// §6.5, §7.3, §8; gate row `test-channels-aggregate`, fast).
+// §6.5, §7.3, §8; gate row `test-channels-aggregate`, heavy since B-f4cb — 54 s).
 //
 // The REAL engine over the REAL store and the REAL registry, with a scripted
 // adapter module that talks to nothing and COUNTS every call — the owner's

@@ -19,7 +19,11 @@
 // literal date · §8 lanes / impact scope / full-tier clock (2026-09-15) · §9 the
 // scratch-orphan reaper (2.369.104; lane H verify r1: candidacy is evidence,
 // never a name — the agent-browser roots, the owned-shell control, `--reap`
-// printing its victims, three mutant-copy controls).
+// printing its victims, three mutant-copy controls) · §2b THE TIER RULE
+// (B-f4cb, 2026-09-27: every fast row names its kind + a measured time < 10 s,
+// and boots / drives / runs nothing its row does not allow — grep-derived,
+// with controls) · §10 the launcher ONCE, for real, in a stub repository (the
+// push-blocking pin test-ci-heavy-launch carried before it moved to heavy).
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -28,7 +32,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE } from './ci.mjs';
+import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
@@ -64,6 +68,28 @@ function commit(repo, file, body, msg, date) {
   git(repo, ['add', '-f', file]);
   git(repo, ['commit', '-q', '-m', msg], date ? { ...GIT_ENV, GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date } : GIT_ENV);
   return git(repo, ['rev-parse', 'HEAD']);
+}
+// A STUB GATE REPOSITORY (B-f4cb, 2026-09-27; the shape test-ci-heavy-launch
+// drives its A/Bs in): scripts/ci.mjs is the REAL module, the build is
+// `node -e 0`, and the one suite is a stub under a name the table puts in the
+// HEAVY tier — so `--only=` accepts it and a run costs well under a second
+// instead of a real build + a real suite. The name is asserted to be heavy, so
+// a table change cannot quietly turn these legs into something else.
+const STUB_SLICE = 'test-eml';
+function stubGateRepo(tag) {
+  const root = mktmp('stub-' + tag);
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  fs.copyFileSync(path.join(REPO, 'scripts', 'ci.mjs'), path.join(root, 'scripts', 'ci.mjs'));
+  fs.copyFileSync(path.join(REPO, 'scripts', 'git-env.mjs'), path.join(root, 'scripts', 'git-env.mjs'));
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'x', version: '0.0.0', private: true, scripts: { build: 'node -e "0"' } }) + '\n');
+  fs.writeFileSync(path.join(root, 'scripts', STUB_SLICE + '.mjs'), "console.log('ALL PASS (1)');\n");
+  git(root, ['init', '-q', '-b', 'main']);
+  git(root, ['config', 'user.email', 'gate@test.local']);
+  git(root, ['config', 'user.name', 'gate test']);
+  git(root, ['config', 'commit.gpgsign', 'false']);
+  git(root, ['add', '-A']);
+  git(root, ['commit', '-q', '-m', 'stub gate']);
+  return { root, sha: git(root, ['rev-parse', 'HEAD']) };
 }
 const writeMarker = (dir, sha, result, failed = [], partial = undefined, flaky = undefined) => {
   fs.mkdirSync(dir, { recursive: true });
@@ -116,6 +142,57 @@ console.log('\n§2 tier hygiene');
   // the split exists to remove.
   const chromeInFast = fast.filter((s) => /chrome/.test(s.why || ''));
   ok(!chromeInFast.length, `no chrome suite in the fast tier (${chromeInFast.map((s) => s.name).join(', ') || 'clean'})`);
+
+  // §2b THE TIER RULE (B-f4cb, 2026-09-27 — ci.mjs, above the table). The fast
+  // tier had grown to 184 suites / ~1050 s here and > 15 min on the runner, one
+  // reasonable exception at a time, because nothing but a running total said
+  // what belonged in it. Now a RULE does, and it is asserted: every fast row's
+  // why begins with its KIND and carries its measured time (< FAST_MAX_MS
+  // unless it is the named EXCEPTION), and the grep-derived disqualifiers —
+  // a scratch server, a browser, a checkout, a real external program — hit
+  // only what its row explicitly `allow`s, each allowance used.
+  const src = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
+  const ruleBad = fast.map((s) => [s.name, fastRuleFindings(s, src(s.name))]).filter(([, r]) => r.problems.length);
+  ok(!ruleBad.length, `every fast row obeys THE TIER RULE (${ruleBad.map(([n, r]) => `${n}: ${r.problems.join('; ')}`).join(' | ') || `${fast.length} rows clean`})`);
+  const allowed = fast.filter((s) => (s.allow || []).length);
+  ok(allowed.length > 0 && allowed.length <= 5 && allowed.every((s) => /^(LAW|EXCEPTION)\b/.test(s.why || '')),
+    `the allowances are few and each on a named LAW / EXCEPTION row (${allowed.map((s) => `${s.name}[${s.allow.join(',')}]`).join(', ')})`);
+  const exceptions = fast.filter((s) => /^EXCEPTION\b/.test(s.why || '')).map((s) => s.name);
+  ok(exceptions.join() === 'test-chat-e2e', `there is ONE exception, the owner's real turn (${exceptions.join(', ') || 'none'})`);
+  const measured = fast.map((s) => fastRuleFindings(s, '').measuredMs || 0);
+  const budget = measured.reduce((a, b) => a + b, 0);
+  ok(budget < 8 * 60 * 1000, `the fast tier's measured sum stays under 8 min (${Math.round(budget / 1000)} s over ${fast.length} suites — the rule's point, re-measured)`);
+  // The census must be able to go red — every disqualifier through its own
+  // shape, the non-shapes that must NOT trip it, and every why rule.
+  // The shapes are ASSEMBLED from pieces so this file's own source does not
+  // spell them — the census runs over this file too (its row allows only the
+  // throwaway-repository checkout).
+  const T = { vnc: ['vnc', 'Env'].join(''), onb: ['ONBOARDED', 'SOURCE'].join('_'), hl: '--' + 'headless=new', dbg: '--' + 'remote-debugging-port', wt: ['work', 'tree'].join(''),
+    dt: ['dt', 'ach'].join(''), cv: ['command', '-v'].join(' '), cx: ['co', 'dex'].join(''), xs: ['startX', 'Server'].join('') };
+  const hitsOf = (code) => fastRuleFindings({ why: 'PURE · 1 ms' }, code).hits.join();
+  ok(hitsOf(`const srv = spawn(process.execPath, ['server.js'], { env: { ...process.env, ...(await ${T.vnc}()) } });`) === 'server', 'NEG: a server.js spawn (its §57 passport) is a server');
+  ok(hitsOf(`execFileSync('git', ['-C', repo, '${T.wt}', 'add', '--detach', wt, 'HEAD']);`) === 'checkout', 'NEG: a git worktree add is a checkout');
+  ok(hitsOf(`await page.evaluateOnNewDocument(${T.onb});`) === 'chrome' && hitsOf(`const c = spawn(CHROME, ['${T.hl}', '${T.dbg}=' + p]);`) === 'chrome',
+    'NEG: a page suite (its §47 onboarded passport) and a hand-launched chrome are chrome');
+  ok(hitsOf(`spawn('${T.dt}', ['-c', sock]);`) === 'binary' && hitsOf(`const w = execFileSync('sh', ['-c', '${T.cv} ${T.cx}']);`) === 'binary'
+    && hitsOf(`await dm.openSession({ cmd: '${T.dt}', args: [] });`) === 'binary' && hitsOf(`await D.${T.xs}({ bin: 'Xvfb' });`) === 'binary',
+    'NEG: a real program by name, a `command -v` probe for one, a cmd: field naming one and an X server started through desktop-display are binaries');
+  ok(hitsOf(`// spawn(process.execPath, ['server.js'], { env: ${T.vnc}() }) — in a comment\n`) === ''
+    && hitsOf(`const h = spawn(process.execPath, ['-e', FAKE_CHROME, '--', '${T.hl}']);`) === ''
+    && hitsOf("execFileSync('git', ['ls-files', 'src', 'server.js']);") === '' && hitsOf('spawn(process.execPath, [wrapper, buf, meta, fakeCli]);') === '',
+    'NON-HITS: a comment, a node FAKE handed --headless, a git ls-files naming server.js, our own wrapper under a stub CLI');
+  const why = (w, extra = {}) => fastRuleFindings({ why: w, ...extra }, '').problems.join(' | ');
+  ok(/names no kind/.test(why('fast · 1 ms')) && /no measured time/.test(why('PURE — no number')) && /≥ 10000 ms/.test(why('in-process · 12.5 s'))
+    && why('EXCEPTION (x) · 30 s — y') === '' && why('LAW money · 2.6 s') === '' && why('PURE · 40 ms') === '',
+    'NEG: a kindless why, a missing time and a ≥ 10 s time are red; an EXCEPTION may exceed the bound; the plain forms pass');
+  ok(/only a LAW or an EXCEPTION/.test(why('PURE · 1 ms', { allow: ['binary'] })) && /dead allowance/.test(why('LAW architecture · 1 ms', { allow: ['binary'] })),
+    'NEG: an allowance on a PURE row, and an allowance nothing needs, are red');
+  // …and over REAL suites the rule moved out: each is caught by the shape it moved for.
+  for (const [n, key] of [['test-client-boot', 'chrome'], ['test-restore-smoke', 'server'], ['test-restore-smoke', 'checkout'], ['test-agentd-session', 'binary'], ['test-desktop-display', 'binary']]) {
+    const r = fastRuleFindings({ why: 'in-process · 1 ms' }, src(n));
+    ok(r.hits.includes(key) && r.problems.length > 0, `CONTROL: ${n} as a fast row would be red — ${key} (${r.hits.join(',') || 'no hit'})`);
+  }
+  ok(FAST_DISQUALIFIERS.map((d) => d.key).join() === 'server,checkout,chrome,binary' && FAST_MAX_MS === 10000, 'the four disqualifiers and the 10 s bound are the ones the rule names');
   ok(EXCLUDED.every((e) => (e.why || '').length > 15), 'every EXCLUDED entry gives a real reason, not a shrug');
 
   // WIRING. A tier table nobody invokes is documentation. These pins live HERE
@@ -931,26 +1008,29 @@ console.log('\n§6 machine-global fixtures + no-verdict honesty');
     ok(/--isolate|ci:heavy/.test(rout), '…and the refusal names the way to get a real verdict');
     ok(!fs.readdirSync(mdir).length, '…and writes no marker');
 
-    // The dirty tree only has to exist until the run CAPTURES it (heavyGate
-    // reads `git status` once, at t=0, and announces it on the next line), so
-    // the probe is removed as soon as the child says it saw one. That keeps the
-    // repository dirty for ~200 ms instead of for the whole run — the window in
-    // which killing this suite would strand the probe, dirty the tree, and cost
-    // the next push its green marker. Belt and braces with the self-heal above:
-    // shrink the hazard, then clean up after it anyway.
-    const child = spawn(process.execPath, [path.join(REPO, 'scripts', 'ci.mjs'), '--heavy', '--dirty-ok', '--markers=' + mdir, '--only=test-eml', '--lock=' + path.join(mdir, 'lock')],
-      { cwd: REPO, env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
+    rmProbe(); // the REAL checkout is dirty only for the refusal above (a spawn that stops before its build)
+
+    // --dirty-ok RUNS the tier (build + suites) and so is driven in a STUB
+    // repository whose scripts/ci.mjs is the real module, whose build is
+    // `node -e 0` and whose one suite is a stub under a heavy-tier name
+    // (B-f4cb, 2026-09-27: in this checkout the leg paid a real `npm run
+    // build` — 5.9 s of a fast-tier suite — and kept the REAL tree dirty until
+    // the child had captured it, the hazard the probe's signal handlers exist
+    // for). What is under test is the gate's honesty about a dirty tree, which
+    // is the same module in either repository.
+    const stub = stubGateRepo('dirty-ok');
+    fs.writeFileSync(path.join(stub.root, '.ci-gate-dirty-probe'), 'round-2 dirty-tree probe\n');
+    const child = spawn(process.execPath, [path.join(stub.root, 'scripts', 'ci.mjs'), '--heavy', '--dirty-ok', '--markers=' + mdir, '--only=' + STUB_SLICE, '--lock=' + path.join(mdir, 'lock')],
+      { cwd: stub.root, env: GIT_ENV, stdio: ['ignore', 'pipe', 'pipe'] });
     let aout = '';
     child.stdout.on('data', (d) => { aout += d; });
     child.stderr.on('data', (d) => { aout += d; });
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    for (let i = 0; i < 600 && !/--dirty-ok: this tree is dirty/.test(aout); i++) await sleep(50);
-    ok(/--dirty-ok: this tree is dirty/.test(aout), 'the run announces the dirty tree as soon as it captures it (so the probe can go)');
-    rmProbe();
-    const anyway = await new Promise((res) => child.on('exit', (code) => res({ status: code })));
+    await new Promise((res) => child.on('exit', (code) => res({ status: code })));
+    ok(/--dirty-ok: this tree is dirty/.test(aout), 'the run announces the dirty tree as soon as it captures it');
     ok(/NO VERDICT will be written/i.test(aout), '--dirty-ok says NO VERDICT at the START of the run');
     ok(/NO VERDICT WRITTEN/.test(aout) && !/HEAVY GATE GREEN/.test(aout),
       '…and the closing line says NO VERDICT WRITTEN instead of "HEAVY GATE GREEN"');
+    ok(new RegExp(STUB_SLICE).test(aout) && /npm run build/.test(aout), '…after really running the tier (the build and the suite ran — the leg is non-vacuous)');
     ok(!fs.existsSync(path.join(mdir, 'x')) && !fs.readdirSync(mdir).some((f) => /\.(green|red)$/.test(f)),
       '…and still writes no green/red marker');
   } finally { try { fs.unlinkSync(probe); } catch {} }
@@ -1155,7 +1235,8 @@ console.log('\n§8 lanes, the serial table, the impact scope, the full-tier cloc
     ok(!!why && /^loads /.test(why), `${changedFile} selects ${suite} (${why || 'MISSED — the measured defect'})`);
   }
   const isProduct = (p) => p === 'server.js' || p.startsWith('src/') || p.startsWith('data/bin/');
-  const inputless = (s, r) => { const { files, prefixes } = suiteInputs(s, { root: r }); return ![...files, ...prefixes].some(isProduct); };
+  const walkMemo = new Map(); // ONE walk of the table (ci.mjs suiteInputs: a memo lives for one computation over an unchanged tree)
+  const inputless = (s, r) => { const { files, prefixes } = suiteInputs(s, { root: r, memo: walkMemo }); return ![...files, ...prefixes].some(isProduct); };
   const silent = realHeavy.filter((s) => !s.always && !(s.reads && s.reads.length) && inputless(s, REPO)).map((s) => s.name);
   ok(silent.length === 0, `every heavy row without always:/reads: has a PRODUCT input the affected tier can match (silent rows: ${silent.join(', ') || 'none'})`);
   ok(inputless({ name: 'test-d' }, root) && !inputless({ name: 'test-a' }, root), 'CONTROL: the census predicate flags a suite that reads no product file and passes one that does');
@@ -1592,6 +1673,51 @@ console.log('\n§9c the reaper reads a scratch root off the arguments (dtach / p
   ok(noExcl.split('PRODUCT_ROOT_RE.test(').length === ciSrc.split('PRODUCT_ROOT_RE.test(').length - 2, 'CONTROL: the second patched copy really drops BOTH /tmp/vs-ab-<uid> exclusions (argv roots + the candidate roots)');
   const ne = await import(M.write('scripts/ci.mjs', noExcl, 'no-product-root', { esm: true }));
   ok(ne.scratchOrphans({ procRoot: root, now: NOW, self: 999999 }).some((o) => o.pid === 830), 'CONTROL: without the exclusion the production Chrome under /tmp/vs-ab-<uid> would be reaped');
+}
+
+// ── §10 THE LAUNCHER, ONCE, FOR REAL (B-f4cb, 2026-09-27) ────────────────
+// test-ci-heavy-launch (131 s: eight real launches, each a worktree + a real
+// build + a suite) moved to the heavy tier by THE TIER RULE. Its header named
+// why it had been fast: the launcher is a SILENT-FAILURE path — if detaching
+// breaks, nothing throws, the heavy tier simply never runs again and
+// `ci:status` stays empty, which looks exactly like "nobody pushed lately"; a
+// guard for that has to run on every push, not in the tier it guards. This is
+// that guard, kept on every push at stub cost: the REAL `--heavy-launch` in a
+// stub repository returns at once, names a SEPARATE detached child in a pid
+// file, and that child checks out an isolated worktree, runs the slice, writes
+// a green marker naming the sha, removes its pid file and its worktree.
+console.log('\n§10 the launcher, once, for real (a stub repository)');
+{
+  ok(SUITES.some((s) => s.name === STUB_SLICE && s.tier === 'heavy'), `${STUB_SLICE} is a heavy-tier name (the stub legs run it through --only)`);
+  ok(SUITES.some((s) => s.name === 'test-ci-heavy-launch' && s.tier === 'heavy'), 'the full launcher battery lives in the heavy tier (this is its push-blocking pin)');
+  const st = stubGateRepo('launch');
+  const md = path.join(st.root, 'data', 'ci-heavy');
+  const t0 = Date.now();
+  const r = spawnSync(process.execPath, [path.join(st.root, 'scripts', 'ci.mjs'), '--heavy-launch', st.sha, '--only=' + STUB_SLICE, '--lock=' + path.join(st.root, 'lock'), '--lock-wait-ms=20000'],
+    { cwd: st.root, encoding: 'utf-8', env: GIT_ENV, timeout: 60000 });
+  const launchMs = Date.now() - t0;
+  ok(r.status === 0 && /launched the FULL tier/.test(r.stderr || ''), `--heavy-launch detaches a run and returns (exit ${r.status}, ${launchMs} ms: ${(r.stderr || '').trim().split('\n').pop()})`);
+  const pidFile = path.join(md, `${st.sha}.pid`);
+  let pidRec = null; try { pidRec = JSON.parse(fs.readFileSync(pidFile, 'utf-8')); } catch { }
+  ok(!!pidRec && pidRec.pid > 0 && pidRec.pid !== process.pid, `a pid file names the SEPARATE detached child (pid ${pidRec && pidRec.pid})`);
+  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+  const markerOf = () => ['green', 'red'].map((k) => path.join(md, `${st.sha}.${k}`)).find((f) => fs.existsSync(f));
+  for (let i = 0; i < 1200 && !markerOf(); i++) await sleep(50);
+  const found = markerOf();
+  let rec = null; try { rec = JSON.parse(fs.readFileSync(found, 'utf-8')); } catch { }
+  ok(!!rec && rec.result === 'green' && rec.sha === st.sha && rec.isolated === true && (rec.partial || []).join() === STUB_SLICE,
+    `the detached child wrote a GREEN marker naming the sha, isolated, the slice it ran (${Math.round((Date.now() - t0) / 100) / 10} s; ${rec ? `${rec.result} ${String(rec.sha).slice(0, 8)} isolated=${rec.isolated} partial=${(rec.partial || []).join()}` : 'no marker'})`);
+  for (let i = 0; i < 600 && fs.existsSync(pidFile); i++) await sleep(50);
+  ok(!fs.existsSync(pidFile), 'the pid file is removed when the run ends (a dead pid must never read as "in flight")');
+  const ourWt = pidRec ? `vs-ci-heavy-${st.sha.slice(0, 8)}-${pidRec.pid}` : '(none)';
+  let wtGone = false;
+  for (let i = 0; i < 600 && !wtGone; i++) {
+    const listed = spawnSync('git', ['-C', st.root, 'worktree', 'list'], { encoding: 'utf-8', env: GIT_ENV }).stdout || '';
+    wtGone = !listed.includes(ourWt) && !fs.existsSync(path.join(os.tmpdir(), ourWt));
+    if (!wtGone) await sleep(50);
+  }
+  ok(wtGone, `the child's isolated worktree is cleaned up (${ourWt}: no registration, no directory)`);
+  if (pidRec) { try { process.kill(-pidRec.pid, 'SIGKILL'); } catch { } try { fs.rmSync(path.join(os.tmpdir(), ourWt), { recursive: true, force: true }); } catch { } }
 }
 
 } finally {
