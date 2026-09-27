@@ -138,7 +138,9 @@ export const SURFACES = [
   ['panel', /^panel-02-rows$/],
   ['window', /^win-01-sendable$/],
   ['outbox', /^outbox-window$/],
-  ['assign-filter', /^dialog-assign-filter$/],
+  // R4 (2026-09-27): access and notification are two operations — Grant access… then Notify…
+  ['grant access', /^dialog-access$/],
+  ['notify', /^dialog-notify-filter$/],
   ['reach', /^dialog-reach$/],
   // r4 (design-integrations-per-account, chunk 3): the account dialogs are the storage dialog
   // component — connect (type-first, Lark + Custom), re-authorize, edit, duplicate, remove refused
@@ -151,7 +153,7 @@ export const SURFACES = [
   ['options/push', /^dialog-(options-lark|push)$/],
   // 2026-09-26 (aggregated IM): the Track… picker is gone; search + the rule grain are new surfaces
   ['search', /^dialog-search$/],
-  ['rule grain', /^dialog-scope-assign$/],
+  ['rule grain', /^dialog-rule-access$/],
   ['integrations', /^integ-01-window$/],
 ];
 

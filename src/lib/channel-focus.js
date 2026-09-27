@@ -24,7 +24,11 @@
 //              read / held / replied like any other.
 //   read       an agent read it (the agent route's `readFor`) in the last 24 h
 //   held       a wake for it is held (hits pending, or the last wake / the
-//              last refusal was not delivered) — within the wake ledger's 7 days
+//              last refusal was not delivered) — within the wake ledger's 7 days.
+//              A DIGEST watcher's hits wait on the conversation BY DESIGN until
+//              its window closes: those are the digest, never "held" (the R3 ×
+//              R4 seam, 2.369.191 — `heldPending` reads the row's R4 `watchers`
+//              beside the engine's per-principal `touch.pendingFor`)
 //   replied    the owner wrote in it in the last 24 h (a message the vendor
 //              records as the owner's own, or the owner's send from here)
 // and a non-archived AGENT GROUP always does (the owner's explicit act, D1).
@@ -48,10 +52,45 @@ export const TAG_ORDER = Object.freeze(['awaiting', 'unknown', 'assigned', 'read
 const num = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
 const within = (at, now, win) => { const a = num(at); return a > 0 && now - a < win; };
 
-/** Is a wake for this conversation HELD (its hits did not reach the agent)? */
-export function heldOf(touch, now = Date.now()) {
+/** A principal's key as the engine spells it (channel-filter's `principalKey`: `kind:id`). */
+const pkOf = (p) => (p && p.kind && String(p.id == null ? '' : p.id).trim() ? `${p.kind}:${String(p.id).trim()}` : '');
+
+/**
+ * HOW MANY OF THIS CONVERSATION'S PENDING HITS ARE HELD (the R3 × R4 seam,
+ * 2.369.191). R4 lets SEVERAL principals watch one conversation, and a
+ * `notify:'digest'` watcher's hits wait on the conversation (`pending`,
+ * tagged `for` that watcher) until its window closes — that wait IS the
+ * digest, not a wake that failed to reach anybody. The engine's `touchView`
+ * sends `touch.pendingFor` = `[{p, n, oldest}]` (per principal key; `p: null`
+ * = a legacy untagged hit); `watchers` = the row's R4 watcher rows
+ * (`{principal, notify, digestMinutes}`). A principal's hits are held unless
+ * its watcher is a digest whose window — `oldest` + `digestMinutes`, the edge
+ * EXCLUSIVE — is still open. A hit with no watcher row (a legacy one, or a
+ * watcher since removed) counts as held. A touch without `pendingFor` (a
+ * server before the seam) falls back to the total.
+ */
+export function heldPending(touch, now = Date.now(), watchers = []) {
+  if (!touch) return 0;
+  const per = Array.isArray(touch.pendingFor) ? touch.pendingFor : null;
+  if (!per) return num(touch.pending);
+  const byPk = new Map();
+  for (const w of Array.isArray(watchers) ? watchers : []) { const k = w && pkOf(w.principal); if (k) byPk.set(k, w); }
+  let n = 0;
+  for (const e of per) {
+    if (!e || num(e.n) <= 0) continue;
+    const w = e.p ? byPk.get(String(e.p)) : null;
+    const windowMs = w ? Math.max(1, num(w.digestMinutes)) * 60e3 : 0;
+    const inWindow = !!(w && w.notify === 'digest' && within(e.oldest, now, windowMs));
+    if (!inWindow) n += num(e.n);
+  }
+  return n;
+}
+
+/** Is a wake for this conversation HELD (its hits did not reach the agent)?
+ *  `watchers` = the row's R4 watcher rows (a digest's open window is not held). */
+export function heldOf(touch, now = Date.now(), watchers = []) {
   if (!touch) return false;
-  if (num(touch.pending) > 0) return true;
+  if (heldPending(touch, now, watchers) > 0) return true;
   const w = touch.wake;
   if (w && w.ok === false && w.lane === 'none' && within(w.at, now, HELD_WINDOW_MS)) return true;
   if (within(touch.refusalAt, now, HELD_WINDOW_MS) && (!w || num(touch.refusalAt) > num(w.at))) return true;
@@ -73,7 +112,7 @@ export function statusTag(row, now = Date.now()) {
   const ob = c.outbox || {};
   if (num(ob.awaiting) > 0) return { code: 'awaiting', n: num(ob.awaiting) };
   if (num(ob.unknown) > 0) return { code: 'unknown', n: num(ob.unknown) };
-  const held = heldOf(touch, now);
+  const held = heldOf(touch, now, c.watchers);
   const a = c.assignment;
   if (a && a.principal && (a.principal.id || a.principal.name)) {
     const grain = a.source || 'conversation';
@@ -90,7 +129,7 @@ export function statusTag(row, now = Date.now()) {
     const kind = rd.kind || 'agent';
     return num(c.lastAt) > num(rd.upTo) ? { code: 'new-since-read', name, kind, at: num(rd.at) } : { code: 'read', name, kind, at: num(rd.at) };
   }
-  if (held) return { code: 'held', n: num(touch.pending) };
+  if (held) return { code: 'held', n: heldPending(touch, now, c.watchers) };
   if (touch && within(touch.selfAt, now, FOCUS_WINDOW_MS)) return { code: 'replied', at: num(touch.selfAt) };
   return null;
 }

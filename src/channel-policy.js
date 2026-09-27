@@ -197,6 +197,38 @@ function validateProposal(input = {}) {
   return { ok: true, proposal: { text, replyTo, why, attachments } };
 }
 
+/** A NEW message's recipients: at most this many (To + Cc together). */
+const COMPOSE_MAX_RECIPIENTS = 20;
+const COMPOSE_SUBJECT_MAX = 300;
+/** One address, plainly — no display name, no header syntax (a comma, a
+ *  semicolon, a bracket, a quote or a line break would let one field become
+ *  two headers). */
+const ADDRESS_RE = /^[^\s@<>,;"'()[\]\\]+@[^\s@<>,;"'()[\]\\]+\.[^\s@<>,;"'()[\]\\]+$/;
+/**
+ * A COMPOSED message (B-6acc — a NEW conversation, where a reply answers
+ * inside one): the proposal's own checks (text, why, attachments) plus the
+ * envelope — `to` (one or more plain addresses), `cc` (optional), `subject`
+ * (one line). A refusal carries `why` (`to` / `address` / `recipients` /
+ * `subject`) and names the bad value; nothing is created.
+ */
+function validateCompose(input = {}) {
+  const base = validateProposal(input);
+  if (!base.ok) return { ...base, why: 'text' };
+  const p = input && typeof input === 'object' ? input : {};
+  const list = (v) => (Array.isArray(v) ? v : String(v === undefined || v === null ? '' : v).split(',')).map((x) => String(x).trim()).filter(Boolean);
+  // R4 verify r2: a field this verb does not carry is REFUSED BY NAME, never
+  // silently dropped (an agent that asked for a Bcc would believe it was sent)
+  if (p.bcc !== undefined && p.bcc !== null && String(Array.isArray(p.bcc) ? p.bcc.join(',') : p.bcc).trim()) return { ok: false, error: 'bcc is not supported — every recipient of a composed message is visible (To / Cc)', why: 'bcc' };
+  if (p.replyTo !== undefined && p.replyTo !== null && String(p.replyTo).trim()) return { ok: false, error: 'a NEW message has nothing to reply to — use `reply` inside a conversation', why: 'replyTo' };
+  const to = list(p.to), cc = list(p.cc);
+  if (!to.length) return { ok: false, error: 'to is required (one or more addresses)', why: 'to' };
+  if (to.length + cc.length > COMPOSE_MAX_RECIPIENTS) return { ok: false, error: `at most ${COMPOSE_MAX_RECIPIENTS} recipients (To + Cc)`, why: 'recipients' };
+  for (const a of [...to, ...cc]) if (!ADDRESS_RE.test(a) || a.length > 254) return { ok: false, error: `not a plain address: ${JSON.stringify(a.slice(0, 80))}`, why: 'address' };
+  const subject = String(p.subject === undefined || p.subject === null ? '' : p.subject).replace(/[\r\n\t]+/g, ' ').trim();
+  if (!subject) return { ok: false, error: 'subject is required', why: 'subject' };
+  return { ok: true, proposal: { ...base.proposal, replyTo: null, compose: { to: to.map((x) => x.toLowerCase()), cc: cc.map((x) => x.toLowerCase()), subject: subject.slice(0, COMPOSE_SUBJECT_MAX) } } };
+}
+
 /**
  * THE SENDER HONESTY LINE (§9.5, decision 17 as overruled): null unless the
  * switch is ON *and* the drafter is an agent — a user's own words carry no
@@ -377,7 +409,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
 
 module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
-  canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, expiryVerdict, receiptFor, renderReceiptBlock,
+  canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
 };

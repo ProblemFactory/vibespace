@@ -210,27 +210,95 @@ console.log('⑧ three-grain assignment + conversation patterns');
   ok(Array.isArray(why) && why.length === 1 && /title/.test(why[0]), 'a pattern hit says WHY (the contract string)', JSON.stringify(why));
   ok(typeof F.patternSummary(P([{ kind: 'title', value: 'GPU' }, { kind: 'from-address', value: '@corp.example' }])) === 'string', 'a pattern has a one-line summary for the chips');
 
-  const mk = (id, over = {}) => ({ principal: { kind: 'agent', id, name: id }, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 40, ...over });
-  const account = { ...mk('acct-agent'), scope: { kind: 'account', id: 'lark' } };
-  const p1 = { id: 'pa', createdAt: 100, pattern: P([{ kind: 'title', value: 'gpu' }]), ...mk('pat-agent-1'), scope: { kind: 'pattern', id: 'pa' } };
-  const p2 = { id: 'pb', createdAt: 50, pattern: P([{ kind: 'participant', value: 'ada' }]), ...mk('pat-agent-2'), scope: { kind: 'pattern', id: 'pb' } };
-  const conv = { ...mk('conv-agent'), scope: { kind: 'conversation', id: 'lark/c1' } };
-  // the THREE-GRAIN TABLE
+  // ── R4 (2026-09-27): ACCESS and WATCHERS — two lists per grain, access first ──
+  const ag = (id, name = id) => ({ kind: 'agent', id, name });
+  const WORK = { kind: 'group', id: 'tg-work', name: '工作' };
+  const acc = (p, authority = 'draft') => ({ principal: p, authority });
+  const wat = (p, over = {}) => ({ principal: p, notify: 'wake', mode: 'all', filterId: null, digestMinutes: 30, dailyWakeCap: 40, receiptWake: false, ...over });
+  const grain = (access = [], watchers = []) => ({ access, watchers });
+  const account = grain([acc(ag('A'), 'send'), acc(WORK)], [wat(ag('A'))]);
+  const p1 = { id: 'pa', createdAt: 100, pattern: P([{ kind: 'title', value: 'gpu' }]), ...grain([acc(ag('P1'))], [wat(ag('P1'), { notify: 'digest' })]) };
+  const p2 = { id: 'pb', createdAt: 50, pattern: P([{ kind: 'participant', value: 'ada' }]), ...grain([acc(ag('A'))], [wat(ag('A'), { mode: 'filtered', filterId: 'f-pb' })]) };
+  const conv = grain([acc(ag('B')), acc(ag('A'))], [wat(ag('B'))]);
+  const pk = (p) => `${p.kind}:${p.id}`;
+  const shape = (e) => e && { src: e.source, access: e.access.map((x) => `${pk(x.row.principal)}@${x.source}:${x.row.authority}`), watchers: e.watchers.map((x) => `${pk(x.watcher.principal)}@${x.source}${x.patternId ? '/' + x.patternId : ''}:${x.watcher.notify}${x.watcher.mode === 'filtered' ? '+f' : ''}`) };
+  // THE PER-PRINCIPAL TABLE — the finest grain NAMING a principal decides, per list
   const table = [
-    [{ conversation: conv, patterns: [p1, p2], account }, 'conversation', 'conv-agent'],
-    [{ conversation: null, patterns: [p1, p2], account }, 'pattern', 'pat-agent-2'],   // pb created FIRST
-    [{ conversation: null, patterns: [p1], account }, 'pattern', 'pat-agent-1'],
-    [{ conversation: null, patterns: [], account }, 'account', 'acct-agent'],
-    [{ conversation: null, patterns: [{ ...p1, pattern: P([{ kind: 'title', value: 'nothing-like-it' }]) }], account }, 'account', 'acct-agent'],
-    [{ conversation: null, patterns: [], account: null }, null, null],
+    ['every grain', { conversation: conv, patterns: [p1, p2], account }, { src: 'conversation',
+      access: ['agent:B@conversation:draft', 'agent:A@conversation:draft', 'agent:P1@pattern:draft', 'group:tg-work@account:draft'],
+      watchers: ['agent:B@conversation:wake', 'agent:A@pattern/pb:wake+f', 'agent:P1@pattern/pa:digest'] }],   // pb was created FIRST
+    ['no conversation grain', { conversation: null, patterns: [p1, p2], account }, { src: 'pattern',
+      access: ['agent:A@pattern:draft', 'agent:P1@pattern:draft', 'group:tg-work@account:draft'],
+      watchers: ['agent:A@pattern/pb:wake+f', 'agent:P1@pattern/pa:digest'] }],
+    ['only the account', { conversation: null, patterns: [], account }, { src: 'account',
+      access: ['agent:A@account:send', 'group:tg-work@account:draft'], watchers: ['agent:A@account:wake'] }],
+    ['a rule that does not match', { conversation: null, patterns: [{ ...p1, pattern: P([{ kind: 'title', value: 'nothing-like-it' }]) }], account }, { src: 'account',
+      access: ['agent:A@account:send', 'group:tg-work@account:draft'], watchers: ['agent:A@account:wake'] }],
+    ['nobody', { conversation: null, patterns: [], account: null }, null],
   ];
-  const TABLE_OK = (fn) => table.every(([inp, src, who]) => { const e = fn(inp, facts); return src === null ? e === null : !!e && e.source === src && e.assignment.principal.id === who; });
-  ok(TABLE_OK((inp, f) => F.effectiveAssignment(inp, f)), 'effectiveAssignment: conversation > pattern (first match in CREATION order) > account > none', JSON.stringify(table.map(([inp]) => { const e = F.effectiveAssignment(inp, facts); return e && [e.source, e.assignment.principal.id]; })));
-  const eff = F.effectiveAssignment({ conversation: null, patterns: [p1], account }, facts);
-  ok(eff.patternId === 'pa' && Array.isArray(eff.why) && eff.why.length, 'an inherited pattern assignment names its pattern and why it matched');
+  const tableFails = table.filter(([, inp, want]) => JSON.stringify(shape(F.effectiveGrants(inp, facts))) !== JSON.stringify(want));
+  ok(!tableFails.length, `effectiveGrants — PER PRINCIPAL the finest grain naming it decides (conversation > rule in CREATION order > account), separately for access and watchers (${table.length} rows)`, JSON.stringify(tableFails.map(([n, inp]) => [n, shape(F.effectiveGrants(inp, facts))])));
+  const e0 = F.effectiveGrants({ conversation: conv, patterns: [p1, p2], account }, facts);
+  ok(e0.access.find((x) => x.row.principal.id === 'A').row.authority === 'draft' && F.effectiveGrants({ conversation: null, patterns: [], account }, facts).access.find((x) => x.row.principal.id === 'A').row.authority === 'send', 'a finer ACCESS row decides the authority for that conversation only (A may send on the account, drafts on this conversation)');
+  ok(e0.watchers.some((x) => x.watcher.principal.id === 'A') && e0.watchers.some((x) => x.watcher.principal.id === 'B'), 'ANOTHER principal\'s rows never mask A\'s: B watching this conversation does not silence A\'s notification here');
+  ok(F.effectiveAccess({ account: grain([acc(WORK)], []) }, facts).length === 1 && F.effectiveWatchers({ account: grain([acc(WORK)], []) }, facts).length === 0, 'THE OWNER\'S CASE: group 工作 with access and NO notification — it may see and act, nobody is woken');
+  const eff = F.effectiveGrants({ conversation: null, patterns: [p1], account }, facts);
+  ok(eff.patternId === 'pa' && Array.isArray(eff.why) && eff.why.length && eff.watchers.find((x) => x.watcher.principal.id === 'P1').patternId === 'pa', 'an inherited rule\'s rows name their pattern and why it matched');
+  ok(F.rowNames(acc(WORK), { kind: 'agent', id: 'x', groups: ['tg-work'] }) && !F.rowNames(acc(WORK), { kind: 'agent', id: 'x', groups: [] }) && F.rowNames(acc(ag('A')), { kind: 'agent', id: 'A', groups: [] }), 'rowNames: a row names an agent itself, or a group the agent is in');
+  // validateAccess / validateWatchers — the two operations' own refusals
+  const caps = { offersSend: true, sendWhy: null, policyRequiresReview: false };
+  const VA = [
+    [[acc(ag('A'))], true, null],
+    [[acc(ag('A')), acc(ag('A'), 'send')], false, 'duplicate-principal'],
+    [[{ principal: { kind: 'robot', id: 'x' } }], false, 'bad-access'],
+    [[acc(ag('A'), 'root')], false, 'bad-access'],
+    [Array.from({ length: F.MAX_ACCESS_ROWS + 1 }, (_, i) => acc(ag(`a${i}`))), false, 'too-many-rows'],
+    ['nope', false, 'bad-access'],
+  ];
+  const vaFails = VA.filter(([list, okWant, code]) => { const v = F.validateAccess(list, caps); return v.ok !== okWant || (!okWant && v.code !== code); });
+  ok(!vaFails.length, `validateAccess: one row per principal, a closed authority, at most ${F.MAX_ACCESS_ROWS} rows — every refusal names its code (${VA.length} rows)`, JSON.stringify(vaFails.map(([l]) => F.validateAccess(l, caps))));
+  const capped = F.validateAccess([acc(ag('A'), 'send')], { offersSend: true, policyRequiresReview: true });
+  ok(!capped.ok && capped.code === 'authority-capped' && /review/.test(capped.error), '`send` on an access row is refused where the policy requires review (the cap is the ACCESS row\'s, not the watcher\'s)');
+  const granted = [acc(ag('A')), acc(WORK)];
+  const VW = [
+    [[wat(ag('A'))], true, null],
+    [[wat(ag('B'))], false, 'watcher-needs-access'],
+    [[wat(ag('A')), wat(ag('A'), { notify: 'digest' })], false, 'duplicate-principal'],
+    [[wat(ag('A'), { notify: 'read' })], false, 'bad-watcher'],
+    [[wat(ag('A'), { mode: 'filtered', filterId: null })], false, 'bad-watcher'],
+    [[wat(ag('A'), { dailyWakeCap: -1 })], false, 'bad-watcher'],
+  ];
+  const vwFails = VW.filter(([list, okWant, code]) => { const v = F.validateWatchers(list, granted); return v.ok !== okWant || (!okWant && v.code !== code); });
+  ok(!vwFails.length, `validateWatchers: a watcher REQUIRES access at its grain (watcher-needs-access, by name), one per principal, notify is wake|digest only (no 'read' mode) (${VW.length} rows)`, JSON.stringify(vwFails.map(([l]) => F.validateWatchers(l, granted))));
+  const vwNeed = F.validateWatchers([wat(ag('B', 'Beta'))], granted);
+  ok(/agent Beta has no access here — grant access first/.test(vwNeed.error) && vwNeed.principal.id === 'B' && vwNeed.index === 0, 'the refusal names the principal and says the order: grant access first', vwNeed.error);
+  ok(F.validateWatchers([wat(ag('A'), { mode: 'filtered', filterId: null })], granted).why === 'filter-missing' && F.validateWatchers([wat(ag('A'), { dailyWakeCap: -1 })], granted).why === 'wake-cap', 'a watcher refusal carries the field as a closed `why` (the hotfix\'s ASSIGN_REFUSALS codes)');
+  const vwB = F.validateWatchers([wat(ag('A'), { digestMinutes: 9999, dailyWakeCap: 9999 })], granted);
+  ok(vwB.ok && vwB.watchers[0].digestMinutes === F.MAX_DIGEST_MINUTES && vwB.watchers[0].dailyWakeCap === F.MAX_DAILY_WAKE_CAP, `the validator holds 9999 to its bounds (${F.MAX_DIGEST_MINUTES} min, ${F.MAX_DAILY_WAKE_CAP}/day) — the Notify dialog says so before saving`);
+  // the COMPATIBILITY write + the READER of a pre-split record + the migration's row transform
+  const legacy = { id: 'pa-1', adapterId: 'lark', scope: { kind: 'pattern', id: 'pa-1' }, pattern: P([{ kind: 'title', value: 'gpu' }]), createdAt: 5, principal: ag('A', 'Alpha'), mode: 'filtered', filterId: 'f-pattern-pa-1', notify: 'digest', digestMinutes: 60, authority: 'send', dailyWakeCap: 9, receiptWake: true, stats: { wakes: [{ at: 1 }], hits: [] } };
+  const sp = F.splitAssignment(legacy);
+  ok(sp.access.authority === 'send' && sp.watcher.notify === 'digest' && sp.watcher.mode === 'filtered' && sp.watcher.filterId === 'f-pattern-pa-1' && sp.watcher.dailyWakeCap === 9 && sp.watcher.receiptWake === true && sp.watcher.stats.wakes.length === 1 && !('authority' in sp.watcher), 'splitAssignment: ONE access row (the authority) + ONE watcher row (notify / filter / window / cap / receipt + the pace ledger) — never an authority on a watcher');
+  const lf = F.liftGrainRecord(legacy);
+  ok(lf.changed && !('principal' in lf.rec) && !('stats' in lf.rec) && lf.rec.pattern && lf.rec.createdAt === 5 && lf.rec.access.length === 1 && lf.rec.watchers.length === 1 && lf.rec.watchers[0].stats.wakes.length === 1, 'liftGrainRecord (the migration\'s row transform): the pre-split fields move into the two lists; the grain\'s own fields (pattern, createdAt) stay');
+  ok(!F.liftGrainRecord(lf.rec).changed && JSON.stringify(F.liftGrainRecord(lf.rec).rec) === JSON.stringify(lf.rec), 'idempotent: a lifted record is left as it is');
+  const acctLegacy = { adapterId: 'lark', scope: { kind: 'account', id: 'lark' }, principal: WORK, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 40 };
+  ok(F.liftGrainRecord(acctLegacy).rec.access[0].principal.id === 'tg-work' && F.liftGrainRecord(acctLegacy).rec.watchers[0].notify === 'wake', 'the ACCOUNT legacy shape lifts the same way');
+  const merged = F.grainOf({ access: [acc(ag('B'))], watchers: [] }, { principal: ag('A'), mode: 'all', notify: 'wake', authority: 'draft' });
+  ok(merged.access.map((r) => r.principal.id).join() === 'B,A' && merged.watchers.map((w) => w.principal.id).join() === 'A', 'grainOf MERGES a conversation\'s pre-split `assignment` with the lists already there (never a fallback that hides one)');
+  const notDoubled = F.grainOf({ access: [acc(ag('A'), 'send')], watchers: [wat(ag('A'), { notify: 'digest' })] }, { principal: ag('A'), notify: 'wake', authority: 'draft' });
+  ok(notDoubled.access.length === 1 && notDoubled.access[0].authority === 'send' && notDoubled.watchers.length === 1 && notDoubled.watchers[0].notify === 'digest', '…and a principal the lists already name is never doubled (the list wins)');
+  // the NOTIFY dialog's total: every watcher its own ceiling, summed
+  ok(F.expectedWakesTotal([{ notify: 'wake', matchedPerDay: 120, dailyWakeCap: 40 }, { notify: 'digest', digestMinutes: 120, matchedPerDay: 5, dailyWakeCap: 40 }]) === 52 && F.expectedWakesPerDay({ notify: 'access', matchedPerDay: 99 }) === 0, 'expectedWakesTotal sums each watcher\'s own ceiling (40 + 12); anything but a watcher is never woken (0)');
+  // two woken agents are told about each other
+  const w2 = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], others: [{ name: 'Beta', notify: 'digest', authority: 'draft' }, { name: '工作', notify: null, authority: 'send' }] });
+  ok(/^also on this conversation: Beta \(digest, drafts\), 工作 \(access only, may send\)$/m.test(w2), 'a wake block names the OTHER principals on the conversation (watching or access only)', w2.split('\n')[1]);
+  const w1 = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }] });
+  ok(w1 === F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], others: [] }) && !/also on this/.test(w1), '…and a block with nobody else is byte-identical to before');
   ok(F.ASSIGN_SCOPES.join() === 'conversation,pattern,account', 'the scope kinds are declared', String(F.ASSIGN_SCOPES));
+  const mk = (id, over = {}) => ({ principal: { kind: 'agent', id, name: id }, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 40, ...over });
   const vs = F.validateAssignment({ ...mk('x'), scope: { kind: 'account', id: 'gmail:0000abcd' } });
-  ok(vs.ok && vs.assignment.scope && vs.assignment.scope.kind === 'account' && vs.assignment.scope.id === 'gmail:0000abcd', 'validateAssignment keeps a declared scope (the account id is the scope id)');
+  ok(vs.ok && vs.assignment.scope && vs.assignment.scope.kind === 'account' && vs.assignment.scope.id === 'gmail:0000abcd', 'validateAssignment (the compatibility write) keeps a declared scope (the account id is the scope id)');
   ok(!F.validateAssignment({ ...mk('x'), scope: { kind: 'channel', id: 'y' } }).ok, 'an unknown scope kind is refused');
   // the expected wake rate the editor shows before saving (pacing folded in)
   ok(F.expectedWakesPerDay({ notify: 'wake', matchedPerDay: 120, dailyWakeCap: 40 }) === 40 && F.expectedWakesPerDay({ notify: 'digest', digestMinutes: 30, matchedPerDay: 120, dailyWakeCap: 40 }) === 40 && F.expectedWakesPerDay({ notify: 'digest', digestMinutes: 120, matchedPerDay: 120, dailyWakeCap: 40 }) === 12 && F.expectedWakesPerDay({ notify: 'wake', matchedPerDay: 3.5, dailyWakeCap: 40 }) === 3.5, 'expected wakes/day = min(matched, digest windows, the cap)');
@@ -242,13 +310,14 @@ console.log('⑧ three-grain assignment + conversation patterns');
   ok(Buffer.byteLength(sd) <= F.BLOCK_MAX_BYTES && /more conversations elided/.test(sd), `the scope digest stays under ${F.BLOCK_MAX_BYTES} bytes and says what it elided (${Buffer.byteLength(sd)})`);
   ok(!carriesFrame(sd), 'the scope digest is frame-inert (a hostile room title)');
   const wb = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], inherited: { kind: 'account' } });
-  ok(/^### Channel message — Lark · Ops \(you are assigned the whole account\)/.test(wb), 'an inherited wake says why it is here (account)', wb.split('\n')[0]);
+  ok(/^### Channel message — Lark · Ops \(you are watching the whole account\)/.test(wb), 'an inherited wake says why it is here (account)', wb.split('\n')[0]);
   const wp = F.renderWakeBlock({ adapterLabel: 'Lark', title: 'Ops', convId: 'c', hits: [{ record: rec(1), why: [] }], inherited: { kind: 'pattern', label: 'title contains "gpu"' } });
-  ok(/\(you are assigned by a rule: title contains "gpu"\)/.test(wp), '…and a rule names its summary', wp.split('\n')[0]);
+  ok(/\(you are watching by a rule: title contains "gpu"\)/.test(wp), '…and a rule names its summary', wp.split('\n')[0]);
 }
 
-// ── ⑨ NEGATIVE CONTROL: a patched copy with the precedence REVERSED goes red ──
-console.log('⑨ control: an account-over-conversation precedence is caught');
+// ── ⑨ NEGATIVE CONTROLS: a patched copy with the precedence REVERSED, and one
+//     with the pre-R4 WHOLESALE override, each go red ──
+console.log('⑨ controls: account-over-conversation precedence; a finer grain silencing another principal');
 {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const fs = await import('node:fs');
@@ -256,13 +325,42 @@ console.log('⑨ control: an account-over-conversation precedence is caught');
   const src = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
   const marker = '/* PRECEDENCE: conversation > pattern > account */';
   ok(src.includes(marker), 'the precedence line carries its marker (the control patches exactly it)');
-  const bad = M.load('src/channel-filter.js', src.replace(marker, marker + ' if (account && account.principal) return { assignment: account, source: \'account\', patternId: null, why: [] };'), 'reversed');
+  const bad = M.load('src/channel-filter.js', src.replace(marker, marker + " if (account) { const g0 = grainOf(account); if (g0.access.length) return { access: g0.access.map((row) => ({ row, source: 'account', patternId: null, why: [] })), watchers: g0.watchers.map((watcher) => ({ watcher, source: 'account', patternId: null, why: [] })), source: 'account', patternId: null, why: [] }; }"), 'reversed');
   const facts = { title: 't', participants: '', kind: 'group', authors: [] };
-  const acc = { principal: { kind: 'agent', id: 'A' }, mode: 'all', scope: { kind: 'account', id: 'x' } };
-  const cv = { principal: { kind: 'agent', id: 'C' }, mode: 'all', scope: { kind: 'conversation', id: 'x/c' } };
-  const good = F.effectiveAssignment({ conversation: cv, patterns: [], account: acc }, facts);
-  const mut = bad.effectiveAssignment({ conversation: cv, patterns: [], account: acc }, facts);
-  ok(good.source === 'conversation' && mut.source === 'account', 'CONTROL: the reversed copy answers account where the real module answers conversation', JSON.stringify([good.source, mut.source]));
+  const accG = { access: [{ principal: { kind: 'agent', id: 'A' }, authority: 'send' }], watchers: [{ principal: { kind: 'agent', id: 'A' }, notify: 'wake', mode: 'all' }] };
+  const cvG = { access: [{ principal: { kind: 'agent', id: 'A' }, authority: 'draft' }, { principal: { kind: 'agent', id: 'C' }, authority: 'draft' }], watchers: [{ principal: { kind: 'agent', id: 'C' }, notify: 'wake', mode: 'all' }] };
+  const good = F.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts);
+  const mut = bad.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts);
+  ok(good.source === 'conversation' && good.access.find((x) => x.row.principal.id === 'A').row.authority === 'draft' && mut.source === 'account' && mut.access.find((x) => x.row.principal.id === 'A').row.authority === 'send', 'CONTROL: the reversed copy lets the account decide A\'s authority on a conversation that narrowed it — the table above would go red', JSON.stringify([good.source, mut.source]));
+  // the pre-R4 law: the FIRST grain holding a watcher took over wholesale — C's
+  // conversation watcher would silence A's account-wide notification
+  const LINE = '      if (seenW.has(k)) continue;';
+  ok(src.split(LINE).length === 2, 'the per-principal watcher line is present once (the second control patches exactly it)');
+  const whole = M.load('src/channel-filter.js', src.replace(LINE, '      if (seenW.has(k) || (watchers.length && watchers[0].source !== gr.source)) continue;'), 'wholesale');
+  const gW = F.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts).watchers.map((x) => x.watcher.principal.id).sort().join();
+  const mW = whole.effectiveGrants({ conversation: cvG, patterns: [], account: accG }, facts).watchers.map((x) => x.watcher.principal.id).sort().join();
+  ok(gW === 'A,C' && mW === 'C', `CONTROL: the wholesale copy wakes only C where the real module wakes A and C (${gW} vs ${mW}) — "another principal's rows never mask A's" would go red`);
+}
+
+console.log('⑩ R4 verify r2: the store invariant holds at READ — a watcher without an access row at its grain is inert');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const fs = await import('node:fs');
+  const M = mutantCopies('chan-filter-r2', REPO);
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const ag = (id) => ({ kind: 'agent', id, name: id });
+  // the shape a hand edit (or a copy of a store from another version) can leave: B watches, B has no access here
+  const orphan = { access: [{ principal: ag('A'), authority: 'draft' }], watchers: [{ principal: ag('A'), notify: 'wake', mode: 'all' }, { principal: ag('B'), notify: 'wake', mode: 'all' }] };
+  const g = F.grainOf(orphan);
+  ok(g.access.length === 1 && g.watchers.length === 1 && g.watchers[0].principal.id === 'A', 'grainOf drops a watcher whose principal holds no access row at this grain (B is inert)');
+  ok(F.effectiveGrants({ conversation: orphan, patterns: [], account: null }, {}).watchers.map((x) => x.watcher.principal.id).join() === 'A', 'effectiveGrants never wakes the orphan');
+  const legacyOK = F.grainOf({ access: [], watchers: [] }, { principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft' });
+  ok(legacyOK.access.length === 1 && legacyOK.watchers.length === 1, 'a pre-split assignment (access + watcher for one principal) still lifts whole');
+  ok(F.liftGrainRecord({ principal: ag('L'), mode: 'all', notify: 'wake', authority: 'draft', watchers: [{ principal: ag('B'), notify: 'wake', mode: 'all' }] }).rec.watchers.map((w) => w.principal.id).join() === 'L', 'liftGrainRecord (the migration) repairs the orphan on its way through');
+  const LINE = '  return { access, watchers: watchers.filter((w) => granted.has(principalKey(w.principal))) };';
+  ok(src.split(LINE).length === 2, 'the read-time filter line is present once (the control patches exactly it)');
+  const bad = M.load('src/channel-filter.js', src.replace(LINE, '  return { access, watchers };'), 'orphan-honoured');
+  ok(bad.grainOf(orphan).watchers.length === 2, 'CONTROL: a copy without the filter honours the orphan watcher — the leg above would go red');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -275,6 +275,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     console.log(`[session] exited ${id} "${session.name || ''}" mode=${session.mode} backend=${session.backend || 'claude'}${childCode != null ? ' code=' + childCode : ''}${exitReason ? ' reason=' + exitReason : ''}${facts.suffix}`);
     global.__vsEvent?.('session-exited', `${session.mode}/${session.backend || 'claude'}${childCode != null ? '/code=' + childCode : ''}${exitReason ? '/' + exitReason : ''}${facts.eventSuffix}`);
     broadcastToSession(session, id, { type: 'exited', sessionId: id, reason: exitReason, detail: death?.detail, ...(facts.signal ? { signal: facts.signal } : {}) });
+    try { require('./helper-asks').forget(session); } catch { } // lane S1 verify r1: a dead parent's helper asks wait for nobody — timers cleared, For-you items resolved
     activeSessions.delete(id);
     if (cleanupOnExit && session.sockName) deleteSessionMeta(session.sockName);
     // Buffer + wrapper-meta files are only meaningful while the dtach session

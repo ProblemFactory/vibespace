@@ -890,7 +890,11 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     // ONE answer path: the ws permission-response case and the sweep share answerPermission; nothing else formats + writes
     const wsSrc = src('src/ws-handler.js');
     const caseBody = wsSrc.slice(wsSrc.indexOf("case 'permission-response': {"), wsSrc.indexOf("case 'set-goal': {"));
-    ok(/answerPermission\(activeSessions\.get\(data\.sessionId\), \{ \.\.\.data, denyMessage: undefined \}, \{ adapterRegistry, feedLive \}\)/.test(caseBody) && !/formatPermissionResponse/.test(caseBody), 'the ws permission-response case answers through THE one permission answer (src/server/permission-answer.js), and a CLIENT cannot name the deny\'s words (denyMessage is the server\'s: no client paints a card stale)');
+    // lane S1 verify r3: the ws case is ONE lookup into the ask's transition table (helper-asks.answerFrame), which alone calls THE one
+    // permission answer — and strips a CLIENT frame's denyMessage (only the server-side sweep passes `serverDeny`)
+    ok(/require\('\.\/server\/helper-asks'\)\.answerFrame\(data, \{ activeSessions, adapterRegistry, feedLive \}\)/.test(caseBody) && !/formatPermissionResponse|answerPermission\(/.test(caseBody) && !/denyMessage/.test(caseBody.replace(/^\s*\/\/.*$/gm, ''))
+      && /answerPermission\(target\.session, serverDeny \? \{ \.\.\.data \} : \{ \.\.\.data, denyMessage: undefined \}, \{ adapterRegistry, feedLive \}\)/.test(src('src/server/helper-asks.js')),
+      'the ws permission-response case answers through THE one permission answer (src/server/permission-answer.js, behind the ask table\'s lookup), and a CLIENT cannot name the deny\'s words (denyMessage is the server\'s: no client paints a card stale)');
     const rUser = JSON.parse(reg.get('claude').formatPermissionResponse({ requestId: 'r1', approved: false, denyMessage: undefined }));
     ok(rUser.response.response.message === 'User denied this action' && T.staleFromDenyMessage(rUser.response.response.message) === null, '…so a user\'s own Deny is the CLI\'s familiar sentence, never read back as stale');
     const callers = [];
@@ -898,8 +902,10 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     walk('src');
     const allowed0 = ['src/server/permission-answer.js', 'src/adapters/base.js', 'src/adapters/claude-code.js', 'src/adapters/codex.js', 'src/adapters/acp.js', 'src/adapters/shell.js'];
     ok(callers.includes('src/server/permission-answer.js') && callers.every((f) => allowed0.includes(f)), `census: formatPermissionResponse is called ONLY by the one answer (+ the adapters that define it): ${callers.join(', ')}`);
-    ok(/approvals: \(\(\) => \{[\s\S]{0,400}answerPermission\(session, data, \{ adapterRegistry, feedLive: N\.feedLive \}\)/.test(src('src/server/mounts-plugins-wiring.js')) && /activeSessions, adapterRegistry,\n\}\);/.test(src('server.js')),
-      'WIRING PIN: the announcer is handed the approvals seam over the one answer, and server.js hands the wiring the adapter registry');
+    // lane S1 verify r3: the seam's deny is a LOOKUP into the ask's transition table (helper-asks.answerFrame, serverDeny keeps
+    // the sweep's browser_paused words) — the one answer is still the only writer (the census above)
+    ok(/approvals: \(\(\) => \{[\s\S]{0,900}HA\.answerFrame\(\{ \.\.\.data, sessionId \}, \{ activeSessions, adapterRegistry, feedLive: N\.feedLive \}, \{ serverDeny: true \}\)/.test(src('src/server/mounts-plugins-wiring.js')) && /activeSessions, adapterRegistry,\n\}\);/.test(src('server.js')),
+      'WIRING PIN: the announcer is handed the approvals seam over the one answer (through the ask table\'s lookup, verify r3), and server.js hands the wiring the adapter registry');
   }
 }
 

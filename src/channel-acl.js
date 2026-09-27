@@ -6,7 +6,7 @@
  *
  *  level : 'hidden' < 'requestable' < 'visible'
  *  grant : { principal:{kind:'agent'|'group', id}, scope:{kind:'conversation'|'adapter', id},
- *            level, origin:'user'|'assignment'|'request', at, by }
+ *            level, origin:'user'|'access'|'request' (| legacy 'assignment'), at, by }
  *
  *  · EVERYTHING DEFAULTS TO `hidden`. There is no "inherit from the platform":
  *    a platform's own ACL says what a USER may see, never what an AGENT may.
@@ -20,10 +20,12 @@
  *    touches no group default.
  *  · `hidden` is total: not listed, not searchable, not addressable — an id
  *    obtained elsewhere gets the SAME uniform error as a nonexistent one.
- *  · `origin` is the ONE reason the machine ever deletes a grant: unassign
- *    removes only the assignment's own row; a request approval is
- *    distinguishable from a hand-written grant; the panel can say WHY a
- *    principal sees something.
+ *  · `origin` is the ONE reason the machine ever deletes a grant: removing
+ *    an ACCESS row (R4, 2026-09-27 — the owner's "Grant access…", the first
+ *    of the two operations) removes only its own `access` row; a request
+ *    approval is distinguishable from a hand-written grant; the panel can
+ *    say WHY a principal sees something. `assignment` is the pre-R4 name of
+ *    `access` — still honoured as a row, renamed by the migration.
  *
  *  THE BUILT-IN AGENTS ADAPTER answers reach with msg-acl, not with this
  *  module (§12.3 — that question already has an answer inside); `fromMsgLevel`
@@ -33,7 +35,7 @@ const msgAcl = require('./msg-acl.js');
 
 const LEVELS = Object.freeze(['hidden', 'requestable', 'visible']);
 const RANK = Object.freeze({ hidden: 0, requestable: 1, visible: 2 });
-const GRANT_ORIGINS = Object.freeze(['user', 'assignment', 'request']);
+const GRANT_ORIGINS = Object.freeze(['user', 'access', 'request', 'assignment']);
 const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
 const SCOPE_KINDS = Object.freeze(['conversation', 'adapter']);
 // The two ladders share a SHAPE (three ranked levels, MAX-combined, widen
@@ -137,20 +139,21 @@ function approveRequest(grants, { principal, scope, at, by = 'user' }) {
   return { grants: applyGrant(grants, grant), grant: validateGrant(grant).grant };
 }
 
-/** THE ACCOUNT GRANT an account-grain assignment implies (2026-09-26, §7.3):
- *  ONE `scope:{kind:'adapter', id:<adapterId>}` row, origin `assignment` —
- *  the adapter id IS the account id, so two accounts of one kind never mix,
- *  and un-assigning removes exactly this row (`removeGrant` by origin). */
+/** THE ACCOUNT GRANT an ACCESS row on the whole account implies (§7.3, R4):
+ *  ONE `scope:{kind:'adapter', id:<adapterId>}` row PER PRINCIPAL, origin
+ *  `access` — the adapter id IS the account id, so two accounts of one kind
+ *  never mix, and removing that principal's access removes exactly its row
+ *  (`removeGrant` by principal + origin). */
 function accountGrant({ principal, adapterId, at = null, by = 'user' } = {}) {
-  const v = validateGrant({ principal, scope: { kind: 'adapter', id: adapterId }, level: 'visible', origin: 'assignment', at, by });
+  const v = validateGrant({ principal, scope: { kind: 'adapter', id: adapterId }, level: 'visible', origin: 'access', at, by });
   if (!v.ok) throw new Error(`channel-acl.accountGrant: ${v.error}`);
   return v.grant;
 }
-/** THE GRANT a PATTERN assignment implies on ONE matching conversation —
+/** THE GRANT a rule's ACCESS row implies on ONE matching conversation —
  *  DERIVED at read time and never stored (so editing or removing the rule
  *  takes effect at once, with no rows to clean up); it names its pattern. */
 function patternGrant({ principal, key, patternId }) {
-  const v = validateGrant({ principal, scope: { kind: 'conversation', id: key }, level: 'visible', origin: 'assignment' });
+  const v = validateGrant({ principal, scope: { kind: 'conversation', id: key }, level: 'visible', origin: 'access' });
   if (!v.ok) throw new Error(`channel-acl.patternGrant: ${v.error}`);
   return { ...v.grant, pattern: String(patternId || '') || null, derived: true };
 }

@@ -191,12 +191,56 @@ router.post('/api/channels/adapters/:id/disconnect', async (req, res) => {
  *  closed refusal code) and `rule` (the refused rule's kind) are what the
  *  client words the refusal with (channel-words' routeErrorText) — the
  *  English `error` stays the contract, never the toast. */
+/** R4: the refusal codes of the two operations (access / notification) —
+ *  400 unless named otherwise; `principal` + `index` name the refused row. */
+const GRAIN_400 = ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filter', 'bad-request', 'bad-access', 'bad-watcher', 'duplicate-principal', 'watcher-needs-access', 'too-many-rows', 'bad-policy'];
 function scopeAnswer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filter', 'bad-request'].includes(code) ? 400 : 500;
-  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}) });
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : GRAIN_400.includes(code) ? 400 : 500;
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}), ...(r && r.principal ? { principal: r.principal } : {}), ...(r && r.index !== undefined ? { index: r.index } : {}) });
 }
+// ── R4 (2026-09-27): TWO OPERATIONS PER GRAIN, ACCESS FIRST ─────────────
+// `PUT …/access {access:[{principal, authority}]}` — GRANT ACCESS (who may
+// see and act); `PUT …/watchers {watchers:[{principal, notify, mode, filter?
+// | filterId, digestMinutes, dailyWakeCap, receiptWake}]}` — NOTIFY (who is
+// woken); a watcher whose principal holds no access at that grain is
+// refused `watcher-needs-access`. The account grain is `adapters/:id/…`, a
+// rule `adapters/:id/patterns/:pid/…` (a NEW rule: `POST …/patterns
+// {pattern, access[, watchers]}`), a conversation `/:adapterId/:convId/…`.
+const listOf = (b, key) => (b && Object.prototype.hasOwnProperty.call(b, key) ? b[key] : undefined);
+router.put('/api/channels/adapters/:id/access', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'access');
+    if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
+    scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list));
+  } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'watchers');
+    if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list));
+  } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'access');
+    if (list === undefined) return bad(res, 400, 'access is required', { code: 'bad-request' });
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}) }));
+  } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'watchers');
+    if (list === undefined) return bad(res, 400, 'watchers is required', { code: 'bad-request' });
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list));
+  } catch (e) { fail(res, e); }
+});
 /** THE ACCOUNT GRAIN — `{assignment}` or `{assignment:null}`; the filter
  *  rides inside (`assignment.filter`). */
 router.put('/api/channels/adapters/:id/assignment', async (req, res) => {
@@ -210,22 +254,27 @@ router.put('/api/channels/adapters/:id/assignment', async (req, res) => {
 /** THE PATTERN GRAIN — create (`POST`), replace (`PUT …/:pid`), remove
  *  (`DELETE …/:pid`); `assignment.pattern` = `{match, rules[]}` over
  *  conversation facts (title / participant / from-address / kind). */
+// R4: `{pattern, access[, watchers]}` = the rule + its two lists; the
+// pre-split `{assignment}` body is the COMPATIBILITY write (one access row +
+// one watcher row).
 router.post('/api/channels/adapters/:id/patterns', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern' }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+    if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern' }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern' }, { pattern: b.pattern, access: b.access === undefined ? [] : b.access, ...(b.watchers !== undefined ? { watchers: b.watchers } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+    if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.delete('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
-  try { forHost(req); scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, null)); } catch (e) { fail(res, e); }
+  try { forHost(req); scopeAnswer(res, await engine().removePattern(req.params.id, req.params.pid)); } catch (e) { fail(res, e); }
 });
 /** THE HONEST ESTIMATE over a scope, BEFORE saving: `{scope:{kind:'account'|
  *  'pattern'}, pattern?, filter?, notify?, digestMinutes?, dailyWakeCap?}` →
@@ -234,7 +283,7 @@ router.post('/api/channels/adapters/:id/estimate', (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    scopeAnswer(res, engine().estimateScope(req.params.id, b.scope || { kind: 'account' }, { filter: b.filter === undefined ? null : b.filter, pattern: b.pattern || null, notify: b.notify || 'wake', digestMinutes: b.digestMinutes, dailyWakeCap: b.dailyWakeCap }));
+    scopeAnswer(res, engine().estimateScope(req.params.id, b.scope || { kind: 'account' }, { filter: b.filter === undefined ? null : b.filter, pattern: b.pattern || null, notify: b.notify || 'wake', digestMinutes: b.digestMinutes, dailyWakeCap: b.dailyWakeCap, principal: b.principal || null }));
   } catch (e) { fail(res, e); }
 });
 
@@ -254,6 +303,9 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     // P4 (§9.5): the per-channel sender honesty switch — true / false / null
     // (= follow the instance setting `channels.senderHonestyLine`).
     if (b.senderHonestyLine !== undefined) out = { ...out, ...(await engine().setSenderHonesty(req.params.id, b.senderHonestyLine)) };
+    // R4 (B-6acc): the ACCOUNT's sending policy — 'direct' | 'review' | null
+    // (= the adapter's default); what a composed NEW message reads
+    if (b.policy !== undefined) { const pr = await engine().setAccountPolicy(req.params.id, b.policy); if (!pr.ok) return scopeAnswer(res, pr); out = { ...out, ...pr }; }
     // r4 (the Edit dialog's in-place saves): the account's name, and a custom
     // client's SECRET for the SAME id (another id / a preset = a client
     // switch = `409 client-change-needs-reauth`: use Re-authorize)
@@ -412,8 +464,8 @@ router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) =
 function answer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : code === 'no-such-filter' || code === 'filter-in-use' || code === 'bad-filter' || code === 'bad-assignment' ? 400 : 500;
-  return res.status(status).json({ error: (r && r.error) || 'refused', code });
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : code === 'filter-in-use' || GRAIN_400.includes(code) ? 400 : 500;
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}), ...(r && r.principal ? { principal: r.principal } : {}), ...(r && r.index !== undefined ? { index: r.index } : {}) });
 }
 
 /** ASSIGN — `{assignment}` (§7.3) or `{assignment:null}` to unassign.
@@ -426,6 +478,24 @@ router.put('/api/channels/:adapterId/:convId/assignment', async (req, res) => {
     if (!('assignment' in b)) return bad(res, 400, 'assignment is required (an object, or null to unassign)', { code: 'bad-request' });
     const input = b.assignment === null ? null : { ...(b.assignment && typeof b.assignment === 'object' ? b.assignment : {}), estimateAtSet: b.estimateAtSet || (b.assignment && b.assignment.estimateAtSet) || null };
     answer(res, await engine().setAssignment(req.params.adapterId, req.params.convId, input));
+  } catch (e) { fail(res, e); }
+});
+/** R4: GRANT ACCESS / NOTIFY on ONE conversation — the same two operations
+ *  as the account and a rule (`{access:[…]}` / `{watchers:[…]}`). */
+router.put('/api/channels/:adapterId/:convId/access', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'access');
+    if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
+    answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list));
+  } catch (e) { fail(res, e); }
+});
+router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
+  try {
+    forHost(req);
+    const list = listOf(req.body, 'watchers');
+    if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
+    answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list));
   } catch (e) { fail(res, e); }
 });
 /** FILTER — `{filter:{match, rules[]}}` or `{filter:null}`; `estimate` may

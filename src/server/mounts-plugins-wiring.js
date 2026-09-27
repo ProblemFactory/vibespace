@@ -759,10 +759,14 @@ function createSessionMessages(session, sessionId) {
         // lane J r2: pending approvals for a browser page command go STALE at the takeover / handback (answered browser_paused through THE one permission answer)
         approvals: (() => {
           const N = require('../normalizers');
-          const { answerPermission } = require('./permission-answer');
+          // lane S1 verify r3: the sweep's deny is a LOOKUP into the ask's transition table like every other
+          // answer (helper-asks.answerFrame → answerVerdict → THE one permission answer); r4: `pendingHelpers`
+          // = the helpers' asks too (judged by the browser THEIR commands land on — browser-handback)
+          const HA = require('./helper-asks');
           return {
             pending: (session) => N.pendingPermissions(session),
-            answer: (_sessionId, session, data) => answerPermission(session, data, { adapterRegistry, feedLive: N.feedLive }),
+            pendingHelpers: (session) => N.pendingHelperApprovals(session),
+            answer: (sessionId, _session, data) => HA.answerFrame({ ...data, sessionId }, { activeSessions, adapterRegistry, feedLive: N.feedLive }, { serverDeny: true }),
             note: (session, requestId, staleBy) => N.notePermissionStale(session, requestId, staleBy),
           };
         })(),

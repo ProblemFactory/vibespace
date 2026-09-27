@@ -20,6 +20,8 @@ const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offe
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
 const { unknownFields: shapeUnknownFields, carrierOf: shapeCarrierOf, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
+const { helperAskOf, askRecordOf, askState, pendingAsksOf, asksSignature, askTransition, isWaiting, ASK_INITIAL, ASK_RECORD_EVENTS, RESULT_EVENT_OF, isUnknownOutcome } = require('./helper-ask.js'); // PURE (lane S1): a helper's permission ask — the parent's card, its view, the waiting chip
+const { permissionOutcome, outcomeHead } = require('./permission-outcome.js'); // PURE (lane S1 verify r5): the CENSUS of the CLI's own permission-outcome sentences — the ONE reader of a tool_result's word
 
 // System subtypes _processSystem actually renders/consumes — anything else
 // trips the unhandled-subtype breadcrumb (2.227.5). Keep in sync when adding
@@ -262,6 +264,10 @@ class MessageManager {
     this.turnIndex = 0;
     this.listeners = [];
     this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
+    // A HELPER's own view (`sub-<tool_use_id>` / `sub-agent-<id>`, lane S1): its
+    // asks attach to its own tool cards; the PARENT's normalizer instead hangs a
+    // helper's ask on the helper's Agent card (the helper's tool is never here).
+    this._subView = /^sub-/.test(String(sessionId || ''));
   }
 
   _notePeerMsgId(id) {
@@ -350,7 +356,182 @@ class MessageManager {
 
   onOp(fn) { this.listeners.push(fn); }
   offOp(fn) { const i = this.listeners.indexOf(fn); if (i >= 0) this.listeners.splice(i, 1); }
-  _emit(op) { for (const fn of this.listeners) fn(op); }
+  _emit(op) {
+    for (const fn of this.listeners) fn(op);
+    // THE PENDING-ASKS LEVEL (lane S1): an edit that can open or settle an ask
+    // (a permission, a helper's ask, the helper's own lifecycle — a stopped
+    // helper's ask is no longer waiting) re-derives the list the waiting chip
+    // and the For-you inbox read; ONE meta op per change, never per record.
+    if (op && op.op === 'edit' && op.fields && (op.fields.permission || op.fields.helperAsks || op.fields.taskInfo)) this._syncPendingAsks();
+  }
+
+  /** EVERY ask the user can answer here, oldest first (src/helper-ask.js
+   *  pendingAsksOf over the cards that ever carried one — `msgIndex` = the
+   *  index the chat window pages by). */
+  pendingAsks() {
+    const ids = this._askIds;
+    if (!ids || !ids.size) return [];
+    const cards = [];
+    for (const id of ids) { const m = this.messageIndex.get(id); if (m) cards.push(m); }
+    return pendingAsksOf(cards, { indexOf: (m) => this.messages.indexOf(m) });
+  }
+
+  /** How many times the pending set changed (the server's inbox observer compares it). */
+  get pendingAsksVersion() { return this._asksVer || 0; }
+
+  _syncPendingAsks() {
+    const list = this.pendingAsks();
+    const sig = asksSignature(list);
+    if (sig === this._asksSig) return;
+    this._asksSig = sig;
+    this._asksVer = (this._asksVer || 0) + 1;
+    const op = { op: 'meta', subtype: 'pending-asks', data: { asks: list } };
+    for (const fn of this.listeners) fn(op);
+  }
+
+  /** A REBUILD ends here (normalizers.rebuildHistory, lane S1 verify r4): the rebuilt list's
+   *  signature becomes the one the clients hold (the attach payload carries `pendingAsks`),
+   *  so the first live edit after a restart announces only a CHANGE — before, the first
+   *  lifecycle edit re-stated an unchanged (often empty) set as a fresh pending-asks op. */
+  sealPendingAsks() {
+    this._asksSig = asksSignature(this.pendingAsks());
+    // verify r5: the unknown-sentence heads a rebuild stashed — raised only where a card still reads unknown
+    const st = this._outcomeDriftStash; this._outcomeDriftStash = null;
+    if (st) for (const head of st) if (this._unknownOutcomeStillHeld(head)) this._raiseOutcomeDrift(head, false);
+  }
+
+  /** The persisted first-seen instants of the session's waiting helper asks
+   *  (session-meta `helperAskedAt`, verify r3) — a rebuilt ask is stamped with
+   *  its REAL arrival so the 60 s For-you clock does not restart with the server. */
+  setHelperAskedAt(map) { this._askedAt = map && typeof map === 'object' ? map : null; }
+
+  /** A helper's ask by request id → {ask, card} (the server routes the answer
+   *  and the helper's own view by it). */
+  helperAskById(requestId) {
+    if (requestId == null || !this._askIds) return null;
+    const rid = String(requestId);
+    for (const id of this._askIds) {
+      const m = this.messageIndex.get(id);
+      const a = m && Array.isArray(m.helperAsks) ? m.helperAsks.find((x) => x.requestId === rid) : null;
+      if (a) return { ask: a, card: m };
+    }
+    return null;
+  }
+
+  /** The parent's Agent call a helper runs under (its card's toolCallId), or null. */
+  helperCallOf(agentId) {
+    const card = agentId != null ? this._taskMsgFor(null, agentId) : null;
+    return card ? (card.toolCallId || null) : null;
+  }
+
+  /** The unanswered asks of ONE helper (by the parent's Agent call), as the raw
+   *  records its own view is fed when it is created after them. */
+  helperAskRecordsFor(parentToolUseId) {
+    const out = [];
+    if (!parentToolUseId || !this._askIds) return out;
+    for (const id of this._askIds) {
+      const m = this.messageIndex.get(id);
+      if (!m || m.toolCallId !== parentToolUseId || !Array.isArray(m.helperAsks)) continue;
+      for (const a of m.helperAsks) if (isWaiting(askState(a, m))) { const r = askRecordOf(a); if (r) out.push(r); } // never an ask whose helper is over (a button nobody can answer)
+    }
+    return out;
+  }
+
+  /** A helper's ask reached the PARENT's normalizer: hang it on the helper's
+   *  Agent card, or hold it until that card learns the helper's id (a rebuild
+   *  replays the task records AFTER the transcript, so a foreground helper's
+   *  card has no id yet when its ask is converted). */
+  _noteHelperAsk(ask, emit) {
+    const entry = { ...ask, resolved: null, at: emit ? Date.now() : ((this._askedAt && Number(this._askedAt[ask.requestId])) || this._replayAt || 0) }; // a rebuild keeps the ask's REAL arrival (session-meta helperAskedAt, verify r3) — the 60 s inbox clock does not restart
+    // the card by the Agent call the record itself names (a future CLI's
+    // parent_tool_use_id — verify r2, M2), else by the helper's id through task_started
+    const card = this._taskMsgFor(ask.parentToolUseId || null, ask.agentId || null);
+    if (card) { this._attachHelperAsk(card, entry, emit); return; }
+    const key = ask.agentId || `ptu:${ask.parentToolUseId}`;
+    const orph = this._helperOrphans || (this._helperOrphans = new Map());
+    const list = orph.get(key) || [];
+    if (!list.some((a) => a.requestId === entry.requestId)) list.push(entry);
+    orph.set(key, list.slice(-20));
+    if (orph.size > 50) orph.delete(orph.keys().next().value);
+  }
+
+  _attachHelperAsk(card, entry, emit) {
+    const prev = Array.isArray(card.helperAsks) ? card.helperAsks : [];
+    if (prev.some((a) => a.requestId === entry.requestId)) return; // a replayed ask is the same ask
+    card.helperAsks = [...prev, entry].slice(-20);
+    (this._askIds || (this._askIds = new Set())).add(card.id);
+    if (emit) this._emit({ op: 'edit', id: card.id, fields: { helperAsks: card.helperAsks } });
+  }
+
+  /** The card that just learned a helper's id adopts the asks held for it. */
+  _adoptHelperOrphans(agentId, emit) {
+    const list = agentId != null && this._helperOrphans ? this._helperOrphans.get(String(agentId)) : null;
+    if (!list) return;
+    const card = this._taskMsgFor(null, agentId);
+    if (!card) return;
+    this._helperOrphans.delete(String(agentId));
+    for (const entry of list) this._attachHelperAsk(card, entry, emit);
+  }
+
+  /** A RECORD moved an ask — the ONE writer of `resolved`, and it writes only what
+   *  THE TABLE says (src/helper-ask.js askTransition, verify r3): `event` is one of
+   *  ASK_RECORD_EVENTS (a control_response allow/deny, the CLI's withdrawal, the
+   *  helper's tool_result for the asked call). The rules live in the table, not
+   *  here — a withdrawal overrides our own answer (2.1.281 removes a request's
+   *  abort listener the moment it settles, so a control_cancel_request after our
+   *  answer PROVES the answer was dropped — verify r2 C1), a record is more precise
+   *  than a derived end, nothing else overwrites a settled ask. */
+  _settleHelperAsk(requestId, event, emit) {
+    if (requestId == null || !ASK_RECORD_EVENTS.includes(event)) return false;
+    const rid = String(requestId);
+    const hit = this.helperAskById(rid);
+    if (hit) {
+      const cur = askState(hit.ask, hit.card);
+      const next = askTransition(cur, event);
+      if (next.state === cur) return true;
+      hit.ask.resolved = next.state;
+      hit.card.helperAsks = [...hit.card.helperAsks]; // a new array: the client's Object.assign sees the change
+      if (emit) this._emit({ op: 'edit', id: hit.card.id, fields: { helperAsks: hit.card.helperAsks } });
+      return true;
+    }
+    if (this._helperOrphans) for (const list of this._helperOrphans.values()) { const a = list.find((x) => x.requestId === rid); if (a) { const cur = a.resolved || ASK_INITIAL; const next = askTransition(cur, event); if (next.state !== cur) a.resolved = next.state; return true; } }
+    return false;
+  }
+
+  /** The helper's tool_result for an ASKED call reached this (parent) normalizer:
+   *  the request is settled — by the CLI's OWN decision when no record of ours
+   *  exists (a deadline or a decision of the CLI's own — the brief's "expired"),
+   *  or ours when the buffer lost it — and the result says
+   *  which way (the same rule a main card uses, _resolutionFromResult). Live from
+   *  the stdout consumer's sidechain sites, at a rebuild from session-store's
+   *  helperResults (the rebuild's record list skips every sidechain record). */
+  noteHelperResult(toolUseId, outputText, isError, emit, bind = null) {
+    if (!toolUseId) return false;
+    const tid = String(toolUseId);
+    // verify r5: the helper's WebFetch PROVENANCE re-ask carries a fresh tool_use_id (see _provenanceReaskCard) — its
+    // result lands on the call's own id; `bind = {parentToolUseId, url}` (the call's card in the helper's view) names
+    // the asks that result settles too: the same helper's WebFetch asks for the same url
+    const byUrl = bind && typeof bind.url === 'string' && bind.parentToolUseId ? bind : null;
+    const hits = (a, card) => a.toolUseId === tid || (!!byUrl && a.toolName === 'WebFetch' && a.input && a.input.url === byUrl.url && !!card && card.toolCallId === byUrl.parentToolUseId);
+    const outcome = this._resolutionFromResult(outputText, isError);
+    const ev = RESULT_EVENT_OF[outcome]; // verify r5: the census's word → the table's result event (allowed / denied / cancelled / unknown)
+    const head = outcome === 'unknown' ? outcomeHead(outputText) : null;
+    const stamp = (a) => { if (head && isUnknownOutcome(a.resolved)) a.unknownHead = head; };
+    let done = false;
+    if (this._askIds) for (const id of this._askIds) { const m = this.messageIndex.get(id); for (const a of (m && Array.isArray(m.helperAsks) ? m.helperAsks : [])) if (hits(a, m)) { done = this._settleHelperAsk(a.requestId, ev, emit) || done; stamp(a); } }
+    if (this._helperOrphans) for (const list of this._helperOrphans.values()) for (const a of list) if (a.toolUseId === tid) { done = this._settleHelperAsk(a.requestId, ev, emit) || done; stamp(a); }
+    if (done && head) this._noteOutcomeDrift(outputText, emit);
+    return done;
+  }
+
+  /** An ask whose tool card is not here YET (a helper's own view fed from its
+   *  file watcher lags the stdout ask; a rotated buffer anchors a request before
+   *  its tool_use) waits for the tool_use that names it. Bounded. */
+  _stashAsk(toolUseId, raw) {
+    const st = this._askStash || (this._askStash = new Map());
+    st.set(toolUseId, raw);
+    if (st.size > 50) st.delete(st.keys().next().value);
+  }
 
   /**
    * Bulk convert historical messages. Returns NormalizedMessage[].
@@ -609,6 +790,11 @@ class MessageManager {
     let drift = null;
     try { drift = shapeUnknownFields('claude', shapeCarrierOf('claude', raw), raw); } catch { return; }
     if (!drift) return;
+    this._noteDrift(drift, raw, emit);
+  }
+  /** ONE drift card per shape per session, merged on new evidence (the record-shape path; verify r5 also
+   *  feeds it a permission-outcome sentence outside the census). */
+  _noteDrift(drift, raw, emit) {
     const cards = this._shapeDrift || (this._shapeDrift = new Map());
     const entry = cards.get(drift.shape);
     const newFields = drift.fields.filter((f) => !entry || !entry.fields.has(f));
@@ -1061,7 +1247,7 @@ class MessageManager {
         { const at = this._taskRecordAt(emit); if (at) next.aliveAt = at; }
         existing.taskInfo = next;
         this.taskMsgByToolUse.set(raw.tool_use_id, existing.id);
-        if (raw.task_id != null) this.taskMsgByTaskId.set(String(raw.task_id), existing.id);
+        if (raw.task_id != null) { this.taskMsgByTaskId.set(String(raw.task_id), existing.id); this._adoptHelperOrphans(String(raw.task_id), emit); } // lane S1: a helper's ask held for this id lands on its card
         if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
       } else if (raw.subtype === 'task_progress') {
         if (existing.taskInfo) {
@@ -1197,7 +1383,16 @@ class MessageManager {
     const pending = toolUseId && this.pendingToolCalls.get(toolUseId);
     if (pending) return this.messageIndex.get(pending.msgId) || null;
     const viaId = taskId != null && this.taskMsgByTaskId.get(String(taskId));
-    return viaId ? (this.messageIndex.get(viaId) || null) : null;
+    if (viaId) return this.messageIndex.get(viaId) || null;
+    // THE CARD BY ITS OWN ID (lane S1): a tool card's id is minted from its call id
+    // (`<session>:t:<tool_use_id>`), so a task record naming the call finds the card
+    // even when no index holds it — the restart's task REPLAY after a background
+    // helper's launch ack completed the call (the ack's text blocks are an array in
+    // real records, so the ack synthesis never indexed an Agent card; measured on
+    // 2.1.281 and in this instance's own transcripts) found nothing, and the card
+    // never learned its helper — nor its helper's pending ask.
+    const byId = toolUseId ? this.messageIndex.get(`${this.sessionId}:t:${toolUseId}`) : null;
+    return byId && byId.role === 'tool' ? byId : null;
   }
 
   _processAttachment(raw, emit) {
@@ -1393,6 +1588,7 @@ class MessageManager {
       let permResolved = false;
       if (existing.permission && !existing.permission.resolved) {
         existing.permission.resolved = this._resolutionFromResult(resultText, tr.is_error);
+        if (existing.permission.resolved === 'unknown') { existing.permission.unknownHead = outcomeHead(resultText); this._noteOutcomeDrift(resultText, emit); } // verify r5
         permResolved = true;
       }
       // Replace tool_call content with tool_result (keeps input + adds output)
@@ -1424,7 +1620,7 @@ class MessageManager {
           }
           existing.taskInfo = { ...syn, status: 'running', backgrounded: true }; // the ack text says "in background" — a member of the level set
           this.taskMsgByToolUse.set(toolUseId, existing.id);
-          if (syn.id) this.taskMsgByTaskId.set(String(syn.id), existing.id);
+          if (syn.id) { this.taskMsgByTaskId.set(String(syn.id), existing.id); this._adoptHelperOrphans(String(syn.id), emit); }
           if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
         }
       } else if (existing.taskInfo && !tr.is_error) {
@@ -1440,7 +1636,7 @@ class MessageManager {
         // the ack's own TYPE wins over whatever task_started spelled (2.369.139)
         if (syn && syn.type && existing.taskInfo.type !== syn.type) { existing.taskInfo.type = syn.type; if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } }); } // the ack says background even when task_started lacked the flag (older CLI)
         if (syn && syn.id && String(syn.id) !== String(existing.taskInfo.id)) {
-          this.taskMsgByTaskId.set(String(syn.id), existing.id);
+          this.taskMsgByTaskId.set(String(syn.id), existing.id); this._adoptHelperOrphans(String(syn.id), emit);
           if (!existing.taskInfo.runId) {
             existing.taskInfo.runId = syn.id;
             if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
@@ -1650,6 +1846,9 @@ class MessageManager {
         this.messageIndex.set(msgId, msg);
         this.pendingToolCalls.set(block.id, { msgId, block });
         if (emit) this._emit({ op: 'create', message: msg });
+        // an ask that arrived before this card (held by _stashAsk) lands on it now
+        const held = this._askStash && this._askStash.get(block.id);
+        if (held) { this._askStash.delete(block.id); this._processControlRequest(held, emit); }
       }
     }
 
@@ -1730,19 +1929,61 @@ class MessageManager {
     }
   }
 
-  // Deduce a permission's resolution from the tool_result that answered it.
-  // is_error alone must NOT read as denied: a user-APPROVED tool that then
-  // fails (nonzero exit, bad edit — hundreds per real transcript) is is_error
-  // too, and labeling it "✗ Denied" misrecords the user's action
-  // (review-confirmed). Only the CLI's canned user-rejection text is a denial.
+  // THE ONE READER of a permission's outcome from the tool_result that answered it (a main card's
+  // autoResolved / the merge site, and the helper table's result-* rows). lane S1 verify r5: it
+  // classifies ONLY by the CENSUS of the CLI's own sentences (src/permission-outcome.js, read in the
+  // 2.1.281 binary): a non-error ⇒ the tool RAN ⇒ allowed (every refusal the binary writes is
+  // is_error); the user's words ⇒ denied; the CLI's own interrupt / turn-ended / parked-expired
+  // markers ⇒ cancelled; any OTHER error ⇒ unknown — a user-APPROVED tool that then fails (nonzero
+  // exit, bad edit — hundreds per real transcript) is is_error too, and so would be a sentence a newer
+  // build invented; this reader cannot tell them apart, so it says so. Before r5 it said "not the
+  // rejection words ⇒ allowed": a fail-OPEN classifier over the vendor's sentences — r4 caught the
+  // WebFetch deadline, r5 the SUBAGENT's own denial sentence ("Permission for this tool use was
+  // denied…", every helper's), the interrupt marker and the parked approval that expired — all
+  // read "✓ Allowed". A word here is never compared to a literal outside the census.
   _resolutionFromResult(outputText, isError) {
-    if (!isError) return 'allowed';
-    return /user (doesn'?t want|rejected|declined|chose not)/i.test(outputText || '') ? 'denied' : 'allowed';
+    return permissionOutcome(outputText, isError).outcome;
+  }
+
+  /** An error sentence outside the census settled a card as `unknown` (verify r5): named ONCE per
+   *  session per sentence by the schema-drift card (the record-shape path — "the harness wrote a
+   *  word this build does not declare"). Live (`emit`) it is raised at once — a live result
+   *  follows our own record, so an unknown reading here is final; in a REBUILD (emit false) the
+   *  request may replay AFTER its result and our control_response record after both (the buffer's
+   *  end-appended control records), so the head is STASHED and raised by sealPendingAsks() only
+   *  when a card or a helper's ask still reads unknown with it — a tool's own failure after an
+   *  allow never raises a card. */
+  _noteOutcomeDrift(text, emit) {
+    const head = outcomeHead(text);
+    if (!head) return;
+    if (!emit) { (this._outcomeDriftStash || (this._outcomeDriftStash = new Set())).add(head); return; }
+    this._raiseOutcomeDrift(head, true);
+  }
+  _raiseOutcomeDrift(head, emit) {
+    this._noteDrift({ shape: 'claude:stream:tool_result/permission_outcome', fields: [], enumDrift: [{ field: 'is_error sentence', value: head }] }, { type: 'tool_result', is_error: true, content: head }, emit);
+  }
+  /** Do any of this normalizer's cards still read `unknown` with this sentence head? */
+  _unknownOutcomeStillHeld(head) {
+    if (this._askIds) for (const id of this._askIds) {
+      const m = this.messageIndex.get(id);
+      if (!m) continue;
+      if (m.permission && isUnknownOutcome(m.permission.resolved) && m.permission.unknownHead === head) return true;
+      for (const a of (Array.isArray(m.helperAsks) ? m.helperAsks : [])) if (isUnknownOutcome(a.resolved) && a.unknownHead === head) return true;
+    }
+    if (this._helperOrphans) for (const list of this._helperOrphans.values()) for (const a of list) if (isUnknownOutcome(a.resolved) && a.unknownHead === head) return true;
+    return false;
   }
 
   _processControlRequest(raw, emit) {
     if (raw.request?.subtype !== 'can_use_tool') return;
     const toolUseId = raw.request.tool_use_id;
+    // A HELPER's ask (lane S1, B-6e95 — measured on 2.1.281: `agent_id` names the
+    // helper, `tool_use_id` the HELPER's own call, which lives in the helper's
+    // view and never in the parent's cards). In the PARENT's normalizer it hangs
+    // on the helper's Agent card; before this lane it fell through the lookup
+    // below and was dropped — every screen silent while the chip said "waiting".
+    const helper = this._subView ? null : helperAskOf(raw);
+    if (helper) { this._noteHelperAsk(helper, emit); return; }
 
     // Find the tool message — may be in pendingToolCalls (live) or already flushed (history replay)
     let existing = null;
@@ -1755,7 +1996,13 @@ class MessageManager {
         if (this.messages[i].toolCallId === toolUseId) { existing = this.messages[i]; break; }
       }
     }
-    if (!existing) return;
+    // lane S1 verify r5 (read in the 2.1.281 binary): the WebFetch PROVENANCE re-ask — a URL outside the
+    // user's messages fails the tool's provenance check AFTER its permission was granted, and the tool asks
+    // AGAIN with `g.ask({url, prompt}, {toolUseId: randomUUID(), forceDecision})` — so its tool_use_id names
+    // NO call and the request was stashed forever (no card, no chip, the CLI denying it itself after 300 s).
+    // The re-ask is that CALL's: it binds to the pending WebFetch call for the same url.
+    if (!existing) existing = this._provenanceReaskCard(raw.request);
+    if (!existing) { if (toolUseId) this._stashAsk(toolUseId, raw); return; }
 
     // A REAL tool_result (content already merged) means the permission
     // question was settled — never flip such a card back to pending. Only an
@@ -1785,9 +2032,20 @@ class MessageManager {
       input: raw.request.input || {},
       suggestions: raw.request.permission_suggestions || [],
       resolved: autoResolved,
+      ...(autoResolved === 'unknown' && { unknownHead: outcomeHead(rblock.output) }), // verify r5
       ...(isAskUser && { kind: 'user_input', questions: raw.request.input?.questions || [] }),
     };
+    if (autoResolved === 'unknown') this._noteOutcomeDrift(rblock.output, emit);
+    (this._askIds || (this._askIds = new Set())).add(existing.id); // the pending-asks level reads only the cards that ever asked
     if (emit) this._emit({ op: 'edit', id: existing.id, fields: { permission: existing.permission } });
+  }
+
+  /** The pending WebFetch call a provenance re-ask (a fresh tool_use_id, the same url) belongs to — the newest. */
+  _provenanceReaskCard(request) {
+    if (!request || request.tool_name !== 'WebFetch' || !request.input || typeof request.input.url !== 'string') return null;
+    let hit = null;
+    for (const p of this.pendingToolCalls.values()) if (p && p.block && p.block.name === 'WebFetch' && p.block.input && p.block.input.url === request.input.url) hit = p;
+    return hit ? this.messageIndex.get(hit.msgId) || null : null;
   }
 
   _processControlResponse(raw, emit) {
@@ -1808,6 +2066,14 @@ class MessageManager {
         break;
       }
     }
+    // …or a HELPER's ask on its Agent card (lane S1), and an ask still held for a card that never came
+    this._settleHelperAsk(requestId, approved ? 'record-allow' : 'record-deny', emit); // the table's record rows
+    this._dropStashedAsk(requestId);
+  }
+
+  _dropStashedAsk(requestId) {
+    if (!this._askStash || requestId == null) return;
+    for (const [k, r] of this._askStash) if (r && r.request_id === requestId) { this._askStash.delete(k); break; }
   }
 
   _processControlCancel(raw, emit) {
@@ -1819,6 +2085,10 @@ class MessageManager {
         break;
       }
     }
+    // the CLI WITHDREW a helper's ask (measured: `stop_task` on a helper whose ask
+    // was pending ⇒ control_cancel_request) — its card says the helper was stopped
+    this._settleHelperAsk(raw.request_id, 'withdraw', emit); // the table's withdraw row (overrides our own answer)
+    this._dropStashedAsk(raw.request_id);
   }
 }
 

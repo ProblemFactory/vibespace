@@ -1424,7 +1424,7 @@ const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'send-not-available' || code === 'account-changed' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : code === 'stopped' ? 503 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503
+  const status = code === 'not-found' ? 404 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : code === 'stopped' ? 503 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
@@ -1479,6 +1479,35 @@ app.post('/api/agent/channels/reply', async (req, res) => {
   try { chanAnswer(res, await eng.propose(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, { mayWake: cidR ? wakeFloorFor(cidR) : null })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// R4 (B-6acc): COMPOSE a NEW message on an account the agent has access to
+// (a whole-account access row) — the same outbox policy as `reply`, the same
+// wake pace where the send would start a turn.
+app.post('/api/agent/channels/compose', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.compose !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  const b = req.body || {};
+  const account = String(b.account || '').trim();
+  if (!account) return res.status(400).json({ error: 'account is required (the account id, as `vibespace-channels status` prints it)', code: 'bad-request' });
+  // R4 verify r2: a field the verb does not carry (bcc, replyTo) is handed to the validator so it is REFUSED BY NAME, never dropped here
+  try { chanAnswer(res, await eng.compose(channelPrincipal(s, id), account, { to: b.to, cc: b.cc, bcc: b.bcc, replyTo: b.replyTo, subject: b.subject, text: b.text, why: b.why, attachments: b.attachments })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// R4: SEARCH the messages the agent can SEE (reach filters every hit; the
+// local logs only — never a vendor call)
+app.get('/api/agent/channels/search', async (req, res) => {
+  const hit = agentSession(req, res);
+  if (!hit) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.searchFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  const [s, id] = hit;
+  try { chanAnswer(res, await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50 })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/agent/channels/status', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
@@ -1486,7 +1515,12 @@ app.get('/api/agent/channels/status', (req, res) => {
   const eng = channelsEngine();
   if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
-  chanAnswer(res, eng.statusFor(channelPrincipal(s, id), req.query.id ? String(req.query.id) : null));
+  const ctx = channelPrincipal(s, id);
+  const r = eng.statusFor(ctx, req.query.id ? String(req.query.id) : null);
+  // R4: WHAT YOU WERE GIVEN — every grain naming you (or a group of yours):
+  // its access authority and whether a notification wakes you
+  if (r && r.ok && !req.query.id && typeof eng.accessFor === 'function') { try { r.access = eng.accessFor(ctx).access; } catch { r.access = []; } }
+  chanAnswer(res, r);
 });
 app.post('/api/agent/channels/request', async (req, res) => {
   const hit = agentSession(req, res);

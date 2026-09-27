@@ -31,6 +31,9 @@ import { collabRowsHtml, collabReportHeadText, collabRowTitle } from '../collab-
 // escaping is provable in a unit test rather than reviewed by eye.
 import { userChannelKind, userChannelRecord, userMessageCardHtml, userFileCardHtml } from '../user-channel.js';
 import { stallWords } from '../workflow-disk.js'; // PURE: a stalled Workflow run's words — the View Workflow window reads the same function
+import { askTarget, askState, isWaiting, helperAskHead, helperAskSettledWords, mainAskSettledWords, helperLabelOf, agentStatusWords, isStopRejection } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — its card's words, a stopped helper's chip
+/** The css class of a settled permission's words (verify r5): green for allowed, red for a refusal, grey for unknown. */
+const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-allowed' : w && w.cls === 'unknown' ? 'chat-permission-unknown' : 'chat-permission-denied');
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
 import { openResetCreditDialog } from './reset-credit-dialog.js';
@@ -177,6 +180,10 @@ const taskStatusChipHtml = (ti, verdict = null) => {
     return ` <span class="chat-task-status-chip">⟳ ${t('running')}</span>`;
   }
   if (ti.status === 'finished') return ` <span class="chat-task-status-chip soft" title="${escHtml(t('finished (outcome not reported)'))}">${t('finished')}</span>`;
+  // a stopped / killed / failed task in WORDS (lane S1: a helper the user stopped read "⟳ running" beside a
+  // "finished" footer, or a bare "killed") — src/helper-ask.js agentStatusWords is the one spelling
+  const w = agentStatusWords(ti.status, t);
+  if (w) return ` <span class="chat-task-status-chip ${escHtml(w.cls)}" title="${escHtml(w.title)}">${escHtml(w.label)}</span>`;
   return ` <span class="chat-task-status-chip err">${escHtml(ti.status)}</span>`;
 };
 
@@ -1005,8 +1012,71 @@ class ChatRenderers {
     if (msg.permission && !(msg.permission.resolved === 'allowed' && msg.status === 'complete')) {
       this.renderPermissionOverlay(el, msg);
     }
+    // A HELPER's asks on its Agent card (lane S1)
+    if (Array.isArray(msg.helperAsks) && msg.helperAsks.length) this.renderHelperAsks(el, msg);
 
     return el;
+  }
+
+  /**
+   * A HELPER'S PERMISSION ASKS, IN THE PARENT CHAT (lane S1, B-6e95 — "帮手要权限时没有任何地方能点'允许'").
+   * One block per ask inside the helper's Agent card, right under its title: who asks, what for (the url /
+   * command / file), then THE SAME permission card a main-session ask gets (renderPermissionOverlay — lane
+   * L's plain words and widened Always Allow included), answered on THIS session's stdin with the helper's
+   * request id. A settled ask shrinks to one line (allowed / denied / withdrawn when the helper was stopped
+   * / the helper finished). Re-rendered in place on every `helperAsks` / `taskInfo` edit; the element of an
+   * ask keeps `data-request-id` (the waiting chip jumps to it).
+   */
+  renderHelperAsks(el, msg) {
+    const card = el.querySelector('.chat-tool-use') || el.querySelector('.chat-tool-pending');
+    if (!card) return;
+    let box = card.querySelector(':scope > .chat-helper-asks');
+    const asks = Array.isArray(msg.helperAsks) ? msg.helperAsks : [];
+    if (!asks.length) { box?.remove(); return; }
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'chat-helper-asks';
+      const label = card.querySelector(':scope > .chat-tool-label');
+      if (label) label.after(box); else card.prepend(box);
+    }
+    const name = helperLabelOf(msg);
+    const keep = new Set();
+    for (const ask of asks) {
+      keep.add(String(ask.requestId));
+      let row = [...box.children].find((c) => c.dataset.requestId === String(ask.requestId));
+      if (!row) { row = document.createElement('div'); row.className = 'chat-helper-ask'; row.dataset.requestId = String(ask.requestId); box.appendChild(row); }
+      const state = askState(ask, msg);
+      const sig = `${state}`; // the card's words are a function of the STATE alone (the table's vocabulary)
+      if (row.dataset.sig === sig) continue; // an unchanged ask keeps its node (and a half-typed answer)
+      row.dataset.sig = sig;
+      row.classList.toggle('pending', isWaiting(state));
+      row.innerHTML = '';
+      const target = askTarget(ask);
+      if (isWaiting(state)) {
+        const head = document.createElement('div');
+        head.className = 'chat-helper-ask-head';
+        head.innerHTML = `${UI_ICONS.robot} <span class="chat-helper-ask-who">${escHtml(helperAskHead(name, t))}</span>`;
+        row.appendChild(head);
+        if (target) {
+          const what = document.createElement('div');
+          what.className = 'chat-helper-ask-what';
+          what.innerHTML = `<span class="chat-helper-ask-tool">${escHtml(ask.toolName || '')}</span> <code>${escHtml(target)}</code>`;
+          row.appendChild(what);
+        }
+        const mount = document.createElement('div');
+        mount.className = 'chat-helper-ask-mount';
+        row.appendChild(mount);
+        // THE ONE permission card, mounted here: `ask` IS the permission object (the click marks it)
+        this.renderPermissionOverlay(row, { permission: ask }, { mount });
+      } else {
+        const w = helperAskSettledWords(state, t);
+        const line = document.createElement('div');
+        line.className = `chat-helper-ask-settled chat-permission-resolved ${permissionClassOf(w)}`;
+        line.textContent = `${w ? w.icon + ' ' + w.text : ''} · ${ask.toolName || ''}${target ? ' ' + target : ''}`;
+        row.appendChild(line);
+      }
+    }
+    for (const c of [...box.children]) if (!keep.has(c.dataset.requestId)) c.remove();
   }
 
   /**
@@ -1043,6 +1113,18 @@ class ChatRenderers {
     const inputStr = stripAnsi(typeof block.input === 'string' ? block.input : JSON.stringify(block.input, null, 2));
 
     const acDone = agentCommandOf(block.input); // lane L: a browser-only call keeps the browser's face once it ran
+    // A HELPER STOPPED MID-RUN (lane S1, study 1 T9): a foreground Agent call's result after Stop is the
+    // CLI's canned rejection ("The user doesn't want to proceed with this tool use… STOP what you are
+    // doing…") — the card kept no title and printed that internal string in red. It keeps its title and
+    // says what happened; any OTHER failure keeps its text (it is the only explanation there is).
+    if (block.status === 'error' && block.toolName === 'Agent') {
+      const desc = block.input?.description || '';
+      const stopped = isStopRejection(resultText);
+      const body = stopped
+        ? `<div class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Stopped before it finished'))}</div>`
+        : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent${desc ? ': ' + escHtml(desc) : ''}${agentModelChip(block.input?.model)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${body}</div>`;
+    }
     if (block.status === 'error') {
       return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
     }
@@ -1112,13 +1194,11 @@ class ChatRenderers {
       const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
+      // lane S1: a helper card names BOTH ids — its LIVE view (`sub-<tool_use_id>`, the only one its
+      // permission asks reach) while it runs, its transcript on disk (`agentId`) once it is over
       const dataAttrs = reviewThreadId
         ? ` data-thread-id="${escHtml(reviewThreadId)}"`
-        : agentId
-          ? ` data-agent-id="${escHtml(agentId)}"`
-          : block.toolCallId
-            ? ` data-parent-tool-id="${escHtml(block.toolCallId)}"`
-            : '';
+        : (agentId ? ` data-agent-id="${escHtml(agentId)}"` : '') + (block.toolCallId ? ` data-parent-tool-id="${escHtml(block.toolCallId)}"` : '');
       const viewBtn = dataAttrs
         ? ` <button class="chat-agent-view-btn"${dataAttrs} data-desc="${escHtml(desc)}">${t('View Log')}</button>`
         : '';
@@ -1409,7 +1489,7 @@ class ChatRenderers {
     return `<div class="chat-wf-live">${keys.map((k) => `<div class="chat-wf-phase" data-phase="${k}"><span class="chat-wf-phase-title">${escHtml(phaseTitle(k) || t('Agents'))}</span>${byPhase.get(k).map(chip).join('')}</div>`).join('')}<div class="chat-wf-foot">${tally}${usage}</div></div>`;
   }
 
-  renderPermissionOverlay(el, msg) {
+  renderPermissionOverlay(el, msg, opts = {}) {
     if (!msg.permission) return;
     // Remove existing permission overlay
     const existing = el.querySelector('.chat-permission-inline');
@@ -1542,7 +1622,7 @@ class ChatRenderers {
         });
         msg.permission.resolved = 'allowed';
         msg.permission.selectedAnswers = answers;
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
         this._onPermissionResolve('allowed');
       };
       const cancelBtn = document.createElement('button');
@@ -1555,7 +1635,7 @@ class ChatRenderers {
           ...(msg.permission.via ? { via: msg.permission.via, host: msg.permission.host || null } : {}),
         });
         msg.permission.resolved = 'denied';
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
       };
 
       if (questions.length > 1) nav.append(prevBtn, pageIndicator, nextBtn);
@@ -1607,10 +1687,10 @@ class ChatRenderers {
         : t('Not run — you took over the browser, so this step went stale. The agent re-plans after you hand back.'));
       section.appendChild(line);
     } else if (msg.permission.resolved) {
-      const icon = msg.permission.resolved === 'denied' ? '\u2717' : '\u2713';
-      const label = msg.permission.resolved === 'denied' ? t('Denied') : t('Allowed');
-      const cls = msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed';
-      section.innerHTML = `<details class="chat-diff"><summary class="chat-diff-summary"><span class="chat-permission-resolved ${cls}">${icon} ${label}</span></summary></details>`;
+      // verify r5: the ONE speller of a settled main card (allowed · denied · cancelled · unknown — a word outside
+      // the census reads as unknown here too, never as "✓ Allowed")
+      const w = mainAskSettledWords(msg.permission.resolved, t) || mainAskSettledWords('unknown', t);
+      section.innerHTML = `<details class="chat-diff"><summary class="chat-diff-summary"><span class="chat-permission-resolved ${permissionClassOf(w)}">${escHtml(w.icon)} ${escHtml(w.text)}</span></summary></details>`;
     } else if (Array.isArray(msg.permission.options) && msg.permission.options.length) {
       // Harness-neutral ORDERED options (ACP request_permission: the agent
       // names them; kinds allow_once/allow_always/reject_once/reject_always
@@ -1623,7 +1703,7 @@ class ChatRenderers {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved, optionId: o?.optionId || null, toolInput: msg.permission.input, permissionUpdates: approved && /always/.test(o.kind || '') ? [{ kind: o.kind }] : undefined });
         msg.permission.resolved = approved ? 'allowed' : 'denied';
         msg.permission.selectedOptionId = o?.optionId || null;
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
         if (approved) this._onPermissionResolve('allowed');
       });
     } else {
@@ -1647,22 +1727,24 @@ class ChatRenderers {
       section.querySelector('.chat-perm-allow')?.addEventListener('click', () => {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input });
         msg.permission.resolved = 'allowed';
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
         this._onPermissionResolve('allowed');
       });
       section.querySelector('.chat-perm-always')?.addEventListener('click', () => {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: true, toolInput: msg.permission.input, permissionUpdates: always });
         msg.permission.resolved = 'allowed';
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
         this._onPermissionResolve('allowed');
       });
       section.querySelector('.chat-perm-deny')?.addEventListener('click', () => {
         this.ws.send({ type: 'permission-response', sessionId: this.sessionId, requestId: msg.permission.requestId, approved: false });
         msg.permission.resolved = 'denied';
-        this.renderPermissionOverlay(el, msg);
+        this.renderPermissionOverlay(el, msg, opts);
       });
     }
 
+    // `opts.mount` (lane S1): a helper's ask on its Agent card carries its own place
+    if (opts.mount) { opts.mount.appendChild(section); return; }
     const toolUse = el.querySelector('.chat-tool-use') || el.querySelector('.chat-tool-pending');
     if (toolUse) {
       const outputPending = toolUse.querySelector('.chat-tool-output-pending');

@@ -59,7 +59,7 @@
 //      timed-out-then-lost install holds the slot until the machine says gone,
 //      the freeing line naming the evidence (F3) — each with a mutant control
 //   (verify r3) §10 the slot's claim: a stale pidfile naming a live unrelated pid
-//      is never followed (M1); no setsid ⇒ 125 in < 1 s by name (L5); no
+//      is never followed (M1); no setsid ⇒ 125 by name before any wait (L5); no
 //      readable starttime ⇒ the runner refuses, nothing run (L8)
 //   (verify r4) §10 the slot is a LOCK THE RUNNING INSTALL HOLDS (flock, fd 9
 //      inherited by the runner and its children, on local storage): five
@@ -83,9 +83,14 @@
 //      the check the refusal is the generic open failure); a directory owned by
 //      another uid ⇒ refused by name (root only — SKIP with evidence otherwise);
 //      `id -u` that is no number ⇒ refused by name; L4 a runner exec'd WITHOUT
-//      fd 9 ⇒ 125 in < 1 s naming the lock (CONTROL: the unbounded wait still
-//      waiting at 3 s, killed — unbounded it answers at 10 s)
-// ~16 s (the install legs run a real detached launcher; the viewer-race legs wait on real timers). Scratch dirs from scripts/scratch.mjs; the install locks are named by the uid (/run/user/<uid>, else /tmp/vibespace-<uid> — verify r5 L3) after the SCRATCH state dirs' realpaths, so no name is ever production's, and every one this suite named is removed at exit; zero vendor calls.
+//      fd 9 ⇒ 125 naming the lock, the pidfile wait ended by the runner's
+//      death — no pidfile, no exit file, fewer polls than its cap (CONTROL: the
+//      unbounded wait still polling at the bound, killed there)
+//   (2.369.189 mirror red) no wall-clock bound is a literal: "at once" = under
+//      half the launcher's own pidfile-wait cap (read from the module) with the
+//      evidence beside it — polls counted by a PATH `sleep`; in-process "at
+//      once" = before the event loop turned; a deadline = its own words
+// ~18 s (the install legs run a real detached launcher; the viewer-race legs wait on real timers). Scratch dirs from scripts/scratch.mjs; the install locks are named by the uid (/run/user/<uid>, else /tmp/vibespace-<uid> — verify r5 L3) after the SCRATCH state dirs' realpaths, so no name is ever production's, and every one this suite named is removed at exit; zero vendor calls.
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -101,6 +106,13 @@ const K = require(path.join(REPO, 'src/server/desktop-app-keeper.js'));
 const D = require(path.join(REPO, 'src/desktop-display.js'));
 const M = require(path.join(REPO, 'src/desktop-apps.js'));
 const until = async (fn, ms = 3000, step = 50) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await new Promise((r) => setTimeout(r, step)); } return null; };
+/** Did `p` (a promise that never rejects) settle BEFORE the event loop turned once? A call that waits on no timer, no
+ *  I/O and no child settles in microtasks, ahead of a setImmediate armed beside it — "at once" said by construction,
+ *  never by a wall clock (the 2.369.189 mirror red: `ms < 1000` read 1002 ms on a 2-vCPU runner). → {value, turned} */
+const beforeTurn = async (p) => { const imm = new Promise((r) => setImmediate(r)); const v = await Promise.race([p.then((x) => ({ x })), imm.then(() => null)]); return v ? { value: v.x, turned: false } : { value: await p, turned: true }; };
+/** A LOWER bound's only slack: libuv arms a timer against its CACHED loop time, so a deadline can fire up to the arming
+ *  macrotask's length early. Slowness only ever RAISES a lower bound — it is never the machine-dependence of an upper one. */
+const EARLY_MS = 100;
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? ' — ' + JSON.stringify(d).slice(0, 300) : '')); } };
@@ -270,9 +282,8 @@ console.log('§4 the local rung is the hub keeper\'s own machine; desktop-access
   ok(r1.ok && asked.length === 1 && asked[0][0] === 'facts' && asked[0][1].fresh === true, 'a paired device is reached through dm.desktopServe(op, params) — the op and its params verbatim');
   const r2 = await acc2.call('dev', 'stop', { id: 'da-x' }).then(() => null, (e) => e);
   ok(r2 && r2.code === 'not-found', 'the device\'s {ok:false, code} is thrown with ITS code', r2 && r2.code);
-  const t0 = Date.now();
-  const r3 = await acc2.call('ssh', 'launch', { body: {} }).then(() => null, (e) => e);
-  ok(r3 && r3.code === 'host_needs_daemon' && Date.now() - t0 < 1000 && asked.length === 2, 'a machine handle that cannot run desktop-serve (stand-in: no desktopServe method) ⇒ host_needs_daemon BY NAME within 1 s — nothing asked, nothing run locally', r3 && r3.message);
+  const { value: r3, turned: r3Turned } = await beforeTurn(acc2.call('ssh', 'launch', { body: {} }).then(() => null, (e) => e));
+  ok(r3 && r3.code === 'host_needs_daemon' && !r3Turned && asked.length === 2, 'a machine handle that cannot run desktop-serve (stand-in: no desktopServe method) ⇒ host_needs_daemon BY NAME before the event loop turned once (no connect deadline, no timer, no I/O waited on) — nothing asked, nothing run locally', r3 && { message: r3.message, turned: r3Turned });
   const r4 = await acc2.call('elsewhere', 'facts', {}).then(() => null, (e) => e);
   ok(r4 && r4.code === 'unsupported-host', 'an unknown host ⇒ unsupported-host');
   const dmOld = { desktopServe: async () => { const e = new Error('daemon lacks desktop-serve (capabilities gate)'); e.code = 'host_needs_daemon'; throw e; } };
@@ -304,16 +315,19 @@ console.log('\n§5 the ssh rung over the REAL HostManager (no stand-in)');
   const localSpy = () => { localTouched++; return null; };
   const hmFor = (ensure) => { const hm = new HostManager({ dataDir: hd }); hm.agentdDeps = { ensureAgentdOnHost: ensure }; return hm; };
   // (a) the bootstrap fails (no node on the host) ⇒ host_unavailable naming the reason, fast
-  const hmA = hmFor(async () => { throw new Error('remote node not found (install node on the host)'); });
-  const t0 = Date.now();
-  const ea = await ACC.create({ hosts: hmA, local: localSpy, install: false, log: quiet }).call('ssh-box', 'facts', {}).then(() => null, (e) => e);
-  ok(ea && ea.code === 'host_unavailable' && /remote node not found/.test(ea.message) && Date.now() - t0 < 1000 && localTouched === 0, `an ssh host whose daemon bootstrap FAILS ⇒ host_unavailable naming the reason (${ea && ea.message}), the local keeper never touched`, ea && { code: ea.code, message: ea.message });
+  let ensureA = 0;
+  const hmA = hmFor(async () => { ensureA++; throw new Error('remote node not found (install node on the host)'); });
+  const { value: ea, turned: eaTurned } = await beforeTurn(ACC.create({ hosts: hmA, local: localSpy, install: false, log: quiet }).call('ssh-box', 'facts', {}).then(() => null, (e) => e));
+  ok(ea && ea.code === 'host_unavailable' && /remote node not found/.test(ea.message) && !/not responding/.test(ea.message) && ensureA === 1 && !eaTurned && localTouched === 0, `an ssh host whose daemon bootstrap FAILS ⇒ host_unavailable naming the reason (${ea && ea.message}) — the bootstrap asked once, the answer before the event loop turned (never the connect deadline's words, never a retry), the local keeper never touched`, ea && { code: ea.code, message: ea.message, ensureA, turned: eaTurned });
   // (b) the bootstrap never answers ⇒ host_unavailable at the connect deadline, never a hang
   const hmB = hmFor(() => new Promise(() => { }));
+  const connectB = 300;
   const t1 = Date.now();
-  const eb = await ACC.create({ hosts: hmB, local: localSpy, install: false, log: quiet, connectMs: 300 }).call('ssh-box', 'facts', {}).then(() => null, (e) => e);
+  const eb = await ACC.create({ hosts: hmB, local: localSpy, install: false, log: quiet, connectMs: connectB }).call('ssh-box', 'facts', {}).then(() => null, (e) => e);
   const msB = Date.now() - t1;
-  ok(eb && eb.code === 'host_unavailable' && /not responding/.test(eb.message) && msB >= 250 && msB < 1500 && localTouched === 0, `an ssh host whose bootstrap never answers ⇒ host_unavailable at the connect deadline (${msB} ms for connectMs 300), never a hang, never local`, eb && { code: eb.code, message: eb.message });
+  // never a hang = the answer is THE DEADLINE's (only its timer says "not responding within <connectMs>s") and never
+  // before it; no upper wall-clock bound (slowness is not a hang)
+  ok(eb && eb.code === 'host_unavailable' && eb.message.includes(`not responding within ${Math.round(connectB / 1000)}s`) && msB >= connectB - EARLY_MS && localTouched === 0, `an ssh host whose bootstrap never answers ⇒ host_unavailable at the connect deadline it was given (${msB} ms for connectMs ${connectB} — the deadline's own words), never a hang, never local`, eb && { code: eb.code, message: eb.message, msB });
   const fb = await ACC.create({ hosts: hmA, local: localSpy, install: false, log: quiet }).forwardPort('ssh-box', 1234).then(() => null, (e) => e);
   ok(fb && fb.code === 'host_unavailable', 'forwardPort to that host fails the same way, loud, before any listener', fb && fb.code);
   // (c) the real DeviceManager always HAS desktopServe (so desktop-access's "no desktopServe" arm is a belt for
@@ -659,12 +673,13 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   // detached; the machine's state dir says so (installing) until it ends, then records its exit
   const pidf = path.join(root, 'timeout-child.pid');
   const stT = path.join(root, 'st-timeout');
-  const aT = ACC.create({ hosts: null, local: () => null, install: false, log: quiet, installMs: 300, holdMs: 20000 });
+  const installT = 300;
+  const aT = ACC.create({ hosts: null, local: () => null, install: false, log: quiet, installMs: installT, holdMs: 20000 });
   const t0 = Date.now();
   const eT = await aT.runArgv('local', ['sh', '-c', `echo $$ > '${pidf}'; exec sleep 1`], { stateDir: stT }).then(() => null, (e) => e);
   const msT = Date.now() - t0;
   const cpid = Number(fs.readFileSync(pidf, 'utf8'));
-  ok(eT && eT.code === 'install_timeout' && msT < 1500 && !/exited/.test(eT.message) && eT.message.includes(path.join(stT, M.INSTALL_FILES.log)), `a local run past installMs ⇒ install_timeout in ${msT} ms (never an exit code), naming where its log is`, eT && { code: eT.code, message: eT.message });
+  ok(eT && eT.code === 'install_timeout' && msT >= installT - EARLY_MS && !/exited/.test(eT.message) && eT.message.includes(path.join(stT, M.INSTALL_FILES.log)), `a local run past installMs ⇒ install_timeout in ${msT} ms (at its ${installT} ms deadline, never before; the code itself is the evidence — only the deadline names it, an exit would be its code), naming where its log is`, eT && { code: eT.code, message: eT.message });
   const stT1 = await D.installState(stT);
   ok(D.pidAlive(cpid) && stT1.installing && stT1.installing.pid > 0 && stT1.installing.pid !== cpid && D.procStart(stT1.installing.pid) > 0, `the child is NOT killed; the machine's slot is its pidfile — installing {pid ${stT1.installing && stT1.installing.pid}} (the detached runner, pid + starttime), the install ${cpid} under it`, stT1);
   const endT = await until(async () => { const x = await D.installState(stT); return !D.pidAlive(cpid) && x.installing === null && x.lastInstall ? x : null; }, 4000);
@@ -734,13 +749,14 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const lineOf = (needle) => { const l = appsSrc.split('\n').find((x) => x.includes(needle)); return l === undefined ? null : l + '\n'; };
   /** A launcher run directly (the local rung's argv); `killAfter` bounds a CONTROL that would hang (our own launcher —
    *  never an install: the control's install is `echo`). → {code, out, ms, killed}; the promise carries `.child`. */
-  const launch = (Mod, argv, stateDir, mode = 'start', { env = process.env, killAfter = 0 } = {}) => {
+  const launch = (Mod, argv, stateDir, mode = 'start', { env = process.env, killAfter = 0, polls = false } = {}) => {
     const l = Mod.installLauncherArgv(argv, { stateDir, mode }); let out = ''; const t = Date.now(); let killed = false;
-    const c = spawnR3(l[0], l.slice(1), { env: { ...env, LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const pc = polls ? withPolls(env) : null; // `polls: true` ⇒ the result counts the polls this launcher sat out
+    const c = spawnR3(l[0], l.slice(1), { env: { ...(pc ? pc.env : env), LC_ALL: 'C' }, stdio: ['ignore', 'pipe', 'pipe'] });
     const p = new Promise((resolve) => {
       c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; });
       const k = killAfter ? setTimeout(() => { killed = true; try { c.kill('SIGKILL'); } catch { } }, killAfter) : null;
-      c.on('close', (code) => { clearTimeout(k); resolve({ code, out, ms: Date.now() - t, killed }); });
+      c.on('close', (code) => { clearTimeout(k); resolve({ code, out, ms: Date.now() - t, killed, polls: pc ? pc.polls() : null }); });
     });
     p.child = c; p.outNow = () => out; return p;
   };
@@ -752,6 +768,30 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   /** The lock file a launcher names for a state dir (verify r4; the root by the uid since r5 L3) */
   const lockOf = (st, dir = LOCKROOT) => lockPathOf(st, dir);
   const lockFree = (K) => { try { execR4(realBin('flock'), ['-n', K, 'true'], { stdio: 'ignore' }); return true; } catch { return false; } };
+  // THE LAUNCHER'S OWN WAITS, read from the text the module exports — never a literal here (the 2.369.189 mirror red:
+  // `ms < 1000` over a whole spawn chain read 1002 ms on a 2-vCPU runner; the wait it meant to bound had polled ONCE).
+  // Each is `while …; do sleep POLL` capped at CAP polls: a `sleep` never returns early, so a launcher that sat a wait
+  // out took ≥ CAP × POLL. "At once" below = under HALF the pidfile wait's cap (AT_ONCE_MS) — the stated slack: any
+  // bound under the cap separates a launcher that answered from one that sat the wait out; the L4 control is killed AT
+  // the bound, so half keeps its cost at 5 s while leaving the answer 2.3× over the slowest spawn chain measured (2165
+  // ms: this whole suite on two CPUs each shared with a `yes`; 1314–1550 ms for the leg alone pinned to one CPU at nice
+  // 19 beside two; 1002 ms on the runner). Beside every such bound sits its EVIDENCE: how many polls the launcher sat
+  // out (`polls`, counted by a PATH `sleep`) — the claim itself; the bound only says "not the cap".
+  const waitOf = (re, what) => {
+    const m = M.INSTALL_LAUNCHER.match(re);
+    ok(m && M.INSTALL_LAUNCHER.split(m[0]).length === 2, `CONTROL setup: the launcher's ${what} is spelled once — its poll and its cap read from the module (${m ? `${m[1]} polls × ${m[2]} s` : 'NOT FOUND'})`);
+    return m ? { cap: Number(m[1]), pollMs: Math.round(Number(m[2]) * 1000), capMs: Number(m[1]) * Math.round(Number(m[2]) * 1000) } : { cap: NaN, pollMs: NaN, capMs: NaN };
+  };
+  const PID_WAIT = waitOf(/\[ \$n -lt (\d+) \] && \[ -e "\/proc\/\$b" \]; do sleep ([0-9.]+); n=\$\(\(n\+1\)\); done/, 'pidfile wait (bounded by the runner\'s life, r5 L4)');
+  const LOCK_WAIT = waitOf(/\[ \$n -le (\d+) \] \|\| \{ echo "[^"\n]*"; exit 125; \}\n {4}sleep ([0-9.]+)\n/, 'lock wait');
+  const AT_ONCE_MS = PID_WAIT.capMs / 2;
+  /** A `sleep` that appends one line per call to $VS_POLLS, then execs the real one (the wait itself unchanged). On a
+   *  launcher's path the only sleepers are its wait loops (and the runner's one /proc retry), so the count is how many
+   *  polls it sat out — an upper bound on any one loop's. */
+  const pollDir = path.join(root, 'bin-polls'); fs.mkdirSync(pollDir, { recursive: true });
+  fs.writeFileSync(path.join(pollDir, 'sleep'), `#!/bin/sh\n[ -z "$VS_POLLS" ] || echo "$*" >> "$VS_POLLS"\nexec ${realBin('sleep')} "$@"\n`, { mode: 0o755 });
+  let pollSeq = 0;
+  const withPolls = (env) => { const f = path.join(root, `polls-${++pollSeq}`); return { env: { ...env, PATH: `${pollDir}:${env.PATH || ''}`, VS_POLLS: f }, polls: () => linesIn(f) }; };
   const slotLock = (st, which) => { try { return fs.readFileSync(path.join(st, M.INSTALL_FILES[which]), 'utf8').trim().split(/\s+/).slice(2).join(' ') || null; } catch { return null; } };
   const runnerOf = (st) => { try { const [pid, s] = fs.readFileSync(path.join(st, M.INSTALL_FILES.pid), 'utf8').trim().split(/\s+/); return D.procStart(Number(pid)) === Number(s) ? Number(pid) : null; } catch { return null; } };
   const fd9Of = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/fd/9`); } catch { return null; } };
@@ -766,8 +806,9 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   };
   // the fast legs first (their timings are the claims), then every slow leg and control AT ONCE (each on its own state
   // dir — the suite is fast-tier; serially these add ~15 s)
-  const m1a = await m1(ACC, 'fix', 20000);
-  ok(m1a.code === 0 && m1a.ms < 1000, `(r3 M1) a stale pidfile naming a LIVE unrelated pid + an install that ends at once ⇒ answered {code 0} in ${m1a.ms} ms (the old pid never followed)`, m1a);
+  const M1_FIX_MS = 20000, M1_PRE_MS = 3000; // the two legs' installMs: the deadline each answer is judged against
+  const m1a = await m1(ACC, 'fix', M1_FIX_MS);
+  ok(m1a.code === 0 && m1a.ms < M1_FIX_MS, `(r3 M1) a stale pidfile naming a LIVE unrelated pid + an install that ends at once ⇒ answered {code 0} in ${m1a.ms} ms (the old pid never followed: code 0 is the fresh install's own exit — following the live stale pid can only end at the ${M1_FIX_MS} ms deadline, install_timeout, the control below)`, m1a);
   // (L5 / r4) no setsid — no flock — on PATH ⇒ refused at once BY NAME, before anything is created (a PATH of symlinks
   // to everything the launcher runs, minus the one tool)
   const binWithout = (tag, missing) => {
@@ -776,12 +817,13 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     return { PATH: dir, HOME: root, XDG_RUNTIME_DIR: XDG };
   };
   const envNoSetsid = binWithout('nosetsid', 'setsid'), envNoFlock = binWithout('noflock', 'flock');
+  const l5p = withPolls(envNoSetsid);
   const t5 = Date.now();
-  const l5 = await ACC.create({ hosts: null, local: () => null, install: false, log: quiet, env: () => envNoSetsid }).runArgv('local', ['sh', '-c', 'echo never'], { stateDir: path.join(root, 'st-l5'), onData: (d) => got.push('L5:' + d) });
-  const l5ms = Date.now() - t5, l5out = got.filter((x) => x.startsWith('L5:')).join('');
-  ok(l5.code === 125 && l5ms < 1000 && /setsid \(util-linux\) is missing/.test(l5out) && !fs.existsSync(path.join(root, 'st-l5')), `(r3 L5) a machine without setsid ⇒ exit 125 in ${l5ms} ms naming setsid, nothing created`, { l5, l5ms, l5out });
-  const lf = await launch(M, ['sh', '-c', 'echo never'], path.join(root, 'st-noflock'), 'start', { env: envNoFlock, killAfter: 3000 });
-  ok(lf.code === 125 && lf.ms < 1000 && /flock \(util-linux\) is missing on this machine/.test(lf.out) && !/never/.test(lf.out) && !fs.existsSync(path.join(root, 'st-noflock')), `(r4) a machine without flock ⇒ exit 125 in ${lf.ms} ms naming util-linux, nothing run, nothing created`, lf);
+  const l5 = await ACC.create({ hosts: null, local: () => null, install: false, log: quiet, env: () => l5p.env }).runArgv('local', ['sh', '-c', 'echo never'], { stateDir: path.join(root, 'st-l5'), onData: (d) => got.push('L5:' + d) });
+  const l5ms = Date.now() - t5, l5out = got.filter((x) => x.startsWith('L5:')).join(''), l5polls = l5p.polls();
+  ok(l5.code === 125 && l5polls === 0 && l5ms < AT_ONCE_MS && /setsid \(util-linux\) is missing/.test(l5out) && !fs.existsSync(path.join(root, 'st-l5')), `(r3 L5) a machine without setsid ⇒ exit 125 in ${l5ms} ms naming setsid, nothing created — refused before any wait (${l5polls} polls)`, { l5, l5ms, l5out, l5polls });
+  const lf = await launch(M, ['sh', '-c', 'echo never'], path.join(root, 'st-noflock'), 'start', { env: envNoFlock, killAfter: 3000, polls: true });
+  ok(lf.code === 125 && lf.polls === 0 && lf.ms < AT_ONCE_MS && /flock \(util-linux\) is missing on this machine/.test(lf.out) && !/never/.test(lf.out) && !fs.existsSync(path.join(root, 'st-noflock')), `(r4) a machine without flock ⇒ exit 125 in ${lf.ms} ms naming util-linux, nothing run, nothing created — refused before any wait (${lf.polls} polls)`, lf);
   // (L8) a starttime that cannot be read (no /proc): nothing is ever recorded as "<pid> " — the RUNNER refuses before it
   // runs (the pidfile's identity needs it; the launcher needs no identity of its own since r4 — the lock is the
   // kernel's). A `cut` that prints nothing stands in for an unreadable /proc/<pid>/stat.
@@ -789,8 +831,9 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   fs.writeFileSync(path.join(noProc, 'cut'), `#!/bin/sh\ncase "$*" in *-f20*) cat > /dev/null ;; *) exec ${realBin('cut')} "$@" ;; esac\n`, { mode: 0o755 }); // only the starttime field (-f20) reads nothing
   const envNoProc = { PATH: `${noProc}:/usr/bin:/bin`, HOME: root, XDG_RUNTIME_DIR: XDG };
   const stL8 = path.join(root, 'st-l8-launch');
-  const l8l = await launch(M, ['sh', '-c', 'echo never'], stL8, 'start', { env: envNoProc, killAfter: 3000 });
-  ok(l8l.code === 125 && l8l.ms < 1000 && /cannot read \/proc\/\d+\/stat/.test(l8l.out) && !/never/.test(l8l.out) && lockFree(lockOf(stL8)), `(r3 L8) no readable starttime ⇒ the install is refused before it runs: exit 125 in ${l8l.ms} ms naming /proc, nothing run, the lock released`, l8l);
+  const l8l = await launch(M, ['sh', '-c', 'echo never'], stL8, 'start', { env: envNoProc, killAfter: 3000, polls: true });
+  l8l.exitRec = (() => { try { return fs.readFileSync(path.join(stL8, M.INSTALL_FILES.exit), 'utf8').trim().split(/\s+/)[0]; } catch { return null; } })();
+  ok(l8l.code === 125 && l8l.exitRec === '125' && l8l.polls < PID_WAIT.cap && l8l.ms < AT_ONCE_MS && /cannot read \/proc\/\d+\/stat/.test(l8l.out) && !/never/.test(l8l.out) && lockFree(lockOf(stL8)), `(r3 L8) no readable starttime ⇒ the install is refused before it runs: exit 125 in ${l8l.ms} ms naming /proc, nothing run, the lock released — the pidfile wait left by the runner's recorded exit (125) after ${l8l.polls} of its ${PID_WAIT.cap} polls`, l8l);
   /** The RUNNER run directly, fd 9 = `fd9` (an open descriptor on the lock file; the launcher hands its own). */
   const runner = (Mod, tag, { env = envNoProc, holdOther = false, seed = false } = {}) => new Promise((resolve) => {
     const st = path.join(root, `st-r-${tag}`); fs.mkdirSync(st, { recursive: true });
@@ -833,8 +876,8 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const stRo = path.join(root, 'st-ro'); fs.mkdirSync(stRo, { recursive: true }); fs.chmodSync(stRo, 0o555);
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
   if (!asRoot) {
-    const ro = await launch(M, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000 });
-    ok(ro.code === 125 && ro.ms < 1000 && /is not writable on this machine/.test(ro.out) && !/never/.test(ro.out), `a state dir that cannot be written ⇒ exit 125 in ${ro.ms} ms naming it`, ro);
+    const ro = await launch(M, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000, polls: true });
+    ok(ro.code === 125 && ro.polls === 0 && ro.ms < AT_ONCE_MS && /is not writable on this machine/.test(ro.out) && !/never/.test(ro.out), `a state dir that cannot be written ⇒ exit 125 in ${ro.ms} ms naming it — refused before any wait (${ro.polls} polls)`, ro);
   } else console.log('  - SKIP the read-only state dir row: running as root (a mode bit does not stop root)');
   const roLine = lineOf('[ -w "$D" ] ||');
   ok(roLine && appsSrc.split(roLine).length === 2, 'CONTROL setup: the writable check is spelled once');
@@ -949,7 +992,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     // a REGULAR FILE where the per-uid dir goes (what a squatter can make without root) ⇒ refused by name, nothing run
     const fB = fakeUid + 1, dB = tmpRootOf(fB); fs.rmSync(dB, { recursive: true, force: true }); fs.writeFileSync(dB, 'squatter\n');
     const stB = path.join(root, 'st-l3-file'); fs.mkdirSync(stB, { recursive: true });
-    const rB = await launch(M, ['sh', '-c', 'echo never'], stB, 'start', { env: idShim(fB, fB), killAfter: 8000 });
+    const rB = await launch(M, ['sh', '-c', 'echo never'], stB, 'start', { env: idShim(fB, fB), killAfter: 8000, polls: true });
     const rBc = await launch(AppsNoOwnCheck, ['sh', '-c', 'echo never'], stB, 'start', { env: idShim(fB, fB), killAfter: 8000 });
     fs.rmSync(dB, { force: true });
     // a DIRECTORY owned by another uid ⇒ refused by name (only root can make one)
@@ -963,7 +1006,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     // an `id -u` that answers no number ⇒ refused by name
     const stD = path.join(root, 'st-l3-noid'); fs.mkdirSync(stD, { recursive: true });
     const rD = await launch(M, ['sh', '-c', 'echo never'], stD, 'start', { env: idShim('nan', 'x1'), killAfter: 8000 });
-    return { same, ctl, fallback, file: { code: rB.code, out: rB.out, ms: rB.ms, dir: dB }, fileCtl: { code: rBc.code, out: rBc.out }, foreign, noid: { code: rD.code, out: rD.out } };
+    return { same, ctl, fallback, file: { code: rB.code, out: rB.out, ms: rB.ms, polls: rB.polls, dir: dB }, fileCtl: { code: rBc.code, out: rBc.out }, foreign, noid: { code: rD.code, out: rD.out } };
   })();
   // (r5 L1) A START IN THE SAME SECOND AS AN EARLIER INSTALL'S EXIT, while a child that install left behind still holds
   // the lock (fd 9 inherited), RUNS its own install — it never answers that stale exit. The first install exits 100 in
@@ -995,7 +1038,14 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   };
   const l1Leg = Promise.all([sameSecond(M, 'fix', 'ns'), sameSecond(AppsWholeSec, 'ctl', 's')]).then(([fix, ctl]) => ({ fix, ctl }));
   // (r5 L4) a runner exec'd WITHOUT fd 9 (a `setsid` that closes it before it execs the real one) refuses — and the
-  // launcher says so at once, with the runner's own line naming the lock: the pidfile wait ends with the runner's life
+  // launcher says so at once, with the runner's own line naming the lock: the pidfile wait ends with the runner's life.
+  // The EVIDENCE is the wait's own exits, never a wall clock (the 2.369.189 mirror red: 1002 ms against a literal
+  // 1000 — the spawn chain on a 2-vCPU runner; the wait had polled once): `while no pidfile && no exit file && n < CAP
+  // && [ -e /proc/$b ]; do sleep POLL` left with NO pidfile, NO exit file and FEWER than CAP polls ⇒ by its only other
+  // exit, the runner was gone (the shell reaps it while it waits on a poll's sleep, so at most one poll outlives it).
+  // CONTROL: the same launcher without `[ -e /proc/$b ]` is still polling AT the bound (killed there: its answer cannot
+  // come before CAP × POLL, twice the bound — a sleep never returns early), the runner's refusal long in its log, its
+  // poll count grown past the fix's (the counter counts this loop).
   const noFd9 = path.join(root, 'bin-nofd9'); fs.mkdirSync(noFd9, { recursive: true });
   fs.writeFileSync(path.join(noFd9, 'setsid'), `#!/bin/sh\nexec 9>&-\nexec ${realBin('setsid')} "$@"\n`, { mode: 0o755 });
   const envNoFd9 = { ...process.env, PATH: `${noFd9}:${process.env.PATH}` };
@@ -1004,13 +1054,17 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const AppsUnbounded = MUT.load('src/desktop-apps.js', appsSrc.replace(waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', '')), 'unbounded');
   const l4Leg = (async () => {
     const stF = path.join(root, 'st-l4'), stC = path.join(root, 'st-l4-pre'); fs.mkdirSync(stF, { recursive: true }); fs.mkdirSync(stC, { recursive: true });
-    const [fx, pre] = await Promise.all([launch(M, ['sh', '-c', 'echo never'], stF, 'start', { env: envNoFd9, killAfter: 15000 }), launch(AppsUnbounded, ['sh', '-c', 'echo never'], stC, 'start', { env: envNoFd9, killAfter: 3000 })]);
-    return { fx: { ...fx, lock: lockOf(stF), free: lockFree(lockOf(stF)) }, pre };
+    // the fix's killAfter is PATIENCE, never a bound (our own launcher — the install is `echo`); the control is killed AT
+    // the bound: still unanswered there is what failing it means
+    const [fx, pre] = await Promise.all([launch(M, ['sh', '-c', 'echo never'], stF, 'start', { env: envNoFd9, killAfter: PID_WAIT.capMs * 6, polls: true }), launch(AppsUnbounded, ['sh', '-c', 'echo never'], stC, 'start', { env: envNoFd9, killAfter: AT_ONCE_MS, polls: true })]);
+    const has = (st, k) => fs.existsSync(path.join(st, M.INSTALL_FILES[k]));
+    const logOf = (st) => { try { return fs.readFileSync(path.join(st, M.INSTALL_FILES.log), 'utf8'); } catch { return ''; } };
+    return { fx: { ...fx, lock: lockOf(stF), free: lockFree(lockOf(stF)), pidfile: has(stF, 'pid'), exitfile: has(stF, 'exit') }, pre: { ...pre, pidfile: has(stC, 'pid'), exitfile: has(stC, 'exit'), runnerLog: logOf(stC) } };
   })();
   const tNat = Date.now();
   const [nat, m1b, wide, killed5, kl, hw, l3, l1, l4, f5ctl, l5pre, lfpre, l8pre, grd, ropre] = await Promise.all([
     batches(40, 8, (i) => five(M, `nat-${i}`)).then((r) => { r.ms = Date.now() - tNat; return r; }),
-    m1(AccPreM1, 'pre', 3000),
+    m1(AccPreM1, 'pre', M1_PRE_MS),
     batches(20, 10, (i) => five(M, `wide-${i}`, { env: envWide })),
     batches(10, 5, (i) => five(M, `killed-${i}`, { prep: killedPrev })),
     killedLauncher, heldLeg, l3Leg, l1Leg, l4Leg,
@@ -1022,23 +1076,28 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
     asRoot ? Promise.resolve(null) : launch(AppsNoRoCheck, ['sh', '-c', 'echo never'], stRo, 'start', { killAfter: 3000 }),
   ]);
   ok(nat.length === 40 && oneEach(nat), `(r3 M4 / r4) five concurrent starts on an empty state dir, 40 trials (8 at a time, beside every other leg) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(nat))}); the other four follow it (${nat.reduce((a, r) => a + r.followed, 0)} follows of 160 — each install runs until all four follow) and all answer its exit 3; the lock free after each (${nat.ms} ms)`, nat.filter((r) => !oneEach([r])).slice(0, 3));
-  ok(m1b.err === 'install_timeout' && m1b.ms >= 2900, `CONTROL: the pre-fix launcher follows the stale pid — install_timeout after ${m1b.ms} ms for an install that ended at once`, m1b);
+  ok(m1b.err === 'install_timeout' && m1b.ms >= M1_PRE_MS - EARLY_MS, `CONTROL: the pre-fix launcher follows the stale pid — install_timeout after ${m1b.ms} ms (its ${M1_PRE_MS} ms deadline) for an install that ended at once`, m1b);
   ok(wide.length === 20 && oneEach(wide), `(r4) the same over 20 trials with the windows WIDENED (setsid +0.3 s, flock +0–60 ms) ⇒ ONE runner in every trial (runners ${JSON.stringify(hist(wide))}), all answer exit 3`, wide.filter((r) => !oneEach([r])).slice(0, 3));
-  ok(killed5.length === 10 && oneEach(killed5) && killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < 1500), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < 1500)).slice(0, 3));
+  ok(killed5.length === 10 && oneEach(killed5) && killed5.every((r) => r.held && r.freed && r.firstRunMs !== null && r.firstRunMs < LOCK_WAIT.capMs / 2), `(r4) a previous install SIGKILLed mid-run, 10 trials (its runner held the lock — fd 9 → the lock file — until the kill: ${killed5.filter((r) => r.held).length}/10; released by the kernel at the kill: ${killed5.filter((r) => r.freed).length}/10) ⇒ five starts ⇒ ONE runner, started at once (first run ${Math.min(...killed5.map((r) => r.firstRunMs))}–${Math.max(...killed5.map((r) => r.firstRunMs))} ms after the starts, < ½ × the ${LOCK_WAIT.capMs} ms lock wait a start sits out when the lock stays held — the kernel released the dead holder's lock; nothing waited)`, killed5.filter((r) => !oneEach([r]) || !(r.firstRunMs < LOCK_WAIT.capMs / 2)).slice(0, 3));
   ok(kl.launcherFd9 === null && kl.runnerAlive && kl.runnerFd9 === kl.K && kl.held && kl.b.followsIt && kl.b.code === 4 && kl.runs.length === 1 && /^run-/.test(kl.runs[0]) && kl.freeAfter, `(r4) the LAUNCHER SIGKILLed mid-install: its runner lives on HOLDING the lock (/proc/${kl.runnerPid}/fd/9 → the lock file; the launcher had closed its own copy) and a concurrent start follows it (answered its exit 4 in ${kl.b.ms} ms) — never a second runner; the lock free once it ended`, kl);
   ok(hw.code === 3 && hw.runners === 1 && hw.ranAfterHolder, `(r4) a lock held by a process that is no recorded install ⇒ a start WAITS (never runs beside it) and runs only once the holder has exited (${hw.gap} ms after the holder's own end stamp, written before it released; answered in ${hw.waitedMs} ms)`, hw);
   ok(l3.same.out.every((x) => x.code === 0) && l3.same.locks.length === 1 && l3.same.locks[0] === lockOf(l3.same.st) && path.dirname(l3.same.locks[0]) === LOCKROOT && l3.same.stateLock && l3.same.stateLock.lock === l3.same.locks[0] && !l3.same.locks[0].startsWith(root + '/'), `(r5 L3) the lock is named by the UID, never the environment: $XDG_RUNTIME_DIR a scratch dir, unset, or naming a gone dir ⇒ ONE lock path on one state dir (${l3.same.locks[0]}; the exit file and installState record it) — local storage, never inside a state dir`, l3.same);
   ok(l3.ctl.locks.length > 1, `CONTROL: the r4 line (T=\${XDG_RUNTIME_DIR:-/tmp}) names ${l3.ctl.locks.length} different locks for ONE state dir across the three environments (${l3.ctl.locks.join(' | ')})`, l3.ctl);
   ok(l3.fallback.runUserGone && l3.fallback.code === 0 && l3.fallback.lock === l3.fallback.want && l3.fallback.modeA === '700' && l3.fallback.ownA, `(r5 L3) a uid with no /run/user dir ⇒ the lock in /tmp/vibespace-<uid>, created 0700 and owned by this user (mode ${l3.fallback.modeA})`, l3.fallback);
-  ok(l3.file.code === 125 && l3.file.ms < 1000 && l3.file.out.includes(`${l3.file.dir} is not a directory this user owns`) && !/never/.test(l3.file.out), `(r5 L3) something that is not a directory this user owns where /tmp/vibespace-<uid> goes (a regular file — what a squatter can make without root) ⇒ exit 125 in ${l3.file.ms} ms naming it, nothing run`, l3.file);
+  ok(l3.file.code === 125 && l3.file.polls === 0 && l3.file.ms < AT_ONCE_MS && l3.file.out.includes(`${l3.file.dir} is not a directory this user owns`) && !/never/.test(l3.file.out), `(r5 L3) something that is not a directory this user owns where /tmp/vibespace-<uid> goes (a regular file — what a squatter can make without root) ⇒ exit 125 in ${l3.file.ms} ms naming it, nothing run — refused before any wait (${l3.file.polls} polls)`, l3.file);
   ok(l3.fileCtl.code === 125 && !/is not a directory this user owns/.test(l3.fileCtl.out) && /cannot be opened/.test(l3.fileCtl.out), 'CONTROL: without the ownership check the same squat is refused only by the generic open failure — the directory never named', l3.fileCtl);
   if (l3.foreign) ok(l3.foreign.code === 125 && l3.foreign.out.includes(`${l3.foreign.dir} is not a directory this user owns`) && !/never/.test(l3.foreign.out), '(r5 L3) a /tmp/vibespace-<uid> DIRECTORY owned by another uid ⇒ refused by name, nothing run', l3.foreign);
   else console.log(`  - SKIP (r5 L3) a /tmp/vibespace-<uid> directory owned by ANOTHER uid: this suite runs as uid ${UID}, and only root can make a directory another uid owns — the regular-file row above goes through the same check (\`[ -d ] && [ -O ]\`)`);
   ok(l3.noid.code === 125 && /this user id cannot be read \(id -u\)/.test(l3.noid.out) && !/never/.test(l3.noid.out), '(r5 L3) an `id -u` that answers no number ⇒ refused by name, nothing run', l3.noid);
   ok(l1.fix.aligned && l1.fix.heldByChild && l1.fix.a === 100 && l1.fix.b === 7 && l1.fix.runs === 1, `(r5 L1) an install exits 100 at second ${l1.fix.aSec} leaving a child on the lock; a start in the SAME second (${l1.fix.bMsIn} ms into it, the lock held by that child) waits for the lock and RUNS its own install (exit 7 in ${l1.fix.bMs} ms, 1 run) — never the stale 100 (attempt ${l1.fix.attempt})`, l1.fix);
   ok(l1.ctl.aligned && l1.ctl.heldByChild && l1.ctl.a === 100 && l1.ctl.b === 100 && l1.ctl.runs === 0, `CONTROL: the whole-second launcher (\`date +%s\`, \`-ge\`) answers the earlier install's stale exit ${l1.ctl.b} in the same second and never runs its own (${l1.ctl.runs} runs)`, l1.ctl);
-  ok(l4.fx.code === 125 && l4.fx.ms < 1000 && l4.fx.out.includes(`does not hold the install lock (${l4.fx.lock})`) && /the install did not start/.test(l4.fx.out) && !/never/.test(l4.fx.out) && l4.fx.free, `(r5 L4) a runner exec'd without fd 9 refuses and the launcher answers 125 in ${l4.fx.ms} ms with the runner's line naming the lock, nothing run, the lock free`, { code: l4.fx.code, ms: l4.fx.ms, out: l4.fx.out.slice(-300) });
-  ok(l4.pre.killed && l4.pre.ms >= 2900 && !/the install did not start/.test(l4.pre.out), `CONTROL: the pidfile wait without the runner's life as its bound is still waiting ${l4.pre.ms} ms later for a runner that already refused (killed at 3 s — our launcher, never an install; unbounded it answers at 10 s)`, { killed: l4.pre.killed, ms: l4.pre.ms, out: l4.pre.out.slice(-200) });
+  ok(l4.fx.code === 125 && l4.fx.out.includes(`does not hold the install lock (${l4.fx.lock})`) && /the install did not start/.test(l4.fx.out) && !/never/.test(l4.fx.out) && l4.fx.free
+    && !l4.fx.pidfile && !l4.fx.exitfile && l4.fx.polls >= 1 && l4.fx.polls < PID_WAIT.cap && l4.fx.ms < AT_ONCE_MS,
+  `(r5 L4) a runner exec'd without fd 9 refuses and the launcher answers 125 with the runner's line naming the lock, nothing run, the lock free — the pidfile wait ENDED WITH THE RUNNER'S LIFE: no pidfile, no exit file, ${l4.fx.polls} of its ${PID_WAIT.cap} polls (${PID_WAIT.pollMs} ms each) ⇒ /proc/$b gone, its only other exit; answered in ${l4.fx.ms} ms (< ${AT_ONCE_MS} ms = ½ × the ${PID_WAIT.capMs} ms cap the pre-fix sits out)`,
+  { code: l4.fx.code, ms: l4.fx.ms, polls: l4.fx.polls, pidfile: l4.fx.pidfile, exitfile: l4.fx.exitfile, out: l4.fx.out.slice(-300) });
+  ok(l4.pre.killed && l4.pre.ms >= AT_ONCE_MS - EARLY_MS && !/the install did not start/.test(l4.pre.out) && /does not hold the install lock/.test(l4.pre.runnerLog) && !l4.pre.pidfile && !l4.pre.exitfile && l4.pre.polls > l4.fx.polls,
+  `CONTROL: the pidfile wait without the runner's life as its bound is still polling at the ${AT_ONCE_MS} ms bound (${l4.pre.polls} polls, killed at ${l4.pre.ms} ms — its answer cannot come before the ${PID_WAIT.capMs} ms cap) for a runner whose refusal is long in its log`,
+  { killed: l4.pre.killed, ms: l4.pre.ms, polls: l4.pre.polls, fxPolls: l4.fx.polls, runnerLog: l4.pre.runnerLog.slice(-200), out: l4.pre.out.slice(-200) });
   ok(f5ctl.length === 3 && f5ctl.every((r) => r.runners > 1), `CONTROL: the launcher (and the runner's re-assertion) with \`flock -n 9\` replaced by \`true\` ⇒ ${f5ctl.map((r) => r.runners).join(', ')} runners per five starts — apt-gets beside each other`, f5ctl);
   ok(grd.ran, 'CONTROL: a runner without the re-assertion runs while another process holds the lock', { ran: grd.ran, code: grd.code });
   ok(l5pre.code === 125 && !/setsid \(util-linux\)/.test(l5pre.out) && /setsid: (command )?not found/.test(l5pre.out), `CONTROL: without the setsid check the refusal is the shell's bare "setsid: not found" (${l5pre.ms} ms — since r5 L4 the pidfile wait ends with the runner's life; before, 10 s), never the package to install`, l5pre);

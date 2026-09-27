@@ -1544,6 +1544,8 @@ assignment = { principal: { kind:'agent'|'group', id },
   action — a **narrowing** operation smuggled into a model whose stated law
   (§8) is widening-only.
 
+> **R4 (2026-09-27) supersedes the single assignment below:** every grain holds an ACCESS list and a WATCHERS list — two operations, access first — see §24.
+
 **Three grains, one editor (2026-09-26; the owner: "hand the whole account, or a
 channel / a chat / the chats matching a pattern, to a specific agent").** One
 record `{principal, mode all|filtered, filterId, notify wake|digest, authority
@@ -2124,7 +2126,10 @@ tokens encrypted at rest.
 
 - **Threads as conversations** (`threadId`), with an inclusion query so a mailbox
   does not become forty thousand conversations.
-- **Send** needs `gmail.send`; label manipulation would need `gmail.modify`. Both
+- **Send** needs `gmail.send` for `messages.send` — and, corrected by the R4 verify
+  (2026-09-27, §24): the two-phase REPLY (`drafts.create` + `drafts.send`) needs
+  `gmail.compose`, which also covers `messages.send`, so the consent asks readonly +
+  `gmail.compose`; label manipulation would need `gmail.modify`. Both
   are sensitive scopes, and the refresh-token lifetime depends on the OAuth
   client's verification status — an unverified/testing client expires refresh
   tokens after **7 days** (public docs: a consent screen in Testing with user type
@@ -4043,7 +4048,7 @@ A conversation is on the first screen (the attention list) exactly when one of t
 | handed to an agent / a Task Group ON ITS OWN (the conversation grain — its own assignment) | the assignment, `source: 'conversation'` | — |
 | handed over by a rule or with its whole account, AND that hand-over acted on it: a wake was DELIVERED to the agent (`touch.wake.ok === true`, a lane other than `none`), or its wake is held (amber) | the assignment `source: 'pattern' / 'account'` + `touch.wake` / held | delivered: 24 h, edge exclusive; held: 7 days |
 | an agent read it | `agentReads` (stamped by the agent route's readFor: who, when, up to which record) | 24 h, edge EXCLUSIVE |
-| a wake for it is held | any of: hits pending; the last wake went nowhere (lane `none`); the last refusal is newer than the last wake. A wake stashed for the agent's next turn is NOT held | 7 days (the wake ledger's own) |
+| a wake for it is held | any of: hits pending (except a DIGEST watcher's hits inside its open window — they are the digest, not held: the R3 × R4 seam, 2.369.191, PURE `heldPending` over `touch.pendingFor` + the row's R4 `watchers`, the window's edge exclusive); the last wake went nowhere (lane `none`); the last refusal is newer than the last wake. A wake stashed for the agent's next turn is NOT held | 7 days (the wake ledger's own) |
 | you replied in it | `selfAt` = a record the vendor marks as yours (`isSelf`), or your own send from here | 24 h, edge exclusive |
 
 Non-archived agent groups are always listed (your explicit act, D1). The order is the full list's (activity). A conversation handed over by a rule or with its whole account is NOT listed for the hand-over alone until a wake is delivered or held — it falls through to read / held / replied / nothing like any other row. When listed, its tag carries `grain`; the tooltip says "Handed to … with the whole account" / "… by a rule that matches it", and the visible words stay "→ Agent".
@@ -4082,6 +4087,7 @@ Non-archived agent groups are always listed (your explicit act, D1). The order i
 
 - `agentReads` (≤ 5 principals, newest first) is stamped by the **agent route's readFor**, AFTER the reach check: a hidden read is the uniform not-found and leaves no trace. The same principal re-reading the same tail within 60 s is not re-stamped (an agent's read loop is not a broadcast loop). The stamp goes through the index's one door (debounced flush) and one partial broadcast of that row.
 - A wake ledger entry now carries `name` (whom it reached).
+- `pendingFor` (2.369.191, the R3 × R4 seam) = the pending hits per principal `[{p, n, oldest}]` (`p` = the watcher's `kind:id`, `null` = a legacy untagged hit; tagged elisions counted); `pending` stays the total.
 - `selfAt` is stamped from `isSelf` records at ingest and push. A sent proposal you drafted counts too, before the vendor echoes it. After boot it is derived once from the log tail for rows active in the last two days and never stamped (`healSelfAt`: one conversation per event-loop turn; a row stamped 0 is never re-read).
 
 Gates:
@@ -4092,3 +4098,159 @@ Gates:
 - **D1** — does a message that @mentions you count as mattering? Today it does not; 18 Lark conversations @-mention you.
 - **D2** — keep the activity order, or put the needs-you rows first?
 - **D3** — should window pictures get an owner reserve inside the vendor budget? Today pictures share the per-minute budget with the timed walk; a refused picture now waits a minute and retries by itself, never silently.
+
+## 24. R4 (2026-09-26 / 27): access and notification — two operations, access first
+
+> **Verify r2 (2026-09-27):** (1) the ladder is an await — a watcher's access removed while its wake is inside the ladder ⇒ a refused block is dropped by name (`access-removed`), never stashed; (2) a receipt wake (`receiptWake`) is a billed turn under the SAME daily cap and on the same ledger as a wake — over the cap the receipt rides the next turn (`noWake`); (3) `compose` refuses `bcc` / `replyTo` by name (To / Cc only); (4) the reader (`grainOf`) leaves a notification row without access at its grain inert, the boot names them.
+> **Verify r3 (2026-09-27):** (1) a receipt is paced INSIDE the watcher's serial sections (the conversation's chain, then the scope's — the order a wake takes): five concurrent rejects under a cap of 2 are two billed turns, a wake beside a receipt under a cap of 1 is one; (2) `stillInEffect` answers two facts — a watcher no longer in effect drops the refused block by name (`access-removed`), a group MEMBER that died while its wake was in flight HOLDS the hits for the group (`member-gone`) and the next wake routes them to another live member.
+
+
+**The owner's question (2026-09-26, on 2.369.185's account menu "交给一个 agent…"):**
+"只能交给一个agent吗？不能给多个？不能只给读取权限不做推送/汇总？" — can an account be
+handed to SEVERAL agents? Can an agent get read access only, with no wake and no digest?
+**The owner's two corrections (2026-09-27):** "你之前的交互的问题是把'让agent能访问对话'和
+'让agent会被通知'耦合在一起了" (the old interaction coupled "an agent may see the
+conversation" with "an agent is notified") and "这实际上应该是两种不同的操作，前者是后者的前提"
+(they are two different operations, the first the prerequisite of the second).
+
+**The model.** Every grain — the account, the conversations a rule matches, one
+conversation — holds TWO lists (`src/channel-filter.js`, PURE):
+
+| list | row | means |
+|---|---|---|
+| **access** | `{principal (agent \| Task Group), authority: draft \| send}` | may list / read / search / refresh the grain's conversations and reply / compose through the outbox with that authority. Access ALONE wakes nobody: no pace ledger, no digest, nothing billed on its behalf. Reach = one `visible` grant per access row (`origin:'access'`) |
+| **watchers** | `{principal, notify: wake \| digest, mode all \| filtered, filterId (+ the filter inline), digestMinutes, dailyWakeCap, receiptWake}` | who is WOKEN and on what. A watcher row REQUIRES an access row for the same principal at that grain — refused by name otherwise (`watcher-needs-access`); removing the access removes the watcher in the same write |
+
+There is no third "read-only mode": read-only IS an access row with no watcher.
+
+**Which rows apply to a conversation** (`effectiveGrants`): PER PRINCIPAL, the finest
+grain that names it decides — conversation > the matching rules in creation order >
+the account — separately for access and for watchers. A's access row on one
+conversation (draft) overrides A's account row (send) there only; A's watcher on a
+rule (its own filter) replaces A's account-wide watcher on the rule's conversations.
+Another principal's rows never mask A's: giving B access to (or a watcher on) one
+conversation does not silence A's account-wide notification there. (Pre-R4, the
+finest grain holding ANY assignment took over wholesale; with lists that would let an
+unrelated row silently stop a notification.)
+
+**Money.** Every watcher carries its OWN pace ledger; its wakes queue on the scope
+chain keyed per (scope, principal) (`scope:acct:<id>|<kind:id>` /
+`scope:pat:<id>|<kind:id>` — the r2 invariant "N fresh conversations in one pass never
+exceed the cap" now holds PER watcher: two watchers of one account, caps 5 and 5, a
+burst over 100 conversations ⇒ exactly 5 + 5). Pending hits are tagged with the
+watcher they wait for (`for: kind:id`, `PENDING_CAP` per watcher); digest, coalescing
+and boot windows are per (conversation, watcher). One batch never bills one session
+twice: a named agent and a group whose round-robin lands on it share one delivery.
+A woken agent's block names the others on the conversation ("also on this
+conversation: B (digest, drafts), 工作 (access only, drafts)"). Outbox authority = the
+caller's own access rows (the widest, clamped by the two caps); `receiptWake` = the
+drafter's own watcher (itself or a group of its — the drafter's groups are read).
+
+**UI — two operations, two dialogs** (`src/lib/channel-filter-editor.js`): the account
+card's ⋯, the conversation row menu and a rule's line each offer **Grant access…**
+(授权访问…) then **Notify…** (通知…). Grant access: a row per agent or group with its
+authority, Add / Remove, a rule's pattern; removing a principal says first that its
+notification goes too. Notify: its picker offers EXACTLY the principals with access
+at that grain (none ⇒ "先授权访问 — 用「授权访问…」" and a button that opens it); a row
+per watcher with the pre-R4 fields and its own estimate; the total sums every
+watcher's ceiling; a number past its bound is clamped VISIBLY ("已保持在最大值 1440").
+The card line: "访问：A（可发送）, 组 · 工作（起草） · 通知：A 每批唤醒 按过滤器". The old
+"交给一个 agent…" entry and its words are retired.
+
+**Routes.** `PUT …/access {access:[…]}` and `PUT …/watchers {watchers:[…]}` at every
+grain (`/api/channels/adapters/:id/…`, `…/patterns/:pid/…`, `/api/channels/:a/:c/…`);
+a new rule is `POST …/patterns {pattern, access[, watchers]}`. The pre-R4 single
+assignment (`{assignment}`) is the COMPATIBILITY write: one access row + one watcher
+row, replacing both lists. `PUT /api/channels/adapters/:id {policy}` sets the
+account's own sending policy (what a composed message reads; a conversation's own
+policy still wins there).
+
+**Compose (B-6acc, the owner: "给我一个agent使用我的 gmail 的能力，让它能读取和发送邮件").**
+`vibespace-channels compose <account> --to … [--cc …] --subject "…" "text"` (+ `POST
+/api/agent/channels/compose`) proposes a NEW conversation on an account the agent has
+access to AS A WHOLE, riding the SAME outbox: review by default; direct only when the
+account's policy says direct AND the agent's account access holds `send` AND no guard
+fires (links, attachments, off-hours); the same honesty line, audit and receipt. The
+adapter must declare `caps.compose` (Gmail: ONE `messages.send` of a fresh RFC-822
+message under `gmail.compose` — or a legacy `gmail.send`-only token, which composes but
+cannot reply — carrying its own `Message-ID` AND `X-VibeSpace-Proposal: <idemKey>`; a lost
+answer is reconciled by `rfc822msgid:` in the sent mail and, should Gmail have rewritten
+the Message-ID, by the proposal header among the sent messages to the first recipient
+since the attempt — the idempotency never depends on the Message-ID surviving (verify r1);
+Lark declares none ⇒ `compose-not-available` by name); `composeCaps()` answers the
+account's send identity with no vendor call (Gmail without a sending scope ⇒
+`send-scope-not-granted`, and nothing is created).
+
+**Verify r1 (2026-09-27) — the Gmail REPLY scope.** Google's method reference lists
+`https://mail.google.com/`, `gmail.modify`, `gmail.compose` for `drafts.create`,
+`drafts.send` and `drafts.delete`; `gmail.send` ("Send email on your behalf") is accepted by
+`messages.send` alone. The P4 consent (readonly + `gmail.send`) therefore minted tokens whose
+every two-phase reply would have been refused 403 at the draft. The consent now asks
+readonly + `gmail.compose` ("Manage drafts and send emails" — both scopes are Google's
+restricted class, so the app's verification class is unchanged; `gmail.send` is not asked
+beside it, since two consent rows for one capability read as two permissions);
+`sendVerbsOf(scopes)` is the ONE table of what a held token allows (reply needs
+compose|modify|mail; compose accepts those or `gmail.send`); a token minted under P4 reads
+`send-scope-not-granted` for replies and still composes; the words say "reconnect
+(Re-authorize) to allow drafts and sending". Pinned in test-channels-gmail-shape ⑧ / ⑧b and
+test-channels-engine ⑪ (a send-only fake: reply refused by name, compose proposes).
+
+**Agent side.** `vibespace-channels status` prints every grain naming the agent: its
+access authority and whether it is watched ("not notified — nothing wakes you");
+`list` shows access and notification as two facts; `search "…"` searches only the
+conversations the agent can see (the local logs; reach filters every hit, no vendor
+call); `refresh` stays within reach and the budget.
+
+**Migration** `2026-09-channels-access-watchers` (src/server/migrations.js through the
+shared runner): an existing assignment ⇒ one access row + one watcher row for its
+principal (the watcher keeps the pace ledger — a conversation's own wakes, the
+inherited grains' mirrors excluded); grants with origin `assignment` ⇒ `access`;
+untagged pending hits ⇒ tagged with the watcher they were held for. The engine reads a
+pre-split record the same way before the runner (merged, never a fallback) and lifts
+one in place before any write reaches it. Idempotent; a blocked store fails the run.
+
+**Deviations from the first brief, stated.** (1) The brief's "modes per assignee"
+(`wake | digest | read`) was superseded by the owner's decoupling: no `read` mode
+exists. (2) Precedence is per principal, not "the winning grain's list" (see above).
+(3) No refusal of two `send` authorities per grain (a woken agent's block names the
+others instead). (4) The index tables keep their names (`accountAssignments` /
+`patternAssignments`); each record now holds `{access, watchers}`.
+
+Gates: test-channel-filter (PURE tables + two patched-copy controls), test-channels-
+engine ⑪ (the conversation grain end to end: watcher-needs-access, two watchers'
+windows, access never delivered, the batch dedupe, receipts per watcher, compose,
+search; a copy that keeps a watcher without access as the control),
+test-channels-aggregate ⑨c (the r2 cap shape per watcher + an access-only group across
+a 2.5 s storm; the unscoped copy as the control) and ⑨d (UI wiring pins),
+test-channel-acl, test-migrations, test-channels-agent-cli, test-channels-gmail-shape
+⑧b; heavy: test-channels-aggregate-ui ⑤/⑦ (the owner's case — 工作 access only, one
+agent woken on a filter — and the owner's clamped numbers), test-channels-e2e ⑮,
+test-channels-i18n.
+
+**Verify r4 (2026-09-27) — the one door.** Four rounds of this lane (and lanes R2, S2 and R5 before it)
+each found a NEW writer of a billed wake beside the one serialized section — a check-then-write across
+an await. The closure is structural: `billedWake(keys, fn)` is the ONLY entry to a billed channel turn
+(the conversation's chain, then the scope chain resolved inside it), and the three section bodies
+(`wakeNow`, `flushScopeNow`, `receiptNow`) reserve the ledger row BEFORE the ladder is asked and finalize
+it after — a row that cannot be written is a hold, never a bill; a finalize that fails leaves the
+reservation counted; a wake queued when the engine stops holds its hits, and the closed store still
+writes that hold. A grep-derived census (test-channels-engine ⑫) counts every ladder call with a channel
+reason, every ledger write and every section body against the door, so a fifth writer cannot appear
+unnoticed. Verified under attack (63 legs, the real engine + store + a gated ladder): 50 concurrent
+events across 5 conversations of one account under an account cap of 3 ⇒ exactly 3 billed, 47 held,
+each on the ledger; with 10 concurrent receipts interleaved ⇒ still 3; the boot digest closing during
+the storm counts under the same cap; a Task Group of five ⇒ 3 wakes to 3 distinct members; the boot
+flush replaying 30 pending while 30 fresh arrive ⇒ 60 delivered exactly once; `stop()` / `remove()`
+mid-chain drain with no orphan and no write after the remove; a reservation, a finalize or a section
+that throws ⇒ the chain continues for the next caller; a watcher re-grained mid-wait ⇒ the new grain's
+cap. VERIFY r5 (the door's remaining edges): ① a wake reservation carries `{bootId, pid}` and a fresh
+boot RELEASES a previous boot's stuck reservations (a crash between the reservation and the finalize left
+the cap counted for 24 h) — `releaseStaleReservations` in `start()`, a same-boot reservation (an in-flight
+wake) is never touched. ② A digest watcher with `dailyWakeCap: 0` is now REFUSED at write (`digest-cap-zero`,
+a digest is a paced wake so cap 0 would never deliver); a legacy row stored before the refusal is READ as
+cap 1 (`F.digestCap`, delivers once per window) and named once at boot — the store is not rewritten. ③ One
+bad record (a matcher throw) no longer drops a conversation's whole batch: `onFresh` matches each record and
+prepares each watcher on its own, logs a failure by name and continues (it was already bounded per
+conversation by `track` — a throw never ends the pass). Re-attacked: restart-in-place (stop at +1 ms, a
+fresh boot at +2 ms) delivers every held hit exactly once; two accounts of one kind under one process are
+independent (one's stuck ladder never blocks the other's). Gates: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫.

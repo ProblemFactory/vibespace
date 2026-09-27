@@ -34,6 +34,7 @@ export function assignmentRefusalText(why) {
     case 'filter-missing': return t('The filter is not saved yet — add its rules, then save again');
     case 'principal': return t('Pick an agent or a group to wake.');
     case 'wake-cap': return t('Wakes per day must be a number of 0 or more');
+    case 'digest-cap-zero': return t('A digest is a paced wake — set “Wakes per day” to at least 1, or remove the notification');
     case 'digest': return t('The digest window must be a number of minutes');
     case 'not-an-object': case 'mode': case 'notify': case 'authority': case 'scope': return staleValueText();
     default: return null;
@@ -92,6 +93,12 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'bad-filter': case 'bad-pattern': { const w = ruleRefusalText(r, code === 'bad-pattern' ? 'pattern' : 'filter', ruleLabel); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
     case 'bad-proposal': case 'bad-policy': case 'bad-grant': case 'bad-request':
       return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
+    // R4 (2026-09-27): access and notification — two operations, access first
+    case 'bad-access': case 'bad-watcher': { const w = assignmentRefusalText(r.why); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
+    case 'duplicate-principal': return t('{who} is listed twice — one row per agent or group', { who: principalText(r.principal) });
+    case 'watcher-needs-access': return t('{who} has no access here — grant access first (Grant access…), then notify', { who: principalText(r.principal) });
+    case 'too-many-rows': return t('At most {n} rows per list', { n: Number(r.max) || 16 });
+    case 'compose-not-available': return t('This account cannot start a new conversation — reply inside an existing one');
     case 'no-such-filter': return t('That filter no longer exists');
     case 'filter-in-use': return t('That filter is still used by an assignment');
     case 'failed': return raw ? t('The channel refused the send: {error}', { error: raw }) : t('The channel refused the send');
@@ -124,6 +131,41 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'stopped': return t('The server is restarting — refresh again in a moment');
     default: return fallback || raw || t('Request failed');
   }
+}
+
+// ── R4 (2026-09-27): ACCESS and NOTIFICATION in words — the card line
+// "访问: A (可发), 组·工作 (起草) · 通知: A 每批唤醒", the dialogs' rows, the toasts.
+/** A principal as a row names it: an agent by its name, a Task Group as
+ *  "Group · <title>". */
+export function principalText(p) {
+  if (!p) return '';
+  const name = p.name || p.id || '';
+  return p.kind === 'group' ? t('Group · {name}', { name }) : String(name);
+}
+/** An access row's authority in words. */
+export function accessAuthorityText(a) {
+  return a === 'send' ? t('may send') : t('drafts');
+}
+/** How a watcher is notified, in words. */
+export function watcherHowText(w) {
+  if (!w) return '';
+  const how = w.notify === 'digest' ? t('digest every {m} min', { m: w.digestMinutes }) : t('wake per batch');
+  return w.mode === 'filtered' ? `${how} ${t('on a filter')}` : how;
+}
+/** The two facts of a grain (or of a conversation, each principal once) on
+ *  ONE line: "Access: A (may send), Group · 工作 (drafts) · Notify: A wake per
+ *  batch" — "Notify: nobody" when access stands alone. */
+export function grainSummaryText({ access = [], watchers = [] } = {}) {
+  const acc = access.map((a) => t('{name} ({authority})', { name: principalText(a.principal), authority: accessAuthorityText(a.authority) })).join(', ');
+  const wat = watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ');
+  const parts = [];
+  if (access.length) parts.push(t('Access: {list}', { list: acc }));
+  parts.push(watchers.length ? t('Notify: {list}', { list: wat }) : t('Notify: nobody'));
+  return parts.join(' · ');
+}
+/** A number the dialog held to its bound, said where it was typed. */
+export function clampNoteText(n, which = 'max') {
+  return which === 'min' ? t('kept at the minimum, {n}', { n }) : t('kept at the maximum, {n}', { n });
 }
 
 /** A principal's kind (agent session / Task Group) in words. */

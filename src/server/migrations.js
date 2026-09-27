@@ -389,6 +389,30 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-channels-access-watchers',
+      note: "ACCESS AND NOTIFICATION ARE TWO OPERATIONS, ACCESS FIRST (R4, the owner 2026-09-27: \"你之前的交互的问题是把'让agent能访问对话'和'让agent会被通知'耦合在一起了\" / \"这实际上应该是两种不同的操作，前者是后者的前提\"). Every grain of a channel account (the account, a rule's conversations, one conversation) now holds an ACCESS list (who may see and act, with an authority draft|send) and a WATCHERS list (who is woken, wake|digest, with the filter / cap / window / receipt fields). Through the engine's own serialized door: every pre-split single assignment — a conversation's `assignment`, an account / rule record's top-level `principal` — becomes ONE access row + ONE watcher row for its principal (the watcher keeps the pace ledger: a conversation's own wakes, the inherited grains' mirrors excluded; a record's `stats`); every reach grant with origin `assignment` becomes origin `access`; pending hits held before the split are tagged with the watcher they were held for. The engine reads a pre-split record the same way before this runs (merged, never a fallback) and lifts one in place before any write reaches it, so the boot order changes WHEN the bytes change, never what is read. Idempotent: a second run finds nothing to lift.",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.migrateGrants !== 'function') {
+          // No engine on this boot: an index still holding a pre-split record
+          // FAILS the run by name (retried on a boot that has one).
+          let doc; try { doc = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', 'index.json'), 'utf-8')); } catch { return; }
+          const convs = Object.values((doc && doc.conversations) || {}).filter((e) => e && e.assignment && e.assignment.principal).length;
+          const grains = [...Object.values((doc && doc.accountAssignments) || {}), ...Object.values((doc && doc.patternAssignments) || {})].filter((g) => g && g.principal).length;
+          if (convs || grains) throw new Error(`no channels engine to split ${convs} conversation assignment(s) and ${grains} account/rule assignment(s) into access + notification — retried on a boot that has one`);
+          return;
+        }
+        // the plan is computed NOW from the live index (these counts ARE the
+        // rows it changes) and queued through the serialized door; a store
+        // that refuses writes THROWS — a failed run, retried next boot
+        const rep = eng.migrateGrants();
+        rep.write.catch((err) => console.error(`[migrate] channels-access-watchers: the queued write failed after the plan was counted (${(err && err.message) || err}) — every reader still lifts the old shape; the next write to a record lifts it in place`));
+        const counts = { conversations: rep.conversations, accounts: rep.accounts, patterns: rep.patterns, grantsRenamed: rep.grantsRenamed, pendingTagged: rep.pendingTagged };
+        console.log('[migrate] channels-access-watchers:', JSON.stringify(counts));
+        return counts;
+      },
+    },
+    {
       id: '2026-09-spend-notices-expire',
       note: "SPEND NOTICES LIVED FOREVER AS ACTIONS (owner's instance, measured 2026-09-22: 33 open 'For you' items, 15 from Spending, 13 of them filed before the notice lane existed (2.369.118) — no kind, so in the ACTION list colouring the badge — and 137–288 h old: '… has used 10 of its 12 unattended turns this hour (83%)', '… 48 of 60 today (80%)', 'VibeSpace refused the Stop bookkeeping mini-turn …', warnings about hour/day windows that closed weeks ago). The producer now stamps expiresAt and the store expires it; this moves what the store already holds into the lane: every Spending item (sessionName 'Spending' in the 'accounts' row — the name spend-guard's one fileInbox freezes on every item it files, and nothing else writes) becomes kind 'notice'; an OPEN one gets the end of the window it was about (its detail's `Scope: hour` = filing + 1 h, a refusal = + 6 h, anything else + 24 h — the longest window any spend notice talks about): past ⇒ resolved 'expired' with resolvedAt = that end (when it SHOULD have died, so it sorts as old history — kept in the ledger, never deleted), still ahead ⇒ stamped as its expiresAt so it cannot live forever either. Written through the live store and flushed before the ledger row; counts in the ledger's report row.",
       run() {

@@ -249,7 +249,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
 
   function markDirty() {
     dirty = true;
-    if (debounce || closed) return;
+    // R4 verify r4: a change that lands AFTER close() (a wake queued behind one
+    // in flight when the engine stopped holds its hits pending) is written
+    // NOW — the debounce is gone, and an unflushed hold was a lost message
+    if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }
+    if (debounce) return;
     debounce = setTimeout(() => { debounce = null; flush(); }, FLUSH_DEBOUNCE_MS);
     if (debounce.unref) debounce.unref();
   }
@@ -297,7 +301,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
    *  outside `update()` — the one-door rule (§5.1) is unchanged. */
   function liveConversations() { return ix.conversations; }
   /** The LIVE top-level table `name` (accountAssignments / patternAssignments
-   *  / accountGrants / filters / rotations), READ-ONLY outside `update()`. */
+   *  — each grain record `{…, access:[], watchers:[]}` since R4 — /
+   *  accountGrants / filters / rotations), READ-ONLY outside `update()`. */
   function liveTable(name) { return ix[name]; }
 
   /**
@@ -318,7 +323,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
       e = ix.conversations[key] = {
         key, id: convId, adapterId, vendorId: convId, title: '', kind: 'group',
         participants: '', lastAt: null, unread: 0, tracked: false, anchor: null,
-        assignment: null, filterId: null, policy: null, pendingTodoId: null,
+        access: [], watchers: [], filterId: null, policy: null, pendingTodoId: null,
         reachEntries: [], stats: { hits7d: 0, msgs7d: 0 },
         convCaps: null,
         lane: { via: 'poll', lastPushAt: null, lastPollAt: null, lastScanAt: null, firstSeenByPoll: 0, firstSeenTotal: 0 },

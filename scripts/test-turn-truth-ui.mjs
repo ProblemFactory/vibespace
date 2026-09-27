@@ -168,6 +168,7 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
     ['the compaction stage (round 7)', /this\._retireCompactionStage\(\)/],
     ['the harness turn-state chip (round 8)', /this\._statusBar\?\.setTurnState\?\.\(null\)/],
     ['the executing-tool run set (round 8, dormant lane)', /this\._onToolsInProgress\(\[\]\)/],
+    ['the pending asks the waiting chip names (lane S1)', /this\._setPendingAsks\(\[\]\)/],
   ];
   for (const [what, re] of CLAIMS) {
     check(`…and that retirement retires ${what} — a claim about RIGHT NOW dies with its producer`,
@@ -181,10 +182,10 @@ const done = () => { console.log(failed ? `\n${failed} FAILED (${passed} passed)
   const r7branch = "} else if (msg.type === 'exited' && msg.sessionId === sessionId) {\n  this._hideTyping();\n  this._retireCompactionStage();\n  this._renderers.appendSystem('Session ended.');\n  this._setReadOnly();\n}";
   const missing = (src) => CLAIMS.filter(([, re]) => !re.test(src)).length;
   check('NEGATIVE CONTROL: the guard detects the round-6 branch (hideTyping + system line + read-only, no retirement at all)',
-    !/this\._retireLiveClaims\(\)/.test(r6branch) && missing(r6branch) === 3, String(missing(r6branch)));
+    !/this\._retireLiveClaims\(\)/.test(r6branch) && missing(r6branch) === CLAIMS.length, String(missing(r6branch)));
   check('NEGATIVE CONTROL: …and the round-7 branch, which retired the compaction stage and nothing else (the shape this round fixes)',
-    !/this\._retireLiveClaims\(\)/.test(r7branch) && missing(r7branch) === 2, String(missing(r7branch)));
-  const halfOwner = '_retireLiveClaims() {\n    const wasCompacting = this._retireCompactionStage();\n    this._onToolsInProgress([]);\n    return wasCompacting;';
+    !/this\._retireLiveClaims\(\)/.test(r7branch) && missing(r7branch) === CLAIMS.length - 1, String(missing(r7branch)));
+  const halfOwner = '_retireLiveClaims() {\n    const wasCompacting = this._retireCompactionStage();\n    this._onToolsInProgress([]);\n    this._setPendingAsks([]);\n    return wasCompacting;';
   check('NEGATIVE CONTROL: …and an OWNER that forgot the chip is reported by name (the enumeration is the thing being guarded)',
     missing(halfOwner) === 1 && !CLAIMS[1][1].test(halfOwner), String(missing(halfOwner)));
 }

@@ -1318,6 +1318,90 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(resB && resB.status === 'failed' && /blocked|refus/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
     if (eB) eB.stop();
   }
+  // ── 2026-09-channels-access-watchers (R4, 2026-09-27) ──
+  // ACCESS and NOTIFICATION are two operations: every pre-split single
+  // assignment becomes ONE access row + ONE watcher row, the reach grants'
+  // origin `assignment` becomes `access`, untagged pending hits are tagged with
+  // the watcher they were held for — the three legacy shapes, the carried-over
+  // cap still refusing, idempotent, a blocked index FAILS, no engine FAILS by name.
+  {
+    const ENG = require('../src/server/channels-engine.js');
+    const F = require('../src/channel-filter.js');
+    const quiet = { log() {}, warn() {}, error() {} };
+    const ID = '2026-09-channels-access-watchers';
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const T = Date.now();
+    const wakes = Array.from({ length: 3 }, (_, i) => ({ at: T - 1000 * (i + 1), n: 1, ok: true, grain: 'conversation' }));
+    const legacyIndex = () => ({ v: 1, updatedAt: 0,
+      conversations: {
+        'fake-poll/c1': { key: 'fake-poll/c1', id: 'c1', adapterId: 'fake-poll', title: 'own assignment', anchor: 'x', readAt: 1, lane: {},
+          assignment: { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'wake', authority: 'draft', dailyWakeCap: 3, receiptWake: true, scope: { kind: 'conversation', id: 'fake-poll/c1' } },
+          reachEntries: [{ principal: { kind: 'agent', id: 'agent-A' }, scope: { kind: 'conversation', id: 'fake-poll/c1' }, level: 'visible', origin: 'assignment', at: 1, by: 'user' }, { principal: { kind: 'agent', id: 'agent-U' }, scope: { kind: 'conversation', id: 'fake-poll/c1' }, level: 'visible', origin: 'user', at: 1, by: 'user' }],
+          stats: { wakes: [...wakes, { at: T - 500, n: 1, ok: true, grain: 'account' }], hits: [], msgs: [] }, pending: [{ record: { id: 'r1', text: 'held' }, why: [], at: T }], pendingElided: 2 },
+        'fake-poll/c2': { key: 'fake-poll/c2', id: 'c2', adapterId: 'fake-poll', title: 'inherits the account', anchor: 'y', readAt: 1, lane: {}, assignment: null, reachEntries: [], stats: { wakes: [], hits: [], msgs: [] }, pending: [{ record: { id: 'r2', text: 'held for the account' }, why: [], at: T }], pendingElided: 0 },
+      },
+      accountAssignments: { 'fake-poll': { adapterId: 'fake-poll', scope: { kind: 'account', id: 'fake-poll' }, principal: { kind: 'group', id: 'tg-work', name: '工作' }, mode: 'all', notify: 'digest', digestMinutes: 30, authority: 'draft', dailyWakeCap: 40, receiptWake: false, createdAt: 5, stats: { wakes: [{ at: T - 10, n: 4, ok: true }], hits: [] } } },
+      patternAssignments: { 'pa-1': { id: 'pa-1', adapterId: 'fake-poll', scope: { kind: 'pattern', id: 'pa-1' }, pattern: { match: 'any', rules: [{ kind: 'title', value: 'zzz-none' }] }, principal: { kind: 'agent', id: 'agent-P', name: 'Pat' }, mode: 'filtered', filterId: 'f-pattern-pa-1', notify: 'wake', authority: 'draft', dailyWakeCap: 9, createdAt: 7, stats: { wakes: [], hits: [] } } },
+      accountGrants: [{ principal: { kind: 'group', id: 'tg-work', name: '工作' }, scope: { kind: 'adapter', id: 'fake-poll' }, level: 'visible', origin: 'assignment', at: 5, by: 'user' }],
+      filters: { 'f-pattern-pa-1': { id: 'f-pattern-pa-1', match: 'any', rules: [{ kind: 'keyword', value: 'gpu' }] } },
+    });
+    const seed = (d, index) => {
+      fs.mkdirSync(path.join(d, 'channels'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'fake-poll', kind: 'fake-poll', label: 'Fake', enabled: true, linkedAt: 1, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: null, scan: null }] }));
+      fs.writeFileSync(path.join(d, 'channels', 'index.json'), typeof index === 'string' ? index : JSON.stringify(index));
+    };
+    // (a) THE THREE LEGACY SHAPES, before the run: every reader already sees the split
+    const rA = path.join(tmp, 'aw-a'); const dA = path.join(rA, 'data');
+    seed(dA, legacyIndex());
+    const eA = ENG.create({ dataDir: dA, env: {}, log: quiet, liveSessions: () => [] });
+    const pre = eA.effectiveFor('fake-poll', 'c1');
+    ok(pre && pre.access.some((x) => x.row.principal.id === 'agent-A') && pre.watchers.some((x) => x.watcher.principal.id === 'agent-A') && pre.access.some((x) => x.row.principal.id === 'tg-work' && x.source === 'account'), 'BEFORE the run the engine already reads each pre-split record as one access row + one watcher row (merged, never a fallback)');
+    const lines = [];
+    const origLog = console.log;
+    console.log = (...a) => { lines.push(a.join(' ')); };
+    let resA;
+    try { resA = runOnly(create({ rootDir: rA, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eA }), rA).find((x) => x.id === ID); }
+    finally { console.log = origLog; }
+    ok(resA && resA.status === 'ran' && resA.report && resA.report.conversations === 1 && resA.report.accounts === 1 && resA.report.patterns === 1 && resA.report.grantsRenamed === 2 && resA.report.pendingTagged === 3, 'the run reports the rows it changes: 1 conversation, 1 account, 1 rule, 2 grants renamed, 3 pending tagged (two hits + the elided count)', JSON.stringify(resA && resA.report));
+    await eA.store.index.update(() => { });
+    const ix = eA.store.index.snapshot();
+    const c1 = ix.conversations['fake-poll/c1'], c2 = ix.conversations['fake-poll/c2'];
+    const acct = ix.accountAssignments['fake-poll'], pat = ix.patternAssignments['pa-1'];
+    ok(!('assignment' in c1) && c1.access.length === 1 && c1.access[0].authority === 'draft' && c1.watchers.length === 1 && c1.watchers[0].receiptWake === true && c1.watchers[0].dailyWakeCap === 3, 'conversation: `assignment` ⇒ one access row (draft) + one watcher (wake, receipt opted in, cap 3)');
+    ok(c1.watchers[0].stats.wakes.length === 3, 'the watcher carries the conversation\'s OWN pace ledger — the inherited grain\'s mirror is not counted against it');
+    ok(!F.paceVerdict(c1.watchers[0].stats.wakes, T, c1.watchers[0].dailyWakeCap).ok, 'the carried-over cap STILL REFUSES (3 of 3 in 24 h) — the migration never hands a watcher a fresh allowance');
+    ok(c1.reachEntries.find((g) => g.principal.id === 'agent-A').origin === 'access' && c1.reachEntries.find((g) => g.principal.id === 'agent-U').origin === 'user', 'its reach grant is renamed origin access; the user\'s own grant is untouched');
+    ok(c1.pending[0].for === 'agent:agent-A' && c1.pendingElidedBy['agent:agent-A'] === 2 && !c1.pendingElided, 'its held hits (and the elided count) are tagged for the watcher they were held for');
+    ok(c2.pending[0].for === 'group:tg-work', 'an INHERITED conversation\'s held hit is tagged for the account\'s watcher (the one in effect)');
+    ok(!('principal' in acct) && acct.access[0].principal.id === 'tg-work' && acct.watchers[0].notify === 'digest' && acct.watchers[0].stats.wakes.length === 1 && acct.createdAt === 5, 'account: the top-level principal ⇒ one access row + one watcher row (the ledger rides on the watcher; the grain keeps createdAt)');
+    ok(!('principal' in pat) && pat.pattern && pat.access[0].principal.id === 'agent-P' && pat.watchers[0].filterId === 'f-pattern-pa-1' && pat.createdAt === 7, 'rule: same, and its pattern and filter reference stay');
+    ok(ix.accountGrants[0].origin === 'access', 'the account-scope grant is renamed origin access');
+    const again = eA.migrateGrants(); await again.write;
+    ok(again.conversations === 0 && again.accounts === 0 && again.patterns === 0 && again.grantsRenamed === 0 && again.pendingTagged === 0, 'idempotent: a second run finds nothing to lift');
+    eA.stop();
+    // (b) a BLOCKED index: the run FAILS by name and the ledger does not record it
+    const rB = path.join(tmp, 'aw-b'); const dB = path.join(rB, 'data');
+    seed(dB, '{ this is not json');
+    for (const sub of ['msgs', 'archive']) fs.mkdirSync(path.join(dB, 'channels', sub), { recursive: true });
+    fs.chmodSync(path.join(dB, 'channels'), 0o500);
+    let resB = null, eB = null;
+    try {
+      eB = ENG.create({ dataDir: dB, env: {}, log: quiet });
+      resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
+    } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
+    const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
+    ok(resB && resB.status === 'failed' && /refus|blocked/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    if (eB) eB.stop();
+    // (c) NO ENGINE on this boot: a pre-split record fails the run BY NAME; none is a success
+    const rC = path.join(tmp, 'aw-c'); const dC = path.join(rC, 'data');
+    seed(dC, legacyIndex());
+    const resC = runOnly(create({ rootDir: rC, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rC).find((x) => x.id === ID);
+    ok(resC && resC.status === 'failed' && /no channels engine to split 1 conversation assignment\(s\) and 2 account\/rule/.test(resC.error || ''), 'without an engine a pre-split index FAILS the run by name (retried on a boot that has one)', JSON.stringify(resC));
+    const rD = path.join(tmp, 'aw-d'); const dD = path.join(rD, 'data');
+    seed(dD, { v: 1, conversations: {}, updatedAt: 0 });
+    const resD = runOnly(create({ rootDir: rD, homeDir: scratchHomeDir, serverNotice: () => { }, channels: null }), rD).find((x) => x.id === ID);
+    ok(resD && resD.status === 'ran', '…and an index with nothing to split is a success');
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

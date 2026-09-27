@@ -3,6 +3,7 @@ import { UI_ICONS } from './icons.js';
 import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, effortDisplay, effortLabel, noteModelCatalog, responseStyleLabel, responseStyleCaps, styleAppliesLive, initHealthLabel } from './agent-meta.js';
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
+import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 
 /** Gap kept between a status-bar dropdown and the right edge of the chat view
  *  (layout px). The panel is positioned OUT of the ≤768px bar's horizontal
@@ -37,8 +38,12 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null }) {
     this._ws = ws;
+    // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
+    // first) and its click goes there — null = the view cannot jump (no chip click)
+    this._pendingAsks = [];
+    this._onJumpToAsk = onJumpToAsk;
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
     // the view has no search bar (never rendered).
@@ -497,6 +502,16 @@ export class ChatStatusBar {
     this.render();
   }
 
+  /** EVERY ask the user can answer in this conversation (lane S1) — the chip's words + its target. */
+  setPendingAsks(asks) {
+    const next = Array.isArray(asks) ? asks : [];
+    const sig = next.map((a) => `${a.kind}:${a.requestId}:${a.label || ''}`).join('|');
+    if (sig === this._pendingAsksSig) return;
+    this._pendingAsksSig = sig;
+    this._pendingAsks = next;
+    this.render();
+  }
+
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -581,8 +596,16 @@ export class ChatStatusBar {
     // to every other reason the CLI parks a turn (an MCP elicitation, a
     // request_user_dialog, a tool waiting on the host). Drawn ONLY when the
     // harness itself reported it, never inferred, never on a backend id.
-    if (this._turnState === 'requires_action') {
-      chip('turnstate', 'chat-status-turnstate chat-status-needs-action', t('The agent is waiting for you — the turn is paused, not finished (reported by the harness).'), `${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}`);
+    // lane S1 (B-6e95, both naive-user studies): the chip said "waiting for you" and nothing on any
+    // screen could be clicked — a helper's ask was dropped. It now NAMES who waits (src/helper-ask.js
+    // waitingChip) and, when there is a card to answer, its click goes there (ChatView.jumpToPendingAsk).
+    // An unanswered ask is ITSELF the harness's word (its own control_request) — so the chip also stands
+    // on it alone: after a server restart the turn state is unknown until the next record, while the
+    // helper still waits (a restart used to hide the only pointer to it).
+    if (this._turnState === 'requires_action' || this._pendingAsks.length) {
+      const wc = waitingChip(this._pendingAsks, t);
+      const canJump = wc.clickable && typeof this._onJumpToAsk === 'function';
+      chip('turnstate', `chat-status-turnstate chat-status-needs-action${canJump ? ' chat-status-clickable' : ''}`, wc.title, `${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}`);
     }
 
     // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP
@@ -1016,6 +1039,7 @@ export class ChatStatusBar {
 
   _onClick(e) {
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
+    if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
       this._onOpenWorkflow(wfChip.dataset.wfRun, wfChip.dataset.wfName);

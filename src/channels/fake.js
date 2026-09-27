@@ -187,6 +187,9 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     attachments: receive === 'scan' ? 'metadata' : 'fetch',
     olderHistory: receive === 'scan' ? 'none' : 'page',
     budget: { unit: 'request', default: 600, settingKey: null, metered: true },
+    // R4 (B-6acc): the poll fake can start a NEW conversation (`compose`) —
+    // the suites drive the compose verb through it; the push fake is read-only
+    compose: receive === 'poll' && sendAs.length > 0,
   };
 
   function create(record = {}, deps = {}) {
@@ -365,6 +368,20 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
         const sentAs = /\[\[fake:as-bot\]\]/.test(s) ? 'bot' : (as || sendAs[0]);
         return { ok: true, vendorMessageId: `sent-${digest(`${convId}|${idemKey}|${s}`)}`, at: clock(), sentAs, observed: { senderType: sentAs === 'bot' ? 'app' : 'user' } };
       } : undefined,
+      // R4 (B-6acc): a NEW conversation — the same markers as `send`, the
+      // vendor answers with the new thread's id (a function of the key, so a
+      // re-send with the same key is the same thread). `record.fakeNoSendScope`
+      // = the account holds no send permission (Gmail without a sending scope).
+      compose: caps.compose ? async ({ to = [], subject = '', text, idemKey, as } = {}) => {
+        const s = String(text == null ? '' : text);
+        if (/\[\[fake:throw\]\]/.test(s)) throw new Error('fake: socket hung up mid-send');
+        if (/\[\[fake:lost\]\]/.test(s)) return { ok: false, code: 'transport', retryable: true, detail: { lost: true, message: 'fake: the request left and the answer never came' } };
+        if (/\[\[fake:refuse\]\]/.test(s)) return { ok: false, code: 'forbidden', retryable: false, detail: { reason: 'fake: the fixture refused the send' } };
+        const sentAs = as || sendAs[0];
+        const threadId = `new-${digest(`${(to || []).join(',')}|${subject}|${idemKey}`)}`;
+        return { ok: true, vendorMessageId: `sent-${digest(`${threadId}|${idemKey}|${s}`)}`, threadId, at: clock(), sentAs, observed: { senderType: 'user' } };
+      } : undefined,
+      composeCaps: caps.compose ? async () => (record && record.fakeNoSendScope ? { sendAs: [], why: 'send-scope-not-granted', at: clock() } : { sendAs: caps.sendAs.slice(), why: null, at: clock() }) : undefined,
       // `[[fake:landed]]` / `[[fake:not-landed]]` steer the reconcile answer;
       // anything else is honestly `unknown` (the default a real vendor gives
       // when it holds no evidence either way).

@@ -135,13 +135,20 @@ const p1 = await newPage();
 ok(await p1.load(), 'page 1 loaded the app');
 
 // ── ① the panel lists the fake adapter's conversations, with chips ──
+// R4 verify r4 (the r3 note): the panel is read only once EVERY expected row is there — the three fake
+// adapters' two rooms each (fake.js worldFor: <kind>-ops + <kind>-announce) — never "any row": under load
+// the first snapshot held the poll adapter's two rows before the push/scan discovery landed, and ④(a)
+// compared the second client to that snapshot. A miss names the rows still missing.
+const EXPECTED_ROWS = ['fake-poll', 'fake-push', 'fake-scan'].flatMap((k) => [`${k}/${k}-ops`, `${k}/${k}-announce`]);
 const OPEN_PANEL = `(async () => {
   const sb = window.app.sidebar;
   if (!sb._railEl) return { ok: false, why: 'no rail' };
   sb._railGo('channels');
-  for (let i = 0; i < 80; i++) {
+  const expected = ${JSON.stringify(EXPECTED_ROWS)};
+  for (let i = 0; i < 160; i++) {
     const rows = [...document.querySelectorAll('.rail-panel-channels .chan-row')];
-    if (rows.length) return {
+    const have = new Set(rows.map((r) => r.dataset.conv));
+    if (rows.length && expected.every((k) => have.has(k))) return {
       ok: true,
       rows: rows.map((r) => ({
         conv: r.dataset.conv,
@@ -154,7 +161,8 @@ const OPEN_PANEL = `(async () => {
     };
     await new Promise((r) => setTimeout(r, 250));
   }
-  return { ok: false, why: 'no rows', html: document.querySelector('.rail-panel-channels')?.textContent?.slice(0, 200) };
+  const have = [...document.querySelectorAll('.rail-panel-channels .chan-row')].map((r) => r.dataset.conv);
+  return { ok: false, why: 'rows missing after 40 s', missing: expected.filter((k) => !have.includes(k)), have, html: document.querySelector('.rail-panel-channels')?.textContent?.slice(0, 200) };
 })()`;
 const panel = await p1.evaljs(OPEN_PANEL);
 ok(panel.ok, 'the Channels rail panel renders', JSON.stringify(panel));
@@ -255,7 +263,8 @@ ok(opsRow && /^within /.test(opsRow.chip), 'a poll-lane row says how long its ev
 const p2 = await newPage();
 ok(await p2.load(), 'page 2 loaded the app');
 const p2rows = await p2.evaljs(OPEN_PANEL);
-ok(p2rows.ok && p2rows.rows.length === panel.rows.length && p2rows.rows.every((r) => r.chip), 'EXIT ④(a): the second client sees the SAME rows with their chips', JSON.stringify(p2rows.rows.map((r) => [r.conv, r.chip])));
+const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x));
+ok(p2rows.ok && sameSet(p2rows.rows.map((r) => r.conv), panel.rows.map((r) => r.conv)) && p2rows.rows.every((r) => r.chip), 'EXIT ④(a): the second client sees the SAME rows (the same conversation set, waited for by name) with their chips', JSON.stringify({ p2: p2rows.rows.map((r) => [r.conv, r.chip]), p1: panel.rows.map((r) => r.conv), why: p2rows.why, missing: p2rows.missing }));
 // Now PAUSE a conversation from page 1 and watch page 2 repaint off the broadcast — never a poll.
 await p1.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/refresh', { method:'PUT', headers:{'Content-Type':'application/json'}, body:'{"every":"paused"}' }).then(r=>r.json())`);
 const synced = await p2.evaljs(`(async () => {
@@ -885,13 +894,18 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
 }
 
 // ── ⑮ A TASK GROUP IS NAMED BY ITS TITLE, NEVER ITS ID (a1 A5; verifier r4:
-//    the fix was unpinned) — the Assign & filter "Wake" select and the Reach
+//    the fix was unpinned) — the Grant access… "who" select and the Reach
 //    dialog's roster + a granted row ──
 {
   const J = { 'Content-Type': 'application/json' };
   // ⑨ left the page in zh (the language switch takes effect on load) — this leg matches the ⋯ menu's English words
   await p1.evaljs(`localStorage.removeItem('vibespace.lang'), 1`);
   ok(await p1.load(), 'page 1 reloaded in en for the menu words');
+  // the product's own settled signal: the boot fetch of the task mirror has landed (verify r1 —
+  // the group used to be created while two boot GETs were still in flight; a stale one parsing
+  // after the broadcast emptied every roster on 1 of 3 runs; the mirror now refuses that, and
+  // this leg no longer races it either)
+  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (window.app.sidebar._tasksLoaded === true) return true; await new Promise((r) => setTimeout(r, 125)); } return false; })()`), 'the task mirror is loaded before the group is created');
   const mk = await (await fetch(`http://127.0.0.1:${PORT}/api/tasks`, { method: 'POST', headers: J, body: JSON.stringify({ title: 'Ops triage' }) })).json();
   const gid = mk.task && mk.task.id;
   ok(!!gid && /^T-/.test(gid) && gid !== 'Ops triage', 'FIXTURE: a Task Group whose generated `T-…` id differs from its title', JSON.stringify(mk));
@@ -903,13 +917,14 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     const w = window.app.openChannel('fake-poll', 'fake-poll-ops');
     for (let i = 0; i < 40; i++) { if (w.content.querySelector('[data-channel-assign]')) break; await new Promise((r) => setTimeout(r, 250)); }
     w.content.querySelector('[data-channel-assign]').click();
-    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-assign-dialog select')) break; await new Promise((r) => setTimeout(r, 250)); }
-    const sel = document.querySelector('#chan-assign-dialog select');
+    // R4: nobody has access yet ⇒ the chip opens GRANT ACCESS… (the first operation)
+    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-access-dialog .chan-access-row select')) break; await new Promise((r) => setTimeout(r, 250)); }
+    const sel = document.querySelector('#chan-access-dialog .chan-access-row select');
     const opts = sel ? [...sel.options].map((o) => o.textContent) : [];
     for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
     return opts;
   })()`);
-  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Assign & filter "Wake" select names the group by its TITLE and never shows its id', JSON.stringify(assign));
+  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Grant access… "who" select names the group by its TITLE and never shows its id', JSON.stringify(assign));
   // a grant that carries only {kind, id} (an assignment's shape) must be named from the roster
   const granted = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: 'visible' }) })).json();
   ok(!!granted && !granted.error, 'FIXTURE: the group is granted reach with a name-less principal', JSON.stringify(granted));

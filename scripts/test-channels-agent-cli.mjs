@@ -25,8 +25,9 @@ ok(fs.existsSync(path.join(REPO, 'docs/agent/channels-manual.md')) && /vibespace
 
 // ── the stub ──────────────────────────────────────────────────────────────
 const calls = [];
-const VISIBLE = { key: 'fake-poll/ops', adapterId: 'fake-poll', adapter: 'fake-poll', id: 'ops', title: 'Ops room', kind: 'group', level: 'visible', tracked: true, unread: 2, lastAt: 1, canSend: true, sendWhy: null, sendAs: 'user', identityMarking: 'unknown', policy: 'review', assigned: true, authority: 'draft', awaiting: 0 };
-const READONLY = { ...VISIBLE, key: 'fake-poll/announce', id: 'announce', title: 'Announcements', canSend: false, sendWhy: 'read-only-mailbox', sendAs: null };
+// R4: ACCESS and NOTIFICATION are two separate facts on a row (the pre-R4 `assigned`/`authority` beside them)
+const VISIBLE = { key: 'fake-poll/ops', adapterId: 'fake-poll', adapter: 'fake-poll', id: 'ops', title: 'Ops room', kind: 'group', level: 'visible', tracked: true, unread: 2, lastAt: 1, canSend: true, sendWhy: null, sendAs: 'user', identityMarking: 'unknown', policy: 'review', access: { authority: 'draft', via: 'account', as: 'group' }, watched: null, assigned: true, authority: 'draft', awaiting: 0 };
+const READONLY = { ...VISIBLE, key: 'fake-poll/announce', id: 'announce', title: 'Announcements', canSend: false, sendWhy: 'read-only-mailbox', sendAs: null, access: { authority: 'send', via: 'conversation', as: 'agent' }, watched: { notify: 'wake', mode: 'filtered', via: 'conversation' } };
 const notFound = () => ({ ok: false, code: 'not-found', error: NOT_FOUND_TEXT });
 // ── r7: THE REFUSED-SET CENSUS ────────────────────────────────────────────
 // The CLI's `refresh` treats a closed set of codes as a REFUSAL (exit 4, "not
@@ -46,7 +47,8 @@ const statusExpr = /const status = ([^;]+);/.exec(chanAnswerSrc);
 const ROUTE_STATUS = new Map();   // code → status
 if (statusExpr) for (const part of statusExpr[1].split(' : ')) { const m = /^(.*)\?\s*(\d{3})\s*$/.exec(part.trim()); if (!m) continue; for (const c of m[1].matchAll(/code === '([^']+)'/g)) ROUTE_STATUS.set(c[1], Number(m[2])); }
 const RETRYABLE = new Set([429, 409, 503]);
-const REPLY_ONLY = ['send-not-available', 'rate-floor'];
+// R4 (B-6acc): `compose-not-available` belongs to the COMPOSE verb alone, the same way
+const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available'];
 const routeRetryable = [...ROUTE_STATUS].filter(([, st]) => RETRYABLE.has(st)).map(([c]) => c);
 const expectedRefused = routeRetryable.filter((c) => !REPLY_ONLY.includes(c)).sort();
 const cliSrc = fs.readFileSync(CLI, 'utf-8');
@@ -55,7 +57,7 @@ const cliRefused = cliSetM ? [...cliSetM[1].matchAll(/'([^']+)'/g)].map((m) => m
 ok(ROUTE_STATUS.size >= 8 && routeRetryable.length >= 7, `CENSUS setup: the agent route's STATUS table parsed — ${ROUTE_STATUS.size} codes, ${routeRetryable.length} retry-able (429/409/503): ${routeRetryable.join(', ')}`);
 const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
 const requestSetRegion = esrc.slice(esrc.indexOf('async function pass(adapterId'), esrc.indexOf('async function watch(adapterId'));
-ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the two retry-able codes excepted as reply-only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
+ok(REPLY_ONLY.every((c) => !requestSetRegion.includes(`'${c}'`)) && REPLY_ONLY.every((c) => asrc.includes(`'${c}'`) || esrc.includes(`'${c}'`)), `CENSUS: the retry-able codes excepted as reply / compose only (${REPLY_ONLY.join(', ')}) are never spelled in the engine's pass / request-set region and are spelled by the reply path`);
 ok(cliRefused.length > 0 && JSON.stringify(cliRefused) === JSON.stringify(expectedRefused), `CENSUS: the CLI's REFRESH_REFUSED set == the route's retry-able refresh codes — [${cliRefused.join(', ')}]`, `cli [${cliRefused.join(', ')}] vs route [${expectedRefused.join(', ')}]`);
 const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
 ok(cliRefused.every((c) => words.includes(`case '${c}'`)), 'CENSUS: every refused code has its own words in channel-words.js (the panel says it in the device\'s language)', cliRefused.filter((c) => !words.includes(`case '${c}'`)).join(', '));
@@ -104,7 +106,20 @@ const server = http.createServer((req, res) => {
     if (url.pathname === '/api/agent/channels/status') {
       const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' } };
       if (url.searchParams.get('id')) return url.searchParams.get('id') === 'p-1' ? send(200, { ok: true, proposal: p }) : send(404, { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' });
-      return send(200, { ok: true, proposals: [p] });
+      // R4: what the agent was given — access (with its authority) and, separately, whether it is watched
+      return send(200, { ok: true, proposals: [p], access: [
+        { adapterId: 'lark', adapter: 'Lark', grain: 'account', via: 'group', as: { kind: 'group', id: 'tg-work', name: '工作' }, authority: 'draft', watched: null },
+        { adapterId: 'gmail', adapter: 'Work mail', grain: 'account', via: 'agent', as: { kind: 'agent', id: 'me' }, authority: 'send', watched: { notify: 'wake', mode: 'filtered', digestMinutes: 30, dailyWakeCap: 40, receiptWake: false, wakes24h: 3 } },
+      ] });
+    }
+    // R4 (B-6acc): compose — a NEW message; the stub answers the engine's shapes
+    if (url.pathname === '/api/agent/channels/compose') {
+      if (body.account === 'lark') return send(409, { ok: false, code: 'compose-not-available', error: 'Lark cannot start a new conversation from here — its adapter declares no compose; reply inside an existing conversation instead' });
+      if (body.account !== 'gmail') return send(404, { ok: false, code: 'not-found', error: 'no such account (not found, or you have no access to the whole account) — `vibespace-channels status` shows your access' });
+      return send(200, { ok: true, proposal: { id: 'p-9', state: 'awaiting-approval', adapterId: 'gmail', convId: null, compose: { to: String(body.to).split(','), cc: [], subject: body.subject }, policy: { mode: 'review', reasons: ['channel-policy'] }, sendAs: 'user', identity: { marking: 'marked', text: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com' } } });
+    }
+    if (url.pathname === '/api/agent/channels/search') {
+      return send(200, { ok: true, truncated: false, results: url.searchParams.get('q') === 'deploy' ? [{ key: 'fake-poll/ops', title: 'Ops room', at: 1, author: { name: 'Ada' }, text: 'the deploy finished' }] : [] });
     }
     if (url.pathname === '/api/agent/channels/request') {
       if (body.conv !== 'fake-poll/requestable') return send(404, notFound());
@@ -128,7 +143,8 @@ const noEnv = spawnSync(process.execPath, [CLI, 'list'], { encoding: 'utf-8', en
 ok(noEnv.status === 2 && /not inside a VibeSpace session/.test(noEnv.stderr), 'outside a session it refuses with exit 2 (no API / token)');
 
 const list = await run(['list']);
-ok(list.code === 0 && /fake-poll\/ops/.test(list.out) && /Ops room/.test(list.out) && /user approves/.test(list.out) && /2 unread/.test(list.out) && /assigned to you \(draft\)/.test(list.out), 'list prints the key, the title, the send/policy chip, unread and the assignment', list.out);
+ok(list.code === 0 && /fake-poll\/ops/.test(list.out) && /Ops room/.test(list.out) && /user approves/.test(list.out) && /2 unread/.test(list.out) && /access via the whole account \(drafts\) · no notification \(read when you choose\)/.test(list.out), 'list prints the key, the title, the send/policy chip, unread, and ACCESS apart from NOTIFICATION (R4: access only — nothing wakes you)', list.out);
+ok(/access \(may send\) · notifies you: wake on a filter/.test(list.out) && !/assigned to you/.test(list.out), '…a row with both says each (access may send · notifies you: wake on a filter); the retired "assigned to you" wording is gone', list.out);
 ok(/no reply \(read-only-mailbox\)/.test(list.out), 'a read-only row says why no reply is possible');
 ok(calls.filter((c) => c.path === '/api/agent/channels/list').length === 1 && calls[0].auth === 'Bearer vsst_test', 'one GET /list with the bearer (never argv)');
 
@@ -180,6 +196,23 @@ const one = await run(['status', 'p-1']);
 ok(one.code === 0 && /text: hello/.test(one.out), 'status <id> prints the full text');
 const notMine = await run(['status', 'p-2']);
 ok(notMine.code === 1 && /not found, or not yours/.test(notMine.err), "somebody else's proposal is not found");
+
+// R4: status names each ACCESS with its authority, and whether a notification wakes the agent
+ok(/access:\n  lark — the whole account \(Lark\) \(as a member of group 工作\)\n      authority: drafts \(the user approves\) · not notified — nothing wakes you; read when you choose/.test(status.out), 'status: access-only (the owner\'s case — group 工作, draft) says "not notified — nothing wakes you"', status.out);
+ok(/gmail — the whole account \(Work mail\)\n      authority: may send directly where the policy allows · notified: woken per batch on a filter, at most 40\/day \(3 in 24 h\)/.test(status.out) && /compose <account>/.test(status.out), 'status: access + a watcher says both (may send · woken per batch on a filter, at most 40/day) and points at compose for a whole account', status.out);
+// R4 (B-6acc): compose
+calls.length = 0;
+const cmp = await run(['compose', 'gmail', '--to', 'bob@example.com', '--subject', 'Weekly numbers', 'the numbers are in', '--why', 'the owner asked']);
+ok(cmp.code === 0 && /proposed — proposal p-9 \(a NEW message to bob@example\.com\) is awaiting the user's approval \(channel-policy\)/.test(cmp.out) && /an application marker — Mail sent through the Gmail API/.test(cmp.out), 'compose PROPOSES a NEW message, prints the verdict and the recipient-identity note', cmp.out);
+ok(calls.length === 1 && calls[0].path === '/api/agent/channels/compose' && calls[0].body.account === 'gmail' && calls[0].body.to === 'bob@example.com' && calls[0].body.subject === 'Weekly numbers' && calls[0].body.text === 'the numbers are in' && calls[0].body.why.label === 'the owner asked', 'exactly ONE request: POST /compose with account / to / subject / text / why', JSON.stringify(calls));
+const cmpLark = await run(['compose', 'lark', '--to', 'x@example.com', '--subject', 's', 'hi']);
+ok(cmpLark.code === 1 && /compose-not-available/.test(cmpLark.err) && /declares no compose/.test(cmpLark.err), 'compose on an account that cannot start a conversation prints compose-not-available BY NAME', cmpLark.err);
+const cmpUse = await run(['compose', 'gmail', '--to', 'x@example.com', 'no subject']);
+ok(cmpUse.code === 1 && /usage: vibespace-channels compose/.test(cmpUse.err), 'compose without a subject prints its usage and sends nothing');
+const srch = await run(['search', 'deploy']);
+ok(srch.code === 0 && /fake-poll\/ops — Ops room .* Ada: the deploy finished/.test(srch.out) && calls.at(-1).path === '/api/agent/channels/search' && calls.at(-1).query.q === 'deploy', 'search prints each hit you can see with its conversation', srch.out);
+const srch0 = await run(['search', 'nothing']);
+ok(srch0.code === 0 && /nothing you can see matches "nothing"/.test(srch0.out), 'a search with no visible hit says so');
 
 const rq = await run(['request', 'fake-poll/requestable', 'I answer the alerts here']);
 ok(rq.code === 0 && /requested/.test(rq.out) && /rq-1/.test(rq.out) && /grants YOU visibility on this ONE conversation/.test(rq.out), 'request files and explains what approval grants', rq.out);

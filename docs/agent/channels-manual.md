@@ -15,7 +15,11 @@ vibespace-channels list                          # conversations visible to you
 vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
 vibespace-channels refresh <conv>                # fetch the newest messages NOW (a floor applies)
 vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
-vibespace-channels status [<proposalId>]         # your proposals + receipts
+vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]
+                                                 # PROPOSE a NEW message (needs access to the whole account)
+vibespace-channels search "words" [--account <id>] [--limit N]
+                                                 # messages you can see (the stored logs)
+vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
 vibespace-channels request <conv> "why"          # ask for access (requestable rows only)
 ```
 
@@ -48,23 +52,39 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
   when YOUR conversation's fetch lands (never at the end of the account's
   whole poll); "still running" means the fetch itself has not happened
   within 15 s (a slow vendor) — read in a moment. Never loop on
-  refresh; if you need to react to new messages, ask the user to assign the
-  conversation to you (you are woken when they arrive).
+  refresh; if you need to react to new messages, ask the user to NOTIFY you
+  about the conversation (you are woken when they arrive).
 - Attachments are listed under each message (name, type, size). Images and
   files are fetched only when the user opens them in the panel.
 
-## Reach (what can I see?)
+## Access and notification (what can I see, and what wakes me?)
 
-- Everything is HIDDEN by default. The user grants reach at three grains:
-  a whole ACCOUNT, the conversations matching a RULE (a title keyword, a
-  person, an address or domain, a kind), or ONE conversation — by assigning
-  it to you or your Task Group, by a hand-written grant, or by approving one
-  of your requests. Assigning you something implies you can see it.
-- `list` says why a row is yours: `assigned to you` (that conversation),
-  `… via the whole account`, or `… via the rule`. An inherited assignment's
-  wake block says so in its head ("you are assigned the whole account" /
-  "by a rule: …"); a digest for a whole account or rule lists several
-  conversations in ONE block.
+The user gives you two DIFFERENT things, in this order:
+
+1. **Access** — you may see and act: list, read, search, refresh, reply (and
+   `compose` a new message on an account you have whole), with an
+   **authority**: `drafts` (the user approves every send) or `may send`
+   (directly, where the channel's policy allows it). Access alone NEVER wakes
+   you — nothing is billed on your behalf; you read when you choose.
+2. **Notification** — only on top of access: you are WOKEN (a billed turn)
+   when new messages arrive — per batch (`wake`) or one digest per window —
+   on every message or on a filter, at most N times a day.
+
+- Everything is HIDDEN by default. Access comes at three grains: a whole
+  ACCOUNT, the conversations matching a RULE (a title keyword, a person, an
+  address or domain, a kind), or ONE conversation — for you or for a Task
+  Group you are in — or from a hand-written grant, or by approving one of your
+  requests. The finest grain that names you decides (a conversation's own row
+  over a rule over the account).
+- `status` prints each grain you were given: its authority, and either how you
+  are notified or `not notified — nothing wakes you; read when you choose`.
+  `list` shows the same two facts per row: `access via the whole account
+  (drafts)` and `notifies you: wake on a filter` / `no notification`.
+- A wake block says why it is here ("you are watching the whole account" /
+  "by a rule: …") and names the OTHER agents on the conversation ("also on
+  this conversation: B (digest, drafts), 工作 (access only, drafts)") — when
+  someone else is woken too, coordinate instead of both answering. A digest
+  for a whole account or rule lists several conversations in ONE block.
 - A row marked `requestable` is one you may ASK for: `vibespace-channels
   request <conv> "why"` files ONE item in the user's For you tray (bottom right) with your
   reason; approval grants YOU visibility on that ONE conversation and
@@ -86,7 +106,9 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
 - The user may EDIT your text before sending, or REJECT it with a reason.
   A proposal nobody decides on EXPIRES after 24 h.
 - On a conversation where sending is not available (a read-only mailbox, a
-  chat the user left, an adapter with no send permission yet) `reply`
+  chat the user left, an adapter with no send permission yet — a Gmail account
+  whose sign-in predates the drafts + sending permission answers
+  `send-scope-not-granted` until the user re-authorizes it) `reply`
   answers `send-not-available` with the reason and creates NO proposal —
   do not draft again until the user changes that.
 - A reply that goes DIRECTLY to another agent session (the built-in `agents/…`
@@ -97,6 +119,31 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
 - The `--why` reference (an alert, a task, a message id) is shown on the
   approval card so the user knows what prompted the reply. Keep the text
   final: the recipient reads exactly what the user approves.
+
+## Composing a NEW message (`compose`)
+
+- `compose <account> --to a@x.com[,b@y.com] [--cc c@z.com] --subject "…" "text"`
+- To and Cc only: a `bcc` or a reply target on a NEW message is refused by name (`bad-proposal`, `why: bcc|replyTo`) — every recipient of a composed message is visible.
+  starts a NEW conversation (a new email thread) on an account you have access
+  to AS A WHOLE (`status` lists it as "the whole account"). It is a PROPOSAL
+  exactly like `reply`: the account's policy decides (review by default), a
+  link or an attachment always needs the user, `drafts` authority always needs
+  the user. Plain addresses only (no "Name <addr>").
+- An account whose channel cannot start a conversation (Lark) answers
+  `compose-not-available` — reply inside an existing conversation instead. An
+  account without the send permission answers `send-not-available`
+  (`send-scope-not-granted`) and nothing is created. (A Gmail sign-in that was
+  granted the older send-only permission can still compose but not reply —
+  `status` / `list` show which; the user re-authorizes to allow both.)
+- The receipt names the new thread; the conversation appears in `list` once the
+  account's next pass sees it (an answer to it arrives in the inbox).
+
+## Searching (`search`)
+
+- `search "words" [--account <id>]` searches the stored messages of the
+  conversations you can SEE — nothing else is read, and a hit in a
+  conversation you cannot see simply is not there. No vendor call; at least 2
+  characters.
 
 ## Receipts
 
@@ -111,7 +158,7 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
   not been verified for that channel yet. Do not claim in chat that a
   message "looks like it came from the user" unless the receipt says `none`.
 - Receipts arrive in your NEXT turn as a "Channel receipt" block — nothing
-  wakes you for them unless the user turned that on for your assignment.
+  wakes you for them unless the user turned that on for your notification.
   Poll with `status` only when you need the answer now.
 - An `unknown` outcome (the adapter lost the result) is NEVER retried
   automatically; the user is asked to check the platform. Do not re-propose

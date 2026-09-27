@@ -8,8 +8,12 @@
 // edited / rejected / expired / failed, and WHO the other side saw) arrives
 // in your next turn unless the user configured a wake. `refresh` asks the
 // channel for the newest messages NOW (2026-09-26) — behind a per-conversation
-// floor and the account's vendor budget, both named when they refuse. Full
-// manual: vibespace-docs channels.
+// floor and the account's vendor budget, both named when they refuse.
+// R4 (2026-09-27): the user gives you ACCESS (see and act, with an authority:
+// draft or send) and, separately, may NOTIFY you (wake / digest) — `status`
+// prints both; `compose` starts a NEW message on an account you have access
+// to (a proposal, like `reply`); `search` looks through what you can see.
+// Full manual: vibespace-docs channels.
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
@@ -39,7 +43,11 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels refresh <conv>                ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply)
   vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
                                                    ← PROPOSES; prints the policy verdict + proposal id
-  vibespace-channels status [<proposalId>]         ← your proposals and their receipts
+  vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]
+                                                   ← PROPOSES a NEW message (needs access to the whole account)
+  vibespace-channels search "words" [--account <id>] [--limit N]
+                                                   ← messages you can see (the stored logs; no vendor call)
+  vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
 <conv> is the key list prints: <adapter>/<conversation id>.
 A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
@@ -47,7 +55,7 @@ A conversation you cannot see and one that does not exist give the same answer.`
 
 function printProposal(p, { full = false } = {}) {
   const rc = p.receipt;
-  console.log(`${p.id}  ${p.state.toUpperCase()}  → ${p.adapterId}/${p.convId} (${p.title || ''})  ${when(p.updatedAt || p.at)}`);
+  console.log(`${p.id}  ${p.state.toUpperCase()}  → ${p.adapterId}/${p.convId || '(new)'} (${p.title || ''})  ${when(p.updatedAt || p.at)}`);
   if (p.policy) console.log(`    policy: ${p.policy.mode}${p.policy.reasons && p.policy.reasons.length ? ' (' + p.policy.reasons.join(', ') + ')' : ''}`);
   if (p.state === 'awaiting-approval') console.log(`    waiting for the user (expires ${when(p.ttlAt)})`);
   if (p.reason) console.log(`    ${p.reason}`);
@@ -55,6 +63,7 @@ function printProposal(p, { full = false } = {}) {
     console.log(`    receipt: ${rc.status}${rc.edited ? ' (edited by the user)' : ''}${rc.sentAs ? ', sent as ' + rc.sentAs : ''}${rc.vendorMessageId ? ', vendor id ' + rc.vendorMessageId : ''}`);
     if (rc.status === 'sent' || rc.status === 'edited') console.log(`    the recipient sees: ${rc.identityMarking === 'none' ? 'you, with no application marker' : (rc.identityMarkingText || (rc.identityMarking === 'unknown' ? 'NOT VERIFIED for this channel' : 'marked as sent by an application'))}`);
   }
+  if (p.compose) console.log(`    a NEW message to ${(p.compose.to || []).join(', ')}${(p.compose.cc || []).length ? ` (cc ${p.compose.cc.join(', ')})` : ''} — subject: ${p.compose.subject}`);
   if (full) console.log(`    text: ${p.text}`);
 }
 
@@ -63,10 +72,15 @@ function printProposal(p, { full = false } = {}) {
     if (!verb) console.log(USAGE + '\n');
     const r = await call('GET', '/api/agent/channels/list');
     const rows = r.conversations || [];
-    if (!rows.length) { console.log('no channel conversations are visible to you right now (ask the user to grant reach, or to assign you one).'); return; }
+    if (!rows.length) { console.log('no channel conversations are visible to you right now (ask the user to grant you access).'); return; }
+    const via = (v) => (v && v !== 'conversation' ? ` via the ${v === 'account' ? 'whole account' : 'rule'}` : '');
     for (const c of rows) {
       const chips = [c.level === 'requestable' ? 'requestable (not readable yet)' : 'visible', c.canSend ? `reply → ${c.policy === 'direct' ? 'sends directly' : 'user approves'}` : `no reply (${c.sendWhy || 'not offered'})`];
-      if (c.assigned) chips.push(`assigned to you${c.assignedVia && c.assignedVia !== 'conversation' ? ` via the ${c.assignedVia === 'account' ? 'whole account' : 'rule'}` : ''} (${c.authority})`);
+      // R4: ACCESS and NOTIFICATION are two separate facts
+      const acc = c.access || (c.assigned ? { authority: c.authority, via: c.assignedVia } : null);
+      if (acc) chips.push(`access${via(acc.via)} (${acc.authority === 'send' ? 'may send' : 'drafts'})`);
+      if (c.watched) chips.push(`notifies you: ${c.watched.notify === 'digest' ? 'digest' : 'wake'}${c.watched.mode === 'filtered' ? ' on a filter' : ''}${via(c.watched.via)}`);
+      else if (acc) chips.push('no notification (read when you choose)');
       if (c.unread) chips.push(`${c.unread} unread`);
       if (c.awaiting) chips.push(`${c.awaiting} of your proposals awaiting approval`);
       console.log(`${c.key}  — ${c.title}  [${c.adapter}]`);
@@ -142,9 +156,55 @@ function printProposal(p, { full = false } = {}) {
     const id = args[1] || null;
     const r = await call('GET', '/api/agent/channels/status' + (id ? '?id=' + encodeURIComponent(id) : ''));
     if (id) { printProposal(r.proposal, { full: true }); return; }
+    // R4: WHAT YOU WERE GIVEN — access (see + act, with an authority) and,
+    // separately, whether a notification wakes you
+    const acc = r.access || [];
+    if (!acc.length) console.log('access: none — nothing of the connected channels is shared with you (ask the user to grant access).');
+    else {
+      console.log('access:');
+      for (const a of acc) {
+        const where = a.grain === 'account' ? `${a.adapterId} — the whole account (${a.adapter})` : a.grain === 'pattern' ? `${a.adapterId} — conversations matching: ${a.rule}` : `${a.key} — ${a.title}`;
+        const as = a.via === 'group' ? ` (as a member of group ${a.as.name || a.as.id})` : '';
+        const w = a.watched;
+        const note = w ? `notified: ${w.notify === 'digest' ? `a digest every ${w.digestMinutes} min` : 'woken per batch'}${w.mode === 'filtered' ? ' on a filter' : ''}, at most ${w.dailyWakeCap}/day (${w.wakes24h} in 24 h)${w.receiptWake ? ', receipts wake you' : ''}` : 'not notified — nothing wakes you; read when you choose';
+        console.log(`  ${where}${as}\n      authority: ${a.authority === 'send' ? 'may send directly where the policy allows' : 'drafts (the user approves)'} · ${note}`);
+      }
+      if (acc.some((a) => a.grain === 'account')) console.log('  (an account you have whole: `compose <account> --to … --subject … "text"` proposes a NEW message)');
+    }
     const list = r.proposals || [];
     if (!list.length) { console.log('you have no proposals.'); return; }
+    console.log('proposals:');
     for (const p of list) printProposal(p);
+    return;
+  }
+  if (verb === 'compose') {
+    const account = args[1];
+    const text = args.slice(2).filter((x, i, all) => !x.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--'))).pop();
+    const to = flag('--to');
+    const subject = flag('--subject');
+    if (!account || account.startsWith('--') || !to || !subject || !text) { console.error('usage: vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]'); process.exit(1); }
+    const body = { account, to, subject, text };
+    if (flag('--cc')) body.cc = flag('--cc');
+    if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
+    const r = await call('POST', '/api/agent/channels/compose', body);
+    const p = r.proposal;
+    if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, a NEW message to ${(p.compose && p.compose.to || []).join(', ')}`);
+    else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} (a NEW message to ${(p.compose && p.compose.to || []).join(', ')}) is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+    else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
+    return;
+  }
+  if (verb === 'search') {
+    const q = args[1];
+    if (!q || q.startsWith('--')) { console.error('usage: vibespace-channels search "words" [--account <id>] [--limit N]'); process.exit(1); }
+    const qs = new URLSearchParams({ q });
+    if (flag('--account')) qs.set('account', flag('--account'));
+    if (flag('--limit')) qs.set('limit', flag('--limit'));
+    const r = await call('GET', '/api/agent/channels/search?' + qs);
+    const rows = r.results || [];
+    if (!rows.length) { console.log(`nothing you can see matches "${q}".`); return; }
+    for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
+    if (r.truncated) console.log('(more matches exist — narrow the words or pass --account)');
     return;
   }
   if (verb === 'request') {

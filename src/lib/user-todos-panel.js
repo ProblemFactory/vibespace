@@ -105,6 +105,18 @@ export function installUserTodos(app) {
       const hasWindow = [...app.sessions.values()].some((term) => term.sessionId === s.webuiId);
       if (hasWindow) app.goToWindow(s.webuiId);
       else app.attachSession(s.webuiId, s.webuiName || displayName(s), s.cwd, { mode: s.webuiMode });
+      // A HELPER's ask (lane S1): land ON the card that waits, not just in its conversation.
+      // A window opened just now learns its asks from the attach — retried for a few seconds.
+      if (item?.action?.type === 'helper-ask' && item.action.requestId) {
+        const rid = item.action.requestId;
+        let n = 0;
+        const tryJump = () => {
+          const view = [...app.sessions.values()].find((v) => v && v.sessionId === s.webuiId && typeof v.jumpToPendingAsk === 'function');
+          if (view && (view._pendingAsks || []).some((a) => String(a.requestId) === String(rid))) { view.jumpToPendingAsk(rid).catch(() => {}); return; }
+          if (++n < 20) setTimeout(tryJump, 250);
+        };
+        setTimeout(tryJump, 50);
+      }
     } else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, displayName(s), s.cwd);
     else if (s.status === 'stopped') app.resumeSession(s.sessionId, s.cwd, displayName(s), { backend: s.backend, hostId: s.hostId || s.host || undefined });
     else showToast(t('This session is running outside VibeSpace'), { type: 'error' });

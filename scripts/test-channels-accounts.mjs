@@ -510,13 +510,13 @@ console.log('⑧ duplicate');
   const never = {
     token: !dup.auth.tokenEnc && !dup.auth.user,
     refresh: !Object.values(ix).some((en) => en && en.adapterId === dup.id),
-    assignments: !Object.values(ix).some((en) => en && en.adapterId === dup.id && en.assignment),
+    access: !Object.values(ix).some((en) => en && en.adapterId === dup.id && ((en.access || []).length || (en.watchers || []).length || en.assignment)),
     reach: !Object.values(ix).some((en) => (en.reachEntries || []).some((g) => g.scope && (g.scope.id === dup.id || String(g.scope.id).startsWith(dup.id + '/')))),
     log: !fs.existsSync(path.join(engDir, 'channels', 'msgs', dup.id.replace(':', '%3a'))) && JSON.stringify(dup.state) === '{}' && dup.lastPass === null,
   };
-  ok(ENG.DUPLICATE_NEVER.map((n) => n.key).join() === 'token,refresh,assignments,reach,log' && Object.values(never).every(Boolean), `the copy carries NO token, refresh override, assignment, reach grant, log or cursor (${JSON.stringify(never)})`);
+  ok(ENG.DUPLICATE_NEVER.map((n) => n.key).join() === 'token,refresh,access,reach,log' && Object.values(never).every(Boolean), `the copy carries NO token, refresh override, access grant / notification, reach grant, log or cursor (${JSON.stringify(never)})`);
   ok(r.adapter.auth.tokenHeld === false && r.adapter.auth.state !== 'connected' && r.adapter.credentialKey === 'custom' && r.adapter.customClient.appId === CUSTOM_ID, 'the answer is an UNAUTHORIZED account under the copied client');
-  ok(ix[`${idC}/thr_c`] && ix[`${idC}/thr_c`].assignment && ix[`${idC}/thr_c`].refresh && ix[`${idC}/thr_c`].refresh.every === 60, 'the source is untouched (its refresh override and assignment stay)');
+  ok(ix[`${idC}/thr_c`] && (ix[`${idC}/thr_c`].access || []).length === 1 && (ix[`${idC}/thr_c`].watchers || []).length === 1 && ix[`${idC}/thr_c`].refresh && ix[`${idC}/thr_c`].refresh.every === 60, 'the source is untouched (its refresh override, its access row and its notification stay)');
   const own = await eng.reauthorize(dup.id, {});
   ok(own.flow && new URL(own.flow.consentUrl).searchParams.get('client_id') === CUSTOM_ID, 'the copy consents on its own, under the copied client');
   await eng.cancelAuth(dup.id);
@@ -557,10 +557,10 @@ console.log('⑨ remove');
   ok(g && g.ok, 'fixture: an agent group exists (it references agent sessions, never a channel account)', JSON.stringify(g && g.error));
   const refs = eng.referencesOf(idC);
   const kinds = refs.map((x) => x.kind).sort().join();
-  ok(kinds === 'assignment,outbox,reach', `referencesOf names exactly the assignment, the adapter-scoped reach grant and the UNSETTLED proposal (${kinds}) — the conversation-scoped user grant, the settled proposal and the agent group are not references`, JSON.stringify(refs));
-  ok(refs.find((x) => x.kind === 'assignment').principal.name === 'Worker' && refs.find((x) => x.kind === 'reach').principal.id === 'agent-9' && refs.find((x) => x.kind === 'outbox').id === 'p-open', 'each reference is NAMED: who is assigned, who holds the grant, which proposal');
+  ok(kinds === 'access,outbox,reach', `referencesOf names exactly the access row (its notification rides it), the adapter-scoped reach grant and the UNSETTLED proposal (${kinds}) — the conversation-scoped user grant, the settled proposal and the agent group are not references`, JSON.stringify(refs));
+  ok(refs.find((x) => x.kind === 'access').principal.name === 'Worker' && refs.find((x) => x.kind === 'reach').principal.id === 'agent-9' && refs.find((x) => x.kind === 'outbox').id === 'p-open', 'each reference is NAMED: who is assigned, who holds the grant, which proposal');
   const e = await threw(() => eng.remove(idC));
-  ok(e && e.status === 409 && e.code === 'account-referenced' && e.detail.refs.length === 3 && /1 assignment, 1 reach grant, 1 outbox proposal/.test(e.message) && /Disconnect only drops the token/.test(e.message), 'remove is 409 account-referenced naming each kind and the remedy', e && e.message);
+  ok(e && e.status === 409 && e.code === 'account-referenced' && e.detail.refs.length === 3 && /1 access grant, 1 reach grant, 1 outbox proposal/.test(e.message) && /Disconnect only drops the token/.test(e.message), 'remove is 409 account-referenced naming each kind and the remedy', e && e.message);
   ok(eng.adapterRecords().adapters.some((x) => x.id === idC) && diskOf(engDir).some((x) => x.id === idC), 'the refused account is intact, live and on disk');
   const dc = await eng.disconnect(idC);
   ok(dc.ok === true && !dc.removed && rowOf(eng, idC) && rowOf(eng, idC).auth.tokenHeld === false && eng.referencesOf(idC).length === 3, 'Disconnect IGNORES references: the token is dropped, the record and every reference stay');
@@ -652,7 +652,7 @@ console.log('⑩ the routes');
   await eng.refresh(idR, 'thr_b');
   await eng.setAssignment(idR, 'thr_b', { principal: { kind: 'agent', id: 'agent-3', name: 'Helper' }, mode: 'all' });
   const dl = await api('DELETE', `/api/channels/adapters/${encodeURIComponent(idR)}`);
-  ok(dl.status === 409 && dl.body.code === 'account-referenced' && dl.body.detail.refs.length === 1 && dl.body.detail.refs[0].kind === 'assignment' && dl.body.detail.refs[0].principal.name === 'Helper', 'DELETE a referenced account → 409 account-referenced with detail.refs naming the assignment', dl.raw);
+  ok(dl.status === 409 && dl.body.code === 'account-referenced' && dl.body.detail.refs.length === 1 && dl.body.detail.refs[0].kind === 'access' && dl.body.detail.refs[0].principal.name === 'Helper', 'DELETE a referenced account → 409 account-referenced with detail.refs naming the access row', dl.raw);
   const dd = await api('DELETE', `/api/channels/adapters/${encodeURIComponent(du.body.adapter.id)}`);
   ok(dd.status === 200 && dd.body.removed === true && !eng.adapterRecords().adapters.some((x) => x.id === du.body.adapter.id), 'DELETE an unreferenced account → removed');
   const d404 = await api('DELETE', '/api/channels/adapters/gmail%3Anope');

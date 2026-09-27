@@ -410,7 +410,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     ...clientFieldSpecs({ ...spec, presets }, { value: cur, custom, hint: tr('Copied from the original; you can change it.') }),
     ...optionFieldSpecs(spec.optionsSchema, { values: cfg.options || {}, only: 1 }),
     ...(cfg.push ? [pushClaimSpec(cfg.push.claimedExclusive)] : []),
-    { key: 'copied', type: 'note', value: tr('Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.') },
+    { key: 'copied', type: 'note', value: tr('Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, access grants and notifications, reach grants, the message log — the copy signs in on its own.') },
     { key: 'flow', label: tr('{provider} authorization', { provider: signin }), type: 'hidden', hint: tr('This copy needs its own sign-in — another account, or the same one authorized again.') },
   ];
   // THE COPY EXISTS FROM ITS FIRST SIGN-IN ATTEMPT (the server's duplicate =
@@ -491,7 +491,7 @@ export async function removeAccount(app, a) {
 /** One reference, in words (each a user / vendor string → textContent). */
 function refText(ref, outboxN) {
   const who = (p) => (p && (p.name || p.id)) || '?';
-  if (ref.kind === 'assignment') return tr('assignment: {conv} → {who}', { conv: ref.title || ref.convId || ref.key, who: who(ref.principal) });
+  if (ref.kind === 'access' || ref.kind === 'assignment') return tr('access: {conv} → {who}', { conv: ref.scope === 'account' ? tr('the whole account') : (ref.title || ref.convId || ref.key), who: who(ref.principal) });
   if (ref.kind === 'reach') return tr('reach: {who} may see the whole account', { who: who(ref.principal) });
   if (ref.kind === 'outbox') return tr('outbox: {n} proposal(s) awaiting approval', { n: outboxN });
   return String(ref.kind || '');

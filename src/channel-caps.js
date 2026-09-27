@@ -447,7 +447,7 @@ function identityWarning(caps) {
  */
 function sendWhyText(why, { t = defaultT } = {}) {
   switch (String(why || 'unknown')) {
-    case 'send-scope-not-granted': return t('sending needs the send permission on the connected app — reconnect (Connect again) to request it; on Lark that also means enabling im:message + im:message.send_as_user and publishing a version');
+    case 'send-scope-not-granted': return t('sending needs the send permission on the connected app — reconnect (Re-authorize) to allow drafts and sending; on Lark that also means enabling im:message + im:message.send_as_user and publishing a version');
     case 'read-only-adapter': return t('this channel is read-only');
     case 'read-only-mailbox': return t('this conversation is read-only');
     case 'not-a-member': return t('you are not a member of this conversation');

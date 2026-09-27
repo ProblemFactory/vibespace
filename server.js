@@ -400,7 +400,7 @@ const WS_OPEN = 1;
 // Add a type here when you add its handling — until then it announces itself.
 const CLAUDE_STREAM_TYPES = new Set([
   'assistant', 'user', 'system', 'result', 'attachment', 'control_request',
-  'control_response', 'tool_progress', 'stream_event', 'summary',
+  'control_response', 'control_cancel_request', 'tool_progress', 'stream_event', 'summary', // control_cancel_request: the normalizer settles the card it withdraws (a helper stopped mid-ask, lane S1) — listed so the breadcrumb stops crying 'unhandled' (the naive-study log line)
   'rate_limit_event', // handled since 2.289.0 — the set lagged the handler, so the breadcrumb cried 'unhandled' for a handled type (misled the inc-msozeyw2 read)
   'command_lifecycle', // handled since 2.369.112 — the turn-start carrier of a harness-delivered peer message (inc-mu6bfv1t-4drq)
   'set_in_progress_tool_use_ids', 'compact_progress', 'tombstone', '_stdin_ack', '_remote_state', '_remote_exit', // B3 §2.5/§2.10/§2.11: the run set + compaction stage have readers in claude-stream-json.js, tombstone in the normalizer — listed here or the breadcrumb cries 'unhandled' for handled records (the 2.289.0 mistake). Round 4: the first two have never been observed on our stdout (host callbacks swallow them; the live compaction lane is system/status) and tombstone is unverified — the rows stay because the READER exists, which is what this set is about
@@ -1233,6 +1233,7 @@ const userTodos = new UserTodoManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
+require('./src/server/helper-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), helperAskedAt: map }); } }); // lane S1: a helper's ask unanswered for 60 s ⇒ ONE For-you item, resolved when it is answered
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
 app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
 require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id

@@ -1121,6 +1121,8 @@ assignment = { principal: { kind:'agent'|'group', id },
   了 A 对 C 的 `visible` 的用户, 会因为一个不相干的动作而被静默地撤销那条授权 —— 这是一次
   被夹带进一个明文写着(§8)只许放宽的模型里的**收窄**操作。
 
+> **R4 (2026-09-27) 取代了下面的单条指派:** 每个粒度有一个访问列表和一个通知列表 —— 两种操作, 先访问 —— 见 §24。
+
 **三个粒度, 一个编辑器 (2026-09-26, owner: "分配整个账号, 或者某个 channel/聊天/符合 pattern
 的聊天等给特定 agent")。** 同一条记录 `{principal, mode all|filtered, filterId, notify
 wake|digest, authority draft|send, dailyWakeCap, scope:{kind, id}}`, 三种作用域:
@@ -1585,7 +1587,9 @@ agent 的下一个 turn 到达, 除非用户另有配置; (c) 一个不可见的
 **channels 新增的部分:**
 
 - **线程即会话**(`threadId`), 加一条包含查询, 免得一个邮箱变成四万个会话。
-- **发送**需要 `gmail.send`; 操作 label 则需要 `gmail.modify`。两者都是敏感 scope, 而 refresh
+- **发送**需要 `gmail.send`(仅 `messages.send`) —— R4 verify (2026-09-27, §24) 纠正: 两阶段**回复**
+  (`drafts.create` + `drafts.send`)需要 `gmail.compose`, 它也覆盖 `messages.send`, 所以同意请求
+  readonly + `gmail.compose`; 操作 label 则需要 `gmail.modify`。两者都是敏感 scope, 而 refresh
   token 的寿命取决于这个 OAuth client 的认证状态 —— 一个未认证/测试中的 client 的 refresh
   token **7 天**就过期(公开文档: 同意屏幕处于 Testing 且用户类型为 External 时即如此), 而这
   正是既有的 Gmail 挂载已经在忍受的痛。**把"加 scope"这件事说准(r7)**: 给一个 client 加一个
@@ -3194,7 +3198,7 @@ owner 看 2.369.185 (聚合 IM) 时的两句话, 原文:
 | **单独**交给了 agent / Task Group (会话粒度 —— 它自己的指派) | assignment, `source: 'conversation'` | — |
 | 按规则或整个账号交出去, **且**这次交接已经作用到它: 一次唤醒**真的送达**了 agent (`touch.wake.ok === true`, lane ≠ `none`), 或它的唤醒被暂存 (琥珀) | assignment `source: 'pattern' / 'account'` + `touch.wake` / 暂存 | 送达: 24 h, 边界不含; 暂存: 7 天 |
 | 有 agent 读过它 | `agentReads` (agent 路由的 readFor 盖章: 谁、何时、读到哪一条) | 24 h, 边界**不含** |
-| 一次唤醒被暂存 | pending > 0、最后一次唤醒 lane `none` 未送达、或最后一次拒绝晚于最后一次唤醒 (**暂存到下一轮不算**) | 7 天 (唤醒台账自己的窗) |
+| 一次唤醒被暂存 | pending > 0 (**摘要**通知在自己的窗口还开着时攒下的命中不算 —— 那就是摘要本身; R3 × R4 接缝, 2.369.191: PURE `heldPending` 读 `touch.pendingFor` + 行上 R4 的 `watchers`, 窗口边界不含)、最后一次唤醒 lane `none` 未送达、或最后一次拒绝晚于最后一次唤醒 (**暂存到下一轮不算**) | 7 天 (唤醒台账自己的窗) |
 | 你在里面回复过 | `selfAt` = vendor 标成你的消息 (`isSelf`) 或你自己从这里发出的 | 24 h, 边界不含 |
 
 未归档的 agent 群永远在 (你的显式动作, D1)。顺序与全列表相同 (按活动)。按规则或整个账号交出去的会话, 在唤醒送达或暂存之前不因交接本身上第一屏 —— 照常往下走 (读过 / 暂存 / 回复过 / 不在); 上了第一屏时 tag 带 `grain`, tooltip 说 "整个账号已交给 …" / "按匹配它的规则交给了 …", 可见的词仍是 "→ Agent"。
@@ -3225,8 +3229,127 @@ owner 看 2.369.185 (聚合 IM) 时的两句话, 原文:
 
 - `agentReads` (≤ 5 个主体, 最新在前) 由 **agent 路由的 readFor** 在 reach 检查**之后**盖 (隐藏的读 = 统一 not-found, 不留痕), 同一主体同一尾巴 60 s 内不重盖 (agent 的读循环不是广播循环), 走索引唯一的门 (去抖落盘), 一次 partial 广播只带这一行。
 - 唤醒台账条目多带 `name` (唤醒到了谁)。
+- `pendingFor` (2.369.191, R3 × R4 接缝) = 按主体分的待发命中 `[{p, n, oldest}]` (`p` = 通知者的 `kind:id`, `null` = 旧的无标记命中; 带标记的省略也计入); `pending` 仍是总数。
 - `selfAt`: 摄入 / 推送时从 `isSelf` 记录盖; outbox 里你自己起草并已发出的提案也算 (vendor 回显之前); 启动后对最近两天活跃、从没盖过的行, 从日志尾巴推导一次 (`healSelfAt`, 一轮事件循环一个会话, 盖 0 的不再读)。
 
 门: test-channels-images (fast) · test-channels-focus (fast) · test-channels-lark-shape ⑨ · test-vendor-whitelist §7 · test-channels-groups-ui · heavy: test-channels-aggregate-ui ②b · test-channels-groups-e2e ⑨ · test-channels-e2e ⑰ · test-channels-i18n。
 
 **要 owner 拍板的 (默认已按下面实现, 一个设置都没加)**: D1 @你 的消息算不算"要紧" (今天没算; 飞书里 18 个会话 @ 过你); D2 排序保持活动顺序, 还是需要你的排前面; D3 给窗口里的图片在 vendor 预算里留一块 owner 保留额 (今天图片与定时遍历共用每分钟预算; 被拒时图会自己等一分钟再试, 不再沉默)。
+
+## 24. R4 (2026-09-26 / 27): 访问与通知 —— 两种操作, 先访问
+
+> **验证 r2 (2026-09-27):** (1) 投递梯是一个 await —— 唤醒还在梯子里时访问被移除 ⇒ 被拒绝的块按名丢弃(`access-removed`), 绝不为其暂存; (2) 回执唤醒(`receiptWake`)是计费回合, 与唤醒共用同一日上限与同一账本 —— 超限时回执搭下一回合(`noWake`); (3) `compose` 按名拒绝 `bcc` / `replyTo`(只有 To / Cc); (4) 读者(`grainOf`)让无访问行的通知行失效, 启动时点名.
+> **验证 r3 (2026-09-27):** (1) 回执在 watcher 自己的串行段里限速(先会话链, 再 scope 链 —— 与唤醒同序): 上限 2 之下五个并发 reject 只计费两个回合, 上限 1 之下唤醒与回执同飞只计费一个; (2) `stillInEffect` 回答两件事 —— 通知已不在效 ⇒ 被拒绝的块按名丢弃(`access-removed`); 被唤醒的**组成员**在飞行中死亡 ⇒ 命中为该组**保留**(`member-gone`), 下一次唤醒轮转到另一个活成员.
+
+
+**owner 的问题 (2026-09-26, 2.369.185 的账号菜单「交给一个 agent…」):** "只能交给一个agent吗？
+不能给多个？不能只给读取权限不做推送/汇总？"
+**owner 的两次更正 (2026-09-27):** "你之前的交互的问题是把'让agent能访问对话'和'让agent会被
+通知'耦合在一起了" 与 "这实际上应该是两种不同的操作，前者是后者的前提"。
+
+**模型。** 每个粒度 —— 账号、规则命中的会话、一个会话 —— 各有**两个**列表
+(`src/channel-filter.js`, PURE):
+
+| 列表 | 行 | 含义 |
+|---|---|---|
+| **访问 (access)** | `{principal (agent \| Task Group), authority: draft \| send}` | 可以列出 / 阅读 / 搜索 / 刷新这个粒度的会话, 并以该权限经 outbox 回复 / 写新消息。**只有访问权限不唤醒任何人**: 没有节奏账本, 没有摘要, 不以它的名义计费。reach = 每个访问行一条 `visible` 授权 (`origin:'access'`) |
+| **通知 (watchers)** | `{principal, notify: wake \| digest, mode all \| filtered, filterId (+ 内联过滤器), digestMinutes, dailyWakeCap, receiptWake}` | 唤醒谁、按什么唤醒。通知行**必须**在同一粒度有同一 principal 的访问行 —— 否则按名拒绝 (`watcher-needs-access`); 移除访问权限会在同一次写入里移除它的通知 |
+
+没有第三种"只读模式": 只读 = 有访问行、没有通知行。
+
+**一个会话适用哪些行** (`effectiveGrants`): **按 principal**, 命名它的最细粒度说了算 ——
+会话 > 按创建顺序命中的规则 > 账号 —— 访问与通知各自独立。A 在某个会话上的访问行 (起草)
+只在那里覆盖 A 的账号行 (可发送); A 在某条规则上的通知 (它自己的过滤器) 在规则命中的会话上
+替换 A 的账号级通知。别的 principal 的行永远不会遮住 A 的: 给 B 一个会话的访问 (或通知),
+不会让 A 的账号级通知在那里静默失效。(R4 之前是"最细的一个有指派的粒度整体接管"; 换成列表后,
+那会让一条无关的行悄悄停掉一个通知。)
+
+**钱。** 每个通知行有**自己的**节奏账本; 它的唤醒排在按 (scope, principal) 键控的 scope 链上
+(`scope:acct:<id>|<kind:id>` / `scope:pat:<id>|<kind:id>` —— r2 的不变量"一趟里 N 个新会话
+永远不超过上限"现在**按通知行**成立: 一个账号两个通知行, 上限 5 与 5, 100 个会话的一次爆发 ⇒
+恰好 5 + 5)。挂起的命中标注它在等哪个通知行 (`for: kind:id`, `PENDING_CAP` 按通知行计);
+摘要 / 合并 / 启动窗口按 (会话, 通知行)。同一批永远不会为同一个会话计费两次: 点名的 agent 与
+轮转落到它身上的组共用一次投递。被唤醒的 agent 的块会写出这个会话上的其他人 ("also on this
+conversation: B (digest, drafts), 工作 (access only, drafts)")。outbox 权限 = 调用者自己的
+访问行 (取最宽, 被两个上限压住); `receiptWake` = 起草者自己的通知行 (本人或它所在的组 ——
+会读取起草者的组)。
+
+**界面 —— 两种操作, 两个对话框** (`src/lib/channel-filter-editor.js`): 账号卡片的 ⋯、会话行菜单、
+规则那一行都先给 **授权访问…** 再给 **通知…**。授权访问: 每个 agent 或组一行带权限, 添加 /
+移除, 规则的 pattern; 移除一个 principal 时会先说它的通知也会一起移除。通知: 选择器**只**列出
+这个粒度有访问权限的 principal (一个都没有 ⇒ "先授权访问 — 用「授权访问…」" 加一个打开它的按钮);
+每个通知行带 R4 之前的字段和自己的估计; 合计把每个通知行的上限加起来; 超出范围的数字**当场**
+说明被压住 ("已保持在最大值 1440")。卡片那一行: "访问：A（可发送）, 组 · 工作（起草） · 通知：A
+每批唤醒 按过滤器"。旧的「交给一个 agent…」入口及其文案退役。
+
+**路由。** 每个粒度都有 `PUT …/access {access:[…]}` 与 `PUT …/watchers {watchers:[…]}`
+(`/api/channels/adapters/:id/…`、`…/patterns/:pid/…`、`/api/channels/:a/:c/…`); 新规则是
+`POST …/patterns {pattern, access[, watchers]}`。R4 之前的单条指派 (`{assignment}`) 是**兼容写入**:
+一个访问行 + 一个通知行, 替换两个列表。`PUT /api/channels/adapters/:id {policy}` 设定账号自己的
+发送策略 (新写的消息读它; 会话自己的策略在那里仍优先)。
+
+**写新邮件 (B-6acc, owner: "给我一个agent使用我的 gmail 的能力，让它能读取和发送邮件")。**
+`vibespace-channels compose <account> --to … [--cc …] --subject "…" "text"` (+ `POST
+/api/agent/channels/compose`) 在 agent **对整个账号**有访问权限的账号上提议一个**新**会话,
+走**同一个** outbox: 默认需要审批; 只有账号策略是 direct **且** agent 的账号访问权限是
+`send` **且** 没有守卫触发 (链接、附件、工作时间外) 时才直接发出; 同样的署名行、审计与回执。
+adapter 必须声明 `caps.compose` (Gmail: 在 `gmail.compose` 下(或一枚只持 `gmail.send` 的旧 token —— 它能
+写新邮件但不能回复)**一次** `messages.send` 一封全新的 RFC-822 邮件 —— 带它自己的 `Message-ID` **和**
+`X-VibeSpace-Proposal: <idemKey>`; 丢失的回答先用已发送邮件里的 `rfc822msgid:` 核对, 若 Gmail 改写了
+Message-ID 再在"发给第一个收件人、尝试时刻之后"的已发送邮件里按 proposal header 核对 —— 幂等从不依赖
+Message-ID 存活 (verify r1); Lark 不声明 ⇒ 按名 `compose-not-available`); `composeCaps()` 不调用
+vendor 就回答账号的发送身份 (Gmail 没有发送 scope ⇒ `send-scope-not-granted`, 什么都不创建)。
+
+**Verify r1 (2026-09-27) —— Gmail 回复的 scope。** Google 的方法参考里 `drafts.create` /
+`drafts.send` / `drafts.delete` 接受 `https://mail.google.com/`、`gmail.modify`、`gmail.compose`;
+`gmail.send`("代你发送邮件")只有 `messages.send` 接受。P4 的同意(readonly + `gmail.send`)因此铸出的
+token, 每一次两阶段回复都会在建草稿那一步吃 403。现在同意请求 readonly + `gmail.compose`("管理草稿并
+发送邮件" —— 两个都是 Google 的 restricted 类, 应用的审核类别不变; 不再并排请求 `gmail.send`, 同意屏幕上
+两行讲同一件事会被读成两个权限); `sendVerbsOf(scopes)` 是持有 token 能做什么的**唯一**表(回复需要
+compose|modify|mail; 写新邮件这些之外还接受 `gmail.send`); P4 时期铸的 token 对回复读作
+`send-scope-not-granted`、仍可写新邮件; 文案说"重新连接(重新授权)以允许起草与发送"。钉在
+test-channels-gmail-shape ⑧ / ⑧b 与 test-channels-engine ⑪。
+
+**agent 那一侧。** `vibespace-channels status` 列出每个命名了这个 agent 的粒度: 它的访问权限
+与是否被通知 ("not notified — nothing wakes you"); `list` 把访问与通知分成两个事实; `search "…"`
+只搜这个 agent 能看到的会话 (本地日志; 每个命中都经过 reach, 不调用 vendor); `refresh` 仍在
+reach 与预算之内。
+
+**迁移** `2026-09-channels-access-watchers` (src/server/migrations.js, 经共享 runner): 现有的
+指派 ⇒ 同一 principal 的一个访问行 + 一个通知行 (通知行保留节奏账本 —— 会话自己的唤醒,
+不计继承粒度的镜像); origin `assignment` 的授权 ⇒ `access`; 没有标注的挂起命中 ⇒ 标注为它
+当时等待的通知行。引擎在 runner 之前就以同样方式读取拆分前的记录 (合并, 绝不 fallback),
+并在任何写入到达它之前就地提升。幂等; store 被阻塞时这次运行失败。
+
+**与第一版 brief 的偏差, 明说。** (1) brief 的"每个 assignee 一种模式" (`wake | digest | read`)
+被 owner 的解耦取代: 不存在 `read` 模式。(2) 优先级按 principal, 不是"胜出粒度的整个列表"
+(见上)。(3) 不拒绝同一粒度有两个 `send` 权限 (改为被唤醒的块写出其他人)。(4) 索引表名保留
+(`accountAssignments` / `patternAssignments`); 每条记录现在装的是 `{access, watchers}`。
+
+门: test-channel-filter (PURE 表 + 两个 patched-copy 对照)、test-channels-engine ⑪ (会话粒度
+端到端: watcher-needs-access、两个通知行各自的窗口、访问权限从不投递、同批去重、按通知行的回执、
+compose、search; 对照 = 保留无访问权限通知行的副本)、test-channels-aggregate ⑨c (r2 的上限形状
+按通知行 + 2.5 s 风暴里只有访问权限的组; 对照 = 去掉 scope 队列的副本) 与 ⑨d (界面接线钉)、
+test-channel-acl、test-migrations、test-channels-agent-cli、test-channels-gmail-shape ⑧b;
+heavy: test-channels-aggregate-ui ⑤/⑦ (owner 的例子 —— 工作只有访问、一个 agent 按过滤器唤醒 ——
+以及 owner 被压住的数字)、test-channels-e2e ⑮、test-channels-i18n。
+
+**验证 r4 (2026-09-27) —— 唯一的门。** 这条 lane 的四轮验证 (以及之前的 R2、S2、R5) 每一轮都在那条唯一的
+串行化区段旁边找到一个**新的**计费唤醒写入点 —— 跨 await 的先查后写。这次的收口是结构性的:
+`billedWake(keys, fn)` 是计费频道回合的**唯一**入口 (先取会话链, 再在其中解析并取 scope 链), 三个区段体
+(`wakeNow`、`flushScopeNow`、`receiptNow`) 在问梯子之前先**预留**账本行、之后再定稿 —— 写不进去的行是持有,
+永远不是计费; 定稿失败的预留照常计数; 引擎停止时排在后面的唤醒把命中持有起来, 已关闭的 store 仍会把这份
+持有写下去。一份按 grep 派生的普查 (test-channels-engine ⑫) 把每一个带频道 spend reason 的梯子调用、每一次
+账本写入、每一个区段体都对着这扇门数一遍, 第五个写入点无法悄悄出现。攻击验证 (63 条腿, 真引擎 + 真 store
++ 带闸门的梯子): 一个账号 5 个会话 50 条并发事件、账号级上限 3 ⇒ 恰好计费 3、持有 47、账本逐条点名;
+夹着 10 条并发回执 ⇒ 仍是 3; 风暴中关闭的启动摘要窗口算在同一上限里; 五人 Task Group ⇒ 3 次唤醒给 3 个不同
+成员; 启动回放 30 条待处理的同时到来 30 条新消息 ⇒ 60 条各投递恰好一次; 链中途 `stop()` / `remove()` ⇒
+链排空、无孤儿 promise、移除之后零写入; 预留 / 定稿 / 区段体抛错 ⇒ 下一个调用者照常运行; 等待中被改粒度的
+通知行 ⇒ 按新粒度的上限。verify r5 (门的剩余边缘): ① 唤醒预留带上 `{bootId, pid}`, 新一次启动会释放上一次
+启动遗留的卡住预留 (预留与定稿之间崩溃会把上限白占 24 小时) —— `start()` 里的 `releaseStaleReservations`,
+本次启动自己在飞的预留绝不被动。② `dailyWakeCap: 0` 的摘要通知在写入时被拒 (`digest-cap-zero`, 摘要也是受节奏
+限制的唤醒, 0 永远不投递); 拒绝之前就存下的旧行按 cap 1 读 (`F.digestCap`, 每窗投一次) 并在启动时点名一次 ——
+不改盘上的字节。③ 一条坏记录 (匹配器抛错) 不再拖垮整个会话的这一批: `onFresh` 逐记录匹配、逐通知行准备,
+失败点名并继续 (它本就按会话被 `track` 兜住 —— 抛错从不终结整趟 pass)。再攻击: 就地重启 (+1ms stop, +2ms
+新启动) 把每条持有各投一次; 同一 kind 的两个账号在一个进程里彼此独立 (一个卡住的梯子绝不挡住另一个)。
+门: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫。

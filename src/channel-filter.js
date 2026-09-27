@@ -21,13 +21,29 @@
  *    `truncated` and rates over the span it actually saw. An estimate that
  *    quietly read 200 of 2,000 records is worse than none, because the user
  *    is about to authorize a PAID RATE on the strength of it (§7.1).
- *  · The ASSIGNMENT (§7.3): `{principal, mode, filterId, notify,
- *    digestMinutes, authority, dailyWakeCap}`. `authority:'send'` is capped
- *    by TWO things separately — channel policy (review ⇒ not selectable, and
- *    a stored value is CLAMPED AT READ TIME so a value the policy forbids can
- *    never silently become a permission when the policy is later relaxed)
- *    and capability (`offers(...)` false ⇒ the option is not drawn, with the
+ *  · ACCESS AND NOTIFICATION — TWO OPERATIONS, ACCESS FIRST (§7.3 R4, owner
+ *    2026-09-27: "你之前的交互的问题是把'让agent能访问对话'和'让agent会被通知'
+ *    耦合在一起了" / "这实际上应该是两种不同的操作，前者是后者的前提"). Every
+ *    grain (account / pattern / conversation) holds TWO lists:
+ *      ACCESS   `[{principal, authority}]` — who may SEE and ACT (list, read,
+ *               search, refresh, reply / compose through the outbox with
+ *               that authority). Access alone wakes nobody: no pace ledger,
+ *               no digest, nothing billed on its behalf.
+ *      WATCHERS `[{principal, notify, mode, filterId, digestMinutes,
+ *               dailyWakeCap, receiptWake}]` — who is WOKEN and on what.
+ *               A watcher REQUIRES an access row for the same principal at
+ *               the same grain (`validateWatchers` refuses one without it,
+ *               `watcher-needs-access`; removing the access removes it).
+ *    `authority:'send'` (on the ACCESS row) is capped by TWO things
+ *    separately — channel policy (review ⇒ not selectable, and a stored
+ *    value is CLAMPED AT READ TIME so a value the policy forbids can never
+ *    silently become a permission when the policy is later relaxed) and
+ *    capability (`offers(...)` false ⇒ the option is not drawn, with the
  *    reason `caps` gives). Both only narrow, so their order is irrelevant.
+ *    The pre-split single ASSIGNMENT (`validateAssignment`) survives as the
+ *    compatibility write: `splitAssignment` turns it into one access row +
+ *    one watcher row, and `grainOf` reads a record written before the split
+ *    the same way (MERGED with any lists present, never a fallback).
  *  · `renderWakeBlock` / `renderDigestBlock` (§7.5): the text an agent is
  *    handed, BUDGETED (the injection channel wraps at 10 KiB and this product
  *    has lost that fight once) and FRAME-INERT — a vendor string is neutered
@@ -38,7 +54,8 @@
  *    belongs in the PURE renderer, where a unit test can prove it.
  *
  * THREE LAYERS, THREE JOBS (§7.4, written here so nobody folds them): the
- * per-assignment daily wake cap (`paceVerdict`) is PACING; the delivery
+ * per-watcher daily wake cap (`paceVerdict`, one ledger per (principal,
+ * scope)) is PACING; the delivery
  * ladder's per-conversation floor is FLOOD CONTROL; the spend authorizer is
  * THE MONEY BOUND. Only the last is per credential slot and only the last
  * survives a restart. This module owns the first and knows nothing of the
@@ -53,15 +70,22 @@ const PRINCIPAL_KINDS = Object.freeze(['agent', 'group']);
 const ASSIGN_MODES = Object.freeze(['all', 'filtered']);
 const NOTIFY_MODES = Object.freeze(['wake', 'digest']);
 const AUTHORITIES = Object.freeze(['draft', 'send']);
-/** THE THREE ASSIGNMENT GRAINS (owner ruling 2026-09-26: a linked account is an
- *  aggregated IM, and the owner hands the whole ACCOUNT, the conversations a
- *  PATTERN matches, or ONE conversation to an agent). Exactly one is in
- *  effect per conversation — `effectiveAssignment` below. */
+/** THE THREE GRAINS (owner ruling 2026-09-26: a linked account is an
+ *  aggregated IM, and the owner gives the whole ACCOUNT, the conversations a
+ *  PATTERN matches, or ONE conversation). R4 (2026-09-27): each grain holds
+ *  an ACCESS list and a WATCHERS list; PER PRINCIPAL the finest grain that
+ *  names it decides (`effectiveGrants` below). */
 const ASSIGN_SCOPES = Object.freeze(['conversation', 'pattern', 'account']);
 /** The CLOSED `why` codes a `validateAssignment` refusal carries (hotfix
  *  2026-09-26) — the client words each one (src/lib/channel-words.js), never
  *  the English contract sentence. */
-const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'filter-missing', 'notify', 'digest', 'authority', 'wake-cap', 'scope']);
+const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'filter-missing', 'notify', 'digest', 'authority', 'wake-cap', 'scope', 'digest-cap-zero']);
+/** R4: the CLOSED route codes an access / watchers refusal carries (the
+ *  field inside rides `why`, from ASSIGN_REFUSALS) — channel-words says each. */
+const GRANT_REFUSALS = Object.freeze(['bad-access', 'bad-watcher', 'duplicate-principal', 'watcher-needs-access', 'too-many-rows', 'authority-capped']);
+/** At most this many rows per list per grain (a refusal names it). */
+const MAX_ACCESS_ROWS = 16;
+const MAX_WATCHER_ROWS = 16;
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
  *  filter chooses messages inside them). `participant` covers "the chats X
@@ -345,6 +369,8 @@ function validateAssignment(input, caps = {}) {
   let dailyWakeCap = a.dailyWakeCap === undefined || a.dailyWakeCap === null || a.dailyWakeCap === '' ? DEFAULT_DAILY_WAKE_CAP : Number(a.dailyWakeCap);
   if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return no('wake-cap', 'dailyWakeCap must be a number ≥ 0');
   dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
+  // R4 verify r5: a digest IS a paced wake — a cap of 0 would never deliver.
+  if (notify === 'digest' && dailyWakeCap === 0) return no('digest-cap-zero', 'a digest is a paced wake — set the daily cap to at least 1, or remove the notification');
   // P3 (design §9.3, decision 8): an outbox RECEIPT never wakes the agent by
   // default (it rides the next turn); an assignment may opt in — a billed
   // turn per approval, said out loud in the editor.
@@ -404,6 +430,179 @@ function effectiveAuthority(assignment, caps = {}) {
   return { authority: 'send', clamped: false, why: null };
 }
 
+// ── R4: ACCESS and WATCHERS — two lists per grain, access first ─────────
+
+/** `kind:id` — the ONE identity of a principal inside a grain's lists. */
+function principalKey(p) {
+  return p && typeof p === 'object' && PRINCIPAL_KINDS.includes(p.kind) && str(p.id).trim() ? `${p.kind}:${str(p.id).trim()}` : null;
+}
+function cleanPrincipal(p0) {
+  const p = p0 && typeof p0 === 'object' ? p0 : null;
+  if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return refuse('bad-principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
+  const pid = str(p.id).trim();
+  if (!pid) return refuse('bad-principal', 'principal.id is required');
+  return { ok: true, principal: { kind: p.kind, id: pid.slice(0, 256), name: str(p.name).trim().slice(0, 200) || null } };
+}
+const principalWords = (p) => `${p.kind} ${p.name || p.id}`;
+
+/**
+ * ONE ACCESS row `{principal, authority}` — who may see and act. `caps` are
+ * the authority cap's two facts (see `authorityCap`); `authority:'send'` is
+ * refused where they say no (`authority-capped`, the reason named).
+ */
+function validateAccessRow(input, caps = {}) {
+  const a = input && typeof input === 'object' ? input : null;
+  if (!a) return refuse('bad-access', 'an access row must be an object {principal, authority}', { why: 'not-an-object' });
+  const pv = cleanPrincipal(a.principal);
+  if (!pv.ok) return { ...pv, code: 'bad-access', why: 'principal' };
+  const authority = a.authority === undefined || a.authority === null ? 'draft' : a.authority;
+  if (!AUTHORITIES.includes(authority)) return refuse('bad-access', `authority must be ${AUTHORITIES.join('|')}`, { why: 'authority' });
+  if (authority === 'send') {
+    const cap = authorityCap(caps);
+    if (cap) return { ok: false, code: 'authority-capped', error: `authority 'send' is not available here: ${cap}`, why: cap, principal: pv.principal };
+  }
+  return { ok: true, row: { principal: pv.principal, authority } };
+}
+/** A grain's whole ACCESS list: one row per principal, at most MAX_ACCESS_ROWS. */
+function validateAccess(list, caps = {}) {
+  if (!Array.isArray(list)) return refuse('bad-access', 'access must be a list of {principal, authority}', { why: 'not-an-object' });
+  if (list.length > MAX_ACCESS_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_ACCESS_ROWS} access rows`, { max: MAX_ACCESS_ROWS });
+  const rows = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const v = validateAccessRow(list[i], caps);
+    if (!v.ok) return { ...v, index: i };
+    const k = principalKey(v.row.principal);
+    if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.row.principal)} is listed twice — one access row per agent or group`, { index: i, principal: v.row.principal });
+    seen.add(k);
+    rows.push(v.row);
+  }
+  return { ok: true, access: rows };
+}
+
+/**
+ * ONE WATCHER row — who is WOKEN and on what: `{principal, notify:'wake'|
+ * 'digest', mode:'all'|'filtered', filterId, digestMinutes, dailyWakeCap,
+ * receiptWake}`. It carries NO authority (that is the access row's). The
+ * defaults are the design's numbers.
+ */
+function validateWatcher(input) {
+  const a = input && typeof input === 'object' ? input : null;
+  if (!a) return refuse('bad-watcher', 'a watcher must be an object', { why: 'not-an-object' });
+  const pv = cleanPrincipal(a.principal);
+  if (!pv.ok) return { ...pv, code: 'bad-watcher', why: 'principal' };
+  const mode = a.mode === undefined ? 'all' : a.mode;
+  if (!ASSIGN_MODES.includes(mode)) return refuse('bad-watcher', `mode must be ${ASSIGN_MODES.join('|')}`, { why: 'mode' });
+  const filterId = a.filterId === undefined || a.filterId === null ? null : str(a.filterId).trim() || null;
+  if (mode === 'filtered' && !filterId) return refuse('bad-watcher', "mode 'filtered' needs a filterId", { why: 'filter-missing' });
+  const notify = a.notify === undefined ? 'wake' : a.notify;
+  if (!NOTIFY_MODES.includes(notify)) return refuse('bad-watcher', `notify must be ${NOTIFY_MODES.join('|')}`, { why: 'notify' });
+  let digestMinutes = a.digestMinutes === undefined || a.digestMinutes === null || a.digestMinutes === '' ? DEFAULT_DIGEST_MINUTES : Number(a.digestMinutes);
+  if (!Number.isFinite(digestMinutes)) return refuse('bad-watcher', 'digestMinutes must be a number', { why: 'digest' });
+  digestMinutes = Math.min(MAX_DIGEST_MINUTES, Math.max(MIN_DIGEST_MINUTES, Math.round(digestMinutes)));
+  let dailyWakeCap = a.dailyWakeCap === undefined || a.dailyWakeCap === null || a.dailyWakeCap === '' ? DEFAULT_DAILY_WAKE_CAP : Number(a.dailyWakeCap);
+  if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return refuse('bad-watcher', 'dailyWakeCap must be a number ≥ 0', { why: 'wake-cap' });
+  dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
+  // R4 verify r5: a digest IS a paced wake — a cap of 0 would never deliver.
+  if (notify === 'digest' && dailyWakeCap === 0) return refuse('bad-watcher', 'a digest is a paced wake — set the daily cap to at least 1, or remove the notification', { why: 'digest-cap-zero' });
+  return { ok: true, watcher: { principal: pv.principal, notify, mode, filterId, digestMinutes, dailyWakeCap, receiptWake: a.receiptWake === true } };
+}
+/**
+ * A grain's whole WATCHERS list against ITS OWN access list: one row per
+ * principal, and EVERY watcher's principal must hold access at this grain —
+ * a watcher without access is refused BY NAME (`watcher-needs-access`):
+ * notification is the second operation, access is its prerequisite.
+ */
+function validateWatchers(list, access = []) {
+  if (!Array.isArray(list)) return refuse('bad-watcher', 'watchers must be a list', { why: 'not-an-object' });
+  if (list.length > MAX_WATCHER_ROWS) return refuse('too-many-rows', `a grain holds at most ${MAX_WATCHER_ROWS} watchers`, { max: MAX_WATCHER_ROWS });
+  const granted = new Set((Array.isArray(access) ? access : []).map((r) => principalKey(r && r.principal)).filter(Boolean));
+  const rows = [];
+  const seen = new Set();
+  for (let i = 0; i < list.length; i++) {
+    const v = validateWatcher(list[i]);
+    if (!v.ok) return { ...v, index: i };
+    const k = principalKey(v.watcher.principal);
+    if (seen.has(k)) return refuse('duplicate-principal', `${principalWords(v.watcher.principal)} is listed twice — one notification per agent or group`, { index: i, principal: v.watcher.principal });
+    if (!granted.has(k)) return refuse('watcher-needs-access', `${principalWords(v.watcher.principal)} has no access here — grant access first (a notification needs access at the same grain)`, { index: i, principal: v.watcher.principal });
+    seen.add(k);
+    rows.push(v.watcher);
+  }
+  return { ok: true, watchers: rows };
+}
+
+/**
+ * THE COMPATIBILITY WRITE: a pre-split single assignment → ONE access row +
+ * ONE watcher row for its principal (the stored extras — timestamps, the
+ * estimate, the watcher's own pace ledger — ride along). PURE.
+ */
+function splitAssignment(a0) {
+  const a = a0 && typeof a0 === 'object' ? a0 : null;
+  if (!a || !principalKey(a.principal)) return null;
+  const principal = { kind: a.principal.kind, id: str(a.principal.id).trim(), name: a.principal.name || null };
+  const stamp = { ...(a.createdAt ? { createdAt: a.createdAt } : {}), ...(a.updatedAt ? { updatedAt: a.updatedAt } : {}), ...(a.createdBy ? { createdBy: a.createdBy } : {}) };
+  const access = { principal, authority: a.authority === 'send' ? 'send' : 'draft', ...stamp };
+  const watcher = {
+    principal, notify: NOTIFY_MODES.includes(a.notify) ? a.notify : 'wake', mode: ASSIGN_MODES.includes(a.mode) ? a.mode : 'all', filterId: a.filterId || null,
+    digestMinutes: Number.isFinite(Number(a.digestMinutes)) ? Number(a.digestMinutes) : DEFAULT_DIGEST_MINUTES,
+    dailyWakeCap: Number.isFinite(Number(a.dailyWakeCap)) ? Number(a.dailyWakeCap) : DEFAULT_DAILY_WAKE_CAP,
+    receiptWake: a.receiptWake === true, ...stamp,
+    ...(a.estimateAtSet ? { estimateAtSet: a.estimateAtSet } : {}),
+    stats: a.stats && typeof a.stats === 'object' ? a.stats : { wakes: [], hits: [] },
+  };
+  return { access, watcher };
+}
+
+/**
+ * THE ONE READER of a grain's two lists. A record written before the split
+ * (a top-level `principal` on an account / pattern record; `legacy` = a
+ * conversation's `assignment`) reads as one access row + one watcher row for
+ * its principal — MERGED with the lists already present (a principal the
+ * list names is never doubled), never a fallback that hides one of them.
+ * Rows without a valid principal are dropped.
+ */
+function grainOf(rec, legacy = undefined) {
+  const r = rec && typeof rec === 'object' ? rec : {};
+  const ok = (x) => x && typeof x === 'object' && !!principalKey(x.principal);
+  const access = Array.isArray(r.access) ? r.access.filter(ok) : [];
+  const watchers = Array.isArray(r.watchers) ? r.watchers.filter(ok) : [];
+  const old = legacy !== undefined ? legacy : (r.principal ? r : null);
+  const sp = old ? splitAssignment(old) : null;
+  if (sp) {
+    const k = principalKey(sp.access.principal);
+    if (!access.some((x) => principalKey(x.principal) === k)) access.push(sp.access);
+    if (!watchers.some((x) => principalKey(x.principal) === k)) watchers.push(sp.watcher);
+  }
+  // R4 verify r2 (2026-09-27): THE INVARIANT HOLDS AT READ, NOT ONLY AT WRITE.
+  // A notification row whose principal holds no access row at this grain (a
+  // hand-edited store, a copy from another version — every product write
+  // keeps the two lists in ONE update) is INERT: never woken, never listed,
+  // never a ledger. `validateWatchers` refuses it by name at write time; the
+  // engine's boot census names the rows this drops.
+  const granted = new Set(access.map((x) => principalKey(x.principal)));
+  return { access, watchers: watchers.filter((w) => granted.has(principalKey(w.principal))) };
+}
+
+/** The fields of a pre-split single assignment on an account / pattern
+ *  record — what `liftGrainRecord` moves into the two lists. */
+const LEGACY_ASSIGNMENT_FIELDS = Object.freeze(['principal', 'mode', 'filterId', 'notify', 'digestMinutes', 'authority', 'dailyWakeCap', 'receiptWake', 'stats', 'estimateAtSet', 'createdBy']);
+/**
+ * THE MIGRATION'S ROW TRANSFORM for an account / pattern record (PURE): a
+ * record carrying a top-level `principal` (the pre-split shape) becomes
+ * `{…the grain's own fields, access:[…], watchers:[…]}` — its principal as
+ * one access row + one watcher row (the pace ledger rides on the watcher).
+ * Anything else is returned unchanged (`changed:false`) — idempotent.
+ */
+function liftGrainRecord(rec) {
+  if (!rec || typeof rec !== 'object' || !rec.principal) return { changed: false, rec };
+  const g = grainOf(rec);
+  const out = {};
+  for (const [k, v] of Object.entries(rec)) if (!LEGACY_ASSIGNMENT_FIELDS.includes(k)) out[k] = v;
+  out.access = g.access;
+  out.watchers = g.watchers;
+  return { changed: true, rec: out };
+}
+
 /**
  * Round-robin over a group's LIVE members. `cursor` is the index state kept
  * in the index (§7.3); a member list that shrank wraps. No members ⇒ null:
@@ -419,8 +618,21 @@ function pickRoundRobin(members, cursor = 0) {
 /**
  * PACING (§7.4, layer one): may this assignment wake again now? `wakes` are
  * the recorded wake instants; the cap is per rolling 24 h. A cap of 0 means
- * "digest only, never wake". Refused hits are STASHED, not dropped.
+ * NO billed turn at all — a digest window under it is refused like a wake
+ * (the Notify dialog's estimate reads 0 wakes/day for it; R4 verify r3).
+ * Refused hits are held PENDING, not dropped.
  */
+/** THE READ-TIME CAP for a watcher (R4 verify r5): a `notify:'digest'` watcher
+ *  with `dailyWakeCap: 0` is now refused at write, but a row stored BEFORE that
+ *  refusal existed would never deliver (a digest IS a paced wake — cap 0 means
+ *  no billed turn ever, so the window arms and the flush is refused for good).
+ *  Such a legacy row is read as cap 1 so it delivers once per window; the store
+ *  is NOT rewritten (the engine's boot census names them; the owner sets a real
+ *  cap). Every other watcher reads its own cap unchanged. */
+function digestCap(w) {
+  const cap = w && Number.isFinite(Number(w.dailyWakeCap)) ? Number(w.dailyWakeCap) : DEFAULT_DAILY_WAKE_CAP;
+  return (w && w.notify === 'digest' && cap === 0) ? 1 : cap;
+}
 function paceVerdict(wakes, now, cap = DEFAULT_DAILY_WAKE_CAP) {
   const limit = Number.isFinite(Number(cap)) ? Math.max(0, Number(cap)) : DEFAULT_DAILY_WAKE_CAP;
   const since = now - DAY_MS;
@@ -508,24 +720,68 @@ function patternSummary(pattern) {
   return parts.join(p.match === 'every' ? ' and ' : '; ');
 }
 /**
- * THE ONE ANSWER: which assignment is in effect for a conversation.
- * `{conversation, patterns, account}` are the three grains' records
- * (`patterns` in any order — they are ranked by `createdAt`, then id);
- * `facts` the conversation's own facts for the patterns. Returns
- * `{assignment, source:'conversation'|'pattern'|'account', patternId, why[]}`
- * or null. Exactly one wins; nothing combines.
+ * THE ONE ANSWER (R4, 2026-09-27): WHO has access to a conversation and WHO
+ * watches it. `{conversation, patterns, account}` are the three grains'
+ * records (each read through `grainOf`, so a record from before the split
+ * counts; `patterns` in any order — ranked by `createdAt`, then id); `facts`
+ * the conversation's own facts for the patterns.
+ *
+ * PER PRINCIPAL, the finest grain that names it decides — separately for the
+ * two lists: A's access row on a conversation (say `draft`) wins over A's
+ * account row (say `send`) for that conversation only; A's watcher on a rule
+ * (its own filter) replaces A's account-wide watcher on the conversations
+ * the rule matches. Another principal's rows never mask A's: giving B access
+ * to one conversation does not silence A's account-wide notification there.
+ *
+ * Returns null (nobody) or `{access:[{row, source, patternId, why}],
+ * watchers:[{watcher, source, patternId, why}], source, patternId, why}` —
+ * `source` = the finest grain holding any row (the row chip's "(account)" /
+ * "(rule)").
  */
-function effectiveAssignment({ conversation = null, patterns = [], account = null } = {}, facts = {}) {
+function effectiveGrants({ conversation = null, patterns = [], account = null } = {}, facts = {}) {
   /* PRECEDENCE: conversation > pattern > account */
-  if (conversation && conversation.principal) return { assignment: conversation, source: 'conversation', patternId: null, why: [] };
-  const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.principal && x.pattern)
+  const grains = [];
+  grains.push({ source: 'conversation', patternId: null, why: [], g: grainOf(conversation) });
+  const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern)
     .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
   for (const pa of ranked) {
     const m = matchConversation(pa.pattern, facts);
-    if (m.hit) return { assignment: pa, source: 'pattern', patternId: pa.id || null, why: m.why };
+    if (m.hit) grains.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainOf(pa) });
   }
-  if (account && account.principal) return { assignment: account, source: 'account', patternId: null, why: [] };
-  return null;
+  grains.push({ source: 'account', patternId: null, why: [], g: grainOf(account) });
+  const access = [], watchers = [];
+  const seenA = new Set(), seenW = new Set();
+  let first = null;
+  for (const gr of grains) {
+    if (!first && (gr.g.access.length || gr.g.watchers.length)) first = gr;
+    for (const row of gr.g.access) {
+      const k = principalKey(row.principal);
+      if (seenA.has(k)) continue;
+      seenA.add(k);
+      access.push({ row, source: gr.source, patternId: gr.patternId, why: gr.why });
+    }
+    for (const w of gr.g.watchers) {
+      const k = principalKey(w.principal);
+      if (seenW.has(k)) continue;
+      seenW.add(k);
+      watchers.push({ watcher: w, source: gr.source, patternId: gr.patternId, why: gr.why });
+    }
+  }
+  if (!first) return null;
+  return { access, watchers, source: first.source, patternId: first.patternId, why: first.why };
+}
+/** Who may see / act (the `access` half of `effectiveGrants`). */
+function effectiveAccess(input, facts) { const e = effectiveGrants(input, facts); return e ? e.access : []; }
+/** Who is woken (the `watchers` half of `effectiveGrants`). */
+function effectiveWatchers(input, facts) { const e = effectiveGrants(input, facts); return e ? e.watchers : []; }
+/** Is THIS principal (an agent ctx `{kind:'agent', id, groups}`) named by a
+ *  row — itself, or one of its groups? */
+function rowNames(row, ctx) {
+  const p = row && row.principal;
+  if (!p || !ctx) return false;
+  if (p.kind === 'agent') return ctx.kind === 'agent' && ctx.id === p.id;
+  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);
+  return false;
 }
 /** What the editor shows BEFORE saving (§7.3): wakes per day at most, the
  *  pacing cap and the digest windows folded in. `matchedPerDay` is the honest
@@ -537,7 +793,15 @@ function expectedWakesPerDay({ notify = 'wake', digestMinutes = DEFAULT_DIGEST_M
     const windows = (24 * 60) / Math.max(MIN_DIGEST_MINUTES, Number(digestMinutes) || DEFAULT_DIGEST_MINUTES);
     return Math.min(cap, windows, matched > 0 ? windows : 0);
   }
+  if (notify !== 'wake') return 0;   // nothing but a watcher is ever woken
   return Math.min(cap, matched);
+}
+/** The Notify dialog's total: every watcher row's own ceiling, summed —
+ *  each has its own ledger, so N watchers of one grain are N budgets. */
+function expectedWakesTotal(rows) {
+  let n = 0;
+  for (const r of Array.isArray(rows) ? rows : []) n += expectedWakesPerDay(r || {});
+  return Math.round(n * 10) / 10;
 }
 
 // ── what the agent receives (§7.5) ─────────────────────────────────────────
@@ -563,7 +827,7 @@ function safeInline(text, max) {
  * (`{n, seconds}`) says "N in this window" when the push lane's window
  * folded a burst (fence 12). Budgeted and frame-inert (see the header).
  */
-function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
+function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, coalesced = null, replyHint = true, inherited = null, others = null } = {}, { maxRecords = BLOCK_MAX_RECORDS, maxChars = BLOCK_MAX_CHARS, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const shown = list.slice(-maxRecords);
   const dropped = list.length - shown.length + (Number(elided) || 0);
@@ -574,6 +838,8 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   if (whys.length) meta.push(`matched: ${whys.map((w) => safeInline(w, 120)).join(', ')}`);
   if (coalesced && Number(coalesced.n) > 1) meta.push(`${coalesced.n} messages in ${Math.round(Number(coalesced.seconds) || 0)} s, one wake`);
   if (meta.length) lines.push(meta.join(' · '));
+  const ol = othersLine(others);
+  if (ol) lines.push(ol);
   let body = shown.map((h) => {
     const r = h.record;
     const who = safeInline((r.author && (r.author.name || r.author.id)) || 'unknown', 80);
@@ -598,13 +864,23 @@ function renderWakeBlock({ adapterLabel = 'channel', title = '', convId = '', hi
   return out;
 }
 
-/** Why an INHERITED assignment's block is in this agent's context (§7.5):
+/** Why an INHERITED watcher's block is in this agent's context (§7.5):
  *  the head says the grain — the whole account, or the rule by its summary. */
 function inheritedNote(inherited) {
   if (!inherited || !inherited.kind) return '';
-  if (inherited.kind === 'account') return ' (you are assigned the whole account)';
-  if (inherited.kind === 'pattern') return ` (you are assigned by a rule: ${safeInline(inherited.label || 'a pattern', 120)})`;
+  if (inherited.kind === 'account') return ' (you are watching the whole account)';
+  if (inherited.kind === 'pattern') return ` (you are watching by a rule: ${safeInline(inherited.label || 'a pattern', 120)})`;
   return '';
+}
+/** R4: the OTHER principals on this conversation, so two woken agents never
+ *  both answer blind — `others` = `[{name, notify?, authority}]` (a watcher
+ *  names its delivery; access alone says so). Null / empty ⇒ no line (a
+ *  single watcher's block is byte-identical to before). */
+function othersLine(others) {
+  const list = (Array.isArray(others) ? others : []).filter((o) => o && (o.name || o.id)).slice(0, 8);
+  if (!list.length) return '';
+  const words = list.map((o) => `${safeInline(o.name || o.id, 60)} (${o.notify ? `${o.notify === 'digest' ? 'digest' : 'woken'}, ` : 'access only, '}${o.authority === 'send' ? 'may send' : 'drafts'})`);
+  return `also on this conversation: ${words.join(', ')}`;
 }
 
 /**
@@ -614,13 +890,15 @@ function inheritedNote(inherited) {
  * budget; what does not fit is COUNTED, never silently dropped.
  * `groups` = `[{title, convId, hits:[{record, why}], elided?}]`.
  */
-function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0 } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
+function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
   const msgs = list.reduce((n, g) => n + g.hits.length + (Number(g.elided) || 0), 0);
   const convs = list.length + (Number(elidedConversations) || 0);
   const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
   const lines = [head];
-  if (scopeLabel) lines.push(`you are assigned ${safeInline(scopeLabel, 160)}`);
+  if (scopeLabel) lines.push(`you are watching ${safeInline(scopeLabel, 160)}`);
+  const ol = othersLine(others);
+  if (ol) lines.push(ol.replace('also on this conversation', 'also on these conversations'));
   const tail = 'Read more: vibespace-channels read <conv>   ·   reply: vibespace-channels reply <conv> "…" (this PROPOSES)';
   let out = lines.join('\n');
   let shown = 0;
@@ -662,8 +940,11 @@ module.exports = {
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, matchRecord, estimate,
-  validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
+  validateAssignment, ASSIGN_REFUSALS, GRANT_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, digestCap, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
   // 2026-09-26: the three grains + conversation patterns + the scope digest
-  ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, effectiveAssignment, expectedWakesPerDay, renderScopeDigestBlock,
+  ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, expectedWakesPerDay, renderScopeDigestBlock,
+  // R4 (2026-09-27): access and notification — two lists per grain, access first
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  splitAssignment, grainOf, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
 };

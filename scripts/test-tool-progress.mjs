@@ -13,7 +13,9 @@ const rec = { type:'tool_progress', tool_use_id:'toolu_X-heartbeat-0', tool_name
   parent_tool_use_id:'toolu_X', elapsed_time_seconds:30, heartbeat:true, session_id:'s', uuid:'u' };
 const src = fs.readFileSync('src/server/stdout/claude-stream-json.js', 'utf8'); // S5: the claude stream-json consumer module
 const iProgress = src.indexOf("msg.type === 'tool_progress'");
-const iSub = src.indexOf("} else if (msg.parent_tool_use_id || msg.isSidechain) {");
+// 2.369.191 (lane S1): the subagent branch also refuses control records (a helper's permission ask rides the
+// PARENT stream; routing it into the helper's virtual session dropped it) — the ORDER pinned here is unchanged
+const iSub = src.indexOf("} else if ((msg.parent_tool_use_id || msg.isSidechain) && !CONTROL_RECORD_TYPES.has(msg.type)) {");
 check('server checks tool_progress BEFORE the subagent branch', iProgress > 0 && iSub > iProgress, `${iProgress}/${iSub}`);
 check('subagent branch is an else-if (cannot also fire)', iSub > 0);
 check('tool_progress is broadcast on its own channel', /type: 'tool-progress'/.test(src));

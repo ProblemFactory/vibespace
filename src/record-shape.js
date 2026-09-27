@@ -166,7 +166,18 @@ const SHAPES = {
   "claude:stream:stream_mode": sh(['mode']),
   "claude:stream:response_length": sh(['op', 'delta']),
   "claude:stream:refusal_continuation": sh(['phase', 'salvage_text']),
-  "claude:stream:control_request": sh(['request_id', 'request']),
+  // lane S1 verify r4: the REQUEST is declared too (the ask's own vocabulary — a new subtype or a new
+  // field inside `request` was invisible: the drift card judged only the envelope). Fields = the
+  // 2.1.281 binary's outbound control_request union (read in the binary 2026-09-27): can_use_tool
+  // (`pn`: subtype, tool_name, mcp_server, input, permission_suggestions, blocked_path,
+  // decision_reason, decision_reason_type, decision_reason_code, classifier_approvable,
+  // suppress_always_allow_rule, default_to_no, matched_ask_rule, title, display_name, tool_use_id,
+  // agent_id, description, requires_user_interaction, server_prompt, computer_folder, tool_kind),
+  // request_user_dialog (dialog_kind, payload), elicitation (mcp_server_name, message, mode, url,
+  // elicitation_id, requested_schema, title, display_name, description), hook_callback (callback_id,
+  // input, tool_use_id, issued_at, deadline_ms), mcp_message (server_name, message). A subtype
+  // outside the five is an enum-drift card naming it — the studies' silence for a FUTURE ask shape.
+  "claude:stream:control_request": sh(['request_id', 'request'], { nested: { request: sh(['subtype', 'tool_name', 'mcp_server', 'input', 'permission_suggestions', 'blocked_path', 'decision_reason', 'decision_reason_type', 'decision_reason_code', 'classifier_approvable', 'suppress_always_allow_rule', 'default_to_no', 'matched_ask_rule', 'title', 'display_name', 'tool_use_id', 'agent_id', 'description', 'requires_user_interaction', 'server_prompt', 'computer_folder', 'tool_kind', 'dialog_kind', 'payload', 'mcp_server_name', 'message', 'mode', 'url', 'elicitation_id', 'requested_schema', 'callback_id', 'issued_at', 'deadline_ms', 'server_name'], { enums: { subtype: ['can_use_tool', 'request_user_dialog', 'elicitation', 'hook_callback', 'mcp_message'] } }) } }),
   "claude:stream:control_response": sh(['response']),
   "claude:stream:control_cancel_request": sh(['request_id']),
   "claude:stream:keep_alive": sh([]),

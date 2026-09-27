@@ -18,6 +18,8 @@
  *              + src/server/browser-keeper.js (a profile's browser keeps
  *              closing: the heal budget's ONE notice, lane H verify r5)
  *   agent    — src/agent-routes.js (`vibespace-ask`, an agent's own item)
+ *              + src/server/helper-asks.js (a helper's permission ask left
+ *              unanswered for 60 s — lane S1)
  *
  * Exactly the producers that file (r2: a `system` row was dropped — nothing
  * has ever filed with `by: 'system'`, so its group, chip and legacy-rung row

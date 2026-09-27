@@ -696,6 +696,7 @@ class SessionMessages {
     const memo = _mergeMemo.get(jsonl);
     if (memo && memo.buffer === buffer) {
       this._pendingPerms = { ...memo.perms };
+      this._helperResults = memo.helperResults || [];
       this._all = memo.all;
       this._display = this._all.filter(isDisplayMessage);
       return;
@@ -713,6 +714,7 @@ class SessionMessages {
     }
 
     this._pendingPerms = {};
+    this._helperResults = []; // verify r3: the helpers' tool_results the record list skips (they settle an asked ask at the rebuild)
     // Surviving buffer records are INTERLEAVED at their true chronological
     // position (right after the JSONL record their buffer-neighborhood dedups
     // against) instead of all appended at the end. Stream-json stdout-only
@@ -753,7 +755,7 @@ class SessionMessages {
       if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor
       const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';
       if (!isControl) {
-        if (isSubagentMessage(msg)) continue;
+        if (isSubagentMessage(msg)) { this._noteHelperResult(msg); continue; }
         if (msg._fromWebui && msg.timestamp) {
           if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
         }
@@ -772,7 +774,7 @@ class SessionMessages {
       }
       this._all = all;
     }
-    _mergeMemo.set(jsonl, { buffer, all: this._all, perms: { ...this._pendingPerms } });
+    _mergeMemo.set(jsonl, { buffer, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
     this._display = this._all.filter(isDisplayMessage);
   }
 
@@ -789,6 +791,22 @@ class SessionMessages {
   slice(offset, limit) { this._ensureParsed(); return this._display.slice(offset, offset + limit); }
   all() { this._ensureParsed(); return this._display; }
   raw() { this._ensureParsed(); return this._all; }
+  /** THE HELPERS' TOOL_RESULTS (lane S1 verify r3): every sidechain `user` record's
+   *  tool_result blocks, as `{toolUseId, text, isError, parentToolUseId}` — the
+   *  record list (`raw()`) skips sidechain records, yet a helper's result for an
+   *  ASKED call is the one witness that the CLI settled the request without a
+   *  record of ours (rebuildHistory feeds them to the table's result rows). */
+  helperResults() { this._ensureParsed(); return this._helperResults || []; }
+  _noteHelperResult(msg) {
+    if (!msg || msg.type !== 'user') return;
+    const c = msg.message && msg.message.content;
+    if (!Array.isArray(c)) return;
+    for (const b of c) {
+      if (!b || b.type !== 'tool_result' || !b.tool_use_id) continue;
+      const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x) => (x && typeof x.text === 'string' ? x.text : '')).join('') : '';
+      (this._helperResults || (this._helperResults = [])).push({ toolUseId: String(b.tool_use_id), text: text.slice(0, 400), isError: !!b.is_error, parentToolUseId: msg.parent_tool_use_id || null });
+    }
+  }
 
   search(query) {
     this._ensureParsed();
@@ -919,6 +937,11 @@ class SessionMessages {
         if (rid) answered.add(rid);
         continue;
       }
+      // …and a request the CLI WITHDREW (lane S1: `stop_task` on a helper whose
+      // ask was pending ⇒ control_cancel_request) — without this a helper's ask,
+      // whose tool_result lives in the helper's own transcript and never here,
+      // came back as pending after every restart
+      if (m.type === 'control_cancel_request') { if (m.request_id) answered.add(m.request_id); continue; }
       if (m.type !== 'user') continue;
       const c = m.message?.content;
       if (!Array.isArray(c)) continue;

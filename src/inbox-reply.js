@@ -1,7 +1,7 @@
 'use strict';
 /**
- * PURE (imports nothing; CJS so the server, the route and the browser bundle
- * share ONE spelling) — a reply to a For-you inbox item (docs/design-user-inbox-reply.md §2).
+ * PURE (imports only PURE src/helper-ask.js — the ask's transition table, verify r3;
+ * CJS so the server, the route and the browser bundle share ONE spelling) — a reply to a For-you inbox item (docs/design-user-inbox-reply.md §2).
  *
  * The owner's quoting rule: "注意回复inbox item的时候 发给agent的消息得带有对应的引用信息"
  * — a reply reaches the agent as a user message that OPENS with the item it
@@ -38,13 +38,26 @@ const SERVER_KEYS = ['accounts', 'jobs'];
 const REPLY_WHY = Object.freeze({
   no_session: 'Not from an agent session — nothing to reply to',
   job_item: 'Background Work item — answer it in the job panel',
+  card_item: 'Answer it on the helper’s card — click the item to go there',
   no_live_session: 'Agent not running — open the session, then reply',
   not_chat: 'Terminal session — reply in its window',
   host_unreachable: 'Host unreachable — reconnect, then reply',
 });
-// The two codes that mean "this item has no reply surface at all" — the client
-// does not render the button (vs. a DISABLED one, which says why).
-const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item']);
+// The codes that mean "this item has no reply surface at all" — the client
+// does not render the button (vs. a DISABLED one, which says why). `card_item`
+// (lane S1 verify r2, M1): a helper's permission ask is answered on ITS CARD
+// (a `control_response` on stdin) — a typed reply can never approve it, and it
+// used to resolve the item while the helper still waited (the pointer gone, the
+// user believing they had approved).
+const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item']);
+// The action kinds that are answered on a card, never by a typed reply.
+const CARD_ACTION_TYPES = Object.freeze(['helper-ask']);
+// lane S1 verify r3: what a typed reply DOES to a helper's ask is the ask's own transition table's
+// `reply` row (src/helper-ask.js) — an open item means the ask is still `asked` (the item is released
+// the moment it leaves), and the table says a reply from there REFUSES. This module decides nothing
+// about an ask on its own.
+const { askTransition, ASK_INITIAL } = require('./helper-ask.js');
+const cardReplyRefused = () => askTransition(ASK_INITIAL, 'reply').effects.includes('refuse');
 
 const pad = (n) => String(n).padStart(2, '0');
 function utcStamp(ms) {
@@ -146,6 +159,7 @@ function replyVerdict({ item, session } = {}) {
   const it = item || {};
   const no = (code) => ({ ok: false, code, why: REPLY_WHY[code] });
   if (it.jobId) return no('job_item');
+  if (it.action && typeof it.action === 'object' && CARD_ACTION_TYPES.includes(it.action.type) && cardReplyRefused()) return no('card_item');
   const key = typeof it.sessionKey === 'string' ? it.sessionKey : '';
   if (!key || SERVER_KEYS.includes(key) || !key.includes(':')) return no('no_session');
   if (!session || session.live === false) return no('no_live_session');
@@ -156,6 +170,6 @@ function replyVerdict({ item, session } = {}) {
 
 module.exports = {
   REPLY_MARKER_RE, DETAIL_QUOTE_CAP, REPLY_MAX, OPTIONS_MAX, OPTION_MAX_CHARS, SERVER_KEYS,
-  REPLY_WHY, REPLY_HIDDEN_CODES,
+  REPLY_WHY, REPLY_HIDDEN_CODES, CARD_ACTION_TYPES,
   checkReplyText, normalizeOptions, composeReply, parseReply, replyVerdict,
 };

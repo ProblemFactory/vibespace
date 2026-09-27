@@ -159,7 +159,7 @@ const DUPLICATE_FIELDS = Object.freeze([
 const DUPLICATE_NEVER = Object.freeze([
   Object.freeze({ key: 'token', why: 'a login is one person\'s consent — the copy signs in on its own' }),
   Object.freeze({ key: 'refresh', why: 'a per-conversation refresh override is the original account\'s choice about its own conversations' }),
-  Object.freeze({ key: 'assignments', why: 'they address the original account\'s conversations' }),
+  Object.freeze({ key: 'access', why: 'access grants and notifications address the original account\'s conversations' }),
   Object.freeze({ key: 'reach', why: 'a grant names the original account\'s id' }),
   Object.freeze({ key: 'log', why: 'the message log and its cursors belong to the original account\'s conversations' }),
 ]);
@@ -514,6 +514,16 @@ function create(deps = {}) {
   const live = new Map();     // adapterId -> { adapter, record, passing, failures, nextAt, budget }
   let timer = null;
   let stopped = false;
+  // R4 verify r5 (money): a per-PROCESS id stamped on every wake reservation
+  // (reserveWake). A reservation that outlived a CRASH — the process died
+  // between the reservation (before the ladder) and the finalize (after) —
+  // stays COUNTED against the cap for 24 h with no finalized row and no live
+  // process: fail-closed is right, but a boot that finds a reservation from a
+  // PREVIOUS boot (a different BOOT_ID — a new process is a new boot by
+  // construction) with no outcome can RELEASE it by evidence
+  // (`releaseStaleReservations`). A reservation from THIS boot is an in-flight
+  // wake and is never touched.
+  const BOOT_ID = `${process.pid}.${Date.now().toString(36)}.${Math.random().toString(36).slice(2, 8)}`;
 
   // ── adapter records: THE LIVE OBJECT, never a fresh parse (r2) ───────────
   // Every caller shares one object, so a mutation made by a failing pass is
@@ -1327,6 +1337,9 @@ function create(deps = {}) {
         sendAsBot: caps.offers(c, en.convCaps, 'send-as-bot', t),
       },
       assignment: eff ? effectiveView(rec, en, eff, t) : null,
+      // R4: WHO HAS ACCESS and WHO IS WOKEN, each principal once (its finest grain)
+      access: eff ? eff.access.map((x) => ({ principal: { kind: x.row.principal.kind, id: x.row.principal.id, name: x.row.principal.name || null }, authority: F.effectiveAuthority(x.row, authorityCapsFor(rec, en, t)).authority, source: x.source })) : [],
+      watchers: eff ? eff.watchers.map((x) => ({ principal: { kind: x.watcher.principal.kind, id: x.watcher.principal.id, name: x.watcher.principal.name || null }, notify: x.watcher.notify, mode: x.watcher.mode, digestMinutes: x.watcher.digestMinutes, source: x.source })) : [],
       held: !!(lw && lw.ok === false),
       outbox: { awaiting: ob.awaiting, unknown: ob.unknown },
       // R3 (§23, the owner 2026-09-26: "开头不要把所有消息都放进来 … 只放重要消息/conversation"): the FACTS the
@@ -1339,34 +1352,55 @@ function create(deps = {}) {
   }
   /** WHAT TOUCHED THIS CONVERSATION (R3 §23) — structure, never words: the
    *  newest AGENT read (`agentReads`, stamped by the agent route's `readFor`),
-   *  the last wake (whom, how, delivered or held), the held hits, the last
+   *  the last wake (whom, how, delivered or held), the pending hits, the last
    *  refusal, the owner's own newest message (a record `isSelf` or a sent
-   *  proposal of the owner's). `null` when nothing did. */
+   *  proposal of the owner's). `null` when nothing did.
+   *
+   *  THE R3 × R4 SEAM (2.369.191): R4 tags every pending hit with the watcher
+   *  it waits for (`for`, `pendingElidedBy`), and a DIGEST watcher's hits wait
+   *  here by design until its window closes. `pendingFor` = `[{p, n, oldest}]`
+   *  per principal key (`p: null` = a legacy untagged hit) — PURE
+   *  src/lib/channel-focus.js `heldPending` reads it with the row's `watchers`
+   *  so an open digest window is never drawn as "held". `pending` stays the
+   *  total (every tagged elision counted). */
   function touchView(en, lw, ob) {
     const reads = Array.isArray(en.agentReads) ? en.agentReads : [];
     let read = null;
     for (const r of reads) if (r && Number(r.at) > 0 && (!read || Number(r.at) > read.at)) read = { id: r.id || null, name: r.name || null, at: Number(r.at), upTo: Number(r.upTo) || 0 };
     const wake = lw ? { at: Number(lw.at) || 0, ok: lw.ok !== false, lane: lw.lane || null, n: Number(lw.n) || 0, name: lw.name || null } : null;
-    const pending = (Array.isArray(en.pending) ? en.pending.length : 0) + (Number(en.pendingElided) || 0);
+    const list = Array.isArray(en.pending) ? en.pending : [];
+    const per = new Map();
+    const slot = (p) => { let x = per.get(p); if (!x) { x = { p, n: 0, oldest: 0 }; per.set(p, x); } return x; };
+    for (const h of list) { if (!h) continue; const x = slot(h.for || null); x.n += 1; const a = Number(h.at) || 0; if (a > 0 && (!x.oldest || a < x.oldest)) x.oldest = a; }
+    for (const [p, v] of Object.entries(en.pendingElidedBy && typeof en.pendingElidedBy === 'object' ? en.pendingElidedBy : {})) if (Number(v) > 0) slot(p).n += Number(v);
+    if (Number(en.pendingElided) > 0) slot(null).n += Number(en.pendingElided);
+    const pendingFor = [...per.values()];
+    const pending = pendingFor.reduce((n, x) => n + x.n, 0);
     const refusalAt = en.stats && en.stats.lastRefusal ? (Number(en.stats.lastRefusal.at) || 0) : 0;
     const selfAt = Math.max(Number(en.selfAt) || 0, Number(ob && ob.ownSentAt) || 0);
     if (!read && !wake && !pending && !refusalAt && !selfAt) return null;
-    return { read, wake, pending, refusalAt, selfAt };
+    return { read, wake, pending, pendingFor, refusalAt, selfAt };
   }
-  /** The EFFECTIVE assignment as a row reads it: which grain it came from
-   *  (`source`), the pattern's summary, authority clamped by THIS
-   *  conversation's two caps (§7.3). */
+  /** THE COMPATIBILITY SUMMARY a row reads (`assignment`): the first
+   *  WATCHER in effect (else the first access row) — which grain it came from
+   *  (`source`), the pattern's summary, the authority of THAT principal's
+   *  access row clamped by THIS conversation's two caps (§7.3). The whole
+   *  answer is `access` + `watchers` beside it. */
   function effectiveView(rec, en, eff, t = now()) {
-    const a = eff.assignment;
-    const cl = F.effectiveAuthority(a, authorityCapsFor(rec, en, t));
-    const s = eff.source === 'conversation' ? (en.stats || {}) : ((a.stats) || {});
+    const lead = eff.watchers[0] || null;
+    const leadPk = lead ? pkOf(lead.watcher.principal) : null;
+    const acc = (leadPk ? eff.access.find((x) => pkOf(x.row.principal) === leadPk) : null) || eff.access[0] || null;
+    const p = lead ? lead.watcher.principal : acc.row.principal;
+    const cl = F.effectiveAuthority(acc ? acc.row : null, authorityCapsFor(rec, en, t));
+    const src = lead || acc;
+    const w = lead ? lead.watcher : null;
     return {
-      principal: { kind: a.principal.kind, id: a.principal.id, name: a.principal.name || null },
-      mode: a.mode, notify: a.notify, digestMinutes: a.digestMinutes, dailyWakeCap: a.dailyWakeCap,
-      authority: cl.authority, authorityStored: a.authority, authorityClamped: cl.clamped, authorityWhy: cl.why || null, authorityWhyCap: cl.whyCap || null,
-      source: eff.source, patternId: eff.patternId || null,
-      patternLabel: eff.source === 'pattern' && a.pattern ? F.patternSummary(a.pattern) : null,
-      hits7d: F.countSince(s.hits, t, 7),
+      principal: { kind: p.kind, id: p.id, name: p.name || null },
+      mode: w ? w.mode : null, notify: w ? w.notify : null, digestMinutes: w ? w.digestMinutes : null, dailyWakeCap: w ? w.dailyWakeCap : null,
+      authority: cl.authority, authorityStored: acc ? acc.row.authority : 'draft', authorityClamped: cl.clamped, authorityWhy: cl.why || null, authorityWhyCap: cl.whyCap || null,
+      source: src.source, patternId: src.patternId || null,
+      patternLabel: src.source === 'pattern' ? F.patternSummary((patternById(src.patternId) || {}).pattern || { rules: [] }) : null,
+      hits7d: w ? F.countSince((w.stats || {}).hits, t, 7) : 0,
     };
   }
   /** THE FULL VIEW of ONE conversation (the window's bar, the editors, the
@@ -1380,8 +1414,10 @@ function create(deps = {}) {
     const lane = laneOrScan(rec, en);
     const ctx = viewCtx(t);
     const row = rowView(rec, en, ctx);
-    const acct = accountAssignmentOf(adapterId);
+    const acct = accountGrainOf(adapterId);
     const pats = patternsOf(adapterId).filter((pa) => F.matchConversation(pa.pattern, convFacts(en)).hit);
+    const capsNow = authorityCapsFor(rec, en, t);
+    const own = convGrainOf(en);
     return {
       ...row,
       convCaps: caps.convCapsState(en.convCaps, t),
@@ -1399,8 +1435,12 @@ function create(deps = {}) {
       // it), the grains it would otherwise inherit, its filter, the
       // after-the-fact measurement, the two caps `authority:'send'` is gated
       // on and the honest per-lane wake latency — structure, the editor words.
-      ownAssignment: en.assignment ? assignmentView(rec, en, t) : null,
-      inherits: { account: acct ? scopeAssignmentView(rec, acct, t) : null, patterns: pats.map((pa) => scopeAssignmentView(rec, pa, t)) },
+      ownAssignment: assignmentView(rec, en, t),
+      // R4: the conversation's OWN two lists (the Grant access / Notify
+      // dialogs edit them) and what it inherits from the account and the
+      // rules it matches (each grain's own lists)
+      own: { access: own.access.map((r) => accessRowView(r, capsNow)), watchers: own.watchers.map((w) => watcherView(w, t)) },
+      inherits: { account: acct ? grainView(rec, acct, t) : null, patterns: pats.map((pa) => grainView(rec, pa, t)) },
       filter: (en.filterId && filterFor(en.filterId)) || null,
       stats: statsView(en, t),
       authorityCaps: authorityCapsFor(rec, en, t),
@@ -1529,8 +1569,14 @@ function create(deps = {}) {
       scheduler: schedulerView(rec, t),
       attachments: { ...store.attachmentUsage(rec.id), budgetBytes: attachmentBudgetBytes(), fetch: registry.capsOf(rec.kind).attachments === 'fetch' },
       linkedAt: rec.linkedAt || null,
-      assignment: accountAssignmentOf(rec.id) ? scopeAssignmentView(rec, accountAssignmentOf(rec.id), t) : null,
-      patterns: patternsOf(rec.id).map((pa) => scopeAssignmentView(rec, pa, t)),
+      // R4: the ACCOUNT grain's two lists (`accountGrain`; `assignment` = the
+      // same view, the pre-split name a legacy reader asks for) and every
+      // rule with its own two lists
+      accountGrain: accountGrainOf(rec.id) && (F.grainOf(accountGrainOf(rec.id)).access.length || F.grainOf(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
+      assignment: accountGrainOf(rec.id) && (F.grainOf(accountGrainOf(rec.id)).access.length || F.grainOf(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
+      patterns: patternsOf(rec.id).map((pa) => grainView(rec, pa, t)),
+      // R4 (B-6acc): the ACCOUNT's sending policy (what a composed message reads, the Grant access dialog's `send` cap)
+      policy: policyFor(rec, null),
       // P4: the §21-item-3 proof (a real send's observed sender_type) and the
       // per-channel honesty switch as the panel draws them.
       identityObserved: rec.identityObserved ? { ...rec.identityObserved } : null,
@@ -2734,8 +2780,9 @@ function create(deps = {}) {
     notify([]);
     return { ok: true };
   }
-  /** WHAT STILL POINTS AT AN ACCOUNT (r4 §8.1 #5, D5): the assignments of
-   *  its conversations, the reach grants scoped to the whole account
+  /** WHAT STILL POINTS AT AN ACCOUNT (r4 §8.1 #5, D5): the ACCESS rows of
+   *  its three grains (R4 — a watcher always has one, so a notification is
+   *  named through its access), the reach grants scoped to the whole account
    *  (`scope.kind === 'adapter'`), and its UNSETTLED outbox proposals (any
    *  state that is not terminal — `unknown` included: a lost outcome still
    *  needs its adapter to be reconciled). Agent groups are NOT counted — a
@@ -2745,9 +2792,8 @@ function create(deps = {}) {
     const seenGrant = new Set();
     for (const en of Object.values(store.index.snapshot().conversations)) {
       if (!en) continue;
-      if (en.adapterId === adapterId && en.assignment && en.assignment.principal) {
-        const pr = en.assignment.principal;
-        refs.push({ kind: 'assignment', key: en.key, convId: en.id, title: en.title || en.id, principal: { kind: pr.kind, id: pr.id, name: pr.name || null } });
+      if (en.adapterId === adapterId) {
+        for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: en.title || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
       }
       for (const g of en.reachEntries || []) {
         if (!g || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== adapterId) continue;
@@ -2758,9 +2804,9 @@ function create(deps = {}) {
       }
     }
     // 2026-09-26: the ACCOUNT and PATTERN grains, and the account-scope grants
-    const acct = accountAssignmentOf(adapterId);
-    if (acct && acct.principal) refs.push({ kind: 'assignment', key: adapterId, scope: 'account', principal: { kind: acct.principal.kind, id: acct.principal.id, name: acct.principal.name || null } });
-    for (const pa of patternsOf(adapterId)) refs.push({ kind: 'assignment', key: pa.id, scope: 'pattern', title: F.patternSummary(pa.pattern), principal: { kind: pa.principal.kind, id: pa.principal.id, name: pa.principal.name || null } });
+    const acct = accountGrainOf(adapterId);
+    for (const r of acct ? F.grainOf(acct).access : []) refs.push({ kind: 'access', key: adapterId, scope: 'account', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
+    for (const pa of patternsOf(adapterId)) for (const r of F.grainOf(pa).access) refs.push({ kind: 'access', key: pa.id, scope: 'pattern', title: F.patternSummary(pa.pattern), principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
     for (const g of store.index.table('accountGrants') || []) {
       if (!g || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== adapterId) continue;
       const gid = ACL.grantId(g);
@@ -2785,7 +2831,7 @@ function create(deps = {}) {
     const refs = referencesOf(rec.id);
     if (refs.length) {
       const n = (k) => refs.filter((r) => r.kind === k).length;
-      throw httpErr(409, 'account-referenced', `cannot remove ${rec.label || rec.id} — it is still referenced (${[['assignment', 'assignment'], ['reach', 'reach grant'], ['outbox', 'outbox proposal']].filter(([k]) => n(k)).map(([k, w]) => `${n(k)} ${w}${n(k) > 1 ? 's' : ''}`).join(', ')}); release them first — Disconnect only drops the token and keeps them`, { refs });
+      throw httpErr(409, 'account-referenced', `cannot remove ${rec.label || rec.id} — it is still referenced (${[['access', 'access grant'], ['reach', 'reach grant'], ['outbox', 'outbox proposal']].filter(([k]) => n(k)).map(([k, w]) => `${n(k)} ${w}${n(k) > 1 ? 's' : ''}`).join(', ')}); release them first — Disconnect only drops the token and keeps them`, { refs });
     }
     const running = flows.runningFor(rec.id);
     if (running) { flows.cancel(running.flowId, 'cancelled'); pendingFlows.delete(running.flowId); }
@@ -2800,7 +2846,11 @@ function create(deps = {}) {
    *  else's. */
   async function removeRecord(rec) {
     dropLive(rec.id, 'removed');
-    for (const [key, w] of [...wakeTimers.entries()]) if (key.startsWith(rec.id + '/')) { clearTimeout(w.timer); wakeTimers.delete(key); }
+    // every wake window of the account: its conversations', and (R4, lane R2
+    // verify A9b) its account / rule scope digests — a surviving scope timer
+    // would fire into a grain that is gone
+    const patIds = new Set(patternsOf(rec.id).map((pa) => pa.id));
+    for (const [key, w] of [...wakeTimers.entries()]) if (key.startsWith(rec.id + '/') || key.startsWith(`scope:acct:${rec.id}|`) || (key.startsWith('scope:pat:') && patIds.has(key.slice(10, key.lastIndexOf('|'))))) { clearTimeout(w.timer); wakeTimers.delete(key); }
     await store.index.update((ix) => {
       for (const k of Object.keys(ix.conversations)) if (ix.conversations[k] && ix.conversations[k].adapterId === rec.id) delete ix.conversations[k];
       if (ix.accountAssignments) delete ix.accountAssignments[rec.id];
@@ -2993,6 +3043,18 @@ function create(deps = {}) {
    *  the instance setting). An audit line records the change; the outbox
    *  repaints because every pending card's "a sender line will be appended"
    *  note follows the switch. */
+  /** The ACCOUNT's sending policy (R4, B-6acc): `direct` | `review` | null
+   *  (= the adapter's declared default). A conversation's own policy still
+   *  wins for that conversation; a composed NEW message reads this one. */
+  async function setAccountPolicy(adapterId, mode, by = 'user') {
+    const rec = recordOrThrow(adapterId);
+    if (mode !== null && !P.POLICY_MODES.includes(mode)) return { ok: false, code: 'bad-policy', error: `mode must be ${P.POLICY_MODES.join('|')} (or null to use the adapter's default)` };
+    const t = now();
+    await store.adapters.update(() => { rec.policy = mode === null ? null : { mode, by, at: t }; });
+    try { store.audit({ kind: 'policy', op: 'set', scope: { kind: 'adapter', id: adapterId }, mode, at: t, by }); } catch {}
+    notify([], { full: true });
+    return { ok: true, policy: policyFor(rec, null) };
+  }
   async function setSenderHonesty(adapterId, value) {
     const rec = recordOrThrow(adapterId);
     const v = value === null || value === undefined ? null : !!value;
@@ -3087,6 +3149,11 @@ function create(deps = {}) {
   function policyFor(rec, en) {
     const own = en && en.policy && typeof en.policy === 'object' ? en.policy : null;
     if (own && own.mode) return { mode: P.policyMode(own).mode, source: 'conversation', declared: own.mode };
+    // R4 (B-6acc): the ACCOUNT's own policy (`PUT /api/channels/adapters/:id
+    // {policy}`) — what a NEW message composed on the account reads, and the
+    // default of every conversation that sets none
+    const acct = rec && rec.policy && typeof rec.policy === 'object' ? rec.policy : null;
+    if (acct && acct.mode) return { mode: P.policyMode(acct).mode, source: 'account', declared: acct.mode };
     let dflt = null;
     try { dflt = registry.get(rec.kind).policyDefault || null; } catch {}
     const pm = P.policyMode(dflt || 'review');
@@ -3109,6 +3176,7 @@ function create(deps = {}) {
     if (!Array.isArray(en.stats.msgs)) en.stats.msgs = [];
     if (!Array.isArray(en.pending)) en.pending = [];
     if (!Number.isFinite(en.pendingElided)) en.pendingElided = 0;
+    if (!en.pendingElidedBy || typeof en.pendingElidedBy !== 'object') en.pendingElidedBy = {};   // R4: per watcher (`kind:id`)
     if (!Array.isArray(en.reachEntries)) en.reachEntries = [];
     if (!Array.isArray(en.reachRequests)) en.reachRequests = [];   // P3 (§8): open/decided access requests
     return en;
@@ -3121,14 +3189,38 @@ function create(deps = {}) {
     const f = ix.filters && ix.filters[filterId];
     return f ? JSON.parse(JSON.stringify(f)) : null;
   }
-  /** The assignment AS IT READS: `authority` clamped by both caps, with the
-   *  reason, the stored bytes untouched (§7.3 (a)). */
+  /** A conversation's OWN grain as the compatibility reader expects it (the
+   *  pre-split `assignment` shape: its first watcher, the authority of that
+   *  principal's access row clamped by both caps, §7.3 (a)) — null when the
+   *  conversation holds no row of its own. */
   function assignmentView(rec, en, t) {
-    const a = en && en.assignment;
-    if (!a) return null;
-    const eff = F.effectiveAuthority(a, authorityCapsFor(rec, en, t));
-    return { ...a, authority: eff.authority, authorityStored: a.authority, authorityClamped: eff.clamped, authorityWhy: eff.why, authorityWhyCap: eff.whyCap || null };
+    const g = convGrainOf(en);
+    if (!g.access.length && !g.watchers.length) return null;
+    const v = grainView(rec, g, t, { capsNow: authorityCapsFor(rec, en, t) });
+    const lead = v.watchers[0] ? v.access.find((r) => pkOf(r.principal) === pkOf(v.watchers[0].principal)) : v.access[0];
+    return { ...v, scope: { kind: 'conversation', id: en.key }, authority: lead ? lead.authority : 'draft', authorityStored: lead ? lead.authorityStored : 'draft', authorityClamped: !!(lead && lead.authorityClamped), authorityWhy: lead ? lead.authorityWhy : null, authorityWhyCap: lead ? lead.authorityWhyCap : null };
   }
+  /** Pending hits by WATCHER (R4): every entry names the principal it waits
+   *  for (`for`); an entry from before the split (no `for`) and the untagged
+   *  elided count belong to the FIRST watcher in effect — the one that was
+   *  the only assignment when it was held. */
+  function pendingOf(en, pk, eff) {
+    const firstPk = eff && eff.watchers[0] ? pkOf(eff.watchers[0].watcher.principal) : null;
+    const mine = (p) => p && (p.for ? p.for === pk : pk === firstPk);
+    const list = (Array.isArray(en && en.pending) ? en.pending : []).filter(mine);
+    const elidedTagged = Number(en && en.pendingElidedBy && en.pendingElidedBy[pk]) || 0;
+    const elidedUntagged = pk === firstPk ? (Number(en && en.pendingElided) || 0) : 0;
+    return { hits: list.map((p) => ({ record: p.record, why: p.why || [] })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
+  }
+  /** Drop what one delivery CARRIED (and nothing else) from `pending`. */
+  function clearCarried(e2, pk, eff, carried) {
+    const firstPk = eff && eff.watchers[0] ? pkOf(eff.watchers[0].watcher.principal) : null;
+    const mine = (p) => p && (p.for ? p.for === pk : pk === firstPk);
+    e2.pending = e2.pending.filter((p) => !(mine(p) && p.record && carried.ids.has(p.record.id)));
+    if (carried.elidedTagged) { if (!e2.pendingElidedBy || typeof e2.pendingElidedBy !== 'object') e2.pendingElidedBy = {}; e2.pendingElidedBy[pk] = Math.max(0, (Number(e2.pendingElidedBy[pk]) || 0) - carried.elidedTagged); if (!e2.pendingElidedBy[pk]) delete e2.pendingElidedBy[pk]; }
+    if (carried.elidedUntagged) e2.pendingElided = Math.max(0, (Number(e2.pendingElided) || 0) - carried.elidedUntagged);
+  }
+  const elidedTotal = (en) => (Number(en && en.pendingElided) || 0) + Object.values((en && en.pendingElidedBy) || {}).reduce((n, v) => n + (Number(v) || 0), 0);
   function statsView(en, t) {
     const s = (en && en.stats) || {};
     const wakes = Array.isArray(s.wakes) ? s.wakes : [];
@@ -3140,7 +3232,7 @@ function create(deps = {}) {
       wakes24h: okWakes.filter((w) => Number(w.at) > t - 86400e3).length,
       wakes7d: okWakes.filter((w) => Number(w.at) > t - 7 * 86400e3).length,
       lastWake: last ? { at: last.at, n: last.n, ok: last.ok !== false, lane: last.lane || null, why: last.why || null, cid: last.cid || null, refused: last.refused || null } : null,
-      pending: (Array.isArray(en && en.pending) ? en.pending.length : 0) + (Number(en && en.pendingElided) || 0),
+      pending: (Array.isArray(en && en.pending) ? en.pending.length : 0) + elidedTotal(en),
       lastRefusal: s.lastRefusal || null,
     };
   }
@@ -3164,49 +3256,139 @@ function create(deps = {}) {
     return { lane: 'poll', seconds: cad.seconds || 30, tier: cad.tier, coalesceSeconds: 0, kick: lane.via === 'push', why: null };
   }
 
-  // ── THE THREE GRAINS (2026-09-26, design §7.3) ─────────────────────────
-  // conversation (on the entry) > pattern (first match in creation order) >
-  // account — exactly one in effect, PURE (`F.effectiveAssignment`). The
-  // account and pattern records live in index tables, each with its OWN
-  // pace ledger (`stats.wakes`): one 40/day ledger per conversation of an
-  // 800-thread account would be 32 000 wakes a day.
-  function accountAssignmentOf(adapterId) { const tb = store.index.table('accountAssignments'); return (tb && tb[adapterId]) || null; }
+  // ── THE THREE GRAINS, TWO LISTS EACH (R4, 2026-09-27, design §7.3) ────
+  // Every grain — the conversation (on its entry), a PATTERN (the conversations
+  // a rule matches), the ACCOUNT — holds an ACCESS list (who may see and act,
+  // with an authority) and a WATCHERS list (who is woken, and on what). Access
+  // is the PREREQUISITE of notification (a watcher's principal must hold
+  // access at the same grain; removing the access removes the watcher). Per
+  // principal the finest grain that names it decides — PURE
+  // (`F.effectiveGrants`). The account and pattern records live in index
+  // tables; every WATCHER carries its OWN pace ledger (`stats.wakes`), so a
+  // cap is per (principal, scope): one 40/day ledger per conversation of an
+  // 800-thread account would be 32 000 wakes a day, and one ledger shared by
+  // two watchers would let one starve the other.
+  function accountGrainOf(adapterId) { const tb = store.index.table('accountAssignments'); return (tb && tb[adapterId]) || null; }
   function patternsOf(adapterId) { const tb = store.index.table('patternAssignments') || {}; return Object.values(tb).filter((p) => p && p.adapterId === adapterId); }
   function patternById(id) { const tb = store.index.table('patternAssignments') || {}; return tb[id] || null; }
+  const pkOf = (p) => F.principalKey(p);
+  /** A conversation's pre-split single assignment, with the pace ledger it
+   *  used (`en.stats.wakes` minus the inherited grains' mirrors) — what the
+   *  reader-side lift and the migration turn into one access + one watcher. */
+  function legacyConvAssignment(en) {
+    const a = en && en.assignment;
+    if (!a || !a.principal) return null;
+    const s = (en.stats && typeof en.stats === 'object') ? en.stats : {};
+    return { ...a, stats: { wakes: (Array.isArray(s.wakes) ? s.wakes : []).filter((w) => w && (!w.grain || w.grain === 'conversation')), hits: Array.isArray(s.hits) ? s.hits.slice() : [], lastRefusal: s.lastRefusal || null } };
+  }
+  /** A conversation's OWN grain `{access, watchers}` (a pre-split entry read
+   *  the same way — merged, never a fallback). */
+  function convGrainOf(en) { return F.grainOf({ access: en && en.access, watchers: en && en.watchers }, legacyConvAssignment(en)); }
   /** The facts a pattern matches over (PURE input). */
   function convFacts(en) { return { title: (en && en.title) || '', participants: (en && en.participants) || '', kind: (en && en.kind) || '', authors: (en && Array.isArray(en.authors)) ? en.authors : [] }; }
+  /** WHO HAS ACCESS AND WHO WATCHES — the ONE answer for a conversation. */
   function effectiveFor(en) {
     if (!en) return null;
-    return F.effectiveAssignment({ conversation: en.assignment || null, patterns: patternsOf(en.adapterId), account: accountAssignmentOf(en.adapterId) }, convFacts(en));
+    return F.effectiveGrants({ conversation: convGrainOf(en), patterns: patternsOf(en.adapterId), account: accountGrainOf(en.adapterId) }, convFacts(en));
   }
-  /** Where an effective assignment's PACE LEDGER lives: the conversation's
-   *  own stats, or the account / pattern record's. */
-  const scopeKeyOf = (eff, rec) => (eff.source === 'account' ? `acct:${rec.id}` : eff.source === 'pattern' ? `pat:${eff.patternId}` : null);
-  function ledgerOf(ix, eff, rec, en) {
-    if (eff.source === 'account') { const tb = ix.accountAssignments || {}; return tb[rec.id] || null; }
-    if (eff.source === 'pattern') { const tb = ix.patternAssignments || {}; return tb[eff.patternId] || null; }
-    return en;
+  /** Is THIS item the watcher of principal `pk`? */
+  const itemIs = (item, pk) => !!item && pkOf((item.watcher || item.row).principal) === pk;
+  /** A WATCHER's scope chain / scope timer key — per (grain, principal): the
+   *  conversation grain has none (its conversation chain covers its ledger). */
+  const scopeKeyOf = (item, rec) => (item.source === 'account' ? `acct:${rec.id}|${pkOf(item.watcher.principal)}` : item.source === 'pattern' ? `pat:${item.patternId}|${pkOf(item.watcher.principal)}` : null);
+  /**
+   * LIFT a stored grain to the two lists IN PLACE (inside `update()` only):
+   * a record written before the split becomes one access row + one watcher
+   * row; the account's origin-`assignment` grant is renamed `access`. The
+   * migration does this to every row at boot; a write reaching a record the
+   * migration has not seen yet (the engine starts before the runner) lifts
+   * exactly that record first, so a ledger is never written to a copy.
+   */
+  function liftGrainInPlace(ix, holder, kind) {
+    if (!holder) return holder;
+    if (kind === 'conversation') {
+      const legacy = legacyConvAssignment(holder);
+      if (legacy || !Array.isArray(holder.access) || !Array.isArray(holder.watchers)) {
+        const g = F.grainOf({ access: holder.access, watchers: holder.watchers }, legacy);
+        holder.access = g.access; holder.watchers = g.watchers;
+        if (legacy) {
+          const pk = pkOf(legacy.principal);
+          for (const p of Array.isArray(holder.pending) ? holder.pending : []) if (p && !p.for) p.for = pk;
+          if (Number(holder.pendingElided) > 0) { if (!holder.pendingElidedBy || typeof holder.pendingElidedBy !== 'object') holder.pendingElidedBy = {}; holder.pendingElidedBy[pk] = (Number(holder.pendingElidedBy[pk]) || 0) + Number(holder.pendingElided); holder.pendingElided = 0; }
+        }
+        if ('assignment' in holder) delete holder.assignment;
+        if (Array.isArray(holder.reachEntries)) for (const g2 of holder.reachEntries) if (g2 && g2.origin === 'assignment') g2.origin = 'access';
+      }
+      return holder;
+    }
+    const lifted = F.liftGrainRecord(holder);
+    if (lifted.changed) {
+      for (const k of Object.keys(holder)) delete holder[k];
+      Object.assign(holder, lifted.rec);
+      if (kind === 'account' && Array.isArray(ix.accountGrants)) for (const g2 of ix.accountGrants) if (g2 && g2.origin === 'assignment' && g2.scope && g2.scope.kind === 'adapter' && g2.scope.id === holder.adapterId) g2.origin = 'access';
+    }
+    if (!Array.isArray(holder.access)) holder.access = [];
+    if (!Array.isArray(holder.watchers)) holder.watchers = [];
+    return holder;
   }
-  /** An account / pattern assignment as the card and the editor read it. */
-  function scopeAssignmentView(rec, a, t = now()) {
-    const s = a.stats || {};
+  /** The LIVE watcher row an effective item names, inside `update()` — the
+   *  one its pace ledger is written to (lifting a pre-split record first). */
+  function watcherRef(ix, rec, en2, item) {
+    const pk = pkOf(item.watcher.principal);
+    let holder = null;
+    if (item.source === 'conversation') holder = en2 ? liftGrainInPlace(ix, en2, 'conversation') : null;
+    else if (item.source === 'account') holder = liftGrainInPlace(ix, (ix.accountAssignments || {})[rec.id] || null, 'account');
+    else holder = liftGrainInPlace(ix, (ix.patternAssignments || {})[item.patternId] || null, 'pattern');
+    const w = holder && Array.isArray(holder.watchers) ? holder.watchers.find((x) => pkOf(x.principal) === pk) : null;
+    if (w && (!w.stats || typeof w.stats !== 'object')) w.stats = { wakes: [], hits: [] };
+    return w;
+  }
+  /** One watcher's ledger view (the card's "N wakes / 24 h"). */
+  function ledgerView(s0, t) {
+    const s = s0 || {};
     const okWakes = (Array.isArray(s.wakes) ? s.wakes : []).filter((w) => w && w.ok !== false);
+    return { hits7d: F.countSince(s.hits, t, 7), wakes24h: okWakes.filter((w) => Number(w.at) > t - 86400e3).length, wakes7d: okWakes.filter((w) => Number(w.at) > t - 7 * 86400e3).length, lastRefusal: s.lastRefusal || null };
+  }
+  function accessRowView(row, capsNow = null) {
+    const base = { principal: { kind: row.principal.kind, id: row.principal.id, name: row.principal.name || null }, authority: row.authority, createdAt: row.createdAt || null, updatedAt: row.updatedAt || null };
+    if (!capsNow) return base;
+    const cl = F.effectiveAuthority(row, capsNow);
+    return { ...base, authority: cl.authority, authorityStored: row.authority, authorityClamped: cl.clamped, authorityWhy: cl.why || null, authorityWhyCap: cl.whyCap || null };
+  }
+  function watcherView(w, t) {
     return {
-      id: a.id || null, scope: a.scope || null, principal: { kind: a.principal.kind, id: a.principal.id, name: a.principal.name || null },
-      mode: a.mode, filterId: a.filterId || null, filter: a.filterId ? filterFor(a.filterId) : null, notify: a.notify, digestMinutes: a.digestMinutes,
-      authority: a.authority, dailyWakeCap: a.dailyWakeCap, receiptWake: !!a.receiptWake,
-      pattern: a.pattern || null, patternLabel: a.pattern ? F.patternSummary(a.pattern) : null,
-      createdAt: a.createdAt || null, updatedAt: a.updatedAt || null, estimateAtSet: a.estimateAtSet || null,
-      stats: { hits7d: F.countSince(s.hits, t, 7), wakes24h: okWakes.filter((w) => Number(w.at) > t - 86400e3).length, wakes7d: okWakes.filter((w) => Number(w.at) > t - 7 * 86400e3).length, lastRefusal: s.lastRefusal || null },
+      principal: { kind: w.principal.kind, id: w.principal.id, name: w.principal.name || null },
+      notify: w.notify, mode: w.mode, filterId: w.filterId || null, filter: w.filterId ? filterFor(w.filterId) : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, receiptWake: !!w.receiptWake,
+      createdAt: w.createdAt || null, updatedAt: w.updatedAt || null, estimateAtSet: w.estimateAtSet || null, stats: ledgerView(w.stats, t),
+    };
+  }
+  /** A grain's two lists as the card and the dialogs read them, + the FIRST
+   *  watcher's (else the first access row's) fields flat beside them — the
+   *  pre-split single-assignment shape a legacy reader expects. */
+  function grainView(rec, holder, t = now(), { capsNow = null } = {}) {
+    const g = F.grainOf(holder);
+    const access = g.access.map((r) => accessRowView(r, capsNow));
+    const watchers = g.watchers.map((w) => watcherView(w, t));
+    const lead = watchers[0] || null;
+    const leadAccess = lead ? access.find((r) => pkOf(r.principal) === pkOf(lead.principal)) : access[0] || null;
+    const flat = lead ? { ...lead, authority: leadAccess ? leadAccess.authority : 'draft' } : (leadAccess ? { principal: leadAccess.principal, authority: leadAccess.authority, notify: null, mode: null, stats: ledgerView(null, t) } : {});
+    return {
+      ...flat,
+      id: holder && holder.id ? holder.id : null, scope: (holder && holder.scope) || null,
+      pattern: (holder && holder.pattern) || null, patternLabel: holder && holder.pattern ? F.patternSummary(holder.pattern) : null,
+      createdAt: (holder && holder.createdAt) || null, updatedAt: (holder && holder.updatedAt) || null,
+      access, watchers,
     };
   }
 
-  /** THE FUNNEL ENTRY. `fresh` are the records that just became durable. */
+  /** THE FUNNEL ENTRY. `fresh` are the records that just became durable.
+   *  R4: EVERY WATCHER in effect matches with ITS OWN filter and is delivered
+   *  on its own (a wake, a digest window, a scope digest), each against its
+   *  own pace ledger; ACCESS alone is never on this path. */
   async function onFresh(rec, convId, fresh, { lane, origin } = {}) {
     if (stopped || !Array.isArray(fresh) || !fresh.length) return;
     const t = now();
-    const snap = store.index.snapshot();
-    const en = snap.conversations[`${rec.id}/${convId}`];
+    const en = store.index.peek(`${rec.id}/${convId}`);
     if (!en) return;
     // The two LEDGERS below are DERIVED counts (§5 invariant 7: cached for
     // the panel, always re-derivable) — a failed write costs one stale
@@ -3216,108 +3398,178 @@ function create(deps = {}) {
     // msgs7d — the estimate's denominator measured after the fact (§7.2)
     await ledger('msgs', () => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.msgs.push({ at: t, n: fresh.length }); e2.stats.msgs = F.pruneLedger(e2.stats.msgs, t); e2.stats.msgs7d = F.countSince(e2.stats.msgs, t, 7); });
     const eff = effectiveFor(en);
-    if (!eff) return;
-    const a = eff.assignment;
-    const filter = a.mode === 'filtered' ? filterFor(a.filterId) : null;
-    if (a.mode === 'filtered' && !filter) { log.warn(`[channels] ${rec.id}/${convId}: assignment names filter ${a.filterId} which does not exist — no wake (fail closed)`); return; }
-    const hits = [];
-    for (const r of fresh) {
-      if (a.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
-      const m = F.matchRecord(filter, r, {});
-      if (m.hit) hits.push({ record: r, why: m.why });
+    if (!eff || !eff.watchers.length) return;
+    // a named AGENT first, then groups: a group's round-robin skips a session
+    // this batch already reached (one batch never bills one agent twice)
+    const order = eff.watchers.slice().sort((a, b) => (a.watcher.principal.kind === 'agent' ? 0 : 1) - (b.watcher.principal.kind === 'agent' ? 0 : 1));
+    const per = [];
+    const union = new Set();
+    // R4 verify r5: ONE BAD RECORD (or a throw preparing one watcher) MUST NOT
+    // DROP THE REST OF THIS CONVERSATION'S BATCH. onFresh is tracked per
+    // conversation, so a throw here never ends the pass or reaches another
+    // conversation (the r4 note's "remaining conversations" was already bounded
+    // by `track`) — but before this guard a single record the matcher could
+    // not handle rejected the whole call, and this conversation's news (every
+    // watcher, the good records beside the bad one) was lost silently. Each
+    // record is matched, and each watcher prepared, on its own: a failure is
+    // logged BY NAME and skipped, never dropped for the batch.
+    for (const item of order) {
+      try {
+        const w = item.watcher;
+        const filter = w.mode === 'filtered' ? filterFor(w.filterId) : null;
+        if (w.mode === 'filtered' && !filter) { log.warn(`[channels] ${rec.id}/${convId}: ${pkOf(w.principal)}'s notification names filter ${w.filterId} which does not exist — not woken (fail closed)`); continue; }
+        const hits = [];
+        for (const r of fresh) {
+          try {
+            if (w.mode === 'all') { hits.push({ record: r, why: [] }); continue; }
+            const m = F.matchRecord(filter, r, {});
+            if (m.hit) hits.push({ record: r, why: m.why });
+          } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: a record could not be matched for ${pkOf(w.principal)} — skipped: ${(err && err.message) || err}`); }
+        }
+        if (!hits.length) continue;
+        for (const h of hits) union.add((h.record && h.record.id) || h);
+        per.push({ item, hits });
+      } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the notification for ${pkOf(item.watcher && item.watcher.principal)} could not be prepared — skipped: ${(err && err.message) || err}`); }
     }
-    if (!hits.length) return;
+    if (!per.length) return;
     await ledger('hits', (ix) => {
-      const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.hits.push({ at: t, n: hits.length }); e2.stats.hits = F.pruneLedger(e2.stats.hits, t); e2.stats.hits7d = F.countSince(e2.stats.hits, t, 7);
-      // an inherited grain measures its OWN rate too (the editor's "since" line)
-      if (eff.source !== 'conversation') { const own = ledgerOf(ix, eff, rec, e2); if (own) { if (!own.stats || typeof own.stats !== 'object') own.stats = {}; own.stats.hits = F.pruneLedger([...(Array.isArray(own.stats.hits) ? own.stats.hits : []), { at: t, n: hits.length }], t); } }
+      const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.hits.push({ at: t, n: union.size }); e2.stats.hits = F.pruneLedger(e2.stats.hits, t); e2.stats.hits7d = F.countSince(e2.stats.hits, t, 7);
+      // each watcher measures its OWN rate too (the editor's "since" line)
+      for (const { item, hits } of per) { const own = watcherRef(ix, rec, e2, item); if (own) own.stats.hits = F.pruneLedger([...(Array.isArray(own.stats.hits) ? own.stats.hits : []), { at: t, n: hits.length }], t); }
     });
-    if (a.notify === 'digest') {
-      // an INHERITED digest delivers ONCE per window for its whole scope (§7.3)
-      if (eff.source !== 'conversation') return queueScopeWindow(rec, convId, hits, eff, { ms: a.digestMinutes * 60e3 });
-      return queueForWindow(rec, convId, hits, { kind: 'digest', ms: a.digestMinutes * 60e3 });
-    }
-    // FENCE 12: the window opens ONLY while push carries content — a poll or
-    // scan pass is already a batch (r4/r6), and a kick-mode push lane's
-    // records arrive by poll. Gated on the RESOLVED lane, never `caps.receive`.
+    const batch = { got: new Map() };
     const cs = coalesceSeconds();
-    if (lane && lane.via === 'push' && lane.carryContent && cs > 0) return queueForWindow(rec, convId, hits, { kind: 'coalesce', ms: cs * 1000 });
-    return wake(rec, convId, hits, { origin });
+    const runs = [];
+    for (const { item, hits } of per) {
+      const w = item.watcher;
+      const pk = pkOf(w.principal);
+      if (w.notify === 'digest') {
+        // an INHERITED digest delivers ONCE per window for its whole scope (§7.3)
+        runs.push(item.source !== 'conversation' ? queueScopeWindow(rec, convId, hits, item, { ms: w.digestMinutes * 60e3 }) : queueForWindow(rec, convId, hits, { kind: 'digest', ms: w.digestMinutes * 60e3, pk }));
+        continue;
+      }
+      // FENCE 12: the window opens ONLY while push carries content — a poll or
+      // scan pass is already a batch (r4/r6), and a kick-mode push lane's
+      // records arrive by poll. Gated on the RESOLVED lane, never `caps.receive`.
+      if (lane && lane.via === 'push' && lane.carryContent && cs > 0) { runs.push(queueForWindow(rec, convId, hits, { kind: 'coalesce', ms: cs * 1000, pk })); continue; }
+      runs.push(wake(rec, convId, hits, { origin, pk, batch }));
+    }
+    // R4 verify r5: allSettled — one watcher's door throwing does not cancel
+    // the siblings already dispatched (each door catches the ladder itself, so
+    // a rejection here is a bug, not a refusal; it is logged, never swallowed).
+    for (const s of await Promise.allSettled(runs)) if (s.status === 'rejected') log.warn(`[channels] ${rec.id}/${convId}: a notification failed unexpectedly: ${(s.reason && s.reason.message) || s.reason}`);
   }
 
-  /** Persist hits as PENDING (bounded, elided counted) and arm ONE timer
-   *  per conversation for the window; a second burst inside the window
-   *  joins it. The hits are on disk before the timer exists. */
-  async function queueForWindow(rec, convId, hits, { kind, ms }) {
-    await keepPending(rec, convId, hits);
-    const key = `${rec.id}/${convId}`;
+  /** Persist hits as PENDING (bounded, elided counted, tagged with the
+   *  watcher they wait for) and arm ONE timer per (conversation, watcher)
+   *  for the window; a second burst inside the window joins it. The hits are
+   *  on disk before the timer exists. */
+  async function queueForWindow(rec, convId, hits, { kind, ms, pk }) {
+    await keepPending(rec, convId, hits, 0, pk);
+    const key = `${rec.id}/${convId}|${pk}`;
     if (wakeTimers.has(key) || stopped) return;
     const startedAt = now();
     const timer = setTimeout(() => {
       wakeTimers.delete(key);
-      track(flushPending(rec, convId, { kind, startedAt }));
+      track(flushPending(rec, convId, { kind, startedAt, pk }));
     }, Math.max(0, ms));
     if (timer.unref) timer.unref();
     wakeTimers.set(key, { timer, kind, startedAt });
   }
-  async function keepPending(rec, convId, hits, elided = 0) {
+  async function keepPending(rec, convId, hits, elided = 0, pk = null) {
     await store.index.update(() => {
       const e2 = store.index.entry(rec.id, convId, { create: false });
       if (!e2) return;
       healP2(e2);
-      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], at: now() });
-      e2.pendingElided += Number(elided) || 0;
-      if (e2.pending.length > PENDING_CAP) { e2.pendingElided += e2.pending.length - PENDING_CAP; e2.pending.splice(0, e2.pending.length - PENDING_CAP); }
+      for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], at: now(), ...(pk ? { for: pk } : {}) });
+      if (!pk) { e2.pendingElided += Number(elided) || 0; return; }
+      if (Number(elided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(elided);
+      // PENDING_CAP per (conversation, watcher): the oldest of THIS watcher's go
+      const idx = [];
+      e2.pending.forEach((p, i) => { if (p && p.for === pk) idx.push(i); });
+      if (idx.length > PENDING_CAP) {
+        const drop = new Set(idx.slice(0, idx.length - PENDING_CAP));
+        e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + drop.size;
+        e2.pending = e2.pending.filter((_, i) => !drop.has(i));
+      }
     });
   }
   /** AN INHERITED DIGEST (account / pattern grain, §7.3): the hits wait on
-   *  their own conversation (persisted, bounded — the same `pending`), and
-   *  ONE timer per SCOPE delivers every conversation's hits of that window as
-   *  ONE block — never a digest per conversation of an 800-thread account. */
-  async function queueScopeWindow(rec, convId, hits, eff, { ms }) {
-    await keepPending(rec, convId, hits);
-    const key = `scope:${scopeKeyOf(eff, rec)}`;
+   *  their own conversation (persisted, bounded — the same `pending`, tagged
+   *  with the watcher), and ONE timer per (SCOPE, watcher) delivers every
+   *  conversation's hits of that window as ONE block — never a digest per
+   *  conversation of an 800-thread account. */
+  async function queueScopeWindow(rec, convId, hits, item, { ms }) {
+    const pk = pkOf(item.watcher.principal);
+    await keepPending(rec, convId, hits, 0, pk);
+    const key = `scope:${scopeKeyOf(item, rec)}`;
     if (wakeTimers.has(key) || stopped) return;
     const startedAt = now();
-    const timer = setTimeout(() => { wakeTimers.delete(key); track(flushScope(rec, eff.source, eff.patternId, { startedAt })); }, Math.max(0, ms));
+    const timer = setTimeout(() => { wakeTimers.delete(key); track(flushScope(rec, item.source, item.patternId, pk, { startedAt })); }, Math.max(0, ms));
     if (timer.unref) timer.unref();
     wakeTimers.set(key, { timer, kind: 'scope-digest', startedAt });
   }
-  /** Deliver ONE scope digest: every conversation of the account whose
-   *  EFFECTIVE assignment is this grain and that holds pending hits. Paced
-   *  by the grain's own ledger; a refusal keeps every hit pending. */
-  async function flushScope(rec, source, patternId = null, { startedAt = null } = {}) {
+  /** Everyone else on a conversation, for a block's "also on this
+   *  conversation" line: `[{name, notify?, authority}]` (R4 — two woken
+   *  agents are told about each other). */
+  function othersFor(eff, pk) {
+    if (!eff) return [];
+    const out = new Map();
+    for (const a of eff.access) { const k = pkOf(a.row.principal); if (k !== pk) out.set(k, { name: a.row.principal.name || a.row.principal.id, authority: a.row.authority, notify: null }); }
+    for (const w of eff.watchers) { const k = pkOf(w.watcher.principal); if (k !== pk && out.has(k)) out.get(k).notify = w.watcher.notify; }
+    return [...out.values()];
+  }
+  /** Deliver ONE scope digest for ONE watcher: every conversation of the
+   *  account whose EFFECTIVE watcher for this principal is this grain and
+   *  that holds its pending hits. Paced by THIS watcher's own ledger; a
+   *  refusal keeps every hit pending. */
+  async function flushScope(rec, source, patternId = null, pk = null, opts = {}) {
     if (stopped) return { ok: false, why: 'stopped' };
-    const sKey = source === 'account' ? `acct:${rec.id}` : `pat:${patternId}`;
-    return serialWake(`scope:${sKey}`, async () => {
+    const sKey = `${source === 'account' ? `acct:${rec.id}` : `pat:${patternId}`}|${pk}`;
+    return billedWake({ scopeOf: () => sKey }, () => flushScopeNow(rec, source, patternId, pk, sKey, opts));
+  }
+  /** The scope digest's SECTION BODY — reached only through `billedWake` (see `flushScope`). */
+  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null } = {}) {
+    {
+      if (stopped) return { ok: false, why: 'stopped', held: true };   // the hits are pending already; the next boot delivers them
       const t = now();
-      const a = source === 'account' ? accountAssignmentOf(rec.id) : patternById(patternId);
-      if (!a) return { ok: false, why: 'unassigned' };
+      const holder = source === 'account' ? accountGrainOf(rec.id) : patternById(patternId);
+      const w = holder ? F.grainOf(holder).watchers.find((x) => pkOf(x.principal) === pk) : null;
+      if (!w) return { ok: false, why: 'not-watching' };
       const groups = [];
-      const held = [];   // [{key, ids:Set, elided}]
+      const held = [];   // [{id, key, carried}]
+      let others = null;
       for (const en of Object.values(store.index.live())) {
         if (!en || en.adapterId !== rec.id || !Array.isArray(en.pending) || !en.pending.length) continue;
         const eff = effectiveFor(en);
-        if (!eff || eff.source !== source || (source === 'pattern' && eff.patternId !== patternId)) continue;
-        groups.push({ title: en.title || en.id, convId: en.id, hits: en.pending.map((p) => ({ record: p.record, why: p.why || [] })), elided: Number(en.pendingElided) || 0 });
-        held.push({ key: en.key, id: en.id, ids: new Set(en.pending.map((p) => p.record && p.record.id).filter(Boolean)), elided: Number(en.pendingElided) || 0 });
+        const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
+        if (!item || item.source !== source || (source === 'pattern' && item.patternId !== patternId)) continue;
+        const pend = pendingOf(en, pk, eff);
+        if (!pend.hits.length && !pend.elided) continue;
+        if (!others) others = othersFor(eff, pk);
+        groups.push({ title: en.title || en.id, convId: en.id, hits: pend.hits, elided: pend.elided });
+        held.push({ key: en.key, id: en.id, eff, carried: pend });
       }
       if (!groups.length) return { ok: false, why: 'nothing-pending' };
-      const target = resolveTarget(a);
+      const item0 = { watcher: w, source, patternId };
+      const target = resolveTarget(w);
       const why = !target.cid ? target.why : null;
-      const pace = target.cid ? F.paceVerdict((a.stats && a.stats.wakes) || [], t, a.dailyWakeCap) : { ok: true };
+      const pace = target.cid ? F.paceVerdict((w.stats && w.stats.wakes) || [], t, F.digestCap(w)) : { ok: true };
       if (!target.cid || !pace.ok) {
-        const w = why || pace.why;
-        await store.index.update((ix) => { const own = source === 'account' ? (ix.accountAssignments || {})[rec.id] : (ix.patternAssignments || {})[patternId]; if (own) { if (!own.stats || typeof own.stats !== 'object') own.stats = {}; own.stats.lastRefusal = { at: t, why: String(w || '').slice(0, 200) }; } });
-        log.log(`[channels] scope digest ${sKey}: ${groups.length} conversation(s) held — ${w}`);
-        return { ok: false, why: w, held: true };
+        const wy = why || pace.why;
+        await store.index.update((ix) => { const own = watcherRef(ix, rec, null, item0); if (own) own.stats.lastRefusal = { at: t, why: String(wy || '').slice(0, 200) }; });
+        log.log(`[channels] scope digest ${sKey}: ${groups.length} conversation(s) held — ${wy}`);
+        return { ok: false, why: wy, held: true };
       }
       const label = rec.label || rec.id;
-      const scopeLabel = source === 'account' ? 'the whole account' : `the conversations matching a rule (${F.patternSummary(a.pattern)})`;
-      const text = F.renderScopeDigestBlock({ adapterLabel: label, scopeLabel, groups, windowMinutes: startedAt ? Math.max(1, Math.round((t - startedAt) / 60e3)) : a.digestMinutes });
+      const scopeLabel = source === 'account' ? 'the whole account' : `the conversations matching a rule (${F.patternSummary(holder.pattern)})`;
+      const text = F.renderScopeDigestBlock({ adapterLabel: label, scopeLabel, groups, windowMinutes: startedAt ? Math.max(1, Math.round((t - startedAt) / 60e3)) : w.digestMinutes, others });
       const n = groups.reduce((x, g) => x + g.hits.length + (g.elided || 0), 0);
       const fromName = `Channels · ${label}`;
       const cardText = `${groups.length} conversation${groups.length === 1 ? '' : 's'}: ${n} message${n === 1 ? '' : 's'} — digest`;
+      const wk0 = { at: t, n, cid: target.cid, ok: true, lane: 'reserved', why: null, refused: null, digest: true, grain: source, conversations: groups.length, p: pk };
+      const resId = await reserveWake(rec, null, item0, wk0);
+      if (!resId) { log.log(`[channels] scope digest ${sKey}: ${groups.length} conversation(s) held — the ledger could not take the row`); return { ok: false, why: 'ledger-unwritable', held: true }; }
       let r = null;
       if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
       else {
@@ -3326,65 +3578,90 @@ function create(deps = {}) {
       }
       const ok = !!(r && r.ok);
       let stashed = false;
-      if (!ok && deliver && typeof deliver.stashFor === 'function') { try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
-      const wk = { at: t, n, cid: target.cid, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: ok ? null : String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null, digest: true, grain: source, conversations: groups.length };
-      await store.index.update((ix) => {
-        const own = source === 'account' ? (ix.accountAssignments || {})[rec.id] : (ix.patternAssignments || {})[patternId];
-        if (own) { if (!own.stats || typeof own.stats !== 'object') own.stats = {}; own.stats.wakes = F.pruneLedger([...(Array.isArray(own.stats.wakes) ? own.stats.wakes : []), wk], t); own.stats.lastRefusal = null; }
-        if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[a.principal.id] = target.cursor;
+      // R4 verify r2: re-ask after the ladder's await (see wakeNow) — a scope
+      // digest refused after its watcher lost access is dropped, never stashed
+      const wNow = ok ? w : F.grainOf(source === 'account' ? accountGrainOf(rec.id) : patternById(patternId)).watchers.find((x) => pkOf(x.principal) === pk);
+      const still = ok ? IN_EFFECT : { watched: !!wNow, targetGone: !!wNow && target.via === 'group' && !groupStillHas(w, target.cid) };
+      const stillWatched = ok || still.watched;
+      const targetGone = !ok && still.watched && still.targetGone;   // r3: the member died — the hits stay pending for the group's next digest
+      if (!ok && !stillWatched) log.log(`[channels] scope digest ${sKey}: ${pk} lost its notification while the digest was in flight — the refused block is not stashed`);
+      if (targetGone) log.log(`[channels] scope digest ${sKey}: ${target.cid} left group ${pk} while the digest was in flight — ${n} hit(s) held for the group's next digest`);
+      if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') { try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
+      const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'digest');
+      const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
+      try { await store.index.update((ix) => {
+        const own = watcherRef(ix, rec, null, item0);
+        if (own) finalizeRow(own, resId, wk, t);
+        if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[w.principal.id] = target.cursor;
         if (!(ok || stashed)) return;
         for (const h of held) {
           const e2 = store.index.entry(rec.id, h.id, { create: false });
           if (!e2) continue;
           healP2(e2);
-          e2.pending = e2.pending.filter((p) => !(p.record && h.ids.has(p.record.id)));
-          e2.pendingElided = Math.max(0, (Number(e2.pendingElided) || 0) - h.elided);
-          e2.stats.wakes.push({ ...wk, n: h.ids.size + h.elided });
+          clearCarried(e2, pk, h.eff, h.carried);
+          e2.stats.wakes.push({ ...wk, n: h.carried.ids.size + h.carried.elided });
           e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
         }
-      });
+      }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
       notify(held.map((h) => h.key));
       return { ok, stashed, cid: target.cid, n, conversations: groups.length };
-    });
+    }
   }
-  /** Deliver everything pending on one conversation as ONE wake (a digest
-   *  block for a digest window or a boot leftover; a wake block that says
-   *  "N in this window" for a coalesced burst). */
-  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null } = {}) {
+  /** Deliver everything pending on one conversation for ONE watcher (`pk`)
+   *  — or, without `pk`, for every watcher holding pending hits — as ONE
+   *  wake each (a digest block for a digest window or a boot leftover; a
+   *  wake block that says "N in this window" for a coalesced burst). */
+  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null, pk = null } = {}) {
     if (stopped) return { ok: false, why: 'stopped' };
     // the read of `pending` happens INSIDE the conversation's serial section
     // (see serialWake): a flush queued behind a direct wake sees what that
     // wake left, never what it was about to carry
-    return serialWake(`${rec.id}/${convId}`, async () => {
-      const en = store.index.snapshot().conversations[`${rec.id}/${convId}`];
-      if (!en || !Array.isArray(en.pending) || !en.pending.length) return { ok: false, why: 'nothing-pending' };
-      const hits = en.pending.map((p) => ({ record: p.record, why: p.why || [] }));
-      const elided = Number(en.pendingElided) || 0;
-      const n = hits.length + elided;
-      const seconds = startedAt ? (now() - startedAt) / 1000 : 0;
-      return inScope(rec, convId, () => wakeNow(rec, convId, hits, {
-        elided, fromPending: true,
-        digest: kind === 'digest' || kind === 'boot',
-        windowMinutes: kind === 'digest' ? (((effectiveFor(en) || {}).assignment || {}).digestMinutes || F.DEFAULT_DIGEST_MINUTES) : Math.max(1, Math.round(seconds / 60)),
-        coalesced: kind === 'coalesce' && n > 1 ? { n, seconds } : null,
-      }));
+    return billedWake({ conv: `${rec.id}/${convId}` }, async () => {
+      const results = [];
+      const en0 = store.index.peek(`${rec.id}/${convId}`);
+      const eff0 = effectiveFor(en0);
+      if (!en0 || !eff0) return { ok: false, why: 'nothing-pending' };
+      const pks = pk ? [pk] : eff0.watchers.map((x) => pkOf(x.watcher.principal));
+      for (const p of pks) {
+        const en = store.index.peek(`${rec.id}/${convId}`);
+        const eff = effectiveFor(en);
+        const item = eff ? eff.watchers.find((x) => itemIs(x, p)) : null;
+        if (!en || !item) continue;
+        const pend = pendingOf(en, p, eff);
+        if (!pend.hits.length && !pend.elided) continue;
+        const n = pend.hits.length + pend.elided;
+        const seconds = startedAt ? (now() - startedAt) / 1000 : 0;
+        results.push(await billedWake({ scopeOf: () => scopeFor(rec, convId, p) }, () => wakeNow(rec, convId, pend.hits, {
+          elided: pend.elided, fromPending: pend, pk: p,
+          digest: kind === 'digest' || kind === 'boot',
+          windowMinutes: kind === 'digest' ? (item.watcher.digestMinutes || F.DEFAULT_DIGEST_MINUTES) : Math.max(1, Math.round(seconds / 60)),
+          coalesced: kind === 'coalesce' && n > 1 ? { n, seconds } : null,
+        })));
+      }
+      if (!results.length) return { ok: false, why: 'nothing-pending' };
+      return { ...results[0], results };
     });
   }
   /** Who is woken: the agent named, or the group's next live member (§7.3
    *  round-robin, the cursor in the index). A group with no live member is
-   *  "keep for the next turn", NEVER "wake them all". */
-  function resolveTarget(a) {
+   *  "keep for the next turn", NEVER "wake them all". `batch` (R4) = the
+   *  sessions THIS batch already reached (`got`: cid → record ids): a group
+   *  prefers a member the batch has not reached yet. */
+  function resolveTarget(w, batch = null) {
     let live = [];
     try { live = liveSessions() || []; } catch (err) { log.warn(`[channels] liveSessions threw: ${(err && err.message) || err}`); }
-    if (a.principal.kind === 'agent') {
-      const s = live.find((x) => x && x.cid === a.principal.id);
-      return { cid: a.principal.id, name: (s && s.name) || a.principal.name || a.principal.id, via: 'agent', live: !!s, cursor: null };
+    if (w.principal.kind === 'agent') {
+      const s = live.find((x) => x && x.cid === w.principal.id);
+      return { cid: w.principal.id, name: (s && s.name) || w.principal.name || w.principal.id, via: 'agent', live: !!s, cursor: null };
     }
-    const members = live.filter((x) => x && Array.isArray(x.groups) && x.groups.includes(a.principal.id)).map((x) => x.cid);
+    const all = live.filter((x) => x && Array.isArray(x.groups) && x.groups.includes(w.principal.id)).map((x) => x.cid);
+    const got = batch && batch.got ? batch.got : null;
+    const fresh = got ? all.filter((c) => !got.has(c)) : all;
+    const members = fresh.length ? fresh : all;
     const rot = store.index.snapshot().rotations || {};
-    const pick = F.pickRoundRobin(members, Number(rot[a.principal.id]) || 0);
-    if (!pick.id) return { cid: null, name: null, via: 'group', live: false, cursor: null, why: `no live session in group ${a.principal.name || a.principal.id} — kept for its next turn` };
+    const pick = F.pickRoundRobin(members, Number(rot[w.principal.id]) || 0);
+    if (!pick.id) return { cid: null, name: null, via: 'group', live: false, cursor: null, why: `no live session in group ${w.principal.name || w.principal.id} — kept for its next turn` };
     const s = live.find((x) => x.cid === pick.id);
     return { cid: pick.id, name: (s && s.name) || pick.id, via: 'group', live: true, cursor: pick.cursor };
   }
@@ -3393,8 +3670,10 @@ function create(deps = {}) {
   // after a restart the boot flush (5 s) and the first tick's pass (5 s) both
   // read `pending` before either had cleared it, so the same held hits went
   // out twice — two billed turns. The second wake now reads the index only
-  // after the first has removed what it carried.
-  const wakeChains = new Map();   // `${adapterId}/${convId}` → the tail of the wakes queued on it
+  // after the first has removed what it carried. R4: every watcher of one
+  // conversation queues on this ONE chain, in the order onFresh enqueued them.
+  const wakeChains = new Map();   // `${adapterId}/${convId}` | `scope:<grain>|<pk>` → the tail of the wakes queued on it
+  // PRIVATE to `billedWake` (R4 verify r4): no other site may take a chain by hand.
   function serialWake(key, fn) {
     const prev = wakeChains.get(key) || Promise.resolve();
     const run = prev.then(() => fn(), () => fn());
@@ -3402,84 +3681,197 @@ function create(deps = {}) {
     wakeChains.set(key, tail);
     return run;
   }
-  function wake(rec, convId, freshHits, opts = {}) { return serialWake(`${rec.id}/${convId}`, () => inScope(rec, convId, () => wakeNow(rec, convId, freshHits, opts))); }
   // AN INHERITED GRAIN'S WAKES RUN ONE AT A TIME TOO (2026-09-26, lane R2
-  // verify, critical): an account / pattern assignment has ONE pace ledger
-  // for many conversations, and `wakeNow` reads it (paceVerdict) BEFORE the
+  // verify, critical): an account / pattern watcher has ONE pace ledger for
+  // many conversations, and `wakeNow` reads it (paceVerdict) BEFORE the
   // ladder's await and writes it AFTER — so the wakes of a burst, serialized
   // only per CONVERSATION, all passed the check on the same stale ledger: one
   // pass bringing news to 100 conversations under a cap of 5 started 100
   // billed turns whenever the ladder took more than ~2 ms (the real one
-  // always does). A grain's wake now also queues on its SCOPE's chain — the
-  // same key `flushScope` holds — so the check and the write of one wake can
-  // never straddle another's. Order: conversation, then scope (flushScope
-  // takes the scope alone), so no two chains wait on each other.
-  function inScope(rec, convId, fn) {
-    const eff = effectiveFor(store.index.peek(`${rec.id}/${convId}`));
-    const sk = eff ? scopeKeyOf(eff, rec) : null;
-    return sk ? serialWake(`scope:${sk}`, fn) : fn();
+  // always does). A grain's wake also queues on its SCOPE's chain — the same
+  // key `flushScope` holds, R4: per (scope, PRINCIPAL), because each watcher
+  // has its own ledger (two watchers of one account never wait on each
+  // other, and neither can pass the other's cap) — so the check and the
+  // write of one wake can never straddle another's. Order: conversation,
+  // then scope (flushScope takes the scope alone), so no two chains wait on
+  // each other.
+  //
+  // THE ONE DOOR TO A BILLED CHANNEL TURN (R4 verify r4, 2026-09-27 — the
+  // fourth strike of "check-then-write across an await" in this campaign:
+  // R2's wake cap, S2's credit count, R5's token bucket, R4's receipt —
+  // every round a NEW billed-wake writer sat outside the serialized section).
+  // `billedWake(keys, fn)` is the ONLY way a section body (`wakeNow`,
+  // `flushScopeNow`, `receiptNow`) is entered: it takes the conversation's
+  // chain, then — resolved INSIDE that section, never before it — the
+  // watcher's scope chain, and runs `fn` there. The cap READ, the ledger
+  // RESERVATION (before the ladder) and its FINALIZE (after) all happen
+  // inside `fn`. A scope that MOVED while the wake waited for it (the owner
+  // re-grained the watcher) is re-taken under the new key, a few times, so
+  // the section always holds the chain of the ledger it reads.
+  // test-channels-engine ⑫ is the census: every ladder call with a channel
+  // reason and every ledger write is lexically inside a section body, and
+  // every section body is called only as `billedWake`'s `fn`.
+  const SCOPE_MOVED = Symbol('scope-moved');
+  const SCOPE_BOUNCE_MAX = 4;
+  function billedWake({ conv = null, scopeOf = null }, fn) {
+    const inner = async () => {
+      for (let bounce = 0; ; bounce++) {
+        const sk = typeof scopeOf === 'function' ? scopeOf() : null;
+        if (!sk) return fn({ conv, scope: null });
+        const r = await serialWake(`scope:${sk}`, () => (bounce < SCOPE_BOUNCE_MAX && scopeOf() !== sk ? SCOPE_MOVED : fn({ conv, scope: sk })));
+        if (r !== SCOPE_MOVED) return r;
+      }
+    };
+    return conv ? serialWake(conv, inner) : inner();
   }
+  /** The scope chain of watcher `pk` on this conversation, read NOW (null = the conversation grain, whose chain is its conversation's). */
+  const scopeFor = (rec, convId, pk) => { const eff = effectiveFor(store.index.peek(`${rec.id}/${convId}`)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; return item ? scopeKeyOf(item, rec) : null; };
+  function wake(rec, convId, freshHits, opts = {}) { return billedWake({ conv: `${rec.id}/${convId}`, scopeOf: () => scopeFor(rec, convId, opts.pk) }, () => wakeNow(rec, convId, freshHits, opts)); }
+  let wakeSeq = 0;
+  /** RESERVE THE LEDGER ROW BEFORE THE BILL (R4 verify r4, money): the
+   *  watcher's ledger takes the row (`reserved`) inside the section BEFORE
+   *  the ladder is asked; the ladder's answer then FINALIZES that same row
+   *  (`finalizeRow`, by id). A reservation that cannot be written is a HOLD
+   *  — no row, no bill (a store that could not take the row used to be billed
+   *  without bound: the write came after the ladder, so a failing write left
+   *  the cap at zero forever); a finalize that fails leaves the reservation
+   *  COUNTED (fail closed: one slot burnt, never one turn uncounted). */
+  async function reserveWake(rec, convId, item, row) {
+    const id = `${row.at}-${++wakeSeq}`;
+    try {
+      await store.index.update((ix) => {
+        const e2 = convId ? store.index.entry(rec.id, convId, { create: false }) : null;
+        const own = watcherRef(ix, rec, e2, item);
+        if (!own) throw new Error('the watcher is gone');
+        // R4 verify r5: {bootId, pid} rides the reservation so a crash's ghost
+        // (a reserved row never finalized, from a previous boot) is releasable.
+        own.stats.wakes = F.pruneLedger([...(Array.isArray(own.stats.wakes) ? own.stats.wakes : []), { ...row, id, reserved: true, bootId: BOOT_ID, pid: process.pid }], row.at);
+      });
+      return id;
+    } catch (err) { log.warn(`[channels] ${rec.id}${convId ? '/' + convId : ''}: the ledger could not take the wake's row — held, not billed: ${(err && err.message) || err}`); return null; }
+  }
+  /** The reserved row becomes the final one (found by id; appended if the ledger was pruned under it). */
+  function finalizeRow(own, id, row, t) {
+    const list = Array.isArray(own.stats.wakes) ? own.stats.wakes : [];
+    const i = list.findIndex((x) => x && x.id === id);
+    if (i >= 0) list[i] = { ...row, id }; else list.push({ ...row, id });
+    own.stats.wakes = F.pruneLedger(list, t);
+    own.stats.lastRefusal = null;
+  }
+  /** Is a group's target session STILL one of its live members? (a session that
+   *  left the group while its wake was in flight is not stashed for) */
+  function groupStillHas(w, cid) {
+    if (!w || w.principal.kind !== 'group') return true;
+    let live = []; try { live = liveSessions() || []; } catch { return false; }
+    return live.some((x) => x && x.cid === cid && Array.isArray(x.groups) && x.groups.includes(w.principal.id));
+  }
+  /** R4 verify r2: is the watcher `pk` of this conversation STILL in effect
+   *  (its access + notification rows, read fresh) and its target still
+   *  addressable? Asked AFTER the ladder's await, before a refused block is
+   *  filed into the principal's durable stash. R4 verify r3: TWO answers,
+   *  not one — `watched` (the rows are in effect) and `targetGone` (the group
+   *  MEMBER this wake was sent to is no longer a live member of the group).
+   *  A dead member is not a removed notification: the group still stands
+   *  and its hits are HELD for the next wake, which the round-robin routes
+   *  to another member. Read as one boolean, a member dying mid-wake dropped
+   *  the batch as "access removed" with four live members watching. */
+  const IN_EFFECT = Object.freeze({ watched: true, targetGone: false });
+  function stillInEffect(rec, convId, pk, target) {
+    const eff = effectiveFor(store.index.peek(`${rec.id}/${convId}`));
+    const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
+    if (!item) return { watched: false, targetGone: false };
+    return { watched: true, targetGone: !!(target && target.via === 'group' && !groupStillHas(item.watcher, target.cid)) };
+  }
+  /** The refused row's two words for the ledger: why + the closed `refused` code. */
+  const refusalWords = (still, r, unit) => (!still.watched
+    ? { why: `notification removed while the ${unit} was in flight`, refused: 'access-removed' }
+    : still.targetGone ? { why: `the group member woken left the group while the ${unit} was in flight — held for the next ${unit}`, refused: 'member-gone' }
+      : { why: String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null });
 
   /**
-   * THE WAKE — one delivery for one batch of hits. Says why (the rule strings
-   * ride the block and the log), is paced by the assignment's daily cap,
-   * goes through the ladder with `spendReason:'channel-message'` (the
-   * authorizer inside it charges the slot it authorized), and stashes what
-   * the ladder refuses. Records the attempt on the row's ledger either way.
-   * Reached ONLY through `wake()` / `flushPending()` (the serial section —
-   * the conversation's, and for an inherited grain its scope's too).
+   * THE WAKE — one delivery for one batch of hits, for ONE watcher (`pk`).
+   * Says why (the rule strings ride the block and the log), is paced by THAT
+   * watcher's daily cap, goes through the ladder with
+   * `spendReason:'channel-message'` (the authorizer inside it charges the
+   * slot it authorized), and stashes what the ladder refuses. Records the
+   * attempt on the conversation's history and the watcher's ledger either
+   * way. Reached ONLY through `wake()` / `flushPending()` (the serial
+   * section — the conversation's, and for an inherited grain its scope's).
    */
-  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, fromPending = false } = {}) {
+  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, fromPending = null, pk = null, batch = null } = {}) {
     const t = now();
     const en = store.index.peek(`${rec.id}/${convId}`);
     const eff = effectiveFor(en);
-    if (!en || !eff) return { ok: false, why: 'unassigned' };
-    const a = eff.assignment;
-    // the pace ledger of the GRAIN in effect (a conversation's own, or the
-    // account / pattern record's — never one per conversation of a scope)
-    const paceWakes = eff.source === 'conversation' ? (en.stats && en.stats.wakes) : (a.stats && a.stats.wakes);
+    const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
+    if (!en || !item) return { ok: false, why: 'not-watching' };
+    // R4 verify r4: a wake queued behind one in flight when the engine STOPPED
+    // is not started — its fresh hits are held for the next boot (two billed
+    // turns used to start after stop(), into a process on its way out)
+    if (stopped) { if (!fromPending) await keepPending(rec, convId, freshHits, elided, pk); return { ok: false, why: 'stopped', held: true }; }
+    const w = item.watcher;
+    // the pace ledger of THIS WATCHER (per principal, per grain — never one
+    // per conversation of a scope, never one shared by two watchers)
+    const paceWakes = (w.stats && w.stats.wakes) || [];
     // HELD HITS RIDE THE NEXT WAKE. A batch the pacing cap or an empty group
     // held is PENDING on the index; a later direct wake carries it along
     // (oldest first), so a hold is a delay and never a drop. Only the NEW
     // hits are re-held on a refusal — the carried ones are already there.
-    const carried = fromPending ? [] : (Array.isArray(en.pending) ? en.pending.map((p) => ({ record: p.record, why: p.why || [] })) : []);
-    const carriedElided = fromPending ? 0 : (Number(en.pendingElided) || 0);
-    const hits = [...carried, ...freshHits];
-    const newElided = elided;
-    elided = elided + carriedElided;
-    // what THIS wake takes out of `pending` — and nothing else (a hit that goes
-    // pending during the delivery, through a window's keepPending, is not ours)
-    const heldIds = new Set((fromPending ? freshHits : carried).map((h) => h.record && h.record.id).filter(Boolean));
-    const heldElided = fromPending ? newElided : carriedElided;
-    const target = resolveTarget(a);
+    const carried = fromPending || pendingOf(en, pk, eff);
+    const hits = fromPending ? [...freshHits] : [...carried.hits, ...freshHits];
+    const newElided = fromPending ? 0 : elided;
+    const allElided = fromPending ? carried.elided : elided + carried.elided;
+    const target = resolveTarget(w, batch);
+    // ONE BATCH NEVER BILLS ONE SESSION TWICE (R4): a session this batch
+    // already reached through another watcher (a named agent, a group's
+    // round-robin) is sent only the hits it has not seen — none left ⇒ no
+    // wake at all, the carried hits counted as delivered.
+    const already = batch && batch.got && target.cid ? batch.got.get(target.cid) : null;
+    if (already) {
+      const unseen = hits.filter((h) => !(h.record && already.has(h.record.id)));
+      if (!unseen.length && !allElided) {
+        await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); });
+        log.log(`[channels] ${rec.id}/${convId}: ${pk} — this batch already reached ${target.cid} through another notification; not woken twice`);
+        return { ok: true, deduped: true, cid: target.cid, n: 0 };
+      }
+      hits.splice(0, hits.length, ...unseen);
+    }
     if (!target.cid) {
-      if (!fromPending) await keepPending(rec, convId, freshHits, newElided);
-      await noteRefusal(rec, convId, target.why, t);
-      log.log(`[channels] ${rec.id}/${convId}: ${hits.length + elided} hit(s) held — ${target.why}`);
+      if (!fromPending) await keepPending(rec, convId, freshHits, newElided, pk);
+      await noteRefusal(rec, convId, target.why, t, item);
+      log.log(`[channels] ${rec.id}/${convId}: ${hits.length + allElided} hit(s) held for ${pk} — ${target.why}`);
       return { ok: false, why: target.why, held: true };
     }
     // PACING (layer one, §7.4) — a refusal here is a HOLD, never a drop.
-    const pace = F.paceVerdict(paceWakes, t, a.dailyWakeCap);
+    const pace = F.paceVerdict(paceWakes, t, F.digestCap(w));
     if (!pace.ok) {
-      if (!fromPending) await keepPending(rec, convId, freshHits, newElided);
-      await noteRefusal(rec, convId, pace.why, t);
-      log.log(`[channels] ${rec.id}/${convId}: ${hits.length + elided} hit(s) held — ${pace.why}`);
+      if (!fromPending) await keepPending(rec, convId, freshHits, newElided, pk);
+      await noteRefusal(rec, convId, pace.why, t, item);
+      log.log(`[channels] ${rec.id}/${convId}: ${hits.length + allElided} hit(s) held for ${pk} — ${pace.why}`);
       return { ok: false, why: pace.why, held: true };
     }
     const label = rec.label || rec.id;
     const title = en.title || convId;
     const whys = [...new Set(hits.flatMap((h) => h.why || []))];
-    const inherited = eff.source === 'conversation' ? null : { kind: eff.source, label: eff.source === 'pattern' ? F.patternSummary(a.pattern) : null };
+    const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
+    const others = othersFor(eff, pk);
     const text = digest
-      ? F.renderDigestBlock({ adapterLabel: label, title, convId, hits, elided, windowMinutes: windowMinutes || a.digestMinutes })
-      : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided, coalesced, inherited });
+      ? F.renderDigestBlock({ adapterLabel: label, title, convId, hits, elided: allElided, windowMinutes: windowMinutes || w.digestMinutes })
+      : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided: allElided, coalesced, inherited, others });
     const fromName = `Channels · ${label}`;
-    const n = hits.length + elided;
+    const n = hits.length + allElided;
     const cardText = `${title}: ${n} message${n === 1 ? '' : 's'} — ${F.whyText(whys)}${coalesced && coalesced.n > 1 ? ` (${coalesced.n} in ${Math.round(coalesced.seconds)} s, one wake)` : ''}`;
     // a direct wake that carries a window's held hits IS that window's
     // delivery — its timer would otherwise fire into an empty (or worse, a
     // refilled) pending and the panel would show a window that is over
-    if (!fromPending && heldIds.size) clearWakeTimer(`${rec.id}/${convId}`);
+    if (!fromPending && (carried.ids.size || carried.elided)) clearWakeTimer(`${rec.id}/${convId}|${pk}`);
+    // THE ROW BEFORE THE BILL (see reserveWake): no row ⇒ no ladder call ⇒ the hits are held; R3 (§23): it NAMES whom it reached (the first screen's tag "→ <name>"), bounded
+    const wk0 = { at: t, n, cid: target.cid, name: target.name ? String(target.name).slice(0, 80) : null, ok: true, lane: 'reserved', why: null, refused: null, whys: whys.slice(0, 8), digest: !!digest, grain: item.source, p: pk };
+    const resId = await reserveWake(rec, convId, item, wk0);
+    if (!resId) {
+      if (!fromPending) await keepPending(rec, convId, freshHits, newElided, pk).catch(() => {});
+      await noteRefusal(rec, convId, 'the ledger could not take the wake\'s row — held', t, item).catch(() => {});
+      return { ok: false, why: 'ledger-unwritable', held: true };
+    }
     let r = null;
     if (!deliver || typeof deliver.deliverToConversation !== 'function') {
       r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
@@ -3492,37 +3884,62 @@ function create(deps = {}) {
     }
     const ok = !!(r && r.ok);
     let stashed = false;
-    if (!ok && deliver && typeof deliver.stashFor === 'function') {
+    // R4 verify r2 (2026-09-27): THE LADDER IS AN AWAIT — re-ask whether this
+    // watcher is STILL in effect before its refused block is stashed for the
+    // principal's next turn. The owner removing A's access while A's wake sat
+    // inside the ladder (a spend hold, a remote peer-post) used to file the
+    // record's text into A's durable stash, drained hours later into a session
+    // that no longer held access. A refused wake for a principal that lost its
+    // notification at the last await is DROPPED by name, never stashed.
+    const still = ok ? IN_EFFECT : stillInEffect(rec, convId, pk, target);
+    const stillWatched = ok || still.watched;
+    // R4 verify r3: the member a GROUP wake was sent to died / left the group
+    // while the wake sat in the ladder — the group is still watching, so the
+    // hits are HELD (pending) for its next wake, never stashed for a session
+    // that is gone and never dropped as "access removed".
+    const targetGone = !ok && still.watched && still.targetGone;
+    if (!ok && !stillWatched) log.log(`[channels] ${rec.id}/${convId}: ${pk} lost its notification while the wake was in flight — the refused block is not stashed`);
+    if (targetGone) log.log(`[channels] ${rec.id}/${convId}: ${target.cid} left group ${pk} while its wake was in flight — ${hits.length + allElided} hit(s) held for the group's next wake`);
+    if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') {
       // The ladder's own durable stash: drained into the agent's next
       // context injection (renderMsgStash), so a refusal loses nothing.
       try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
+    if ((ok || stashed) && batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of hits) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
+    const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'wake');
+    const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
+    try { await store.index.update((ix) => {
+      const e2 = store.index.entry(rec.id, convId, { create: false });
+      if (!e2) return;
+      healP2(e2);
+      e2.stats.wakes.push({ ...wk, id: resId });
+      e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
+      e2.stats.lastRefusal = null;
+      const own = watcherRef(ix, rec, e2, item);
+      if (own) finalizeRow(own, resId, wk, t);
+      // the pending hits this wake CARRIED were delivered (or durably
+      // stashed) — clear those and only those; with no ladder wired at all
+      // they stay pending until one is
+      if (ok || stashed) clearCarried(e2, pk, eff, carried);
+      else if (!stillWatched) clearCarried(e2, pk, eff, carried);   // nobody waits for them any more (prunePending would drop them next)
+      else if (!fromPending) {
+        for (const h of freshHits) e2.pending.push({ record: h.record, why: h.why || [], at: t, for: pk });
+        if (Number(newElided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(newElided);
+      }
+      if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[w.principal.id] = target.cursor;
+    }); } catch (err) { log.warn(`[channels] ${rec.id}/${convId}: the ledger could not take the wake's outcome — the reservation stays counted: ${(err && err.message) || err}`); }
+    log.log(`[channels] wake ${rec.id}/${convId} → ${target.name || target.cid}: ${n} hit(s) (${F.whyText(whys)})${coalesced && coalesced.n > 1 ? `, ${coalesced.n} coalesced in ${Math.round(coalesced.seconds)} s` : ''}${digest ? ', digest' : ''} — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
+    notify([convId]);
+    return { ok, stashed, cid: target.cid, n, why: ok ? null : ((r && r.reason) || 'refused'), refused: ok ? null : refusalWords(still, r, 'wake').refused, held: targetGone || undefined };
+  }
+  async function noteRefusal(rec, convId, why, t, item = null) {
     await store.index.update((ix) => {
       const e2 = store.index.entry(rec.id, convId, { create: false });
       if (!e2) return;
       healP2(e2);
-      // R3 (§23): the wake NAMES whom it reached (the first screen's tag says "→ <name>"), bounded
-      const wk = { at: t, n, cid: target.cid, name: target.name ? String(target.name).slice(0, 80) : null, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: ok ? null : String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null, whys: whys.slice(0, 8), digest: !!digest, grain: eff.source };
-      e2.stats.wakes.push(wk);
-      e2.stats.wakes = F.pruneLedger(e2.stats.wakes, t);
-      e2.stats.lastRefusal = null;
-      if (eff.source !== 'conversation') { const own = ledgerOf(ix, eff, rec, e2); if (own) { if (!own.stats || typeof own.stats !== 'object') own.stats = {}; own.stats.wakes = F.pruneLedger([...(Array.isArray(own.stats.wakes) ? own.stats.wakes : []), wk], t); own.stats.lastRefusal = null; } }
-      // the pending hits this wake CARRIED were delivered (or durably
-      // stashed) — clear those and only those; with no ladder wired at all
-      // they stay pending until one is
-      if (ok || stashed) {
-        e2.pending = e2.pending.filter((p) => !(p.record && heldIds.has(p.record.id)));
-        e2.pendingElided = Math.max(0, (Number(e2.pendingElided) || 0) - heldElided);
-      }
-      else if (!fromPending) { for (const h of freshHits) e2.pending.push({ record: h.record, why: h.why || [], at: t }); e2.pendingElided += Number(newElided) || 0; if (e2.pending.length > PENDING_CAP) { e2.pendingElided += e2.pending.length - PENDING_CAP; e2.pending.splice(0, e2.pending.length - PENDING_CAP); } }
-      if (target.via === 'group' && target.cursor !== null) rotationsOf(ix)[a.principal.id] = target.cursor;
+      e2.stats.lastRefusal = { at: t, why: String(why || '').slice(0, 200) };
+      if (item) { const own = watcherRef(ix, rec, e2, item); if (own) own.stats.lastRefusal = { at: t, why: String(why || '').slice(0, 200) }; }
     });
-    log.log(`[channels] wake ${rec.id}/${convId} → ${target.name || target.cid}: ${n} hit(s) (${F.whyText(whys)})${coalesced && coalesced.n > 1 ? `, ${coalesced.n} coalesced in ${Math.round(coalesced.seconds)} s` : ''}${digest ? ', digest' : ''} — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
-    notify([convId]);
-    return { ok, stashed, cid: target.cid, n, why: ok ? null : ((r && r.reason) || 'refused'), refused: (r && r.refused) || null };
-  }
-  async function noteRefusal(rec, convId, why, t) {
-    await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); e2.stats.lastRefusal = { at: t, why: String(why || '').slice(0, 200) }; });
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -3623,22 +4040,24 @@ function create(deps = {}) {
     return ACL.effective(ctx, target, grantsOfConversation(en, target));
   }
   /** EVERY grant that applies to ONE conversation (2026-09-26, §8): its own
-   *  rows, the ACCOUNT-scope rows, and the rows a matching PATTERN assignment
-   *  implies — derived here at read time, never stored. */
+   *  rows, the ACCOUNT-scope rows, and the rows a matching PATTERN's ACCESS
+   *  list implies (R4: one per access row) — derived here at read time,
+   *  never stored. A conversation's own access rows before the migration
+   *  reached it (a legacy `assignment` with no reach row) grant too. */
   function grantsOfConversation(en, target = { key: en.key, adapterId: en.adapterId }) {
     const acct = (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === en.adapterId);
     const derived = [];
     for (const pa of patternsOf(en.adapterId)) {
-      if (!pa.principal || !F.matchConversation(pa.pattern, convFacts(en)).hit) continue;
-      try { derived.push(ACL.patternGrant({ principal: { kind: pa.principal.kind, id: pa.principal.id, name: pa.principal.name || null }, key: en.key, patternId: pa.id })); } catch { /* a malformed principal grants nothing */ }
+      if (!F.matchConversation(pa.pattern, convFacts(en)).hit) continue;
+      for (const r of F.grainOf(pa).access) {
+        try { derived.push(ACL.patternGrant({ principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null }, key: en.key, patternId: pa.id })); } catch { /* a malformed principal grants nothing */ }
+      }
     }
     return ACL.grantsForConversation(target, { entries: en.reachEntries || [], accountGrants: acct, patternGrants: derived });
   }
-  /** Does this assignment name the principal (itself or one of its groups)? */
-  function assignmentNames(a, ctx) {
-    if (!a || !a.principal || !ctx || ctx.kind !== 'agent') return false;
-    if (a.principal.kind === 'agent') return a.principal.id === ctx.id;
-    return Array.isArray(ctx.groups) && ctx.groups.includes(a.principal.id);
+  /** The groups a live session belongs to (a drafter's, for its receipt). */
+  function groupsOfSession(cid) {
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.groups) ? s.groups.slice() : []; } catch { return []; }
   }
   function convFor(adapterId, convId) {
     const en = store.index.snapshot().conversations[`${adapterId}/${convId}`] || null;
@@ -3793,13 +4212,18 @@ function create(deps = {}) {
     if (ctx && ctx.kind === 'agent' && !ACL.canSee(reachFor(ctx, rec, en).level)) return ACL.notFound();
     if (rec.enabled === false) return { ok: false, code: 'send-not-available', error: `${rec.label || rec.id} is disabled` };
     let who = sendIdentityFor(rec, en, t);
+    // the entry AS THIS PROPOSAL KNOWS IT: with the caps it resolved below
+    // (R4 verify — the authority clamp read the snapshot taken BEFORE the
+    // refresh, so the first direct send on a never-resolved conversation was
+    // downgraded to review with reason `authority`, the second went direct)
+    let enNow = en;
     if (!who.as && (who.why === 'unknown' || who.why === 'stale')) {
       // A proposal is a better refresh trigger than a render (§4's second
       // trigger, applied where the answer decides a real message): resolve
       // ONCE, then re-ask. A conversation whose caps were never resolved has none cached.
       let fresh = null;
       try { fresh = await refreshConvCaps(adapterId, convId); } catch (err) { log.warn(`[channels] convCaps refresh at propose failed: ${(err && err.message) || err}`); }
-      if (fresh) who = sendIdentityFor(rec, { ...en, convCaps: fresh }, now());
+      if (fresh) { enNow = { ...en, convCaps: fresh }; who = sendIdentityFor(rec, enNow, now()); }
     }
     if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this conversation (${who.why})`, why: who.why };
     const own = !!(input && input.direct === true) && (!ctx || ctx.kind === 'user');
@@ -3810,7 +4234,13 @@ function create(deps = {}) {
     // agent's is its assignment's EFFECTIVE authority (clamped), else draft.
     let authority = 'draft';
     if (!ctx || ctx.kind === 'user') authority = 'send';
-    else { const effA = effectiveFor(en); if (effA && assignmentNames(effA.assignment, ctx)) authority = F.effectiveAuthority(effA.assignment, authorityCapsFor(rec, en, t)).authority; }
+    else {
+      // R4: the authority of the caller's OWN access rows in effect here (the
+      // agent's, or a group of its) — the widest one, clamped by both caps
+      const effA = effectiveFor(en);
+      const capsA = authorityCapsFor(rec, enNow, t);
+      if (effA && effA.access.some((x) => F.rowNames(x.row, ctx) && F.effectiveAuthority(x.row, capsA).authority === 'send')) authority = 'send';
+    }
     const decision = own
       ? { mode: 'direct', reasons: [], detail: { ownMessage: true } }
       : P.decideOutbound({ channelPolicy: policyFor(rec, en), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
@@ -3854,6 +4284,157 @@ function create(deps = {}) {
     return { ok: true, proposal: proposalView(fresh), decision };
   }
 
+  /** The ACCOUNT grain alone, as `effectiveGrants` answers it (a NEW
+   *  conversation has no facts for a rule to match, so only the account's
+   *  own rows apply to a composed message). */
+  function effectiveForAccount(adapterId) { return F.effectiveGrants({ account: accountGrainOf(adapterId) }, {}); }
+  /** The account-scope grants (reach to the WHOLE account). */
+  function accountScopeGrants(adapterId) { return (store.index.table('accountGrants') || []).filter((g) => g && g.scope && g.scope.kind === 'adapter' && g.scope.id === adapterId); }
+  const COMPOSE_NOT_FOUND = 'no such account (not found, or you have no access to the whole account) — `vibespace-channels status` shows your access';
+  /**
+   * COMPOSE A NEW MESSAGE (B-6acc, the owner 2026-09-26: "给我一个agent使用
+   * 我的 gmail 的能力，让它能读取和发送邮件"). A NEW conversation, where
+   * `reply` only answers inside one. Everything a reply rides applies:
+   * REACH FIRST — an agent needs access to the WHOLE account (an account
+   * access row, or a hand-written account-scope grant), else the uniform
+   * not-found; the adapter must DECLARE `caps.compose` (Lark does not —
+   * `compose-not-available`, by name); the account's send identity is asked
+   * NOW (`composeCaps` — Gmail without a sending scope answers
+   * `send-scope-not-granted` and NOTHING is created); the SAME outbox policy
+   * (the account's, else the adapter's default — review; direct only when it
+   * says so AND the caller's account access holds `send` AND no guard fires:
+   * links, attachments, off-hours), the same honesty line, the same audit,
+   * the same receipt. The proposal is keyed `<account>/~compose/<id>` until
+   * the vendor answers with the new thread's id.
+   */
+  async function compose(ctx, adapterId, input, guards = {}) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    const agent = !!(ctx && ctx.kind === 'agent');
+    if (!rec) return agent ? { ok: false, code: 'not-found', error: COMPOSE_NOT_FOUND } : { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
+    if (agent && !ACL.canSee(ACL.effective(ctx, { key: '', adapterId: rec.id }, accountScopeGrants(rec.id)).level)) return { ok: false, code: 'not-found', error: COMPOSE_NOT_FOUND };
+    if (rec.enabled === false) return { ok: false, code: 'send-not-available', error: `${rec.label || rec.id} is disabled`, why: 'disabled' };
+    const c = registry.capsOf(rec.kind);
+    if (!(c.compose === true && (c.sendAs || []).length)) return { ok: false, code: 'compose-not-available', error: `${rec.label || rec.id} cannot start a new conversation from here — its adapter declares no compose; reply inside an existing conversation instead` };
+    const v = P.validateCompose(input);
+    if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error, ...(v.why ? { why: v.why } : {}) };
+    let who = null;
+    try {
+      const cc = await adapterFor(rec).adapter.composeCaps();
+      const as = Array.isArray(cc.sendAs) ? cc.sendAs : [];
+      who = as.includes('user') ? { as: 'user', why: null } : as.includes('bot') ? { as: 'bot', why: null } : { as: null, why: cc.why || 'unknown' };
+    } catch (err) { who = { as: null, why: (err && err.detail && err.detail.why) || (err && err.code) || 'unknown' }; }
+    if (!who.as) return { ok: false, code: 'send-not-available', error: `sending is not available on this account (${who.why})`, why: who.why };
+    const t = now();
+    // the authority the drafter holds ON THE ACCOUNT: the user's own is
+    // `send`; an agent's is its account access rows' (itself or a group of
+    // its), clamped by the account's two caps — else draft
+    let authority = 'draft';
+    if (!agent) authority = 'send';
+    else {
+      const effA = effectiveForAccount(rec.id);
+      const capsA = { offersSend: true, sendWhy: null, policyRequiresReview: policyRequiresReview(rec, null) };
+      if (effA && effA.access.some((x) => F.rowNames(x.row, ctx) && F.effectiveAuthority(x.row, capsA).authority === 'send')) authority = 'send';
+    }
+    const decision = P.decideOutbound({ channelPolicy: policyFor(rec, null), guards: guardsFromSettings(), proposal: { ...v.proposal, authority }, now: t });
+    const drafter = agent ? { kind: 'agent', id: ctx.id, name: ctx.name || null } : { kind: 'user', id: null, name: null };
+    let created = null;
+    await store.outbox.update((ob) => {
+      const id = store.outbox.nextId();
+      const cp = v.proposal.compose;
+      created = ob.proposals[id] = {
+        id, adapterId, convId: null, key: `${adapterId}/~compose/${id}`, title: cp.subject,
+        compose: { to: cp.to.slice(), cc: cp.cc.slice(), subject: cp.subject },
+        text: v.proposal.text, originalText: v.proposal.text, replyTo: null, why: v.proposal.why, attachments: v.proposal.attachments,
+        draftedBy: drafter, authority, at: t, updatedAt: t, state: 'proposed',
+        policy: { mode: decision.mode, reasons: decision.reasons, detail: decision.detail },
+        sendAs: who.as, identity: identityFor(rec, who.as),
+        ttlMs: P.PROPOSAL_TTL_MS, awaitingSince: null, edited: false, approvedBy: null, reason: null, result: null, receipt: null, receiptDelivery: null,
+        history: [{ state: 'proposed', at: t, by: drafter.kind }],
+      };
+    });
+    auditOutbox(created, 'propose', { mode: decision.mode, reasons: decision.reasons, compose: true });
+    if (decision.mode === 'direct') {
+      await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
+      await sendNow(created.id);
+    } else {
+      await transition(created.id, 'awaiting-approval', 'policy');
+      await composePointerSync(adapterId);
+      notifyOutbox([created.id]);
+    }
+    const fresh = store.outbox.snapshot().proposals[created.id];
+    return { ok: true, proposal: proposalView(fresh), decision };
+  }
+  /** The For-you pointer for COMPOSED messages awaiting approval — one per
+   *  account (a composed message has no conversation to hang one on), its
+   *  id on the account record, retracted by this producer when the last one
+   *  leaves `awaiting-approval`. */
+  async function composePointerSync(adapterId) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    if (!rec) return;
+    const awaiting = proposalsFor().filter((p) => p.adapterId === adapterId && p.compose && p.state === 'awaiting-approval');
+    const label = rec.label || rec.id;
+    if (awaiting.length) {
+      if (rec.composeTodoId || !userTodos || typeof userTodos.add !== 'function') return;
+      const latest = awaiting[0];
+      const who = latest.draftedBy && latest.draftedBy.kind === 'agent' ? (latest.draftedBy.name || latest.draftedBy.id) : null;
+      const subject = String((latest.compose && latest.compose.subject) || '').slice(0, 160);
+      const to = ((latest.compose && latest.compose.to) || []).join(', ').slice(0, 200);
+      try {
+        const item = userTodos.add(INBOX_KEY, {
+          origin: 'channels', urgency: 'normal', by: 'agent', sessionName: 'Channels',
+          text: `New messages awaiting approval on ${label}`,
+          detail: `${awaiting.length} new message(s) awaiting your approval on ${label}.\nLatest${who ? ` (${who})` : ''}: to ${to} — "${subject}"\n\nOpen the Outbox (rail → Channels → Outbox) to approve, edit or reject.`,
+          i18n: {
+            text: { key: i18nKey('New messages awaiting approval on {account}'), params: { account: label } },
+            detail: [
+              { key: i18nKey('{n} new message(s) awaiting your approval on {account}.'), params: { n: awaiting.length, account: label } },
+              { key: i18nKey('Latest: to {to} — "{subject}"'), params: { to, subject } },
+              { key: i18nKey('Open the Outbox (rail → Channels → Outbox) to approve, edit or reject.') },
+            ],
+            source: INBOX_SOURCE,
+          },
+        });
+        if (item && item.id) await store.adapters.update(() => { rec.composeTodoId = item.id; });
+      } catch (e) { log.warn(`[channels] ${adapterId}: could not file the compose approval pointer (${(e && e.message) || e}) — the Outbox badge still shows it`); }
+      return;
+    }
+    if (!rec.composeTodoId) return;
+    const id = rec.composeTodoId;
+    await store.adapters.update(() => { rec.composeTodoId = null; });
+    if (!userTodos || typeof userTodos.get !== 'function') return;
+    try { const it = userTodos.get(id); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(id, 'done', RESOLVED_BY); } catch {}
+  }
+  /**
+   * THE AGENT'S SEARCH (R4): the owner's search (`search`, off the event
+   * loop, byte-capped) over every account the caller can see anything of —
+   * each result filtered by REACH, so a hit in a conversation the agent
+   * cannot see is simply absent (no oracle). Never a vendor call.
+   */
+  async function searchFor(ctx, q, { adapterId = null, limit = 50 } = {}) {
+    const query = String(q || '').trim();
+    if (query.length < 2) return { ok: false, code: 'bad-request', error: 'a search needs at least 2 characters' };
+    const n = Math.min(200, Math.max(1, Number(limit) || 50));
+    const results = [];
+    let truncated = false;
+    for (const rec of adapterRecords().adapters) {
+      if (rec.enabled === false || (adapterId && rec.id !== adapterId)) continue;
+      const visible = new Map();
+      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level)) visible.set(en.id, en.title || en.id);
+      if (!visible.size) continue;
+      // only the VISIBLE conversations' logs are read at all
+      const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
+      truncated = truncated || !!r.truncated;
+      for (const x of r.results) {
+        if (!visible.has(x.convId)) continue;
+        results.push({ key: `${rec.id}/${x.convId}`, adapterId: rec.id, adapter: rec.label || rec.id, convId: x.convId, title: visible.get(x.convId), at: x.at || null, author: x.author || null, text: String(x.text || '').slice(0, 400), vendorId: x.vendorId || null });
+        if (results.length >= n) break;
+      }
+      if (results.length >= n) { truncated = true; break; }
+    }
+    results.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+    return { ok: true, results, truncated };
+  }
+
   /**
    * APPROVE (maybe edited). THE UNCONDITIONAL RE-RESOLUTION (§9.2 r4): a
    * proposal may have waited 24 h; the conversation may have kicked the user
@@ -3876,12 +4457,17 @@ function create(deps = {}) {
       const v = P.validateProposal({ ...p0, text });
       if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error };
     }
-    const { en, rec } = convFor(p0.adapterId, p0.convId);
+    const composing = !!p0.compose && !p0.result;
+    const cf0 = composing ? { en: null, rec: adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null } : convFor(p0.adapterId, p0.convId);
+    const { en, rec } = cf0;
     const t = now();
     let cc = null, ccErr = null;
-    if (rec) { try { cc = await refreshConvCaps(p0.adapterId, p0.convId); } catch (err) { ccErr = (err && err.message) || String(err); } }
+    // a COMPOSED message re-asks the ACCOUNT (`composeCaps`), a reply its conversation
+    if (rec) { try { cc = composing ? await adapterFor(rec).adapter.composeCaps() : await refreshConvCaps(p0.adapterId, p0.convId); } catch (err) { ccErr = (err && err.message) || String(err); } }
     const c = rec ? registry.capsOf(rec.kind) : null;
-    const stillOffered = !!(rec && en && cc && c && caps.offers(c, cc, p0.sendAs === 'bot' ? 'send-as-bot' : 'send-as-user', t).offered);
+    const stillOffered = composing
+      ? !!(rec && cc && Array.isArray(cc.sendAs) && cc.sendAs.includes(p0.sendAs))
+      : !!(rec && en && cc && c && caps.offers(c, cc, p0.sendAs === 'bot' ? 'send-as-bot' : 'send-as-user', t).offered);
     if (!stillOffered) {
       const why = !rec ? 'adapter no longer exists' : ccErr ? `convCaps could not be resolved (${ccErr})` : (cc && cc.why) || 'not-offered';
       await transition(id, 'failed', 'recheck', (p) => {
@@ -3892,7 +4478,7 @@ function create(deps = {}) {
       auditOutbox(p1, 'refused-at-approval', { code: 'send-not-available', why });
       await receipt(id);
       await pointerSync(p1.key);
-      notifyOutbox([id]); notify([p1.convId]);
+      notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
       log.log(`[channels] outbox ${id}: approval refused — ${why}`);
       return { ok: false, code: 'send-not-available', error: `cannot send now: ${why}`, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
     }
@@ -3923,7 +4509,7 @@ function create(deps = {}) {
     auditOutbox(p, 'reject', { reason: p.reason });
     await receipt(id);
     await pointerSync(p.key);
-    notifyOutbox([id]); notify([p.convId]);
+    notifyOutbox([id]); notify(p.convId ? [p.convId] : []);
     return { ok: true, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
   }
 
@@ -3958,7 +4544,10 @@ function create(deps = {}) {
       // leaves `reconcile()` something to ask about (§9.4).
       const onHandle = async (h) => { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.sendHandle = h; }); };
       sendLeft.add(id);
-      try { r = await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle }); }
+      // B-6acc: a COMPOSED message starts a NEW conversation through the
+      // adapter's declared `compose` (the same idempotency key, the same
+      // handle / lost-answer rules as a reply)
+      try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle }); }
       catch (err) {
         r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
         if (err && err.message && !r.message) r.message = err.message;
@@ -3973,7 +4562,13 @@ function create(deps = {}) {
     let to, patch;
     if (r && r.ok) {
       to = 'sent';
-      patch = (q) => { q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null }; q.reason = null; };
+      patch = (q) => {
+        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}) };
+        q.reason = null;
+        // the NEW conversation's id (the thread the vendor answered with) —
+        // the card's link, the receipt; the index row arrives with the next pass
+        if (q.compose && r.threadId && !q.convId) q.convId = String(r.threadId);
+      };
     } else if (lost) {
       to = 'unknown';
       patch = (q) => { q.reason = `outcome unknown: ${threw ? 'the adapter threw mid-send' : 'the request left and the answer was lost'} (${(r.detail && r.detail.message) || r.message || r.code}); NOT retried automatically — check the conversation on the platform, or press Check outcome`; q.failure = { code: r.code || 'vendor-error', detail: r.detail || null, at: t }; };
@@ -3989,8 +4584,8 @@ function create(deps = {}) {
     if (to === 'unknown') await speakUnknown(p1);
     else await receipt(id);
     await pointerSync(p1.key);
-    notifyOutbox([id]); notify([p1.convId]);
-    log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
+    notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
+    log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId || (p1.compose ? `(new: ${(p1.compose.to || []).join(', ')})` : '')}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
     sendLeft.delete(id);
     return { ok: to === 'sent', state: to };
   }
@@ -4062,7 +4657,7 @@ function create(deps = {}) {
     let answer;
     try {
       const e = adapterFor(rec);
-      answer = await e.adapter.reconcile(p.convId, { idemKey: p.id, sentAt: p.attemptAt || p.updatedAt || p.at, text: (p.wire && p.wire.text) || p.text, replyTo: p.replyTo, as: p.sendAs, handle: p.sendHandle || null });
+      answer = await e.adapter.reconcile(p.convId, { idemKey: p.id, sentAt: p.attemptAt || p.updatedAt || p.at, text: (p.wire && p.wire.text) || p.text, replyTo: p.replyTo, as: p.sendAs, handle: p.sendHandle || null, ...(p.compose ? { compose: p.compose } : {}) });
     } catch (err) {
       answer = { unknown: true, reason: `reconcile threw: ${(err && err.message) || err}`, detail: { threw: true, code: (err && err.code) || null } };
     }
@@ -4072,7 +4667,7 @@ function create(deps = {}) {
       await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) stamp(q); });
       const p1 = store.outbox.snapshot().proposals[id];
       auditOutbox(p1, 'reconcile-outcome', { answer: 'unknown', why: v.reason || null, n });
-      notifyOutbox([id]); notify([p1.convId]);
+      notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
       log.log(`[channels] outbox ${id}: reconcile #${n} — still unknown${v.reason ? ` (${v.reason})` : ''}`);
       return { ok: true, resolved: false, state: 'unknown', answer: 'unknown', reason: v.reason || null, proposal: proposalView(p1) };
     }
@@ -4088,7 +4683,7 @@ function create(deps = {}) {
     await retractUnknownItem(p1);
     await receipt(id);
     await pointerSync(p1.key);
-    notifyOutbox([id]); notify([p1.convId]);
+    notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
     log.log(`[channels] outbox ${id}: reconcile #${n} → ${v.to}${v.reason ? ` — ${v.reason}` : ''}`);
     return { ok: true, resolved: true, state: v.to, answer: v.answer, proposal: proposalView(p1) };
   }
@@ -4109,7 +4704,7 @@ function create(deps = {}) {
       auditOutbox(p1, 'outcome', { code: 'lost-at-boot', vendorMessageId: null, lost: true });
       await speakUnknown(p1);
       await pointerSync(p1.key);
-      notifyOutbox([p.id]); notify([p1.convId]);
+      notifyOutbox([p.id]); notify(p1.convId ? [p1.convId] : []);
       log.warn(`[channels] outbox ${p.id}: was 'sending' when the previous process stopped — now unknown (Check outcome settles it)`);
     }
     return stuck.length;
@@ -4129,9 +4724,53 @@ function create(deps = {}) {
     await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receipt = rc; });
     if (!p.draftedBy || p.draftedBy.kind !== 'agent' || !p.draftedBy.id) return rc;
     const cid = p.draftedBy.id;
-    const { en, rec } = convFor(p.adapterId, p.convId);
-    const effR = en ? effectiveFor(en) : null;
-    const wake = !!(effR && effR.assignment.receiptWake === true && assignmentNames(effR.assignment, { kind: 'agent', id: cid, groups: [] }));
+    const cf = p.convId ? convFor(p.adapterId, p.convId) : { en: null, rec: null };
+    const en = cf.en;
+    const rec = cf.rec || adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
+    // R4: the drafter's OWN watcher in effect here opted in — the drafter
+    // itself or a group it belongs to (the drafter's groups are the live
+    // session's; the pre-R4 path passed none, so a group's opt-in never fired)
+    const drafterCtx = { kind: 'agent', id: cid, groups: groupsOfSession(cid) };
+    const optInOf = (eff) => (eff ? eff.watchers.find((x) => x.watcher.receiptWake === true && F.rowNames(x.watcher, drafterCtx)) || null : null);
+    // R4 verify r2 (2026-09-27, money): A RECEIPT WAKE IS A BILLED TURN AND
+    // COUNTS AGAINST THE WATCHER'S DAILY CAP LIKE ANY OTHER. An agent that
+    // drafted five proposals (free) and had them rejected / expired got five
+    // billed receipt wakes under a cap of 2, none on its ledger, and the next
+    // fresh record made a sixth. Over the cap the receipt still reaches the
+    // drafter — with `noWake` (it rides the next turn), refused by name on the
+    // watcher's ledger — and a delivered receipt wake is written to the ledger.
+    // R4 verify r3 (money): THE RECEIPT QUEUES ON THE WATCHER'S OWN CHAINS
+    // (the conversation's, then its scope's — the order every wake takes), and
+    // reads the ledger INSIDE that section. Read before the ladder's await and
+    // written after it, five CONCURRENT rejects (five HTTP requests, the
+    // owner clearing an outbox) each passed the same stale ledger: five billed
+    // receipt wakes under a cap of 2, and a wake in flight beside a receipt
+    // made two billed turns under a cap of 1 — the class r2 closed for wakes.
+    // R4 verify r4: the opt-in that names the chain is READ INSIDE the
+    // conversation's section (a watcher opting in between an outside read and
+    // the section ran the receipt's cap read outside every chain); a receipt
+    // nobody opted in to runs inside the conversation's section alone.
+    const key = p.convId ? `${p.adapterId}/${p.convId}` : null;
+    const scopeOf = () => { const en2 = key ? store.index.peek(key) : null; const eff2 = en2 ? effectiveFor(en2) : (p.compose && rec ? effectiveForAccount(rec.id) : null); const o = optInOf(eff2); return o && rec ? scopeKeyOf(o, rec) : null; };
+    return billedWake({ conv: key, scopeOf }, () => receiptNow(id, p, rc, cid, rec, key, optInOf));
+  }
+  /** The receipt's delivery — paced by the opted-in watcher's ledger read
+   *  HERE (inside its serial section), the ledger written after the ladder. */
+  async function receiptNow(id, p, rc, cid, rec, key, optInOf) {
+    const en = key ? store.index.peek(key) : null;
+    const effR = en ? effectiveFor(en) : (p.compose && rec ? effectiveForAccount(rec.id) : null);
+    const optIn = optInOf(effR);
+    const tR = now();
+    const pace = optIn ? F.paceVerdict((optIn.watcher.stats && optIn.watcher.stats.wakes) || [], tR, F.digestCap(optIn.watcher)) : { ok: true };
+    let wake = !!optIn && pace.ok && !stopped;
+    // THE ROW BEFORE THE BILL (see reserveWake): a receipt wake whose row cannot be written rides the next turn instead
+    const wk0 = wake ? { at: tR, n: 1, cid, ok: true, lane: 'reserved', why: null, refused: null, whys: [], digest: false, grain: optIn.source, p: pkOf(optIn.watcher.principal), receipt: id } : null;
+    const resId = wake ? await reserveWake(rec, en ? p.convId : null, optIn, wk0) : null;
+    if (wake && !resId) { wake = false; log.log(`[channels] receipt ${id} → ${cid}: the ledger could not take the wake's row — delivered without a wake`); }
+    if (optIn && !pace.ok) {
+      await store.index.update((ix) => { const own = watcherRef(ix, rec, en ? store.index.entry(p.adapterId, p.convId, { create: false }) : null, optIn); if (own) own.stats.lastRefusal = { at: tR, why: `receipt: ${String(pace.why || '').slice(0, 180)}` }; });
+      log.log(`[channels] receipt ${id} → ${cid}: the watcher's cap holds — ${pace.why}; delivered without a wake`);
+    }
     const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text });
     const fromName = 'Channels · Outbox';
     const cardText = `Receipt: proposal ${p.id} ${rc.status}${rc.reason ? ` — ${String(rc.reason).slice(0, 160)}` : ''}`;
@@ -4146,6 +4785,17 @@ function create(deps = {}) {
     }
     const delivery = { at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String((r && r.reason) || 'refused').slice(0, 200) };
     await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receiptDelivery = delivery; });
+    if (wake) {
+      // the receipt WOKE the drafter (or was refused): the reserved row on the opted-in watcher's ledger becomes the outcome (and the conversation's history takes it when it woke), like every wake
+      const wk = { ...wk0, ok: !!delivery.ok, lane: delivery.lane, why: delivery.why, refused: delivery.refused };
+      try { await store.index.update((ix) => {
+        const e2 = en ? store.index.entry(p.adapterId, p.convId, { create: false }) : null;
+        if (e2 && delivery.ok) { healP2(e2); e2.stats.wakes = F.pruneLedger([...e2.stats.wakes, { ...wk, id: resId }], tR); }
+        const own = watcherRef(ix, rec, e2, optIn);
+        if (own) finalizeRow(own, resId, wk, tR);
+      }); } catch (err) { log.warn(`[channels] receipt ${id}: the ledger could not take the wake's outcome — the reservation stays counted: ${(err && err.message) || err}`); }
+      if (en) notify([p.convId]);
+    }
     log.log(`[channels] receipt ${id} → ${cid}: ${delivery.ok ? `delivered via ${delivery.lane}` : (stashed ? 'stashed for the next turn' : 'not delivered')}${delivery.why ? ` (${delivery.why})` : ''}`);
     return rc;
   }
@@ -4161,7 +4811,7 @@ function create(deps = {}) {
       auditOutbox(store.outbox.snapshot().proposals[p.id], 'expire');
       await receipt(p.id);
       await pointerSync(p.key);
-      notifyOutbox([p.id]); notify([p.convId]);
+      notifyOutbox([p.id]); notify(p.convId ? [p.convId] : []);
     }
     return due.length;
   }
@@ -4176,6 +4826,7 @@ function create(deps = {}) {
    * the Outbox window; it never takes the proposal down with it.
    */
   async function pointerSync(key) {
+    if (typeof key === 'string' && key.includes('/~compose/')) return composePointerSync(key.slice(0, key.indexOf('/~compose/')));
     const en = store.index.snapshot().conversations[key];
     if (!en) return;
     const awaiting = proposalsFor(key).filter((p) => p.state === 'awaiting-approval');
@@ -4340,13 +4991,23 @@ function create(deps = {}) {
       if (reach.level === 'hidden') continue;
       const c = registry.capsOf(rec.kind);
       const who = sendIdentityFor(rec, en, t);
+      // R4: THE TWO FACTS SEPARATELY — the caller's access in effect here
+      // (the finest grain naming it or its group; its authority clamped) and
+      // whether a watcher of its wakes it
       const effL = effectiveFor(en);
-      const mine = !!effL && assignmentNames(effL.assignment, ctx);
+      const acc = effL ? effL.access.filter((x) => F.rowNames(x.row, ctx)) : [];
+      const wat = effL ? effL.watchers.filter((x) => F.rowNames(x.watcher, ctx)) : [];
+      const capsL = acc.length ? authorityCapsFor(rec, en, t) : null;
+      const authority = acc.length ? (acc.some((x) => F.effectiveAuthority(x.row, capsL).authority === 'send') ? 'send' : 'draft') : null;
       out.push({
         key: en.key, adapterId: en.adapterId, adapter: rec.label || rec.id, id: en.id, title: en.title || en.id, kind: en.kind,
         level: reach.level, unread: en.unread || 0, lastAt: en.lastAt || null, polledAt: (en.lane && en.lane.lastPollAt) || null,
         canSend: !!who.as, sendWhy: who.why, sendAs: who.as, identityMarking: c.identityMarking,
-        policy: policyFor(rec, en).mode, assigned: mine, assignedVia: mine ? effL.source : null, authority: mine ? F.effectiveAuthority(effL.assignment, authorityCapsFor(rec, en, t)).authority : null,
+        policy: policyFor(rec, en).mode,
+        access: acc.length ? { authority, via: acc[0].source, as: acc[0].row.principal.kind } : null,
+        watched: wat.length ? { notify: wat[0].watcher.notify, mode: wat[0].watcher.mode, via: wat[0].source, as: wat[0].watcher.principal.kind } : null,
+        // the pre-R4 names (a CLI older than this server reads them)
+        assigned: acc.length > 0, assignedVia: acc.length ? acc[0].source : null, authority,
         awaiting: proposalsFor(en.key).filter((p) => p.state === 'awaiting-approval' && p.draftedBy && p.draftedBy.id === ctx.id).length,
       });
     }
@@ -4409,163 +5070,350 @@ function create(deps = {}) {
   }
 
   // ── the verbs ─────────────────────────────────────────────────────────────
-  /** ASSIGN (or `null` to unassign). Assignment IMPLIES REACH as an explicit
-   *  grant with `origin:'assignment'` (§7.3 / §8): unassigning removes ONLY
-   *  that row, never a grant the user wrote by hand. */
+  // R4 (2026-09-27): TWO OPERATIONS PER GRAIN, ACCESS FIRST. `setAccess`
+  // writes a grain's ACCESS list (who may see and act, with an authority),
+  // `setWatchers` its WATCHERS list (who is woken, and on what). A watcher's
+  // principal must hold access at the same grain — refused by name
+  // otherwise (`watcher-needs-access`); removing a principal's access removes
+  // its watcher in the same write. `setGrain` writes both (and a rule's
+  // pattern) in ONE index update. The pre-split single-assignment verbs
+  // (`setAssignment` / `setScopeAssignment`) are the COMPATIBILITY WRITE:
+  // one principal ⇒ one access row + one watcher row, replacing both lists.
+  // Reach follows access: one visible grant per access row (origin
+  // `access`) — a conversation's on its entry, the account's in
+  // `accountGrants`, a rule's derived at read time — and a removed row takes
+  // exactly its own grant with it, never a hand-written one.
+  /** Where a grain lives + the two caps `authority:'send'` is checked
+   *  against there. `grain` = `{kind:'conversation', convId}` |
+   *  `{kind:'account'}` | `{kind:'pattern', id?}` (no id = a NEW rule). */
+  function grainSite(adapterId, grain, t = now()) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+    const kind = grain && grain.kind;
+    if (kind === 'conversation') {
+      if (!rec || !known(adapterId, grain.convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
+      const key = `${adapterId}/${grain.convId}`;
+      const en = store.index.peek(key);
+      return { ok: true, rec, kind, key, id: key, convId: grain.convId, caps: authorityCapsFor(rec, en, t), holder: en, scope: { kind: 'conversation', id: key } };
+    }
+    if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
+    const c = registry.capsOf(rec.kind);
+    const scopeCaps = { offersSend: (c.sendAs || []).length > 0, sendWhy: (c.sendAs || []).length ? null : 'read-only-adapter', policyRequiresReview: policyRequiresReview(rec, null) };
+    if (kind === 'account') return { ok: true, rec, kind, id: adapterId, caps: scopeCaps, holder: accountGrainOf(adapterId), scope: { kind: 'adapter', id: adapterId } };
+    if (kind === 'pattern') {
+      if (grain.id) {
+        const pa = patternById(grain.id);
+        if (!pa || pa.adapterId !== adapterId) return { ok: false, code: 'not-found', error: 'no such rule' };
+        return { ok: true, rec, kind, id: pa.id, caps: scopeCaps, holder: pa, scope: { kind: 'pattern', id: pa.id } };
+      }
+      const id = `pa-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+      return { ok: true, rec, kind, id, caps: scopeCaps, holder: null, isNew: true, scope: { kind: 'pattern', id } };
+    }
+    return { ok: false, code: 'bad-request', error: 'grain.kind must be conversation|account|pattern' };
+  }
+  /** The id a watcher's INLINE filter is stored under — minted BEFORE the
+   *  validator runs (the 2026-09-26 hotfix: a filtered row carrying its
+   *  filter was refused for the very id this request supplies). One per
+   *  (grain, principal); a watcher kept by the same principal keeps its id. */
+  function inlineFilterIdFor(site, pk, prevWatcher) {
+    if (prevWatcher && prevWatcher.filterId && /^f-/.test(prevWatcher.filterId)) return prevWatcher.filterId;
+    return site.kind === 'conversation' ? `f-${site.key}|${pk}` : `f-${site.kind}-${site.id}|${pk}`;
+  }
+  const estimateOf = (e, t) => (e && typeof e === 'object' ? { matchedPerDay: Number(e.matchedPerDay) || 0, totalPerDay: Number(e.totalPerDay) || 0, windowDays: Number(e.windowDays) || 7, sampled: !!e.sampled, truncated: !!e.truncated, conversations: Number(e.conversations) || 0, at: t } : null);
+  /**
+   * WRITE ONE GRAIN — `patch` = `{access?, watchers?, pattern?}` (an absent
+   * key keeps the stored list). Validates the ACCESS list, then every
+   * watcher against the resulting access (a watcher whose principal lost its
+   * access goes with it), mints inline filter ids first, applies the diff by
+   * principal in ONE index update (a kept row keeps its createdAt, its
+   * estimate and — a watcher — its pace ledger), writes / removes exactly the
+   * reach rows the access diff names, audits every change, clears the wake
+   * windows of the watchers that changed, prunes pending hits nobody waits
+   * for any more, broadcasts.
+   */
+  async function setGrain(adapterId, grain, patch = {}, { by = 'user' } = {}) {
+    const t = now();
+    const site = grainSite(adapterId, grain, t);
+    if (!site.ok) return site;
+    const { rec, kind } = site;
+    const cur = site.kind === 'conversation' ? convGrainOf(site.holder) : F.grainOf(site.holder);
+    const p = patch && typeof patch === 'object' ? patch : {};
+    // the rule itself (a NEW rule needs one; an edit may change it)
+    let pattern = site.holder && site.holder.pattern ? site.holder.pattern : null;
+    if (kind === 'pattern' && (p.pattern !== undefined || site.isNew)) {
+      const pv = F.validatePattern(p.pattern);
+      if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null };
+      pattern = pv.pattern;
+    }
+    // ① ACCESS
+    let access = cur.access;
+    if (p.access !== undefined) {
+      const va = F.validateAccess(p.access === null ? [] : p.access, site.caps);
+      if (!va.ok) return { ok: false, code: va.code, error: va.error, ...(va.why ? { why: va.why } : {}), ...(va.principal ? { principal: va.principal } : {}), ...(va.index !== undefined ? { index: va.index } : {}) };
+      const prevA = new Map(cur.access.map((r) => [pkOf(r.principal), r]));
+      access = va.access.map((r) => { const pr = prevA.get(pkOf(r.principal)); const same = pr && pr.authority === r.authority; return { ...r, createdAt: pr ? (pr.createdAt || t) : t, updatedAt: same ? (pr.updatedAt || pr.createdAt || t) : t, createdBy: pr ? (pr.createdBy || by) : by }; });
+    }
+    if (kind === 'pattern' && site.isNew && !access.length) return { ok: false, code: 'bad-access', error: 'a new rule needs at least one agent or group with access', why: 'principal' };
+    const granted = new Set(access.map((r) => pkOf(r.principal)));
+    // ② WATCHERS — against THIS grain's resulting access
+    const prevW = new Map(cur.watchers.map((w) => [pkOf(w.principal), w]));
+    let watchers;
+    const filterWrites = [];   // [{id, filter, est}]
+    if (p.watchers !== undefined) {
+      const inList = Array.isArray(p.watchers) ? p.watchers : (p.watchers === null ? [] : p.watchers);
+      if (!Array.isArray(inList)) return { ok: false, code: 'bad-watcher', error: 'watchers must be a list', why: 'not-an-object' };
+      // mint each inline filter's id first, then validate (hotfix order)
+      const minted = inList.map((w0) => {
+        const w = w0 && typeof w0 === 'object' ? w0 : w0;
+        if (!w || typeof w !== 'object') return w;
+        const pk = pkOf(w.principal);
+        if (w.filter && w.mode === 'filtered' && pk) return { ...w, filterId: inlineFilterIdFor(site, pk, prevW.get(pk)) };
+        return w;
+      });
+      const vw = F.validateWatchers(minted, access);
+      if (!vw.ok) return { ok: false, code: vw.code, error: vw.error, ...(vw.why ? { why: vw.why } : {}), ...(vw.principal ? { principal: vw.principal } : {}), ...(vw.index !== undefined ? { index: vw.index } : {}) };
+      watchers = [];
+      for (let i = 0; i < vw.watchers.length; i++) {
+        const w = vw.watchers[i];
+        const src = minted[i] || {};
+        const pk = pkOf(w.principal);
+        if (w.mode === 'filtered') {
+          if (src.filter) {
+            const fv = F.validateFilter(src.filter);
+            if (!fv.ok) return { ok: false, code: 'bad-filter', error: fv.error, why: fv.code, rule: fv.kind || null, principal: w.principal };
+            filterWrites.push({ id: w.filterId, filter: fv.filter, est: estimateOf(src.estimateAtSet, t) });
+          } else if (!filterFor(w.filterId)) return { ok: false, code: 'no-such-filter', error: `filter ${w.filterId} does not exist — save the filter first (or send it inline as \`filter\`)`, principal: w.principal };
+        }
+        const pw = prevW.get(pk);
+        watchers.push({ ...w, createdAt: pw ? (pw.createdAt || t) : t, updatedAt: t, createdBy: pw ? (pw.createdBy || by) : by, estimateAtSet: estimateOf(src.estimateAtSet, t) || (pw ? pw.estimateAtSet || null : null), stats: pw && pw.stats ? pw.stats : { wakes: [], hits: [] } });
+      }
+    } else {
+      // access removed ⇒ its watcher goes too (notification needs access)
+      watchers = cur.watchers.filter((w) => granted.has(pkOf(w.principal)));
+    }
+    const beforeA = new Set(cur.access.map((r) => pkOf(r.principal)));
+    const beforeW = new Set(cur.watchers.map((w) => pkOf(w.principal)));
+    const removedA = cur.access.filter((r) => !granted.has(pkOf(r.principal)));
+    const addedA = access.filter((r) => !beforeA.has(pkOf(r.principal)));
+    const changedW = new Set([...beforeW].filter((pk) => { const nw = watchers.find((w) => pkOf(w.principal) === pk); const ow = prevW.get(pk); return !nw || JSON.stringify({ ...nw, stats: null, updatedAt: null }) !== JSON.stringify({ ...ow, stats: null, updatedAt: null }); }));
+    const oldFilterIds = cur.watchers.map((w) => w.filterId).filter(Boolean);
+    const empty = !access.length && !watchers.length;
+    await store.index.update((ix) => {
+      let holder;
+      if (kind === 'conversation') {
+        holder = store.index.entry(adapterId, site.convId, { create: false });
+        if (!holder) return;
+        healP2(holder);
+        liftGrainInPlace(ix, holder, 'conversation');
+        holder.access = access; holder.watchers = watchers;
+        // THE GRANTS — one row per access principal with origin `access`; a
+        // user's own grant on the same pair is a DIFFERENT row, never touched
+        for (const r of removedA) { holder.reachEntries = ACL.removeGrant(holder.reachEntries, { principal: r.principal, scope: site.scope, origin: 'access' }); holder.reachEntries = ACL.removeGrant(holder.reachEntries, { principal: r.principal, scope: site.scope, origin: 'assignment' }); }
+        for (const r of access) holder.reachEntries = ACL.applyGrant(holder.reachEntries, { principal: { kind: r.principal.kind, id: r.principal.id }, scope: site.scope, level: 'visible', origin: 'access', at: r.createdAt || t, by });
+      } else {
+        const tbName = kind === 'account' ? 'accountAssignments' : 'patternAssignments';
+        const tb = ix[tbName] || (ix[tbName] = {});
+        if (empty && kind === 'account') { delete tb[site.id]; holder = null; }
+        else {
+          holder = tb[site.id] ? liftGrainInPlace(ix, tb[site.id], kind) : (tb[site.id] = { adapterId, scope: { kind, id: site.id }, createdAt: t, createdBy: by });
+          holder.adapterId = adapterId; holder.scope = { kind, id: site.id }; holder.updatedAt = t;
+          if (kind === 'pattern') { holder.id = site.id; holder.pattern = pattern; }
+          holder.access = access; holder.watchers = watchers;
+        }
+        if (kind === 'account') {
+          let g = Array.isArray(ix.accountGrants) ? ix.accountGrants : [];
+          for (const r of removedA) { g = ACL.removeGrant(g, { principal: r.principal, scope: site.scope, origin: 'access' }); g = ACL.removeGrant(g, { principal: r.principal, scope: site.scope, origin: 'assignment' }); }
+          for (const r of access) g = ACL.applyGrant(g, ACL.accountGrant({ principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null }, adapterId, at: r.createdAt || t, by }));
+          ix.accountGrants = g;
+        }
+      }
+      for (const fw of filterWrites) { const fp = filtersOf(ix)[fw.id] || null; filtersOf(ix)[fw.id] = { id: fw.id, ...fw.filter, createdAt: fp ? fp.createdAt : t, updatedAt: t, estimateAtSet: fw.est || (fp ? fp.estimateAtSet : null) || null }; }
+      // a filter this grain minted and nothing references any more goes
+      for (const fid of oldFilterIds) if (/\|/.test(fid) || /^f-(account|pattern)-/.test(fid)) { if (!filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; }
+    });
+    // every changed watcher's wake windows (its held hits stay pending — the
+    // new shape delivers them, or the prune below drops the orphans)
+    for (const pk of changedW) { clearWakeTimer(kind === 'conversation' ? `${site.key}|${pk}` : `scope:${kind === 'account' ? 'acct' : 'pat'}:${site.id}|${pk}`); }
+    await prunePending(adapterId, kind === 'conversation' ? site.key : null);
+    for (const r of removedA) auditGrant('revoke', r.principal, site, t, by);
+    for (const r of addedA) auditGrant('grant', r.principal, site, t, by);
+    for (const pk of changedW) { const nw = watchers.find((w) => pkOf(w.principal) === pk); try { store.audit({ kind: 'watch', op: nw ? 'set' : 'unset', principal: (nw || prevW.get(pk)).principal, scope: site.scope, notify: nw ? nw.notify : null, at: t, by }); } catch {} }
+    for (const w of watchers) if (!beforeW.has(pkOf(w.principal))) { try { store.audit({ kind: 'watch', op: 'set', principal: w.principal, scope: site.scope, notify: w.notify, at: t, by }); } catch {} }
+    if (kind === 'conversation') notify([site.convId]); else notify([], { full: true });
+    return { ok: true, ...grainAnswer(rec, site, t) };
+  }
+  function auditGrant(op, principal, site, t, by) {
+    try { store.audit({ kind: 'acl', op, principal, scope: site.scope, level: op === 'grant' ? 'visible' : null, origin: 'access', at: t, by }); } catch {}
+  }
+  /** Does any watcher, conversation filter or rule still name `fid`? */
+  function filterReferenced(ix, fid) {
+    for (const en of Object.values(ix.conversations || {})) {
+      if (!en) continue;
+      if (en.filterId === fid) return true;
+      if ((Array.isArray(en.watchers) ? en.watchers : []).some((w) => w && w.filterId === fid)) return true;
+      if (en.assignment && en.assignment.filterId === fid) return true;
+    }
+    for (const tbName of ['accountAssignments', 'patternAssignments']) for (const g of Object.values(ix[tbName] || {})) if (g && ((g.filterId === fid) || (Array.isArray(g.watchers) && g.watchers.some((w) => w && w.filterId === fid)))) return true;
+    return false;
+  }
+  /** Pending hits wait for a WATCHER; one no watcher in effect names any more
+   *  (it was removed, or its principal lost access) would sit in the count
+   *  for ever — dropped here, after a grain changed. `onlyKey` narrows the
+   *  scan to one conversation (the conversation grain). */
+  async function prunePending(adapterId, onlyKey = null) {
+    const drop = [];
+    for (const en of Object.values(store.index.live())) {
+      if (!en || en.adapterId !== adapterId || (onlyKey && en.key !== onlyKey)) continue;
+      const hasTagged = Array.isArray(en.pending) && en.pending.some((x) => x && x.for);
+      const hasElided = en.pendingElidedBy && Object.keys(en.pendingElidedBy).length;
+      const hasUntagged = (Array.isArray(en.pending) && en.pending.some((x) => x && !x.for)) || Number(en.pendingElided) > 0;
+      if (!hasTagged && !hasElided && !hasUntagged) continue;
+      const eff = effectiveFor(en);
+      const live = new Set(eff ? eff.watchers.map((x) => pkOf(x.watcher.principal)) : []);
+      const gone = new Set([...(en.pending || []).map((x) => x && x.for).filter(Boolean), ...Object.keys(en.pendingElidedBy || {})].filter((pk) => !live.has(pk)));
+      if (gone.size || (hasUntagged && !live.size)) drop.push({ key: en.key, gone, untagged: hasUntagged && !live.size });
+    }
+    if (!drop.length) return;
+    await store.index.update((ix) => {
+      for (const d of drop) {
+        const e2 = ix.conversations[d.key];
+        if (!e2) continue;
+        healP2(e2);
+        e2.pending = e2.pending.filter((x) => !(x && ((x.for && d.gone.has(x.for)) || (!x.for && d.untagged))));
+        for (const pk of d.gone) delete e2.pendingElidedBy[pk];
+        if (d.untagged) e2.pendingElided = 0;
+      }
+    });
+  }
+  /** What every grain verb answers: the grain's two lists as the dialogs read
+   *  them (+ `assignment`, the pre-split summary a legacy caller reads). */
+  function grainAnswer(rec, site, t) {
+    if (site.kind === 'conversation') {
+      const en = store.index.peek(site.key);
+      const g = convGrainOf(en);
+      const capsNow = authorityCapsFor(rec, en, t);
+      return { grain: { kind: 'conversation', id: site.key }, access: g.access.map((r) => accessRowView(r, capsNow)), watchers: g.watchers.map((w) => watcherView(w, t)), assignment: assignmentView(rec, en, t) };
+    }
+    const holder = site.kind === 'account' ? accountGrainOf(rec.id) : patternById(site.id);
+    const v = holder ? grainView(rec, holder, t) : null;
+    return { grain: { kind: site.kind, id: site.id }, access: v ? v.access : [], watchers: v ? v.watchers : [], assignment: v };
+  }
+  /** GRANT ACCESS — the first operation: a grain's whole ACCESS list. */
+  function setAccess(adapterId, grain, list, opts) { return setGrain(adapterId, grain, { access: list }, opts); }
+  /** NOTIFY — the second operation: a grain's whole WATCHERS list; every
+   *  principal must already hold access there. */
+  function setWatchers(adapterId, grain, list, opts) { return setGrain(adapterId, grain, { watchers: list }, opts); }
+  /** REMOVE a rule (its access rows, its watchers, its derived reach). */
+  async function removePattern(adapterId, id, { by = 'user' } = {}) {
+    const pa = patternById(id);
+    if (!pa || pa.adapterId !== adapterId) return { ok: false, code: 'not-found', error: 'no such rule' };
+    const t = now();
+    const g = F.grainOf(pa);
+    await store.index.update((ix) => { const tb = ix.patternAssignments || {}; const fids = g.watchers.map((w) => w.filterId).filter(Boolean); delete tb[id]; for (const fid of fids) if (/^f-pattern-/.test(fid) && !filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; });
+    for (const w of g.watchers) clearWakeTimer(`scope:pat:${id}|${pkOf(w.principal)}`);
+    await prunePending(adapterId);
+    for (const r of g.access) auditGrant('revoke', r.principal, { scope: { kind: 'pattern', id } }, t, by);
+    notify([], { full: true });
+    return { ok: true, removed: true, id };
+  }
+
+  /** THE COMPATIBILITY WRITE (conversation grain): `{…assignment}` ⇒ ONE
+   *  access row + ONE watcher row for its principal, replacing both lists;
+   *  `null` clears both. Validated by the pre-split validator (its defaults
+   *  and refusals are unchanged). */
   async function setAssignment(adapterId, convId, input) {
     if (!known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
+    if (input === null) return setGrain(adapterId, { kind: 'conversation', convId }, { access: [], watchers: [] });
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     const t = now();
     const key = `${adapterId}/${convId}`;
-    if (input === null) {
-      let had = false;
-      await store.index.update(() => {
-        const e2 = store.index.entry(adapterId, convId, { create: false });
-        if (!e2) return;
-        healP2(e2);
-        had = !!e2.assignment;
-        e2.assignment = null;
-        e2.reachEntries = e2.reachEntries.filter((g) => !(g && g.origin === 'assignment'));
-        e2.pending = []; e2.pendingElided = 0;
-      });
-      clearWakeTimer(key);
-      if (had) { try { store.audit({ kind: 'acl', op: 'revoke', scope: { kind: 'conversation', id: key }, origin: 'assignment', at: t, by: 'user', why: 'unassigned' }); } catch {} }
-      notify([convId]);
-      return { ok: true, assignment: null };
-    }
-    const en = store.index.snapshot().conversations[key];
-    const v = F.validateAssignment(input, authorityCapsFor(rec, en, t));
-    if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error };
-    if (v.assignment.mode === 'filtered' && !filterFor(v.assignment.filterId)) return { ok: false, code: 'no-such-filter', error: `filter ${v.assignment.filterId} does not exist — save the filter first` };
-    const est = input && input.estimateAtSet && typeof input.estimateAtSet === 'object' ? { matchedPerDay: Number(input.estimateAtSet.matchedPerDay) || 0, totalPerDay: Number(input.estimateAtSet.totalPerDay) || 0, windowDays: Number(input.estimateAtSet.windowDays) || 7, sampled: !!input.estimateAtSet.sampled, truncated: !!input.estimateAtSet.truncated, at: t } : null;
-    let stored = null;
-    await store.index.update(() => {
-      const e2 = store.index.entry(adapterId, convId, { create: false });
-      if (!e2) return;
-      healP2(e2);
-      const prev = e2.assignment;
-      const samePrincipal = prev && prev.principal && prev.principal.kind === v.assignment.principal.kind && prev.principal.id === v.assignment.principal.id;
-      stored = { ...v.assignment, scope: { kind: 'conversation', id: key }, createdAt: samePrincipal ? prev.createdAt : t, updatedAt: t, createdBy: 'user', estimateAtSet: est || (samePrincipal ? prev.estimateAtSet : null) || null };
-      e2.assignment = stored;
-      // THE GRANT — one row per (principal, scope) with this origin; a user's
-      // own grant on the same pair is a DIFFERENT row and is never touched.
-      e2.reachEntries = e2.reachEntries.filter((g) => !(g && g.origin === 'assignment'));
-      e2.reachEntries.push({ principal: { kind: stored.principal.kind, id: stored.principal.id }, scope: { kind: 'conversation', id: key }, level: 'visible', origin: 'assignment', at: t, by: 'user' });
-    });
-    try { store.audit({ kind: 'acl', op: 'grant', principal: stored.principal, scope: { kind: 'conversation', id: key }, level: 'visible', origin: 'assignment', at: t, by: 'user' }); } catch {}
-    clearWakeTimer(key);
-    notify([convId]);
-    const en2 = store.index.snapshot().conversations[key];
-    return { ok: true, assignment: assignmentView(rec, en2, t) };
+    const en = store.index.peek(key);
+    const b = input && typeof input === 'object' ? input : {};
+    const cur = convGrainOf(en);
+    const prevW = cur.watchers.find((w) => b.principal && pkOf(w.principal) === pkOf(b.principal));
+    const inlineFilterId = b.filter && b.mode === 'filtered' && pkOf(b.principal) ? inlineFilterIdFor({ kind: 'conversation', key }, pkOf(b.principal), prevW) : null;
+    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}) }, authorityCapsFor(rec, en, t));
+    if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error, ...(v.code ? {} : { why: v.why || null }) };
+    if (v.assignment.mode === 'filtered' && !inlineFilterId && !filterFor(v.assignment.filterId)) return { ok: false, code: 'no-such-filter', error: `filter ${v.assignment.filterId} does not exist — save the filter first` };
+    const sp = F.splitAssignment(v.assignment);
+    return setGrain(adapterId, { kind: 'conversation', convId }, { access: [sp.access], watchers: [{ ...sp.watcher, ...(inlineFilterId ? { filter: b.filter } : {}), estimateAtSet: b.estimateAtSet || null }] });
   }
 
-  /**
-   * THE ACCOUNT AND PATTERN GRAINS (2026-09-26, design §7.3): ONE record per
-   * account (`scope:{kind:'account'}`) or one per rule (`scope:{kind:
-   * 'pattern', id?}` + `pattern`), the SAME shape as a conversation's
-   * assignment. `input === null` removes it. The filter rides along
-   * (`input.filter`) because a scope has no conversation to hang one on.
-   * Reach follows: the account grain writes ONE adapter-scope grant (origin
-   * `assignment`, removed with it); a pattern's grants are derived at read
-   * time. Every change broadcasts the whole digest (every row of the account
-   * may now read a different assignment).
-   */
+  /** THE COMPATIBILITY WRITE (account / rule grains): the pre-split single
+   *  assignment ⇒ one access row + one watcher row (the rule's `pattern`
+   *  rides along); `null` clears the account's lists / removes the rule.
+   *  The inline filter's id is minted before the validator (the 2026-09-26
+   *  hotfix), and a refusal carries the validator's closed code. */
   async function setScopeAssignment(adapterId, scope, input) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     const kind = scope && scope.kind;
     if (kind !== 'account' && kind !== 'pattern') return { ok: false, code: 'bad-assignment', error: 'scope.kind must be account|pattern (a conversation is assigned on its own route)' };
-    const t = now();
-    if (input === null) {
-      let had = null;
-      if (kind === 'account') {
-        await store.index.update((ix) => {
-          const tb = ix.accountAssignments || (ix.accountAssignments = {});
-          had = tb[adapterId] || null;
-          delete tb[adapterId];
-          if (Array.isArray(ix.accountGrants)) ix.accountGrants = ix.accountGrants.filter((g) => !(g && g.origin === 'assignment' && g.scope && g.scope.kind === 'adapter' && g.scope.id === adapterId));
-        });
-        clearWakeTimer(`scope:acct:${adapterId}`);
-      } else {
-        const pa = scope.id ? patternById(scope.id) : null;
-        if (!pa || pa.adapterId !== adapterId) return { ok: false, code: 'not-found', error: 'no such pattern assignment' };
-        await store.index.update((ix) => { const tb = ix.patternAssignments || {}; had = tb[scope.id] || null; delete tb[scope.id]; });
-        clearWakeTimer(`scope:pat:${scope.id}`);
-      }
-      if (had) { try { store.audit({ kind: 'acl', op: 'revoke', scope: { kind: kind === 'account' ? 'adapter' : 'pattern', id: kind === 'account' ? adapterId : scope.id }, origin: 'assignment', at: t, by: 'user', why: 'unassigned' }); } catch {} }
-      notify([], { full: true });
-      return { ok: true, assignment: null };
-    }
+    if (input === null) return kind === 'account' ? setGrain(adapterId, { kind: 'account' }, { access: [], watchers: [] }) : (scope.id ? removePattern(adapterId, scope.id) : { ok: false, code: 'not-found', error: 'no such rule' });
     const b = input && typeof input === 'object' ? input : {};
-    const c = registry.capsOf(rec.kind);
-    const scopeCaps = { offersSend: (c.sendAs || []).length > 0, sendWhy: (c.sendAs || []).length ? null : 'read-only-adapter', policyRequiresReview: policyRequiresReview(rec, null) };
-    const existingPattern = kind === 'pattern' && scope.id ? patternById(scope.id) : null;
-    if (kind === 'pattern' && scope.id && (!existingPattern || existingPattern.adapterId !== adapterId)) return { ok: false, code: 'not-found', error: 'no such pattern assignment' };
-    const id = kind === 'account' ? adapterId : (existingPattern ? existingPattern.id : `pa-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`);
-    // THE INLINE FILTER'S ID IS MINTED BEFORE THE VALIDATOR RUNS (hotfix
-    // 2026-09-26, the owner's toast "请求被拒绝: mode 'filtered' needs a
-    // filterId"): these two grains carry their filter INSIDE the request and
-    // the engine stores it under `f-<kind>-<id>` — the validator ran first and
-    // refused every filtered save for the id this same request supplies. The
-    // id is threaded into the validator's input; every other check and the
-    // order of writes are unchanged. `why` = the refusal's closed code (the
-    // client's words, src/lib/channel-words.js); `error` stays the contract.
-    const inlineFilterId = b.filter && b.mode === 'filtered' ? `f-${kind}-${id}` : null;
-    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id } }, scopeCaps);
+    const t = now();
+    const site = grainSite(adapterId, kind === 'account' ? { kind } : { kind, id: scope.id || null }, t);
+    if (!site.ok) return site;
+    const cur = F.grainOf(site.holder);
+    const prevW = cur.watchers.find((w) => b.principal && pkOf(w.principal) === pkOf(b.principal));
+    const inlineFilterId = b.filter && b.mode === 'filtered' && pkOf(b.principal) ? inlineFilterIdFor(site, pkOf(b.principal), prevW) : null;
+    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id: site.id } }, site.caps);
     if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error, ...(v.code ? {} : { why: v.why || null }) };
-    let pattern = null;
-    if (kind === 'pattern') {
-      const pv = F.validatePattern(b.pattern);
-      if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null };
-      pattern = pv.pattern;
+    if (v.assignment.mode === 'filtered' && !inlineFilterId && !filterFor(v.assignment.filterId)) return { ok: false, code: 'no-such-filter', error: 'a filtered assignment needs its filter (send `filter` with the assignment)' };
+    const sp = F.splitAssignment(v.assignment);
+    const r = await setGrain(adapterId, kind === 'account' ? { kind } : { kind, id: site.isNew ? null : site.id }, { access: [sp.access], watchers: [{ ...sp.watcher, ...(inlineFilterId ? { filter: b.filter } : {}), estimateAtSet: b.estimateAtSet || null }], ...(kind === 'pattern' ? { pattern: b.pattern } : {}) });
+    if (r && r.ok && r.assignment && kind === 'pattern') r.assignment = { ...r.assignment, scope: { kind: 'pattern', id: r.grain.id } };
+    return r;
+  }
+
+  /** Every grain naming this agent (itself or one of its groups) on every
+   *  account — what `vibespace-channels status` prints: the grain, the
+   *  access authority, and the watcher (or none — access only). */
+  function accessFor(ctx) {
+    const out = [];
+    const t = now();
+    for (const rec of adapterRecords().adapters) {
+      if (rec.enabled === false) continue;
+      const label = rec.label || rec.id;
+      const push = (grain, g, extra = {}) => {
+        for (const r of g.access) {
+          if (!F.rowNames(r, ctx)) continue;
+          const w = g.watchers.find((x) => pkOf(x.principal) === pkOf(r.principal)) || null;
+          out.push({ adapterId: rec.id, adapter: label, grain, ...extra, via: r.principal.kind, as: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null }, authority: r.authority, watched: w ? { notify: w.notify, mode: w.mode, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap, receiptWake: !!w.receiptWake, wakes24h: ledgerView(w.stats, t).wakes24h } : null });
+        }
+      };
+      const acct = accountGrainOf(rec.id);
+      if (acct) push('account', F.grainOf(acct));
+      for (const pa of patternsOf(rec.id)) push('pattern', F.grainOf(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
+      for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: en.key, title: en.title || en.id }); }
     }
-    let filterId = null, filterRec = null;
-    if (v.assignment.mode === 'filtered') {
-      if (inlineFilterId) {
-        const fv = F.validateFilter(b.filter);
-        if (!fv.ok) return { ok: false, code: 'bad-filter', error: fv.error, why: fv.code, rule: fv.kind || null };
-        filterId = inlineFilterId;
-        filterRec = fv.filter;
-      } else if (v.assignment.filterId && filterFor(v.assignment.filterId)) filterId = v.assignment.filterId;
-      else return { ok: false, code: 'no-such-filter', error: 'a filtered assignment needs its filter (send `filter` with the assignment)' };
-    }
-    const est = b.estimateAtSet && typeof b.estimateAtSet === 'object' ? { matchedPerDay: Number(b.estimateAtSet.matchedPerDay) || 0, totalPerDay: Number(b.estimateAtSet.totalPerDay) || 0, windowDays: Number(b.estimateAtSet.windowDays) || 7, sampled: !!b.estimateAtSet.sampled, truncated: !!b.estimateAtSet.truncated, conversations: Number(b.estimateAtSet.conversations) || 0, at: t } : null;
-    let stored = null;
-    await store.index.update((ix) => {
-      const tbName = kind === 'account' ? 'accountAssignments' : 'patternAssignments';
-      const tb = ix[tbName] || (ix[tbName] = {});
-      const prev = tb[id] || null;
-      const same = !!(prev && prev.principal && prev.principal.kind === v.assignment.principal.kind && prev.principal.id === v.assignment.principal.id);
-      stored = { ...v.assignment, filterId, scope: { kind, id }, adapterId, createdAt: prev ? prev.createdAt : t, updatedAt: t, createdBy: 'user', estimateAtSet: est || (prev && prev.estimateAtSet) || null, stats: same && prev.stats ? prev.stats : { wakes: [], hits: [] } };
-      if (kind === 'pattern') { stored.id = id; stored.pattern = pattern; }
-      tb[id] = stored;
-      if (filterRec) { const fp = filtersOf(ix)[filterId] || null; filtersOf(ix)[filterId] = { id: filterId, ...filterRec, createdAt: fp ? fp.createdAt : t, updatedAt: t, estimateAtSet: est || (fp ? fp.estimateAtSet : null) || null }; }
-      if (kind === 'account') {
-        ix.accountGrants = (Array.isArray(ix.accountGrants) ? ix.accountGrants : []).filter((g) => !(g && g.origin === 'assignment' && g.scope && g.scope.kind === 'adapter' && g.scope.id === adapterId));
-        ix.accountGrants.push(ACL.accountGrant({ principal: stored.principal, adapterId, at: t, by: 'user' }));
-      }
-    });
-    try { store.audit({ kind: 'acl', op: 'grant', principal: stored.principal, scope: kind === 'account' ? { kind: 'adapter', id: adapterId } : { kind: 'pattern', id }, level: 'visible', origin: 'assignment', at: t, by: 'user' }); } catch {}
-    clearWakeTimer(`scope:${kind === 'account' ? 'acct' : 'pat'}:${id}`);
-    notify([], { full: true });
-    return { ok: true, assignment: scopeAssignmentView(rec, stored, t) };
+    return { ok: true, access: out };
   }
 
   /**
    * THE HONEST ESTIMATE OVER A SCOPE (§7.3, before saving): the conversations
-   * the grain would OWN (no conversation grain of their own; for a pattern,
-   * the ones it matches), their logs read with a bound per conversation and
-   * in total — `sampled` whenever a bound was hit or not every conversation
-   * was covered — then folded through notify and the daily cap.
+   * a watcher of this grain would be woken by — for a rule, the ones it
+   * matches; with `principal` (R4), minus the ones where that principal is
+   * watched at a FINER grain (its own watcher on the conversation, or — for
+   * the account — on a rule that matches it) — their logs read with a bound
+   * per conversation and in total — `sampled` whenever a bound was hit or
+   * not every conversation was covered — then folded through notify and the
+   * daily cap.
    */
-  function estimateScope(adapterId, scope, { filter = null, pattern = null, notify: how = 'wake', digestMinutes = F.DEFAULT_DIGEST_MINUTES, dailyWakeCap = F.DEFAULT_DAILY_WAKE_CAP } = {}) {
+  function estimateScope(adapterId, scope, { filter = null, pattern = null, notify: how = 'wake', digestMinutes = F.DEFAULT_DIGEST_MINUTES, dailyWakeCap = F.DEFAULT_DAILY_WAKE_CAP, principal = null } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     let f = null;
-    if (filter !== null && filter !== undefined) { const v = F.validateFilter(filter); if (!v.ok) return { ok: false, code: 'bad-filter', error: v.error }; f = v.filter; }
+    if (filter !== null && filter !== undefined) { const v = F.validateFilter(filter); if (!v.ok) return { ok: false, code: 'bad-filter', error: v.error, why: v.code, rule: v.kind || null }; f = v.filter; }
     let pat = null;
-    if (scope && scope.kind === 'pattern') { const pv = F.validatePattern(pattern); if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code }; pat = pv.pattern; }
-    const convs = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !en.assignment && (!pat || F.matchConversation(pat, convFacts(en)).hit))
+    if (scope && scope.kind === 'pattern') { const pv = F.validatePattern(pattern); if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null }; pat = pv.pattern; }
+    const pk = principal ? pkOf(principal) : null;
+    const finer = (en) => {
+      if (!pk) return false;
+      if (convGrainOf(en).watchers.some((w) => pkOf(w.principal) === pk)) return true;
+      if (scope && scope.kind === 'account') return patternsOf(adapterId).some((pa) => F.grainOf(pa).watchers.some((w) => pkOf(w.principal) === pk) && F.matchConversation(pa.pattern, convFacts(en)).hit);
+      return false;
+    };
+    const convs = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
       .sort((a, b) => (Number(b.lastAt) || 0) - (Number(a.lastAt) || 0));
     const PER_CONV = 400, MAX_CONVS = 200, TOTAL = 20000;
     const recs = [];
@@ -4627,6 +5475,60 @@ function create(deps = {}) {
     return { ...report, write: Promise.all([idx, ad]) };
   }
 
+  /**
+   * THE MIGRATION (`2026-09-channels-access-watchers`, run through
+   * src/server/migrations.js — R4, 2026-09-27): every pre-split single
+   * assignment becomes ONE access row + ONE watcher row for its principal —
+   * a conversation's `assignment` (its pace ledger = the conversation's own
+   * wakes, the inherited grains' mirrors excluded), an account / rule
+   * record's top-level `principal` (its `stats` ride on the watcher); every
+   * grant with origin `assignment` becomes origin `access`; pending hits held
+   * before the split (no `for`) are tagged with the watcher they were held
+   * for (the first in effect — the only assignment there was). The engine
+   * STARTS before the runner: every reader lifts a pre-split record the same
+   * way (`F.grainOf`, merged), and a write reaching one lifts it in place
+   * first — so the order only decides WHEN the bytes change, never what a
+   * reader sees. Idempotent: a second run finds nothing to lift.
+   */
+  function migrateGrants() {
+    const blocked = store.index.blocked();
+    if (blocked) throw new Error(`the channels store refuses writes (${blocked}) — retried next boot`);
+    // THE PLAN IS COMPUTED NOW from the live index (the runner is synchronous;
+    // the door below runs a microtask later) — these counts ARE the rows it changes
+    const convs = [];
+    for (const en of Object.values(store.index.live())) {
+      if (!en) continue;
+      const legacy = !!(en.assignment && en.assignment.principal);
+      const assignmentKey = 'assignment' in en;
+      const grants = (Array.isArray(en.reachEntries) ? en.reachEntries : []).filter((g) => g && g.origin === 'assignment').length;
+      const untagged = (Array.isArray(en.pending) ? en.pending : []).filter((p) => p && !p.for).length + (Number(en.pendingElided) > 0 ? 1 : 0);
+      let tagPk = null;
+      if (untagged && !legacy) { const eff = effectiveFor(en); tagPk = eff && eff.watchers[0] ? pkOf(eff.watchers[0].watcher.principal) : null; }
+      if (legacy || assignmentKey || grants || (untagged && tagPk)) convs.push({ key: en.key, legacy, grants, untagged: untagged && (legacy || tagPk) ? untagged : 0, tagPk });
+    }
+    const accts = Object.entries(store.index.table('accountAssignments') || {}).filter(([, g]) => g && g.principal).map(([id]) => id);
+    const pats = Object.entries(store.index.table('patternAssignments') || {}).filter(([, g]) => g && g.principal).map(([id]) => id);
+    const acctGrants = (store.index.table('accountGrants') || []).filter((g) => g && g.origin === 'assignment').length;
+    const report = { conversations: convs.filter((c) => c.legacy).length, accounts: accts.length, patterns: pats.length, grantsRenamed: convs.reduce((n, c) => n + c.grants, 0) + acctGrants, pendingTagged: convs.reduce((n, c) => n + c.untagged, 0) };
+    const any = convs.length || accts.length || pats.length || acctGrants;
+    const write = any ? store.index.update((ix) => {
+      for (const c of convs) {
+        const e2 = ix.conversations[c.key];
+        if (!e2) continue;
+        liftGrainInPlace(ix, e2, 'conversation');
+        if (c.tagPk) {
+          for (const p of Array.isArray(e2.pending) ? e2.pending : []) if (p && !p.for) p.for = c.tagPk;
+          if (Number(e2.pendingElided) > 0) { if (!e2.pendingElidedBy || typeof e2.pendingElidedBy !== 'object') e2.pendingElidedBy = {}; e2.pendingElidedBy[c.tagPk] = (Number(e2.pendingElidedBy[c.tagPk]) || 0) + Number(e2.pendingElided); e2.pendingElided = 0; }
+        }
+        if (Array.isArray(e2.reachEntries)) for (const g of e2.reachEntries) if (g && g.origin === 'assignment') g.origin = 'access';
+      }
+      for (const id of accts) { const g = (ix.accountAssignments || {})[id]; if (g) liftGrainInPlace(ix, g, 'account'); }
+      for (const id of pats) { const g = (ix.patternAssignments || {})[id]; if (g) liftGrainInPlace(ix, g, 'pattern'); }
+      for (const g of Array.isArray(ix.accountGrants) ? ix.accountGrants : []) if (g && g.origin === 'assignment') g.origin = 'access';
+    }) : Promise.resolve();
+    return { ...report, write };
+  }
+
   /** SAVE this conversation's filter (`null` clears it — refused by name while
    *  a filtered assignment still points at it). One filter per conversation
    *  in v1, keyed so a later phase may share one across rows. */
@@ -4636,7 +5538,7 @@ function create(deps = {}) {
     const t = now();
     const en = store.index.snapshot().conversations[key];
     if (input === null) {
-      if (en.assignment && en.assignment.mode === 'filtered' && en.assignment.filterId === en.filterId) return { ok: false, code: 'filter-in-use', error: 'this filter is what the assignment wakes on — switch the assignment to all messages or unassign first' };
+      if (en.filterId && convGrainOf(en).watchers.some((w) => w.mode === 'filtered' && w.filterId === en.filterId)) return { ok: false, code: 'filter-in-use', error: 'this filter is what a notification wakes on — switch that notification to all messages or remove it first' };
       await store.index.update((ix) => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; const fid = e2.filterId; e2.filterId = null; if (fid && !Object.values(ix.conversations).some((x) => x.filterId === fid)) delete filtersOf(ix)[fid]; });
       notify([convId]);
       return { ok: true, filter: null };
@@ -4674,29 +5576,36 @@ function create(deps = {}) {
   }
 
   /** Boot: hits left pending by a restart (a window that never fired) are
-   *  delivered as ONE digest per conversation shortly after start. */
+   *  delivered as ONE digest per (conversation, watcher) shortly after start
+   *  — an inherited digest's leftovers as ONE scope digest per (scope,
+   *  watcher). Hits nobody waits for any more are left to `prunePending`. */
   function scheduleBootPending() {
     const snap = store.index.snapshot();
     for (const en of Object.values(snap.conversations)) {
-      if (!Array.isArray(en.pending) || !en.pending.length) continue;
+      if (!Array.isArray(en.pending) || (!en.pending.length && !elidedTotal(en))) continue;
       const eff = effectiveFor(en);
-      if (!eff) continue;
+      if (!eff || !eff.watchers.length) continue;
       const rec = adapterRecords().adapters.find((r) => r.id === en.adapterId);
       if (!rec) continue;
-      if (eff.source !== 'conversation' && eff.assignment.notify === 'digest') {
-        // an inherited digest's leftovers go out as ONE scope digest
-        const sk = `scope:${scopeKeyOf(eff, rec)}`;
-        if (wakeTimers.has(sk)) continue;
-        const timer = setTimeout(() => { wakeTimers.delete(sk); track(flushScope(rec, eff.source, eff.patternId, {})); }, BOOT_PENDING_DELAY_MS);
+      for (const item of eff.watchers) {
+        const pk = pkOf(item.watcher.principal);
+        const pend = pendingOf(en, pk, eff);
+        if (!pend.hits.length && !pend.elided) continue;
+        if (item.source !== 'conversation' && item.watcher.notify === 'digest') {
+          // an inherited digest's leftovers go out as ONE scope digest
+          const sk = `scope:${scopeKeyOf(item, rec)}`;
+          if (wakeTimers.has(sk)) continue;
+          const timer = setTimeout(() => { wakeTimers.delete(sk); track(flushScope(rec, item.source, item.patternId, pk, {})); }, BOOT_PENDING_DELAY_MS);
+          if (timer.unref) timer.unref();
+          wakeTimers.set(sk, { timer, kind: 'boot', startedAt: now() });
+          continue;
+        }
+        const key = `${en.key}|${pk}`;
+        if (wakeTimers.has(key)) continue;
+        const timer = setTimeout(() => { wakeTimers.delete(key); track(flushPending(rec, en.id, { kind: 'boot', pk })); }, BOOT_PENDING_DELAY_MS);
         if (timer.unref) timer.unref();
-        wakeTimers.set(sk, { timer, kind: 'boot', startedAt: now() });
-        continue;
+        wakeTimers.set(key, { timer, kind: 'boot', startedAt: now() });
       }
-      const key = en.key;
-      if (wakeTimers.has(key)) continue;
-      const timer = setTimeout(() => { wakeTimers.delete(key); track(flushPending(rec, en.id, { kind: 'boot' })); }, BOOT_PENDING_DELAY_MS);
-      if (timer.unref) timer.unref();
-      wakeTimers.set(key, { timer, kind: 'boot', startedAt: now() });
     }
   }
 
@@ -4757,11 +5666,75 @@ function create(deps = {}) {
     if (found.length && !stopped) notify(found);
     return { planned: plan.length, found: found.length };
   }
+  /** R4 verify r2: NOTIFICATION ROWS WITHOUT ACCESS AT THEIR GRAIN — the
+   *  store invariant every write keeps, re-counted at boot (a hand edit, a
+   *  copy of a store from another version). The PURE reader (`F.grainOf`)
+   *  already leaves such a row INERT; this names them once so nobody wonders
+   *  why a listed notification never fires. Returns `[{grain, id, principal}]`. */
+  function orphanWatchers() {
+    const out = [];
+    const check = (grain, id, raw, legacy) => {
+      const rawW = Array.isArray(raw && raw.watchers) ? raw.watchers.filter((w) => w && pkOf(w.principal)) : [];
+      const kept = new Set(F.grainOf({ access: raw && raw.access, watchers: raw && raw.watchers }, legacy).watchers.map((w) => pkOf(w.principal)));
+      for (const w of rawW) if (!kept.has(pkOf(w.principal))) out.push({ grain, id, principal: pkOf(w.principal) });
+    };
+    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
+    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
+    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, legacyConvAssignment(en));
+    return out;
+  }
+  /** R4 verify r5 (money): RELEASE THE RESERVATIONS OF A DEAD BOOT. A wake
+   *  reservation (reserveWake, written before the ladder) whose `bootId` is
+   *  NOT this process's and which was never finalized (`reserved === true`
+   *  still) belonged to a process that has since died between the reservation
+   *  and the finalize — its cap slot is held forever (24 h) with no live
+   *  process to finalize it. At boot such rows are dropped, so the cap they
+   *  held is freed; a reservation from THIS boot (an in-flight wake) is never
+   *  touched. A legacy reservation with no `bootId` at all can only predate
+   *  this fix (this boot stamps one) — it is a previous boot's and released. */
+  function releaseStaleReservations() {
+    let released = 0;
+    const sweep = (ws) => {
+      if (!Array.isArray(ws)) return;
+      for (const w of ws) {
+        if (!w || !w.stats || !Array.isArray(w.stats.wakes)) continue;
+        const before = w.stats.wakes.length;
+        w.stats.wakes = w.stats.wakes.filter((r) => !(r && r.reserved === true && r.bootId !== BOOT_ID));
+        released += before - w.stats.wakes.length;
+      }
+    };
+    return store.index.update((ix) => {
+      for (const en of Object.values(ix.conversations || {})) if (en) sweep(en.watchers);
+      for (const g of Object.values(ix.accountAssignments || {})) if (g) sweep(g.watchers);
+      for (const g of Object.values(ix.patternAssignments || {})) if (g) sweep(g.watchers);
+      return released;
+    }).then((n) => { if (n) log.warn(`[channels] released ${n} wake reservation(s) from a previous boot (never finalized, the process is gone) — the cap they held is freed`); return n; }, (err) => { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); return 0; });
+  }
+  /** R4 verify r5: NAME A STORED cap-0 DIGEST WATCHER ONCE. `dailyWakeCap: 0`
+   *  on a `notify:'digest'` watcher is now refused at write (validateWatcher /
+   *  validateAssignment); a row stored before that refusal existed would never
+   *  deliver (a digest IS a paced wake). `F.digestCap` reads such a row as
+   *  cap 1 so it delivers once per window — the store is NOT rewritten (the
+   *  owner edits the notification to set a real cap; a silent on-disk migration
+   *  would hide the choice). This names them once. */
+  function capZeroDigests() {
+    const out = [];
+    const check = (grain, id, holder, legacy) => {
+      for (const w of F.grainOf({ access: holder && holder.access, watchers: holder && holder.watchers }, legacy).watchers) if (w && w.notify === 'digest' && Number(w.dailyWakeCap) === 0) out.push({ grain, id, principal: pkOf(w.principal) });
+    };
+    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
+    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
+    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, legacyConvAssignment(en));
+    return out;
+  }
   function start() {
     if (timer || stopped) return;
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
     healSelfAt().catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
+    try { const orphans = orphanWatchers(); if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain — inert until access is granted there: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
+    try { const z = capZeroDigests(); if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
+    try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
     // P4: a proposal the previous process died on mid-send is `unknown`, not
     // "not sent" — and never re-sent.
@@ -4790,9 +5763,21 @@ function create(deps = {}) {
     conversationView, setRefresh, refresh, agentRefresh, watch, loadOlder, attachment, search,
     healSelfAt,   // R3 (§23): the one-shot derivation of the owner's newest message for rows that predate the field
     setScopeAssignment, estimateScope, effectiveFor: (adapterId, convId) => effectiveFor(store.index.peek(`${adapterId}/${convId}`)), migrateAggregated,
+    // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
+    setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },
     budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || null) : null; },
-    flushScope: (adapterId, source, patternId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushScope(rec, source, patternId || null, {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
+    // R4: one scope digest per WATCHER — `pk` (`kind:id`) names it; without one, every watcher of that grain is flushed
+    flushScope: async (adapterId, source, patternId, pk = null) => {
+      const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
+      if (!rec) return { ok: false, why: 'no-such-adapter' };
+      if (pk) return flushScope(rec, source, patternId || null, pk, {});
+      const holder = source === 'account' ? accountGrainOf(rec.id) : patternById(patternId);
+      const results = [];
+      for (const w of holder ? F.grainOf(holder).watchers : []) results.push(await flushScope(rec, source, patternId || null, pkOf(w.principal), {}));
+      const first = results.find((x) => x && x.ok) || results[0] || { ok: false, why: 'not-watching' };
+      return { ...first, results };
+    },
     adapterRecords, laneOrScan, start, stop,
     connect, reauthorize, finishAuth, cancelAuth, disconnect, setEnabled, setOptions, adapterView,
     // r4 (design-integrations-per-account): the account's own client, the
@@ -4816,7 +5801,12 @@ function create(deps = {}) {
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
-    pendingWindows: () => [...wakeTimers.entries()].map(([key, w]) => ({ key, kind: w.kind, startedAt: w.startedAt })),
+    // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher
+    orphanWatchers,
+    // R4 verify r5: the boot GC of a dead boot's stuck wake reservations (a
+    // suite drives it by hand — it also runs in `start()`)
+    releaseStaleReservations, capZeroDigests,
+    pendingWindows: () => [...wakeTimers.entries()].map(([k, w]) => { const i = k.lastIndexOf('|'); return { key: i > 0 ? k.slice(0, i) : k, principal: i > 0 ? k.slice(i + 1) : null, kind: w.kind, startedAt: w.startedAt }; }),
     REQUESTS_PER_MINUTE, RECONCILE_SECONDS, PAGE, MAX_PAGES, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PENDING_CAP, ESTIMATE_CAP,
     DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS,
     // r5: the refresh request set as a suite / a diagnostic reads it; `tick` = the scheduler's one step (the suites drive it by hand)

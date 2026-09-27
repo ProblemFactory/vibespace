@@ -70,6 +70,10 @@ export function installSidebarTasks(SidebarClass) {
     }).catch(() => { });
     this.app.ws.onGlobal((msg) => {
       if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
+        // THE BROADCAST IS NEWER THAN ANY FETCH IN FLIGHT (R4 verify r1,
+        // 2026-09-27, the e2e ⑮ flake): every write of the mirror bumps a
+        // generation; a fetch issued before it must not overwrite it.
+        this._tasksGen = (this._tasksGen || 0) + 1;
         this._tasks = msg.tasks;
         this._tasksLoaded = true;
         if (this._activeTab === 'tasks') this._render();
@@ -221,11 +225,23 @@ export function installSidebarTasks(SidebarClass) {
     // for the tab's lifetime if the page loaded during a restart window
     // (2.272.1 campaign). Now: surface once, keep the last good list, and let
     // the reconnect refetch (app.js) recover.
+    // A FETCH NEVER OVERWRITES A NEWER BROADCAST (R4 verify r1, 2026-09-27 —
+    // the channels e2e ⑮ flake, 3–4 of 30 page loads under a 12× CPU
+    // throttle): two GETs are in flight at page load (the boot fetch here
+    // and the ws-connect refetch in app.js), both answered BEFORE a group is
+    // created; when the second one's body parses AFTER the `tasks-updated`
+    // broadcast that carried the new group, the stale snapshot replaced the
+    // fresh list and every roster built from the mirror (Grant access…,
+    // Reach & policy) was empty. The generation taken before the request
+    // says whether a broadcast landed meanwhile; if so the answer is only
+    // an "I loaded" signal.
+    const gen = this._tasksGen || 0;
     try {
       const res = await fetch('/api/tasks');
       if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'request failed'}`);
       const data = await res.json();
       if (data?.error) throw new Error(String(data.error));
+      if ((this._tasksGen || 0) !== gen) { this._tasksLoaded = true; this._tasksLoadErr = null; return; }
       this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
       this._tasksLoaded = true;
       this._tasksLoadErr = null;

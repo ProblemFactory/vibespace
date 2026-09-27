@@ -47,8 +47,18 @@
  *
  * SENDING (P4, §9.4 / §12.2): `caps.sendAs` = `['user']`, narrowed by
  * `convCaps` to `[]` with `send-scope-not-granted` until the held token
- * carries `gmail.send` (the consent asks for it — one re-consent for a token
- * minted before P4). `idempotency: 'two-phase'`: Gmail has no idempotency
+ * carries a scope that covers DRAFTS + SENDING — `gmail.compose` (what the
+ * consent asks for since the R4 verify, 2026-09-27; `gmail.modify` or
+ * `https://mail.google.com/` cover it too). Google's own method table:
+ * `drafts.create` / `drafts.send` / `drafts.delete` accept mail.google.com,
+ * gmail.modify, gmail.compose — NOT `gmail.send` ("Send email on your behalf"
+ * covers `messages.send` alone), so the P4 consent (readonly + gmail.send)
+ * minted tokens whose every REPLY would have been refused 403 at the draft.
+ * One re-consent for such a token; until then `convCaps` says
+ * `send-scope-not-granted` and `send()` refuses BY NAME before any request.
+ * A token holding only `gmail.send` still COMPOSES (`messages.send`, R4):
+ * `sendVerbsOf(scopes)` is the ONE table of what the held scopes allow.
+ * `idempotency: 'two-phase'`: Gmail has no idempotency
  * key on send, so `send()` first CREATES A DRAFT in the thread (a durable
  * handle, reported to the engine through `onHandle` BEFORE the send so a
  * crash between the two phases leaves something `reconcile()` can ask about)
@@ -78,14 +88,36 @@ const INTEGRATION = 'gmail';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-/** THE SEND SCOPE (P4, decision 5): requested at consent beside the read one;
- *  a token minted without it narrows `convCaps` to read-only until re-consent. */
+/** THE SEND SCOPE the consent asks for (P4 decision 5, corrected by the R4
+ *  verify 2026-09-27): `gmail.compose` = "Manage drafts and send emails" —
+ *  the ONLY scope short of modify / mail.google.com that covers the reply's
+ *  `drafts.create` + `drafts.send` (+ reconcile's `drafts.delete`) AND
+ *  `messages.send`. `gmail.send` ("Send email on your behalf") covers
+ *  `messages.send` alone: it is RECOGNISED on a held token (compose only) and
+ *  never asked for again — two overlapping rows on the consent screen would
+ *  read as two permissions for one thing. Both readonly and compose are
+ *  Google's RESTRICTED class, so the app's verification class is unchanged. */
+const SCOPE_COMPOSE = 'https://www.googleapis.com/auth/gmail.compose';
 const SCOPE_SEND = 'https://www.googleapis.com/auth/gmail.send';
+const SCOPE_MODIFY = 'https://www.googleapis.com/auth/gmail.modify';
+const SCOPE_MAIL = 'https://mail.google.com/';
+/** THE SCOPE TABLE (PURE): what the HELD scopes allow. `reply` = the
+ *  two-phase draft send (compose | modify | mail.google.com); `compose` = one
+ *  `messages.send` (any of those, or the legacy `gmail.send`). */
+function sendVerbsOf(scopes) {
+  const s = new Set(Array.isArray(scopes) ? scopes.map(String) : []);
+  const drafts = s.has(SCOPE_COMPOSE) || s.has(SCOPE_MODIFY) || s.has(SCOPE_MAIL);
+  return { reply: drafts, compose: drafts || s.has(SCOPE_SEND), drafts };
+}
+/** The header a composed message carries so a lost answer can be matched to
+ *  its PROPOSAL without trusting Gmail to keep our Message-ID (R4 verify). */
+const PROPOSAL_HEADER = 'X-VibeSpace-Proposal';
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
-/** THE DECLARED EGRESS (§3.1). `www.googleapis.com` is the SCOPE identifier,
- *  not a request target — declared because it is a host literal in a file
- *  that constructs requests, and the census reads code, not intent. */
-const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com']);
+/** THE DECLARED EGRESS (§3.1). `www.googleapis.com` and `mail.google.com`
+ *  are SCOPE identifiers, not request targets — declared because they are
+ *  host literals in a file that constructs requests, and the census reads
+ *  code, not intent. */
+const EGRESS = Object.freeze(['oauth2.googleapis.com', 'accounts.google.com', 'gmail.googleapis.com', 'www.googleapis.com', 'mail.google.com']);
 
 /** Per-record OPTIONS the engine stores and the panel edits (§6.3). */
 /** A declared `label` / `help` is a KEY the client renders with `t()` (a3
@@ -138,6 +170,7 @@ const caps = Object.freeze({
   historyBySource: null,
   listConversations: true,
   sendAs: ['user'],                // P4: as the USER; convCaps narrows until gmail.send is held
+  compose: true,                   // R4 (B-6acc): a NEW message — `messages.send` under the same gmail.send scope
   identityMarking: 'marked',
   identityMarkingWhere: 'raw-headers',
   identityMarkingText: 'Mail sent through the Gmail API carries a Received: header naming gmailapi.google.com — invisible in mail clients, visible in "Show original".',
@@ -159,7 +192,7 @@ const caps = Object.freeze({
 /** THE QUOTA COST of one Gmail API call (units, the vendor's published table
  *  as read 2026-09-26: getProfile 1, history.list 2, threads.list 10,
  *  threads.get 40, messages.get 20, messages.list 5, attachments.get 20,
- *  drafts.create 10, drafts.send 100, drafts.get 20, drafts.list 5,
+ *  drafts.create 10, drafts.send 100, messages.send 100 (R4 compose), drafts.get 20, drafts.list 5,
  *  drafts.delete 10, watch 100, labels.list 1). PURE. */
 function unitsFor(pathq, method = 'GET') {
   const m = String(method || 'GET').toUpperCase();
@@ -168,6 +201,7 @@ function unitsFor(pathq, method = 'GET') {
   if (pth === '/history') return 2;
   if (pth === '/threads') return 10;
   if (pth.startsWith('/threads/')) return 40;
+  if (pth === '/messages/send') return 100;   // R4 (B-6acc): a composed NEW message (messages.send)
   if (/^\/messages\/[^/]+\/attachments\//.test(pth)) return 20;
   if (pth.startsWith('/messages/')) return 20;
   if (pth === '/messages') return 5;
@@ -292,12 +326,16 @@ function encodeHeader(s) {
  * THE MIME the draft carries: text/plain, base64, CRLF; From/To/Cc/Subject and
  * the two threading headers when the anchor has a Message-ID. PURE.
  */
-function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null, references = null, text = '' } = {}) {
+function buildMime({ from = null, to, cc = null, subject = '', inReplyTo = null, references = null, messageId = null, text = '', extraHeaders = null } = {}) {
   const lines = [];
   if (from) lines.push(`From: ${encodeHeader(from)}`);
   lines.push(`To: ${encodeHeader(to)}`);
   if (cc) lines.push(`Cc: ${encodeHeader(cc)}`);
   lines.push(`Subject: ${encodeHeader(subject)}`);
+  if (messageId) lines.push(`Message-ID: ${String(messageId).replace(/[\r\n]+/g, '')}`);
+  // extra headers (R4 verify: `X-VibeSpace-Proposal`) — names and values
+  // stripped of CR/LF so nothing can inject a second header
+  for (const [k, v] of Object.entries(extraHeaders && typeof extraHeaders === 'object' ? extraHeaders : {})) if (/^X-[A-Za-z0-9-]+$/.test(k) && v != null) lines.push(`${k}: ${String(v).replace(/[\r\n]+/g, ' ').slice(0, 200)}`);
   if (inReplyTo) lines.push(`In-Reply-To: ${String(inReplyTo).replace(/[\r\n]+/g, ' ')}`);
   if (references) lines.push(`References: ${String(references).replace(/[\r\n]+/g, ' ')}`);
   lines.push('MIME-Version: 1.0', 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '');
@@ -372,9 +410,13 @@ function create(record = {}, deps = {}) {
   /** The consent's scopes: the read scope always; the pubsub scope when the
    *  push switch is on at consent time (an existing token is untouched —
    *  scopes bind at consent, so enabling push asks for ONE re-authorize). */
-  const scopesFor = () => (pushEnabled() ? [SCOPE, SCOPE_SEND, PUBSUB_SCOPE] : [SCOPE, SCOPE_SEND]);
-  /** Does the HELD token carry the send scope (P4)? */
-  const hasSendScope = () => (((readToken().token || {}).scopes) || []).includes(SCOPE_SEND);
+  const scopesFor = () => (pushEnabled() ? [SCOPE, SCOPE_COMPOSE, PUBSUB_SCOPE] : [SCOPE, SCOPE_COMPOSE]);
+  /** What the HELD token's scopes allow (P4 / R4 — the ONE table). */
+  const heldVerbs = () => sendVerbsOf(((readToken().token || {}).scopes) || []);
+  /** May a REPLY (drafts.create + drafts.send) be built with the held token? */
+  const hasReplyScope = () => heldVerbs().reply;
+  /** May a NEW message (messages.send) be built with the held token? */
+  const hasComposeScope = () => heldVerbs().compose;
 
   // `walked` = the threads this PROCESS has fully read at least once since
   // the last (re)seed: a thread not in it is fetched whatever history.list
@@ -634,12 +676,14 @@ function create(record = {}, deps = {}) {
 
     /** Membership = the thread is readable by this account (one metadata
      *  read); a 404 is `read:'no'` with the reason. Never wider than caps:
-     *  sending is offered ONLY while the held token carries `gmail.send`
-     *  (P4), else `[]` with `send-scope-not-granted`. */
+     *  sending is offered ONLY while the held token carries a scope that
+     *  covers drafts + sending (`gmail.compose`; P4 / R4 verify), else `[]`
+     *  with `send-scope-not-granted` — a `gmail.send`-only token cannot
+     *  create the draft a reply rides. */
     async convCaps(convId) {
       try {
         await metaFor(convId);
-        const send = hasSendScope();
+        const send = hasReplyScope();
         return { read: 'yes', sendAs: send ? ['user'] : [], why: send ? null : 'send-scope-not-granted', at: now() };
       } catch (e) {
         if (e instanceof ChannelError && (e.code === 'not-found' || e.code === 'forbidden')) return { read: 'no', sendAs: [], why: 'not-a-member', at: now() };
@@ -658,7 +702,7 @@ function create(record = {}, deps = {}) {
      */
     async send(convId, { text, replyTo = null, idemKey, as = 'user', onHandle = null } = {}) {
       if (as !== 'user') throw new ChannelError('send-not-available', `gmail: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
-      if (!hasSendScope()) throw new ChannelError('forbidden', 'gmail: the held token has no gmail.send scope — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted' } });
+      if (!hasReplyScope()) throw new ChannelError('forbidden', 'gmail: the held token carries no scope covering drafts + sending (gmail.compose) — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted', held: heldVerbs() } });
       const t = await api(`/threads/${encodeURIComponent(convId)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Cc&metadataHeaders=Reply-To&metadataHeaders=Message-ID&metadataHeaders=References`, { what: 'gmail thread (reply anchor)' });
       const msgs = (Array.isArray(t.messages) ? t.messages : []).filter((m) => m && m.id)
         .sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0) || String(a.id).localeCompare(String(b.id)));
@@ -686,6 +730,49 @@ function create(record = {}, deps = {}) {
       return { ok: true, vendorMessageId: String((s2 && s2.id) || handle.messageId || ''), at: now(), sentAs: 'user', handle, threadId: (s2 && s2.threadId) || convId, anchorId: String(anchor.id) };
     },
 
+    /** THE ACCOUNT's send identity for a NEW message (R4, B-6acc): the held
+     *  token carries a scope covering `messages.send` (gmail.compose, or the
+     *  legacy gmail.send) or it does not — no vendor call. */
+    async composeCaps() {
+      const send = hasComposeScope();
+      return { sendAs: send ? ['user'] : [], why: send ? null : 'send-scope-not-granted', at: now() };
+    },
+    /**
+     * COMPOSE A NEW MESSAGE (R4, B-6acc — the owner: "给我一个agent使用我的
+     * gmail 的能力，让它能读取和发送邮件"). ONE request: `messages.send`
+     * with a fresh RFC-822 message (no threadId — Gmail starts a thread),
+     * under `gmail.compose` (the consent's scope) or a legacy `gmail.send`.
+     * The message carries its own `Message-ID` built from the idempotency
+     * key AND an `X-VibeSpace-Proposal: <idemKey>` header — the durable
+     * handle handed to `onHandle` BEFORE the request. When the answer is
+     * lost, `reconcile` looks for the Message-ID in the SENT mail
+     * (`rfc822msgid:`) and, should Gmail have rewritten it, for the proposal
+     * header among the SENT messages to the first recipient since the
+     * attempt (R4 verify: the idempotency never depends on the Message-ID
+     * surviving). A transport failure after the request left is `detail.lost`.
+     */
+    async compose({ to = [], cc = [], subject = '', text, idemKey, as = 'user', onHandle = null } = {}) {
+      if (as !== 'user') throw new ChannelError('send-not-available', `gmail: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
+      if (!hasComposeScope()) throw new ChannelError('forbidden', 'gmail: the held token carries no scope covering sending (gmail.compose) — reconnect to request it', { retryable: false, detail: { why: 'send-scope-not-granted', held: heldVerbs() } });
+      const self = selfEmail();
+      const domain = (String(self || '').split('@')[1] || 'localhost').replace(/[^A-Za-z0-9.-]/g, '') || 'localhost';
+      const messageId = `<${String(idemKey || '').replace(/[^A-Za-z0-9._-]/g, '') || 'msg'}.${Buffer.from(String(idemKey || '') + String(subject)).toString('hex').slice(0, 12)}@${domain}>`;
+      const toList = (Array.isArray(to) ? to : [to]).filter(Boolean);
+      const ccList = (Array.isArray(cc) ? cc : [cc]).filter(Boolean);
+      if (!toList.length) throw new ChannelError('vendor-error', 'gmail: a new message needs at least one recipient', { retryable: false });
+      const proposalHeader = String(idemKey || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 120) || null;
+      const raw = Buffer.from(buildMime({ from: self, to: toList.join(', '), cc: ccList.length ? ccList.join(', ') : null, subject, messageId, text, extraHeaders: proposalHeader ? { [PROPOSAL_HEADER]: proposalHeader } : null }), 'utf-8').toString('base64url');
+      const handle = { messageIdHeader: messageId, proposalHeader, to: toList[0], at: now(), compose: true };
+      if (typeof onHandle === 'function') await onHandle(handle);
+      let s2;
+      try { s2 = await api('/messages/send', { method: 'POST', what: 'gmail send (new message)', json: { raw } }); }
+      catch (e) {
+        if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the send request left and the answer was lost`, { retryable: true, detail: { ...(e.detail || {}), lost: true, phase: 'send', handle } });
+        throw e;
+      }
+      return { ok: true, vendorMessageId: String((s2 && s2.id) || ''), threadId: (s2 && s2.threadId) ? String(s2.threadId) : null, at: now(), sentAs: 'user', handle };
+    },
+
     /**
      * A LOST OUTCOME ONLY (§9.4). With the persisted handle: `drafts.get` —
      * still there ⇒ never sent ⇒ discarded (it would otherwise sit in the
@@ -695,8 +782,38 @@ function create(record = {}, deps = {}) {
      * Without a handle (the crash came before phase 1's handle was persisted)
      * the drafts list is searched for one in this thread first.
      */
-    async reconcile(convId, { idemKey, sentAt = null, handle = null, text = null } = {}) {
+    async reconcile(convId, { idemKey, sentAt = null, handle = null, text = null, compose = null } = {}) {
       const since = (Number(sentAt) || now()) - 60e3;
+      // R4 (B-6acc): a COMPOSED message has no thread to look in — its own
+      // Message-ID (the handle) is searched in the SENT mail; found ⇒ landed,
+      // not found ⇒ honestly unknown (Gmail search lags; absence is no proof)
+      if (compose) {
+        const mid = handle && handle.messageIdHeader ? String(handle.messageIdHeader) : null;
+        const ph = handle && handle.proposalHeader ? String(handle.proposalHeader) : (String(idemKey || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 120) || null);
+        const firstTo = (handle && handle.to) || (compose && Array.isArray(compose.to) ? compose.to[0] : null) || null;
+        if (!mid && !(ph && firstTo)) return { unknown: true, reason: 'the composed message has no recorded Message-ID or proposal header to look for', detail: { how: 'no-handle' } };
+        try {
+          // ① our Message-ID in the sent mail (Gmail kept it)
+          if (mid) {
+            const l = await api(`/messages?${new URLSearchParams({ q: `in:sent rfc822msgid:${mid.replace(/^<|>$/g, '')}`, maxResults: '5' })}`, { what: 'gmail sent search (reconcile)' });
+            const m = (l.messages || [])[0];
+            if (m && m.id) return { landed: true, vendorMessageId: String(m.id), at: null, detail: { how: 'message-id-in-sent', threadId: m.threadId ? String(m.threadId) : null } };
+          }
+          // ② the proposal header among the SENT messages to the first
+          // recipient since the attempt (bounded: the 10 newest), read one
+          // metadata header each — identity by witness, never by position
+          if (ph && firstTo) {
+            const after = Math.max(0, Math.floor(since / 1000));
+            const l2 = await api(`/messages?${new URLSearchParams({ q: `in:sent to:${firstTo} after:${after}`, maxResults: '10' })}`, { what: 'gmail sent search (reconcile, by recipient)' });
+            for (const m of (l2.messages || []).slice(0, 10)) {
+              if (!m || !m.id) continue;
+              const g = await api(`/messages/${encodeURIComponent(String(m.id))}?format=metadata&metadataHeaders=${PROPOSAL_HEADER}`, { what: 'gmail message headers (reconcile)' });
+              if (header(g.payload && g.payload.headers, PROPOSAL_HEADER) === ph) return { landed: true, vendorMessageId: String(m.id), at: Number(g.internalDate) || null, detail: { how: 'proposal-header-in-sent', threadId: g.threadId ? String(g.threadId) : (m.threadId ? String(m.threadId) : null) } };
+            }
+          }
+          return { unknown: true, reason: 'no sent message carries this Message-ID or proposal header yet (search can lag — check the Sent folder)', detail: { how: 'not-found-in-sent' } };
+        } catch (e) { return { unknown: true, reason: `the sent mail could not be searched: ${(e && e.message) || e}`, detail: { how: 'search-failed' } }; }
+      }
       let draftId = handle && handle.draftId ? String(handle.draftId) : null;
       if (!draftId) {
         try {
@@ -834,6 +951,6 @@ async function integrationTest({ resolved } = {}) {
 const adapter = { kind: KIND, caps, create };
 module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS,
-  EGRESS, SCOPE, SCOPE_SEND, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
+  EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader,
 };

@@ -82,6 +82,10 @@ const METHOD_GATES = Object.freeze({
   older: (c) => c.olderHistory === 'page',
   reconcile: (c) => (c.sendAs || []).length > 0,
   send: (c) => (c.sendAs || []).length > 0,
+  // R4 (B-6acc): a NEW conversation — `caps.compose === true` declares both
+  // the send (`compose`) and the ACCOUNT-level identity check (`composeCaps`)
+  compose: (c) => c.compose === true && (c.sendAs || []).length > 0,
+  composeCaps: (c) => c.compose === true && (c.sendAs || []).length > 0,
   listConversations: (c) => c.listConversations !== false,
 });
 
@@ -100,6 +104,7 @@ function validateCaps(kind, caps) {
   if (!TOS_RISK.includes(c.tosRisk || 'none')) bad(`caps.tosRisk must be one of ${TOS_RISK.join('|')}`);
 
   if (c.olderHistory !== undefined && !OLDER_HISTORY.includes(c.olderHistory)) bad(`caps.olderHistory must be one of ${OLDER_HISTORY.join('|')}`);
+  if (c.compose !== undefined && typeof c.compose !== 'boolean') bad('caps.compose must be a boolean (true = the adapter can start a NEW conversation)');
   if (c.budget !== undefined) {
     const b = c.budget;
     if (!b || typeof b !== 'object') bad('caps.budget must be an object {unit, default, settingKey?, metered?}');
@@ -290,6 +295,18 @@ function createChannelRegistry() {
         return { records, exhausted: r.exhausted === true };
       },
       send: gated('send', impl.send && impl.send.bind(impl)),
+      compose: gated('compose', impl.compose && impl.compose.bind(impl)),
+      /** THE ACCOUNT's send identity for a NEW conversation, NARROWED to
+       *  `caps.sendAs` exactly like `convCaps` (a resolution may only shrink
+       *  the declaration). */
+      async composeCaps() {
+        const r = (await gated('composeCaps', impl.composeCaps && impl.composeCaps.bind(impl))()) || {};
+        const declared = Array.isArray(caps.sendAs) ? caps.sendAs : [];
+        const asked = Array.isArray(r.sendAs) ? r.sendAs : [];
+        const wider = asked.filter((x) => !declared.includes(x));
+        if (wider.length) throw new ChannelError('vendor-error', `${kind}.composeCaps returned sendAs wider than caps.sendAs (${wider.join(',')})`, { retryable: false, detail: { declared, asked } });
+        return { sendAs: asked, why: r.why || null, at: Number.isFinite(r.at) ? r.at : Date.now() };
+      },
       reconcile: gated('reconcile', impl.reconcile && impl.reconcile.bind(impl)),
       fetchAttachment: gated('fetchAttachment', impl.fetchAttachment && impl.fetchAttachment.bind(impl)),
       scanHost: gated('scanHost', impl.scanHost && impl.scanHost.bind(impl)),

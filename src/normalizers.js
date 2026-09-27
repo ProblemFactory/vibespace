@@ -1,5 +1,6 @@
 const { HARNESSES } = require('./harnesses');
 const { MessageManager } = require('./message-manager');
+const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
 
 // REGISTRY, not a ternary (P4, design-backend-parity.md §4): the old
 // `backend === 'codex' ? Codex : Claude` shape silently handed every FUTURE
@@ -35,7 +36,103 @@ function createMessageManager(backend, sessionId, opts) {
 function feedLive(session, msg) {
   if (!session?._normalizer) return;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'live', msg }); return; }
+  const v0 = session._normalizer.pendingAsksVersion;
   session._normalizer.processLive(msg);
+  routeToHelperView(session, msg);
+  if (session._normalizer.pendingAsksVersion !== v0) notifyAsks(session);
+}
+
+// ── A HELPER'S PERMISSION ASK (lane S1, B-6e95) ────────────────────────────
+// The CLI asks for a helper on the PARENT's stdout (no parent_tool_use_id, an
+// `agent_id` naming the helper — measured on 2.1.281, src/helper-ask.js). The
+// parent's normalizer hangs it on the helper's Agent card; the helper's OWN
+// view (the sub-normalizer its View Log window reads) must see the same
+// control records, or its tool card sits on "running" with no Allow button.
+// Every control record passes through here (the live gate, the drain after a
+// rebuild) — so the answer from EITHER window settles BOTH cards.
+const isControlRecord = (msg) => !!msg && (msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request');
+function helperCallFor(session, msg) {
+  const mm = session._normalizer;
+  if (msg.type === 'control_request') {
+    // a record that NAMES its Agent call (a future CLI's parent_tool_use_id — verify r2, M2) is routed by it
+    if (typeof msg.parent_tool_use_id === 'string' && msg.parent_tool_use_id) return msg.parent_tool_use_id;
+    const agentId = msg.request && msg.request.agent_id;
+    if (!agentId) return null;
+    return (mm && typeof mm.helperCallOf === 'function' ? mm.helperCallOf(agentId) : null) || helperParentFromTaskRecords(agentId, session._taskRecords);
+  }
+  const rid = msg.type === 'control_response' ? (msg.response && msg.response.request_id) : msg.request_id;
+  const hit = mm && typeof mm.helperAskById === 'function' ? mm.helperAskById(rid) : null;
+  return (hit && hit.card && hit.card.toolCallId) || null;
+}
+function routeToHelperView(session, msg) {
+  if (!isControlRecord(msg) || !session || !session._subNormalizers || !session._subNormalizers.size) return false;
+  const ptuid = helperCallFor(session, msg);
+  const sub = ptuid ? session._subNormalizers.get(ptuid) : null;
+  if (!sub) return false;
+  try { sub.processLive(msg); return true; } catch (e) { console.warn('[normalizer] helper view skipped a control record:', e.message); return false; }
+}
+/** A helper's view CREATED after its ask (a restart re-arms the file watcher, a
+ *  viewer opens late) is handed the helper's unanswered asks from the parent's
+ *  cards. Returns how many. */
+function seedHelperView(session, parentToolUseId, sub) {
+  const mm = session && session._normalizer;
+  if (!mm || typeof mm.helperAskRecordsFor !== 'function' || !sub) return 0;
+  let n = 0;
+  for (const rec of mm.helperAskRecordsFor(parentToolUseId)) { try { sub.processLive(rec); n++; } catch (e) { console.warn('[normalizer] helper view seed skipped:', e.message); } }
+  return n;
+}
+/** THE HELPER'S OWN RESULT (verify r3 — the table's result-allow / result-deny
+ *  rows): a sidechain `user` record carrying tool_result blocks never reaches the
+ *  parent normalizer (the stdout consumer routes it to the helper's view alone,
+ *  the rebuild's record list skips it), yet it is the ONE witness that the CLI
+ *  settled an asked request without a record of ours (a deadline or a decision
+ *  of the CLI's own — the brief's "expired") — or that the buffer lost ours. Held
+ *  behind the rebuild gate like every live record. Returns how many asks moved. */
+function noteHelperResults(session, msg) {
+  const mm = session && session._normalizer;
+  if (!mm || typeof mm.noteHelperResult !== 'function' || !msg || msg.type !== 'user') return 0;
+  const c = msg.message && msg.message.content;
+  if (!Array.isArray(c)) return 0;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'helper-result', msg }); return 0; }
+  return applyHelperResults(session, mm, msg);
+}
+const resultText = (b) => (typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((x) => (x && typeof x.text === 'string' ? x.text : '')).join('') : '');
+/** verify r5: the call a helper's tool_result answers, as its own view knows it — {parentToolUseId, url} for a
+ *  WebFetch call (the provenance re-ask's binding, message-manager.noteHelperResult), else null. */
+function helperResultBind(session, parentToolUseId, toolUseId) {
+  const sub = parentToolUseId && session && session._subNormalizers ? session._subNormalizers.get(parentToolUseId) : null;
+  if (!sub) return null;
+  const tid = String(toolUseId);
+  const p = sub.pendingToolCalls && sub.pendingToolCalls.get(tid);
+  const block = p && p.block;
+  const m = block ? null : (Array.isArray(sub.messages) ? sub.messages.find((x) => x && x.toolCallId === tid) : null);
+  const input = block ? block.input : (m && Array.isArray(m.content) && m.content[0] ? m.content[0].input : null);
+  const name = block ? block.name : (m ? m.toolName : null);
+  return name === 'WebFetch' && input && typeof input.url === 'string' ? { parentToolUseId, url: input.url } : null;
+}
+function applyHelperResults(session, mm, msg) {
+  const c = msg.message && msg.message.content;
+  if (!Array.isArray(c)) return 0;
+  const v0 = mm.pendingAsksVersion;
+  let n = 0;
+  for (const b of c) {
+    if (!b || b.type !== 'tool_result' || !b.tool_use_id) continue;
+    try { if (mm.noteHelperResult(b.tool_use_id, resultText(b), !!b.is_error, true, helperResultBind(session, msg.parent_tool_use_id, b.tool_use_id))) n++; } catch (e) { console.warn('[normalizer] helper result skipped:', e.message); }
+  }
+  if (n && mm.pendingAsksVersion !== v0) notifyAsks(session);
+  return n;
+}
+function seedHelperViews(session) {
+  if (!session || !session._subNormalizers) return;
+  for (const [ptuid, sub] of session._subNormalizers) seedHelperView(session, ptuid, sub);
+}
+/** The server's pending-asks observer (src/server/helper-asks.js — the For-you
+ *  inbox): told whenever a normalizer's pending set changed. ONE slot. */
+let asksObserver = null;
+function setAsksObserver(fn) { asksObserver = typeof fn === 'function' ? fn : null; }
+function notifyAsks(session) {
+  if (!asksObserver || !session) return;
+  try { asksObserver(session); } catch (e) { console.warn('[normalizer] pending-asks observer failed:', e.message); }
 }
 
 /** Peer cards (Background Work notify, vibespace-msg, auto-resume notices)
@@ -55,6 +152,23 @@ function feedPeerCard(session, card) {
  * current turn, so the pending ones are recent). Harness-neutral: every
  * normalizer keeps `messages` with the same `permission` shape.
  */
+/** The HELPERS' pending asks of a session in the same shape as `pendingPermissions` (the takeover's
+ *  stale sweep — lane S1 verify r4, L3): `{requestId, toolName, input, kind:null, resolved:null,
+ *  helperCall}` where `helperCall` = the parent's Agent call the helper runs under (its card's
+ *  toolCallId — the key `session._browserHelpers` binds a child browser handle to). */
+function pendingHelperApprovals(session) {
+  const mm = session && session._normalizer;
+  if (!mm || typeof mm.pendingAsks !== 'function' || typeof mm.helperAskById !== 'function') return [];
+  const out = [];
+  try {
+    for (const a of mm.pendingAsks()) {
+      if (a.kind !== 'helper') continue;
+      const hit = mm.helperAskById(a.requestId);
+      if (hit) out.push({ requestId: a.requestId, toolName: a.toolName || null, input: hit.ask.input || {}, kind: null, resolved: null, helperCall: a.parentToolUseId || null });
+    }
+  } catch { }
+  return out;
+}
 function pendingPermissions(session, { scan = 600 } = {}) {
   const list = session && session._normalizer && Array.isArray(session._normalizer.messages) ? session._normalizer.messages : [];
   const out = [];
@@ -94,7 +208,8 @@ function drainQueue(session, mm) {
     try {
       if (e.kind === 'peer') mm.injectPeerCard?.(e.card);
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
-      else mm.processLive(e.msg);
+      else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
+      else { mm.processLive(e.msg); if (session._normalizer === mm) routeToHelperView(session, e.msg); }
     } catch (err) { console.error('[normalizer] queued record skipped after rebuild:', err.message); }
   }
 }
@@ -128,11 +243,12 @@ function taskReplayRecords(taskRecords) {
   }
   return out;
 }
-function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null } = {}) {
+function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
   const mm = createMessageManager(session.backend || 'claude', sessionId, { threadId: session.backendSessionId || session.claudeSessionId || null }); // the rendered conversation's id = the codex ledger-key DEFAULT (file-tagged records key by their own file; wrapper_meta re-points it; null before a fresh thread is adopted)
   for (const h of opHandlers) mm.onOp(h);
+  if (typeof mm.setHelperAskedAt === 'function') mm.setHelperAskedAt(session._helperAskedAt || null); // verify r3: a rebuilt ask keeps its real arrival (the 60 s inbox clock survives the restart)
   session._normalizer = mm;
   session._normEpoch = Date.now();
   // …and the op ring dies with the epoch (perf lane chunk D): its frames carry
@@ -146,8 +262,17 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       await mm.convertHistoryAsync(records, { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
+      // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
+      // record) settle an asked ask by the table's result rows; after the task replay so a record wins over a derived end
+      for (const r of (Array.isArray(helperResults) ? helperResults : [])) { try { if (typeof mm.noteHelperResult === 'function') mm.noteHelperResult(r.toolUseId, r.text, r.isError, false, helperResultBind(session, r.parentToolUseId, r.toolUseId)); } catch (err) { console.error('[normalizer] helper result replay skipped:', err.message); } }
       drainQueue(session, mm);
       session._historyLoaded = true;
+      // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
+      // helper view that already exists is handed them, and the inbox re-syncs
+      // verify r4: the rebuilt pending set is what the attach payload hands the clients — sealed, so
+      // the first live edit after the restart emits a pending-asks op only for a CHANGE
+      if (typeof mm.sealPendingAsks === 'function') { try { mm.sealPendingAsks(); } catch { } }
+      if (session._normalizer === mm) { seedHelperViews(session); notifyAsks(session); }
     } finally {
       // Even a FAILED rebuild must not lose the records held meanwhile
       // (review-caught): drain into whatever normalizer we have.
@@ -163,4 +288,4 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, notePermissionStale };
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults };

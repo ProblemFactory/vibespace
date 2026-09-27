@@ -168,11 +168,22 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     out.sessionId = sess.id;
     let pend = [];
     try { pend = approvals.pending(sess.s) || []; } catch (e) { out.why = 'pending cards unreadable: ' + (e && e.message); return out; }
-    if (!pend.length) return out;
+    // lane S1 verify r4 (r2's L3, the owner's 2026-09-27 ruling: a takeover interrupts ALL of the
+    // agent's operations on that browser): a HELPER's pending browser approval is swept too. Its
+    // bare command lands on the browser its commands run under — the child handle a witness bound
+    // to its Agent call (session._browserHelpers, in memory) when it minted one, else the parent's
+    // — so for a helper ask `isDefault` is "the taken browser IS that one" (a handle-naming command
+    // is judged by the handles as before). Answered through the same table lookup (one frame).
+    let helpers = [];
+    try { helpers = typeof approvals.pendingHelpers === 'function' ? (approvals.pendingHelpers(sess.s) || []) : []; } catch { helpers = []; }
+    if (!pend.length && !helpers.length) return out;
     const taken = takenFor(ev);
     const label = labelOf(ev.profileId);
-    for (const p of pend) {
-      const v = T.browserApprovalVerdict({ permission: p, classify: VERBS.classify, taken });
+    const st = sess.s._browserHelpers || null;
+    const childKeyOf = (call) => { if (!call || !st) return null; const w = (st.witnesses || []).find((x) => x && x.parent === call && x.handle); const c = w ? (st.children || []).find((x) => x && x.witness === w.id) : null; return c ? c.handle : (w && w.handle) || null; };
+    const takenFor1 = (p) => { if (!p.helperCall) return taken; const ck = childKeyOf(p.helperCall); return ck ? { ...taken, isDefault: ck === ev.browserKey } : taken; };
+    for (const p of [...pend, ...helpers]) {
+      const v = T.browserApprovalVerdict({ permission: p, classify: VERBS.classify, taken: takenFor1(p) });
       if (!v.stale) { out.kept++; continue; }
       const staleBy = { code: 'browser_paused', moment, at: Date.now() };
       let r = null;

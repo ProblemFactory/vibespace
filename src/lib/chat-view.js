@@ -25,6 +25,7 @@ import { TEXT_WINDOW } from '../text-window.js';
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
+import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -100,6 +101,13 @@ const RESUME_RETAIL_AT_MS = [RESUME_SETTLE_MS + RESUME_RETAIL_SLACK_MS, 2000];
 // displacement the rungs cannot catch is exactly the one that arrives BETWEEN
 // them, so the evidence gate must outlive them.
 const RESUME_DISPLACEMENT_MS = 2800;
+// THE EPOCH RESET'S STAGGER (2.338.0, kept) and the cap on the ops held for it
+// (B-63f1 ②): the rebuild after a server restart is deferred 0–500 ms so N
+// windows rebuild in N tasks; the ops of that window are queued and drained
+// after the slab. A queue past the cap poisons the watermark (the next attach
+// rebuilds from the full rung) rather than dropping a card silently.
+const RESET_JITTER_MS = 500;
+const RESET_QUEUE_CAP = 10000;
 // THE KEYS THAT MOVE THE VIEW. A keydown on one of these is a positioning act
 // (it scrolls the list itself); any other key is mere input — see
 // _notePositioning vs _noteUserInput (round-3 verifier's MAJOR).
@@ -362,6 +370,7 @@ class ChatView {
       // runs, and the same gate: a read-only viewer builds no ChatSearch, so
       // it gets no chip either (a control that cannot do what it says).
       onSearch: readOnly ? null : () => this._search?.open(),
+      onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
     });
@@ -1879,6 +1888,7 @@ class ChatView {
     if ('turnState' in meta) this._statusBar?.setTurnState?.(meta.turnState || null);
     if ('inProgressTools' in meta) this._onToolsInProgress(meta.inProgressTools || []);
     if ('backgroundTasks' in meta && Array.isArray(meta.backgroundTasks)) this._statusBar?.setBackgroundTasks?.(meta.backgroundTasks); // the harness's level set (design-unknown-records); absent/null = never published, the card-derived set stands
+    if ('pendingAsks' in meta) this._setPendingAsks(Array.isArray(meta.pendingAsks) ? meta.pendingAsks : []); // lane S1: who waits for the user, and where
     if ('autoResume' in meta) this._statusBar?.setAutoResume?.(meta.autoResume || null);
     // WHERE this spawn's model/effort came from (B-6b6d) — the resume ladder's
     // verdict, so the effort tooltip can say "carried over from this
@@ -3632,6 +3642,11 @@ class ChatView {
 
   // Handle normalized message ops from server (create/edit/meta)
   _onOp(op) {
+    // A REBUILD IS PENDING (B-63f1 ②): the op post-dates the slab a timer is about
+    // to swap in — applied now it would land in the list that slab replaces (and
+    // advance the watermark past a card the view will not hold). Held, in order,
+    // tagged with the epoch this view believes; the rebuild drains it.
+    if (this._resetPending) { this._holdResetOp(op); return; }
     // THE LAST FRAME THIS VIEW HAS (perf lane chunk D): a stamped op carries the
     // server's per-session `seq`; the epoch it belongs to is the one this view
     // holds right now (a frame of a newer epoch that lands before its `attached`
@@ -3900,9 +3915,23 @@ class ChatView {
       this._updateRuns();
     }
 
+    // A HELPER's asks on its Agent card (lane S1): patched in place — the card, and any half-made
+    // answer on another ask, stays put; a pending ask pops the card out of a fold
+    if (fields.helperAsks || (fields.taskInfo && Array.isArray(msg.helperAsks) && msg.helperAsks.length)) {
+      const el = this._elements.get(id);
+      if (el) this._renderers.renderHelperAsks(el, msg);
+      this._updateRuns();
+    }
+    // …and an ask this card SETTLED leaves the waiting chip at once — a normalizer that publishes no
+    // pending-asks op (codex, ACP) would otherwise leave the chip naming an answered card until re-attach
+    if ((fields.permission || fields.helperAsks || fields.taskInfo) && this._pendingAsks?.length) this._prunePendingAsks(msg);
+
     // Task info update — delegate to status bar
     if (fields.taskInfo) {
       this._statusBar.updateTask(fields.taskInfo, msg.toolCallId, msg.content);
+      // …and the helper card's OWN chip (lane S1): a stopped helper read "⟳ running" in its title
+      // while the line under it said "finished" — the chip was drawn once, at render
+      if (msg.toolName === 'Agent' && msg.role === 'tool') this._patchAgentChip(id);
       // LIVE WORKFLOW CARD (2.369.118): the phases/agent chips live IN the card.
       // PATCHED IN PLACE (inc-mudv05ja-n5rv): re-creating the card on every
       // task_progress painted it at its content-visibility placeholder for a
@@ -4211,6 +4240,8 @@ class ChatView {
     // a level signal, design-unknown-records 2026-09-21): the status bar
     // reconciles its running set + shows the count.
     if (op.subtype === 'background-tasks') { this._statusBar?.setBackgroundTasks?.(op.data?.tasks || []); return; }
+    // EVERY ask the user can answer here (lane S1) — the waiting chip names who waits and jumps to it
+    if (op.subtype === 'pending-asks') { this._setPendingAsks(op.data?.asks || []); return; }
     if (op.subtype === 'usage') {
       this._statusBar.updateUsage(op.data);
     } else if (op.subtype === 'todos') {
@@ -5001,7 +5032,85 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     const wasCompacting = this._retireCompactionStage();
     this._statusBar?.setTurnState?.(null);
     this._onToolsInProgress([]);
+    this._setPendingAsks([]); // lane S1: "a helper waits for you" dies with the process that asked
     return wasCompacting;
+  }
+
+  /** THE PENDING ASKS of this conversation (lane S1): the server's list (the attach payload + the
+   *  normalizer's `pending-asks` meta op), oldest first — the waiting chip's words and its jump target. */
+  _setPendingAsks(asks) {
+    this._pendingAsks = Array.isArray(asks) ? asks : [];
+    this._statusBar?.setPendingAsks?.(this._pendingAsks);
+  }
+
+  /** Drop the asks `msg` no longer holds open (its permission resolved, a helper ask settled or its
+   *  helper over) from the chip's list — the server's next list, when it sends one, replaces it anyway. */
+  _prunePendingAsks(msg) {
+    const open = new Set();
+    if (msg.permission && !msg.permission.resolved && msg.permission.requestId != null) open.add(String(msg.permission.requestId));
+    for (const a of (Array.isArray(msg.helperAsks) ? msg.helperAsks : [])) if (isWaiting(askState(a, msg))) open.add(String(a.requestId));
+    const next = this._pendingAsks.filter((a) => a.msgId !== msg.id || open.has(String(a.requestId)));
+    if (next.length !== this._pendingAsks.length) this._setPendingAsks(next);
+  }
+
+  /** The element of an ask on screen: a helper's ask block inside its Agent card, else the card's
+   *  permission card — null when the card is not in the rendered window. */
+  _askElement(a) {
+    if (!a) return null;
+    const esc = (v) => (window.CSS && CSS.escape ? CSS.escape(String(v)) : String(v).replace(/["\\]/g, '\\$&'));
+    let card = a.msgId ? this._elements.get(a.msgId) : null;
+    const tid = a.kind === 'helper' ? a.parentToolUseId : a.toolUseId;
+    if ((!card || !card.isConnected) && tid) card = this._messageList.querySelector(`[data-tool-id="${esc(tid)}"]`);
+    if (!card || !card.isConnected) return null;
+    if (a.kind === 'helper') return card.querySelector(`.chat-helper-ask[data-request-id="${esc(a.requestId)}"]`) || card;
+    return card.querySelector('.chat-permission-inline') || card;
+  }
+
+  /** THE WAITING CHIP's click (lane S1): go to the ask the user must answer — the first one, or
+   *  `requestId` — scrolled to the middle and flashed. A card outside the rendered window is paged in
+   *  first (`msgIndex`, the server's index). Returns whether it landed. */
+  async jumpToPendingAsk(requestId = null) {
+    const asks = this._pendingAsks || [];
+    const a = (requestId != null && asks.find((x) => String(x.requestId) === String(requestId))) || asks[0] || null;
+    let el = this._askElement(a);
+    if (!el && a && Number.isFinite(a.msgIndex) && this._canPaginate !== false && a.msgIndex >= 0 && a.msgIndex < (this._total || 0)) {
+      await this.jumpToIndex(a.msgIndex);
+      el = this._askElement(a);
+    }
+    if (!el) {
+      // no list (an older server) — the first unanswered card on screen, if any
+      el = this._messageList.querySelector('.chat-helper-ask.pending') || [...this._messageList.querySelectorAll('.chat-permission-inline')].find((x) => x.querySelector('.chat-perm-btn')) || null;
+    }
+    if (!el) { showToast(t('Nothing to answer is on screen — the request may have been settled already')); return false; }
+    this._noteUserNav?.('jumpToAsk');
+    this._pinned = false;
+    const host = el.closest('.chat-msg');
+    if (host) host.style.contentVisibility = 'visible';
+    this._scrollElStable ? this._scrollElStable(el) : el.scrollIntoView({ block: 'center' });
+    el.classList.remove('chat-ask-flash'); void el.offsetWidth; el.classList.add('chat-ask-flash');
+    setTimeout(() => el.classList.remove('chat-ask-flash'), 1800);
+    return true;
+  }
+
+  /** A helper card's lifecycle chip, patched in place (lane S1) — the same renderer fragment a fresh
+   *  render draws (`renderTaskChip`), inserted before the View Log button. */
+  _patchAgentChip(id) {
+    const el = this._elements.get(id);
+    const msg = this._messages.find((m) => m.id === id);
+    const label = el?.querySelector?.('.chat-tool-use > .chat-tool-label');
+    if (!label || !msg) return;
+    // only where a fresh render draws the chip: a completed (non-error) Agent result — a pending call or a
+    // stopped one draws none, exactly as renderToolMsg would (the Workflow patch's own rule)
+    const b = msg.content?.[0];
+    if (!b || b.type !== 'tool_result' || b.status === 'error') return;
+    const html = (this._renderers.renderTaskChip?.(msg.taskInfo, null) || '').trim();
+    const old = label.querySelector(':scope > .chat-task-status-chip');
+    if (!html) { old?.remove(); return; }
+    const tpl = document.createElement('template'); tpl.innerHTML = html;
+    const chip = tpl.content.firstElementChild;
+    if (!chip) return;
+    if (old) { if (old.outerHTML !== chip.outerHTML) old.replaceWith(chip); }
+    else label.insertBefore(chip, label.querySelector(':scope > .chat-agent-view-btn'));
   }
 
   /** Replace a finished agent card's live activity with its终态 (2.233.1).
@@ -5148,8 +5257,14 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       return;
     }
 
-    // Virtual session ID for subscribing to messages
-    const virtualId = agentId ? `sub-agent-${agentId}` : `sub-${parentToolUseId}`;
+    // Virtual session ID for subscribing to messages. LIVE FIRST (lane S1): while the helper runs, its
+    // view is `sub-<tool_use_id>` — the only one that receives its permission asks (and their Allow /
+    // Deny) — even when the card also names its transcript; `agentId` rides along so the server falls
+    // back to the transcript on disk once the live buffers are gone. A finished helper opens from disk.
+    const card = parentToolUseId ? this._messages.find((m) => m.toolCallId === parentToolUseId) : null;
+    const st = card?.taskInfo?.status;
+    const helperLive = !!parentToolUseId && (!st || st === 'running');
+    const virtualId = agentId && !helperLive ? `sub-agent-${agentId}` : `sub-${parentToolUseId}`;
 
     // Reuse existing viewer window if still open
     if (!this._subagentViewers) this._subagentViewers = new Map();
@@ -5174,6 +5289,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       parentThreadId: backendSessionId || null,
       cwd,
       ...(host ? { hostId: host } : {}), // remote parent → agent transcript on the host
+      ...(agentId ? { agentId } : {}), // lane S1: a live view's fallback to the transcript on disk
       description,
     };
     const winInfo = this.app.wm.createWindow({
@@ -5195,6 +5311,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       claudeSessionId: claudeId,
       cwd,
       hostId: host || undefined,
+      agentId: agentId || undefined, // lane S1: the disk fallback of a live view
     });
 
     // No reply at all (host wedged mid-fetch, ws message dropped): say the
@@ -5560,7 +5677,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       // possibly-rebuilt normalizer silently drops messages (2.219.0 audit)
       const epochChanged = msg.normEpoch && msg.normEpoch !== epochBefore;
       if (msg.normEpoch) this._normEpoch = msg.normEpoch;
-      if (epochChanged) {
+      if (epochChanged || this._resetPending) {
         // STAGGERED (2.338.0): after a server restart EVERY chat window used
         // to wipe + re-render its 50-message tail in the same tick — N
         // synchronous marked+DOMPurify passes back-to-back froze the page.
@@ -5569,7 +5686,16 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // …and by the time this runs the payload is up to half a second OLD —
         // live state applied from it must be judged against `msg.__rxTick`
         // (stamped above), never against "whatever ran last".
-        setTimeout(() => { if (!this._disposed) this._fullViewReset(msg); }, Math.random() * 500);
+        // THE OPS OF THAT HALF SECOND ARE HELD (B-63f1 ②, S1 verify r2 — measured
+        // 9 of 12 restarts on a page not reloaded): every op the server emitted
+        // between this frame and the deferred rebuild used to run into the list
+        // the slab was about to REPLACE — and advance the watermark, so no resume
+        // by seq ever replayed them; they came back only at the next epoch or a
+        // reload. `_armViewReset` holds this snapshot; `_onOp` queues while it is
+        // pending; the rebuild drains the queue AFTER the slab it post-dates. A
+        // second `attached` inside the window (a `lagged`, a reconnect) is a
+        // NEWER snapshot of the same rebuild and supersedes the held one.
+        this._armViewReset(msg);
         return;
       }
       // THE HELD RUNG (perf lane chunk D): the server's ring still held every
@@ -5714,7 +5840,51 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   // Server-restart reload: rebuild the whole view from the fresh attach
   // payload (new ID space, new totals). Position resets to the live tail —
   // predictable, and beats silently frozen messages.
+  /** ARM THE DEFERRED REBUILD (B-63f1 ②): hold the snapshot, queue every op
+   *  until it lands, ONE timer per pending rebuild (the 2.338.0 stagger — the
+   *  jitter from `_resetJitterMs`, a seam a suite pins to its maximum). A
+   *  later `attached` of the same rebuild replaces the held snapshot; a HELD
+   *  resume arriving meanwhile (no slab to swap in) has its replay queued. */
+  _armViewReset(msg) {
+    if (!this._resetQueue) this._resetQueue = [];
+    if (this._resetPending && msg.slab === 'held' && Array.isArray(msg.replay)) {
+      for (const op of msg.replay) if (op && op.type === 'msg' && op.sessionId === this.sessionId) this._holdResetOp(op);
+      return;
+    }
+    this._resetPending = msg;
+    if (this._resetTimer) return;
+    this._resetTimer = setTimeout(() => {
+      this._resetTimer = null;
+      if (this._disposed) return;
+      const m = this._resetPending;
+      if (m) this._fullViewReset(m);
+    }, this._resetJitterMs());
+  }
+
+  /** The stagger (2.338.0): 0–500 ms so N windows rebuild in N tasks. */
+  _resetJitterMs() { return Math.random() * RESET_JITTER_MS; }
+
+  /** An op held for the pending rebuild, tagged with the epoch this view holds
+   *  (an op of a newer epoch that lands before ITS `attached` is tagged with the
+   *  older one — the drain drops what the slab does not describe). A queue past
+   *  RESET_QUEUE_CAP poisons the watermark: the next attach rebuilds from the
+   *  full rung instead of trusting a position the view never held. */
+  _holdResetOp(op) {
+    const q = this._resetQueue || (this._resetQueue = []);
+    if (q.length >= RESET_QUEUE_CAP) { this._resetOverflow = true; this._seqPoisoned = true; return; }
+    q.push({ op, epoch: this._normEpoch });
+  }
+
   _fullViewReset(msg) {
+    // the pending state is CONSUMED before the rebuild: this call is the one the
+    // timer armed (or the poisoned heal / a caller's direct reset) — either way the
+    // held snapshot is spent and the queue belongs to this slab
+    if (this._resetTimer) { clearTimeout(this._resetTimer); this._resetTimer = null; }
+    this._resetPending = null;
+    const held = this._resetQueue || [];
+    this._resetQueue = null;
+    const overflow = !!this._resetOverflow;
+    this._resetOverflow = false;
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
     this._elements.clear();
@@ -5724,10 +5894,45 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     // The attach payload IS the meta — never re-copy it key by key (a hand-
     // maintained list silently dropped outputStyle/autoResume on the sibling
     // attach path; the whitelist-drift class, 2.368.4).
-    this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
-    // the slab is the truth now: a poisoned watermark is healed (perf r1) —
-    // only when the rebuild itself ran through (a throw above keeps it poisoned)
-    this._seqPoisoned = false;
+    // a rebuild that THROWS poisons the watermark (verify r2): the ops held for it
+    // are gone with it, so no seq this view holds says "on screen" any more — the
+    // next attach asks for no seq and rebuilds from the full rung
+    try {
+      this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
+      // the slab is the truth now: a poisoned watermark is healed (perf r1) —
+      // only when the rebuild itself ran through (a throw above keeps it poisoned)
+      this._seqPoisoned = false;
+    } catch (e) { this._seqPoisoned = true; throw e; }
+    this._drainResetQueue(held, msg);
+    // A QUEUE THAT OVERFLOWED (verify r2): the ops past RESET_QUEUE_CAP were never
+    // held, so this slab + the drained prefix is NOT the whole view — the heal above
+    // must not clear that. Poisoned again and healed at once: an attach with no
+    // seq, answered by the full rung (the handler's poisoned branch rebuilds from
+    // its slab — synchronously, no stagger, nothing to hold).
+    if (overflow) {
+      this._seqPoisoned = true;
+      try { this._trace('reset:overflow', { held: held.length }); } catch { }
+      if (!this._disposed && !this._readOnly && !this._disconnected) this._reattach(false);
+    }
+  }
+
+  /** THE DRAIN (B-63f1 ②): the ops held while the rebuild was pending, applied
+   *  AFTER the slab, in order — only those the slab does not already describe:
+   *  a stamped op with `seq` ≤ the slab's `opSeq` is IN the slab (the server
+   *  reads both in one synchronous step), an op tagged with another epoch is
+   *  not this slab's. A create the slab holds anyway dedups by id
+   *  (`_renderedMsgIds`); the watermark advances only for what applied. */
+  _drainResetQueue(held, msg) {
+    if (!held || !held.length) return;
+    const epoch = (msg && msg.normEpoch) || this._normEpoch || null;
+    const floor = msg && typeof msg.opSeq === 'number' ? msg.opSeq : null;
+    let applied = 0, inSlab = 0, foreign = 0, failed = 0;
+    for (const { op, epoch: ep } of held) {
+      if (epoch && ep && ep !== epoch) { foreign++; continue; }
+      if (floor != null && typeof op.seq === 'number' && op.seq <= floor) { inSlab++; continue; }
+      try { this._onOp(op); applied++; } catch (e) { failed++; console.error('[chat] an op held for the rebuild failed to apply', e); }
+    }
+    try { this._trace('reset:drain', { held: held.length, applied, inSlab, foreign, failed, opSeq: floor }); } catch { }
   }
 
   _clearWaiting() {
@@ -6196,6 +6401,8 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // and the turn stalls unnoticed (real report). Returning null also
         // BREAKS the run so the surrounding fold can't swallow it.
         if (m.permission && !m.permission.resolved) return null;
+        // …and so must a helper card holding its helper's unanswered ask (lane S1)
+        if (hasPendingHelperAsk(m)) return null;
         // pending/running cards collapse too (user directive — the bottom
         // streaming indicator already shows live activity)
         const mk = memberKind(el);
@@ -6603,6 +6810,8 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     try { this._steerKeyDispose?.(); } catch { }
     this._steerKeyDispose = null;
     this._clearPendingSteers();
+    if (this._resetTimer) { clearTimeout(this._resetTimer); this._resetTimer = null; } // a pending rebuild dies with the view (B-63f1 ②)
+    this._resetPending = null; this._resetQueue = null; this._resetOverflow = false;
     if (this._blankProbe) { clearTimeout(this._blankProbe); this._blankProbe = null; }
     if (this._autoFillT1) { clearTimeout(this._autoFillT1); this._autoFillT1 = null; }
     if (this._autoFillT2) { clearTimeout(this._autoFillT2); this._autoFillT2 = null; }

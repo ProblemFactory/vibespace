@@ -167,7 +167,8 @@ export function formControls(text) {
 // D6: the account ⋯ in the storage row's action order (group, order → label key)
 // 2026-09-26 (the aggregated IM): no Track… — the storage row's ＋ submount
 // slot holds the account's search and its two assignment grains
-export const D6_ORDER = ['Open conversation window', 'Search messages…', 'Hand to an agent…|Handed to an agent — edit…', 'Conversations matching a rule…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
+// R4 (2026-09-27): the one hand-off verb became TWO operations, access first — Grant access… then Notify…
+export const D6_ORDER = ['Open conversation window', 'Search messages…', 'Grant access…', 'Notify…', 'Conversations matching a rule…', 'Options', 'Push…', 'Connect|Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', 'Disable|Enable'];
 /** The `channel-adapter` items an ACCOUNT sees, in menu order (group, order),
  *  read off the registrations (the label's key(s); a source-only item is skipped). */
 export function accountMenuOrder(panel) {
@@ -255,7 +256,7 @@ export const DESIGN_I18N = [
   { key: 'Duplicate', built: 'Duplicate…', where: 'channels', why: 'a verb that opens a dialog carries the ellipsis; the storage row\'s ⧉ Duplicate was retired for submounts (design §1)' },
   { key: 'Create & connect', where: 'both' },
   { key: 'List labels', where: 'mounts', why: 'the channel Gmail account filters by its include query (src/channels/gmail.js), not by a label list — the picker stays a storage verb' },
-  { key: 'Hand to an agent…', where: 'channels' },
+  { key: 'Hand to an agent…', built: ['Grant access…', 'Notify…'], where: 'channels', why: 'R4 (2026-09-27, the owner: "让agent能访问对话" and "让agent会被通知" are two operations, access first) — the one hand-off verb is drawn as its two operations' },
   { key: 'Conversations matching a rule…', where: 'channels' },
   { key: 'Search messages…', where: 'channels' },
   { key: 'Options', where: 'channels' },
@@ -273,12 +274,12 @@ export const DESIGN_I18N = [
   { key: '{name} (copy)', where: 'channels' },
   { key: 'Copied from the original; you can change it.', where: 'channels' },
   { key: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person\'s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.',
-    built: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, assignments, reach grants, the message log — the copy signs in on its own.',
-    where: 'channels', why: 'the typographic apostrophe — the house spelling of UI text' },
+    built: 'Copied: the type, the OAuth client, the query, the push claim, the sender line. NOT copied: the token (a login is one person’s consent), refresh overrides, access grants and notifications, reach grants, the message log — the copy signs in on its own.',
+    where: 'channels', why: 'the typographic apostrophe — the house spelling of UI text; R4: an assignment is now an access grant + a notification' },
   { key: 'This copy needs its own sign-in — another account, or the same one authorized again.', where: 'channels' },
   { key: 'Cannot remove "{name}"', where: 'channels' },
   { key: 'This account is still referenced — release these first:', where: 'channels' },
-  { key: 'assignment: {conv} → {who}', where: 'channels' },
+  { key: 'assignment: {conv} → {who}', built: 'access: {conv} → {who}', where: 'channels', why: 'R4 (2026-09-27): what points at an account is its ACCESS rows (a notification always rides one)' },
   { key: 'reach: {who} may see the whole account', where: 'channels' },
   { key: 'outbox: {n} proposal(s) awaiting approval', where: 'channels' },
   { key: 'Disconnect only drops the token and keeps these; Remove needs them released first — the same rule as a credential with submounts.', where: 'channels' },

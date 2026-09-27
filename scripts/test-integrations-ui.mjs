@@ -558,7 +558,8 @@ const p2 = await newPage();
 
   // (i) the ⋯ order = D6
   const menu = await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const m = document.querySelector('.context-menu'); const items = m ? [...m.children].map((e) => e.classList.contains('context-menu-separator') ? '‖' : e.textContent.trim()) : []; if (m) m.remove(); return items; })()`);
-  const D6 = ['Open conversation window', 'Search messages…', 'Hand to an agent…', 'Conversations matching a rule…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
+  // R4 (2026-09-27): the one hand-off verb became TWO operations, access first
+  const D6 = ['Open conversation window', 'Search messages…', 'Grant access…', 'Notify…', 'Conversations matching a rule…', 'Options', 'Push…', '‖', 'Re-authorize', 'Duplicate…', 'Disconnect', 'Remove…', '‖', 'Disable'];
   ok(JSON.stringify(menu) === JSON.stringify(D6), `the ⋯ is the storage row's order, EXACTLY D6 (${menu.join(' · ')})`);
 
   // (j) Edit: prefilled, the four buttons in order, switching the client ⇒ Save opens Re-authorize
@@ -640,7 +641,8 @@ const p2 = await newPage();
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelector('#chan-remove-refused')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'a referenced account is REFUSED — the "Cannot remove" dialog');
   const rf = await p1.evaljs(`(() => { const d = document.querySelector('#chan-remove-refused'); return { title: d.querySelector('.dialog-header h3').textContent, lead: d.querySelector('.chan-flow-refusal').textContent, refs: [...d.querySelectorAll('[data-ref-kind]')].map((e) => e.dataset.refKind + '|' + e.textContent), tail: [...d.querySelectorAll('p.dialog-hint')].map((p) => p.textContent).join(' ') }; })()`);
   ok(rf.title === 'Cannot remove "Gmail · ada@example.test"' && /still referenced/.test(rf.lead), `titled by the account's name (${rf.title})`);
-  ok(rf.refs.length === 1 && rf.refs[0].startsWith('assignment|') && rf.refs[0].includes(conv.title) && rf.refs[0].includes('Procurement agent'), `each reference NAMED: the assignment, its conversation and its principal (${JSON.stringify(rf.refs)})`);
+  // R4 (2026-09-27): the compatibility write = one ACCESS row (+ its notification) — the reference is the access row
+  ok(rf.refs.length === 1 && rf.refs[0].startsWith('access|') && rf.refs[0].includes(conv.title) && rf.refs[0].includes('Procurement agent'), `each reference NAMED: the access row, its conversation and its principal (${JSON.stringify(rf.refs)})`);
   ok(/^Disconnect only drops the token and keeps these/.test(rf.tail), 'and the Disconnect sentence');
   await p1.probe('the remove-refused dialog', '#chan-remove-refused .dialog');
   ok((await accounts()).some((a) => a.id === A.id), 'the referenced account is still there');

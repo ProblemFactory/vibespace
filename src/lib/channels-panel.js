@@ -64,8 +64,10 @@ import { routeErrorText, groupErrorText, statusTagParts, viewSwitchText } from '
 // g3 (design §22): the IM-first list's arithmetic and the group dialogs.
 import { groupListRows, foldsFrom, GROUP_ADAPTER_ID, firstScreen, statusTag } from './channel-groups-view.js';
 import { showGroupMembersDialog, showGroupDetail, renameGroup, archiveGroup } from './channel-group-dialogs.js';
-// P2: the Assign & filter editor and the one-line summary a row draws.
-import { showAssignFilterDialog, showScopeAssignDialog, assignmentSummary } from './channel-filter-editor.js';
+// R4: access and notification — two operations (Grant access… / Notify…),
+// the grain menu, and the one-line summary a row draws.
+import { showGrantAccessDialog, showNotifyDialog, showGrainMenu, assignmentSummary } from './channel-filter-editor.js';
+import { grainSummaryText } from './channel-words.js';
 // P3: the reach/policy dialog (row menu) and the Outbox window (header button).
 import { showReachDialog } from './channel-reach-editor.js';
 import './channel-outbox.js';
@@ -547,9 +549,12 @@ export function registerChannelAdapterMenu() {
   const acct = (c) => !!A(c).connectable;
   registerMenuItem({ menu: M, group: '1_rows', order: 5, when: (c) => acct(c) && (c.convs || []).length > 0, label: () => t('Open conversation window'), run: (c) => openConversationOf(c.app, c.convs) });
   registerMenuItem({ menu: M, group: '1_rows', order: 8, when: (c) => !A(c).builtin && (c.convs || []).length > 0, label: () => t('Search messages…'), run: (c) => showSearchDialog(c.app, A(c)) });
-  // 2026-09-26 (design §7.3): the ACCOUNT and PATTERN grains, the same editor as a conversation's
-  registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: (c) => (A(c).assignment ? t('Handed to an agent — edit…') : t('Hand to an agent…')), run: (c) => showScopeAssignDialog(c.app, A(c), { kind: 'account' }) });
-  registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showScopeAssignDialog(c.app, A(c), { kind: 'pattern' }) });
+  // R4 (2026-09-27, design §7.3): TWO OPERATIONS, ACCESS FIRST — who may see
+  // and act on the whole account, then who is woken; a rule's conversations
+  // are a grain of their own (a new rule starts with its access)
+  registerMenuItem({ menu: M, group: '1_rows', order: 10, when: (c) => !A(c).builtin, label: () => t('Grant access…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'account', adapter: A(c) }) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 11, when: (c) => !A(c).builtin, label: () => t('Notify…'), run: (c) => showNotifyDialog(c.app, { kind: 'account', adapter: A(c) }) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
   registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
@@ -646,10 +651,16 @@ export function registerChannelsMenus() {
   registerMenuItem({
     menu: M, group: '3_assign', order: 10, separator: true,
   });
+  // R4: the CONVERSATION grain's two operations, access first
   registerMenuItem({
     menu: M, group: '3_assign', order: 20,
-    label: (c) => (c.conv.assignment && c.conv.assignment.source === 'conversation' ? t('Assign & filter…') : t('Assign to an agent…')),
-    run: (c) => showAssignFilterDialog(c.app, c.conv),
+    label: () => t('Grant access…'),
+    run: (c) => showGrantAccessDialog(c.app, { kind: 'conversation', conv: c.conv }),
+  });
+  registerMenuItem({
+    menu: M, group: '3_assign', order: 22,
+    label: () => t('Notify…'),
+    run: (c) => showNotifyDialog(c.app, { kind: 'conversation', conv: c.conv }),
   });
   // P3: who may see this conversation (with each grant's origin) + its
   // sending policy — one dialog (design §8, §9.1).
@@ -1058,8 +1069,8 @@ export function renderChannelsPanel(app, c) {
   /** THE ACCOUNT CARD (r4 §2.5 / §8.1 #1, the mockup `account-card`): head =
    *  chevron · type glyph · name · client chip · dot · conversations · ✎ · ⋯;
    *  under it the health line OR the error line + Re-authorize button, the
-   *  account / pattern grains (2026-09-26, §7.3: "Handed to <name> · all ·
-   *  wake", each rule on its own line), then EVERY conversation as ↳ rows
+   *  account / pattern grains (R4 §7.3: "Access: … · Notify: …", each rule
+   *  on its own line), then EVERY conversation as ↳ rows
    *  (newest first, the rest behind "Show all"). */
   function accountCard(a, mine, siblings, ordinal) {
     const kinds = (digest && digest.kinds) || [];
@@ -1140,35 +1151,27 @@ export function renderChannelsPanel(app, c) {
     b.dataset.showAll = '1';
     return b;
   }
-  /** The account card's grain lines: "Handed to <name> · all · wake" for the
-   *  whole account, and one line per rule ("Rule: title contains … → <name>"). */
+  /** The account card's grain lines (R4): the WHOLE ACCOUNT's two facts —
+   *  "Access: A (may send), Group · 工作 (drafts) · Notify: A wake per batch"
+   *  — and one line per rule ("Rule: title contains … → Access: … · Notify:
+   *  …"). A click offers the two operations (Grant access… / Notify…). */
   function grainLines(a) {
     const out = [];
-    const say = (g) => [g.principal.name || g.principal.id, g.mode === 'filtered' ? t('filtered') : t('all messages'), g.notify === 'digest' ? t('digest every {m} min', { m: g.digestMinutes }) : t('wake')].join(' · ');
-    if (a.assignment) {
+    const line = (grain, text, title, target) => {
       const l = document.createElement('div');
       l.className = 'chan-row-assign chan-grain-line';
-      l.dataset.grain = 'account';
+      l.dataset.grain = grain;
       l.appendChild(icon('filter', 10));
       const tx = document.createElement('span');
-      tx.textContent = t('Handed to {who}', { who: say(a.assignment) });
+      tx.textContent = text;
       l.appendChild(tx);
-      l.title = t('The whole account is handed to this agent — every conversation without an assignment of its own wakes it. Click to edit.');
-      l.onclick = () => showScopeAssignDialog(app, a, { kind: 'account' });
-      out.push(l);
-    }
-    for (const pa of a.patterns || []) {
-      const l = document.createElement('div');
-      l.className = 'chan-row-assign chan-grain-line';
-      l.dataset.grain = 'pattern';
-      l.appendChild(icon('filter', 10));
-      const tx = document.createElement('span');
-      tx.textContent = t('Rule: {rule} → {who}', { rule: pa.patternLabel || '', who: say(pa) });
-      l.appendChild(tx);
-      l.title = t('Conversations matching this rule — now and later — wake this agent. Click to edit.');
-      l.onclick = () => showScopeAssignDialog(app, a, { kind: 'pattern', id: pa.id });
-      out.push(l);
-    }
+      l.title = title;
+      l.onclick = (ev) => { ev.stopPropagation(); showGrainMenu(app, target, ev.clientX, ev.clientY); };
+      return l;
+    };
+    const g = a.accountGrain;
+    if (g && ((g.access || []).length || (g.watchers || []).length)) out.push(line('account', grainSummaryText(g), t('The whole account: who may see and act on every conversation, and who is woken. Click for Grant access… / Notify….'), { kind: 'account', adapter: a }));
+    for (const pa of a.patterns || []) out.push(line('pattern', t('Rule: {rule} → {grant}', { rule: pa.patternLabel || '', grant: grainSummaryText(pa) }), t('Conversations matching this rule — now and later. Click for Grant access… / Notify….'), { kind: 'pattern', adapter: a, id: pa.id }));
     return out;
   }
 

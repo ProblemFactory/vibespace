@@ -5047,8 +5047,13 @@ console.log('— ⑬d the deferred restart payload cannot overwrite the answer i
   ok('the re-attach STAMPS the payload with its arrival BEFORE the epoch branch defers it (a stamp taken inside the timer would be the bug)',
     (() => {
       const stamp = cvSrc.indexOf("if (typeof msg.__rxTick !== 'number') msg.__rxTick = performance.now();");
-      const defer = cvSrc.indexOf('setTimeout(() => { if (!this._disposed) this._fullViewReset(msg); }, Math.random() * 500);');
-      return stamp > 0 && defer > stamp;
+      // 2.369.191 (lane S1, B-63f1 ②): the deferral moved into `_armViewReset` (which also holds the ops of
+      // the window); the stamp must still precede the hand-off, and the armed timer still rebuilds from the
+      // snapshot it holds after the product's own 0–500 ms jitter
+      const defer = cvSrc.indexOf('        this._armViewReset(msg);\n        return;');
+      const armed = /_armViewReset\(msg\) \{[\s\S]*?this\._resetTimer = setTimeout\(\(\) => \{[\s\S]*?if \(m\) this\._fullViewReset\(m\);\n\s*\}, this\._resetJitterMs\(\)\);/.test(cvSrc)
+        && /_resetJitterMs\(\) \{ return Math\.random\(\) \* RESET_JITTER_MS; \}/.test(cvSrc);
+      return stamp > 0 && defer > stamp && armed;
     })());
   ok('…and `_applyLiveMeta` reads THAT stamp for the queue, with its own `in meta` test (absent ⇒ now, which is the truth for every synchronous caller — and what test-auto-resume\'s carries-the-key sweep demands of every key read there)',
     /const rxTick = \('__rxTick' in meta\) \? Number\(meta\.__rxTick\) : NaN;/.test(cvSrc)
@@ -5705,10 +5710,15 @@ process.stdin.on('data', (d) => {
         const CVW = path.join(wt, 'src', 'lib', 'chat-view.js');
         const CVW_PRISTINE = fs.existsSync(CVW) ? fs.readFileSync(CVW, 'utf8') : '';
         const GUARD14 = '    if ((this._queueStatedAt || 0) > at) return;\n';
+        // 2.369.191 (lane S1, B-63f1 ②): a SECOND layer now removes this race — the ops of the stagger
+        // window are HELD and drained after the slab, so the answer can no longer land before the stale
+        // payload. The old layer's control must strip the new layer too (else it reproduces nothing), the
+        // recency guard is proven on its own with the hold removed, and the whole product runs last.
+        const HOLD14 = '    if (this._resetPending) { this._holdResetOp(op); return; }\n';
         if (!fs.existsSync(ESBUILD)) {
           ok('⑭b: esbuild is available to rebuild the worktree bundle (the arms differ by ONE source line, so each needs its own build)', false, ESBUILD);
-        } else if (!CVW_PRISTINE.includes(GUARD14)) {
-          ok('⑭b: the recency guard is a real line of the worktree copy of chat-view.js', false, CVW);
+        } else if (!CVW_PRISTINE.includes(GUARD14) || CVW_PRISTINE.split(HOLD14).length !== 2) {
+          ok('⑭b: the recency guard and the reset hold are real lines of the worktree copy of chat-view.js (the hold exactly once)', false, CVW);
         } else {
           // The page must run the bytes we just built, not a cached bundle.
           await cdp('Network.enable');
@@ -5800,11 +5810,12 @@ process.stdin.on('data', (d) => {
             return { calls: calls || {}, end };
           };
 
-          // ARM 1 — PRE-FIX: the real worktree source with ONLY the guard line
-          // removed, built into the bundle the page loads.
-          fs.writeFileSync(CVW, CVW_PRISTINE.replace(GUARD14, ''));
-          ok('⑭b PRE-FIX: exactly one line was removed from the worktree copy of the product source',
-            fs.readFileSync(CVW, 'utf8').length === CVW_PRISTINE.length - GUARD14.length);
+          // ARM 1 — PRE-FIX: the real worktree source with the guard line AND
+          // the reset hold (the later layer, 2.369.191) removed, built into the
+          // bundle the page loads.
+          fs.writeFileSync(CVW, CVW_PRISTINE.replace(GUARD14, '').replace(HOLD14, ''));
+          ok('⑭b PRE-FIX: exactly two lines were removed from the worktree copy of the product source (the recency guard and the reset hold)',
+            fs.readFileSync(CVW, 'utf8').length === CVW_PRISTINE.length - GUARD14.length - HOLD14.length);
           buildBundle();
           const pre14 = await arm('PRE-FIX', false);
           const bCallsPre = pre14.calls[B.sid] || [];
@@ -5814,8 +5825,10 @@ process.stdin.on('data', (d) => {
           ok('⑭b PRE-FIX: …and the strip ends EMPTY — a message that will really run, held by the wrapper, stated on the wire, and NOWHERE on screen (no row to steer, remove or edit; the ask is self-limiting, so nothing asks again)',
             pre14.end.b.rows === 0, JSON.stringify(pre14.end));
 
-          // ARM 2 — FIXED: the same file, restored.
-          fs.writeFileSync(CVW, CVW_PRISTINE);
+          // ARM 2 — FIXED (the recency layer ALONE): the guard restored, the
+          // reset hold still removed — the race's order is the incident's, and
+          // the guard alone keeps the row.
+          fs.writeFileSync(CVW, CVW_PRISTINE.replace(HOLD14, ''));
           buildBundle();
           const fix14 = await arm('FIXED', true);
           const bCallsFix = fix14.calls[B.sid] || [];
@@ -5824,8 +5837,21 @@ process.stdin.on('data', (d) => {
             JSON.stringify(bCallsFix));
           ok('⑭b FIXED: …and the row is STILL THERE in the steady state — a payload half a second old cannot overwrite the answer it asked for',
             fix14.end.b.rows === 1 && /the b message/.test(fix14.end.b.texts.join(' ')) && fix14.end.b.red === 0, JSON.stringify(fix14.end));
-          ok('⑭b BOTH ARMS: session A — whose message really did leave the queue — ends EMPTY either way (the fix is about recency, not about keeping whatever was on screen)',
-            pre14.end.a.rows === 0 && fix14.end.a.rows === 0, JSON.stringify({ pre: pre14.end.a, fix: fix14.end.a }));
+
+          // ARM 3 — THE PRODUCT (both layers, the file restored): the hold
+          // drains the answer AFTER the slab, so the stale payload runs first
+          // and the answer lands last — the row is there either way.
+          fs.writeFileSync(CVW, CVW_PRISTINE);
+          buildBundle();
+          const both14 = await arm('PRODUCT', true);
+          const bCallsBoth = both14.calls[B.sid] || [];
+          ok('⑭b PRODUCT: the reset hold ORDERS the two calls — the held payload first, the wrapper\'s answer drained after the slab it post-dates',
+            bCallsBoth.length >= 2 && bCallsBoth.findIndex((c) => c.known === false && c.n === 0) >= 0 && bCallsBoth.findIndex((c) => c.known === false && c.n === 0) < bCallsBoth.findIndex((c) => c.known === true && c.n === 1),
+            JSON.stringify(bCallsBoth));
+          ok('⑭b PRODUCT: …and the row is there in the steady state',
+            both14.end.b.rows === 1 && /the b message/.test(both14.end.b.texts.join(' ')) && both14.end.b.red === 0, JSON.stringify(both14.end));
+          ok('⑭b EVERY ARM: session A — whose message really did leave the queue — ends EMPTY either way (the fix is about recency, not about keeping whatever was on screen)',
+            pre14.end.a.rows === 0 && fix14.end.a.rows === 0 && both14.end.a.rows === 0, JSON.stringify({ pre: pre14.end.a, fix: fix14.end.a, both: both14.end.a }));
         }
       } catch (e) {
         ok('the ⑭ browser leg ran', false, String(e.message || e).slice(0, 400));

@@ -457,6 +457,27 @@
 .chat-permission-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
 .chat-permission-question { display: flex; flex-direction: column; gap: 6px; min-width: 180px; flex: 1 1 180px; }
 
+/* A HELPER's permission ask, inside its Agent card in the parent chat (lane S1, B-6e95) —
+   who asks and what for, above the same permission card a main-session ask gets. */
+.chat-helper-asks { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 4px; }
+.chat-helper-ask.pending { padding: 6px 8px; border-left: 3px solid var(--yellow); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--yellow) 6%, transparent); }
+.chat-helper-ask-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--yellow); }
+.chat-helper-ask-head svg { width: 14px; height: 14px; flex-shrink: 0; }
+.chat-helper-ask-what { font-size: 12px; color: var(--text); margin: 4px 0 0; overflow-wrap: anywhere; }
+.chat-helper-ask-what code { font-size: 11px; }
+.chat-helper-ask-tool { color: var(--text-secondary); font-weight: 600; }
+.chat-helper-ask .chat-permission-inline { margin: 6px 0 0; }
+.chat-helper-ask-settled { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-agent-stopped { color: var(--text-secondary); font-size: 12px; padding: 2px 0; }
+/* the waiting chip's jump lands here — one pulse, then still */
+.chat-ask-flash { animation: chat-ask-flash-anim 1.6s ease-out; }
+@keyframes chat-ask-flash-anim {
+  0%, 60% { box-shadow: 0 0 0 2px var(--yellow), 0 0 14px 4px color-mix(in srgb, var(--yellow) 55%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .chat-ask-flash { animation: none; outline: 2px solid var(--yellow); } }
+.chat-status-turnstate.chat-status-clickable { cursor: pointer; }
+
 /* AskUserQuestion interactive UI */
 .chat-ask-form { gap: 10px; }
 .chat-ask-page { display: flex; flex-direction: column; gap: 8px; }
@@ -500,6 +521,7 @@
 .chat-perm-btn.chat-ask-submit:not(:disabled):hover { background: var(--accent-hover); border-color: var(--accent-hover); opacity: 1; }
 .chat-permission-allowed { color: var(--green); font-weight: 600; }
 .chat-permission-denied { color: var(--red); font-weight: 600; }
+.chat-permission-unknown { color: var(--text-secondary); font-weight: 600; } /* lane S1 verify r5: a result the sentence census does not know — never drawn as allowed */
 .chat-permission-stale { color: var(--text-secondary); font-weight: 500; line-height: 1.4; } /* lane J r2: a browser approval answered stale at a takeover — informational, not a refusal the user made */
 
 .chat-diff { margin: 4px 0 0; font-size: 12px; }

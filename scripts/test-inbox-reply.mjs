@@ -114,7 +114,17 @@ console.log('§2 replyVerdict');
   ok(unreach.code === 'host_unreachable' && unreach.why === 'Host unreachable — reconnect, then reply', 'unreachable host ⇒ host_unreachable', unreach);
   ok(idle.ok === true && mid.ok === true, 'live idle ⇒ ok; live MID-TURN ⇒ ok too (the session queues it)');
   ok(v(idle, { ...item, sessionKey: 'accounts' }).code === 'no_session' && v(idle, { ...item, sessionKey: 'jobs' }).code === 'no_session' && v(idle, { ...item, jobId: 'j1' }).code === 'job_item', 'accounts/jobs keys ⇒ no_session; a job item ⇒ job_item (those two are HIDDEN, not disabled)');
-  ok(R.REPLY_HIDDEN_CODES.includes('no_session') && R.REPLY_HIDDEN_CODES.includes('job_item') && R.REPLY_HIDDEN_CODES.length === 2, 'REPLY_HIDDEN_CODES = exactly the two no-surface codes');
+  ok(R.REPLY_HIDDEN_CODES.includes('no_session') && R.REPLY_HIDDEN_CODES.includes('job_item') && R.REPLY_HIDDEN_CODES.includes('card_item') && R.REPLY_HIDDEN_CODES.length === 3, 'REPLY_HIDDEN_CODES = exactly the three no-surface codes');
+  // lane S1 verify r2 (M1): a helper's permission ask is answered on ITS CARD — a typed reply
+  // can never approve it (a control_response on stdin is the only answer), and it used to
+  // resolve the item while the helper still waited
+  const helperItem = { ...item, action: { type: 'helper-ask', requestId: '2e19e852-98d5-4094-be1b-5fc1ccc2a3c7', sessionId: 'sess-1' } };
+  const liveChat = { live: true, mode: 'chat', remoteState: null };
+  const c1 = v(liveChat, helperItem), c2 = v(null, helperItem), c3 = v({ ...liveChat, turn: 'running' }, helperItem);
+  ok(c1.code === 'card_item' && c1.why === 'Answer it on the helper’s card — click the item to go there' && c2.code === 'card_item' && c3.code === 'card_item', 'a helper-ask item ⇒ card_item on a live, a dead and a mid-turn session alike (the card is the surface, never a typed reply)', [c1, c2, c3]);
+  ok(R.REPLY_HIDDEN_CODES.includes('card_item') && R.CARD_ACTION_TYPES.includes('helper-ask') && R.CARD_ACTION_TYPES.length === 1, 'card_item is HIDDEN (no Reply button drawn) and helper-ask is the one card action kind');
+  ok(v(liveChat, { ...item, action: { type: 'open-window', winId: 'w1' } }).ok === true && v(liveChat, { ...item, action: null }).ok === true, 'an item with another action kind (or none) still replies');
+  ok(v(liveChat, { ...item, jobId: 'j1', action: { type: 'helper-ask', requestId: 'r' } }).code === 'job_item', 'a job item stays job_item (the earlier rung wins)');
 }
 
 // ── §3 the store ──────────────────────────────────────────────────────────
@@ -377,6 +387,19 @@ console.log('§5b vibespace-ask --options: the CLI passes the labels as typed, t
   srv.close();
 }
 
+// ── §4b (lane S1 verify r2, M1) the route: a helper-ask item is refused by name — nothing written, nothing resolved ──
+console.log('§4b POST /api/user-todos/:id/reply on a helper-ask item');
+{
+  const H = harness();
+  const { wrote } = H.addSession('sess-h');
+  const item = H.userTodos.add('claude:sid-sess-h', { origin: 'agent', kind: 'action', urgency: 'high', text: 'Helper “Fetch title of example.com” needs your approval to use WebFetch', action: { type: 'helper-ask', requestId: '2e19e852-98d5-4094-be1b-5fc1ccc2a3c7', sessionId: 'sess-h' } });
+  const r = H.call(item.id, { text: 'yes, allow it' });
+  ok(r.status === 409 && r.json.code === 'card_item' && /helper’s card/.test(r.json.error), 'a typed reply to a helper-ask item ⇒ 409 card_item with the sentence', r);
+  ok(wrote.length === 0 && H.rec.feed.length === 0, 'NOTHING was written to the pty and nothing fed (a typed line can never be a control_response)', wrote.length);
+  ok(H.userTodos.get(item.id).status === 'open', 'the item stays OPEN — the pointer to the waiting card is kept', H.userTodos.get(item.id).status);
+  H.userTodos.stop(); H.userTodos.flush();
+}
+
 // ── §6 NEGATIVE CONTROL ──────────────────────────────────────────────────────
 console.log('§6 negative control');
 {
@@ -395,6 +418,21 @@ console.log('§6 negative control');
   const r = H.call(it.id, { text: 'speaking as the owner' }, { authorization: 'Bearer vsst_x' });
   ok(r.status === 200 && wrote.length === 1, 'without the isAgentBearer line a vsst_ token IS let through — the §4 leg can go red', r);
   H.userTodos.stop(); H.userTodos.flush();
+}
+
+// ── §6b negative control (M1): the PURE verdict without its card_item rung ──
+console.log('§6b negative control: replyVerdict without the card_item rung');
+{
+  const rel = 'src/inbox-reply.js';
+  const src = read(rel);
+  const needle = "  if (it.action && typeof it.action === 'object' && CARD_ACTION_TYPES.includes(it.action.type) && cardReplyRefused()) return no('card_item');\n"; // lane S1 verify r3: the rung asks the ask table's `reply` row
+  ok(src.includes(needle), '§6b control needle exists');
+  const MUT = mutantCopies('inbox-reply-card', REPO);
+  const Mut = MUT.load(rel, src.replace(needle, ''), 'no-card-item');
+  const helperItem = { id: 'ut-aaaaaaaaaa', sessionKey: 'claude:sid', text: 'q', action: { type: 'helper-ask', requestId: 'r1' } };
+  const v = Mut.replyVerdict({ item: helperItem, session: { live: true, mode: 'chat', remoteState: null } });
+  ok(v.ok === true, '§6b CONTROL: without the rung a helper-ask item is offered a typed reply (the F3 symptom: the item resolved, the helper still waiting) — the §2/§4b legs can go red', v);
+  for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { label: '§6b ' })) ok(row.pass, row.name, row.detail);
 }
 
 // ── §7 chunk 4: setStatusMany + POST /api/user-todos/resolve-many ─────────────

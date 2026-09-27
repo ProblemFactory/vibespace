@@ -392,6 +392,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/browser-keeper.js': 'browser', // lane H verify r5: the ONE notice when a profile's browser keeps closing (the heal budget)
     'src/server/mounts-plugins-wiring.js': 'browser', // the browser routes' switch PROPOSAL (this file only wires them)
     'src/agent-routes.js': 'agent',
+    'src/server/helper-asks.js': 'agent', // lane S1: a helper's permission ask left unanswered for 60 s
   };
   // r2: no exemptions — every origin of the closed set has a producer (the
   // `system` row was dropped: nothing has ever filed with by:'system')
@@ -493,8 +494,8 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   console.log('     sites: ' + C.sites.map((x) => `${x.rel.replace(/^src\//, '')}:${x.line}=${x.origin}`).join(' · '));
   ok(C.sites.length >= 12, `the census scope is non-vacuous (${C.sites.length} sites; 12 when this shipped)`);
   ok(C.problems.length === 0, 'every site declares a literal origin of the closed set, the one its file produces; every origin has a producer; every PRODUCERS row files', C.problems);
-  eq(C.sites.length, 13, 'the widened match finds exactly the 13 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice)');
-  eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 5, 'channels-engine files from five sites — all five declared');
+  eq(C.sites.length, 15, 'the widened match finds exactly the 15 declared sites (every classList.add(a, b) excluded, no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer)');
+  eq(C.sites.filter((x) => x.rel === 'src/server/channels-engine.js').length, 6, 'channels-engine files from six sites — all six declared (R4: + composePointerSync, origin channels)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };
   const cDrop = census(drop);

@@ -30,7 +30,9 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { MessageManager, peerOriginOf } = require('../../message-manager');
 const { cwdToProjectDir, findSessionJsonlPath } = require('../../session-store');
-const { feedPeerCard } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive)
+const { feedPeerCard, seedHelperView, noteHelperResults } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive); seedHelperView = a helper view created after its ask gets it (lane S1)
+// The CLI's control-channel records: never routed to a helper's view ALONE, whatever tags they carry (lane S1 verify r2, M2).
+const CONTROL_RECORD_TYPES = new Set(['control_request', 'control_response', 'control_cancel_request']);
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
 const { isTurnState, turnStateEffect } = require('../../turn-state.js');
 const { userChannelKind, userChannelRecord, userFilePaths } = require('../../user-channel.js');
@@ -314,6 +316,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               // Buffer + broadcast
               if (!session.subagentBuffers.has(toolUseId)) session.subagentBuffers.set(toolUseId, []);
               session.subagentBuffers.get(toolUseId).push(msg);
+              noteHelperResults(session, msg); // verify r3: the helper's tool_result for an ASKED call settles the parent's ask (the table's result rows)
               broadcastToSession(session, id, { type: 'subagent-message', sessionId: id, parentToolUseId: toolUseId, message: msg });
               // Normalize for subagent viewers
               if (!session._subNormalizers) session._subNormalizers = new Map();
@@ -321,8 +324,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 const subMM = new MessageManager(`sub-${toolUseId}`);
                 subMM.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: `sub-${toolUseId}`, ...op }));
                 session._subNormalizers.set(toolUseId, subMM);
-              }
-              session._subNormalizers.get(toolUseId).processLive(msg);
+                session._subNormalizers.get(toolUseId).processLive(msg);
+                seedHelperView(session, toolUseId, subMM); // lane S1: an ask the parent already holds (a restart re-armed this watcher) — after the record that may carry its tool card
+              } else session._subNormalizers.get(toolUseId).processLive(msg);
             } catch {}
           }
         } catch {}
@@ -1355,7 +1359,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               elapsedSeconds: msg.elapsed_time_seconds ?? null,
               heartbeat: !!msg.heartbeat,
             });
-          } else if (msg.parent_tool_use_id || msg.isSidechain) {
+          } else if ((msg.parent_tool_use_id || msg.isSidechain) && !CONTROL_RECORD_TYPES.has(msg.type)) {
+            // (a CONTROL record a future CLI stamps with parent_tool_use_id — lane S1
+            // verify r2, M2 — falls through to feedLive: the parent's normalizer hangs
+            // the ask on the helper's card and the gate routes it to the helper's own
+            // view; routed here alone, the parent chat went silent again)
             const ptuid = msg.parent_tool_use_id;
             if (ptuid) {
               // Mark uuid as emitted (for dedup with JSONL watcher)
@@ -1366,6 +1374,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               // Buffer
               if (!session.subagentBuffers.has(ptuid)) session.subagentBuffers.set(ptuid, []);
               session.subagentBuffers.get(ptuid).push(msg);
+              noteHelperResults(session, msg); // verify r3 (see the watcher's twin above)
             }
             // Broadcast to parent (for tool card status) + normalize for subagent viewers
             broadcastToSession(session, id, { type: 'subagent-message', sessionId: id, parentToolUseId: ptuid, message: msg });
@@ -1375,8 +1384,9 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
                 const subMM = new MessageManager(`sub-${ptuid}`);
                 subMM.onOp((op) => broadcastToSession(session, id, { type: 'msg', sessionId: `sub-${ptuid}`, ...op }));
                 session._subNormalizers.set(ptuid, subMM);
-              }
-              session._subNormalizers.get(ptuid).processLive(msg);
+                session._subNormalizers.get(ptuid).processLive(msg);
+                seedHelperView(session, ptuid, subMM); // lane S1 (see the watcher's twin above)
+              } else session._subNormalizers.get(ptuid).processLive(msg);
             }
             continue;
           }

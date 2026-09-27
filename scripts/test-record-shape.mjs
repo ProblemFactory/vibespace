@@ -26,6 +26,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+// §4d (lane S1 verify r5): THE PERMISSION-OUTCOME SENTENCE CENSUS — the binary's OWN lists of the tool_result
+//   texts it writes for a permission outcome (`Gd()` and the exact is_error set) vs src/permission-outcome.js;
+//   the names are read off an anchor (the interrupt marker), never spelled; a newer build's extra sentence
+//   PRINTS and FAILS until classified — the same discipline as §4's field census.
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
@@ -284,6 +288,49 @@ function extractZodUnion(text) {
   return { union, helpers: [...pairs.values()], error: null };
 }
 
+/** §4d (lane S1 verify r5): the binary's OWN census of the tool_result texts it writes for a permission
+ *  outcome. Anchor = the constant holding the interrupt marker; from it the two lists the binary keeps —
+ *  `function X(){return[…,N,…]}` (the 2.1.281 `Gd()`, matched by startsWith in `Hd()`) and
+ *  `Y=new Set([…,N,…])` (the exact is_error set, with `a+b` suffix forms) — name every constant; each
+ *  is resolved to its string on a strings-dump line that declares at least ONE OTHER member (a chunk
+ *  declares them together; a reused minified name elsewhere in the bundle is not that). Template literals
+ *  end at the dump's line (a feedback tail after "the user said:" begins on the next line) — the rows are
+ *  prefixes, as the binary's own matcher is. Never throws; every failure names its anchor. */
+function extractPermissionSentences(text) {
+  const anchor = /(?<![\w$])([\w$]+)="\[Request interrupted by user for tool use\]"/.exec(text);
+  if (!anchor) return { error: 'NO ANCHOR: "[Request interrupted by user for tool use]" is not a named constant in the bundle — the interrupt marker moved or was reworded: read the binary around "Tool call did not complete" and teach extractPermissionSentences the new form' };
+  const N = anchor[1], esc = N.replace(/\$/g, '\\$');
+  const gd = new RegExp('function ([\\w$]+)\\(\\)\\{return\\[((?:[\\w$]+,)*' + esc + '(?:,[\\w$]+)*)\\]\\}').exec(text);
+  if (!gd) return { error: 'NO LIST: no `function X(){return[…,' + N + ',…]}` (the tool_result census the 2.1.281 bundle calls Gd) — the list moved: read the binary around "' + N + '" and teach extractPermissionSentences the new form' };
+  // several chunks keep a Set naming the marker (2.1.281: If = [Jw,Ud], Fbe = [Jw,Ud,pb,ww,WO], IS = the 15-member exact
+  // is_error set) — the census is the LARGEST, the one that lists every constant with its suffix forms
+  const setRe = new RegExp('(?<![\\w$])([\\w$]+)=new Set\\(\\[((?:[\\w$+]+,)*' + esc + '(?:,[\\w$+]+)*)\\]\\)', 'g');
+  let is = null; for (let m; (m = setRe.exec(text));) if (!is || m[2].split(',').length > is[2].split(',').length) is = m;
+  if (!is) return { error: 'NO SET: no `Y=new Set([…,' + N + ',…])` (the exact is_error set the 2.1.281 bundle calls IS) — read the binary around "' + N + '"' };
+  const from = new Map(); const suffixes = new Set();
+  for (const tok of gd[2].split(',')) from.set(tok, 'Gd');
+  for (const tok of is[2].split(',')) { const [head, ...rest] = tok.split('+'); from.set(head, from.has(head) ? 'both' : 'IS'); for (const p of rest) suffixes.add(p); }
+  const names = [...from.keys()];
+  const defRe = (name, flags) => new RegExp('(?<![\\w$])' + name.replace(/\$/g, '\\$') + '=(?:"((?:[^"\\\\]|\\\\.)*)"|`([^`\\n]*))', flags);
+  const defsOf = (name) => { const out = []; const re = defRe(name, 'g'); let m; while ((m = re.exec(text))) out.push({ at: m.index, value: m[1] !== undefined ? m[1] : m[2] }); return out; };
+  const lineOf = (at) => { const a = text.lastIndexOf('\n', at) + 1; const b = text.indexOf('\n', at); return [a, b < 0 ? text.length : b]; };
+  const declaresAnother = (name, at) => { const [a, b] = lineOf(at); const line = text.slice(a, b); return names.some((o) => o !== name && defRe(o, '').test(line)); };
+  const sentences = [], unresolved = [];
+  for (const name of names) {
+    const cands = defsOf(name).filter((d) => d.value.length >= 20 && declaresAnother(name, d.at));
+    if (cands.length === 1) sentences.push({ name, from: from.get(name), text: cands[0].value.replace(/\\"/g, '"'), at: cands[0].at });
+    else unresolved.push(name + ' (' + cands.length + ' candidate definitions on a line declaring another member)');
+  }
+  return { anchor: N, list: gd[1], set: is[1], sentences, unresolved, suffixes: [...suffixes] };
+}
+/** PURE: the binary's sentences vs the table — {unclassified: sentences the table lacks, ghosts: rows the binary lacks}. */
+function outcomeCensus(sentences, rows, literalText = '') {
+  const texts = new Set(sentences.map((x) => x.text));
+  const unclassified = sentences.filter((x) => !rows.some((r) => r.text === x.text)).map((x) => x.name + ' = ' + JSON.stringify(x.text.slice(0, 90)));
+  const ghosts = rows.filter((r) => (r.binary === 'literal' ? !literalText.includes(r.text) : !texts.has(r.text))).map((r) => r.id + ' (' + r.binary + ')');
+  return { unclassified, ghosts };
+}
+
 console.log('§4a the extractor on every spelling the minifier has used — a rename is FOLLOWED, a new form fails BY NAME');
 {
   // Each fixture keeps the real bundle's layout (the lazy `p(()=>…)` wrapper, `.describe(…)` with braces
@@ -349,6 +396,32 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
     let text = '';
     try { text = execFileSync('strings', ['-n', '8', bin], { maxBuffer: 1024 * 1024 * 1024, encoding: 'latin1' }); } catch { try { text = fs.readFileSync(bin, 'latin1'); } catch { } }
     const { union, helpers, error: exErr } = extractZodUnion(text);
+    // §4d THE PERMISSION-OUTCOME SENTENCE CENSUS (lane S1 verify r5) — while the dump is still in memory
+    {
+      const PO = require(path.join(REPO, 'src/permission-outcome.js'));
+      const cen = extractPermissionSentences(text);
+      oracleOk('§4d the sentence extractor found its anchor (the interrupt marker), the tool_result list and the exact is_error set in the installed bundle (a moved list fails HERE, by name)', !cen.error, cen.error);
+      if (!cen.error) {
+        console.log(`    §4d permission sentences: anchor ${cen.anchor} · list ${cen.list}() · set ${cen.set} · ${cen.sentences.length} resolved (${cen.sentences.map((x) => x.name).join(',')}) · suffixes ${cen.suffixes.join(',') || '(none)'} · unresolved ${cen.unresolved.join('; ') || '(none)'}`);
+        oracleOk(`§4d every member of both lists resolves to ONE sentence (${cen.sentences.length} — the 2.1.281 census is 13 + the user-message marker the set adds)`, cen.unresolved.length === 0 && cen.sentences.length >= 14, cen.unresolved);
+        const { unclassified, ghosts } = outcomeCensus(cen.sentences, PO.PERMISSION_OUTCOME_ROWS, text);
+        oracleOk(`§4d every sentence the binary writes for a permission outcome is a ROW of src/permission-outcome.js (${cen.sentences.length} checked) — a newer build's extra sentence FAILS HERE, named, until classified`, unclassified.length === 0, 'UNCLASSIFIED: ' + unclassified.join(' · '));
+        oracleOk('§4d no GHOST row: every list-backed row is in the binary\'s lists and every literal row is spelled in the bundle (the WebFetch deadline, the conversation-ended and streaming-fallback results)', ghosts.length === 0, 'GHOST: ' + ghosts.join(', '));
+        oracleOk('§4d the census names the installed build it was read from (PERMISSION_OUTCOME_CLI_VERSION = SCHEMA_CLI_VERSION)', PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION, PO.PERMISSION_OUTCOME_CLI_VERSION);
+        // NEGATIVE CONTROLS on the real census: one planted sentence is named; one row removed is named
+        const planted = cen.sentences.concat([{ name: 'zz9', from: 'Gd', text: '[Tool call refused: the safety classifier declined it after your approval — a sentence a future build invented]' }]);
+        const pv = outcomeCensus(planted, PO.PERMISSION_OUTCOME_ROWS, text);
+        ok('…NEGATIVE CONTROL: the real lists plus ONE planted sentence fail the classification leg naming exactly it', pv.unclassified.length === unclassified.length + 1 && pv.unclassified.some((x) => /^zz9 = .*safety classifier declined it/.test(x)) && pv.ghosts.length === ghosts.length, pv);
+        const fewer = PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.id !== 'hL');
+        const fv = outcomeCensus(cen.sentences, fewer, text);
+        ok('…NEGATIVE CONTROL: the table without the SUBAGENT\'s denial row (the r5 finding) fails the same leg naming that sentence', fv.unclassified.length === unclassified.length + 1 && fv.unclassified.some((x) => /Permission for this tool use was denied/.test(x)), fv);
+        // the extractor's own controls: a synthetic bundle in the 2.1.281 spelling, a reused name elsewhere, a missing anchor / list
+        const mini = 'var Jw="[Request interrupted by user]",Ud="[Request interrupted by user for tool use]",ok="[Tool call did not complete: the turn was ended.]",pb="The user doesn\'t want to take this action right now.",u4e=`\nNote: a suffix`;\nvar ok="tengu_worker_owner_rows_killswitch_reused_name";\nvar ww="The user doesn\'t want to proceed with this tool use. Rejected.",Dx=`The user doesn\'t want to proceed with this tool use. The user said:\nfeedback`;\nvar If=new Set([Jw,Ud]);function Gd(){return[ww,Dx,pb,Ud,ok]}function Hd(e){return Gd().some((r)=>n.startsWith(r))}\nvar IS=new Set([Jw,Ud,ok,pb,pb+u4e,ww,ww+u4e]);';
+        const mc = extractPermissionSentences(mini);
+        ok('§4d the extractor on a synthetic 2.1.281-shaped bundle: names read off the anchor, the LARGEST marker set taken (a two-member If is not the census), the reused `ok` elsewhere ignored (its line declares no other member), a template literal ends at its line, the suffix named, from = Gd | IS | both', !mc.error && mc.list === 'Gd' && mc.set === 'IS' && mc.suffixes.join() === 'u4e' && mc.sentences.length === 6 && mc.sentences.find((x) => x.name === 'ok').text.startsWith('[Tool call did not complete') && mc.sentences.find((x) => x.name === 'Dx').text === "The user doesn't want to proceed with this tool use. The user said:" && mc.sentences.find((x) => x.name === 'Jw').from === 'IS' && mc.sentences.find((x) => x.name === 'Dx').from === 'Gd' && mc.sentences.find((x) => x.name === 'Ud').from === 'both', mc);
+        ok('§4d …and a bundle without the anchor / without the list fails BY NAME', /NO ANCHOR/.test(extractPermissionSentences('var x="nothing here";').error) && /NO LIST/.test(extractPermissionSentences('var Ud="[Request interrupted by user for tool use]";').error));
+      }
+    }
     text = '';
     oracleOk('the extractor found the union\'s anchor in the installed bundle (a new spelling fails HERE, by name)', !exErr, exErr);
     const keys = Object.keys(union);

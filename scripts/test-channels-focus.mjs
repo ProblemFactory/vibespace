@@ -35,6 +35,15 @@
 //   ⑥ WIRING PINS: the panel draws firstScreen + statusTag + statusTagParts,
 //     the tag through channel-chrome's el() (no innerHTML), the header switch
 //     and the filter; the agent route's readFor is the stamp's only door
+//   ⑦ THE R3 × R4 SEAM (2.369.191, backlog B-adb7 (a)): a DIGEST watcher's
+//     hits wait on the conversation until its window closes — while the window
+//     is open the row is neither "held" nor listed for it; closed with the hits
+//     still pending it is held (amber). PURE `heldPending` over the engine's
+//     per-principal `touch.pendingFor` + the row's R4 `watchers` (a table: the
+//     open / closed / edge window, a wake watcher, a mixed pair, an orphan, a
+//     legacy hit, an older server), the REAL engine (setAccess + setWatchers,
+//     a digest hit pending ⇒ untagged; 61 min later ⇒ held), two patched
+//     copies as controls (the pre-seam total; statusTag without the watchers)
 //
 // Zero vendor calls; per-pid scratch dirs (scripts/scratch.mjs).
 // Run: node scripts/test-channels-focus.mjs
@@ -254,7 +263,10 @@ let SPEC = null;
   const { d: d2, rows, fs: fs2 } = screen();
   const got2 = tagsOf(fs2);
   const w30 = d2.conversations.find((c) => c.id === ids[30]), w44 = d2.conversations.find((c) => c.id === ids[44]);
-  ok(delivered.length === 2 && w30.touch.wake.ok === true && w30.touch.wake.lane === 'message' && w44.touch.wake.ok === true, `FIXTURE: both wakes were DELIVERED by the ladder (${delivered.length}: ${delivered.map((x) => x.cid).join(', ')})`, JSON.stringify([w30.touch, w44.touch]));
+  // R4 (2.369.191 merge): another principal's rows never mask A's — Room 44 is the RULE's (Beta) AND still the
+  // ACCOUNT's (Ops desk), so its new message wakes BOTH; Room 30 wakes Ops desk alone ⇒ 3 deliveries, never 2
+  const byCid = delivered.reduce((m, x) => { m[x.cid] = (m[x.cid] || 0) + 1; return m; }, {});
+  ok(delivered.length === 3 && byCid['cid-ops'] === 2 && byCid['cid-beta'] === 1 && w30.touch.wake.ok === true && w30.touch.wake.lane === 'message' && w44.touch.wake.ok === true, `FIXTURE: every wake was DELIVERED by the ladder — Room 30 → Ops desk; Room 44 → Beta (the rule) AND Ops desk (the account, R4: never masked) (${delivered.length}: ${delivered.map((x) => x.cid).join(', ')})`, JSON.stringify([w30.touch, w44.touch]));
   ok(fs2.shown.length === 9 && got2[ids[30]] && got2[ids[30]].code === 'assigned' && got2[ids[30]].grain === 'account' && got2[ids[30]].name === 'Ops desk' && got2[ids[44]] && got2[ids[44]].code === 'assigned' && got2[ids[44]].grain === 'pattern' && got2[ids[44]].name === 'Beta', `a DELIVERED wake lists its conversation: 9 — "→ Ops desk" (account) on Room 30, "→ Beta" (rule) on Room 44 (${Object.entries(got2).map(([k, v]) => `${k}=${v.code}${v.grain && v.grain !== 'conversation' ? `/${v.grain}` : ''}`).join(' ')})`);
   ok(fs2.focus === 9 && fs2.all === 50, `the header: "${Wd.viewSwitchText(fs2, { t: (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => p[k]) }).focus}" / "${Wd.viewSwitchText(fs2, { t: (s, p) => s.replace(/\{(\w+)\}/g, (m, k) => p[k]) }).all}"`);
   ok(Fo.firstScreen(rows, { view: 'all', now: clock }).shown.length === 50, 'the All switch shows all 50');
@@ -447,6 +459,68 @@ console.log('⑥ wiring pins');
   ok((ENGINE_SRC.match(/stampAgentRead\(/g) || []).length === 2 && /stampAgentRead\(en\.key, ctx, upTo\);/.test(ENGINE_SRC) && /eng\.readFor\(channelPrincipal\(s, id\)/.test(A), 'PIN: the stamp has ONE door — readFor, the agent route\'s read — and one definition');
   ok(/touch: touchView\(en, lw, ob\),/.test(ENGINE_SRC) && /name: target\.name \? String\(target\.name\)\.slice\(0, 80\) : null,/.test(ENGINE_SRC), 'PIN: the row carries `touch`; the wake names its target');
   ok(!/\b(lark|gmail|fake-poll)\b/.test(FOCUS_SRC.replace(/^\s*\/\/.*$/gm, '')), 'channel-focus.js names no adapter id (a fact, never a kind)');
+}
+
+// ═══ ⑦ the R3 × R4 seam ══════════════════════════════════════════════════
+console.log('⑦ the R3 × R4 seam (2.369.191): a DIGEST watcher\'s open window is not "held"');
+{
+  const OPS = { kind: 'agent', id: 'cid-Ops desk', name: 'Ops desk' };
+  const OPK = 'agent:cid-Ops desk';
+  const dig = () => ({ principal: OPS, notify: 'digest', mode: 'all', digestMinutes: 60, source: 'account' });
+  const wk = (who) => ({ principal: { kind: 'agent', id: `cid-${who}`, name: who }, notify: 'wake', mode: 'all', digestMinutes: 60, source: 'account' });
+  const pf = (p, n, oldest) => ({ p, n, oldest });
+  const M = 60e3;
+  // [name, row, the tag's code (null = not on the first screen), held hits]
+  const SEAM = [
+    ['digest-open', row('s-open', { assignment: principal('Ops desk', 'account'), watchers: [dig()], touch: { pending: 3, pendingFor: [pf(OPK, 3, NOW - 10 * M)] } }), null, 0],
+    ['digest-open-59m', row('s-open59', { watchers: [dig()], touch: { pending: 2, pendingFor: [pf(OPK, 2, NOW - 59 * M)] } }), null, 0],
+    ['digest-closed', row('s-closed', { assignment: principal('Ops desk', 'account'), watchers: [dig()], touch: { pending: 3, pendingFor: [pf(OPK, 3, NOW - 61 * M)] } }), 'assigned', 3],
+    ['digest-edge', row('s-edge', { watchers: [dig()], touch: { pending: 1, pendingFor: [pf(OPK, 1, NOW - 60 * M)] } }), 'held', 1],
+    ['wake-pending', row('s-wake', { watchers: [wk('Beta')], touch: { pending: 2, pendingFor: [pf('agent:cid-Beta', 2, NOW - M)] } }), 'held', 2],
+    ['mixed', row('s-mixed', { watchers: [dig(), wk('Beta')], touch: { pending: 5, pendingFor: [pf(OPK, 3, NOW - M), pf('agent:cid-Beta', 2, NOW - M)] } }), 'held', 2],
+    ['orphan', row('s-orphan', { watchers: [dig()], touch: { pending: 1, pendingFor: [pf('agent:cid-Gone', 1, NOW - M)] } }), 'held', 1],
+    ['legacy-untagged', row('s-legacy', { watchers: [dig()], touch: { pending: 1, pendingFor: [pf(null, 1, NOW - M)] } }), 'held', 1],
+    ['older-server', row('s-old', { watchers: [dig()], touch: { pending: 2 } }), 'held', 2],
+  ];
+  const seamReds = (F) => SEAM.filter(([, r, want, n]) => { const g = F.statusTag({ kind: 'conv', conv: r }, NOW); return (g ? g.code : null) !== want || F.heldPending(r.touch, NOW, r.watchers) !== n; }).map(([name]) => name);
+  const bad = seamReds(Fo);
+  ok(bad.length === 0, `the seam table: an OPEN digest window is neither held nor listed; closed (the edge exclusive) it is held; a wake watcher's, an orphan's, a legacy and an older server's pending stay held; a mixed pair counts only the wake's (${SEAM.length} rows)`, bad.join(', '));
+  ok(Fo.heldOf(SEAM[0][1].touch, NOW, SEAM[0][1].watchers) === false && Fo.heldOf(SEAM[0][1].touch, NOW) === true, 'heldOf reads the WATCHERS: the same open-window touch is held only when nobody says it is a digest');
+  ok(V.heldPending === Fo.heldPending, 'channel-groups-view re-exports heldPending (the panel\'s import path)');
+  // the REAL engine: an account-grain DIGEST watcher (R4's two operations) — the hit waits, the row is not held
+  const W = makeWorld(2);
+  const delivered = [];
+  const deliver = { async deliverToConversation(cid, text, opts) { delivered.push({ cid, text, opts }); return { ok: true, lane: 'message' }; } };
+  const { eng } = await engine('seam', W, { deliver, sessions: [{ cid: 'cid-ops', name: 'Ops desk', groups: [] }] });
+  const OPS2 = { kind: 'agent', id: 'cid-ops', name: 'Ops desk' };
+  const ra = await eng.setAccess('im', { kind: 'account' }, [{ principal: OPS2, authority: 'draft' }]);
+  const rw = await eng.setWatchers('im', { kind: 'account' }, [{ principal: OPS2, notify: 'digest', mode: 'all', digestMinutes: 60 }]);
+  ok(ra && ra.ok !== false && rw && rw.ok !== false, 'FIXTURE: access, then a DIGEST notification (60 min) for Ops desk on the whole account', JSON.stringify({ ra, rw }).slice(0, 300));
+  clock += 31e3;
+  W.convs.get('c00').recs.push({ vendorId: 'c00-news', at: clock - 500, author: { id: 'u2', name: 'Brook', isSelf: false, isBot: false }, text: 'news' });
+  await eng.refresh('im', 'c00');
+  await eng.settleWakes();
+  await drainIndex(eng);
+  const r00 = eng.digest().conversations.find((c) => c.id === 'c00');
+  const pfor = r00 && r00.touch && r00.touch.pendingFor;
+  ok(delivered.length === 0 && r00.touch.pending === 1 && Array.isArray(pfor) && pfor.length === 1 && pfor[0].p === 'agent:cid-ops' && pfor[0].n === 1 && pfor[0].oldest > 0 && r00.watchers.length === 1 && r00.watchers[0].notify === 'digest', 'the engine: the digest\'s hit WAITS on the conversation (nothing delivered), and the row says for whom — touch.pendingFor + the R4 watcher row', JSON.stringify({ delivered: delivered.length, touch: r00 && r00.touch, watchers: r00 && r00.watchers }));
+  const conv00 = { kind: 'conv', conv: r00 };
+  ok(Fo.statusTag(conv00, clock) === null, 'the window OPEN ⇒ the row wears no tag — not "→ Ops desk · held", not on the first screen (the account grain alone never lists it, D4)');
+  const later = Fo.statusTag(conv00, clock + 61 * M);
+  ok(later && later.code === 'assigned' && later.held === true && later.name === 'Ops desk', 'the window CLOSED with the hit still pending ⇒ "→ Ops desk", amber (held)', JSON.stringify(later));
+  eng.stop();
+  // CONTROLS: the pre-seam rule (any pending hit is held) and a statusTag that does not pass the row's watchers
+  const loadSeam = async (tag, a, b) => {
+    ok(FOCUS_SRC.split(a).length === 2, `CONTROL ${tag}: the edit's anchor is spelled once`);
+    return import(pathToFileURL(MUT.write('src/lib/channel-focus.js', FOCUS_SRC.replace(a, b), tag, { esm: true })).href);
+  };
+  const preSeam = await loadSeam('pre-seam', '  if (heldPending(touch, now, watchers) > 0) return true;', '  if (num(touch.pending) > 0) return true;');
+  const pr = seamReds(preSeam);
+  ok(pr.includes('digest-open') && pr.includes('digest-open-59m') && preSeam.statusTag(conv00, clock).held === true, `CONTROL: the pre-seam rule ("any pending hit is held") draws the open digest as "→ Ops desk · held" — the table and the real row redden (${pr.join(', ')})`);
+  const blind = await loadSeam('no-watchers', '  const held = heldOf(touch, now, c.watchers);', '  const held = heldOf(touch, now);');
+  const br = seamReds(blind);
+  ok(br.includes('digest-open') && br.includes('digest-open-59m') && !br.includes('wake-pending'), `CONTROL: a statusTag that does not hand heldOf the row's watchers cannot tell a digest from a stuck wake — the open-window rows redden (${br.join(', ')})`);
+  ok(/touch: touchView\(en, lw, ob\),/.test(ENGINE_SRC) && /return \{ read, wake, pending, pendingFor, refusalAt, selfAt \};/.test(ENGINE_SRC) && /x = slot\(h\.for \|\| null\)/.test(ENGINE_SRC), 'PIN: touchView groups the pending hits by the watcher they wait for (`for`) and sends pendingFor');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

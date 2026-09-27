@@ -110,10 +110,17 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
   card.appendChild(head);
   if (!compact) {
     const where = el('div', 'chan-prop-where');
-    const link = el('a', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${p.title || p.convId}`);
-    link.href = '#';
-    link.onclick = (ev) => { ev.preventDefault(); app.openChannel(p.adapterId, p.convId); };
-    where.appendChild(link);
+    if (p.compose) {
+      // R4 (B-6acc): a NEW message — its envelope, and a link only once the vendor named its thread
+      const env = t('New message to {to} — "{subject}"', { to: (p.compose.to || []).join(', '), subject: p.compose.subject || '' }) + ((p.compose.cc || []).length ? ' · ' + t('cc {list}', { list: p.compose.cc.join(', ') }) : '');
+      where.appendChild(el('span', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${env}`));
+      if (p.convId) { const link = el('a', 'chan-prop-link', t('Open the conversation')); link.href = '#'; link.onclick = (ev) => { ev.preventDefault(); app.openChannel(p.adapterId, p.convId); }; where.appendChild(document.createTextNode(' · ')); where.appendChild(link); }
+    } else {
+      const link = el('a', 'chan-prop-link', `${p.adapterLabel || p.adapterId} · ${p.title || p.convId}`);
+      link.href = '#';
+      link.onclick = (ev) => { ev.preventDefault(); app.openChannel(p.adapterId, p.convId); };
+      where.appendChild(link);
+    }
     card.appendChild(where);
   }
   // ── THE BODY — an agent's text, plain (or the editor while editing) ──

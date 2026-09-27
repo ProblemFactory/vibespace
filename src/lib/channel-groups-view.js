@@ -34,7 +34,7 @@
 import { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER, mentionsIn } from '../channel-groups.js';
 
 export { GROUP_ADAPTER_ID, NOTIFY_MODES, DEFAULT_NOTIFY, OWNER };
-export { focusRows, statusTag, filterRows, firstScreen, heldOf, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';
+export { focusRows, statusTag, filterRows, firstScreen, heldOf, heldPending, FOCUS_WINDOW_MS, HELD_WINDOW_MS, TAG_ORDER } from './channel-focus.js';
 
 /** Is this (adapterId, convId) pair an agent GROUP rather than a channel
  *  conversation? The group log's namespace (the store files a group's log

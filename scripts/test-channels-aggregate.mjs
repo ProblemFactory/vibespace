@@ -1599,7 +1599,7 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   await eng.settleWakes();
   const woke = delivered.slice(d0).filter((d) => d.cid === 'agent-A');
   ok(woke.length === 3, `an account assignment with ${already} wakes already spent and a daily cap of ${already + 3} wakes 3 more times across 5 conversations (${woke.length}) — ONE ledger for the whole account, not one per conversation`);
-  ok(woke.every((d) => /\(you are assigned the whole account\)/.test(d.text) && d.opts.spendReason === 'channel-message'), 'each inherited wake says why it is here and rides the spend authorizer\'s reason');
+  ok(woke.every((d) => /\(you are watching the whole account\)/.test(d.text) && d.opts.spendReason === 'channel-message'), 'each inherited wake says why it is here and rides the spend authorizer\'s reason');
   const acct = eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === 'many')).assignment;
   ok(acct && acct.stats.wakes24h === already + 3, 'the account assignment\'s own ledger holds them', JSON.stringify(acct && acct.stats));
   const heldRow = eng.conversationView('many', targets[4]);
@@ -1615,7 +1615,10 @@ console.log('⑨ assignment grains reach exactly their sets; ledgers per assignm
   await eng.settleWakes();
   const dg = delivered.slice(d1);
   ok(fl.ok && dg.length === 1 && dg[0].cid === 'agent-B' && /### Channel digest — many · 3 conversations, 3 messages/.test(dg[0].text), 'the window delivers ONE block listing the 3 conversations', dg[0] && dg[0].text.split('\n')[0]);
-  ok(['c0007', 'c0057', 'c0107'].every((id) => !(eng.store.index.live()[`many/${id}`].pending || []).length), '…and clears exactly those pending hits');
+  // R4: the account watcher (Alpha, capped out) still watches these three too — per principal, a rule's watcher never silences another's — so
+  // Alpha's held hits stay; Beta's (the rule's digest) are exactly the ones cleared
+  ok(['c0007', 'c0057', 'c0107'].every((id) => !(eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-B')), '…and clears exactly THOSE pending hits (Beta\'s)');
+  ok(['c0007', 'c0057', 'c0107'].every((id) => (eng.store.index.live()[`many/${id}`].pending || []).some((p) => p.for === 'agent:agent-A')), '…while Alpha\'s — held by ITS OWN cap — stay pending for Alpha (another principal\'s rule never masks its notification)');
   // un-assigning the account removes ONLY its grant: Alpha keeps nothing, Beta keeps its pattern set
   await eng.setScopeAssignment('many', { kind: 'account' }, null);
   ok(eng.listFor(A).conversations.length === 0 && eng.listFor(B).conversations.length === gpu.length + 1, 'un-assigning the account removes exactly its reach; the pattern\'s stands');
@@ -1664,7 +1667,9 @@ async function capRace(ENGmod, label, grain) {
   // CONTROL: the pre-fix wake — a grain's wake NOT queued on its scope — breaks the cap
   const M9 = mutantCopies('chan-agg-race', REPO);
   const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  const unscoped = esrc.replace('    return sk ? serialWake(`scope:${sk}`, fn) : fn();', '    return fn();');
+  // R4 verify r4: the pre-fix shape is BOTH halves gone — the ONE door's scope leg dropped AND the row written after the
+  // ladder (no reservation): with the row reserved before the bill, dropping the chain alone no longer overshoots here
+  const unscoped = esrc.replace('        const r = await serialWake(`scope:${sk}`, () => (bounce < SCOPE_BOUNCE_MAX && scopeOf() !== sk ? SCOPE_MOVED : fn({ conv, scope: sk })));', '        const r = await fn({ conv, scope: sk });').replace('    const resId = await reserveWake(rec, convId, item, wk0);', "    const resId = 'late';");
   ok(unscoped !== esrc, 'CONTROL setup: the pre-fix (per-conversation only) wake is reconstructed from the shipped bytes');
   const E9 = M9.load('src/server/channels-engine.js', unscoped, 'unscoped');
   const rc = await capRace(E9, 'ctl', 'account');
@@ -1672,10 +1677,98 @@ async function capRace(ENGmod, label, grain) {
   for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
+// R4 (2026-09-27, access and notification are two operations): TWO WATCHERS
+// of one account each hold their OWN cap under the same burst — the r2
+// invariant "N fresh conversations in one pass never exceed the cap" per
+// (principal, scope) — and a principal with ACCESS ONLY (the owner's group
+// "工作") is never woken, never billed, never in a ledger, across the storm.
+console.log('⑨c two watchers of one account, 100 fresh conversations, a slow ladder: each wakes exactly its own cap; access alone is never woken');
+async function capRace2(ENGmod, label) {
+  const Wc = makeWorld(clock, { n: 100, hot: 0, warm: 0 });
+  const kc = worldModule('race2', Wc);
+  const dirC = path.join(ROOT, `race2-${label}`);
+  seedAccounts(dirC, [['race2', 'race2']]);
+  const got = [];
+  const slow = { async deliverToConversation(cid, text, opts) { await sleep(20); got.push({ cid, text, opts }); return { ok: true, lane: 'message' }; }, stashFor(cid) { got.push({ cid, stash: true }); } };
+  const registry = CH.createChannelRegistry(); registry.register(kc);
+  const sessions = [{ cid: 'agent-X', name: 'Xi', groups: [] }, { cid: 'agent-Y', name: 'Ypsilon', groups: [] }, { cid: 'agent-W', name: 'Worker', groups: ['tg-work'] }];
+  const ec = ENGmod.create({ dataDir: dirC, registry, env: {}, now, broadcast: () => {}, serverSetting: () => undefined, liveSessions: () => sessions, deliver: slow, log: quiet });
+  await ingestAll(ec, 'race2');
+  const X = { kind: 'agent', id: 'agent-X', name: 'Xi' }, Y = { kind: 'agent', id: 'agent-Y', name: 'Ypsilon' }, WORK = { kind: 'group', id: 'tg-work', name: '工作' };
+  const acc = await ec.setAccess('race2', { kind: 'account' }, [{ principal: X }, { principal: Y }, { principal: WORK }]);
+  const wat = await ec.setWatchers('race2', { kind: 'account' }, [{ principal: X, mode: 'all', notify: 'wake', dailyWakeCap: 5 }, { principal: Y, mode: 'all', notify: 'wake', dailyWakeCap: 5 }]);
+  const inScope = Object.values(ec.store.index.live()).filter((e) => e.adapterId === 'race2').map((e) => e.id);
+  for (const id of inScope) Wc.convs.get(id).recs.push({ vendorId: `${id}-news`, at: clock + 500, author: { id: 'u-1', name: 'Brook' }, text: `news in ${id}`, attachments: [] });
+  clock += 1000;
+  await ec.pass('race2', { force: true });          // ONE pass brings news to every one of them
+  await ec.settleWakes();
+  // …and a 2.5 s storm of further passes: access alone must still never be woken
+  const t0 = Date.now();
+  let n = 0;
+  while (Date.now() - t0 < 2500) { const id = inScope[n++ % inScope.length]; Wc.convs.get(id).recs.push({ vendorId: `${id}-storm-${n}`, at: clock + 600 + n, author: { id: 'u-2', name: 'Cass' }, text: `storm ${n}`, attachments: [] }); clock += 50; await ec.refresh('race2', id); }
+  await ec.settleWakes();
+  const view = ec.adapterView(ec.adapterRecords().adapters.find((r) => r.id === 'race2'));
+  const g = view.accountGrain || { watchers: [] };
+  const byWatcher = (id) => (g.watchers.find((w) => w.principal.id === id) || { stats: {} }).stats.wakes24h;
+  const out = { ok: !!(acc && acc.ok && wat && wat.ok), n: inScope.length, storm: n, x: got.filter((d) => d.cid === 'agent-X').length, y: got.filter((d) => d.cid === 'agent-Y').length, w: got.filter((d) => d.cid === 'agent-W').length, ledX: byWatcher('agent-X'), ledY: byWatcher('agent-Y'), workWatcher: g.watchers.some((w) => w.principal.id === 'tg-work'), pendingWork: Object.values(ec.store.index.live()).filter((e) => (e.pending || []).some((p) => p.for === 'group:tg-work')).length, listW: ec.listFor({ kind: 'agent', id: 'agent-W', groups: ['tg-work'] }).conversations.length };
+  ec.stop();
+  return out;
+}
+{
+  const r = await capRace2(ENG, 'real');
+  ok(r.ok && r.n >= 98, `FIXTURE: access for Xi, Ypsilon and group 工作; watchers Xi (cap 5) and Ypsilon (cap 5); ${r.n} conversations; a 20 ms ladder`);
+  ok(r.x === 5 && r.y === 5 && r.ledX === 5 && r.ledY === 5, `each watcher woke EXACTLY its own cap — Xi ${r.x} (ledger ${r.ledX}), Ypsilon ${r.y} (ledger ${r.ledY}) — per (principal, scope), neither eating the other's`);
+  ok(r.w === 0 && !r.workWatcher && r.pendingWork === 0, `group 工作 has ACCESS ONLY: across the burst and a 2.5 s storm of ${r.storm} further refreshes it was woken ${r.w} times, holds no watcher, no ledger, no pending hit`);
+  ok(r.listW === r.n, `…and yet its member SEES every conversation of the account (${r.listW}) — access is reach, nothing else`);
+  // CONTROL: the pre-fix wake — a watcher's wake NOT queued on its (scope, principal) chain — breaks both caps
+  const M9c = mutantCopies('chan-agg-race2', REPO);
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  // R4 verify r4: the pre-fix shape is BOTH halves gone — the ONE door's scope leg dropped AND the row written after the
+  // ladder (no reservation): with the row reserved before the bill, dropping the chain alone no longer overshoots here
+  const unscoped = esrc.replace('        const r = await serialWake(`scope:${sk}`, () => (bounce < SCOPE_BOUNCE_MAX && scopeOf() !== sk ? SCOPE_MOVED : fn({ conv, scope: sk })));', '        const r = await fn({ conv, scope: sk });').replace('    const resId = await reserveWake(rec, convId, item, wk0);', "    const resId = 'late';");
+  ok(unscoped !== esrc, 'CONTROL setup: the unscoped wake is reconstructed from the shipped bytes');
+  const E9c = M9c.load('src/server/channels-engine.js', unscoped, 'unscoped2');
+  const rc = await capRace2(E9c, 'ctl');
+  ok(rc.x > 5 && rc.y > 5, `CONTROL: without the per-(scope, principal) queue the same burst wakes Xi ${rc.x} and Ypsilon ${rc.y} times past their caps of 5 — the leg above would go red`);
+  for (const r2 of copiesCensus(M9c.files, M9c.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// R4 UI WIRING (source pins; the heavy test-channels-aggregate-ui drives the same in chrome):
+// the two operations are two menu entries, access first, on the account and the row; the
+// Notify picker is built from the grain's ACCESS list and nothing else; the empty picker
+// points at Grant access…; a number past its bound is clamped VISIBLY; the retired
+// single-assignment verb is gone from the code and the dictionaries; every string is
+// textContent (the XSS judge over the editor, with a planted control).
+console.log('⑨d R4 UI wiring: two operations, the picker = the access list, visible clamps, no innerHTML');
+{
+  const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8');
+  const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
+  const notifyBody = ED.slice(ED.indexOf('export async function showNotifyDialog('), ED.indexOf('export function showGrainMenu('));
+  ok(/const principals = st\.access\.map\(/.test(notifyBody) && (notifyBody.match(/principals\s*=/g) || []).length === 1 && /watcherRow\(list, \{ w, f: filter, st, principals,/.test(notifyBody), 'the Notify picker is built from the grain\'s ACCESS list — one assignment, handed to every watcher row, nothing else');
+  ok(/if \(!principals\.length\) \{[\s\S]*?Grant access first — use "Grant access…"[\s\S]*?showGrantAccessDialog\(app, target\)/.test(notifyBody), 'an EMPTY picker says "Grant access first" and its button opens Grant access… (access is the prerequisite)');
+  const mutated = notifyBody.replace('const principals = st.access.map(', 'const principals = principalChoices(app, st.access).map(');
+  ok(mutated !== notifyBody && !/const principals = st\.access\.map\(/.test(mutated), 'CONTROL: a picker built from every live principal is caught by the same pin');
+  const acctOrder = [...PANEL.matchAll(/registerMenuItem\(\{ menu: M, group: '1_rows', order: (\d+), when: \(c\) => !A\(c\)\.builtin, label: \(\) => t\('([^']+)'\)/g)].map((m) => `${m[1]}:${m[2]}`);
+  ok(acctOrder.join() === '10:Grant access…,11:Notify…,12:Conversations matching a rule…', 'the account ⋯: Grant access… (10), Notify… (11), then the rule grain (12)', acctOrder.join());
+  ok(/label: \(\) => t\('Grant access…'\),\s*\n\s*run: \(c\) => showGrantAccessDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL) && /label: \(\) => t\('Notify…'\),\s*\n\s*run: \(c\) => showNotifyDialog\(c\.app, \{ kind: 'conversation', conv: c\.conv \}\)/.test(PANEL), 'the conversation row menu offers the same two operations');
+  const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const RETIRED = ['Hand to an agent…', 'Handed to an agent — edit…', 'Handed to {who}', 'Hand the whole account to an agent — {label}', 'Assign to an agent…', 'Unassign', 'by assignment'];
+  const srcAll = ['src/lib/channels-panel.js', 'src/lib/channel-filter-editor.js', 'src/lib/channel-window.js', 'src/lib/channel-words.js', 'src/lib/channel-reach-editor.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf-8')).join('\n');
+  const alive = RETIRED.filter((k) => srcAll.includes(`t('${k}')`) || k in zh || k in ja);
+  ok(!alive.length, `the retired single-assignment verb and its words are gone from the code AND both dictionaries (${RETIRED.length} keys)`, alive.join(' | '));
+  ok(/digestClamp\.textContent = notifySel\.value === 'digest' \? d\.note : ''/.test(ED) && /capClamp\.textContent = c\.note;/.test(ED) && /clampNoteText\(max, 'max'\)/.test(ED), 'a number past its bound is CLAMPED VISIBLY in the Notify dialog (the window and the cap each say "kept at the maximum, N")');
+  // block comments FIRST, then whole-line // comments (the other order drops a JSDoc's closing
+  // `*/` line and lets the block pattern swallow the code up to the NEXT comment's end)
+  const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const judge = (x) => [...strip(x).matchAll(/\.(innerHTML|outerHTML)\s*=\s*([^;\n]+)|insertAdjacentHTML\(([^;\n]+)/g)].map((m) => (m[2] || m[3] || '').trim()).filter((r) => !/^UI_ICONS\[|^''$|^""$/.test(r));
+  ok(judge(ED).length === 0, 'XSS: the access / notify editor writes no innerHTML — every principal name, rule and estimate is textContent', JSON.stringify(judge(ED)));
+  ok(judge(ED.replace("row.dataset.principal = r.key;", "row.innerHTML = r.key;")).length === 1, 'CONTROL: a planted `row.innerHTML = r.key` in the editor is flagged by the same judge');
+}
+
 // ═══ ⑩ restart + migration ═══════════════════════════════════════════════
 console.log('⑩ a restart keeps everything; the migration turns tracked into hot');
 {
-  const snapshot = (e) => ({ override: e.store.index.live()['many/c0500'].refresh, patterns: Object.keys(e.store.index.table('patternAssignments') || {}).length, conv: !!e.store.index.live()['many/c0001'].assignment, anchors: Object.values(e.store.index.live()).filter((x) => x.anchor).length, linkedAt: e.adapterRecords().adapters.find((r) => r.id === 'many').linkedAt });
+  const snapshot = (e) => ({ override: e.store.index.live()['many/c0500'].refresh, patterns: Object.keys(e.store.index.table('patternAssignments') || {}).length, conv: (e.store.index.live()['many/c0001'].access || []).length + ':' + (e.store.index.live()['many/c0001'].watchers || []).length, anchors: Object.values(e.store.index.live()).filter((x) => x.anchor).length, linkedAt: e.adapterRecords().adapters.find((r) => r.id === 'many').linkedAt });
   const s1 = snapshot(eng);
   eng.stop();
   ({ eng, events } = mkEngine('main', { kinds: [kindMany], settings: SET, now, deliver, sessions: SESS, dataDir: dirMain }));

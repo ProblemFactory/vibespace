@@ -4,9 +4,9 @@
  */
 
 const { MessageManager } = require('./message-manager');
-const { createMessageManager, feedLive, feedPeerCard, rebuildHistory } = require('./normalizers');
+const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView } = require('./normalizers');
+const { pendingAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks of a normalizer that keeps no index (codex / ACP)
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
-const { answerPermission } = require('./server/permission-answer'); // lane J r2: THE one permission answer (the ws case + the browser takeover's stale sweep)
 const { listCodexThreads } = require('./codex-session-store');
 const { findCodexSessionJsonlPath, extractCodexThreadMeta } = require('./adapters/codex');
 const { cwdToProjectDir, findSessionJsonlPath } = require('./session-store');
@@ -677,7 +677,21 @@ function registerWsHandler(wss, ctx) {
           // THE one answer path (src/server/permission-answer.js) — the browser takeover's stale sweep answers through it too.
           // A client's own Deny keeps the CLI's sentence: `denyMessage` is the server's alone (a stale answer names
           // browser_paused, and a client must not be able to paint a card "stale" by sending one)
-          answerPermission(activeSessions.get(data.sessionId), { ...data, denyMessage: undefined }, { adapterRegistry, feedLive });
+          // lane S1: a HELPER's ask answered from its View Log window names that
+          // window's virtual id (`sub-<tool_use_id>`) — the answer belongs on the
+          // PARENT's stdin (the CLI's request ids are process-wide), found by the
+          // request it answers. A frame no live session can take is SAID, never
+          // dropped (the card already flipped itself optimistically).
+          // verify r3: the whole case is ONE lookup into the ask's transition table
+          // (src/helper-ask.js askTransition, through helper-asks.answerFrame): which live
+          // session answers, what it knows about the request, and whether a press from
+          // that state WRITES (asked / unknown — the CLI decides) or is REFUSED by code
+          // (permission-settled: answered from the other window, withdrawn by the CLI,
+          // its helper over; permission-unrouted: no live session holds it — a stale View
+          // Log window after Terminate + Resume). The refusal is said in the window that
+          // pressed the button (its card flipped itself optimistically).
+          const r = require('./server/helper-asks').answerFrame(data, { activeSessions, adapterRegistry, feedLive });
+          if (!r.ok) { try { ws.send(JSON.stringify({ type: 'error', scope: 'action', code: r.code, sessionId: data.sessionId, requestId: data.requestId, settled: r.state, error: r.words, message: r.words })); } catch { } }
           break;
         }
 
@@ -826,9 +840,43 @@ function registerWsHandler(wss, ctx) {
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {
             const subId = data.sessionId;
-            if (subId.startsWith('sub-agent-')) {
+            // THE LIVE VIEW FIRST (lane S1): only a live helper's view (`sub-<tool_use_id>`)
+            // receives its permission asks and their answers — the disk read below is a
+            // snapshot. A live view whose buffers are gone (the helper finished and was
+            // collected, a restart) falls back to the disk read when the viewer names the
+            // helper (`agentId`), instead of the empty reply it used to get.
+            const liveTuid = subId.startsWith('sub-agent-') ? null : subId.slice('sub-'.length);
+            let found = false;
+            if (liveTuid) {
+              const toolUseId = liveTuid;
+              for (const [sid, sess] of activeSessions) {
+                if (sess.subagentBuffers?.has(toolUseId)) {
+                  // viewer:true — receive broadcasts but NEVER influence the
+                  // parent session's PTY size (this read-only window has no terminal)
+                  sess.clients.set(ws, { ...seqStateOf(sess.clients.get(ws)), cols: 120, rows: 30, viewer: true });
+                  attachedSessions.add(sid); // so ws close removes us from the parent's clients map
+                  const rawMsgs = sess.subagentBuffers.get(toolUseId);
+                  // Use existing sub-normalizer if available, or create one
+                  if (!sess._subNormalizers) sess._subNormalizers = new Map();
+                  let subMM = sess._subNormalizers.get(toolUseId);
+                  if (!subMM) {
+                    subMM = new MessageManager(subId);
+                    subMM.onOp((op) => broadcastToSession(sess, sid, { type: 'msg', sessionId: subId, ...op }));
+                    await subMM.convertHistoryAsync(rawMsgs);
+                    sess._subNormalizers.set(toolUseId, subMM);
+                    seedHelperView(sess, toolUseId, subMM); // lane S1: the helper's unanswered asks, from the parent's cards
+                  }
+                  ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total }));
+                  found = true;
+                  break;
+                }
+              }
+            }
+            const diskAgentId = subId.startsWith('sub-agent-') ? subId.slice('sub-agent-'.length)
+              : (typeof data.agentId === 'string' && /^[\w-]+$/.test(data.agentId) ? data.agentId : '');
+            if (!found && diskAgentId) {
               // Completed agent: load from JSONL
-              const agentId = subId.slice('sub-agent-'.length);
+              const agentId = diskAgentId;
               // Find parent session to get claudeSessionId/cwd
               const parentId = data.parentSessionId;
               const parentSession = parentId ? activeSessions.get(parentId) : null;
@@ -881,33 +929,7 @@ function registerWsHandler(wss, ctx) {
               // with a retry instead of a blank read-only window.
               ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total, meta,
                 ...(rawMsgs.length === 0 && subFetchErr ? { loadError: `Couldn’t load this agent’s log from the machine: ${subFetchErr}` } : {}) }));
-            } else {
-              // Live agent: sub-{parentToolUseId} — find parent session and return buffered messages
-              const toolUseId = subId.slice('sub-'.length);
-              let found = false;
-              for (const [sid, sess] of activeSessions) {
-                if (sess.subagentBuffers?.has(toolUseId)) {
-                  // viewer:true — receive broadcasts but NEVER influence the
-                  // parent session's PTY size (this read-only window has no terminal)
-                  sess.clients.set(ws, { ...seqStateOf(sess.clients.get(ws)), cols: 120, rows: 30, viewer: true });
-                  attachedSessions.add(sid); // so ws close removes us from the parent's clients map
-                  const rawMsgs = sess.subagentBuffers.get(toolUseId);
-                  // Use existing sub-normalizer if available, or create one
-                  if (!sess._subNormalizers) sess._subNormalizers = new Map();
-                  let subMM = sess._subNormalizers.get(toolUseId);
-                  if (!subMM) {
-                    subMM = new MessageManager(subId);
-                    subMM.onOp((op) => broadcastToSession(sess, sid, { type: 'msg', sessionId: subId, ...op }));
-                    await subMM.convertHistoryAsync(rawMsgs);
-                    sess._subNormalizers.set(toolUseId, subMM);
-                  }
-                  ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: subMM.messages, totalCount: subMM.total }));
-                  found = true;
-                  break;
-                }
-              }
-              if (!found) ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: [], totalCount: 0 }));
-            }
+            } else if (!found) ws.send(JSON.stringify({ type: 'attached', sessionId: subId, mode: 'chat', messages: [], totalCount: 0 }));
             break;
           }
 
@@ -963,7 +985,7 @@ function registerWsHandler(wss, ctx) {
                   const p = session._rebuildProgress;
                   try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId, progress: p ? { done: p.done, total: p.total } : null, queued: !p })); } catch { }
                 }, 10000);
-                try { await rebuildHistory(session, data.sessionId, sm.raw()); }
+                try { await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null }); } // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
                 // rebuild — never hand the client a live ChatView on a dead
@@ -1133,6 +1155,10 @@ function registerWsHandler(wss, ctx) {
                 turnState: session._turnStateSeen ? (session._turnState || null) : null,
                 inProgressTools: session._inProgressTools ? [...session._inProgressTools] : [],
                 backgroundTasks: session._normalizer?.backgroundTasks?.() || null, // the harness's last published level set (design-unknown-records) — null = never published
+                // lane S1: EVERY ask the user can answer here (the session's own permission
+                // cards and each helper's), oldest first — the waiting chip names who waits and
+                // jumps to the card even when it is outside the loaded window (`msgIndex`)
+                pendingAsks: (() => { try { const mm = session._normalizer; return mm ? (typeof mm.pendingAsks === 'function' ? mm.pendingAsks() : pendingAsksOf(mm.messages)) : []; } catch { return []; } })(),
                 normEpoch: session._normEpoch || 0,
                 remoteState: session._remoteState || (session._bareRemote ? { state: 'unprotected' } : null),
                 goal: session._goal || null, goalElapsed: session._goalElapsed || 0, goalStatus: session._goalStatus || null,
@@ -1408,6 +1434,7 @@ function registerWsHandler(wss, ctx) {
             if (!session.host && session.agentdSession && session.keeperSid) {
               try { hosts.device(null).then((dm) => dm.killPipeSession(session.keeperSid)).catch(() => { }); } catch { }
             }
+            try { require('./server/helper-asks').forget(session); } catch { } // lane S1 verify r1: a killed parent's helper asks wait for nobody — timers cleared, For-you items resolved
             activeSessions.delete(data.sessionId);
             refreshWebuiPids();
             broadcastActiveSessions();

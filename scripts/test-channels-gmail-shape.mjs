@@ -66,6 +66,13 @@ function mkVendor() {
     if (p === '/drafts' && method === 'POST') { if (state.sendFail === 'transport-draft') { state.sendFail = null; throw new Error('ECONNRESET'); } return jsonRes(FX.draftCreated); }
     if (p === '/drafts') return jsonRes(state.draftsListHas ? FX.draftsList : { drafts: [], resultSizeEstimate: 0 });
     if (p === '/drafts/send') { if (state.sendFail === 'transport') { state.sendFail = null; throw new Error('ECONNRESET'); } return jsonRes(FX.draftSent); }
+    // R4 (B-6acc): a composed NEW message = ONE messages.send (no thread), the reconcile's SENT search
+    if (p === '/messages/send' && method === 'POST') { if (state.sendFail === 'transport-compose') { state.sendFail = null; throw new Error('ECONNRESET'); } return jsonRes({ id: 'msg_new_0001', threadId: 'thr_new_0001', labelIds: ['SENT'] }); }
+    if (p === '/messages' && u.searchParams.get('q') && /rfc822msgid:/.test(u.searchParams.get('q'))) return jsonRes(state.composedInSent ? { messages: [{ id: 'msg_new_0001', threadId: 'thr_new_0001' }], resultSizeEstimate: 1 } : { resultSizeEstimate: 0 });
+    // R4 verify: the reconcile's FALLBACK — the sent mail to the first recipient since the attempt (Gmail rewrote our Message-ID), then one metadata read per candidate for the proposal header
+    if (p === '/messages' && u.searchParams.get('q') && /^in:sent to:\S+ after:\d+$/.test(u.searchParams.get('q'))) return jsonRes(state.sentByRecipient ? { messages: state.sentByRecipient.map((id) => ({ id, threadId: `thr-of-${id}` })), resultSizeEstimate: state.sentByRecipient.length } : { resultSizeEstimate: 0 });
+    const mm = /^\/messages\/([^/]+)$/.exec(p);
+    if (mm && u.searchParams.get('format') === 'metadata') { const id = decodeURIComponent(mm[1]); const ph = (state.proposalHeaders || {})[id]; return jsonRes({ id, threadId: `thr-of-${id}`, internalDate: '1790000000000', payload: { headers: ph ? [{ name: 'X-VibeSpace-Proposal', value: ph }] : [] } }); }
     const dm = /^\/drafts\/([^/]+)$/.exec(p);
     if (dm) {
       if (method === 'DELETE') return { ok: true, status: 204, json: async () => { throw new Error('no body'); }, text: async () => '' };
@@ -156,8 +163,8 @@ let flowState = null;
   ok(r.flow.mode === 'ephemeral' && r.flow.listening === true && /^http:\/\/127\.0\.0\.1:\d+$/.test(r.flow.redirectUri) && r.flow.running === true, `connect() runs the EPHEMERAL loopback on a port of its own (${r.flow.redirectUri})`);
   ok(!('state' in r.flow) && !JSON.stringify(r).includes('channels-secret'), 'the flow view carries neither the CSRF state nor the client secret');
   const cu = new URL(r.flow.consentUrl);
-  ok(cu.hostname === 'accounts.google.com' && cu.searchParams.get('client_id') === 'ch.apps.googleusercontent.com' && cu.searchParams.get('redirect_uri') === r.flow.redirectUri && cu.searchParams.get('scope') === `${gmail.SCOPE} ${gmail.SCOPE_SEND}` && cu.searchParams.get('access_type') === 'offline' && cu.searchParams.get('prompt') === 'consent' && cu.searchParams.get('state'),
-    'THE CONSENT URL CARRIES THE `channels` PRESET\'S CLIENT ID — the user typed nothing; gmail-sync\'s own parameters (offline + consent); the READ + SEND scopes (P4, decision 5 — one consent, one token)');
+  ok(cu.hostname === 'accounts.google.com' && cu.searchParams.get('client_id') === 'ch.apps.googleusercontent.com' && cu.searchParams.get('redirect_uri') === r.flow.redirectUri && cu.searchParams.get('scope') === `${gmail.SCOPE} ${gmail.SCOPE_COMPOSE}` && cu.searchParams.get('access_type') === 'offline' && cu.searchParams.get('prompt') === 'consent' && cu.searchParams.get('state'),
+    'THE CONSENT URL CARRIES THE `channels` PRESET\'S CLIENT ID — the user typed nothing; gmail-sync\'s own parameters (offline + consent); the READ + COMPOSE scopes (P4 decision 5, the R4 verify: gmail.compose covers the reply\'s drafts AND messages.send — one consent, one token)');
   flowState = cu.searchParams.get('state');
   const bad = await get(`${r.flow.redirectUri}/?state=forged&code=stolen`);
   ok(bad.status === 400 && !v.calls.some((c) => c.host === 'oauth2.googleapis.com'), 'a forged state on the loopback exchanges nothing');
@@ -339,10 +346,26 @@ let flowState = null;
   const ccRo = await ro.a.convCaps(C);
   ok(ccRo.read === 'yes' && ccRo.sendAs.length === 0 && ccRo.why === 'send-scope-not-granted', 'a token holding only gmail.readonly: convCaps read yes, sendAs [] with the reason that names the re-consent');
   const rs = await threw(() => ro.a.send(C, { text: 'x', idemKey: 'p-1', as: 'user' }));
-  ok(rs && rs.code === 'forbidden' && rs.detail.why === 'send-scope-not-granted' && !ro.v.calls.some((c) => c.path.endsWith('/drafts')), 'send without gmail.send is refused by name and builds NO request');
-  const { a, v: v8 } = mk([gmail.SCOPE, gmail.SCOPE_SEND]);
+  ok(rs && rs.code === 'forbidden' && rs.detail.why === 'send-scope-not-granted' && !ro.v.calls.some((c) => c.path.endsWith('/drafts')), 'send without a drafts+send scope is refused by name and builds NO request');
+  // R4 verify (2026-09-27): THE SCOPE TABLE — Google's method reference: drafts.create / drafts.send /
+  // drafts.delete accept mail.google.com | gmail.modify | gmail.compose (NOT gmail.send); messages.send
+  // accepts those + gmail.send. A reply is the two-phase DRAFT send ⇒ it needs gmail.compose; a
+  // P4-era token (readonly + gmail.send) would have been 403'd at the draft — it now reads as
+  // send-scope-not-granted for replies and still COMPOSES (one messages.send).
+  const T = (scopes) => { const v = gmail.sendVerbsOf(scopes); return `${v.reply ? 'reply' : '-'}/${v.compose ? 'compose' : '-'}`; };
+  ok(T([gmail.SCOPE]) === '-/-' && T([gmail.SCOPE, gmail.SCOPE_SEND]) === '-/compose' && T([gmail.SCOPE, gmail.SCOPE_COMPOSE]) === 'reply/compose' && T([gmail.SCOPE_MODIFY]) === 'reply/compose' && T([gmail.SCOPE_MAIL]) === 'reply/compose' && T([]) === '-/-',
+    'THE SCOPE TABLE: readonly ⇒ nothing; readonly+send ⇒ compose only; readonly+compose / modify / mail.google.com ⇒ reply + compose');
+  const sendOnly = mk([gmail.SCOPE, gmail.SCOPE_SEND]);
+  const ccSo = await sendOnly.a.convCaps(C);
+  const rsSo = await threw(() => sendOnly.a.send(C, { text: 'x', idemKey: 'p-so', as: 'user' }));
+  ok(ccSo.read === 'yes' && ccSo.sendAs.length === 0 && ccSo.why === 'send-scope-not-granted' && rsSo && rsSo.code === 'forbidden' && rsSo.detail.why === 'send-scope-not-granted' && /gmail\.compose/.test(rsSo.message) && !sendOnly.v.calls.some((c) => c.method === 'POST'), 'a P4-era token (readonly + gmail.send): a REPLY is not offered and is refused by name — naming gmail.compose — with no draft request built (the 403 it would have met)', JSON.stringify([ccSo, rsSo && rsSo.message]));
+  ok((await sendOnly.a.composeCaps()).sendAs.join() === 'user', '…while the same token still COMPOSES (messages.send accepts gmail.send)');
+  const { a, v: v8 } = mk([gmail.SCOPE, gmail.SCOPE_COMPOSE]);
   const cc = await a.convCaps(C);
-  ok(cc.sendAs.join(',') === 'user' && cc.why === null, 'with gmail.send held, convCaps offers `user`');
+  ok(cc.sendAs.join(',') === 'user' && cc.why === null, 'with gmail.compose held, convCaps offers `user`');
+  // the CONSENT asks readonly + compose (never gmail.send beside it: two rows for one thing)
+  const src8 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  ok(/const scopesFor = \(\) => \(pushEnabled\(\) \? \[SCOPE, SCOPE_COMPOSE, PUBSUB_SCOPE\] : \[SCOPE, SCOPE_COMPOSE\]\);/.test(src8) && gmail.SCOPE_COMPOSE === 'https://www.googleapis.com/auth/gmail.compose', 'the consent asks readonly + gmail.compose (+ pubsub with push on) — gmail.send is recognised on a held token, never asked for');
   const seen = [];
   v8.calls.length = 0;
   const r1 = await a.send(C, { text: 'fixed & deployed, thanks', idemKey: 'p-0001', as: 'user', onHandle: async (h) => { seen.push({ h, callsSoFar: v8.calls.map((c) => `${c.method} ${c.path.replace('/gmail/v1/users/me', '')}`) }); } });
@@ -395,6 +418,69 @@ let flowState = null;
   v8.state.draftExists = false; v8.state.fail = 'backend';
   const rc6 = await a.reconcile(C, { idemKey: 'p-0001', sentAt: T0, handle: H, text: 'fixed' });
   ok(rc6.unknown === true && rc6.detail.how === 'draft-get-failed', 'reconcile ⑥ a vendor failure on the draft read is UNKNOWN, never a verdict');
+}
+
+// ── ⑧b R4 (B-6acc): COMPOSE a NEW message — ONE messages.send under gmail.compose (or a legacy gmail.send) ──
+{
+  const reg = CH.createChannelRegistry(); reg.register(gmail.adapter);
+  const mk = (scopes) => {
+    const v9 = mkVendor();
+    const tok = { st: { token: { access_token: 'ya29.s', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes, email: 'member.a@example.com' } }, read: () => ({ token: tok.st.token, why: null }), write: async (t2) => { tok.st.token = t2; }, clear: async () => { tok.st.token = null; } };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: v9.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    return { a, v: v9 };
+  };
+  ok(gmail.caps.compose === true && gmail.unitsFor('/messages/send', 'POST') === 100, 'Gmail DECLARES compose; a messages.send is metered 100 quota units (the vendor\'s table)');
+  const ro = mk([gmail.SCOPE]);
+  const ccRo = await ro.a.composeCaps();
+  ok(ccRo.sendAs.length === 0 && ccRo.why === 'send-scope-not-granted' && ro.v.calls.length === 0, 'composeCaps without a sending scope answers [] with send-scope-not-granted — and asks the vendor nothing');
+  const rs = await threw(() => ro.a.compose({ to: ['bob@example.com'], subject: 'Hi', text: 'x', idemKey: 'p-c1', as: 'user' }));
+  ok(rs && rs.code === 'forbidden' && rs.detail.why === 'send-scope-not-granted' && !ro.v.calls.some((c) => c.path.endsWith('/messages/send')), 'compose without a sending scope is refused by name and builds NO request');
+  const { a, v } = mk([gmail.SCOPE, gmail.SCOPE_COMPOSE]);
+  ok((await a.composeCaps()).sendAs.join() === 'user' && (await mk([gmail.SCOPE, gmail.SCOPE_SEND]).a.composeCaps()).sendAs.join() === 'user', 'with gmail.compose held — or only the legacy gmail.send — composeCaps offers `user`');
+  const seen = [];
+  v.calls.length = 0;
+  const r = await a.compose({ to: ['bob@example.com', 'carol@example.com'], cc: ['dan@example.com'], subject: 'Weekly numbers', text: 'the numbers are in', idemKey: 'p-0042', as: 'user', onHandle: async (h) => { seen.push({ h, callsSoFar: v.calls.length }); } });
+  const sends = v.calls.filter((c) => c.path.endsWith('/messages/send'));
+  ok(v.calls.length === 1 && sends.length === 1 && !v.calls.some((c) => /\/drafts|\/threads/.test(c.path)), 'ONE request: messages.send — no draft, no thread read', JSON.stringify(v.calls.map((c) => `${c.method} ${c.path}`)));
+  const mime = Buffer.from(sends[0].json.raw, 'base64url').toString('utf-8');
+  ok(!('threadId' in sends[0].json) && /^From: member\.a@example\.com\r\n/.test(mime) && /\r\nTo: bob@example\.com, carol@example\.com\r\n/.test(mime) && /\r\nCc: dan@example\.com\r\n/.test(mime) && /\r\nSubject: Weekly numbers\r\n/.test(mime) && !/In-Reply-To|References/.test(mime), 'a FRESH RFC-822 message: no thread, From = the account, To / Cc / Subject as proposed, no reply headers', mime.split('\r\n').slice(0, 6).join(' | '));
+  const mid = (/\r\nMessage-ID: (<[^>\r\n]+>)\r\n/.exec(mime) || [])[1];
+  ok(mid && /^<p-0042\.[0-9a-f]{12}@example\.com>$/.test(mid) && seen.length === 1 && seen[0].h.messageIdHeader === mid && seen[0].callsSoFar === 0, 'its own Message-ID (built from the idempotency key) is the HANDLE, handed to onHandle BEFORE the request', JSON.stringify({ mid, seen }));
+  // R4 verify: the idempotency never depends on Gmail keeping our Message-ID — the message ALSO
+  // carries `X-VibeSpace-Proposal: <idemKey>` and the handle names it with the first recipient
+  ok(/\r\nX-VibeSpace-Proposal: p-0042\r\n/.test(mime) && seen[0].h.proposalHeader === 'p-0042' && seen[0].h.to === 'bob@example.com', 'the MIME carries X-VibeSpace-Proposal = the idempotency key; the handle records it with the first recipient', mime.split('\r\n').slice(0, 8).join(' | '));
+  const hostile = await (async () => { v.calls.length = 0; await a.compose({ to: ['bob@example.com'], subject: 'x', text: 'y', idemKey: 'p-1\r\nBcc: evil@example.com', as: 'user' }); return Buffer.from(v.calls.find((c) => c.path.endsWith('/messages/send')).json.raw, 'base64url').toString('utf-8'); })();
+  ok(!/Bcc:/.test(hostile) && /\r\nX-VibeSpace-Proposal: p-1Bcc/.test(hostile), 'a CR/LF in the key can never inject a header (the key is stripped to [A-Za-z0-9._-])', hostile.split('\r\n').slice(0, 8).join(' | '));
+  ok(Buffer.from(mime.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString('utf-8') === 'the numbers are in' && r.ok && r.vendorMessageId === 'msg_new_0001' && r.threadId === 'thr_new_0001' && r.sentAs === 'user', 'the body decodes byte for byte; the answer carries the new message id AND the new thread id', JSON.stringify(r));
+  v.state.sendFail = 'transport-compose';
+  const lost = await threw(() => a.compose({ to: ['bob@example.com'], subject: 'x', text: 'y', idemKey: 'p-0043', as: 'user' }));
+  ok(lost && lost.code === 'transport' && lost.detail.lost === true && lost.detail.handle && /p-0043/.test(lost.detail.handle.messageIdHeader), 'a transport failure after the request left is LOST with the handle (the message may have gone out)', lost && JSON.stringify(lost.detail));
+  // reconcile: the Message-ID in the SENT mail, never a re-send
+  v.calls.length = 0;
+  const rc0 = await a.reconcile(null, { idemKey: 'p-0042', compose: { to: ['bob@example.com'], subject: 'Weekly numbers' }, handle: { messageIdHeader: mid } });
+  const q = v.calls[0] && v.calls[0].q.q;
+  ok(rc0.unknown === true && rc0.detail.how === 'not-found-in-sent' && q === `in:sent rfc822msgid:${mid.slice(1, -1)}` && !v.calls.some((c) => c.method === 'POST'), 'reconcile a composed message: searched BY ITS Message-ID in the sent mail; absent ⇒ honestly UNKNOWN (search can lag), nothing re-sent', JSON.stringify({ rc0, q }));
+  v.state.composedInSent = true;
+  const rc1 = await a.reconcile(null, { idemKey: 'p-0042', compose: { to: ['bob@example.com'], subject: 'Weekly numbers' }, handle: { messageIdHeader: mid } });
+  ok(rc1.landed === true && rc1.vendorMessageId === 'msg_new_0001' && rc1.detail.threadId === 'thr_new_0001', '…found ⇒ landed with the message and thread ids');
+  // ② Gmail REWROTE our Message-ID (unmeasurable without a real send): the fallback finds the message by
+  //    its proposal header among the SENT mail to the first recipient since the attempt — bounded, one
+  //    metadata read per candidate, identity by the header's VALUE never by position
+  v.state.composedInSent = false; v.state.sentByRecipient = ['msg_other_1', 'msg_new_0007', 'msg_other_2']; v.state.proposalHeaders = { msg_other_1: 'p-0009', msg_new_0007: 'p-0042' };
+  v.calls.length = 0;
+  const rc3 = await a.reconcile(null, { idemKey: 'p-0042', sentAt: 1790000000000, compose: { to: ['bob@example.com'], subject: 'Weekly numbers' }, handle: { messageIdHeader: mid, proposalHeader: 'p-0042', to: 'bob@example.com' } });
+  const q2 = v.calls.filter((c) => c.path === '/gmail/v1/users/me/messages').map((c) => c.q.q);
+  const gets = v.calls.filter((c) => /\/messages\/msg_/.test(c.path)).map((c) => c.path.split('/').pop());
+  ok(rc3.landed === true && rc3.vendorMessageId === 'msg_new_0007' && rc3.detail.how === 'proposal-header-in-sent', 'Message-ID rewritten ⇒ the message is found by its X-VibeSpace-Proposal header in the sent mail to the recipient ⇒ landed with ITS id', JSON.stringify({ rc3, q2, gets }));
+  ok(q2.length === 2 && /^in:sent rfc822msgid:/.test(q2[0]) && q2[1] === 'in:sent to:bob@example.com after:1789999940' && gets.join() === 'msg_other_1,msg_new_0007' && !v.calls.some((c) => c.method === 'POST'), 'the two searches in order (Message-ID first, then the recipient since the attempt − 60 s), one metadata read per candidate until the header matches, nothing re-sent', JSON.stringify({ q2, gets }));
+  v.state.sentByRecipient = ['msg_other_1']; v.calls.length = 0;
+  const rc4 = await a.reconcile(null, { idemKey: 'p-0042', sentAt: 1790000000000, compose: { to: ['bob@example.com'], subject: 'Weekly numbers' }, handle: { messageIdHeader: mid, proposalHeader: 'p-0042', to: 'bob@example.com' } });
+  ok(rc4.unknown === true && rc4.detail.how === 'not-found-in-sent', 'a sent message to the same recipient WITHOUT our header is never claimed ⇒ honestly UNKNOWN');
+  v.state.sentByRecipient = null; v.state.proposalHeaders = null;
+  const rc2 = await a.reconcile(null, { idemKey: 'p-0044', compose: { to: ['bob@example.com'], subject: 's' }, handle: null });
+  ok(rc2.landed === undefined && (rc2.unknown === true) && (rc2.detail.how === 'not-found-in-sent'), 'no handle at all: the idempotency key + the first recipient still let the fallback look ⇒ unknown when nothing carries it', JSON.stringify(rc2));
+  const rc2b = await a.reconcile(null, { idemKey: '', compose: { to: [], subject: 's' }, handle: null });
+  ok(rc2b.unknown === true && rc2b.detail.how === 'no-handle', 'no Message-ID, no key, no recipient ⇒ UNKNOWN by name (no-handle)');
 }
 
 // ── ⑦ pure helpers ──

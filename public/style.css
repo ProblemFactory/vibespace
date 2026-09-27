@@ -4330,7 +4330,10 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-awaiting { flex-shrink: 0; display: inline-flex; align-items: center; gap: 3px; font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 999px; line-height: 13px; color: var(--attn-text); border: 1px solid var(--accent-dim); background: transparent; font-variant-numeric: tabular-nums; }
 .chan-awaiting .chan-ic { font-size: 9px; }
 .chan-row-needs { display: none; flex-shrink: 0; font-size: 9px; font-weight: 700; min-width: 16px; box-sizing: border-box; text-align: center; padding: 0 5px; border-radius: 999px; line-height: 15px; background: var(--accent); color: var(--accent-fg); }
-.chan-row-assign { display: block; font-size: 10px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-row-assign { display: flex; align-items: center; font-size: 10px; color: var(--text-secondary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* R4: the access · notify line is longer — its text span is bounded by the row (ellipsis), never a box past the panel */
+.chan-row-assign > span:not(.chan-ic) { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chan-row-assign > .chan-ic { flex: none; }
 .chan-row-assign .chan-ic { font-size: 10px; margin-right: 3px; vertical-align: -1px; }
 .chan-row-assign.chan-warn { color: var(--warn-text); }
 /* 2026-09-26 (design §7.3): an INHERITED assignment (the account's / a rule's) is dim */
@@ -4612,6 +4615,16 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .chan-af-stat.chan-warn { color: var(--warn-text); font-weight: 500; }
 .chan-af-stat-hint { font-size: 10px; color: var(--text-dim); line-height: 1.45; }
 .chan-af-stat-hint:empty { display: none; }
+/* R4 (2026-09-27): Grant access… rows (who · authority · ×) and Notify… watcher blocks */
+.chan-access-list { display: flex; flex-direction: column; gap: 4px; }
+.chan-access-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) auto; align-items: center; gap: 6px; }
+.chan-access-row .chan-opt-input { min-width: 0; width: 100%; }
+.chan-watch-list { display: flex; flex-direction: column; gap: 8px; }
+.chan-watch-row { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.chan-watch-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.chan-watch-head .chan-opt-input { min-width: 0; width: 100%; font-weight: 600; }
+.chan-watch-total { margin-top: 2px; }
+.chan-notify-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 /* the Reach & policy editor (a1 R1–R4) */
 .chan-reach-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
 .chan-reach-row { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 8px; padding: 5px 8px; font-size: 12px; border-bottom: 1px solid var(--border); }

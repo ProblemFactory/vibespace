@@ -79,17 +79,18 @@ console.log('§1b the three homes of a grant (2026-09-26: account + pattern scop
   const lark = { key: 'lark/c1', adapterId: 'lark' };
   const lark2 = { key: 'lark:0000abcd/c1', adapterId: 'lark:0000abcd' };
   const acct = ACL.accountGrant({ principal: { kind: 'agent', id: 'a1' }, adapterId: 'lark', at: 1, by: 'user' });
-  ok(acct.scope.kind === 'adapter' && acct.scope.id === 'lark' && acct.origin === 'assignment' && acct.level === 'visible', 'an ACCOUNT assignment implies ONE adapter-scope grant with origin assignment');
+  ok(acct.scope.kind === 'adapter' && acct.scope.id === 'lark' && acct.origin === 'access' && acct.level === 'visible', 'an ACCESS row on the whole account (R4) implies ONE adapter-scope grant with origin access');
   ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { accountGrants: [acct] })).level === 'visible', 'the account grant reaches every conversation of THAT account');
   ok(ACL.effective(ctx, lark2, ACL.grantsForConversation(lark2, { accountGrants: [acct] })).level === 'hidden', 'NEGATIVE CONTROL: …and never a second account of the same kind (the adapter id IS the account id — two accounts never mix)');
   const pg = ACL.patternGrant({ principal: { kind: 'group', id: 'g1' }, key: 'lark/c1', patternId: 'p-1' });
-  ok(pg.scope.kind === 'conversation' && pg.scope.id === 'lark/c1' && pg.origin === 'assignment' && pg.pattern === 'p-1', 'a PATTERN assignment implies a conversation grant that names its pattern (derived at read, never stored)');
+  ok(pg.scope.kind === 'conversation' && pg.scope.id === 'lark/c1' && pg.origin === 'access' && pg.pattern === 'p-1', 'a rule\'s ACCESS row implies a conversation grant that names its pattern (derived at read, never stored)');
   ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { patternGrants: [pg] })).via === 'group', '…and a group principal reaches its members');
   const userRow = { principal: { kind: 'agent', id: 'a1' }, scope: { kind: 'conversation', id: 'lark/c1' }, level: 'requestable', origin: 'user' };
   const all = ACL.grantsForConversation(lark, { entries: [userRow], accountGrants: [acct], patternGrants: [pg] });
   ok(all.length === 3 && ACL.effective(ctx, lark, all).level === 'visible', 'the three homes MAX together (widen only)');
-  const left = ACL.removeGrant([userRow, acct], { principal: acct.principal, scope: acct.scope, origin: 'assignment' });
-  ok(left.length === 1 && left[0] === userRow, 'un-assigning the account removes ONLY its own origin:assignment row — the user row stays');
+  const left = ACL.removeGrant([userRow, acct], { principal: acct.principal, scope: acct.scope, origin: 'access' });
+  ok(left.length === 1 && left[0] === userRow, 'removing that access removes ONLY its own origin:access row — the user row stays');
+  ok(ACL.GRANT_ORIGINS.includes('access') && ACL.GRANT_ORIGINS.includes('assignment'), 'origin `access` is declared; the pre-R4 `assignment` is still honoured as a row (the migration renames it)');
   ok(ACL.effective(ctx, lark, ACL.grantsForConversation(lark, { entries: [userRow] })).level === 'requestable', '…so the agent falls back to what the user granted by hand');
 }
 
@@ -113,14 +114,22 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   const userBefore = JSON.stringify(userRow());
   await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
   const rows = eng.store.index.snapshot().conversations[KEY].reachEntries;
-  ok(rows.length === 2 && rows.some((g) => g.origin === 'assignment') && rows.some((g) => g.origin === 'user'), 'assignment adds ITS OWN row beside the user\'s');
+  ok(rows.length === 2 && rows.some((g) => g.origin === 'access') && rows.some((g) => g.origin === 'user'), 'access (the compatibility write) adds ITS OWN row beside the user\'s');
   await eng.setAssignment(A, C, null);
   const rowsAfter = eng.store.index.snapshot().conversations[KEY].reachEntries;
-  ok(rowsAfter.length === 1 && JSON.stringify(rowsAfter[0]) === userBefore, 'NEGATIVE CONTROL: un-assign removes ONLY the assignment row — the user grant is byte-identical');
+  ok(rowsAfter.length === 1 && JSON.stringify(rowsAfter[0]) === userBefore, 'NEGATIVE CONTROL: removing the access removes ONLY its own row — the user grant is byte-identical');
   ok(eng.reachFor(AG, eng.adapterRecords().adapters.find((r) => r.id === A), eng.store.index.snapshot().conversations[KEY]).level === 'visible', '…and the agent still sees the conversation');
   ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'visible') && eng.readFor(AG, A, C, {}).ok, 'now listed and readable');
   const audit = eng.store.auditTail().filter((l) => l.kind === 'acl').map((l) => [l.op, l.origin]);
-  ok(JSON.stringify(audit) === JSON.stringify([['grant', 'user'], ['grant', 'assignment'], ['revoke', 'assignment']]), 'every grant change is an audit line with who/why', JSON.stringify(audit));
+  ok(JSON.stringify(audit) === JSON.stringify([['grant', 'user'], ['grant', 'access'], ['revoke', 'access']]), 'every grant change is an audit line with who/why', JSON.stringify(audit));
+  // R4: TWO principals with access — removing ONE takes exactly its own row
+  const B = { kind: 'agent', id: 'agent-2', name: 'Other' };
+  await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' } }, { principal: B }]);
+  const two = eng.store.index.snapshot().conversations[KEY].reachEntries.filter((g) => g.origin === 'access').map((g) => g.principal.id).sort().join();
+  await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: B }]);
+  const one = eng.store.index.snapshot().conversations[KEY].reachEntries.filter((g) => g.origin === 'access').map((g) => g.principal.id).join();
+  ok(two === 'agent-1,agent-2' && one === 'agent-2' && JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries.find((g) => g.origin === 'user')) === userBefore, `two access rows ⇒ two grants; removing ONE principal removes exactly its row (${two} → ${one}); the user\'s grant untouched`);
+  await eng.setAccess(A, { kind: 'conversation', convId: C }, []);
   // remove the user row
   await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-1' }, level: null });
   ok(eng.store.index.snapshot().conversations[KEY].reachEntries.length === 0 && eng.readFor(AG, A, C, {}).code === 'not-found', 'removing the user grant hides it again');

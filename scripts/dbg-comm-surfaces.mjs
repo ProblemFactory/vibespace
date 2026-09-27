@@ -376,7 +376,7 @@ async function pass({ lang, viewport, theme }) {
   log(`=== PASS ${tag} ===`);
   resetData();
   await restart();
-  // a principal for the Assign / Reach editors (a Task Group — no live agent session in this fixture)
+  // a principal for the Grant access / Notify / Reach editors (a Task Group — no live agent session in this fixture)
   await api('POST', '/api/tasks', { name: 'Ops triage', title: 'Ops triage' });
   const page = await newPage(mobile ? { width: 375, height: 667, mobile: true } : { width: 1200, height: 800, mobile: false });
   await page.prime({ lang, theme, sidebarWidth: 260 });
@@ -509,7 +509,7 @@ async function pass({ lang, viewport, theme }) {
     await closeDialogs(page);
     // REMOVE REFUSED: the dialog's words (the references are staged on the page's fetch — the
     // engine's refusal is the chunk-2 suites'; this driver only needs the dialog on screen)
-    await page.evaljs(`(() => { const of = window.fetch; window.fetch = function (u, init, ...r) { if (init && init.method === 'DELETE' && /\\/api\\/channels\\/adapters\\//.test(String(u))) return Promise.resolve(new Response(JSON.stringify({ error: 'referenced', code: 'account-referenced', detail: { refs: [{ kind: 'assignment', convId: 'fake-poll-ops', title: 'Ops room', principal: { kind: 'task-group', id: 'g1', name: 'Ops triage' } }, { kind: 'reach', principal: { kind: 'agent', id: 'a1', name: 'Scout' } }, { kind: 'outbox', id: 'p1' }] } }), { status: 409, headers: { 'Content-Type': 'application/json' } })); return of.call(this, u, init, ...r); }; return 1; })()`);
+    await page.evaljs(`(() => { const of = window.fetch; window.fetch = function (u, init, ...r) { if (init && init.method === 'DELETE' && /\\/api\\/channels\\/adapters\\//.test(String(u))) return Promise.resolve(new Response(JSON.stringify({ error: 'referenced', code: 'account-referenced', detail: { refs: [{ kind: 'access', convId: 'fake-poll-ops', title: 'Ops room', scope: 'conversation', principal: { kind: 'group', id: 'g1', name: 'Ops triage' } }, { kind: 'reach', principal: { kind: 'agent', id: 'a1', name: 'Scout' } }, { kind: 'outbox', id: 'p1' }] } }), { status: 409, headers: { 'Content-Type': 'application/json' } })); return of.call(this, u, init, ...r); }; return 1; })()`);
     await tagSections(page);
     await clickMenu(page, lang, SEC('gmail'), 'Remove…');
     await sleep(250);
@@ -526,10 +526,11 @@ async function pass({ lang, viewport, theme }) {
     await sleep(300);
     await capture(page, tag, 'dialog-search', '#chan-search-dialog .dialog', { pad: 8 });
     await closeDialogs(page);
+    // R4: a new rule starts with its ACCESS (the first operation)
     await clickMenu(page, lang, SEC('fake-poll'), 'Conversations matching a rule…');
-    await waitFor(page, `!!document.querySelector('#chan-scope-assign-dialog .chan-af-rule')`, 20);
+    await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-af-rule')`, 20);
     await sleep(600);
-    await capture(page, tag, 'dialog-scope-assign', '#chan-scope-assign-dialog .dialog', { pad: 8 });
+    await capture(page, tag, 'dialog-rule-access', '#chan-access-dialog .dialog', { pad: 8 });
     await closeDialogs(page);
     await clickMenu(page, lang, SEC('lark'), 'Options');
     await waitFor(page, `!!document.querySelector('#chan-options-dialog .chan-opt-input')`, 20);
@@ -616,28 +617,36 @@ async function pass({ lang, viewport, theme }) {
   await capture(page, tag, 'outbox-window-all', '[data-shot="win"]');
   await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel-outbox')) window.app.wm.closeWindow(w.id); return 1; })()`);
 
-  // ── ASSIGN & FILTER editor (live estimate) → assignment → REACH & POLICY ──
+  // ── R4: GRANT ACCESS… (the first operation) → NOTIFY… (the second, live estimate) → REACH & POLICY ──
   await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; window.app.wm.focusWindow(w.id); return 1; })()`);
   await waitFor(page, `(() => { const w = ${WIN('fake-poll-ops')}; return !!(w && w.content.querySelector('[data-channel-assign]')); })()`, 20);
   await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
-  await waitFor(page, `!!document.querySelector('#chan-assign-dialog select')`, 20);
+  await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-access-row select')`, 20);
   await sleep(300);
-  await capture(page, tag, 'dialog-assign-default', '#chan-assign-dialog .dialog', { pad: 8 });
-  await page.evaljs(`(() => { const d = document.querySelector('#chan-assign-dialog'); const sels = d.querySelectorAll('select.chan-opt-input'); sels[1].value = 'filtered'; sels[1].dispatchEvent(new Event('change')); return 1; })()`);
+  await capture(page, tag, 'dialog-access', '#chan-access-dialog .dialog', { pad: 8 });
+  const granted = await clickBtn(page, lang, '#chan-access-dialog', 'Save');
+  log('access save:', granted);
+  await waitFor(page, `!document.querySelector('#chan-access-dialog')`, 30);
+  await sleep(800);
+  await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
+  await waitFor(page, `!!document.querySelector('#chan-notify-dialog .chan-watch-row select')`, 20);
+  await sleep(300);
+  await capture(page, tag, 'dialog-notify-default', '#chan-notify-dialog .dialog', { pad: 8 });
+  await page.evaljs(`(() => { const d = document.querySelector('#chan-notify-dialog'); const sels = d.querySelectorAll('.chan-watch-row select.chan-opt-input'); sels[1].value = 'filtered'; sels[1].dispatchEvent(new Event('change')); return 1; })()`);
   await sleep(150);
-  await clickBtn(page, lang, '#chan-assign-dialog', 'Add rule');
+  await clickBtn(page, lang, '#chan-notify-dialog', 'Add rule');
   // the fresh rule has an EMPTY value: the stat line words the validator's refusal (a3 r4 — it used
   // to print the PURE module's English `keyword: value is required` under zh/ja)
-  await waitFor(page, `!!document.querySelector('#chan-assign-dialog .chan-flow-status.chan-warn')`, 20);
+  await waitFor(page, `!!document.querySelector('#chan-notify-dialog .chan-flow-status.chan-warn')`, 20);
   await sleep(200);
-  await capture(page, tag, 'dialog-assign-filter-incomplete', '#chan-assign-dialog .dialog', { pad: 8 });
-  await page.evaljs(`(() => { const d = document.querySelector('#chan-assign-dialog'); const inp = d.querySelector('.chan-af-rule input'); if (inp) { inp.value = 'deploy'; inp.dispatchEvent(new Event('input')); } return 1; })()`);
-  await waitFor(page, `(() => { const e = document.querySelector('#chan-assign-dialog .chan-flow-status'); return !!(e && /\\d/.test(e.textContent)); })()`, 30);
+  await capture(page, tag, 'dialog-notify-filter-incomplete', '#chan-notify-dialog .dialog', { pad: 8 });
+  await page.evaljs(`(() => { const d = document.querySelector('#chan-notify-dialog'); const inp = d.querySelector('.chan-af-rule input'); if (inp) { inp.value = 'deploy'; inp.dispatchEvent(new Event('input')); } return 1; })()`);
+  await waitFor(page, `(() => { const e = document.querySelector('#chan-notify-dialog .chan-flow-status'); return !!(e && /\\d/.test(e.textContent)); })()`, 30);
   await sleep(300);
-  await capture(page, tag, 'dialog-assign-filter', '#chan-assign-dialog .dialog', { pad: 8 });
-  const saved = await clickBtn(page, lang, '#chan-assign-dialog', 'Save');
-  log('assign save:', saved);
-  await waitFor(page, `!document.querySelector('#chan-assign-dialog')`, 30);
+  await capture(page, tag, 'dialog-notify-filter', '#chan-notify-dialog .dialog', { pad: 8 });
+  const saved = await clickBtn(page, lang, '#chan-notify-dialog', 'Save');
+  log('notify save:', saved);
+  await waitFor(page, `!document.querySelector('#chan-notify-dialog')`, 30);
   await sleep(1200);
   await capture(page, tag, 'win-06-assigned-bar', '[data-shot="win"] .chanwin-bar', { pad: 4 });
   if (hasPanel) { await tagSections(page); await capture(page, tag, 'panel-08-assigned-row', '.rail-panel-channels .chan-row[data-conv="fake-poll/fake-poll-ops"]', { pad: 4 }); }
@@ -652,9 +661,9 @@ async function pass({ lang, viewport, theme }) {
     await page.metrics(375, 667, false);
     await sleep(300);
     await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
-    await waitFor(page, `!!document.querySelector('#chan-assign-dialog select')`, 20);
+    await waitFor(page, `!!document.querySelector('#chan-notify-dialog select')`, 20);
     await sleep(300);
-    await capture(page, tag, 'narrow-dialog-assign', '#chan-assign-dialog .dialog', { fullPage: true });
+    await capture(page, tag, 'narrow-dialog-notify', '#chan-notify-dialog .dialog', { fullPage: true });
     await closeDialogs(page);
     await clickMenu(page, lang, '[data-shot="win"]', 'Reach & policy…');
     await waitFor(page, `!!document.querySelector('#chan-reach-dialog select')`, 20);

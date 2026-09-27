@@ -353,8 +353,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       chipEl.dataset.channelAssign = '1';
       chipEl.appendChild(icon(c.assignment ? 'filter' : 'plus', 10));
       // unassigned: the chip is the VERB (short); the fact rides its tooltip
-      chipEl.appendChild(el('span', '', c.assignment ? assignmentSummary(c) + (held ? ' · ' + t('last wake held') : '') : t('Assign to an agent…')));
-      chipEl.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(c.stats.lastWake.refused, { t }) || c.stats.lastWake.why || '' }) : (c.assignment ? t('Assign & filter…') : t('Not assigned — nobody is woken by this conversation.'));
+      chipEl.appendChild(el('span', '', c.assignment ? assignmentSummary(c) + (held ? ' · ' + t('last wake held') : '') : t('Grant access…')));
+      chipEl.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(c.stats.lastWake.refused, { t }) || c.stats.lastWake.why || '' }) : (c.assignment ? t('Grant access… / Notify…') : t('No agent has access here — nobody sees it, nobody is woken.'));
       chipEl.onclick = () => showAssignFilterDialog(app, c);
       bar.appendChild(chipEl);
     }

@@ -38,7 +38,7 @@ async function api(pathname, body, method = 'PUT') {
 function originLabel(o) {
   switch (o) {
     case 'user': return t('you granted it');
-    case 'assignment': return t('by assignment');
+    case 'access': case 'assignment': return t('by an access grant');
     case 'request': return t('you approved a request');
     default: return String(o || '');
   }
@@ -121,7 +121,7 @@ export async function showReachDialog(app, conv0) {
           rm.onclick = async () => { rm.disabled = true; const r = await api(`${base}/reach`, { principal: g.principal, level: null }); if (!r) rm.disabled = false; };
           row.appendChild(rm);
         } else {
-          const n = el('span', 'chan-reach-note', g.origin === 'assignment' ? (g.pattern ? t('removed with the rule') : g.scope && g.scope.kind === 'adapter' ? t('removed when the account is no longer handed over') : t('removed with the assignment')) : t('a request you approved'));
+          const n = el('span', 'chan-reach-note', g.origin === 'access' || g.origin === 'assignment' ? (g.pattern ? t('removed with the rule\'s access') : g.scope && g.scope.kind === 'adapter' ? t('removed with the account\'s access (Grant access…)') : t('removed with its access (Grant access…)')) : t('a request you approved'));
           row.appendChild(n);
         }
         listEl.appendChild(row);

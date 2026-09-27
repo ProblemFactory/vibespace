@@ -1682,6 +1682,7 @@ function replayViewSubagent(app, spec, { syncId } = {}) {
     claudeSessionId: spec.claudeSessionId,
     cwd: spec.cwd,
     hostId: spec.hostId || spec.host || undefined, // remote workflow agent → transcript on the host (2.191.0)
+    agentId: spec.agentId || undefined, // lane S1: a live helper view whose buffers are gone reads the transcript instead
   });
   const handler = (msg) => {
     if (!app.wm.windows.has(winInfo.id)) { app.ws.offGlobal(handler); return; }

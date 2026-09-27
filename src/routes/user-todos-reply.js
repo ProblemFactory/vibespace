@@ -10,7 +10,7 @@
  *       (`resolvedBy:'reply'`, the reply kept on it) — ONE store broadcast
  *     | {error, code} by NAME: agent_forbidden 403 · not_found 404 ·
  *       empty / too_long / input_rejected / too_large 400 ·
- *       no_session / job_item / no_live_session / not_chat / host_unreachable 409 ·
+ *       no_session / job_item / card_item / no_live_session / not_chat / host_unreachable 409 ·
  *       send_failed 500. A refusal resolves nothing.
  *
  *   POST /api/user-todos/resolve-many   {ids: string[] (1..200), status: 'dismissed'|'done'}
@@ -35,7 +35,7 @@ const { checkReplyText, composeReply, replyVerdict } = require('../inbox-reply.j
 const STATUS = Object.freeze({
   agent_forbidden: 403, not_found: 404,
   empty: 400, too_long: 400, input_rejected: 400, too_large: 400,
-  no_session: 409, job_item: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
+  no_session: 409, job_item: 409, card_item: 409, no_live_session: 409, not_chat: 409, host_unreachable: 409,
   send_failed: 500,
 });
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));

@@ -443,5 +443,23 @@ console.log('§3 P4: idempotency + reconcile');
   }
 }
 
+console.log('§4 R4 verify r2: validateCompose refuses bcc / replyTo BY NAME (never accept-and-ignore)');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const M = mutantCopies('chan-outbox-r2', REPO);
+  const base = { to: 'a@example.com', subject: 's', text: 'hello' };
+  ok(P.validateCompose(base).ok, 'the plain form composes');
+  const b1 = P.validateCompose({ ...base, bcc: 'hidden@example.com' }), b2 = P.validateCompose({ ...base, bcc: ['x@example.com'] }), r1 = P.validateCompose({ ...base, replyTo: 'm-1' });
+  ok(!b1.ok && b1.why === 'bcc' && !b2.ok && b2.why === 'bcc' && /not supported/.test(b1.error), `bcc ⇒ refused by name (${b1.why}: ${b1.error})`);
+  ok(!r1.ok && r1.why === 'replyTo', `replyTo on a NEW message ⇒ refused by name (${r1.why})`);
+  ok(P.validateCompose({ ...base, bcc: '', replyTo: null }).ok && P.validateCompose({ ...base, bcc: [] }).ok, 'an EMPTY bcc / a null replyTo (a flag that was not given) is not a refusal');
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8');
+  const lines = src.split('\n'); const i = lines.findIndex((l) => l.startsWith('  if (p.bcc !== undefined && p.bcc !== null'));
+  ok(i > 0, 'the bcc line is present (the control removes exactly it)');
+  const bad = M.load('src/channel-policy.js', lines.filter((_, k) => k !== i).join('\n'), 'bcc-dropped');
+  const c = bad.validateCompose({ ...base, bcc: 'hidden@example.com' });
+  ok(c.ok && !JSON.stringify(c.proposal).includes('hidden@'), 'CONTROL: a copy without the line ACCEPTS the bcc and silently drops it — the leg above would go red');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

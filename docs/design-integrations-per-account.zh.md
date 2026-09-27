@@ -7,7 +7,7 @@
 >
 > **状态: SHIPPED (2.369.165, 四个 chunk: 1 共用对话框组件 D1 · 2 频道服务端 · 3 账号卡与对话框 · 4a 存储侧 D2 (独立 commit) + 4b 普查 `scripts/test-oauth-field-parity.mjs` 与文档); D1–D8 均按推荐默认值落地。** 以下是设计原文 (r4), 实现细节见 `docs/kb-features.md` (Communication panel / Mounts) 与 `docs/kb-file-structure.md`。设计时的状态行: **设计 + mockup (r4), 零产品代码。** r4 = **r2 的结构** (频道保留 `data/channels/` 与自己的面板小节; 账号对话框 = 挂载对话框的语法: 一个 "OAuth 客户端" 下拉 + 自定义就地字段, 选择存在账号记录上; 密钥库撤回; 集成窗口只剩浏览器 key) **+ mounts 侧的模式逐条采用** (§8: 每条 采用 / 改用 / 不适用 + 理由)。r3 的"频道账号 = mounts.json 凭据的子项"**撤回** —— 参考的是设计, 不是合并对象。§1 的 Remote 清单保留, 作为模式的来源。英文镜像: `docs/design-integrations-per-account.md`。
 
-> **2026-09-26 —— 部分被「聚合 IM」取代** (docs/design-communication-panel §5 不变式 6): 下文的 `跟踪…` 动词、只列被跟踪会话的 ↳ 行、`showTrackPicker` 勾选列表和「仅登录 —— 尚未跟踪任何会话」措辞均已**退役** —— 已链接账号的每个会话都是一条 ↳ 行并会被抓取。账号 ⋯ 顺序现为: 打开会话窗口 → 搜索消息… → 交给一个 agent… → 符合规则的会话… → 选项 → 推送… ‖ 重新授权 / 连接 → 创建副本… → 断开 → 移除… ‖ 禁用 (`scripts/test-oauth-field-parity.mjs` 的 D6 普查钉住它); 健康行为 `[Gmail] 已连接 · 收件箱 · 轮询 · N 个会话 · 上次同步 …`。
+> **2026-09-26 —— 部分被「聚合 IM」取代** (docs/design-communication-panel §5 不变式 6): 下文的 `跟踪…` 动词、只列被跟踪会话的 ↳ 行、`showTrackPicker` 勾选列表和「仅登录 —— 尚未跟踪任何会话」措辞均已**退役** —— 已链接账号的每个会话都是一条 ↳ 行并会被抓取。账号 ⋯ 顺序现为: 打开会话窗口 → 搜索消息… → 授权访问… → 通知… (R4, 2026-09-27: 访问与通知是两种操作 —— design-communication-panel §24; 取代了「交给一个 agent…」) → 符合规则的会话… → 选项 → 推送… ‖ 重新授权 / 连接 → 创建副本… → 断开 → 移除… ‖ 禁用 (`scripts/test-oauth-field-parity.mjs` 的 D6 普查钉住它); 健康行为 `[Gmail] 已连接 · 收件箱 · 轮询 · N 个会话 · 上次同步 …`。
 
 ## §0 一段话
 
