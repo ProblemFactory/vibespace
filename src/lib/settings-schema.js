@@ -486,6 +486,8 @@ const SETTINGS_SCHEMA = {
     description: t('When you take over an agent\'s browser in the live view and then walk away, control goes back to the agent by itself after this many milliseconds without your input, so an abandoned takeover never parks an agent for ever. 0 = never (only an explicit Hand back or closing the live view returns control). Anything under 30 s is raised to 30 s.'),
     category: t('Agent browser'), liveApply: true,
   },
+  // ── (verify S2 r4's `browser.fenceScriptsWhileDriven` was RETIRED 2026-09-27 by the owner's ruling — "直接打断所有脚本和agent操作":
+  //    a takeover interrupts every script and page edit of the agent on every instance; a stored value is ignored and said once by the keeper) ──
   'browser.announceIdleHandback': {
     // §4.3.1's zero-spend default: an idle handback is nobody's action, so by
     // default it delivers NOTHING into the conversation (the lease flips, the
@@ -879,6 +881,22 @@ const SETTINGS_SCHEMA = {
     type: 'number', default: 3000, min: 100, max: 6000, step: 100,
     label: t('Gmail: quota units per minute per account'),
     description: t('Gmail allows 6000 quota units a minute per user (a thread read costs 40, a change check 2). When an account reaches this budget its refreshes wait for the next minute, and the account card says so.'),
+    category: t('Channels'), liveApply: true,
+  },
+  // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读取速度"):
+  // the PER-SECOND pace (src/channel-drain.js rule 18) — the vendor refuses
+  // bursts that stay inside its per-minute cap. Default = the adapter's
+  // `caps.pace.unitsPerSec`; the engine reads the SAME bounds (SETTING_BOUNDS).
+  'channels.gmailUnitsPerSec': {
+    type: 'number', default: 40, min: 5, max: 100, step: 5,
+    label: t('Gmail: quota units per second per account'),
+    description: t('Reads are spread evenly: at most this many quota units a second (a thread read costs 40, so 40 = one thread a second), and never faster than the per-minute budget above allows. Google refuses bursts well inside its 6000-a-minute cap; when it does, the account waits a few seconds and the card says so.'),
+    category: t('Channels'), liveApply: true,
+  },
+  'channels.larkRequestsPerSec': {
+    type: 'number', default: 5, min: 1, max: 50, step: 1,
+    label: t('Lark: requests per second per account'),
+    description: t('Requests are spread evenly: at most this many a second, and never faster than the per-minute budget above allows. Lark allows 50 a second per API for the whole app across every instance and user that shares it.'),
     category: t('Channels'), liveApply: true,
   },
   // ── Channels outbox GUARDS (design §9.1, decision 9, P3): they stack on

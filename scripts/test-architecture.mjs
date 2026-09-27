@@ -63,8 +63,10 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   'src/browser-trace.js',
   // AGENT BROWSER P6 (design §6.2 / §6.5 / D6): the CDP MEDIATION RULES — target scoping, the
   // session gate, browser_paused, the whole-browser acts, the scope's growth/shrinkage, the
-  // per-session url/env composition — imports nothing (the proxy does the I/O)
+  // per-session url/env composition — imports only the sibling PURE census (the proxy does the I/O)
   'src/browser-mediation.js',
+  'src/cdp-census.js', // verify S2 r4: ONE row per method of the installed Chrome's protocol, classed — the paused fence reads the class; imports nothing
+  'src/browser-interrupt.js', // the owner's ruling (2026-09-27): the takeover's words (browser_interrupted), what was in flight off the trace, the takeover→handback cycle; imports nothing
   'src/search-card.js', // web-search card renderer + title query + twin key — shared server (codex normalizer) + browser (chat-renderers)
   'src/path-linkify.js', // where a chat file path ENDS (CJK punctuation) — shared browser (chat-renderers) + node tests; imports nothing
   'src/collab-row.js', // codex multi-agent collab row labels/HTML — esc/t/icons injected, so the XSS rule is unit-provable

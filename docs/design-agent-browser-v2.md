@@ -2114,6 +2114,197 @@ silent absence. This is a change from round 1, which listed both values as avail
 conceded the enforcement gap; owner request (1.b)'s "one profile driven by several sessions at
 once" is delivered by `sharing: "owner"` today and by `"instance"` after D6/P6.
 
+#### 6.2.1 The CDP census — what the mediating proxy refuses while the user drives (verify r4, 2026-09-27)
+
+Three verify rounds each found the takeover fence one method short, because the fence was a
+hand-written list: r1 fenced `Input.*` + a navigation family, r2 added the tab acts, r3 added the
+deaf-page arm (`Input.setIgnoreInputEvents`) and a focus move (`DOM.focus`) — and still left
+`Emulation.setDeviceMetricsOverride`, `setScriptExecutionDisabled`, `Debugger.pause`,
+`Target.openDevTools`, `Cast.startTabMirroring`… open while the user drove. A list names what
+somebody thought of; a census names what the vendor ships. So the fence is now a CENSUS
+(`src/cdp-census.js`, PURE): every one of the 664 methods the installed Chrome lists in its own
+`GET /json/protocol` (153.0.8010.47, pinned as the names-only fixture
+`scripts/fixtures/cdp-protocol-153.0.8010.47/`, written by `scripts/cdp-protocol-fetch.mjs`) has
+ONE row, in one of seven closed classes:
+
+| class | rows | while the user drives a shared (mediated) browser |
+|---|---|---|
+| `input` | 15 | refused `browser_interrupted` (since 2026-09-27, §6.2.2; `browser_paused` before) — keys / pointer / touch / drag / text / files / focus / autofill into the page; the user's own takeover input passes on its credit (§4.3.1, verify r1/r2) |
+| `view` | 106 | refused — which tab, the page (navigate / reload / history / dialogs / document), viewport / scale / screen / emulated media, a frozen page (Debugger pause, breakpoints, virtual time, script execution off), overlays, casting. One row, `Page.bringToFront`, is fenced by the live view's takeover anchor instead (measured r2 + r3: refusing it at the proxy leaves the switched-to tab hidden) |
+| `page-mutation` | 195 | refused (since 2026-09-27 — §6.2.2: the owner's ruling superseded D6's open script door and retired the r4 switch `browser.fenceScriptsWhileDriven`, which is ignored when still stored); r4 shipped this class OPEN behind that switch |
+| `read` | 176 | answers (screenshots, the AX tree, layout, cookies read, tracing…) |
+| `session` | 11 | the existing `Target.*` scoping rules apply (a lease sees and reaches only its own targets), never the fence |
+| `harmless` | 147 | answers (enable / disable / acks / releases) |
+| `refused` | 14 | refused on every lease, paused or not (`method_refused`): Browser.close / crash*, the escape hatches out of the mediation, Tethering, an unpacked extension, desktop mirroring, a renderer crash, the deaf-page arm |
+
+A method with NO row (a newer Chrome's) is refused BY NAME while the user drives — the refusal
+names the method, the censused Chrome and the file; the proxy logs it once per grant — and is
+forwarded otherwise: the gap is visible, never a hole. Tab scoping is lease-wide for every class
+(the proxy cannot tell a tab from an out-of-process iframe under the driven tab; the CLI rung
+refuses every page verb; the daemon's own `tab <n>` moves the active tab). A new Chrome: run
+`scripts/cdp-protocol-fetch.mjs`, bump `CENSUS_CHROME`, class every method the fast gate prints.
+The takeover anchor's grace (r3) was lowered in the same round from a round second to 62 ms =
+3 × the measured p99 of the daemon's tabs-record latency (`scripts/measure-anchor-grace.mjs`,
+2 × 100 real switches on agent-browser 0.38.1 + this Chrome: p99 15.4 / 20.4 ms). Gates:
+test-browser-mediation ⑥ (the fixture ⇔ the table, every row's verdict, the unknown rule, the
+retired switch ignored, three patched-copy controls) + test-browser-mediation-chrome ⑥ (the launched
+Chrome's own protocol — extras print and fail — and every class against a real paused lease, the
+raw endpoint as the oracle).
+
+#### 6.2.2 The takeover INTERRUPTS — the owner's ruling (2026-09-27)
+
+> "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行"
+> — when the user takes over the agent's browser, interrupt every script and operation of the
+> agent there, tell the agent it was interrupted, and on the handback remind it to re-run.
+
+This supersedes D6's "script evaluation is not fenced while the user drives" (r4 kept that door
+open behind `browser.fenceScriptsWhileDriven`, default OFF; the switch is retired — a stored value
+is ignored and said once in the journal). Three parts, each with its gate:
+
+**1. Interrupt.** At the takeover instant (the keeper's `takeover`, before anything is announced)
+the mediating proxy answers every call of that (profile, conversation) lease still waiting on the
+browser whose census class is refused while the user drives — `input`, `view`, `page-mutation`
+and every method with no row — with `browser_interrupted` ("The user took over this browser — your
+operation was interrupted (<method>). Wait for the handback, then run it again."), at once
+(measured ≤ 2 ms in the fast gate's real proxy). A `read`, `session` or `harmless` call in flight is
+left to finish (the live view's own stream rides those). The browser's late answer to an aborted
+call is swallowed; its scope growth still applies (a tab a cut `createTarget` made stays the
+lease's, so the revoke closes it). A session that was running an aborted SCRIPT call
+(`Runtime.evaluate` / `callFunctionOn` / `runScript`) gets ONE `Runtime.terminateExecution` under
+the proxy's own id. While the user drives, every call but `read` / `session` / `harmless` is
+refused `browser_interrupted` (the census's paused set is input + view + page-mutation).
+**What cannot be recalled — measured on Chrome 153.0.8010.47 + agent-browser 0.38.1:** a script
+RUNNING in the page (0.38.1's `eval` = `Runtime.evaluate` with `awaitPromise: true`; a 5 s busy
+loop) stops within ~2 ms of `terminateExecution` — the CLI's JSON carried `browser_interrupted`
+2 ms after the takeover, the page answered the next probe at once and the loop's last statement
+never ran; `terminateExecution` with nothing running changes nothing (the page's own timer 400 ms
+later still ran); but a script AWAITING a timer or a fetch is not running — its continuation still
+runs later and cannot be recalled (the call is rejected, the agent told). **The blast radius (verify
+r5, measured on the real proxy + Chrome 153): `Runtime.terminateExecution` stops the execution
+running in the page's context at that instant — normally the agent's script, but on a shared page it
+is a page-context primitive, so if the agent's aborted call was merely AWAITING (nothing of the
+agent's running) and the user's OWN page script happens to be executing, that one synchronous run is
+aborted (measured: one `setInterval` iteration killed, 6/6 forced-busy trials; the interval keeps
+firing, a navigation in flight still lands and the page is left `complete`, not broken). This is
+inherent to CDP — there is no per-script terminate — and it is bounded (one execution, transient);
+the alternative (never terminate) would leave the owner's "打断所有脚本" unmet for a running busy
+loop, so the takeover terminates and accepts the transient collateral. A read in flight is never
+terminated.** An `Input.*` call that
+already left the proxy has reached Chrome: 0.38.1's `fill` is ONE `Input.insertText` — caught in
+flight it COMPLETES (the field held all 4000 chars) while the agent is told `browser_interrupted`;
+its `type` is one `insertText` per character — caught mid-word it STOPS (20 of 300 characters). On
+0.38.1 even `get title` reads by script and is refused while the user drives. A browser that is not
+shared instance-wide (the conversation's own ephemeral browser, an owner-shared profile) has no
+proxy between the agent's daemon and Chrome: its command in flight runs to its own end — the agent
+is still told (below) and every next command is refused at `/resolve` (`browser_paused`).
+
+**2. Tell the agent.** (a) The command the agent had running ends with `[browser_interrupted]`
+through `vibespace-browser` (exit 1, like every refusal): the CLI hands the server the instant its
+`/resolve` answered (`since`, on the keeper's clock) with its audit, and a takeover that began at
+or after it answers `interrupted` — cut (a mediated lease: its calls were aborted) or ran to its end
+(no proxy). (b) The conversation shows VibeSpace's card at the takeover ("The user took over the
+"Work" browser; 2 operations were interrupted: fill, eval. Wait for the handback, then run them
+again." — or "nothing of yours was running there"), through the live session's card path
+(`normalizers.feedPeerCard`, the auto-resume notice's own path: display only) — ONE card per
+takeover → handback cycle; (c) the agent reads the same words at its next turn as a zero-spend
+`browser-takeover` notice. Nothing is delivered: no rung of the ladder, no billed turn. What was in
+flight is a PURE function of the action trace and the instant (`src/browser-interrupt.js`
+`inFlightAt`: the recorder keeps a ring of every command / result record of the daemon's stream —
+`eval` and `wait` included, the `launch` pair and the recorder's own probe excluded; a command with
+no result for over 5 min is a lost result, never an interruption; an operation is counted once
+across cycles); with no trace of that browser, the aborted CDP methods name what was cut.
+
+**3. The handback reminds.** The keeper closes the cycle and hands the announcer its re-run list —
+what was interrupted, then every verb the agent tried while the user drove (refused at `/resolve`),
+each once. The explicit handback's delivered words (§4.3.1, `spendReason: 'browser-handback'`
+unchanged — the census did not grow a producer) end with "Re-run what was interrupted: fill, eval —
+read the page first; refs from before the takeover are stale."; the idle / viewer-left notice and
+the idle For-you item carry the same list; a cycle with nothing in flight and nothing refused says
+nothing about re-running (its words byte-identical to before). A refused or failed delivery is now
+carried by ONE carrier — the stash (the notice only when the stash cannot take it): stash + notice
+both rode the same next prompt and the agent read the handback twice. The live view's toasts say
+the same to the human (t(), zh + ja): "You took over — 2 agent operation(s) interrupted: fill,
+eval…" / "Control handed back to the agent — it was told to re-run: …".
+
+**4. A shared browser is taken over WHOLE (verify r6, 2026-09-27).** A takeover is of the
+BROWSER, not of the conversation whose live view the user clicked in. Every other conversation
+leased on that named profile (one Chrome, its own tabs) is taken over WITH it by the same viewer —
+its calls in flight are cut, its own cycle opens (its own card and its own reminder naming ITS
+verbs; nothing crosses between conversations), its next verbs are refused `browser_paused`, and
+its `tab` switch is refused like the primary's (the r3 anchor rule, now across conversations —
+measured before the fix: the sibling's `fill` ran on under the user's hands and its
+`Target.activateTarget` was forwarded). A conversation attaching while the user drives is paused
+from birth (it joins the running takeover, its own card). The handback from the driving view hands
+every sibling back (four conversations ⇒ four handbacks, each through the one ladder site), a pass
+moves their holder, the holder's input restarts their idle clock; a second viewer of the same
+browser meets `held` (one user drives one browser). The conversation's ephemeral browser and a
+helper's have no siblings. **The audit's join (r5's fix, pinned):** a verb whose audit lands after
+the handback joins nothing (its own line says control is back); one whose audit lands while the
+user drives AGAIN joins that OPEN cycle — the CLI said "wait for the handback (it names what to
+re-run)", so it does, once; an audit repeated names it once. **The words follow what happened:** an
+aborted call the browser still answered with a success had LANDED (measured: `fill` caught on its
+one `Input.insertText` — the field holds all 4000 chars; `type` after its 20th key — 20 of 300) —
+the proxy records it (`landed`), the audit waits ≤ 250 ms for those late replies, and the CLI says
+"cut short … but one of its calls had already reached the page and took effect: check the page";
+a mediated command whose next call met the takeover (nothing aborted, binary exit 1) says "the
+takeover came between its calls: what it had done before it stands, its calls after it were
+refused". A takeover that sent a `terminateExecution` tells the human in the live view's toast that
+a script running in the page was stopped with it. **The takeover card before the first attach:** a
+card fed before the chat window's first attach is held (32) and replayed after the history; a
+DELIVERED notification (the ladder's card, `recorded` = the text the CLI's transcript holds) is
+answered by the rendered record and never replayed beside it (each record answers for one card — a
+same-body repeat keeps one card per delivery); a display-only card always replays.
+
+**5. One browser, one holder — on the wired path; a sibling's handback is not a billed wake; an
+unanswered call is said as unknown (verify r7, 2026-09-27).** Part 4's "a second viewer meets
+`held`" was pinned with the keeper's `holderAlive` defaulting true, while the bridge computed it
+PER RELAY (`relay.viewers.has(relay.holder)`) — and a sibling conversation's holder sits on
+ANOTHER relay by construction, so on the wired path it read as gone: a second view (the same human
+on a phone, or conversation C's view while A's drove) RE-SEIZED its lease — two holders of one
+Chrome, both views' inputs forwarded, and the handback from the driving view left the other lease
+paused under its own viewer (measured through the real bridge: holders [1, 2], inputs x=10 and
+x=20 both upstream; then A's handback releasing A + B and leaving C `user`). Now the bridge answers
+`viewerAlive(id)` across EVERY relay (viewer ids come from one counter) and hands the keeper that
+fact; the keeper consults it for its own lease's holder AND, at the door, for every sibling's — a
+LIVE holder anywhere on the browser is `held` by name (`heldBy` the sibling), a holder whose socket
+is gone never blocks and the browser moves WHOLE to the new viewer (`siblingTakeover` re-seizes a
+dead-holder sibling; its cycle goes on — no second card). **Spend:** the mirrored handback event
+names the primary (`sibling`), and the PURE `announceVerdict({cause, sibling, rerun})` delivers a
+sibling's explicit handback ONLY when its own cycle interrupted or refused something (its agent was
+told to wait for the handback that names it); with nothing of its own to re-run the zero-spend
+notice rides its next turn — one click on one view never wakes every conversation leased on the
+browser (measured before: a shared "remember login" profile with N conversations ⇒ N billed
+wakes per handback, N−1 of them to idle agents). **Words:** `interruptionFor` also carries
+`unsettled` (aborted calls the browser had not answered when the audit's ≤ 250 ms settle-wait ran
+out — measured: a click's success reply landing 450 ms after the takeover read `landed: 0` with no
+mark), and the CLI says "— and one of its calls had not been answered by the page when this was
+written, so whether it took effect is unknown: check the page before running it again" instead of
+a definite cut. Held (no change): a child handle names the helper's OWN ephemeral browser — never
+on the shared browser, no siblings; a helper acting on the shared browser acts as its parent's key
+and is paused with the parent (the keeper's `attach` would admit a child KEY on a named profile,
+but no route hands one in — recorded, not built).
+
+Gates: test-browser-mediation ⑦ (the PURE plan; the real keeper + proxy: a script, a key and a new
+tab in flight aborted ≤ 50 ms, a read left alone, terminateExecution on the script's session, the
+late answers swallowed, the cut tab kept in scope, the retired switch ignored; r6: the sibling's
+call cut, its tab switch refused, freed by the handback with its own list; `landed` / `unsettled` /
+the bounded settle-wait; CONTROL: a mediator copy with the old pause leaves the call waiting),
+test-browser-takeover ⑧ (in flight = PURE(trace, instant), the cycle merge and close, the words,
+the real recorder + keeper, one card + one notice, one reminder; CONTROL: an announcer copy without
+the takeover moment tells nobody; the shipped CLI end to end) + ⑨ (r6: the siblings, the
+mid-takeover attach, the pass / idle / handback mirror, the audit join in both orders, `terminated`
+in the view, the toast wired; CONTROL: a keeper copy without the sibling call leaves the other
+conversation driving; r7: one holder across leases — `held` naming the sibling's live holder, a
+dead holder's browser re-seized whole, the PURE spend rule + its wiring (one delivery, three
+notices), the REAL bridge over a fake upstream: `held` on the wired path, one view's input
+forwarded, viewer-left releases both; CONTROLS: a keeper copy ignoring the cross-relay fact and a
+per-relay bridge copy each let a second view take a browser a live viewer drives), test-attach-rebuild ④ (the held cards: bound + journal line, a killed
+session collected, the replay vs the transcript's record), test-browser-verbs (the CLI's words:
+cut / landed / unanswered (r7) / came-between / ran-to-end), test-spend-paths §2 (the takeover
+tells for free — no new producer), test-browser-mediation-chrome ⑦ (heavy, the real 0.38.1 +
+Chrome: the numbers above), test-browser-live ⑧ (heavy: the card in the chat, the toasts, the
+reminder once).
+
 ### 6.3 Domain restriction, honestly
 
 Because `--allowed-domains` refuses profiles / CDP / restore (§1.5), a persistent profile cannot
@@ -3067,7 +3258,7 @@ their ranges say how little is known about them.
 | **D3** | **Default profile policy for a session that asks for nothing.** | (a) ephemeral, no cookies kept; (b) auto-create a per-session persistent profile; (c) keep today's shared default. | **(a) ephemeral** — and see **D12**, which is the same question asked at the level where it is actually decided. Persistence should be a request, because a request is how the profile gets an owner and a label. (b) recreates the 53-orphan problem automatically, on a schedule; D12's variant C is *not* (b), because those directories are named, owned and swept — but only if the sweep ships with them. |
 | **D4** | **Adopt CloakBrowser now, and at which tier?** | (a) free tier, self-hosted, opt-in per profile, **after §7.2.1's egress measurement is performed and recorded**; (b) Solo $19/mo; (c) Team $49/mo; (d) not yet — human-login-through-live-view first. | **(a), with the measurement as a hard precondition rather than an aside** — it costs nothing and tells us whether the sites in question actually need it. Move to a paid tier only against a measured failure on a named site. Never the global default. Round 1 named `test-vendor-whitelist` as the control for the phone-home risk; that was wrong (§9), so the control is now a recorded proof record plus an enforcing egress allowlist on the container. |
 | **D5** | **Does a browser ever run on a machine other than this one?** | (a) local only for now; (b) paired devices via the `browser-serve` op + `tcpForward` (P4); (c) cloud providers with API keys. | **(b), in P4, and only for machines already paired.** (c) puts a vendor key and every page we visit on someone else's infrastructure and deserves its own decision with its own §ban-safety review. |
-| **D6** | **Cooperative lease or hard CDP mediation?** | (a) cooperative for `sharing: "owner"`, with `sharing: "instance"` REFUSED until P6; (b) build P6 now and offer both; (c) cooperative for both and say so in the UI. | **(a).** Between one owner's own sessions a cooperative lease matches every other surface here, and §5.1 removes the accident that made it worse. Between *different* owners it is not a boundary at all (§3.4), so `"instance"` is refused with its reason rather than shipped with a badge that promises isolation the mechanism cannot keep. This is a change from round 1, which listed both values as available while conceding the gap in §6.5. |
+| **D6** | **Cooperative lease or hard CDP mediation?** (**superseded in part 2026-09-27** by the owner's ruling "直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行": script evaluation is no longer open while the user drives — a takeover interrupts, tells and reminds, §6.2.2) | (a) cooperative for `sharing: "owner"`, with `sharing: "instance"` REFUSED until P6; (b) build P6 now and offer both; (c) cooperative for both and say so in the UI. | **(a).** Between one owner's own sessions a cooperative lease matches every other surface here, and §5.1 removes the accident that made it worse. Between *different* owners it is not a boundary at all (§3.4), so `"instance"` is refused with its reason rather than shipped with a badge that promises isolation the mechanism cannot keep. This is a change from round 1, which listed both values as available while conceding the gap in §6.5. |
 | **D7** | **Recording default.** | (a) off, opt-in per profile; (b) on for attached profiles; (c) thumbnails always, video opt-in. | **(c).** One JPEG per agent action is nearly free and makes the transcript useful; 30 fps video of a logged-in profile is a secret with a storage bill. |
 | **D8** | **What happens to the orphan profile directories (53–56, 98 GB — §1.2)?** | (a) list them, let the user adopt or delete; (b) auto-adopt all; (c) auto-delete anything older than N days. | **(a).** A cookie jar is somebody's login; a sweep that deletes one is the same class of mistake as the incident where a `(deleted)` match killed a live session. |
 | **D9** | **Does the live view get its own window type, or a pane in the chat window?** | (a) window type `browser-live`; (b) a chat pane like Codex desktop's right-hand panel. | **(a) window type.** VibeSpace *is* a window manager; a window can be tiled beside the chat, moved to a desktop, opened on a phone and shared across clients — all of which the registry gives us for free, and none of which a chat pane does. |

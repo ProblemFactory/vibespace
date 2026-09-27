@@ -27,9 +27,10 @@
  *                                                 each detached live one hears it on its next message); anything else refused by name
  *   POST   /api/browser/profiles/:id/forget       { release?, unpin? } archive-THEN-remove (the dir is moved beside itself, a
  *                                                 ledger row is filed BEFORE the record goes); 409 leased / running; 400 not_ours
- *                                                 by provider row. Owner ruling A (6): the row's Delete… sends release + unpin —
+ *                                                 by provider row; lane S2: a PINNED profile is refused `pinned` {count, names}
+ *                                                 unless unpin. Owner ruling A (6): the row's Delete… sends release + unpin —
  *                                                 every lease detached by the user and the browser stopped first, then every pin
- *                                                 naming it cleared (lane S2's `unpinProfile` seam), then the set-aside
+ *                                                 naming it cleared (lane S2's `unpinProfile`, the cleared MARK), then the set-aside
  *   POST   /api/browser/orphans/adopt             { dir, label }   label an unregistered directory in place
  *   POST   /api/browser/orphans/forget            { dir }          move an orphan aside + ledger row (never deleted by itself)
  *   POST   /api/browser/forgotten/:fid/delete     THE one permanent deletion — a human's click on a forgotten row
@@ -209,13 +210,19 @@ router.post('/api/browser/profiles/:id/forget', async (req, res) => {
   if (!PROFILE_ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const release = req.body?.release === true, unpin = req.body?.unpin === true;
   try {
-    // owner ruling A (6): Delete… — release every lease + stop the browser, clear every pin naming it (lane S2's seam),
-    // THEN the set-aside (archive-before-remove, unchanged); without the flags the old refusals stand (leased / running)
-    let released = null, unpinned = null;
+    // owner ruling A (6): Delete… — release every lease + stop the browser FIRST (a user act: the leases are what a plain
+    // set-aside would be refused for), then lane S2's refuse-or-warn — the housekeeping verdict (leased / running / not
+    // ours: never an unpin for a set-aside that cannot happen), a PINNED profile only with `unpin` (every pin cleared with
+    // its MARK, each chat's browser chip says so; never a dangling pin) — THEN the set-aside (archive-before-remove)
+    let released = null;
     if (release && typeof ctx?.releaseProfile === 'function') released = await ctx.releaseProfile(req.params.id);
-    if (unpin && typeof ctx?.unpinProfile === 'function') unpinned = ctx.unpinProfile(req.params.id);
-    const r = await tr.forgetProfile(req.params.id);
-    res.json({ ...r, ...(released ? { detached: released.detached.length, stopped: released.stopped } : {}), ...(unpinned ? { unpinned: unpinned.cleared } : {}) });
+    const kv = ctx.keeper && typeof ctx.keeper.removeVerdict === 'function' ? ctx.keeper.removeVerdict(req.params.id) : { ok: true };
+    if (!kv.ok) return res.status(STATUS[kv.code] || 409).json({ error: kv.error, code: kv.code });
+    const g = typeof ctx.pinGuard === 'function' ? ctx.pinGuard(req.params.id, unpin) : null;
+    if (g) return res.status(409).json(g);
+    const u = unpin && typeof ctx.unpinProfile === 'function' ? ctx.unpinProfile(req.params.id) : null;
+    const r = await tr.forgetProfile(req.params.id, { unpin });
+    res.json({ ...r, ...(released ? { detached: released.detached.length, stopped: released.stopped } : {}), unpinned: u ? u.cleared : 0 });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/orphans/adopt', (req, res) => {

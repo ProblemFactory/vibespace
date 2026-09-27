@@ -155,7 +155,7 @@ export class ChatStatusBar {
   /** The Browser chip's facts (§3.8 ③): `{key, active, pinned, activeLabel,
    *  pinnedLabel}` or null. Drawn only when the session has a browser key AND
    *  something to say (a pin, or a use); amber when the two halves differ. */
-  setBrowserProfile(v) { this._browserProfile = v && v.key ? v : null; this.render(); }
+  setBrowserProfile(v) { this._browserProfile = v && v.key && v.fact && v.words ? v : null; this.render(); } // lane S2: {key, fact, words} — THE browser fact and its words
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
   setBilling(auth, onSwitch) {
@@ -737,25 +737,22 @@ export class ChatStatusBar {
       chip('design', `chat-status-design chat-status-clickable${n ? '' : ' chat-status-design-empty'}`, dTitle, `${UI_ICONS.design}${n ? ` ${n}` : ''}`);
     }
 
-    // Browser chip (agent browser P2, §3.8 layer ③): the profile the agent LAST
-    // ACTUALLY USED vs the PINNED default — amber when they differ, because
-    // this is the only surface that answers "I pinned it, now what?". Drawn
-    // for the pinned half alone (neutral) before the agent has used anything.
-    if (this._browserProfile && (this._browserProfile.pinned || this._browserProfile.active != null || this._browserProfile.input === 'user' || this._browserProfile.live)) {
-      const b = this._browserProfile;
-      const differs = b.active != null && (b.active || '') !== (b.pinned || '');
+    // Browser chip (agent browser P2, §3.8 layer ③; lane S2): THE browser fact's words — the browser this
+    // conversation uses now, and when the pin says otherwise BOTH in one sentence ("pinned work · running nothing —
+    // work could not start"), amber. The words are src/browser-fact.js's; this chip never derives its own answer.
+    if (this._browserProfile && this._browserProfile.words && this._browserProfile.words.show) {
+      const { fact: f, words: w } = this._browserProfile;
       // P3 (§4.3): while the USER drives, the chip says so before anything else —
       // the agent's browser commands are refused until the handback
-      const driving = b.input === 'user';
-      const shown = driving ? t('You are driving') : (b.active == null ? b.pinnedLabel : b.activeLabel);
-      const facts = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
-      // lane H: say whether a browser of this conversation is RUNNING right now (the live fact `browserLive`)
-      const running = b.live ? t('Running now — click for the live view') : t('Not running — the agent’s next browser command starts it');
-      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + (differs ? t('The agent is still on {a} — pinned is {p}. Remind it?', { a: b.activeLabel, p: b.pinnedLabel }) + '\n' : '') + facts + '\n' + running;
+      const driving = f.input === 'user';
+      const shown = driving ? t('You are driving') : w.line;
+      // lane H: say whether a browser of this conversation is RUNNING right now
+      const running = f.live ? t('Running now — click for the live view') : t('Not running — the agent’s next browser command starts it');
+      const tip = (driving ? t('You took over this browser — the agent is paused until you hand back') + '\n' : '') + w.tooltip + '\n' + running;
       // the three browser faces (design-browser-faces direction B): the chip names WHOSE browser this is — the agent's — on its window-with-a-dot glyph (the globe is the web view's); the tooltip's first line carries the same prefix
       const face = t('Agent browser') + ' · ';
-      // lane S4: the words sit in their own span so the phone's sticky chip can cut them to fit (chat.css ≤768px)
-      chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (differs ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} <span class="chat-status-browser-text">${escHtml(face + String(shown || ''))}</span>`);
+      // lane S4: the words sit in their own span so the phone's sticky chip can cut them to fit (chat.css ≤768px); lane S2: amber = the browser fact's words say so
+      chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (w.amber ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} <span class="chat-status-browser-text">${escHtml(face + String(shown || ''))}</span>`);
     }
 
     // Remote reconnect chip — amber, only while the ssh pipe is down
@@ -1137,19 +1134,25 @@ export class ChatStatusBar {
     // (zero-spend: the reminder rides the user's next message), the live
     // view, and the pin picker. The nudge row exists only when they differ.
     const brEl = e.target.closest('.chat-status-browser');
-    if (brEl && this._browserProfile) {
+    if (brEl && this._browserProfile && this._browserProfile.words) {
       e.stopPropagation();
       const dropdown = showDropdown(brEl, { minWidth: 240, maxWidth: 380 });
       if (!dropdown) return;
-      const b = this._browserProfile;
-      const differs = b.active != null && (b.active || '') !== (b.pinned || '');
+      const { fact: f, words: w } = this._browserProfile;
+      // lane S2: the menu says THE fact in the chip's own words — the line, then what it is made of
       const facts = document.createElement('div');
       facts.className = 'chat-status-dropdown-note chat-status-browser-facts';
-      facts.textContent = t('Agent last used: {a} · pinned: {p}', { a: b.active == null ? t('nothing yet') : b.activeLabel, p: b.pinnedLabel });
+      facts.textContent = w.line;
+      facts.title = w.tooltip;
       dropdown.appendChild(facts);
+      const sub = document.createElement('div');
+      sub.className = 'chat-status-dropdown-note chat-status-browser-pinned';
+      sub.textContent = t('Using: {name} — {state}', { name: w.name, state: w.state }) + ' · ' + t('Pinned: {p}', { p: w.pinned });
+      dropdown.appendChild(sub);
       const row = (cls, text, title, act) => { const it = document.createElement('div'); it.className = 'chat-status-dropdown-item ' + cls; it.textContent = text; if (title) it.title = title; it.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); act(ev); }; dropdown.appendChild(it); };
-      if (b.input === 'user') row('chat-status-browser-handback', t('Hand back to the agent'), t('An explicit handback is announced into the conversation (a billed turn) with the current URL'), (ev) => this._onBrowserAction?.('handback', ev));
-      if (differs) row('chat-status-browser-nudge', t('Remind on next message'), t('The reminder rides your next message — no billed turn'), (ev) => this._onBrowserAction?.('nudge', ev));
+      if (f.input === 'user') row('chat-status-browser-handback', t('Hand back to the agent'), t('An explicit handback is announced into the conversation (a billed turn) with the current URL'), (ev) => this._onBrowserAction?.('handback', ev));
+      // the zero-spend reminder: only while the agent is on something other than the pin (its last command said so)
+      if (f.pinned && (f.differs === 'agent_elsewhere' || f.differs === 'other_attached' || f.differs === 'pin_pending') && f.lastUsed) row('chat-status-browser-nudge', t('Remind on next message'), t('The reminder rides your next message — no billed turn'), (ev) => this._onBrowserAction?.('nudge', ev));
       row('chat-status-browser-live', t('Open live view'), '', (ev) => this._onBrowserAction?.('live', ev));
       row('chat-status-browser-pin', t('Change pin…'), '', (ev) => this._onBrowserAction?.('pin', ev));
       return;

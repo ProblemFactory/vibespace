@@ -592,6 +592,12 @@ function budgetText(budget, { t = defaultT } = {}) {
   // WHO SPENT IT (2026-09-26, lane R2 verify): an agent's refreshes count
   // against the same minute — the card names them when they took a part
   const byAgents = Math.round(Number(b.spentBy && b.spentBy.agent) || 0);
+  // lane R5: a PACED account names its per-second figure beside the minute's (drain rule 18)
+  const r = Number(b.perSec) > 0 ? Math.round(Number(b.perSec) * 100) / 100 : 0;
+  if (r) {
+    if (byAgents > 0) return t('Vendor budget reached — {n} {unit}/min (at most {r}/s) for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s', { ...args, r, a: byAgents });
+    return t('Vendor budget reached — {n} {unit}/min (at most {r}/s) for this account; {k} conversations waiting, next refresh in {s} s', { ...args, r });
+  }
   if (byAgents > 0) return t('Vendor budget reached — {n} {unit}/min for this account, {a} of them by agent refreshes; {k} conversations waiting, next refresh in {s} s', { ...args, a: byAgents });
   return t('Vendor budget reached — {n} {unit}/min for this account; {k} conversations waiting, next refresh in {s} s', args);
 }
@@ -610,7 +616,36 @@ function passStateText(account, { t = defaultT, now = Date.now() } = {}) {
   const code = errorCodeText(lp.code || 'failed', { t });
   const until = Number(a.backoffUntil) || 0;
   const s = until > now ? Math.max(1, Math.ceil((until - now) / 1000)) : 0;
+  // lane R5: a vendor RATE refusal is a short wait said by the VENDOR's name
+  // (a declared label — `vendor` on the account view — worded by the device's
+  // t(); "the vendor" when none is declared): "Google is limiting the rate ·
+  // resuming in 12 s", never "paused" and never a failure count
+  if (lp.code === 'rate-limited') {
+    const vendor = a.vendor ? t(String(a.vendor)) : t('The vendor');
+    return { lastOkAt, rate: true, note: s ? t('{vendor} is limiting the rate · resuming in {s} s', { vendor, s }) : t('{vendor} is limiting the rate · resuming at the next pass', { vendor }) };
+  }
   return { lastOkAt, note: s ? t('{code} — retrying in {s} s', { code, s }) : t('{code} — retrying at the next pass', { code }) };
+}
+
+/** THE FIRST READ (lane R5): while an account's conversations are read for
+ *  the first time (`scheduler.firstIngest` = {done, total, etaSec}) the card
+ *  says how far it is and, at the account's pace, about how long the rest
+ *  takes — the answer to "why is it slow" is a number, not a stall. '' once
+ *  every conversation was read once. */
+function firstReadText(scheduler, { t = defaultT } = {}) {
+  const f = scheduler && scheduler.firstIngest;
+  if (!f || !(Number(f.total) > 0) || Number(f.done) >= Number(f.total)) return '';
+  const head = t('reading for the first time · {n}/{m} conversations', { n: Number(f.done) || 0, m: Number(f.total) });
+  const eta = Number(f.etaSec);
+  if (!(eta > 0)) return head;
+  // verify r3: past 90 minutes the wait is said in hours and minutes ("about 5 h 49 min left", "about 2 h left") —
+  // "about 349 min left" was said but nobody reads a wait that way
+  const min = Math.ceil(eta / 60);
+  let tail;
+  if (eta < 60) tail = t('under a minute left');
+  else if (min < 90) tail = t('about {min} min left', { min });
+  else { const h = Math.floor(min / 60), m = min % 60; tail = m ? t('about {h} h {min} min left', { h, min: m }) : t('about {h} h left', { h }); }
+  return `${head} · ${tail}`;
 }
 
 /** The sentence for a `freshnessClaim`. ONE producer per string, and the
@@ -762,7 +797,7 @@ module.exports = {
   laneState, scanState, convCapsState, offers, authState,
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
-  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, passStateText, pushUnavailableText,
+  TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, cadenceFor, budgetText, passStateText, firstReadText, pushUnavailableText,
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
 };

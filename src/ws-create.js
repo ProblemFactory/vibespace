@@ -1134,6 +1134,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 session._browserCap = kc && typeof kc.capOf === 'function' ? kc.capOf(bk.key) : null;
               } catch { session._browserCap = null; }
               spawnBrowserPre = be.remotePrelude || '';
+              // lane S2 (naive study 2, T4): a SHARED profile chosen in the New Session dialog needs no attach-at-start here —
+              // under owner ruling A the dialog's pick IS the pin, and a pin is the conversation's default ATTACHMENT (the
+              // keeper opens / joins the profile's one browser on the first bare command; a refusal names the button)
               // `resume-unknown` is the leak this ladder exists to prevent, so
               // it is SAID rather than inferred later from orphaned dirs.
               if (bk.origin === 'resume-unknown') {

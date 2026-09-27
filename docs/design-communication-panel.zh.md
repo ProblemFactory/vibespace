@@ -813,8 +813,10 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 | Gmail | 配额单位 | `channels.budgetGmailPerMin` 3000 | 每用户每项目 6000 单位/分; history.list 2, threads.list 10, threads.get 40, attachments.get 20, drafts.send 100, watch 100 |
 
 预算用尽 = 这一趟停下、到期的会话等下一窗, 账号卡片上说
-"已到 {n} {单位}/分钟 的预算 —— {k} 个会话在排队, 下一次刷新在 {s} 秒后"; vendor 自己的
-429 仍走原来的指数退避 (30 s → 15 min)。`auth-expired` 整个停下并说出去 (不变)。
+"已到 {n} {单位}/分钟 的预算 —— {k} 个会话在排队, 下一次刷新在 {s} 秒后"。lane R5 (§6.2b) 起
+每分钟的额度还要**按秒摊开**, vendor 的**限速拒绝**是一次短等 (它给的 Retry-After, 否则 5 s
+翻倍到 60 s), 绝不爬失败阶梯; transport / vendor 错误仍走指数退避 (30 s → 15 min)。
+`auth-expired` 整个停下并说出去 (不变)。
 
 **算术** (这份设计欠读者的):
 
@@ -826,9 +828,11 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 - Gmail: 档位驱动的是**邮箱级**的 `history.list` 节奏 (最热那个线程的节奏, 适配器里 20 s
   memo), 从不是逐线程的 `threads.get`: 热 2 × 2 = 4 单位/分, 冷 0.13 单位/分; 再加上
   `history.list` 点名的每个线程 40 单位 —— 被点名的线程通过 `changed` 提示**立刻到期**,
-  所以一个冷线程的新邮件也不等 15 分钟。发现: 247 线程 30 单位 / 573 线程 60 单位每趟。首轮
-  逐线程 walk: 247 × 40 = 9 880, 573 × 40 = 22 920 单位 —— 在 3000/分 的预算下自动摊成
-  3.3 / 7.6 分钟。邮箱游标 (`historyId`) 与尚未取的 `changed` 集合持久化在账号的
+  所以一个冷线程的新邮件也不等 15 分钟。发现: 线程标题 memo 之后 247 线程 30 单位 / 573 线程
+  60 单位每趟 —— **首次**发现还要读每个线程的元数据 (每 100 个线程一页 10 × 40): 约 1 230 /
+  2 460 单位 (lane R5 对着生产数据更正)。首轮逐线程 walk: 247 × 40 = 9 880, 573 × 40 = 22 920
+  单位 —— 3000/分 的预算只是**平均**把它们摊成 3.3 / 7.6 分钟 (真实形状是 ~20 秒花掉 3 000 单位
+  再空等 ~40 秒, 正是 vendor 拒绝的那种); lane R5 起按秒匀速: 每秒 40 单位, 247 / 573 秒 (§6.2b)。邮箱游标 (`historyId`) 与尚未取的 `changed` 集合持久化在账号的
   `state` 里 (绝不是只在内存 —— 旧实现每次重启都把每个线程重新 walk 一遍)。如果逐线程轮询:
   573 线程冷档就是 1528 单位/分、温档 4584 (每用户上限的 76 %) —— 这正是不这样做的原因。
 
@@ -836,6 +840,180 @@ poll 与 scan 灌进去, 必须得到**同一批记录、同一个唤醒次数�
 `await` 携带一份陈旧快照 (引擎按会话取单条 `peek`, 不再为每个会话深拷贝整份索引 —— 873 个
 会话时每趟省掉约 2.5 s 主线程)。未读数按追加增量维护, 标已读时从日志重算 (仍是可重新推导的
 派生值)。广播只带**变化了的会话** (`partial`), 整份 digest 只在结构变化时发。
+
+### 6.2b 按秒匀速, 以及 vendor 的限速拒绝 (lane R5, 2026-09-26)
+
+owner 在 2.369.185 上的原话: **"gmail一直被限速 你可能要控制下gmail默认的读取速度"**。
+
+**发生了什么** (生产 journal, 只读): 十分钟里两个账号三次 Gmail 拒绝, 每次都是 HTTP 403
+"Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'"。
+每一次都发生在配额空闲状态下 ~13–26 秒花掉 ~2 000–2 800 单位之后 (抓取间隔 150–320 ms,
+每秒 100–200 单位) —— 低于我们 3 000/分 的预算, 也低于 Google 公布的每用户 6 000/分。
+**每分钟额度是个总和, 不是形状**, 而 vendor 的计量比一分钟更细。每次拒绝被归为
+`rate-limited`, 却爬了**失败**阶梯 (30 s → 2 min → 5 min → 15 min) 并在第三次时往"For you"
+里放了一条: owner 看到的是一次 15 分钟的停摆。
+
+**1. 按秒匀速 —— drain 第 18 条** (`src/channel-drain.js`)。每账号一个令牌桶, 单位就是预算的
+单位, 由 adapter 声明 (`caps.pace = {unitsPerSec, settingKey, cost: {fetch, discover,
+scanHost}}`, 注册表校验; 有 pace 必须有 budget)。一次发现 / 主机扫描 / 抓取, 若成本在桶里
+找不到 min(成本, 桶容量) 个令牌, 就**不发** —— drain 这一步是 `wait` (≤ 1 秒), 醒来后**重新**
+判定、重新挑选: 等待中提交的人工请求排最前, 拒绝 (第 5、11 条, 第 9 条的截断) 绝不被等待
+挡住, 等待不动任何到期行、任何连续计数、任何计数。比桶还大的调用等一个满桶, 留下的欠账由
+后面的调用等掉。adapter 自己在**每一个**请求发出前还要 `await deps.pace(units)` (成本取自它
+自己的表), 然后立刻记账, 中间没有 await —— 所以一个多调用的动作 (一页发现 = threads.list +
+十次元数据读取) 是逐次匀速的。引擎把两个设置耦合起来: unitsPerSec = min(每秒设置,
+预算/60), 桶容量 = min(每秒设置, 预算/2) —— 匀速绝不比每分钟额度允许的更快, 第 9 条的截断
+仍是外层上限。**精确容差**: 任意 T 秒窗口内花掉的 ≤ 桶容量 + unitsPerSec·T + max(0, 最大
+一次调用 − 桶容量)。
+
+| vendor | 设置 (默认, 范围) | 依据 |
+|---|---|---|
+| Gmail | `channels.gmailUnitsPerSec` 40 (5–100) | 每秒读一个线程 (40 单位): 任意一秒 ≤ 80 单位, 任意 60 秒 ≤ 2 440 —— 远低于每用户 6 000/分 (100/秒); owner 873 个线程的首次读取约 873 秒 (≈ 14.6 分钟), 匀速 |
+| 飞书 | `channels.larkRequestsPerSec` 5 (1–50) | 第 4 档 (会话 / 消息 / 成员 / 资源读取) 是每接口每应用每**租户** 1 000 次/分、50 次/秒 —— 集群应用共用这个池 —— 所以取每秒档的 10 %; 60/分 的预算由此摊成约每秒一次 |
+
+令牌桶跑在**物理**单调时钟上 (`performance.now()`): vendor 按真实时间计量, 而引擎的逻辑
+`now` 是套件可以冻结的; 时钟与 sleep 都可注入 (`paceClock`, `sleep`)。停机或账号被删除时,
+每个 pace sleep 立刻被唤醒 (一个带类型的中止, pass 不把它算作失败)。**pass 睡在 `wait` 上时
+新来的请求也会把它叫醒** (lane R5 verify): 模型在下一步立刻裁决这个新等待者 —— 拒绝 (floor /
+share / 退避) 绝不等睡眠结束, owner 的一按立刻被接下; 之后 wait 只补桶里还差的那一段 (fetch
+本身仍受桶约束)。**pass 之外的桶一次只裁决一个调用者, 按到达顺序, 并且原子预留** (lane R5
+verify r2): adapter 的 `await pace(units)` 曾是跨 await 的 check-then-charge —— N 个并发调用者
+(一个窗口的 N 张附件缩略图、pass 抓取旁边的一次向上翻页) 在任何一个计量之前都读到了同一桶,
+于是 20 次 20 单位的附件抓取**同一瞬间**出去 (真 Gmail adapter 上一秒 400 单位 —— vendor 拒绝
+的那种突发), 而 pass 之外的一次向上翻页被整趟 ingest 饿死 (8 行的 5.7 秒; owner 的 873 行是
+14 分钟)。现在 `paceWait` 按账号 FIFO 逐个裁决, 放行的单位当场**预留** (`paceInflight`, 由紧随
+其后的 meter 释放), 下一个裁决看到的是已花掉的桶: 20 × 20 单位在 40/秒下花 9 秒, 任一秒 ≤ 80,
+ingest 中途的向上翻页拿到下一个槽位。**排在一个已被移除/重建的账号后面的调用者会被中止, 绝不放行**
+(lane R5 verify r3): `paceWait` 原本直接 return ("没有活条目, 无从限速") —— 于是 `remove()` (或选项重建)
+之后所有排队的调用者**同一瞬间**不受限速地出去 (1 ms 内 17 × 20 单位), 每一次都是 owner 刚刚结束的账号上的
+vendor 调用; 现在只要它排队时依据的条目消失或被替换, 就抛出带类型的中止 ("the account changed … the
+request was not sent")。裁决用的桶先按 `burst` 封顶再扣预留 (先扣后封顶会把闲置的桶投影成超满 —— 潜在缺陷, 被
+"扣费先于下一个裁决落地"的微任务顺序掩盖); 2 秒内没有任何 meter 释放的预留是契约违反 (adapter 限速了一次
+它从未计量的调用), 记一行日志后丢弃, 而不是永久压低该账号的桶。记录在案的低: adapter 的 FIFO 是到达顺序 ——
+一次 100 单位的发送形状调用排在用户自己的 30 张缩略图后面要等约 15 秒 (drain 的"人优先"排的是请求, 不是
+adapter 的队列); Disable / Disconnect 之后已经排队的调用按限速跑完 (Stop 会拒绝它们)。**桶按账号, 不按 vendor 用户** (记录在案的已知低): 同一个 Google 用户下的两个
+账号 —— 或同一个邮箱在两个 OAuth client 下连两次 —— 各自独立限速, 用户级速率是它们之和
+(默认 2 × 40 单位/秒, 2 × 2 440/分, 仍在 6 000/分之内); 几个账号共用一个 vendor 用户时调低每秒设置。
+
+**2. vendor 的限速拒绝是一次短等** (引擎 `failPass`): 先用 vendor 自己的提示 (`Retry-After`,
+秒数或 HTTP-date; 飞书的 `x-ogw-ratelimit-reset`, 以 `detail.retryAfterSec` 携带, 最多照办
+15 分钟), 否则 5 秒翻倍到 60 秒。它绝不推进 `consecutiveFailures`, 也不触发三连败的"For you"
+条目, 并且**清空**令牌桶, 让恢复后的那一趟从匀速开始, 绝不是一次突发。连续 10 次仍被拒
+(匀速之下约 7 分钟) 才往"For you"里放一条; 第一次成功的 pass 撤回它。认证 / transport /
+vendor 错误仍走失败阶梯 (30 s → 15 min, 第三次说出来)。**每个账号只留一条开放条目** (lane R5
+verify r2): 两条阶梯彼此独立而记录只记得一条, 所以另一条阶梯上的失败 (限速条目之后的 transport
+失败, 或反过来) 先把在架的那条按 *superseded* 撤回再放自己的 —— 收件箱点名的是**当前**的失败,
+第一次成功的 pass 撤回最后那条 (此前会放两条, 第一条在恢复后永远开着)。持续的日配额 403
+(Google 的 `dailyLimitExceeded`, 没有 `Retry-After`) 走同一条阶梯重试: 5 → 60 秒, 之后每个账号
+每分钟至多**一次** vendor 调用 (tick 自己的门), 第 10 次放一条, 到了新的一天自愈。Gmail 的判定: 429、限速或用量原因
+(`rateLimitExceeded`、`userRateLimitExceeded`、`quotaExceeded`、`dailyLimitExceeded`)、
+或 `usageLimits` 域的 403、或消息里点名配额指标的 403 ⇒ `rate-limited`; 其它 403 仍是
+`forbidden`。飞书: 429 或它的频控错误码 (99991400 …) ⇒ `rate-limited`, 与之前一致。
+
+**3. 说出来的话。** 从第一次拒绝起, 账号卡片说 **"Google 限速中 · 12 秒后继续"** (en "Google
+is limiting the rate · resuming in 12 s") —— vendor 用它**声明的**名字 (`caps.vendorName`;
+飞书按记录的品牌经模块的 `vendorNameOf(record)`: 飞书 / Lark), 绝不用 kind id, 绝不说
+"已暂停" (会话行上的"刷新已暂停"只属于 owner 自己的覆盖), 也绝不是"连续 N 次失败"。会话在
+被首次读取期间, 健康行说 **"首次读取中 · 已 120/873 个会话 · 约剩 13 分钟"**
+(`scheduler.firstIngest {done, total, etaSec}`, 按匀速估算), 一趟长的匀速 pass 最多每 5 秒
+广播一次进度 (绝不每抓一次就广播)。预算那句话同时点名 单位/分 与 单位/秒。
+
+把关: test-channel-drain (第 18 条在一个**匀速**的随机游走档里每一步对着模拟器自己的令牌桶
+检查; ②b owner 的 873 行首次读取 —— 任意一秒 ≤ 80 单位, 任意一分钟 ≤ 2 440, 约 872 秒 ——
+关掉匀速的突发作对照; 五个变异: 永不回填的桶、无视等待的抓取、计入上限的等待、被等待挡住的
+拒绝、不设上限的等待), test-channels-aggregate ③d (限速阶梯 + R5 之前的对照) / ③e (真引擎里
+的匀速 + 对照), test-channel-caps, test-channel-adapter-contract, test-channels-gmail-shape
+⑥b (vendor 成本表, 钉住), test-channels-lark-shape ⑥b, test-channels-e2e ⑰ (heavy: 一个匀速、
+被限速的 fake 之上的中文卡片)。
+
+**一个闸门、一个出口, 都是普查 (lane R5 verify r4, 2026-09-27)。** 匀速的四轮验证每轮都找到一条
+绕过闸门的新路 (r1 请求要等睡醒才被判; r2 跨 await 的先查后扣; r3 排在已删账号后面的调用被放行),
+所以第四轮不再猎, 改为穷举。**闸门**: Gmail / 飞书的每个请求都走 adapter 的 `api()` —— token →
+pace → meter → **等待之后重读 bearer** → 发送。那次重读正是等待期间落地的断开或重新授权撞上的地方:
+token 已被清掉 ⇒ 按名拒绝 (什么都没发; 已计量的单位照扣, 绝不泄漏预留), 更新的 token ⇒ 用它发,
+绝不用等待之前捕获的那个 (之前有 20 个请求带着被清掉的 / 旧的 token 发出去)。token 刷新单飞
+(同一到期时刻 20 个并发缩略图曾是 20 次刷新 POST; 飞书的 refresh token 会轮换, 12 个里 11 个
+`invalid_grant`, 每一个都把过期的 token 盖回兄弟刚写好的新 token 上 —— 账号把自己登出); 被拒绝的
+刷新只在存着的 token 仍是它试过的那个时才盖 `invalidGrantAt`。飞书的 send 和所有请求一样匀速并计量
+(此前两者皆无)。两个 adapter 文件 (以及 Gmail 推送通道) 里其它每一处对外调用都带一个套件从代码上读的
+标记 —— `// gated-inline: <id>` (紧挨上方有自己的 pace + meter) 或 `// ungated: <id>` 并在模块冻结导出的
+`UNGATED` 里有一行说明一个 agent 或循环无法放大的理由: 一次人的授权同意 (一次, 由 flow 的一次性 state
+锁定)、Pub/Sub 长轮询 (另一个 API, 同时只有一个 pull)、集成面板的 Test 按钮。闸门之外新增的对外调用、
+没有行的标记、没有标记的行、没有 pace 的 gated-inline —— 每一样都红 (test-channels-gmail-shape ⑥c /
+test-channels-lark-shape ⑥c, 打过补丁的副本作对照)。**出口**: 账号调用 vendor 的权利的每一个生命周期
+终点 —— 删除、禁用、断开、选项重建、切换客户端、被拒的连接、引擎停止 —— 都走引擎唯一的 `dropLive`:
+排队等匀速的调用按名中止 (`paceWait` 每个 await 之后重查条目), 进行中的 pass 在下一步结束, 活过了自己
+条目的抓取**什么都不写** (删除中途的抓取曾把已删账号的索引行和日志页复活、写下它的附件缓存文件),
+账号的令牌桶比条目活得久, 所以出口绝不重新灌满 (禁用/启用一次曾是一次崭新的 80 单位突发)。r3 记录过
+`setEnabled(false)` 与 `disconnect()` 让 18 个排队抓取 (360 单位) 在 owner 结束账号之后带着捕获的 Bearer
+匀速跑完 —— 现在两者都走出口。出口普查 (test-channels-aggregate ③g (v)) 对第二个 `live.delete` 点、
+没有出口的生命周期动词、未列入动词里的 `dropLive` 调用、没有守卫的 vendor-然后-写 路径, 一律红。
+记录、未改: adapter 的 FIFO 是到达顺序 —— 一个 100 单位的发送排在用户自己 30 个缩略图后面等约 15 秒;
+pass 之外唯一的 agent 类调用者是 pass 自己的单个抓取, 所以人绝不会落后 agent 超过一个槽位 (约 1 秒),
+双类队列只能买回那一个槽位, 代价是把调度决策又散回 await 之间 (r9 拆掉的那种形状)。令牌桶、预留、队列、
+睡眠者一样都不持久化: 等待中途 SIGKILL, 下次启动不饿死任何账号。
+
+**token 是闸门的另一个输入, 而它的写入者在跟 owner 赛跑 (lane R5 verify r5, 2026-09-27)。** 第四轮封住了
+每一次 vendor 调用; 第五轮打闭环自己的边, 发现 token 的几个写入者之间没有次序: 单飞的刷新把它捕获的那份
+无条件写回, 于是刷新进行中落地的重新授权被回退 (50 次里 25 次)、断开被撤销 (迟到的写把 token 放回去, 下一个
+pass 在 owner 已结束的账号上调了 4 次 vendor)、切换客户端的 rebind 以旧客户端的 token 挂在新客户端的记录上
+收场 —— 下一次刷新 `invalid_grant`, owner 刚做的授权反而把账号登出 (10 次里 10 次)。现在刷新**只在**存储仍
+持有它试过的那个 token 时才写: 已清空 ⇒ 丢弃并按名拒绝; 已被替换 ⇒ 被取代 (调用方重读存储; 落后者对已被替换
+token 的 `invalid_grant` 同样按取代处理, 其调用方照常被服务)。存储拒绝的写 (磁盘满) 把 vendor 的 token 留在
+内存里, 下一次请求时再写 —— 飞书的 refresh token 会轮换, 以前丢掉一次写就等于唯一有效的 token 被作废
+(`invalid_grant` ⇒ needs-reauth)。闸门在等待之后多了一道检查: 排队期间**过期**的 bearer (5 单位/秒的下限上
+50 张缩略图 = 200 秒, 对 60 秒的余量: 34 个请求带着过期 bearer 出门, 401) 在发送前单飞刷新一次。记录现在知道
+**自己是谁的**: 授权到的是另一个 Google / 飞书用户 (vendor 选择器里点错账号) 时, 在唯一的 token 写入口和
+rebind 处按名拒绝 —— 客户端与 token 保留, 卡片的上次登录一行点出两个身份 (`src/channel-identity.js`: Gmail
+按邮箱; 飞书按 open_id / union_id / user_id, 换一个 app 的 rebind 仍能认出同一个人); 身份由第一次授权盖章,
+断开后仍在 —— 要读另一个账号, 就新加一个账号。守住的: 刷新中途断网 ⇒ 每个等待者被拒一次, 下一次调用开新的
+刷新; 同类两个账号各自单飞; 幽灵桶经一分钟内十次开关不多给一个桶, 停着的欠债随时间消失; 20 个排队调用者下
+stop() 全部落定、之后什么都不写 (stop 时飞行中的刷新仍会落盘它的 token —— 那是 vendor 的事实); 一次调用的
+pace 与发送之间落地的禁用把它拒掉。钉住: test-channels-gmail-shape / -lark-shape ⑥c (d)–(g), r4 的写法作对照;
+test-channels-accounts ⑫, 去掉身份门的引擎副本作对照。
+
+**第六轮打的是第五轮自己的三处修复 (lane R5 verify r6, 2026-09-27)。** 身份门有三条边, 写入规则有一个机制。
+vendor **叫不出名字**的授权 (profile / user_info 读失败) 曾被照存: 新账号无人绑定, 于是**任何人**的下一次授权都能
+绑上它; 陌生人的无名授权落到已绑定的记录上也不经判断 ("没有共同键")。现在授权必须叫出自己的账号 —— adapter 按名
+拒绝, 什么都不写, owner 重试。迁移的边: 旧 (pre-r5) 飞书记录的 `auth.user` 是显示名, 于是它不持有身份, 陌生人的授权
+把它绑走; 旧 Gmail 记录升级后断开会丢掉 `auth.user`, 同样被陌生人绑走 —— 门现在按记录**持有的 token** 判定, 每条旧
+记录在启动时盖章一次。写入规则 ("只在存储仍持有你试过的 token 时才写") 之前是同步重读再入队, 只在两者之间没有
+await 时才成立; 现在是存储串行门**内部**的 compare-and-swap (`supersedes`, 在落地时判定), 另一个 token 的持久化排在
+飞行中的那次之后, 而不是被递给它的 promise (飞书轮换下被丢掉的那次写让存储留着一个已作废的 token)。飞书的限速
+刷新在等待之后重读 token (等待期间断开不再用已丢弃的 refresh token 发 POST)。磁盘拒收的刷新登录在**发生时**就说
+出来 (每账号一条 "For you", 有写入落地即撤回) —— 残留 (在那之前重启) 仍按名 needs-reauth。实测: 50 次 ×
+{重新授权, 断开, 切换客户端, 移除} × {gmail, lark}, 刷新 POST 挂起; 以及 50 次同一 tick 的 microtask 次序 —— 0 次回退,
+0 次带错 bearer 的 vendor 调用。身份规则按 vendor: Gmail 比较 profile 的规范地址 (折叠大小写; `+tag` 或别名拼法是
+另一个字符串 —— 同一个人的 profile 从不这样回答); 飞书换 app 的 rebind 在 union_id 或 user_id 相同时接受, 只有
+open_id 的授权在另一个 app 下拒绝 (证明不了是同一个人); 没有印章的记录按它存的 token 判; 升级前已断开的旧飞书
+记录没有证据, 接受下一次授权; 授权中途拿着 owner 浏览器的攻击者不在范围内 (授权由 owner 驱动)。钉住: gmail-shape /
+lark-shape ⑥c (h)–(k), r5 的 persist 恢复到副本里作对照; accounts ⑫ (f)–(i), 去掉 compare-and-swap 的引擎副本与在
+间隙里加了 await 的 adapter 副本作对照。
+
+**第七轮打的是第六轮的收口 (lane R5 verify r7, 2026-09-27)。** CAS 门、启动盖章、无名拒绝都站住了; 围着它们的流程没有。
+授权**正在完成**(profile 读取在飞)时落下的人为动作被迟到的授权撤销: 断开 ⇒ 记录重新连上, 它踢起的 pass 在 owner 已
+结束的账号上打了 4 次 vendor 调用; 更新的登录 ⇒ 被旧流程的迟到完成盖掉; 取消 ⇒ 被无视; 切换客户端的 rebind ⇒ 在断开
+之后落地。loopback 的 `cancel()` 只是给流程打了个标记。现在 exchange 拿到流程自己的 `cancelled()`, adapter 把它传给门,
+门在串行写入**内部**拒绝一个流程已被中途结束的授权 —— 取消它的那个人为动作才是更晚的; 交换中途被取消的流程以
+`{ok:false, cancelled}` 收场, 不管 exchange 返回了什么。门的每一项判定 (取消、无名、身份、compare-and-swap) 现在都在
+落地时进行 (身份判定原本在存储 await 之前: 同一 tick 里两次授权落到无绑定记录上都被拿空来判); CAS 写绝不落到已清空
+的存储上; `email` 只有像地址才算身份 (空白或裸词的 profile 回答曾是"真值的无人" —— r6 的洞从一个不守约的 vendor
+再回来; 飞书带 '@' 的显示名在启动时被盖成 email); 飞书的 id 做 trim; 启动盖章说出盖了什么、点名盖不了什么。守住的:
+真存储上的 ENOSPC 形状 (条目点名 EACCES, 下一次请求冲刷并撤回它)、8 秒的 profile 读取 (答复前什么都不存)、挂死的
+在 20 秒被界住 (无名)、15 种旧记录形状表、幂等的第二次启动。钉住: accounts ⑫ (j)–(k), 去掉取消判定的引擎副本与把
+判定提到 await 前的副本作对照; gmail-shape ⑥c (l)–(m); lark-shape ⑥c (l); oauth-loopback ⑥。
+
+**第八轮, 只打 `cancelled()` 的收口轮 (lane R5 verify r8, 2026-09-27)。** 一条 medium: r7 的 loopback 只要流程被打了取消标记
+就改写自己的报告 —— 在一份**已经落盘**的授权之上回 `{ok:false, "nothing was connected"}` —— 于是取消、计时器的取消、
+更新的登录或 stop() 落在门的串行回调与 `finish()` 报告之间时, 记录用这份授权的 token 连着, 最后一行登录状态却说什么都没连上,
+也不踢 pass; 交换中途 stop() 则门按名拒绝之后 `onAuthDone` 在 `store.close()` 之后仍把 adapters.json 盖了一笔。**写入即事实**:
+`finish()` 的 `ok` = exchange 是否 resolve (它撤不回一次写入), 迟到的取消作为 `ok:true` 旁的 `cancelled` **带给**那个持久写入
+还在后面的消费者; `onAuthDone` 把 `ok` 读作已落地、按记录判断随后的断开、只跳过**被拒绝**的 superseded 流程; `onPendingDone`
+继续拒绝带来的取消 (它的持久写入是 `applyRebind` / Connect); 两扇门都把引擎自己的 `stopped` 读作 `shutdown`; stop() 之后什么都
+不写。拒绝句的尾巴说记录此刻持有什么 ("keeps its current sign-in" / "nothing was connected")。守住的: 两条路径上 A 在飞、B 顶替
+它的 20 种顺序 (取消、断开; 绝不第二次写入; B 取消 ⇒ 流程前的记录), 真实 deadline 在写入前/后。记录: 被拒绝的门仍然经过存储
+无条件的原子重写 (同字节、新 inode); `flows.take()` 无人调用。钉住: accounts ⑫ (l), 以带 r7 改写的 loopback 副本与去掉 stop
+守卫的引擎副本作对照; oauth-loopback ⑥; gmail-shape ⑥c (m) 重钉。
 
 ### 6.3 各 adapter 的摄入
 

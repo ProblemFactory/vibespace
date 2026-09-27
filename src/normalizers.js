@@ -141,7 +141,43 @@ function notifyAsks(session) {
 function feedPeerCard(session, card) {
   if (!session?._normalizer?.injectPeerCard) return false;
   if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'peer', card }); return true; }
+  // verify r5 (S2): a server-injected card (no msgId — a takeover / auto-resume / jobs notice, a stash drain; never in the
+  // transcript) fed BEFORE the first attach lived only in the normalizer the attach rebuild discards — held here, bounded,
+  // and replayed after the rebuild (a harness-delivered message carries a msgId and its JSONL record; the transcript renders it)
+  if (!session._historyLoaded && card && !card.msgId) {
+    const held = session._heldPeerCards || (session._heldPeerCards = []);
+    held.push(card);
+    if (held.length > HELD_PEER_CARDS_CAP) {
+      // verify r6: the bound drops the OLDEST and says so (once at the first drop, then every 32nd — a storm never floods the journal)
+      const n = held.length - HELD_PEER_CARDS_CAP; held.splice(0, n);
+      held.dropped = (held.dropped || 0) + n;
+      if (held.dropped === n || held.dropped % HELD_PEER_CARDS_CAP === 0) console.log(`[normalizer] held peer cards for ${session.name || session.claudeSessionId || session.backendSessionId || '?'}: the bound (${HELD_PEER_CARDS_CAP}) dropped the oldest ${n} (${held.dropped} dropped so far before the first attach)`);
+    }
+  }
   session._normalizer.injectPeerCard(card);
+  return true;
+}
+const HELD_PEER_CARDS_CAP = 32;
+/** verify r6 (S2, MEDIUM — the replay vs the transcript's own record): a card the delivery ladder emitted after a
+ *  SUCCESSFUL post carries `recorded` = the exact text the CLI's transcript now holds (a JSONL user record with
+ *  origin.kind 'peer' — the CLI wraps it: "Another Claude session sent a message:\n…"); message-manager.injectPeerCard's
+ *  contract is that such a card is in-memory only and A REBUILD RENDERS THE RECORD INSTEAD. So a held (or queued) card
+ *  is replayed only when no not-yet-consumed peer-message the rebuild rendered CONTAINS its recorded text — each
+ *  rendered record answers for ONE card (a same-body repeat, delivered twice and recorded twice, keeps its two cards:
+ *  the 2.362.2 lesson). A display-only card (no `recorded`: the takeover card, an auto-resume notice, a stash drain)
+ *  is always replayed — the transcript never carries it. */
+const peerTextOf = (m) => { const c = m && m.content; return Array.isArray(c) ? c.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n') : String(c || ''); };
+function replayContext(mm) {
+  const pool = mm && Array.isArray(mm.messages) ? mm.messages.filter((m) => m && m.originKind === 'peer-message') : [];
+  return { pool, used: new Set(), skipped: 0 };
+}
+function replayCard(mm, card, ctx) {
+  const rec = card && typeof card.recorded === 'string' ? card.recorded.trim() : '';
+  if (rec && ctx) {
+    const i = ctx.pool.findIndex((m, idx) => !ctx.used.has(idx) && peerTextOf(m).includes(rec));
+    if (i >= 0) { ctx.used.add(i); ctx.skipped++; return false; }
+  }
+  mm.injectPeerCard(card);
   return true;
 }
 
@@ -200,13 +236,13 @@ function notePermissionStale(session, requestId, staleBy) {
   return applyPermissionStale(session._normalizer, requestId, staleBy);
 }
 
-function drainQueue(session, mm) {
+function drainQueue(session, mm, ctx = null) {
   // Records that arrive DURING the drain queue behind (the queue stays armed
   // until it is empty) — no interleaving window.
   while (session._rebuildQueue?.length) {
     const e = session._rebuildQueue.shift();
     try {
-      if (e.kind === 'peer') mm.injectPeerCard?.(e.card);
+      if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
       else { mm.processLive(e.msg); if (session._normalizer === mm) routeToHelperView(session, e.msg); }
@@ -265,7 +301,13 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
       // record) settle an asked ask by the table's result rows; after the task replay so a record wins over a derived end
       for (const r of (Array.isArray(helperResults) ? helperResults : [])) { try { if (typeof mm.noteHelperResult === 'function') mm.noteHelperResult(r.toolUseId, r.text, r.isError, false, helperResultBind(session, r.parentToolUseId, r.toolUseId)); } catch (err) { console.error('[normalizer] helper result replay skipped:', err.message); } }
-      drainQueue(session, mm);
+      // verify r5 (S2): the cards fed before this first attach (feedPeerCard held them) — after the history, before the live queue;
+      // verify r6: a card whose delivery the transcript RECORDED is answered by the rendered record (replayCard), never twice
+      const ctx = replayContext(mm);
+      for (const card of session._heldPeerCards || []) { try { replayCard(mm, card, ctx); } catch (err) { console.error('[normalizer] held card replay skipped:', err.message); } }
+      session._heldPeerCards = null;
+      drainQueue(session, mm, ctx);
+      if (ctx.skipped) console.log(`[normalizer] ${sessionId}: ${ctx.skipped} delivered card(s) rendered from the transcript's own record, not replayed`);
       session._historyLoaded = true;
       // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
       // helper view that already exists is handed them, and the inbox re-syncs
@@ -288,4 +330,4 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults };
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP };

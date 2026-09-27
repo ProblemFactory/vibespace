@@ -48,6 +48,16 @@ ok(REGISTERED.length === 3, `the P0 registry holds the three fakes (${REGISTERED
   bad({ ...good, identityMarking: 'maybe' }, /identityMarking/, 'an unknown identityMarking is refused (the approval card reads it)');
   bad({ ...good, receive: 'push' }, /pushTransport/, 'a push adapter must name its transport');
   bad({ ...good, receive: 'push', pushTransport: 'ws-long-conn' }, /pushAckBudgetMs/, 'a push adapter must state the vendor\'s ack deadline (fence 11 acks AFTER durability)');
+  // lane R5: the PER-SECOND pace (drain rule 18) and the vendor's declared name
+  const budgeted = { ...good, budget: { unit: 'quota-unit', default: 3000, settingKey: 'channels.budgetXPerMin', metered: true } };
+  ok(CH.validateCaps('paced', { ...budgeted, pace: { unitsPerSec: 40, settingKey: 'channels.xUnitsPerSec', cost: { fetch: 40, discover: 410, scanHost: 1 } }, vendorName: 'Google' }) === true, 'a declared pace (per second, a channels.* setting, a cost per drain action) and a vendor name validate');
+  bad({ ...good, pace: { unitsPerSec: 40 } }, /needs caps\.budget/, 'a pace with no budget is refused (the pace is counted in the budget\'s unit)');
+  bad({ ...budgeted, pace: { unitsPerSec: 0 } }, /unitsPerSec must be a positive number/, 'a pace of 0 a second is refused (it would never send)');
+  bad({ ...budgeted, pace: { unitsPerSec: 5, settingKey: 'gmail.rate' } }, /pace\.settingKey must be a channels\.\* setting key/, 'a pace setting outside channels.* is refused');
+  bad({ ...budgeted, pace: { unitsPerSec: 5, cost: { send: 100 } } }, /not an action the drain paces/, 'a cost for an action the drain does not pace is refused (the drain prices fetch / discover / scanHost only)');
+  bad({ ...budgeted, pace: { unitsPerSec: 5, cost: { fetch: -1 } } }, /cost\.fetch must be a number/, 'a negative cost is refused');
+  bad({ ...good, vendorName: '' }, /caps\.vendorName must be a non-empty string/, 'an empty vendor name is refused (the card would say " is limiting the rate")');
+  ok(JSON.stringify(CH.PACE_COSTS) === JSON.stringify(['fetch', 'discover', 'scanHost']), 'the priced actions are exactly the drain\'s three vendor actions');
 
   const scan = { ...good, receive: 'scan', history: null, scanSources: { darwin: 'store', linux: 'ui' }, scanLatency: { store: 15, ui: 300 }, historyBySource: { store: 'since', ui: 'page' } };
   ok(CH.validateCaps('scan', scan) === true, 'a complete scan declaration validates');

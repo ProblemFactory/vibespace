@@ -9,10 +9,20 @@
  *   GET /m/<token>/json[/list]         only the lease's targets, endpoints re-pointed
  *   WS  /m/<token>/devtools/browser    the browser endpoint, every message JUDGED
  *   WS  /m/<token>/devtools/page/<id>  a page endpoint, in scope only
- * The RULES are PURE (src/browser-mediation.js): scope over `Target.*`, the
- * typed `browser_paused` refusal while the user drives (a live callback the
- * keeper hands the grant — read PER MESSAGE, never cached), the whole-browser
- * acts refused outright. This file does the I/O only: the upstream socket is
+ * The RULES are PURE (src/browser-mediation.js over the census src/cdp-census.js):
+ * scope over `Target.*`, the typed `browser_paused` refusal while the user
+ * drives (a live callback the keeper hands the grant — read PER MESSAGE, never
+ * cached; verify r4: a method with no census row is refused by name while
+ * paused, logged once per method), the whole-browser acts refused outright.
+ * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27 — "直接打断所有脚本和
+ * agent操作"): `interrupt({profileId, browserKey})` (the keeper calls it at the
+ * takeover instant) answers every call of the lease still waiting on the browser
+ * whose class is refused while the user drives with `browser_interrupted` AT ONCE
+ * and sends `Runtime.terminateExecution` on the sessions of the aborted script
+ * calls (the PURE plan: browser-mediation.interruptPlan); the browser's late reply
+ * to an aborted call is swallowed (its scope growth still applied — a tab it
+ * created stays the lease's, so the revoke closes it). The retired r4 switch
+ * `browser.fenceScriptsWhileDriven` is not read here any more. This file does the I/O only: the upstream socket is
  * opened HERE (the raw endpoint never leaves the server), a refusal is a CDP
  * error the client reads by id, an event the lease may not see is dropped.
  *
@@ -44,6 +54,10 @@ const { WebSocketServer, WebSocket } = require('ws');
 const M = require('../browser-mediation.js');
 
 const MAX_PAYLOAD = 256 * 1024 * 1024; // a Page.captureScreenshot / printToPDF answer can be tens of MB
+/** The ids the proxy uses for ITS OWN calls upstream (the takeover's Runtime.terminateExecution): counted DOWN from
+ *  here (CDP ids are int32; a daemon counts up from 1), never one a client has pending on that connection. */
+const INTERNAL_ID_BASE = 2000000000;
+const SPENT_CREDIT_REPLY_MS = 10000; // verify r3: how long a SPENT credit waits for the browser's own answer before its receipt says no_reply
 const UPSTREAM_OPEN_MS = 8000;
 const FETCH_MS = 4000;
 /** The status text a PARKED client is refused with (503) when its grant moved during the upstream's open — keyed by
@@ -151,6 +165,7 @@ function create({ log = console, now = Date.now } = {}) {
     g.lastUsedAt = now();
     const closeBoth = (code, reason) => {
       g.conns.delete(conn);
+      if (conn.credits) { for (const c of conn.credits.values()) settleCredit(c, { ok: false, code: 'upstream_gone', error: 'the browser connection closed before it answered' }); conn.credits.clear(); } // lane S2
       try { if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close(code, reason); } catch { /* gone */ }
       try { if (up.readyState === WebSocket.OPEN || up.readyState === WebSocket.CONNECTING) up.close(); } catch { /* gone */ }
     };
@@ -161,9 +176,34 @@ function create({ log = console, now = Date.now } = {}) {
       g.lastUsedAt = now();
       let paused = false;
       try { paused = !!(typeof g.paused === 'function' && g.paused()); } catch (e) { paused = false; log.warn?.(`[cdp-mediator] paused() threw for ${g.profileId}/${g.browserKey}: ${e && e.message}`); }
-      const v = M.judge(msg, g.scope, { paused });
-      if (v.kind === 'refuse') { g.refusals = (g.refusals || 0) + 1; try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return; }
-      if (v.kind !== 'forward') return;
+      // lane S2: the USER's own input (a live view's takeover, forwarded by the bridge) spends a credit and passes the
+      // paused fence — its receipt is the browser's own reply; an Input.* with no credit is judged as before
+      let credit = null;
+      if (M.isInputMethod(msg.method) && g.credits && g.credits.length) {
+        const tc = M.takeCredit(g.credits, now(), { msg, sessionTarget: (sid) => g.scope.sessions.get(sid) }); // lane S2 verify: only the Input.* the record BECAME spends its credit (an agent's own call matches nothing and burns nothing); verify r2: and only on a page session of the lease that IS the tab the user is looking at
+        for (const x of tc.expired) settleCredit(x, M.creditExpiryReceipt(x));
+        for (const x of tc.otherTab || []) x.otherTab = true; // verify r3: MARKED, never burnt — its expiry then says `other_tab` (honest), its own dispatch still spends it
+        credit = tc.credit;
+      }
+      // the owner's ruling (2026-09-27): no switch — every class but read / session / harmless is refused while the user drives
+      const v = M.judge(msg, g.scope, { paused: credit ? false : paused });
+      if (v.kind === 'refuse') {
+        g.refusals = (g.refusals || 0) + 1;
+        // verify r4: a method the census does not list was refused while the user drives — said ONCE per method per grant (the
+        // census is extended by a row; the refusal already names the file). Never a token, never the raw url.
+        if (v.why === 'unclassified') { g.unclassified = g.unclassified || new Set(); if (!g.unclassified.has(msg.method)) { g.unclassified.add(msg.method); log.warn?.(`[cdp-mediator] ${g.browserKey} on ${g.profileId}: ${msg.method} has no row in the CDP census (src/cdp-census.js) — refused while the user drives; add its row`); } }
+        if (credit) settleCredit(credit, M.creditReceipt(v.reply)); try { ws.send(JSON.stringify(v.reply)); } catch { /* gone */ } return;
+      }
+      if (v.kind !== 'forward') { if (credit) settleCredit(credit, { ok: false, code: 'dropped', error: 'not a CDP call' }); return; }
+      if (credit) {
+        conn.credits = conn.credits || new Map(); conn.credits.set(msg.id, credit);
+        // verify r3: a SPENT credit waits for the browser's own answer — measured: a mouse dispatch on a HIDDEN tab never
+        // answers, and the 1.3 s expiry then said "never asked" for a call that WAS forwarded. The expiry is re-armed as
+        // `no_reply` (bounded: the entry leaves conn.credits with it; a close settles it `upstream_gone` first)
+        credit.spent = true; if (credit.timer) clearTimeout(credit.timer);
+        credit.timer = setTimeout(() => { if (conn.credits && conn.credits.get(msg.id) === credit) conn.credits.delete(msg.id); settleCredit(credit, M.creditExpiryReceipt(credit)); }, SPENT_CREDIT_REPLY_MS);
+        if (credit.timer.unref) credit.timer.unref();
+      }
       conn.pending.set(msg.id, v.pending);
       if (conn.pending.size > 10000) { const first = conn.pending.keys().next().value; conn.pending.delete(first); }
       try { up.send(String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
@@ -172,9 +212,21 @@ function create({ log = console, now = Date.now } = {}) {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }
       if (!msg || typeof msg !== 'object') return;
+      // the takeover's own calls (Runtime.terminateExecution): the browser's answer is the interruption's record, never the client's
+      if (msg.id != null && conn.internal && conn.internal.has(msg.id)) {
+        const it = conn.internal.get(msg.id); conn.internal.delete(msg.id);
+        const rec = g.lastInterrupt && g.lastInterrupt.at === it.at ? g.lastInterrupt : null;
+        if (rec) rec.terminateAnswers.push(msg.error ? `error: ${String(msg.error.message || msg.error.code || 'refused').slice(0, 120)}` : 'ok');
+        return;
+      }
       if (msg.id != null && conn.pending.has(msg.id)) {
         const pend = conn.pending.get(msg.id); conn.pending.delete(msg.id);
+        if (conn.credits && conn.credits.has(msg.id)) { const c = conn.credits.get(msg.id); conn.credits.delete(msg.id); settleCredit(c, M.creditReceipt(msg)); } // lane S2: the receipt is the browser's own answer
         const out = M.admitReply(msg, pend, g.scope);
+        // an ABORTED call (the takeover answered it browser_interrupted already): its scope growth stands, its reply is swallowed —
+        // verify r6: a SUCCESS reply means the call had reached Chrome and TOOK EFFECT (a fill's insertText, a click): the takeover's
+        // record counts it as `landed` so the agent is told "cut short — but this reached the page" rather than a plain "cut"
+        if (pend.aborted) { const rec = g.lastInterrupt && pend.interruptAt === g.lastInterrupt.at ? g.lastInterrupt : null; if (rec && !msg.error) { rec.landed = (rec.landed || 0) + 1; if (!rec.landedMethods.includes(pend.method)) rec.landedMethods.push(pend.method); } return; }
         try { for (const ev of out.emit) ws.send(JSON.stringify(ev)); ws.send(JSON.stringify(out.reply)); } catch { /* gone */ }
         return;
       }
@@ -212,7 +264,7 @@ function create({ log = console, now = Date.now } = {}) {
     const key = M.grantKey(profileId, browserKey);
     let g = byKey.has(key) ? grants.get(byKey.get(key)) : null;
     if (!g) {
-      g = { token: mintToken(), key, profileId: String(profileId), browserKey: String(browserKey), upstream: null, scope: M.newScope({}), paused: null, conns: new Set(), pendingUps: new Set(), createdAt: now(), lastUsedAt: 0, refusals: 0, dropped: 0 };
+      g = { token: mintToken(), key, profileId: String(profileId), browserKey: String(browserKey), upstream: null, scope: M.newScope({}), paused: null, conns: new Set(), pendingUps: new Set(), createdAt: now(), lastUsedAt: 0, refusals: 0, dropped: 0, unclassified: null, lastInterrupt: null };
       grants.set(g.token, g); byKey.set(key, g.token);
       log.log?.(`[cdp-mediator] grant minted for ${g.browserKey} on ${g.profileId}`);
     }
@@ -220,6 +272,68 @@ function create({ log = console, now = Date.now } = {}) {
     if (typeof paused === 'function') g.paused = paused;
     if (upstream !== undefined && upstream !== g.upstream) repointGrant(g, upstream);
     return { token: g.token, url: M.mediatedBrowserUrl({ port, token: g.token }), httpBase: M.mediatedHttpBase({ port, token: g.token }), view: view(g) };
+  }
+  /**
+   * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27). Called by the keeper at the takeover instant, BEFORE
+   * anything is announced: every call of this (profile, conversation) lease still waiting on the browser whose class
+   * is refused while the user drives is answered NOW with `browser_interrupted` (the same words a new call meets —
+   * browser-mediation.pausedWords), marked `aborted` (the browser's own late reply is swallowed; its scope growth
+   * stands), and every CDP session that was running one of the aborted SCRIPT calls gets ONE
+   * `Runtime.terminateExecution` (browser-mediation.interruptPlan; measured on Chrome 153: a running script stops at
+   * once, nothing running = no effect, a script awaiting a timer keeps its continuation — it cannot be recalled).
+   * Synchronous: the refusals are written before this returns. → {aborted:[{method, sessionId}], terminated, at}
+   */
+  function interrupt({ profileId, browserKey } = {}) {
+    const g = grantOf(profileId, browserKey);
+    const out = { aborted: [], terminated: 0, at: now() };
+    if (!g) return out;
+    const rec = { at: out.at, aborted: 0, methods: [], terminated: 0, terminateAnswers: [], landed: 0, landedMethods: [] }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
+    for (const conn of g.conns) {
+      const plan = M.interruptPlan([...conn.pending].map(([id, p]) => ({ id, method: p.method, sessionId: p.sessionId, aborted: !!p.aborted })), { pageConn: conn.kind === 'page' });
+      for (const a of plan.abort) {
+        const p = conn.pending.get(a.id);
+        if (!p || p.aborted) continue;
+        p.aborted = true; p.interruptAt = out.at;
+        g.refusals = (g.refusals || 0) + 1;
+        if (conn.credits && conn.credits.has(a.id)) { const c = conn.credits.get(a.id); conn.credits.delete(a.id); settleCredit(c, { ok: false, code: M.INTERRUPTED_CODE, error: 'interrupted by the takeover' }); }
+        try { conn.ws.send(JSON.stringify(M.refusal(a.id, M.INTERRUPTED_CODE, M.pausedWords(a.method, M.pausedVerdict(a.method)), a.sessionId))); } catch { /* gone */ }
+        out.aborted.push({ method: a.method, sessionId: a.sessionId });
+      }
+      for (const sid of plan.terminate) {
+        conn.internal = conn.internal || new Map();
+        let iid = INTERNAL_ID_BASE - (conn.nextInternal = (conn.nextInternal || 0) + 1);
+        while (conn.pending.has(iid) || conn.internal.has(iid)) iid -= 1;
+        conn.internal.set(iid, { method: 'Runtime.terminateExecution', sessionId: sid, at: out.at });
+        try { conn.up.send(JSON.stringify({ id: iid, method: 'Runtime.terminateExecution', params: {}, ...(sid ? { sessionId: sid } : {}) })); out.terminated++; } catch { conn.internal.delete(iid); }
+      }
+    }
+    rec.aborted = out.aborted.length; rec.methods = [...new Set(out.aborted.map((a) => a.method))]; rec.terminated = out.terminated;
+    g.lastInterrupt = rec;
+    if (out.aborted.length) log.log?.(`[cdp-mediator] ${g.browserKey} on ${g.profileId}: the user took over — ${out.aborted.length} call(s) in flight interrupted (${rec.methods.join(', ')}; browser_interrupted)${out.terminated ? `, Runtime.terminateExecution on ${out.terminated} session(s)` : ''}`);
+    return out;
+  }
+  /** lane S2: settle a credit's waiter once (the bridge's input receipt). */
+  function settleCredit(c, r) { if (!c || c.done) return; c.done = true; if (c.timer) clearTimeout(c.timer); try { c.resolve(r); } catch { /* none */ } }
+  /**
+   * lane S2: ONE credit for ONE forwarded viewer input record (measured 1:1 on 0.38.1) — minted by the live view's
+   * bridge BEFORE it forwards; resolves with the browser's own reply to the `Input.*` call that spent it, or
+   * `not_dispatched` when none came within the credit's life (the stream server never asked the browser). A grant
+   * that does not exist (no lease on this pair) answers at once.
+   */
+  function creditInput({ profileId, browserKey, record = null, targetId = null } = {}) {
+    const g = grantOf(profileId, browserKey);
+    if (!g) return Promise.resolve({ ok: false, code: 'no_grant', error: 'this conversation holds no mediated lease on that browser' });
+    // lane S2 verify: a credit names the CDP call its record becomes — a record that becomes none is not creditable
+    const expect = M.creditExpectation(record, { targetId }); // verify r2: bound to the tab the user is looking at (the stream's active tab), when the stream named it
+    if (!expect) return Promise.resolve({ ok: false, code: 'not_creditable', error: 'not an input record a browser can be asked to act on' });
+    g.credits = g.credits || [];
+    return new Promise((resolve) => {
+      const c = { at: now(), resolve, done: false, timer: null, expect };
+      c.timer = setTimeout(() => { const i = g.credits.indexOf(c); if (i >= 0) g.credits.splice(i, 1); settleCredit(c, M.creditExpiryReceipt(c)); }, M.INPUT_CREDIT_MS + 100); // verify r3: the expiry says what was seen (other_tab / not_dispatched)
+      if (c.timer.unref) c.timer.unref();
+      g.credits.push(c);
+      if (g.credits.length > 256) settleCredit(g.credits.shift(), { ok: false, code: 'not_dispatched', error: 'too many inputs waiting' });
+    });
   }
   function repointGrant(g, upstream) {
     const was = g.upstream;
@@ -285,7 +399,17 @@ function create({ log = console, now = Date.now } = {}) {
     try { server?.close(); } catch { /* none */ }
     server = null; wss = null; port = null; listening = null;
   }
-  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
+  /** verify r6: what the LAST takeover of this (profile, conversation) lease interrupted — the keeper's audit answer reads
+   *  `landed` off it (aborted calls the browser still answered with a success: they took effect on the page). */
+  function interruptionOf(profileId, browserKey) {
+    const g = grantOf(profileId, browserKey);
+    if (!g || !g.lastInterrupt) return null;
+    // `unsettled` = aborted calls of that takeover the browser has not answered yet (its late reply says whether they landed)
+    let unsettled = 0;
+    for (const conn of g.conns) for (const p of conn.pending.values()) if (p && p.aborted && p.interruptAt === g.lastInterrupt.at) unsettled++;
+    return { ...g.lastInterrupt, methods: [...g.lastInterrupt.methods], landedMethods: [...(g.lastInterrupt.landedMethods || [])], terminateAnswers: [...g.lastInterrupt.terminateAnswers], unsettled };
+  }
+  return { listen, port: () => port, grantFor, repoint, revoke, revokeWhere, admitTarget, urlFor, list, available: () => !closed, shutdown, creditInput, interrupt, interruptionOf, _grant: grantOf, _closeTargetsOf: closeTargetsOf };
 }
 
-module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT };
+module.exports = { create, MAX_PAYLOAD, REFUSE_TEXT, INTERNAL_ID_BASE };

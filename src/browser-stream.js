@@ -274,6 +274,77 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   return { kind: 'unknown', forward: false, refusal: { type: 'refused', code: 'unknown-type', error: `unknown message type ${JSON.stringify(t).slice(0, 40)}` } };
 }
 
+// ── lane S2 (naive study 2 T4): EVERY INPUT HAS A RECEIPT ──
+/**
+ * "Typed input during a takeover was not delivered — side pane, floating window, keyboard box — and nothing said so,
+ * while the bar read 'You are driving · Typing goes to the browser'." Measured on agent-browser 0.38.1: the stream
+ * server answers NOTHING for an input record (its status / tabs / frame / command / result records never mention one),
+ * so a view cannot learn from upstream silence whether its click landed. The BRIDGE answers instead: a viewer record
+ * carrying `rid` gets `{type:'input-receipt', rid, ok, via, code?, error?}` — `via:'browser'` = the browser's own
+ * reply to the `Input.*` call (a mediated lease: the mediator saw it), `via:'stream'` = written to an open stream
+ * server (a direct lease: as far as the bridge can see), a refusal (watch mode, no upstream, a write that failed) =
+ * ok:false with its code. A record whose receipt has not come in `INPUT_RECEIPT_MS` counts as NOT DELIVERED.
+ * The book below is the view's arithmetic: `failing` = the LAST settled receipt failed (a later success clears it).
+ */
+const INPUT_RECEIPT_MS = 1500;
+function receiptBook() { return { next: 1, pending: new Map(), delivered: 0, failed: 0, failing: null, via: null }; }
+/** A record is about to be sent: its `rid`. */
+function noteInputSent(book, now) { const rid = book.next++; book.pending.set(rid, Number(now) || 0); return rid; }
+/** The bridge's receipt for `rid` (a duplicate / unknown one changes nothing). */
+function noteInputReceipt(book, { rid, ok, via = null, code = null, error = null } = {}) {
+  if (!book.pending.has(rid)) return false;
+  book.pending.delete(rid);
+  if (ok) { book.delivered++; book.failing = null; book.via = via === 'browser' || via === 'stream' ? via : null; } // verify r3 (r2 F3): the bar's words follow what the last delivered receipt PROVED (via)
+  else { book.failed++; book.failing = { code: code || 'refused', error: error || null }; }
+  return true;
+}
+/** Receipts that never came: settled as NOT DELIVERED (`no_answer`). Returns how many expired. */
+function sweepInputReceipts(book, now, { ms = INPUT_RECEIPT_MS } = {}) {
+  let n = 0;
+  for (const [rid, at] of [...book.pending]) if ((Number(now) || 0) - at > ms) { book.pending.delete(rid); book.failed++; n++; book.failing = { code: 'no_answer', error: null }; }
+  return n;
+}
+/** Strip the view's `rid` off a record before it goes upstream (the stream server gets its own shape only). */
+function withoutRid(msg) { if (!isObj(msg) || msg.rid === undefined) return msg; const { rid, ...rest } = msg; return rest; }
+
+// ── VERIFY S2 r3 (2026-09-26): A TAKEOVER IS ANCHORED TO THE TAB IT BEGAN ON ──
+/**
+ * Measured on agent-browser 0.38.1 (verify r2 F2 + r3): while the user drives, the agent's raw `agent-browser tab <n>` on
+ * the mediated url is NOT stopped by the CDP fence — the daemon carries the switch on `Target.setAutoAttach` + a
+ * screencast restart, flips its `tabs` record and dispatches the user's next inputs on the tab IT chose; refusing
+ * `Page.bringToFront` there leaves that tab hidden (no frames, mouse input never answered, the stream dead after the
+ * handback). So the switch is refused where it is seen: the bridge remembers the tab a takeover began on, and a `tabs`
+ * record naming another active tab AFTER the takeover's first second marks the takeover SWITCHED — the user's inputs are
+ * then answered `tab_switched` (never forwarded to the agent's tab) until they hand back and take over again (consent
+ * to drive what is now on show). Within the first second the record is the in-flight switch that raced the takeover
+ * (measured: the daemon's `tabs` record lands 11–45 ms after its switch, ahead of its first dispatch) and re-anchors
+ * silently; a record naming no tab (an older stream server) judges nothing; the anchor's own tab coming back clears the mark.
+ *
+ * THE GRACE IS A MEASURED CONSTANT (verify S2 r4, 2026-09-27; scripts/measure-anchor-grace.mjs — the real agent-browser
+ * 0.38.1 + a real headless Chrome 153.0.8010.47 + the real mediator + the real bridge, a recording proxy stamping every CDP
+ * call of the daemon, 2 × 100 alternating `tab t2` / `tab t1` switches, all 200 arrived): from the CLI's invocation to the
+ * `tabs` record at the bridge — run 1 p50 10.7 / p90 13.6 / p99 15.4 / max 15.4 ms, run 2 p50 7.6 / p90 10.3 / p99 20.4 /
+ * max 20.4 ms; from the daemon's `Page.bringToFront` p99 11.0 / 8.3 ms. r3's 1 s was 50× that latency — a whole second in
+ * which an agent's switch was FOLLOWED (r3 F6). The grace is 3 × the worse p99 (the CLI-to-record span, the widest of the
+ * measured ones): a switch the record cannot explain by latency is a switch, refused; a loaded box that stretches the record
+ * past it mis-judges a takeover as switched, which the user undoes with a re-takeover (fail closed, recoverable). Re-measure
+ * (the script) before changing either number; the pin in test-browser-fact ③ r4 holds the constant to the measurement.
+ */
+const TABS_RECORD_LATENCY_P99_MS = 20.37;
+const TAKEOVER_ANCHOR_GRACE_MS = Math.ceil(3 * TABS_RECORD_LATENCY_P99_MS); // 62
+function takeoverAnchor(activeTarget, now) { return { target: activeTarget == null || activeTarget === '' ? null : String(activeTarget), at: Number(now) || 0, switched: null }; }
+function takeoverAnchorStep(anchor, { activeTarget = null, now = 0, graceMs = TAKEOVER_ANCHOR_GRACE_MS } = {}) {
+  if (!isObj(anchor)) return null;
+  const t = activeTarget == null || activeTarget === '' ? null : String(activeTarget);
+  if (t === null) return anchor;
+  if (anchor.target === null) return { ...anchor, target: t };
+  if (t === anchor.target) return anchor.switched ? { ...anchor, switched: null } : anchor;
+  if ((Number(now) || 0) - (Number(anchor.at) || 0) <= graceMs) return { ...anchor, target: t, switched: null };
+  return { ...anchor, switched: { from: anchor.target, to: t, at: Number(now) || 0 } };
+}
+/** The receipt an input gets while the takeover is switched (the bridge forwards nothing). */
+function tabSwitchedReceipt(anchor) { return { ok: false, code: 'tab_switched', error: 'the browser moved to another tab while you were driving — hand back and take over again to drive it', from: anchor && anchor.switched ? anchor.switched.from : null, to: anchor && anchor.switched ? anchor.switched.to : null }; }
+
 // ── P3 (§4.3): the viewer's input → the stream server's CDP-shaped records ──
 /** The modifier bitmask off a DOM event's four flags. */
 function modifiersOf(ev) {
@@ -645,7 +716,7 @@ function browserListFor(status, { activity = null, helpers = null } = {}) {
     // ('other', `driverKey` names it) or the user from another conversation's live view ('other-user')
     const dk = l && isObj(l.driver) && typeof l.driver.browserKey === 'string' ? l.driver.browserKey : null;
     const other = dk && dk.split('.')[0] !== bk ? (l.driver.by === 'user' ? 'other-user' : 'other') : null;
-    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: drivenByUser(bk, a.profileId) ? 'you' : (other || 'agent'), driverKey: other ? dk : null, isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
+    push({ ref: a.profileId, kind: 'attachment', profileId: a.profileId, alias: a.alias || null, label: String(a.label || a.alias || a.profileId), state: stateFor(a.profileId, l ? l.browser : null), driver: other === 'other-user' ? other : (drivenByUser(bk, a.profileId) ? 'you' : (other || 'agent')), driverKey: other ? dk : null, isDefault: !!a.isDefault, owners: l ? Math.max(0, Number(l.others) || 0) : 0, helper: null });
   }
   const e = isObj(status.ephemeral) ? status.ephemeral : null;
   if (e && !e.child && String(e.browserKey || '') === bk && typeof e.profileId === 'string') {
@@ -809,6 +880,10 @@ module.exports = {
   toLocal, frameGeometry, pageViewportFor, sameAspect, jpegSize, pickViewportTarget, privateUpstream, SCROLLBAR_MAX_PX,
   // P3 (§4.3): the viewer's input as the stream server's CDP-shaped records
   modifiersOf, mouseRecord, wheelRecord, keyRecord, touchRecord,
+  // lane S2 (naive study 2 T4): every input has a receipt
+  INPUT_RECEIPT_MS, receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts, withoutRid,
+  // verify r3: a takeover is anchored to the tab it began on (an agent's switch while the user drives is refused at the bridge)
+  TAKEOVER_ANCHOR_GRACE_MS, TABS_RECORD_LATENCY_P99_MS, takeoverAnchor, takeoverAnchorStep, tabSwitchedReceipt, // verify r4: the grace is 3 × the measured p99
   // lane J r2: the picture's placement (top-aligned) and text a viewer hands the page (a paste, an IME composition)
   LIVE_ALIGN, ALIGNS, textRecords, TEXT_CHUNK, TEXT_MAX,
   // MULTIVIEW (design-browser-multiview §2 / §4 / D3): the strip's list, the helper witness

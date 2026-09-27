@@ -423,5 +423,75 @@ const strip = (msgs) => JSON.stringify(msgs.map((m) => ({ ...m, ts: undefined })
   }
 }
 
+// ═══ ④ VERIFY r6 (S2): the HELD PEER CARDS — the bound says so, a kill leaks nothing, the replay never doubles a delivery the transcript recorded ═══
+console.log('— ④ verify r6: cards fed BEFORE the first attach — bounded (said), collected with a killed session, replayed once against the transcript\'s own record');
+{
+  const N = require(path.join(REPO, 'src/normalizers.js'));
+  const mk = (id) => ({ backend: 'claude', claudeSessionId: 'conv-' + id, _normalizer: createMessageManager('claude', id), _historyLoaded: false });
+  const peerCards = (mm) => mm.messages.filter((m) => m.originKind === 'peer-message').map((m) => (m.content || []).map((b) => b.text || '').join(''));
+  const ts = () => new Date().toISOString();
+  const user = (uuid, content) => ({ type: 'user', message: { role: 'user', content }, uuid, timestamp: ts(), promptSource: 'sdk' });
+  const peerRec = (uuid, text, extra = {}) => ({ type: 'user', message: { role: 'user', content: 'Another Claude session sent a message:\n' + text }, isMeta: true, origin: { kind: 'peer', from: 'unknown', ...extra }, promptSource: 'sdk', uuid, timestamp: ts() });
+  // (a) the bound: the NEWEST 32 stay, the oldest go, the journal says how many (once at the first drop, then every 32nd)
+  const lines = []; const origLog = console.log; console.log = (...a) => lines.push(a.join(' '));
+  const sa = mk('r6a');
+  for (let i = 0; i < 70; i++) feedPeerCard(sa, { fromName: 'VibeSpace browser', text: `card ${i}` });
+  console.log = origLog;
+  ok(sa._heldPeerCards.length === N.HELD_PEER_CARDS_CAP && sa._heldPeerCards[0].text === 'card 38' && sa._heldPeerCards.at(-1).text === 'card 69', `70 cards before the first attach ⇒ the newest ${N.HELD_PEER_CARDS_CAP} held (card 38 … card 69)`);
+  const drops = lines.filter((l) => /held peer cards for conv-r6a: the bound \(32\) dropped the oldest 1 \((\d+) dropped so far/.test(l));
+  ok(drops.length === 2 && /\(1 dropped so far/.test(drops[0]) && /\(32 dropped so far/.test(drops[1]), `the journal names the count at the first drop and every 32nd (${drops.length} lines for 38 drops), never per card`, JSON.stringify(lines.slice(0, 3)));
+  await rebuildHistory(sa, 'r6a', [user('u0', 'hi')], { budgetMs: 1 });
+  ok(peerCards(sa._normalizer).length === 32 && peerCards(sa._normalizer)[0] === 'card 38' && sa._heldPeerCards === null, 'the first attach replays the held 32 after the history and clears the hold');
+  // (b) a kill before any attach: activeSessions.delete drops the ONLY holder — the session object and its cards are collectable
+  {
+    const v8 = require('node:v8'), vm = require('node:vm');
+    v8.setFlagsFromString('--expose-gc'); const gc = vm.runInNewContext('gc');
+    const active = new Map();
+    const make = () => { const s = mk('r6b'); active.set('r6b', s); for (let i = 0; i < 5; i++) feedPeerCard(s, { fromName: 'x', text: 'held ' + i }); const r = new WeakRef(s); active.delete('r6b'); return r; }; // a SYNC helper: an async function's block locals live in its suspended frame
+    const ref = make();
+    await new Promise((r) => setTimeout(r, 5)); gc(); await new Promise((r) => setTimeout(r, 5)); gc(); await new Promise((r) => setTimeout(r, 5));
+    ok(ref.deref() === undefined, 'a session killed before its first attach (activeSessions.delete) is collected with its held cards — no module-level holder, nothing persisted');
+    const src = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+    ok(!/const\s+\w*[hH]eld\w*\s*=\s*new (Map|Set|WeakMap)/.test(src), 'normalizers.js keeps no module-level map of held cards');
+  }
+  // (c) the replay vs the transcript: a DELIVERED card (the ladder's `recorded` text) whose JSONL user record the rebuild renders — once;
+  // a display-only card (the takeover card, no `recorded`) — once; a same-body repeat — one per delivery; a recorded card whose
+  // record is not there yet — replayed; a summary card — answered by its RECORDED text
+  const HB = 'Control of the "Team" browser is back with you — the page is now https://x/a. Re-run what was interrupted: fill.';
+  const sc = mk('r6c');
+  feedPeerCard(sc, { fromName: 'VibeSpace browser', text: HB, recorded: HB });
+  feedPeerCard(sc, { fromName: 'VibeSpace browser', text: 'The user took over the "Team" browser; 1 operation was interrupted: fill.' });
+  await rebuildHistory(sc, 'r6c', [user('u1', 'do the form'), peerRec('u2', HB)], { budgetMs: 1 });
+  const pc = peerCards(sc._normalizer);
+  ok(pc.filter((t) => t.includes('Re-run what was interrupted: fill')).length === 1 && pc.filter((t) => t.includes('took over the "Team"')).length === 1, 'a delivered handback the transcript recorded renders ONCE (the record answers for the held card); the display-only takeover card renders once', JSON.stringify(pc));
+  const sr = mk('r6r');
+  feedPeerCard(sr, { fromName: 'Background Work · watch-x', text: 'job fired', recorded: 'job fired' });
+  feedPeerCard(sr, { fromName: 'Background Work · watch-x', text: 'job fired', recorded: 'job fired' });
+  await rebuildHistory(sr, 'r6r', [peerRec('r1', 'job fired'), peerRec('r2', 'job fired')], { budgetMs: 1 });
+  ok(peerCards(sr._normalizer).length === 2, 'a same-body repeat (two deliveries, two records) keeps one card per delivery — each record answers for ONE card (the 2.362.2 lesson)');
+  const sq = mk('r6q');
+  feedPeerCard(sq, { fromName: 'VibeSpace browser', text: HB, recorded: HB });
+  await rebuildHistory(sq, 'r6q', [user('u3', 'busy')], { budgetMs: 1 });
+  ok(peerCards(sq._normalizer).length === 1, 'CONTROL: a recorded card whose record is NOT in the transcript yet (a busy CLI queued the delivery) is replayed — never lost');
+  const ss = mk('r6s');
+  feedPeerCard(ss, { fromName: 'Lark', text: '3 conversations: 5 messages — digest', recorded: 'The full digest\nline 2' });
+  await rebuildHistory(ss, 'r6s', [peerRec('d1', 'The full digest\nline 2')], { budgetMs: 1 });
+  ok(peerCards(ss._normalizer).length === 1 && !peerCards(ss._normalizer)[0].startsWith('3 conversations'), 'a summary card (channels: cardText ≠ the posted text) is answered by its RECORDED text — the record renders, the summary is not replayed beside it');
+  const sm = mk('r6m');
+  feedPeerCard(sm, { fromName: 'scout-7', text: 'found the doc', msgId: 'm-77' });
+  ok(!sm._heldPeerCards, 'a harness-delivered message (msgId) is never held');
+  await rebuildHistory(sm, 'r6m', [peerRec('m1', 'found the doc', { name: 'scout-7', msg_id: 'm-77' })], { budgetMs: 1 });
+  ok(peerCards(sm._normalizer).length === 1, '…the transcript renders it once');
+  // a card fed DURING the rebuild rides the queue and meets the same rule
+  const sd = mk('r6d');
+  const p = rebuildHistory(sd, 'r6d', [peerRec('q1', HB)], { budgetMs: 1 });
+  feedPeerCard(sd, { fromName: 'VibeSpace browser', text: HB, recorded: HB });
+  feedPeerCard(sd, { fromName: 'VibeSpace browser', text: 'display only' });
+  await p;
+  ok(peerCards(sd._normalizer).filter((t) => t.includes('Re-run')).length === 1 && peerCards(sd._normalizer).includes('display only'), 'a recorded card queued mid-rebuild is answered by the record too; a display-only one lands');
+  // WIRED: the ladder's card carries `recorded` = the posted text
+  ok(/emitPeerCard\?\.\(cid, \{ fromName: opts\.fromName \|\| null, text: opts\.cardText \|\| text, recorded: text(, kind)? \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')), 'WIRED: conversation-deliver\'s cardOk carries `recorded` (the exact text the CLI recorded)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

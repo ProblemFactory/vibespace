@@ -19,6 +19,9 @@ import http from 'node:http';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { gitEnvFrom } from './git-env.mjs';
+import { execFileSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -32,6 +35,9 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
 const FX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/gmail/recorded.json'), 'utf-8'));
 const ROOT = scratch('chan-gmail');
+// lane R5 (drain rule 18): the per-second PACE runs on a private clock this suite's sleep advances —
+// exact and instantaneous, so a leg about something else never waits a real second per Gmail thread
+const FAST_PACE = (() => { let t = 0; return { paceClock: () => t, sleep: (ms) => new Promise((r) => { t += ms; setImmediate(r); }) }; })();
 
 // ── the recorded vendor, as a fake fetch ─────────────────────────────────
 const T0 = 1_700_000_000_000;
@@ -152,7 +158,7 @@ const integrations = STORE.create({ dataDir: storeDir, env: {}, now, broadcast: 
 const v = mkVendor();
 const engDir = path.join(ROOT, 'eng'); fs.mkdirSync(engDir, { recursive: true });
 const frames = [];
-const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: quiet });
+const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
 process.on('exit', () => { try { eng.stop(); } catch {} });
 let flowState = null;
 {
@@ -266,6 +272,7 @@ let flowState = null;
   ok(e && e.code === 'unknown-option' && /pollSeconds/.test(e.message) && /query/.test(e.message), 'an option the adapter did not declare is refused BY NAME, naming the declared ones');
   const r2 = await eng.setOptions('gmail', { query: '' });
   ok(r2.options.query === 'label:INBOX', "'' restores the declared default");
+  await eng.idle('gmail');   // lane R5: the pass that restore kicked is PACED (waits between its calls) — it ends here, not inside ⑤'s disconnect
   const sch = eng.digest().adapters.find((a) => a.id === 'gmail').optionsSchema;
   ok(sch.map((o) => o.key).join() === 'scope,labels,query,pushTopic,pushSubscription' && sch[0].choiceLabels && sch[0].choiceLabels.all, 'the digest publishes the option schema the panel draws (the mailbox choices WITH their labels)', JSON.stringify(sch.map((o) => o.key)));
 }
@@ -313,7 +320,7 @@ let flowState = null;
   ok(row && row.auth.state === 'unknown' && row.auth.why === 'never-authenticated' && eng.digest().conversations.some((c) => c.adapterId === 'gmail'), 'disconnect drops the token (state unknown) and keeps the record and its conversations for a later Connect');
   clock += 61e3;   // past the 20/min request window the earlier passes spent
   const p = await eng.pass('gmail', { force: true });
-  ok(p.ok === false && p.why === 'not-connected' && eng.adapterRecords().adapters.find((x) => x.id === 'gmail').consecutiveFailures === 0, 'a pass on a never-authenticated record is refused as not-connected and counts NO failure', JSON.stringify(p));
+  ok(p.ok === false && p.why === 'not-connected' && eng.adapterRecords().adapters.find((x) => x.id === 'gmail').consecutiveFailures === 0, 'a pass on a never-authenticated record is refused as not-connected and counts NO failure', JSON.stringify({ p, lastPass: eng.adapterRecords().adapters.find((x) => x.id === 'gmail').lastPass }));
 }
 
 // ── ⑥ the shape-only Test runner (zero network) ──
@@ -481,6 +488,303 @@ let flowState = null;
   ok(rc2.landed === undefined && (rc2.unknown === true) && (rc2.detail.how === 'not-found-in-sent'), 'no handle at all: the idempotency key + the first recipient still let the fallback look ⇒ unknown when nothing carries it', JSON.stringify(rc2));
   const rc2b = await a.reconcile(null, { idemKey: '', compose: { to: [], subject: 's' }, handle: null });
   ok(rc2b.unknown === true && rc2b.detail.how === 'no-handle', 'no Message-ID, no key, no recipient ⇒ UNKNOWN by name (no-handle)');
+}
+
+// ── ⑥b lane R5: the quota table, the PER-SECOND pace, Google's rate words ──
+{
+  // the vendor's published per-call costs (developers.google.com/gmail/api/reference/quota, "Last updated 2026-09-10")
+  const TABLE = [['/profile', 'GET', 1], ['/history?startHistoryId=1', 'GET', 2], ['/threads?q=x', 'GET', 10], ['/threads/t1?format=full', 'GET', 40], ['/threads/t1?format=metadata', 'GET', 40], ['/messages/m1', 'GET', 20], ['/messages/m1/attachments/a1', 'GET', 20], ['/messages?q=x', 'GET', 5], ['/drafts', 'POST', 10], ['/drafts', 'GET', 5], ['/drafts/d1', 'GET', 20], ['/drafts/d1', 'DELETE', 10], ['/drafts/send', 'POST', 100], ['/watch', 'POST', 100], ['/stop', 'POST', 50], ['/labels', 'GET', 1], ['/somethingNew', 'GET', 10]];
+  const off = TABLE.filter(([p, m, u]) => gmail.unitsFor(p, m) !== u).map(([p, m, u]) => `${m} ${p}: ${gmail.unitsFor(p, m)} ≠ ${u}`);
+  ok(off.length === 0, `unitsFor matches the vendor's published table on every row (${TABLE.length} rows; an unknown path is priced 10)`, off.join('; '));
+  ok(gmail.caps.pace && gmail.caps.pace.unitsPerSec === 40 && gmail.caps.pace.settingKey === 'channels.gmailUnitsPerSec' && gmail.caps.pace.cost.fetch === gmail.unitsFor('/threads/x') && gmail.caps.pace.cost.discover === gmail.unitsFor('/threads') + gmail.META_PER_LIST * gmail.unitsFor('/threads/x') && gmail.caps.vendorName === 'Google' && CH.validateCaps('gmail', gmail.caps) === true,
+    'caps.pace: 40 quota units a second (one thread read), a fetch priced as a threads.get and a discovery page as threads.list + its metadata reads, the vendor named Google — and it validates');
+  // the PRODUCTION refusal (2026-09-26 journal, verbatim shape): a 403 in the usageLimits domain naming the per-minute metric
+  const prod = { error: { code: 403, message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' of service 'gmail.googleapis.com' for consumer 'project_number:0'.", errors: [{ message: "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'", domain: 'usageLimits', reason: 'rateLimitExceeded' }], status: 'PERMISSION_DENIED' } };
+  const t1 = gmail.typedFailure(403, prod, 'gmail thread');
+  ok(t1.code === 'rate-limited' && t1.retryable === true && t1.detail.retryAfterSec === null, 'the production 403 "Units per minute per user" (usageLimits / rateLimitExceeded) ⇒ rate-limited, no hint (the engine\'s own 5 s → 60 s)', JSON.stringify(t1.detail));
+  const noReason = { error: { code: 403, message: "Quota exceeded for quota metric 'Queries' and limit 'Queries per minute per user'", errors: [{ message: 'x', domain: 'global' }] } };
+  ok(gmail.typedFailure(403, noReason, 'gmail').code === 'rate-limited', 'a 403 whose MESSAGE names a quota metric is a rate refusal even without the reason field');
+  ok(gmail.typedFailure(403, { error: { code: 403, message: 'Request had insufficient authentication scopes.', errors: [{ domain: 'global', reason: 'insufficientPermissions' }] } }, 'gmail').code === 'forbidden', 'a scope 403 is still forbidden (the fixture\'s `forbidden` above too)');
+  const hdr = (o) => ({ get: (k) => (k in o ? o[k] : null) });
+  const t2 = gmail.typedFailure(429, FX.errors.rateLimited.body, 'gmail', CH.retryAfterSeconds(hdr({ 'retry-after': '7' })));
+  ok(t2.code === 'rate-limited' && t2.detail.retryAfterSec === 7, 'a 429 with Retry-After: 7 ⇒ rate-limited carrying retryAfterSec 7');
+  const t3 = CH.retryAfterSeconds(hdr({ 'retry-after': new Date(Date.now() + 9000).toUTCString() }));
+  ok(t3 >= 8 && t3 <= 10 && CH.retryAfterSeconds(null) === null && CH.retryAfterSeconds(hdr({})) === null, 'Retry-After as an HTTP-date is read too; no header answers null');
+  // the order: pace → meter → send, for every request
+  const reg = CH.createChannelRegistry(); reg.register(gmail.adapter);
+  const v6 = mkVendor();
+  const order = [];
+  const f0 = v6.fetchFn;
+  const fetchFn = async (url, init) => { order.push('send ' + new URL(String(url)).pathname.replace('/gmail/v1/users/me', '')); return f0(url, init); };
+  const tok = { st: { token: { access_token: 'ya29.x', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE] } }, read: () => ({ token: tok.st.token, why: null }), write: async (t) => { tok.st.token = t; }, clear: async () => {} };
+  const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); }, meter: (n) => { order.push('meter ' + n); } });
+  await a.listConversations({ limit: 1 });
+  ok(JSON.stringify(order.slice(0, 3)) === JSON.stringify(['pace 10', 'meter 10', 'send /threads']) && order.filter((x) => x.startsWith('pace')).length === order.filter((x) => x.startsWith('send')).length, 'every Gmail request is PACED for its own cost, then metered, then sent (threads.list: pace 10 → meter 10 → send; one pace per send)', JSON.stringify(order));
+  // verify r3: the pairing holds on EVERY exit path — a 403, a 500, a 401, a socket error: every `pace n` is IMMEDIATELY
+  // followed by `meter n` (the engine reserves the units at pace() and only that meter releases them — a pace without its
+  // meter would hold the account's bucket down)
+  const b0 = order.length;
+  for (const k of ['rateLimited', 'backend', 'unauthorized']) { v6.state.fail = k; try { await a.history('thr_ops_0001', { limit: 5 }); } catch {} }
+  v6.state.throwNet = true; try { await a.history('thr_ops_0001', { limit: 5 }); } catch {} v6.state.throwNet = false;
+  const tailO = order.slice(b0); const pairs = tailO.filter((x) => x.startsWith('pace ')).length;
+  ok(pairs >= 4 && tailO.every((x, i) => !x.startsWith('pace ') || tailO[i + 1] === 'meter ' + x.slice(5)), `under a 403, a 500, a 401 and a socket error every pace n is still immediately followed by meter n (${pairs} pairs)`, JSON.stringify(tailO));
+}
+
+// ── ⑥c lane R5 verify r4: THE GATE CENSUS — one gate for every vendor call, the rest a closed list ──
+// Four rounds of the pace each found one more path around it. The closure is PHYSICAL: every outbound call site in
+// src/channels/gmail.js (+ the push lane's src/channels/live/gmail.js) is the ONE gate line (`api()`: token → pace →
+// meter → the bearer re-read → send), or carries `// ungated: <id>` with a row in the exported `UNGATED` naming why it
+// may stand outside the pace. A comment is not a call; the primitive's own definition and its inner send are not sites.
+/** @returns {{sites, problems, gate}} */
+function gateCensus(src, { gateRe, ungatedIds }) {
+  const lines = src.split('\n');
+  const code = (l) => l.replace(/\/\/.*$/, '');
+  const sites = [], problems = [], markerIds = new Set();
+  let gate = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i], c = code(l);
+    if (/^\s*(\*|\/\/|\/\*)/.test(l)) continue;                                   // a comment line is not a call
+    if (!/\b(callJson|fetchFn)\s*\(|\bawait f\(/.test(c)) continue;
+    if (/^\s*async function callJson\(/.test(l) || /\bfetchFn\(url\b/.test(c)) continue;   // the primitive itself, and its inner send
+    const m = /\/\/\s*(ungated|gated-inline):\s*([\w-]+)/.exec(l);
+    if (gateRe.test(c)) { if (gate >= 0) problems.push(`two gate lines: ${gate + 1} and ${i + 1}`); gate = i; sites.push({ line: i + 1, cls: 'gate' }); continue; }
+    if (!m) { problems.push(`line ${i + 1}: an outbound call outside the gate with no marker: ${c.trim().slice(0, 100)}`); sites.push({ line: i + 1, cls: 'unmarked' }); continue; }
+    if (m[1] === 'ungated') { markerIds.add(m[2]); if (!ungatedIds.has(m[2])) problems.push(`line ${i + 1}: ungated '${m[2]}' has no UNGATED row`); sites.push({ line: i + 1, cls: 'ungated', id: m[2] }); continue; }
+    const above = code(lines.slice(Math.max(0, i - 8), i).join('\n'));
+    const pi = above.lastIndexOf('await pace('), mi = above.lastIndexOf('meter(');
+    if (pi < 0 || mi < 0 || mi < pi) problems.push(`line ${i + 1}: gated-inline '${m[2]}' has no 'await pace(' + 'meter(' right above it`);
+    sites.push({ line: i + 1, cls: 'gated-inline', id: m[2] });
+  }
+  if (gate < 0) problems.push('no gate line');
+  for (const id of ungatedIds) if (!markerIds.has(id)) problems.push(`UNGATED names '${id}' but no call carries it`);
+  return { sites, problems, gate: gate + 1 };
+}
+{
+  const GATE = /callJson\(fetchFn, `\$\{API\}\$\{pathq\}`/;
+  const srcMain = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const srcLive = fs.readFileSync(path.join(REPO, 'src/channels/live/gmail.js'), 'utf-8');
+  const ids = new Set(gmail.UNGATED.map((u) => u.id));
+  ok(Object.isFrozen(gmail.UNGATED) && gmail.UNGATED.every((u) => typeof u.id === 'string' && typeof u.why === 'string' && u.why.length > 30), `UNGATED is a frozen list of {id, why}: ${[...ids].join(', ')}`);
+  const c1 = gateCensus(srcMain + '\n' + srcLive, { gateRe: GATE, ungatedIds: ids });
+  console.log('    gate census (gmail.js + live/gmail.js): ' + c1.sites.map((x) => `${x.cls}${x.id ? ':' + x.id : ''}@${x.line}`).join(' '));
+  ok(c1.problems.length === 0 && c1.sites.filter((x) => x.cls === 'gate').length === 1, `every outbound call is the ONE gate or a listed ungated site (${c1.sites.length} sites: 1 gate + ${c1.sites.filter((x) => x.cls === 'ungated').length} ungated — token-refresh, the two consent calls, the Pub/Sub pull)`, c1.problems.join(' ; '));
+  ok(c1.sites.filter((x) => x.cls === 'ungated').map((x) => x.id).sort().join() === 'consent-exchange,consent-profile,pubsub,token-refresh', 'the ungated set is exactly {token-refresh, consent-exchange, consent-profile, pubsub} — a human consent (once per flow), a single-flight refresh, a long-poll on another API');
+  // the gate's own order: token → pace → meter → the bearer re-read, on the way to the one send
+  const L = srcMain.split('\n'); const a0 = L.findIndex((l) => /^  const api = async \(pathq, opts = \{\}\) => \{/.test(l)); const g0 = L.findIndex((l) => GATE.test(l));
+  const idx = (re) => L.findIndex((l, i) => i > a0 && i < g0 && re.test(l));
+  ok(a0 >= 0 && g0 > a0 && idx(/await accessToken\(\)/) < idx(/await pace\(units\)/) && idx(/await pace\(units\)/) < idx(/^\s*meter\(units\)/) && /bearerNow\(at\)/.test(L[g0]), 'the gate reads token → pace → meter → bearerNow(at) → send (the bearer re-read AFTER the wait is on the gate line itself)');
+  ok(/if \(refreshing\) \{ await refreshing; return accessToken\(\); \}/.test(srcMain) && /refreshing = refreshAccessToken\(cred, token\)\.finally/.test(srcMain) && /cur\.refresh_token \|\| ''\) === String\(token\.refresh_token/.test(srcMain), 'the refresh is SINGLE-FLIGHT (siblings wait for the one POST and re-read) and a refused refresh stamps invalidGrantAt only while the stored token is still the one it tried');
+  // NEGATIVE CONTROLS (patched copies in scratch, never src/): the census must SEE a bare call
+  const M = mutantCopies('chan-gmail-gate', REPO);
+  const bare = srcMain.replace("  const selfEmail = () => {", "  const labels = () => callJson(fetchFn, `${API}/labels`, { what: 'gmail labels' });\n  const selfEmail = () => {");
+  M.write('src/channels/gmail.js', bare, 'bare-call');
+  const cb = gateCensus(bare, { gateRe: GATE, ungatedIds: ids });
+  ok(bare !== srcMain && cb.problems.some((x) => /no marker/.test(x) && /gmail labels/.test(x)), 'CONTROL: a copy with one more callJson (a labels read, no marker) is RED on that line', cb.problems.join(' ; '));
+  const renamed = srcMain.replace('// ungated: consent-profile', '// ungated: consent-profile-2');
+  M.write('src/channels/gmail.js', renamed, 'unknown-id');
+  const cr = gateCensus(renamed, { gateRe: GATE, ungatedIds: ids });
+  ok(renamed !== srcMain && cr.problems.some((x) => /'consent-profile-2' has no UNGATED row/.test(x)) && cr.problems.some((x) => /names 'consent-profile' but no call/.test(x)), 'CONTROL: a marker whose id UNGATED does not name is RED (and the orphaned row too)', cr.problems.join(' ; '));
+  const noRow = srcMain.replace(/\n  \{ id: 'consent-profile', why: [^\n]+\n/, '\n');
+  const modNoRow = M.load('src/channels/gmail.js', noRow, 'no-row');
+  const cn = gateCensus(noRow, { gateRe: GATE, ungatedIds: new Set(modNoRow.UNGATED.map((u) => u.id)) });
+  ok(noRow !== srcMain && modNoRow.UNGATED.length === gmail.UNGATED.length - 1 && cn.problems.some((x) => /'consent-profile' has no UNGATED row/.test(x)), 'CONTROL: a copy whose UNGATED lost the consent-profile row is RED on the marker that still carries it', cn.problems.join(' ; '));
+  const unmarkedRefresh = srcMain.replace('// ungated: token-refresh', '');
+  M.write('src/channels/gmail.js', unmarkedRefresh, 'unmarked-refresh');
+  ok(gateCensus(unmarkedRefresh, { gateRe: GATE, ungatedIds: ids }).problems.some((x) => /no marker/.test(x) && /gmail token refresh/.test(x)), 'CONTROL: the token refresh with its marker removed is RED (a comment is not a call, and a call is not a comment)');
+  // the pre-fix build (the r3 tree): three unmarked sites — best effort, a depth-1 checkout cannot show the ref
+  let pre = null; try { pre = execFileSync('git', ['-C', REPO, 'show', '6f1aad6d:src/channels/gmail.js'], { encoding: 'utf-8', env: gitEnvFrom(process.env), stdio: ['ignore', 'pipe', 'ignore'] }); } catch { pre = null; }
+  if (pre) { const cp = gateCensus(pre + '\n' + srcLive, { gateRe: GATE, ungatedIds: ids }); ok(cp.problems.filter((x) => /no marker/.test(x)).length >= 3, `CONTROL (the r3 tree 6f1aad6d): ${cp.problems.filter((x) => /no marker/.test(x)).length} unmarked outbound calls (the refresh, the consent exchange, the consent profile) — the census would have been red on every round before this one`); }
+  else ok(true, 'SKIP control on the r3 tree: `git show 6f1aad6d:src/channels/gmail.js` is not available here (a depth-1 checkout) — the four patched-copy controls above carry the leg');
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 4 })) ok(r.pass, r.name, r.detail);
+
+  // ── THE RUNTIME HALF: the real adapter over the recorded vendor ──
+  const reg = CH.createChannelRegistry(); reg.register(gmail.adapter);
+  // (a) SINGLE-FLIGHT: an expired token, 20 concurrent callers ⇒ ONE refresh POST; every caller answered by it
+  {
+    const v = mkVendor(); let refreshes = 0; const f0 = v.fetchFn;
+    const fetchFn = async (url, init) => { if (/oauth2\.googleapis\.com/.test(String(url)) && /refresh_token/.test(String(init && init.body))) { refreshes++; await sleep(20); } return f0(url, init); };
+    const tok = { st: { token: { access_token: 'ya29.stale', expiresAt: now() - 1, refresh_token: '1//r', scopes: [gmail.SCOPE] } }, read: () => ({ token: tok.st.token, why: null }), write: async (t) => { tok.st.token = t; }, clear: async () => { tok.st.token = null; } };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const rs = await Promise.all(Array.from({ length: 20 }, () => a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code)));
+    ok(refreshes === 1 && rs.every((x) => x === 'ok') && tok.st.token.access_token === 'ya29.fixture-access-0003', `20 concurrent callers on an expired token ⇒ ${refreshes} refresh POST (single-flight), all 20 served with the refreshed token`, JSON.stringify({ refreshes, rs }));
+  }
+  // (b) a vendor that ROTATES the refresh token (a used one is invalid_grant): the account stays connected, the held token is the rotated one
+  {
+    const v = mkVendor(); const used = new Set(); let refreshes = 0; const f0 = v.fetchFn;
+    const fetchFn = async (url, init) => {
+      const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      if (form && form.grant_type === 'refresh_token') { refreshes++; if (used.has(form.refresh_token)) return jsonRes(FX.tokenInvalidGrant, 400); used.add(form.refresh_token); await sleep(20); return jsonRes({ ...FX.tokenRefreshed, refresh_token: `1//rot-${refreshes}` }); }
+      return f0(url, init);
+    };
+    const tok = { st: { token: { access_token: 'ya29.stale', expiresAt: now() - 1, refresh_token: '1//initial', scopes: [gmail.SCOPE] } }, read: () => ({ token: tok.st.token, why: null }), write: async (t) => { tok.st.token = t; }, clear: async () => { tok.st.token = null; } };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const rs = await Promise.all(Array.from({ length: 20 }, () => a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code)));
+    const st = await a.auth.state();
+    ok(refreshes === 1 && rs.every((x) => x === 'ok') && st.state === 'connected' && tok.st.token.refresh_token === '1//rot-1' && !tok.st.token.invalidGrantAt, `under a rotating vendor: ${refreshes} refresh, state ${st.state}, the held refresh token is the rotated one (${tok.st.token.refresh_token}), no invalidGrantAt`, JSON.stringify({ refreshes, rs, st: st.state, tok: tok.st.token }));
+    // the stale-stamp guard on its own: a refusal for a token the store no longer holds stamps NOTHING
+    tok.st.token = { access_token: 'ya29.stale2', expiresAt: now() - 1, refresh_token: '1//dead', scopes: [gmail.SCOPE] };
+    used.add('1//dead');
+    const p = a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);
+    tok.st.token = { access_token: 'ya29.fresh', expiresAt: now() + 3600e3, refresh_token: '1//newer', scopes: [gmail.SCOPE] };   // a re-authorize landed while the (refused) refresh was in flight
+    const r2 = await p;
+    ok(r2 === 'ok' && tok.st.token.refresh_token === '1//newer' && !tok.st.token.invalidGrantAt, `a refused refresh of a token the store has since replaced stamps nothing on the newer one, and its caller is SERVED with the newer token (verify r5: superseded, not a fact about the account — caller: ${r2}, held: ${tok.st.token.refresh_token})`);
+  }
+  // (c) THE BEARER AFTER THE WAIT: a pace held open — a re-authorize's new token is the one sent; a disconnect refuses by name, nothing sent
+  {
+    const v = mkVendor(); const sends = []; const f0 = v.fetchFn;
+    const fetchFn = async (url, init) => { if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
+    let release = null, hold = null;   // ONE-SHOT: the first pace of a call is held open until `release()`; the rest pass
+    const order = [];
+    const tok = { st: { token: { access_token: 'ya29.old', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE] } }, read: () => ({ token: tok.st.token, why: null }), write: async (t) => { tok.st.token = t; }, clear: async () => { tok.st.token = null; } };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; await h; } }, meter: (n) => { order.push('meter ' + n); } });
+    hold = new Promise((r) => { release = r; });
+    const p1 = a.listConversations({ limit: 1 });
+    await sleep(10);
+    tok.st.token = { ...tok.st.token, access_token: 'ya29.REAUTH' };   // the re-authorize landed during the wait
+    release();
+    await p1;
+    ok(sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.REAUTH'), `a re-authorize that landed during the pace wait: the request carries the NEW bearer (${sends[0]}), never the one captured before the wait (${sends.length} sends, all new)`);
+    const n1 = sends.length;
+    hold = new Promise((r) => { release = r; });
+    const p2 = a.listConversations({ limit: 1 }).then(() => null, (e) => e);
+    await sleep(10);
+    await tok.clear();   // the owner disconnected during the wait
+    release();
+    const e2 = await p2;
+    ok(e2 && e2.code === 'auth-expired' && /disconnected while the request waited/.test(e2.message) && e2.detail.tokenDropped === true && sends.length === n1 && order.slice(-2).join() === 'pace 10,meter 10', `a disconnect during the pace wait: refused by name (${e2 && e2.code}: ${e2 && String(e2.message).slice(0, 60)}…), nothing sent (${sends.length - n1} sends), the units already metered stay charged (never a leaked reservation)`, JSON.stringify({ e2: e2 && e2.message, order: order.slice(-4) }));
+  }
+
+  // ── verify r5: THE REFRESH'S OWN EDGES ──
+  const mkTok = (t) => { const tok = { st: { token: t, writes: 0 }, read: () => ({ token: tok.st.token, why: tok.st.token ? null : 'never-authenticated' }), write: async (x) => { tok.st.writes++; tok.st.token = x; }, clear: async () => { tok.st.token = null; } }; return tok; };
+  const heldRefresh = (v) => { let release = null; const f0 = v.fetchFn; const sends = []; const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') await new Promise((r) => { release = r; }); if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); }; return { fetchFn, sends, release: () => release && release() }; };
+  const expired = () => ({ access_token: 'ya29.stale', expiresAt: now() - 1, refresh_token: '1//old', scopes: [gmail.SCOPE], email: 'member.a@example.com' });
+  // (d) a RE-AUTHORIZE that lands while the refresh POST is in flight wins: the late refresh writes nothing, its callers use the re-authorize's token
+  const raceReauth = async (rg) => {
+    const v = mkVendor(); const h = heldRefresh(v); const tok = mkTok(expired());
+    const ad = rg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const ps = Array.from({ length: 5 }, () => ad.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code));
+    await sleep(10);
+    await tok.write({ access_token: 'ya29.REAUTH', expiresAt: now() + 3600e3, refresh_token: '1//reauth', scopes: [gmail.SCOPE], email: 'member.a@example.com' });   // the consent landed meanwhile
+    h.release(); const rs = await Promise.all(ps);
+    return { rs, held: tok.st.token.refresh_token, bearers: [...new Set(h.sends)], writes: tok.st.writes };
+  };
+  {
+    const r = await raceReauth(reg);
+    ok(r.rs.every((x) => x === 'ok') && r.held === '1//reauth' && r.bearers.join() === 'Bearer ya29.REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late refresh wrote nothing (${r.writes} write = the consent's), its 5 callers carried the new bearer (${r.bearers.join()})`, JSON.stringify(r));
+    const r4 = srcMain.replace("    const cur = readToken().token;\n    if (!cur) throw new ChannelError('auth-expired', 'Gmail was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);');
+    ok(r4 !== srcMain, 'CONTROL fixture: the write-only-while-current guard was removed from a copy');
+    const modR4 = M.load('src/channels/gmail.js', r4, 'r4-write'); const rg4 = CH.createChannelRegistry(); rg4.register(modR4.adapter);
+    const c = await raceReauth(rg4);
+    ok(c.held === '1//old' && c.bearers.join() !== 'Bearer ya29.REAUTH', `CONTROL: the r4 write REVERTS the re-authorize (held ${c.held}, bearers ${c.bearers.join()})`);
+  }
+  // (e) a DISCONNECT that lands while the refresh is in flight: the refreshed token is discarded, the callers refused by name, nothing sent
+  {
+    const v = mkVendor(); const h = heldRefresh(v); const tok = mkTok(expired());
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const ps = Array.from({ length: 5 }, () => a.listConversations({ limit: 1 }).then(() => 'ok', (e) => `${e.code}:${/disconnected while its token was refreshed/.test(e.message) ? 'named' : e.message}`));
+    await sleep(10); await tok.clear(); h.release(); const rs = await Promise.all(ps);
+    ok(rs.every((x) => x === 'auth-expired:named') && tok.st.token === null && tok.st.writes === 0 && h.sends.length === 0, `(e) a disconnect landing during the refresh: nothing written back (store empty, ${tok.st.writes} writes), the 5 callers refused by name (${[...new Set(rs)].join()}), nothing sent`);
+  }
+  // (f) a store write that FAILS after a successful refresh: the vendor's token is served from memory and persisted at the first chance
+  {
+    const v = mkVendor(); let refreshes = 0; const f0 = v.fetchFn;
+    const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') { refreshes++; await sleep(5); } return f0(url, init); };
+    const tok = mkTok(expired()); let failOnce = true; tok.write = async (x) => { tok.st.writes++; if (failOnce) { failOnce = false; throw new Error('ENOSPC: adapters.json not written'); } tok.st.token = x; };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const rs = await Promise.all(Array.from({ length: 20 }, () => a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code)));
+    ok(refreshes === 1 && rs.every((x) => x === 'ok') && tok.st.writes === 2 && tok.st.token.access_token === 'ya29.fixture-access-0003', `(f) a store write that fails once after the refresh: 20 callers served from memory with the vendor's token, ONE flush by the first waiter lands it (${tok.st.writes} attempts), ${refreshes} POST`, JSON.stringify({ refreshes, rs: [...new Set(rs)], writes: tok.st.writes }));
+    await a.listConversations({ limit: 1 });
+    ok(refreshes === 1 && tok.st.writes === 2, 'the next call neither refreshes nor re-writes');
+  }
+  // (g) a bearer that EXPIRES while the request waits for its pace: ONE refresh after the wait, the new bearer sent — never the expired one
+  {
+    const v = mkVendor(); let refreshes = 0; const f0 = v.fetchFn; const sends = [];
+    const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') refreshes++; if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
+    let release = null, hold = null; const order = [];
+    const tok = mkTok({ access_token: 'ya29.short', expiresAt: now() + 120e3, refresh_token: '1//r', scopes: [gmail.SCOPE] });   // two minutes left: outside the margin, nobody refreshes on entry
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; await h; } }, meter: (n) => { order.push('meter ' + n); } });
+    hold = new Promise((r) => { release = r; });
+    const p1 = a.listConversations({ limit: 1 });
+    await sleep(10); clock += 130e3;   // the token expired while the request waited
+    release(); await p1; clock -= 130e3;
+    ok(refreshes === 1 && sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.fixture-access-0003') && order.slice(0, 2).join() === 'pace 10,meter 10', `(g) a bearer that EXPIRED during the pace wait: ${refreshes} refresh AFTER the wait (pace → meter → refresh → send), every request of the list carries the new bearer (${sends.length} sends, ${sends[0]})`, JSON.stringify({ refreshes, sends, order }));
+  }
+  // ── verify r6: THE TOKEN STORE CONTRACT — `meta.supersedes` honoured at APPLY time (what the engine's door does inside its serialized callback) ──
+  /** a contract store: `supersedes` judged when the write APPLIES (after any hold); the write may be refused (`fail`) or held (`slow`) once */
+  const tokC = (t) => { const s = { st: { token: t, writes: 0 }, mode: 'ok', releaseW: null, read: () => ({ token: s.st.token, why: s.st.token ? null : 'never-authenticated' }), write: async (x, meta) => { s.st.writes++; if (s.mode === 'fail') { s.mode = 'ok'; throw new Error('ENOSPC'); } if (s.mode === 'slow') { s.mode = 'ok'; await new Promise((r) => { s.releaseW = r; }); } if (meta && meta.supersedes !== undefined && String((s.st.token || {}).refresh_token || '') !== String(meta.supersedes)) return { written: false, superseded: true }; s.st.token = x; return { written: true }; }, clear: async () => { s.st.token = null; } }; return s; };
+  /** a ROTATING Google (a used refresh token is retired) whose refresh POST can be held; the thread list EMPTY so a listConversations is ONE api call (the fixture's thread metas each flush the unsaved token before the held refresh) */
+  const rotatingG = (v) => { let n = 0; const retired = new Set(); const h = { hold: null, release: null, retired }; const f0 = v.fetchFn; h.fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (/\/threads$/.test(new URL(String(url)).pathname)) return jsonRes({ threads: [] }); if (form && form.grant_type === 'refresh_token') { if (retired.has(form.refresh_token)) return jsonRes({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400); if (h.hold) { const w = h.hold; h.hold = null; await w; } retired.add(form.refresh_token); n++; return jsonRes({ access_token: `ya29.rot-${n}`, expires_in: 3599, refresh_token: `1//rot-${n}`, scope: gmail.SCOPE, token_type: 'Bearer' }); } return f0(url, init); }; return h; };
+  // (h) a persist in flight for ANOTHER token queues this write behind it — the r5 single flight handed the later token the EARLIER token's promise and DROPPED it (the store kept a refresh token the vendor had retired when it issued the later one ⇒ the next refresh invalid_grant ⇒ logged out)
+  const coalesce = async (rg) => {
+    const clk0 = clock; const v = mkVendor(); const h = rotatingG(v); const tok = tokC(expired());
+    const a = rg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    tok.mode = 'fail'; const r1 = await a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);   // R1 ⇒ 1//rot-1, the write refused ⇒ unsaved
+    clock += 3600e3 + 130e3;   // rot-1's access token expires
+    tok.mode = 'fail'; let releaseR; h.hold = new Promise((r) => { releaseR = r; });
+    const pX = a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);   // X: the flush fails again, then R2's POST (held)
+    await sleep(15);
+    tok.mode = 'slow'; const pY = a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);   // Y: flushes rot-1 — SLOW, succeeding
+    await sleep(15); releaseR(); await sleep(15); tok.releaseW && tok.releaseW();
+    const rx = await pX, ry = await pY; const held = tok.st.token && tok.st.token.refresh_token; const retiredThen = new Set(h.retired);
+    clock += 3600e3 + 130e3; const rz = await a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);
+    const state = (await a.auth.state()).state; clock = clk0;   // the clock restored for the legs after this one
+    return { r1, rx, ry, rz, held, retired: [...retiredThen], writes: tok.st.writes, state };
+  };
+  {
+    const r = await coalesce(reg);
+    ok(r.r1 === 'ok' && r.rx === 'ok' && r.ry === 'ok' && r.held === '1//rot-2' && !r.retired.includes(r.held) && r.rz === 'ok' && r.state === 'connected', `(h) a later token's persist queued behind an in-flight flush of the earlier one: the store ends with the LIVE token (${r.held}; retired ${r.retired.join(',')}), the next refresh ok, connected`, JSON.stringify(r));
+    const r5 = srcMain.replace(srcMain.slice(srcMain.indexOf('  let persisting = null;'), srcMain.indexOf('  async function refreshAccessToken')), "  let persisting = null;   // ONE write in flight: the waiters of a refresh each re-enter accessToken() and must not each re-write\n  function persistToken(next) {\n    if (persisting) return persisting;\n    persisting = (async () => {\n      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';\n      try { await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null }); unsaved = null; }\n      catch (e) {\n        unsaved = { token: next, supersedes: storeRt };\n        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) \u2014 held in memory and written again at the next request`);\n      }\n    })().finally(() => { persisting = null; });\n    return persisting;\n  }" + '\n');
+    ok(r5 !== srcMain && /if \(persisting\) return persisting;/.test(r5), 'CONTROL fixture: the r5 single-flight persist (a different token handed the in-flight promise) restored in a copy');
+    const mod5 = M.load('src/channels/gmail.js', r5, 'r5-persist'); const rg5 = CH.createChannelRegistry(); rg5.register(mod5.adapter);
+    const c = await coalesce(rg5);
+    ok(c.held === '1//rot-1' && c.retired.includes(c.held) && c.rz !== 'ok', `CONTROL: the r5 persist DROPS the later token — the store keeps the retired ${c.held}, the next refresh ${c.rz}`, JSON.stringify(c));
+  }
+  // (i) the contract at apply time: a flush that lands AFTER a disconnect / a re-authorize writes nothing over the new state
+  for (const act of ['disconnect', 'reauth']) {
+    const v = mkVendor(); const h = rotatingG(v); const tok = tokC(expired());
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    tok.mode = 'fail'; await a.listConversations({ limit: 1 }).catch(() => {});   // unsaved rot-1 (the store holds 1//old)
+    tok.mode = 'slow'; const p2 = a.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code);   // the flush, held
+    await sleep(15);
+    if (act === 'disconnect') await tok.clear(); else tok.st.token = { ...expired(), access_token: 'ya29.REAUTH', expiresAt: now() + 3600e3, refresh_token: '1//reauth' };
+    tok.releaseW(); const r2 = await p2; await sleep(10);
+    const held = tok.st.token && tok.st.token.refresh_token;
+    ok(act === 'disconnect' ? held == null : held === '1//reauth', `(i) the unsaved flush landing after a ${act}: superseded at apply time, the store keeps the ${act === 'disconnect' ? 'cleared state' : 're-authorize\'s token'} (held ${held}; the queued caller ${r2})`);
+  }
+  // (j) A CONSENT MUST NAME ITS ACCOUNT: the profile read fails ⇒ the consent is refused by name, nothing written (a nameless token bound nothing — the record then took anyone's next consent)
+  {
+    const v = mkVendor(); const f0 = v.fetchFn; const fetchFn = async (url, init) => (/\/profile$/.test(new URL(String(url)).pathname) ? jsonRes({ error: { code: 500, message: 'Backend Error' } }, 500) : f0(url, init));
+    const OL2 = require(path.join(REPO, 'src/oauth-loopback.js')); const oauth = OL2.createOAuthLoopback({ now, log: quiet }); const done = []; const tok = mkTok(null);
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, oauth, resolveIntegration: (id) => integrations.resolveIntegration(id), onAuthDone: (id, r) => done.push(r), log: quiet });
+    const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
+    const pb = await a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`);
+    ok(pb.ok === false && /did not say which account signed in/.test(pb.error) && done.length === 1 && done[0].ok === false && tok.st.writes === 0 && tok.st.token === null, `(j) a consent whose profile read failed is REFUSED by name and writes nothing (${pb.error})`);
+    oauth.stopAll();
+  }
+  // (l) verify r7: a profile answering WHITESPACE or a bare word is NOBODY too (the r6 check was truthiness: '   ' landed a token that named no account — the record then took anyone's next consent; 'not-an-email' bound the record to a non-address)
+  for (const [mode, answer] of [['whitespace', '   '], ['a bare word', 'not-an-email'], ['an empty string', '']]) {
+    const v = mkVendor(); const f0 = v.fetchFn; const fetchFn = async (url, init) => (/\/profile$/.test(new URL(String(url)).pathname) ? jsonRes({ emailAddress: answer, historyId: '100' }) : f0(url, init));
+    const OL2 = require(path.join(REPO, 'src/oauth-loopback.js')); const oauth = OL2.createOAuthLoopback({ now, log: quiet }); const done = []; const tok = mkTok(null);
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, oauth, resolveIntegration: (id) => integrations.resolveIntegration(id), onAuthDone: (id, r) => done.push(r), log: quiet });
+    const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
+    const pb = await a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`);
+    ok(pb.ok === false && /did not say which account signed in \(the profile carried no email address\)/.test(pb.error) && done[0].ok === false && tok.st.writes === 0, `(l) a profile answering ${mode} is NAMELESS: refused by name, nothing written`, JSON.stringify({ pb, writes: tok.st.writes }));
+    oauth.stopAll();
+  }
+  // (m) verify r7: the consent write hands the door the flow's own `cancelled()` (the door refuses, inside its serialized write, a consent whose flow a disconnect / cancel / newer sign-in ended meanwhile); a flow cancelled DURING its exchange reports {ok:false, cancelled}
+  {
+    const v = mkVendor(); const f0 = v.fetchFn; let release; const hold = new Promise((r) => { release = r; });
+    const fetchFn = async (url, init) => { if (/\/profile$/.test(new URL(String(url)).pathname)) await hold; return f0(url, init); };
+    const OL2 = require(path.join(REPO, 'src/oauth-loopback.js')); const oauth = OL2.createOAuthLoopback({ now, log: quiet }); const done = []; const tok = mkTok(null);
+    const seen = []; const tokens = { ...tok, write: async (t, meta) => { seen.push({ consent: meta.consent, cancelled: meta.consent && typeof meta.consent.cancelled === 'function' ? meta.consent.cancelled() : undefined }); return tok.write(t, meta); } };
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens, oauth, resolveIntegration: (id) => integrations.resolveIntegration(id), onAuthDone: (id, r) => done.push(r), log: quiet });
+    const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
+    const pb = a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`); await sleep(30);
+    oauth.cancel(f.flowId, 'cancelled'); release(); const r = await pb;
+    ok(seen.length === 1 && seen[0].consent && typeof seen[0].consent.cancelled === 'function' && seen[0].cancelled === 'cancelled', `(m) the consent write carries the flow's cancelled() and it reads the cancel that landed mid-exchange (${JSON.stringify(seen[0] && seen[0].cancelled)})`);
+    ok(r.ok === true && r.error === null && tok.st.token && done[0] && done[0].ok === true && done[0].cancelled === 'cancelled', `(m) r8: this memory store does not consult cancelled() and WROTE — the exchange resolved, so the report says ok:true with the cancel carried (the loopback cannot undo a write; the engine's doors are the ones that refuse) (ok ${r.ok}, cancelled ${done[0] && done[0].cancelled})`);
+    oauth.stopAll();
+  }
 }
 
 // ── ⑦ pure helpers ──

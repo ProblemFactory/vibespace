@@ -165,7 +165,7 @@ console.log('— ② chips appear at their place and leave again, neighbours unt
   ok(!!wf && wf.getAttribute('data-wf-run') === 'wf_abc' && wf.getAttribute('data-wf-name') === 'Build & verify' && wf.className.includes('chat-status-wf'), '② the workflow chip carries data-wf-run / data-wf-name as RAW attribute values');
   bar.dispose();
   const created = counters.created;
-  bar.setBrowserProfile({ key: 'k', active: null, pinned: 'p1', pinnedLabel: 'Work', activeLabel: '' });
+  bar.setBrowserProfile({ key: 'k', fact: { input: null, live: false }, words: { show: true, line: 'Work', name: 'Work', tooltip: 'Using: Work', amber: false } }); // lane S2: the chip prints THE browser fact's words
   ok(keys(bar).includes('browser') && counters.created - created === 1, `② a new chip costs exactly ONE element (${counters.created - created})`);
 }
 

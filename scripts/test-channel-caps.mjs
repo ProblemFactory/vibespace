@@ -246,6 +246,31 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
   ok(/60/.test(b) && /37/.test(b) && /23/.test(b) && /request/.test(b), 'the budget sentence names the cap, the queue and the wait', b);
   ok(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: false }, { t }) === '', 'a budget that is not exhausted says nothing');
   ok(/quota unit/.test(C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 1, resetInSeconds: 5 }, { t })), 'Gmail\'s budget is worded in quota units');
+  // lane R5: the per-second figure, the vendor's rate words, the first read
+  const bp = C.budgetText({ unit: 'quota-unit', limit: 3000, perSec: 40, exhausted: true, waiting: 2, resetInSeconds: 9, spentBy: { agent: 5 } }, { t });
+  ok(/3000 quota units\/min/.test(bp) && /at most 40\/s/.test(bp) && /5 of them by agent/.test(bp), 'a PACED account\'s budget sentence names units/min AND units/s (and the agents\' part)', bp);
+  const NOW = 1_800_000_000_000;
+  const rl = (extra) => ({ lastPass: { ok: false, code: 'rate-limited' }, backoffUntil: NOW + 12_000, ...extra });
+  const gr = C.passStateText(rl({ vendor: 'Google' }), { t, now: NOW });
+  ok(gr.rate === true && gr.note === 'Google is limiting the rate · resuming in 12 s', 'a RATE refusal is said by the vendor\'s declared name with the wait — never "failed", never "paused"', JSON.stringify(gr));
+  const zt = (s2, p) => t({ 'Feishu': '飞书', '{vendor} is limiting the rate · resuming in {s} s': '{vendor} 限速中 · {s} 秒后继续' }[s2] || s2, p);
+  ok(C.passStateText(rl({ vendor: 'Feishu' }), { t: zt, now: NOW }).note === '飞书 限速中 · 12 秒后继续', 'the vendor name is a KEY the device\'s t() words (Feishu ⇒ 飞书)');
+  ok(C.passStateText(rl({}), { t, now: NOW }).note === 'The vendor is limiting the rate · resuming in 12 s' && C.passStateText(rl({ vendor: 'Google', backoffUntil: NOW - 1 }), { t, now: NOW }).note === 'Google is limiting the rate · resuming at the next pass', 'no declared name ⇒ "The vendor"; a lapsed wait ⇒ "at the next pass"');
+  const tr = C.passStateText({ lastPass: { ok: false, code: 'transport' }, backoffUntil: NOW + 30_000 }, { t, now: NOW });
+  ok(!tr.rate && tr.note === 'transport failure — retrying in 30 s', 'any other failure keeps its code words and its retry', JSON.stringify(tr));
+  const fr = (f) => C.firstReadText({ firstIngest: f }, { t });
+  ok(fr({ done: 100, total: 873, etaSec: 773 }) === 'reading for the first time · 100/873 conversations · about 13 min left' && fr({ done: 870, total: 873, etaSec: 3 }) === 'reading for the first time · 870/873 conversations · under a minute left' && fr({ done: 5, total: 9, etaSec: null }) === 'reading for the first time · 5/9 conversations', 'the first read says how far and, at the pace, how long (rounded UP to whole minutes, "under a minute" below one)');
+  ok(fr({ done: 873, total: 873, etaSec: 0 }) === '' && C.firstReadText(null) === '' && C.firstReadText({ firstIngest: null }) === '', 'once every conversation was read once the line is gone');
+  // verify r3: past 90 minutes the wait is hours + minutes (349 min under a 100/min budget was said as "349 min")
+  ok(fr({ done: 0, total: 873, etaSec: 349 * 60 }) === 'reading for the first time · 0/873 conversations · about 5 h 49 min left' && fr({ done: 0, total: 10, etaSec: 7200 }) === 'reading for the first time · 0/10 conversations · about 2 h left' && fr({ done: 0, total: 10, etaSec: 89 * 60 }) === 'reading for the first time · 0/10 conversations · about 89 min left' && fr({ done: 0, total: 10, etaSec: 90 * 60 }) === 'reading for the first time · 0/10 conversations · about 1 h 30 min left',
+    'past 90 minutes the ETA says hours and minutes (349 min = "about 5 h 49 min left"; a whole hour names no minutes; 89 min stays minutes)');
+  const ZH = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default;
+  const zh = (s2, p) => t(ZH[s2] || s2, p);
+  const zb = C.budgetText({ unit: 'quota-unit', limit: 3000, exhausted: true, waiting: 12, resetInSeconds: 30, spentBy: { agent: 400 }, perSec: 40 }, { t: zh });
+  ok(zb.includes('其中 400 来自 agent 主动刷新') && !zb.includes('次是') && ZH['about {h} h {min} min left'] && ZH['about {h} h left'], `the zh budget sentence names the agents' units without 次 ("${zb}"), and the hours ETA has its zh entries`, zb);
+  const pillSrc = require('node:fs').readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
+  const pausedReturns = (pillSrc.match(/state: 'paused'/g) || []).length;
+  ok(pausedReturns === 1 && /if \(cad\.paused\) return \{ kind: 'within', state: 'paused'/.test(pillSrc), 'the row pill\'s "paused" has ONE producer — the owner\'s own override (cadenceFor) — so a vendor\'s rate wait can never read "refresh paused"');
 }
 
 // ── ⑦ the module is PURE ──

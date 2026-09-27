@@ -11,7 +11,7 @@
 //   ② one driver at a time: conversation 2 mid-turn while conversation 1 drives ⇒ `browser_busy` naming "First chat"
 //      through the shipped CLI; the turn ends ⇒ it runs
 //   ③ the user takes over from conversation 2's live view (the real bridge): conversation 2 browser_paused,
-//      conversation 1 browser_busy "the user"; the handback frees it
+//      conversation 1 browser_paused too (lane S2 r6: a takeover is of the BROWSER); the handback frees it
 //   ④ the row switch "Only First chat" ⇒ conversation 2 refused with the button sentence (never a command line); the
 //      user's new pick gives it back
 //   ⑤ Rename; Delete… with two pins ⇒ the warning's count, every pin cleared, the browser stopped, the directory set aside
@@ -144,7 +144,8 @@ else await (async () => {
     for (let i = 0; i < 50 && !inbox.some((m) => m.type === 'mode-ack'); i++) await sleep(100);
     const ack = inbox.find((m) => m.type === 'mode-ack');
     const u2 = await run(s2, ['get', 'title']), u1 = await run(s1, ['get', 'title']);
-    ok(ack && ack.ok && !u2.ok && /\[browser_paused\]/.test(u2.err) && !u1.ok && /\[browser_busy\]/.test(u1.err) && /driven by the user/.test(u1.err) && /"Second chat"/.test(u1.err), '③ the user takes over from conversation 2\'s live view: conversation 2 browser_paused (as today), conversation 1 browser_busy — "the user (in Second chat\'s live view)"', { ack, u2: u2.err, u1: u1.err });
+    // integration 2.369.192: a takeover is of the BROWSER (lane S2 r6, the owner's ruling B-7199) — conversation 1 is taken WITH it
+    ok(ack && ack.ok && !u2.ok && /\[browser_paused\]/.test(u2.err) && !u1.ok && /\[browser_paused\]/.test(u1.err), '③ the user takes over from conversation 2\'s live view: conversation 2 browser_paused (as today), conversation 1 browser_paused too — the takeover is of the browser, never one conversation\'s', { ack, u2: u2.err, u1: u1.err });
     ws.send(JSON.stringify({ type: 'handback' }));
     for (let i = 0; i < 50 && inbox.filter((m) => m.type === 'mode-ack').length < 2; i++) await sleep(100);
     ws.close();
@@ -166,7 +167,7 @@ else await (async () => {
     ws3.send(JSON.stringify({ type: 'takeover' }));
     for (let i = 0; i < 50 && !inbox3.some((m) => m.type === 'mode-ack'); i++) await sleep(100);
     const b1 = await run(s1, ['get', 'title']);
-    ok(!b1.ok && /\[browser_busy\]/.test(b1.err) && /driven by the user/.test(b1.err), '③b setup: the user drives work from conversation 2\'s live view — conversation 1 is browser_busy (by user)', b1.err);
+    ok(!b1.ok && /\[browser_paused\]/.test(b1.err), '③b setup: the user drives work from conversation 2\'s live view — conversation 1 is browser_paused (taken WITH it: lane S2 r6)', b1.err);
     const mark3 = inbox3.length;
     await sleep(5);
     r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'one', conversation: KA });

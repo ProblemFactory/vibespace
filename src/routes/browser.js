@@ -13,7 +13,8 @@
  *                                             P4: `host` = the PAIRED machine the browser runs on (chromium via the
  *                                             browser-serve op, cdp via tcpForward); `cdpPort` = a cdp profile's port
  *   GET    /api/browser/profiles/:id
- *   DELETE /api/browser/profiles/:id          refused while leased or running; the dir is kept
+ *   DELETE /api/browser/profiles/:id[?unpin=1] refused while leased or running; the dir is kept; lane S2: a PINNED profile is
+ *                                             refused `pinned` {count, names} unless `unpin` — then every pin is cleared first
  *   POST   /api/browser/profiles/:id/stop     stop its browser (leases stay; it restarts on the next attach)
  *   POST   /api/browser/attach                { sessionId, profile }   a live session's conversation → profile
  *   POST   /api/browser/detach                { sessionId, profile? }
@@ -112,6 +113,8 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
   // P3 (§4.3): the user drives ⇒ the agent's command is refused typed; the control verbs' own refusals
   browser_paused: 409, held: 409, not_taken: 409, no_confirmation: 404, 'no-browser': 409, refused: 409,
+  // the owner's ruling (2026-09-27): a command the takeover caught in flight (the audit's answer names it; never a route refusal of its own)
+  browser_interrupted: 409,
   // P4 second half (§7.4 / §7.5): the switch's typed refusals — three named backend refusals (D33), the ladder, seats, the gap
   backend_unavailable: 400, backend_no_key: 409, backend_seat_taken: 409, backend_seat_ceiling: 409, downgrade_refused: 409, downgrade_unknown: 409,
   switch_refused: 400, switch_export_only: 400, switch_noop: 409, browser_restarting: 409, hint_tier_with_backend: 400, host_underivable: 400, no_profile: 409,
@@ -265,7 +268,15 @@ router.delete('/api/browser/profiles/:id', (req, res) => {
   if (refuseHost(req, res)) return;
   const k = keeperOr503(res); if (!k) return;
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
-  try { res.json(k.removeProfile(req.params.id)); } catch (e) { fail(res, e); }
+  // lane S2 (naive study 2, T7): refuse-or-warn — a pinned profile is removed only with `unpin` (every pin cleared first)
+  const unpin = req.query.unpin === '1' || req.query.unpin === 'true' || req.body?.unpin === true;
+  try {
+    const rv = typeof k.removeVerdict === 'function' ? k.removeVerdict(req.params.id) : { ok: true };
+    if (!rv.ok) return res.status(STATUS[rv.code] || 409).json({ error: rv.error, code: rv.code }); // leased / running first: never an unpin for a removal that cannot happen
+    const g = pinGuardFor(req.params.id, unpin); if (g) return res.status(409).json(g);
+    const u = unpin ? unpinProfile(req.params.id) : { cleared: 0, sessions: [] };
+    res.json({ ...k.removeProfile(req.params.id, { unpin }), unpinned: u.cleared });
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/profiles/:id/stop', async (req, res) => {
   if (refuseHost(req, res)) return;
@@ -567,7 +578,7 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
  *  check an attachment gets: paused, busy). A pin that does not open is a TYPED refusal naming the pin (`pinned:true`),
  *  recorded for the conversation's facts — NEVER a silent fall-back to a temporary browser (the study's path B). A
  *  remote session (rung H) never had a pin applied here: it keeps its own browser, as before. */
-async function attachPin(k, f, v) {
+async function attachPin(k, f, v, verb = null) {
   const B = require('../browser-profiles.js');
   const s = f.session || {};
   if (s._browserVariant === B.VARIANTS.H || s.hostId || s.host) return { ...v, kind: 'none' };
@@ -584,43 +595,7 @@ async function attachPin(k, f, v) {
   }
   try { k.clearPinFailure?.(f.browserKey); } catch { /* optional */ }
   k.tell(f.browserKey); // the verb's own set change never earns it a one-time profile_changed
-  return k.resolveFor({ browserKey: f.browserKey, handle: '', subagent: sidechainOpen(f.session) });
-}
-/** Lane S2's seam name (the dangling-pin half, `routes/browser.js` beside the pin route): the conversations whose pin
- *  names `profileId` — the keeper's pins and a live session's own record — with the live ones' names. */
-function pinHoldersOf(profileId) {
-  const k = ctx && ctx.keeper;
-  const out = new Map();
-  if (k && typeof k.pinnedBy === 'function') for (const x of k.pinnedBy(profileId)) out.set(x.browserKey, { browserKey: x.browserKey, name: '', sessionId: null });
-  for (const [id, s] of (ctx?.activeSessions || new Map())) {
-    if (!s || !s._browserKey) continue;
-    const hit = out.get(s._browserKey) || (s._browserProfileId === profileId ? { browserKey: s._browserKey, name: '', sessionId: null } : null);
-    if (!hit) continue;
-    hit.sessionId = id; hit.name = String(s.webuiName || s.name || '');
-    out.set(s._browserKey, hit);
-  }
-  return [...out.values()];
-}
-/** Lane S2's seam name: clear every pin naming `profileId` BEFORE its record goes — a live conversation through THE pin
- *  implementation (its session record + meta, the agent's zero-billed notice), a stopped one in the keeper. Never throws.
- *  (Owner ruling A's Delete… calls it; when lane S2 lands its richer version — the cleared MARK the browser fact reads —
- *  that one replaces this body under the same name.) */
-function unpinProfile(profileId) {
-  const k = ctx && ctx.keeper;
-  if (!k) return { cleared: 0, sessions: [] };
-  const p = k.profile(profileId);
-  const label = p ? p.label : '';
-  let cleared = 0; const sessions = [];
-  for (const h of pinHoldersOf(profileId)) {
-    try {
-      const s = h.sessionId ? ctx.activeSessions.get(h.sessionId) : null;
-      if (s) { pinAnswer(k, { session: s, sessionId: h.sessionId, browserKey: h.browserKey, taskIds: [] }, null, { by: 'user' }); sessions.push(h.sessionId); }
-      if (typeof k.clearPin === 'function') k.clearPin(h.browserKey);
-      cleared++;
-    } catch (e) { console.warn(`[browser] ${h.browserKey}: pin not cleared before deleting ${profileId} — ${e && e.message}`); }
-  }
-  if (cleared) console.log(`[browser] profile ${profileId}${label ? ' "' + label + '"' : ''}: ${cleared} conversation pin(s) cleared before its removal (${sessions.length} live)`);
-  return { cleared, sessions };
+  return k.resolveFor({ browserKey: f.browserKey, handle: '', subagent: sidechainOpen(f.session), verb }); // the verb rides the re-resolve (a paused refusal still names it for the handback's re-run list)
 }
 /** Owner ruling A (6): Delete… releases the profile first — every conversation's lease detached BY THE USER (each live
  *  one hears it on its next message: layer ②'s zero-billed notice) and its browser stopped. */
@@ -647,6 +622,72 @@ function convertPinnedDirs() {
     if (!s || !s._browserKey) continue;
     const r = clearPinnedDir(k, { session: s, sessionId: id, browserKey: s._browserKey });
     if (r) n++;
+  }
+  return n;
+}
+
+// ── lane S2 (naive study 2, T7): a deleted profile leaves NO dangling pin ──
+/** The conversations whose pin names `profileId` — the keeper's pins AND a live session's own record (a pin the
+ *  keeper never mirrored) — with the live ones' names (the UI's "3 conversations use this profile — unpin them?"). */
+function pinHoldersOf(profileId) {
+  const k = ctx && ctx.keeper;
+  const out = new Map();
+  if (k && typeof k.pinnedBy === 'function') for (const x of k.pinnedBy(profileId)) out.set(x.browserKey, { browserKey: x.browserKey, name: '', sessionId: null });
+  for (const [id, s] of (ctx?.activeSessions || new Map())) {
+    if (!s || !s._browserKey) continue;
+    const hit = out.get(s._browserKey) || (s._browserProfileId === profileId ? { browserKey: s._browserKey, name: '', sessionId: null } : null);
+    if (!hit) continue;
+    hit.sessionId = id; hit.name = String(s.webuiName || s.name || '');
+    out.set(s._browserKey, hit);
+  }
+  return [...out.values()];
+}
+/** null = may proceed; else the 409 body (`code:'pinned'`, the count, the names, the sentence). */
+function pinGuardFor(profileId, unpin = false) {
+  const k = ctx && ctx.keeper;
+  const p = k ? k.profile(profileId) : null;
+  const v = require('../browser-fact.js').deletePinnedVerdict({ label: p ? p.label : '', pinnedBy: pinHoldersOf(profileId), unpin });
+  return v.ok ? null : { error: v.error, code: v.code, count: v.count, names: v.names };
+}
+/**
+ * Clear every pin naming `profileId` BEFORE its record goes: a live conversation through THE pin implementation
+ * (`pinAnswer(…, null, {by:'user'})` — its session record + meta, its browser-env indirection moved OFF the
+ * directory (else the next launch would recreate an empty profile at the old path), the agent's zero-billed notice),
+ * a stopped one in the keeper + its env; each entry keeps the cleared MARK the browser fact reads. Never throws.
+ */
+function unpinProfile(profileId) {
+  const k = ctx && ctx.keeper;
+  if (!k) return { cleared: 0, sessions: [] };
+  const p = k.profile(profileId);
+  const label = p ? p.label : '';
+  let cleared = 0; const sessions = [];
+  for (const h of pinHoldersOf(profileId)) {
+    try {
+      const s = h.sessionId ? ctx.activeSessions.get(h.sessionId) : null;
+      if (s) { pinAnswer(k, { session: s, sessionId: h.sessionId, browserKey: h.browserKey, taskIds: [] }, null, { by: 'user' }); sessions.push(h.sessionId); }
+      else { try { ctx.browserEnv?.()?.repointPin?.(h.browserKey, null); } catch (e) { console.warn(`[browser] ${h.browserKey}: pin re-point off a deleted profile failed — ${e && e.message}`); } }
+      k.clearPin(h.browserKey, { cleared: { id: profileId, label } });
+      cleared++;
+    } catch (e) { console.warn(`[browser] ${h.browserKey}: pin not cleared before deleting ${profileId} — ${e && e.message}`); }
+  }
+  if (cleared) console.log(`[browser] profile ${profileId}${label ? ' "' + label + '"' : ''}: ${cleared} conversation pin(s) cleared before its removal (${sessions.length} live)`);
+  return { cleared, sessions };
+}
+/** A live session whose pin names a profile the registry no longer has (a delete before this fix, a hand-edited
+ *  store): cleared at boot the same way, the MARK without a label ("a deleted profile"). */
+function healDanglingPins() {
+  const k = ctx && ctx.keeper;
+  if (!k) return 0;
+  let n = 0;
+  for (const [id, s] of (ctx.activeSessions || new Map())) {
+    if (!s || !s._browserKey || !s._browserProfileId || k.profile(s._browserProfileId)) continue;
+    const gone = s._browserProfileId;
+    try {
+      pinAnswer(k, { session: s, sessionId: id, browserKey: s._browserKey, taskIds: [] }, null, { by: 'user' });
+      k.clearPin(s._browserKey, { cleared: { id: gone, label: '' } });
+      n++;
+      console.log(`[browser] ${id}: its pin named ${gone}, a profile that no longer exists — cleared (the chip says so)`);
+    } catch (e) { console.warn(`[browser] ${id}: dangling pin ${gone} not cleared — ${e && e.message}`); }
   }
   return n;
 }
@@ -752,10 +793,15 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   const B = require('../browser-profiles.js');
   try {
-    let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session) });
+    // the owner's ruling (2026-09-27): a verb refused while the user drives goes on the handback's re-run list (its NAME only)
+    const verb = require('../browser-profiles.js').auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
+    let v = k.resolveFor({ browserKey: f.browserKey, handle: req.body?.handle || '', subagent: sidechainOpen(f.session), verb });
     // owner ruling A: a pin is this conversation's DEFAULT ATTACHMENT, opened through the keeper — never a directory
-    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v);
+    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);
     if (!v.ok) return failVerdict(res, v);
+    // …and the SERVER's instant this command was allowed to run: the CLI hands it back with its audit, and a takeover that
+    // began at or after it caught the command in flight (`interrupted` — one clock, the server's, for every machine)
+    const resolvedAt = typeof k.clock === 'function' ? k.clock() : Date.now(); // the keeper's clock — the one its takeovers are stamped on
     if (v.kind === 'none') {
       // D7 (design-browser-takeover §5.3): a session on the SHARED rung (isolation
       // off, or the one local corner that gave it nothing) drives the machine's
@@ -776,10 +822,10 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return res.json({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false });
+        return res.json({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt });
       }
       stampActive(f, '');
-      return res.json({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false });
+      return res.json({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     if (v.kind === 'child') {
       const env = childEnvOf(f, v.handle);
@@ -790,14 +836,14 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
-        return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser });
+        return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt });
       }
-      return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false });
+      return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds });
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
-    res.json({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault });
+    res.json({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/new-child', (req, res) => {
@@ -812,7 +858,7 @@ router.post('/api/agent/browser/new-child', (req, res) => {
     res.json({ ...c, env: env.pairs, unset: env.unset, handles: k.setFor(f.browserKey).handles });
   } catch (e) { fail(res, e); }
 });
-router.post('/api/agent/browser/audit', (req, res) => {
+router.post('/api/agent/browser/audit', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   try {
@@ -826,7 +872,18 @@ router.post('/api/agent/browser/audit', (req, res) => {
     // P4 (§7.4 step 1): a navigation stamps the lease's lastUrl — the URL a switch re-opens; the audit LINE stays verb-only
     if (profileId && typeof req.body?.url === 'string') k.noteLeaseUrl(f.browserKey, profileId, req.body.url);
     k.audit({ sessionId: f.sessionId, browserKey: f.browserKey, profileId, verb: req.body?.verb, ok: req.body?.ok !== false });
-    res.json({ ok: true });
+    // THE AGENT IS TOLD (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): a takeover that began at or after this
+    // command's /resolve caught it in flight — the CLI prints it by name and exits as a refusal. A child handle's pair is
+    // its own key (a helper's browser); an unmanaged / ephemeral command asks the conversation's own pair.
+    const since = Number(req.body?.since) || 0;
+    let interrupted = null;
+    if (since > 0 && typeof k.interruptionFor === 'function') {
+      const child = typeof req.body?.handle === 'string' && require('../browser-profiles.js').isChildKey(req.body.handle) && require('../browser-profiles.js').parentKeyOf(req.body.handle) === f.browserKey ? req.body.handle : null;
+      // verify r6: a mediated lease's aborted calls may still be answered by the browser (a fill's text LANDED) — wait, bounded, so the words are true
+      if (!child && profileId && typeof k.awaitInterruptionSettled === 'function') { try { await k.awaitInterruptionSettled({ browserKey: f.browserKey, profileId }); } catch { /* the answer below stands */ } }
+      interrupted = k.interruptionFor({ browserKey: child || f.browserKey, profileId: child ? null : profileId, since, verb: req.body?.verb }); // verify r5: the interrupted verb joins the handback's re-run list
+    }
+    res.json({ ok: true, ...(interrupted ? { interrupted } : {}) });
   } catch (e) { fail(res, e); }
 });
 /** P4: the same provider rows for the CLI (`vibespace-browser providers`),
@@ -939,4 +996,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, unpinProfile, pinHoldersOf, releaseProfile, convertPinnedDirs }; // owner ruling A: Delete…'s release + lane S2's unpin seam; the boot conversion of pre-ruling pins
+module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs }; // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

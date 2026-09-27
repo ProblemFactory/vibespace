@@ -76,7 +76,7 @@ function createGmailLive({ adapterId, api, accessToken, tokenScopes, options, fe
   async function pubsub(method, sub, verb, body, token, signal) {
     let r;
     try {
-      r = await f(`${PUBSUB}/${sub}:${verb}`, {
+      r = await f(`${PUBSUB}/${sub}:${verb}`, {   // ungated: pubsub
         method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8', Accept: 'application/json' },
         body: JSON.stringify(body || {}), signal: signal || AbortSignal.timeout(pullTimeoutMs),
       });

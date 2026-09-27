@@ -111,6 +111,10 @@ console.log('① the PURE router');
     ok(census.includes('a11y') && census.includes('webmcp'), '0.38.1: the census carries its two new top-level words (a11y from `skills get core --full`, webmcp from the help)', census.join(' '));
     const a = V.classify(['a11y']), au = V.classify(['a11y', 'https://example.com', '--tags', 'wcag2a']), af = V.classify(['a11y', 'file:///etc/passwd']), ac = V.classify(['a11y', 'chrome://version']);
     ok(a.kind === 'page' && au.kind === 'page' && af.code === 'local_scheme_refused' && ac.code === 'local_scheme_refused' && V.NAV_VERBS.includes('a11y'), '0.38.1: `a11y [url]` is a page verb that NAVIGATES — a web url passes, a file:/chrome: one is refused like `open`\'s', JSON.stringify([a.kind, au.kind, af.code, ac.code]));
+    // verify S2 r3 (r2 F2): a paused refusal of a verb that would MOVE THE USER'S VIEW is said by name (every page verb is refused by /resolve while they drive — the note is the why)
+    { const n = (v, sub) => V.pausedSwitchNote(v, sub);
+      ok(/`tab t2` would switch what the user is looking at to another tab/.test(n('tab', 't2')) && /never queued/.test(n('tab', 't2')) && /re-orient there/.test(n('tab', 'new')) && /another window/.test(n('window', 'new')) && /`open` would move the page the user is looking at/.test(n('open', 'https://x')) && n('back', null) && n('reload', null) && n('goto', 'https://x') && n('pushstate', '/x'), 'r3: `tab <n>` / `tab new` / `window new` / `open` / `goto` / `back` / `reload` / `pushstate` carry the switching note (what it would move, never queued, re-orient at the handback)');
+      ok(n('tab', 'list') === null && n('tab', null) === null && n('window', 'list') === null && n('click', '@e1') === null && n('type', 'x') === null && n('snapshot', null) === null && n('', null) === null && V.SWITCH_VERBS.every((v) => V.PAGE_VERBS.includes(v) || v === 'goto' || v === 'navigate' || v === 'nav'), 'r3: a read (`tab list`), a page act (`click`, `type`, `snapshot`) and no verb carry none; every switching verb is a page verb or an alias of `open`'); }
     const w = V.classify(['webmcp', 'invoke', 'x']);
     ok(w.kind === 'refused' && w.code === 'verb_not_offered' && /action trace/.test(w.error) && /snapshot/.test(w.remedy), '0.38.1: `webmcp` (page-declared tools, experimental) is refused BY NAME — neither mediated nor traced — with the page-UI way out', JSON.stringify(w));
     ok(V.classify(['snapshot', '--no-pin-tab']).code === 'identity_flag_refused' && V.classify(['open', 'https://x', '--pin-tab']).kind === 'page', '0.38.1: `--no-pin-tab` (drops the sticky tab binding) is the lease\'s decision — refused; `--pin-tab` only tightens it and passes');
@@ -683,12 +687,14 @@ if (process.argv.includes('batch') && !process.argv.slice(process.argv.indexOf('
 const ab = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
 fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ argv: process.argv.slice(2), session: process.env.AGENT_BROWSER_SESSION || null, env: ab, xdg: Object.prototype.hasOwnProperty.call(process.env, 'XDG_RUNTIME_DIR') ? process.env.XDG_RUNTIME_DIR : null, input, batchJson, cwd: process.cwd() }) + '\\n');
 if (process.argv[2] === 'open') console.log('✓ opened ' + process.argv[3]);
+if (process.env.FAKE_AB_EXIT) process.exit(Number(process.env.FAKE_AB_EXIT)); // verify r6: a binary that exits non-zero (a refused first call)
 process.exit(0);
 `, { mode: 0o755 });
 const realCalls = () => { try { return fs.readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 
 const calls = [];
 let resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
+let auditAnswer = { ok: true }; // the owner's ruling (2026-09-27): the audit may answer `interrupted`
 const server = http.createServer((req, res) => {
   let body = '';
   req.on('data', (d) => { body += d; });
@@ -697,7 +703,7 @@ const server = http.createServer((req, res) => {
     calls.push({ method: req.method, path: req.url, body: j, auth: req.headers.authorization || '' });
     const send = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
     if (req.url === '/api/agent/browser/resolve') return send(resolveAnswer._status || 200, resolveAnswer);
-    if (req.url === '/api/agent/browser/audit') return send(200, { ok: true });
+    if (req.url === '/api/agent/browser/audit') return send(200, auditAnswer);
     if (req.url === '/api/agent/browser/new-child') return send(200, { handle: 'bk-0000000a.1', env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a.1', 'AGENT_BROWSER_NAMESPACE=vs-bk-0000000a.1'], unset: [], handles: [] });
     if (req.url === '/api/agent/browser/use') return send(200, { profile: { id: 'bp-00000001', label: 'Work' }, lease: { since: Date.now() }, others: 0, alias: 'work', created: true, env: ['AGENT_BROWSER_SESSION=vs-bk-0000000a'], attachments: [{}] });
     send(404, { error: 'no such route', code: 'not-found' });
@@ -750,6 +756,49 @@ try {
   ok(calls.length === before && realCalls().length === 2, '…with ZERO server calls and nothing run');
   c = await cli(['frobnicate']);
   ok(c.status === 2 && /\[unknown_verb\]/.test(c.stderr) && calls.length === before, 'an unknown verb exits 2 (usage) with no server call');
+  // THE OWNER'S RULING (2026-09-27, "告知agent发生了打断"): the audit answers whether a takeover caught the command in flight — the
+  // CLI prints the refusal BY NAME and exits 1 like every refusal, whatever the binary said
+  {
+    const SENT = 'The user took over this browser — your operation was interrupted. Wait for the handback, then run it again.';
+    const auditBodies = () => calls.filter((x) => x.path === '/api/agent/browser/audit').map((x) => x.body);
+    ok(auditBodies().every((b) => !('since' in b)), 'interrupt: an answer with no server instant (an older server) ⇒ the audit sends no `since` (nothing to compare)');
+    resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false, at: 1790000000123 };
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true } };
+    let ci = await cli(['click', '@e1']);
+    ok(ci.status === 1 && ci.stderr.includes(`${SENT} [browser_interrupted]`) && /taken over at: 2026-/.test(ci.stderr) && /the user still drives — wait for the handback \(it names what to re-run\)/.test(ci.stderr) && /cut short/.test(ci.stderr) && auditBodies().at(-1).since === 1790000000123, 'interrupt: the audit answers `interrupted` (cut on a mediated browser) ⇒ THE sentence [browser_interrupted], when, that the user still drives, that it was cut — exit 1; the audit carried the /resolve instant as `since` (the server\'s clock)', JSON.stringify(ci));
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'agent', handedBackAt: 1790000009000, aborted: false } };
+    ci = await cli(['click', '@e1']);
+    ok(ci.status === 1 && ci.stderr.includes(`${SENT} [browser_interrupted]`) && /control is back with you: re-read the page, then run it again/.test(ci.stderr) && /nothing stood between your command and the page: it ran to its end/.test(ci.stderr) && !/cut short/.test(ci.stderr), 'interrupt: not cut (an unmediated browser — the binary exited 0) and already handed back ⇒ the refusal still stands (exit 1), it says the command ran to its end and that control is back', JSON.stringify(ci));
+    resolveAnswer = { ok: true, kind: 'child', handle: 'bk-0000000a.2', env: [], unset: [], handles: [], pinTab: false, at: 1790000000999 };
+    auditAnswer = { ok: true };
+    ci = await cli(['click', '@e1']);
+    ok(ci.status === 0 && !/browser_interrupted/.test(ci.stderr) && auditBodies().at(-1).handle === 'bk-0000000a.2' && auditBodies().at(-1).since === 1790000000999, 'interrupt: nothing interrupted ⇒ exit 0, not a word of it; a helper\'s command names its handle so the server asks THAT browser', JSON.stringify(ci));
+    // verify r6: the words follow WHAT HAPPENED — (a) a cut whose aborted call Chrome still answered with a success LANDED (a
+    // fill's one insertText: the field holds the text while the agent was told browser_interrupted) ⇒ said, with the remedy
+    resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false, at: 1790000000123 };
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 1 } };
+    ci = await cli(['fill', '#f', 'x']);
+    ok(ci.status === 1 && /cut short/.test(ci.stderr) && /but one of its calls had already reached the page and took effect \(a fill's text may be in the field, a click may have landed\): check the page before running it again/.test(ci.stderr), 'r6 (measured on 0.38.1 + Chrome 153: a fill caught on its insertText holds all 4000 chars): a cut whose call LANDED says so — "cut short … but one of its calls had already reached the page and took effect: check the page"', ci.stderr.slice(0, 600));
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 3 } };
+    ci = await cli(['type', '#f', 'xyz']);
+    ok(ci.status === 1 && /but 3 of its calls had already reached the page and took effect/.test(ci.stderr), 'r6: …several landed calls are counted');
+    // verify r7: a call the browser had NOT answered when the audit's bounded wait ran out is said as UNKNOWN — never a definite "cut" (measured: the reply landed 200 ms later)
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 0, unsettled: 1 } };
+    ci = await cli(['click', '@e1']);
+    ok(ci.status === 1 && /cut short/.test(ci.stderr) && /and one of its calls had not been answered by the page when this was written, so whether it took effect is unknown: check the page before running it again/.test(ci.stderr) && !/had already reached the page/.test(ci.stderr), 'r7: a cut whose call was still UNANSWERED says so — "…had not been answered by the page when this was written, so whether it took effect is unknown: check the page"', ci.stderr.slice(0, 700));
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: true, mediated: true, landed: 1, unsettled: 2 } };
+    ci = await cli(['type', '#f', 'xyz']);
+    ok(ci.status === 1 && /but one of its calls had already reached the page and took effect/.test(ci.stderr) && /and 2 of its calls had not been answered by the page/.test(ci.stderr), 'r7: landed AND unanswered calls are both said, counted');
+    // (b) a mediated command whose binary exited 1 with NOTHING aborted: the takeover came between its calls (refused at the next one)
+    auditAnswer = { ok: true, interrupted: { code: 'browser_interrupted', error: SENT, takenAt: 1790000000500, input: 'user', handedBackAt: 0, aborted: false, mediated: true, landed: 0 } };
+    ci = await cli(['click', '@e1'], { ...baseEnv, FAKE_AB_EXIT: '1' });
+    ok(ci.status === 1 && /the takeover came between its calls: what it had done before it stands, its calls after it were refused \(nothing more reached the page\)/.test(ci.stderr) && !/cut short/.test(ci.stderr) && !/ran to its end/.test(ci.stderr) && !/not shared instance-wide/.test(ci.stderr), 'r6: a mediated command refused at its next call (binary exit 1, nothing aborted) says the takeover came between its calls — never "cut short", never "ran to its end"', ci.stderr.slice(0, 600));
+    // (c) the same answer with the binary exiting 0 (r5): it ran to its end — check the page
+    ci = await cli(['click', '@e1']);
+    ok(ci.status === 1 && /found none of this command's calls in flight \(its last one had answered\): it ran to its end — check the page before re-running it/.test(ci.stderr) && !/came between its calls/.test(ci.stderr), 'r5/r6: a mediated command that ran to its end (binary exit 0, nothing aborted) says so — check the page');
+    auditAnswer = { ok: true };
+    resolveAnswer = { ok: true, kind: 'none', handle: null, env: [], handles: [], pinTab: false };
+  }
 
   c = await cli(['use', 'Work', '--print']);
   ok(c.status === 1 && /\[not_offered\]/.test(c.stderr) && !calls.some((x) => x.path === '/api/agent/browser/use'), '`use --print` ⇒ not_offered (nothing to export), no attach made');

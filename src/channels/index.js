@@ -69,6 +69,30 @@ const TOS_RISK = Object.freeze(['none', 'stated', 'prohibited']);
  *  the unit its per-account budget is counted in (`caps.budget.unit`). */
 const OLDER_HISTORY = Object.freeze(['page', 'none']);
 const BUDGET_UNITS = Object.freeze(['request', 'quota-unit']);
+/** Lane R5: the drain actions a `caps.pace.cost` may price (drain rule 18). */
+const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost']);
+
+/**
+ * THE VENDOR'S OWN RETRY HINT (lane R5): seconds from a response's
+ * `Retry-After` (delta-seconds or an HTTP-date) or Lark's
+ * `x-ogw-ratelimit-reset` (seconds), else null. Read by an adapter's
+ * `callJson` when a call is refused, carried as `detail.retryAfterSec` —
+ * the engine's short rate back-off honours it. `headers` = a fetch Headers
+ * (or anything with `get`); a fixture without headers answers null.
+ */
+function retryAfterSeconds(headers, nowMs = Date.now()) {
+  if (!headers || typeof headers.get !== 'function') return null;
+  const read = (k) => { try { const v = headers.get(k); return v == null ? null : String(v).trim(); } catch { return null; } };
+  const ra = read('retry-after');
+  if (ra) {
+    if (/^\d+(\.\d+)?$/.test(ra)) return Math.max(0, Number(ra));
+    const at = Date.parse(ra);
+    if (Number.isFinite(at)) return Math.max(0, Math.ceil((at - nowMs) / 1000));
+  }
+  const reset = read('x-ogw-ratelimit-reset');
+  if (reset && /^\d+(\.\d+)?$/.test(reset)) return Math.max(0, Number(reset));
+  return null;
+}
 
 /** Which capability each optional method is DECLARED by. A method present
  *  without its declaration is refused at registration; a method CALLED without
@@ -112,6 +136,23 @@ function validateCaps(kind, caps) {
     if (!(Number(b.default) > 0)) bad('caps.budget.default must be a positive number (per minute)');
     if (b.settingKey !== undefined && b.settingKey !== null && !/^channels\.[A-Za-z0-9]+$/.test(String(b.settingKey))) bad('caps.budget.settingKey must be a channels.* setting key');
   }
+  // lane R5: the PER-SECOND pace (drain rule 18) — in the budget's unit, so a
+  // pace without a budget has no unit and is refused
+  if (c.pace !== undefined) {
+    const p = c.pace;
+    if (!p || typeof p !== 'object') bad('caps.pace must be an object {unitsPerSec, settingKey?, cost?}');
+    if (c.budget === undefined) bad('caps.pace needs caps.budget (the pace is counted in the budget\'s unit)');
+    if (!(Number(p.unitsPerSec) > 0)) bad('caps.pace.unitsPerSec must be a positive number (per second)');
+    if (p.settingKey !== undefined && p.settingKey !== null && !/^channels\.[A-Za-z0-9]+$/.test(String(p.settingKey))) bad('caps.pace.settingKey must be a channels.* setting key');
+    if (p.cost !== undefined) {
+      if (!p.cost || typeof p.cost !== 'object') bad('caps.pace.cost must be an object {fetch?, discover?, scanHost?}');
+      for (const [k, v] of Object.entries(p.cost)) {
+        if (!PACE_COSTS.includes(k)) bad(`caps.pace.cost.${k} is not an action the drain paces (${PACE_COSTS.join('|')})`);
+        if (!(Number(v) >= 0)) bad(`caps.pace.cost.${k} must be a number ≥ 0`);
+      }
+    }
+  }
+  if (c.vendorName !== undefined && !(typeof c.vendorName === 'string' && c.vendorName.trim() && c.vendorName.length <= 40)) bad('caps.vendorName must be a non-empty string of at most 40 characters (the vendor as the card names it)');
   if (c.receive === 'push') {
     if (!c.pushTransport) bad("caps.receive 'push' must declare pushTransport");
     if (!Number.isFinite(Number(c.pushAckBudgetMs))) bad("caps.receive 'push' must declare pushAckBudgetMs (the vendor's own deadline — fence 11 acks AFTER durability)");
@@ -319,5 +360,6 @@ function createChannelRegistry() {
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
-  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS,
+  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS,
+  retryAfterSeconds,
 };

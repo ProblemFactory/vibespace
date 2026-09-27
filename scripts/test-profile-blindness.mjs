@@ -235,7 +235,8 @@ console.log('— ⑤ the chip says WHOSE browser it is (design-browser-faces dir
   ok(i > 0 && /UI_ICONS\.browserLive\b/.test(blk) && !/UI_ICONS\.(web|globe)\b/.test(blk), "the chip wears UI_ICONS.browserLive — the globe is the web view's alone", blk.slice(-220));
   ok(/const face = t\('Agent browser'\) \+ ' · ';/.test(blk) && /escHtml\(face \+ String\(shown \|\| ''\)\)/.test(blk) && /chip\('browser', [^,]+, face \+ tip,/.test(blk),
     "the chip text AND its tooltip's first line are prefixed 'Agent browser · ' (one t() call, escHtml kept around it); the amber rule is untouched", blk.slice(0, 400));
-  ok(/const differs = b\.active != null && \(b\.active \|\| ''\) !== \(b\.pinned \|\| ''\);/.test(blk) && /driving \? ' driving' : \(differs \? ' amber' : ''\)/.test(blk), 'the amber rule (last used ≠ pinned) and the driving state are unchanged by the rename');
+  // lane S2: the amber rule is THE browser fact's (`words.amber` = the pin and the browser in use differ — src/browser-fact.js), the driving state unchanged
+  ok(/driving \? ' driving' : \(w\.amber \? ' amber' : ''\)/.test(blk) && /const driving = f\.input === 'user';/.test(blk), 'the amber rule (THE fact: the pin and the browser in use differ) and the driving state survive the rename');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

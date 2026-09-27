@@ -20,21 +20,31 @@
  *     (filtered out of `Target.getTargets` / the discovery events) and
  *     unreachable (`attachToTarget` / `activateTarget` / `closeTarget` /
  *     `getTargetInfo` refused BY NAME);
- *   · REFUSES `Input.*` and the navigation family (`Page.navigate` /
- *     `reload` / `navigateToHistoryEntry` / `close` / `stopLoading` /
- *     `setDocumentContent` / `handleJavaScriptDialog`, `DOM.setFileInputFiles`
- *     and the target acts that change what the user is looking at) while the
- *     USER holds the input side (P3's `lease.input === 'user'`) — a typed
- *     `browser_paused` CDP error, never a timeout;
- *   · REFUSES the whole-browser acts outright (`Browser.close` / `crash*`,
- *     `Target.exposeDevToolsProtocol`, `Target.setRemoteLocations`, the
- *     deprecated `Target.sendMessageToTarget`) — a shared browser is nobody's
- *     to kill through a session url;
+ *   · REFUSES, while the USER holds the input side (P3's `lease.input === 'user'`),
+ *     every method whose CENSUS CLASS is `input`, `view` or `page-mutation`
+ *     (src/cdp-census.js — ONE row per method of the installed Chrome's own
+ *     /json/protocol: every `Input.*`, the navigation family, a file upload, a
+ *     dialog answer, a focus move, the tab acts, viewport / emulation / a frozen
+ *     page, script evaluation, DOM / CSS edits, cookies…) and every method
+ *     WITHOUT a row (a newer Chrome's) — a typed `browser_interrupted` CDP error
+ *     naming the takeover, never a timeout, the unclassified one NAMED so the
+ *     census can be extended (verify r4: three rounds each found a hand-written
+ *     list one method short). THE OWNER'S RULING (2026-09-27, verbatim):
+ *     "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，
+ *     交还时提醒它重新运行" — D6's open script door and the r4 switch
+ *     `browser.fenceScriptsWhileDriven` are gone; only `read`, `session` and
+ *     `harmless` answer while the user drives, and `interruptPlan` names the
+ *     calls IN FLIGHT at the takeover that the mediator aborts at once (a
+ *     running script is also asked to stop — src/browser-interrupt.js);
+ *   · REFUSES the census's `refused` class outright (`Browser.close` /
+ *     `crash*`, `Target.exposeDevToolsProtocol`, `Target.setRemoteLocations`,
+ *     the deprecated `Target.sendMessageToTarget`, the deaf-page arm,
+ *     Tethering, an unpacked extension…) — a shared browser is nobody's to
+ *     kill through a session url;
  *   · a message on a CDP `sessionId` the proxy did not hand out is refused.
- * What it is NOT: `Runtime.evaluate` is not refused while paused (an agent
- * reading page state during a takeover is the honest use; the CLI's typed
- * `browser_paused` refusal (P3) already stops the cooperative path before any
- * CDP message exists) — say so rather than promising a DOM-level fence.
+ * What it CANNOT do: recall a script already running in the page when it is
+ * AWAITING (a timer, a fetch) — its continuation runs later; the CALL is
+ * rejected and the agent told (measured on Chrome 153, §6.2).
  *
  * Everything here is a DECISION over one JSON message and a scope; the
  * mediator does the I/O, the suite drives these with literal messages.
@@ -125,20 +135,175 @@ function admissible(scope, info) {
 }
 function admitTarget(scope, targetId) { if (scope && targetId) scope.targets.add(String(targetId)); return scope; }
 
-// ── the method tables ──────────────────────────────────────────────────────
-/** Whole-browser acts no session url may perform (a shared browser is not
- *  one lease's to kill), and the two escape hatches out of the mediation. */
-const ALWAYS_REFUSED = new Set(['Browser.close', 'Browser.crash', 'Browser.crashGpuProcess', 'Target.exposeDevToolsProtocol', 'Target.setRemoteLocations', 'Target.sendMessageToTarget']);
+// ── the method tables — DERIVED from the census (verify S2 r4, 2026-09-26) ────
+// One source of truth: src/cdp-census.js classes EVERY method of the installed Chrome's protocol. The sets below are
+// views of it for the readers that want a set (the suites, the CLI's words); the judge reads the census directly.
+const CENSUS = require('./cdp-census.js');
+const INT = require('./browser-interrupt.js'); // the owner's ruling (2026-09-27): the ONE spelling of `browser_interrupted`
+const { INTERRUPTED_CODE } = INT;
+/** Whole-browser acts no session url may perform, and the escape hatches out of the mediation (the census's `refused` class). */
+const ALWAYS_REFUSED = CENSUS.methodsOf('refused');
+/** The words of an always-refused method that carries its own (the default names the whole shared browser). */
+const ALWAYS_REFUSED_WHY = Object.freeze(Object.fromEntries([...ALWAYS_REFUSED].map((m) => [m, CENSUS.rowOf(m).why]).filter(([, w]) => w)));
 /** Methods that NAME a target (`params.targetId`) — in scope or refused. */
 const TARGET_METHODS = new Set(['Target.attachToTarget', 'Target.activateTarget', 'Target.closeTarget', 'Target.getTargetInfo', 'Browser.getWindowForTarget']);
 /** Methods that NAME a browser context — one this lease created or refused. */
 const CONTEXT_METHODS = new Set(['Target.disposeBrowserContext']);
-/** Refused while the USER holds the input side (§4.3): every `Input.*`, the
- *  navigation family, a file upload, a dialog answer, and the target acts
- *  that change what the user is looking at. */
+/** The paused classes as sets (readers only — `pausedVerdict` is the rule): every `Input.*` is an `input` row
+ *  (the deaf-page arm is `refused`), so the old prefix stays true by construction. Since the owner's ruling of
+ *  2026-09-27 the page-mutation rows are in the set too (the census's PAUSED_RULE says 'refuse' for all three). */
 const PAUSED_PREFIXES = ['Input.'];
-const PAUSED_METHODS = new Set(['Page.navigate', 'Page.reload', 'Page.navigateToHistoryEntry', 'Page.close', 'Page.stopLoading', 'Page.setDocumentContent', 'Page.handleJavaScriptDialog', 'DOM.setFileInputFiles', 'Target.createTarget', 'Target.closeTarget', 'Target.activateTarget']);
-function isPausedMethod(method) { const m = String(method || ''); return PAUSED_METHODS.has(m) || PAUSED_PREFIXES.some((p) => m.startsWith(p)); }
+const PAUSED_METHODS = new Set(CENSUS.rows().filter((r) => CENSUS.PAUSED_RULE[r.cls] === 'refuse' && r.fence === 'mediator' && r.domain !== 'Input').map((r) => r.domain + '.' + r.method));
+/**
+ * THE PAUSED FENCE IS A CENSUS, NOT A LIST (verify S2 r4). `{refuse, why, row}`: `why` names the class that refused
+ * (`input` / `view` / `page-mutation` — the owner's ruling of 2026-09-27 retired the r4 switch: scripts and page edits
+ * are refused like input), `unclassified` for a method the census does not list (a newer Chrome — FAIL CLOSED while
+ * the user drives, and said by name), else null. A row whose `fence` is `anchor` (Page.bringToFront) is refused by
+ * the live view's takeover anchor, never here (measured r2 + r3). A second argument (the retired `{fenceScripts}`) is
+ * IGNORED — nothing can re-open the script door.
+ */
+function pausedVerdict(method) {
+  const row = CENSUS.rowOf(method);
+  if (!row) return { refuse: true, why: 'unclassified', row: null };
+  if (row.fence === 'anchor') return { refuse: false, why: null, row };
+  const rule = CENSUS.PAUSED_RULE[row.cls];
+  if (rule === 'refuse') return { refuse: true, why: row.cls, row };
+  return { refuse: false, why: null, row };
+}
+/** The sentence a refusal while the user drives carries — `browser_interrupted: <INT.interruptedText(…)>` (the CLI's
+ *  refusal reader keys on the code's prefix; the takeover, the interruption and the way out are named). */
+function pausedWords(method, pv) {
+  if (pv && pv.why === 'unclassified') return INT.interruptedText(`${method} is not in VibeSpace's CDP census — Chrome ${CENSUS.CENSUS_CHROME}, src/cdp-census.js; a row classing it lifts this`);
+  return INT.interruptedText(method);
+}
+function isPausedMethod(method) { return pausedVerdict(method).refuse; }
+/**
+ * THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27): which calls STILL WAITING on the browser at the takeover
+ * instant the mediator answers NOW with `browser_interrupted` (`abort`: every pending call whose method is refused
+ * while the user drives — the same census rule a new call meets; a read / session / harmless call in flight is left
+ * to finish, the live view's own stream rides those), and on which CDP sessions it asks Chrome to stop the script
+ * RUNNING there (`terminate`: the sessions of the aborted script calls — Runtime.evaluate / callFunctionOn /
+ * runScript; `null` = the page endpoint's own target). Measured on Chrome 153.0.8010.47: a running 5 s busy loop
+ * stops within ~2 ms of `Runtime.terminateExecution` (its evaluate answers -32603, the page answers the next probe at
+ * once, the loop's last statement never runs); sent with nothing running it changes nothing (the page's own timer
+ * 400 ms later still ran); a script AWAITING a timer is not running — its continuation still runs (cannot be recalled).
+ * `pending` = [{id, method, sessionId}] (one connection's); `pageConn` = a page endpoint (its messages carry no sessionId).
+ */
+function interruptPlan(pending, { pageConn = false } = {}) {
+  const abort = []; const terminate = [];
+  const seen = new Set();
+  for (const p of Array.isArray(pending) ? pending : []) {
+    if (!p || p.aborted || p.id === undefined || p.id === null) continue;
+    const method = String(p.method || '');
+    if (!pausedVerdict(method).refuse) continue;
+    const sid = p.sessionId == null || p.sessionId === '' ? null : String(p.sessionId);
+    abort.push({ id: p.id, method, sessionId: sid });
+    if (INT.SCRIPT_METHODS.includes(method) && (sid || pageConn)) { const k = sid || '(page)'; if (!seen.has(k)) { seen.add(k); terminate.push(sid); } }
+  }
+  return { abort, terminate };
+}
+
+/**
+ * THE USER'S OWN INPUT PASSES THE PAUSED FENCE — ON A CREDIT (lane S2, naive study 2 T4: a takeover of a MEDIATED
+ * browser typed nothing and said nothing). A mediated lease's live view streams from the SESSION's own daemon over
+ * its scoped url, so the stream server's `Input.*` calls for the USER'S takeover arrive on the very connection the
+ * fence judges — and were refused `browser_paused` because the user drives. Measured on agent-browser 0.38.1: one
+ * viewer record = exactly one `Input.*` call (6 of 6 kinds), and the stream server reports nothing back. So the live
+ * view's bridge mints ONE credit per record it forwards, BEFORE it forwards; the next `Input.*` on that grant spends
+ * the oldest live credit and is admitted (the paused fence stays for every `Input.*` without one — an agent driving
+ * the url directly while the user drives is still refused); a credit unspent after `INPUT_CREDIT_MS` expires (the
+ * stream server never dispatched it — "not delivered"). Credits are FIFO; nothing else is admitted by one.
+ */
+const INPUT_CREDIT_MS = 1200;
+const isInputMethod = (method) => String(method || '').startsWith('Input.');
+/**
+ * A CREDIT IS BOUND TO THE RECORD'S OWN CDP CALL (lane S2 verify, 2026-09-26 — the credit was a per-grant COUNT: the
+ * agent's own commands ride the same daemon connection as the stream server's dispatches, so a concurrent
+ * `agent-browser click` / `Input.insertText` / a second socket of the lease spent the user's credit — the agent's
+ * input landed during the takeover, the user's own key was refused browser_paused, and the receipt said "delivered").
+ * Measured on 0.38.1 (scripts/measure-input-receipts.mjs): the stream server hands CDP the record's fields VERBATIM
+ * (`eventType` → `params.type`; a mouse record's x/y/button/clickCount/modifiers[/deltaX/deltaY]; a key record's
+ * key/code/text/windowsVirtualKeyCode/modifiers; a touch record's touchPoints), one call per record, in order, under a
+ * 61-record burst too. So `creditExpectation(record)` names the call the record BECOMES and only an `Input.*` that
+ * matches it (method + every field the record carried) spends that credit — anything else is judged as if no credit
+ * existed (refused while the user drives; it burns nothing). The agent can pass the fence only by issuing the exact
+ * event the user just made, which is the user's own act.
+ */
+const CREDIT_METHODS = Object.freeze({ input_mouse: 'Input.dispatchMouseEvent', input_keyboard: 'Input.dispatchKeyEvent', input_touch: 'Input.dispatchTouchEvent' });
+const CREDIT_FIELDS = Object.freeze({ input_mouse: ['x', 'y', 'button', 'clickCount', 'modifiers', 'deltaX', 'deltaY'], input_keyboard: ['key', 'code', 'text', 'windowsVirtualKeyCode', 'modifiers'], input_touch: ['modifiers'] });
+/**
+ * …AND TO THE TAB THE USER IS LOOKING AT (verify r2, 2026-09-26 — the r1 binding named the call's method + params but
+ * not its TARGET: measured on 0.38.1, every dispatch rides a page `sessionId`, so an agent's OWN CDP socket, attached
+ * to ITS tab B, could flood the exact Enter the user was about to press on tab A — the first arrival spent the credit,
+ * a TRUSTED Enter landed on B, the user's own Enter was refused browser_paused, and the receipt said delivered). The
+ * stream server's `tabs` record names the active tab's CDP `targetId` (0.38.1), so the bridge binds the credit to it:
+ * `creditExpectation(record, {targetId})`, and `creditSessionOk` admits only an `Input.*` on a PAGE session the lease
+ * was HANDED (`scope.sessions`: sessionId → targetId) whose target IS that tab. No session, an unknown session, the
+ * browser session, another tab: no credit — judged as if none existed, burning nothing. A credit with no targetId
+ * (a stream server whose `tabs` carry none) accepts any handed page session. What remains is the user's own tab and
+ * the user's own act: an agent session on tab A mirroring the user's Enter lands ONE Enter on A either way.
+ */
+/** The CDP call a viewer input record becomes: `{method, params, targetId}` (only the fields the record carries; the
+ *  tab the user is looking at, or null when the stream did not name it), or null. */
+function creditExpectation(record, { targetId = null } = {}) {
+  if (!record || typeof record !== 'object') return null;
+  const method = CREDIT_METHODS[record.type]; const eventType = String(record.eventType || '');
+  if (!method || !eventType) return null;
+  const params = { type: eventType };
+  for (const k of CREDIT_FIELDS[record.type]) if (record[k] !== undefined && record[k] !== null) params[k] = typeof record[k] === 'number' ? record[k] : String(record[k]);
+  if (record.type === 'input_touch') params.touchPoints = Array.isArray(record.touchPoints) ? record.touchPoints.map((p) => ({ x: Number(p && p.x), y: Number(p && p.y) })) : [];
+  return { method, params, targetId: targetId == null || targetId === '' ? null : String(targetId) };
+}
+/** May a call on CDP session `sid` — which the lease's scope maps to `target` (a targetId; null = the browser session;
+ *  undefined = never handed to this lease) — spend a credit with this expectation? A page session of the lease, on
+ *  the credit's tab (any handed page session when the credit names none). */
+function creditSessionOk(expect, sid, target) {
+  if (!expect || !sid || typeof sid !== 'string') return false;
+  if (target === undefined || target === null || target === '') return false;
+  return expect.targetId == null || String(target) === expect.targetId;
+}
+const sameValue = (a, b) => ((typeof a === 'number' || typeof b === 'number') ? Number(a) === Number(b) : String(a) === String(b));
+/** Does THIS CDP message match the credit's expectation? (method + every expected field; extra params are the stream server's defaults) */
+function creditMatches(expect, msg) {
+  if (!expect || !msg || typeof msg !== 'object' || String(msg.method || '') !== expect.method) return false;
+  const p = msg.params && typeof msg.params === 'object' ? msg.params : {};
+  for (const [k, v] of Object.entries(expect.params)) {
+    if (k === 'touchPoints') { const tp = Array.isArray(p.touchPoints) ? p.touchPoints : []; if (tp.length !== v.length || v.some((q, i) => !tp[i] || Number(tp[i].x) !== q.x || Number(tp[i].y) !== q.y)) return false; continue; }
+    if (p[k] === undefined || p[k] === null || !sameValue(p[k], v)) return false;
+  }
+  return true;
+}
+/** Take the credit THIS `Input.*` spends — the first live one whose expectation it matches AND whose tab its session
+ *  is on (`sessionTarget(sid)` = the scope's sessionId → targetId read; FAIL CLOSED: no resolver, no session, an
+ *  unknown one = no credit); expired ones leave wherever they sit (returned so their waiter is told).
+ *  VERIFY r3: `otherTab` = the live credits this call MATCHED but could not spend because its session is on another
+ *  tab — returned so the mediator can MARK them (never burn them: a hostile mirror on its own tab must not cost the
+ *  user their key); an unspent marked credit expires with an honest `other_tab` receipt instead of `not_dispatched`. */
+function takeCredit(credits, now, { ttlMs = INPUT_CREDIT_MS, msg = null, sessionTarget = null } = {}) {
+  const expired = [];
+  const q = Array.isArray(credits) ? credits : [];
+  for (let i = q.length - 1; i >= 0; i--) if (now - (Number(q[i].at) || 0) > ttlMs) expired.unshift(q.splice(i, 1)[0]);
+  const sid = msg && msg.sessionId != null ? String(msg.sessionId) : null;
+  let target;
+  try { target = sid && typeof sessionTarget === 'function' ? sessionTarget(sid) : undefined; } catch { target = undefined; }
+  const i = msg ? q.findIndex((c) => c && creditMatches(c.expect, msg) && creditSessionOk(c.expect, sid, target)) : -1;
+  const otherTab = msg && i < 0 ? q.filter((c) => c && creditMatches(c.expect, msg) && !creditSessionOk(c.expect, sid, target)) : [];
+  return { credit: i >= 0 ? q.splice(i, 1)[0] : null, expired, otherTab };
+}
+/** The receipt a spent credit answers, from the browser's own reply to the `Input.*` call. */
+function creditReceipt(reply) {
+  if (!reply || typeof reply !== 'object') return { ok: false, code: 'no_reply', error: 'the browser did not answer' };
+  if (reply.error) return { ok: false, code: 'browser_refused', error: String(reply.error.message || 'the browser refused it') };
+  return { ok: true, code: null, error: null };
+}
+/** VERIFY r3: the receipt of a credit that EXPIRED — honest about what was seen: `spent` (the call went to the browser,
+ *  which has not answered — measured: a mouse dispatch on a HIDDEN tab never answers), `otherTab` (an `Input.*` matching
+ *  the record arrived on another tab of the lease and was refused there), else nothing matching ever came. */
+function creditExpiryReceipt(c) {
+  if (c && c.spent) return { ok: false, code: 'no_reply', error: 'the browser has not answered it (a hidden tab answers no mouse input)' };
+  if (c && c.otherTab) return { ok: false, code: 'other_tab', error: 'it arrived on another tab than the one you are looking at and was refused there' };
+  return { ok: false, code: 'not_dispatched', error: 'the browser was never asked to act on it' };
+}
 
 /** The CDP error a refusal becomes: JSON-RPC's server-error code, the
  *  message PREFIXED with the typed code (agent-browser prints the message;
@@ -160,7 +325,8 @@ function refusalCodeOf(reply) {
  *   {kind:'forward', pending:{method, params, sessionId}}  — send upstream, remember by id
  *   {kind:'refuse', reply}                                  — answer the client, send nothing
  *   {kind:'drop', why}                                      — not a CDP call (no id): say nothing
- * `paused` is the live input side (true = the user drives).
+ * `paused` is the live input side (true = the user drives). A refusal carries `why`
+ * (the census class, or 'unclassified'). The retired `fenceScripts` option is ignored.
  */
 function judge(msg, scope, { paused = false } = {}) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return { kind: 'drop', why: 'not an object' };
@@ -171,8 +337,8 @@ function judge(msg, scope, { paused = false } = {}) {
   if (!method) return id == null ? { kind: 'drop', why: 'no method' } : { kind: 'refuse', reply: refusal(id, 'bad_message', 'a CDP call names a method', sid) };
   if (id == null) return { kind: 'drop', why: 'no id' };
   if (sid && !scope.sessions.has(sid)) return { kind: 'refuse', reply: refusal(id, 'session_out_of_scope', `CDP session ${sid} was not handed to this lease`, sid) };
-  if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', reply: refusal(id, 'method_refused', `${method} acts on the whole shared browser — not through a session url`, sid) };
-  if (paused && isPausedMethod(method)) return { kind: 'refuse', reply: refusal(id, 'browser_paused', `${method} is refused while the user holds this browser's input — wait for the handback (P3)`, sid) };
+  if (ALWAYS_REFUSED.has(method)) return { kind: 'refuse', why: 'refused', reply: refusal(id, 'method_refused', `${method} ${ALWAYS_REFUSED_WHY[method] || 'acts on the whole shared browser — not through a session url'}`, sid) };
+  if (paused) { const pv = pausedVerdict(method); if (pv.refuse) return { kind: 'refuse', why: pv.why, reply: refusal(id, INT.INTERRUPTED_CODE, pausedWords(method, pv), sid) }; }
   if (TARGET_METHODS.has(method)) {
     const t = params.targetId == null ? '' : String(params.targetId);
     if (!inScope(scope, t)) return { kind: 'refuse', reply: refusal(id, 'target_out_of_scope', `target ${t || '(none)'} is not one of this lease's tabs`, sid) };
@@ -300,23 +466,27 @@ function grantKey(profileId, browserKey) { return `${String(profileId || '')}|${
  *  the raw upstream. */
 function grantView(g) {
   if (!g) return null;
-  return { profileId: g.profileId, browserKey: g.browserKey, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream };
+  return { profileId: g.profileId, browserKey: g.browserKey, targets: g.scope ? g.scope.targets.size : 0, sessions: g.scope ? g.scope.sessions.size : 0, contexts: g.scope ? g.scope.contexts.size : 0, connections: g.conns ? g.conns.size : 0, createdAt: g.createdAt || 0, lastUsedAt: g.lastUsedAt || 0, upstreamKnown: !!g.upstream, unclassified: g.unclassified ? [...g.unclassified] : [], // verify r4: the methods this lease was refused for lacking a census row
+    // the owner's ruling (2026-09-27): what the LAST takeover interrupted on this lease (counts + method names + the browser's answers to terminateExecution — never a param)
+    lastInterrupt: g.lastInterrupt ? { at: g.lastInterrupt.at, aborted: g.lastInterrupt.aborted, methods: [...(g.lastInterrupt.methods || [])], terminated: g.lastInterrupt.terminated, terminateAnswers: [...(g.lastInterrupt.terminateAnswers || [])], landed: Number(g.lastInterrupt.landed) || 0, landedMethods: [...(g.lastInterrupt.landedMethods || [])] } : null }; // verify r6: `landed` = aborted calls the browser still answered with a success (they took effect)
 }
-/** The one-line sentence a chip / the CLI prints for a mediated profile. */
+/** The one-line sentence a chip / the CLI prints for a mediated profile. THE SENTENCE NAMES THE FENCE'S REAL SCOPE
+ *  (2026-09-21, the verifier's finding; re-worded 2026-09-27 for the owner's ruling): everything but reads is refused
+ *  while the user drives, and what was running when they took over is interrupted. The retired `fenceScripts`
+ *  option is ignored. */
 function mediationSentence({ profileLabel = '', others = 0 } = {}) {
   const n = Number(others) || 0;
-  // THE SENTENCE NAMES THE FENCE'S REAL SCOPE (2026-09-21, the verifier's finding):
-  // Input.* and the page-navigation COMMANDS are refused while the user drives;
-  // script evaluation (Runtime.evaluate — `get title`, a snapshot) is NOT, by
-  // design (reads stay open, pinned by both mediation suites), and a script can
-  // navigate — so the promise is worded to the fence, never past it.
-  return `"${profileLabel}" is shared instance-wide through a mediated CDP url: you see and drive only your own tabs${n ? ` (${n} other session${n === 1 ? '' : 's'} attached, each confined the same way)` : ''}; while the user drives, input and page-navigation commands are refused (browser_paused) — script evaluation and reads are not, so do not navigate by script while they drive.`;
+  return `"${profileLabel}" is shared instance-wide through a mediated CDP url: you see and drive only your own tabs${n ? ` (${n} other session${n === 1 ? '' : 's'} attached, each confined the same way)` : ''}; while the user drives, everything but reads is refused (browser_interrupted) and what you had running there when they took over is interrupted — wait for the handback, then run it again.`;
 }
 
 module.exports = {
   TOKEN_RE, isToken, parseMediatedPath, mediatedBrowserUrl, mediatedHttpBase, versionAnswer, listAnswer,
   newScope, inScope, admissible, admitTarget, remember, RECENT_MAX,
   ALWAYS_REFUSED, TARGET_METHODS, CONTEXT_METHODS, PAUSED_METHODS, PAUSED_PREFIXES, isPausedMethod,
+  CENSUS, pausedVerdict, pausedWords, // verify r4: the paused fence is a CENSUS over the vendor's own method list (src/cdp-census.js)
+  interruptPlan, INTERRUPTED_CODE, // the owner's ruling (2026-09-27): a takeover interrupts what is in flight
   CDP_REFUSAL_CODE, refusal, refusalCodeOf, judge, admitReply, filterEvent,
+  INPUT_CREDIT_MS, isInputMethod, takeCredit, creditReceipt, creditExpectation, creditMatches, creditSessionOk, CREDIT_METHODS, // lane S2: the user's own input passes the paused fence on a credit BOUND to its record's own CDP call AND to the tab the user is looking at (verify r2)
+  creditExpiryReceipt, ALWAYS_REFUSED_WHY, // verify r3: honest expiry words (spent / other_tab / not_dispatched); the deaf-page method's words
   mediatedNamespace, mediatedEnvFor, grantKey, grantView, mediationSentence,
 };

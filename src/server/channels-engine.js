@@ -96,6 +96,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { createChannelStore } = require('../channel-store.js');
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
+const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent
 const caps = require('../channel-caps.js');
 const fake = require('../channels/fake.js');
 const lark = require('../channels/lark.js');
@@ -200,8 +201,29 @@ const ATTACHMENT_MAX_BYTES = 100 * 1024 * 1024;
 const DUE_HINTS_MAX = 2000;
 /** Poll cadences (seconds) — the floor is the VENDOR's, so it comes from caps. */
 const RECONCILE_SECONDS = 15 * 60;
-/** Exponential backoff after a typed `rate-limited` / `transport` failure. */
+/** Exponential backoff after a typed ACCOUNT failure — `transport`, `auth-expired`,
+ *  `vendor-error`, … (never `rate-limited` since lane R5: see RATE_BACKOFF_MS). */
 const BACKOFF_MS = [0, 30e3, 2 * 60e3, 5 * 60e3, 15 * 60e3];
+/** A vendor RATE refusal is a SHORT wait (lane R5, 2026-09-26 — the owner:
+ *  "gmail一直被限速 你可能要控制下gmail默认的读取速度"; three Gmail refusals of
+ *  "Units per minute per user" had climbed the ladder above to its 15-minute
+ *  maximum while the per-minute budget was never exceeded — the vendor meters
+ *  finer than a minute). The vendor's own hint first (`Retry-After` /
+ *  `x-ogw-ratelimit-reset`, carried as `err.detail.retryAfterSec`, honoured up
+ *  to RATE_RETRY_AFTER_MAX_MS), else 5 s doubling to 60 s. A rate strike never
+ *  advances the failure ladder (`consecutiveFailures`, the 3-strike "For you"
+ *  item); a refusal that PERSISTS through RATE_STRIKES_LOUD strikes in a row
+ *  (≈ 7 min of refusals despite the pace) is said once in "For you". */
+const RATE_BACKOFF_MS = [5e3, 10e3, 20e3, 40e3, 60e3];
+/** lane R5 verify r3: a pace reservation older than this was never metered (a contract violation) — the phantom is dropped. */
+const PACE_RESERVE_TTL_MS = 2000;
+/** A PACED pass is long (the owner's 873-conversation first read at one
+ *  thread a second is ~15 min): it says its progress — the conversations it
+ *  read so far and the account's first-read count — at most this often, never
+ *  per fetch (the broadcast law: one recomputed result per change, bounded). */
+const PROGRESS_EVERY_MS = 5000;
+const RATE_RETRY_AFTER_MAX_MS = 15 * 60e3;
+const RATE_STRIKES_LOUD = 10;
 /** THE REFRESH REQUEST SET (lane R2 verify r5): a refresh is a REQUEST into
  *  the account's coalescing set, drained by the pass loop alone. At most
  *  REFRESH_QUEUE_CAP untaken waiters per account (past it:
@@ -231,6 +253,9 @@ const SETTING_BOUNDS = Object.freeze({
   'channels.attachmentBudgetMB': { dflt: 5120, min: 64, max: 102400 },
   'channels.budgetLarkPerMin': { dflt: null, min: 5, max: 1000 },
   'channels.budgetGmailPerMin': { dflt: null, min: 100, max: 6000 },
+  // lane R5: the PER-SECOND pace (drain rule 18), default = the module's `caps.pace.unitsPerSec`
+  'channels.gmailUnitsPerSec': { dflt: null, min: 5, max: 100 },
+  'channels.larkRequestsPerSec': { dflt: null, min: 1, max: 50 },
 });
 /** Consecutive failures before the adapter row goes amber and says so. */
 const FAILURES_BEFORE_LOUD = 3;
@@ -312,6 +337,14 @@ function create(deps = {}) {
     // groups[]}]` — cid is the conversation id the ladder addresses; groups
     // are the task-group ids the session belongs to (round-robin, §7.3).
     liveSessions = () => [],
+    // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
+    // the vendor meters requests in real time, whatever the engine's logical
+    // `now` says (a suite freezes `now`; the bucket must still refill). Default:
+    // the monotonic `performance.now()`. `sleep(ms)` = how a pace wait passes;
+    // default a real, stop-wakeable timer. A suite may inject both (a private
+    // pace clock its `sleep` advances) so pacing is exact and instantaneous.
+    paceClock = () => performance.now(),
+    sleep: sleepImpl = null,
   } = deps;
   if (!dataDir) throw new Error('channels-engine: dataDir is required');
 
@@ -512,6 +545,7 @@ function create(deps = {}) {
   }
 
   const live = new Map();     // adapterId -> { adapter, record, passing, failures, nextAt, budget }
+  const paceCarry = new Map();   // adapter id -> the ghost of a dropped entry (its minute window + per-second bucket) until the id is rebuilt
   let timer = null;
   let stopped = false;
   // R4 verify r5 (money): a per-PROCESS id stamped on every wake reservation
@@ -581,18 +615,62 @@ function create(deps = {}) {
   // door like every other byte of adapters.json; decrypted only for the
   // adapter that owns it. `publicView` never carries it (see `digest`).
   function tokensFor(rec) {
+    const read = () => {
+      const a = rec.auth || {};
+      if (!a.tokenEnc) return { token: null, why: 'never-authenticated' };
+      try { return { token: JSON.parse(box.dec(a.tokenEnc)), why: null }; }
+      catch (e) { return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` }; }
+    };
     return {
-      read() {
-        const a = rec.auth || {};
-        if (!a.tokenEnc) return { token: null, why: 'never-authenticated' };
-        try { return { token: JSON.parse(box.dec(a.tokenEnc)), why: null }; }
-        catch (e) { return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` }; }
-      },
+      read,
+      /** `meta.consent` = a human consent (the adapter's exchange); `meta.supersedes` = the refresh token the writer READ
+       *  (a refresh's persist, an invalid_grant stamp): the write lands ONLY while the store holds that token at APPLY
+       *  time (verify r6: a compare-and-swap inside the serialized door — the r5 re-read-then-enqueue relied on there
+       *  being no await between the two, a fact one edit reopens; a patched copy with an await between them reverted a
+       *  re-authorize again). Answers `{written}` or `{written:false, superseded:true, held}`. */
       async write(token, meta = {}) {
+        // verify r5 (credential): a token that NAMES another identity than the account's is REFUSED, never stored —
+        // a re-authorize as another Google / Lark user (the wrong account in the vendor's chooser) used to land with
+        // ok:true and retarget every assignment and grant on this record onto a stranger's mailbox. The identity is
+        // stamped by the first consent that names one, survives a disconnect, and only remove() forgets it.
+        // verify r6: the held identity is read off the token the record HOLDS when it carries no stamp (a legacy
+        // Lark record's auth.user is a display name — a stranger's consent used to bind it).
+        // verify r7: EVERY judgement runs INSIDE the serialized callback, at apply time (the identity check used to sit
+        // before the store's await — two consents of one tick on an unbound record were both judged against nothing
+        // and the record ended bound to whichever was enqueued last); a CONSENT names an account or is refused
+        // whatever the record holds; a consent whose flow was CANCELLED meanwhile (`meta.consent.cancelled()` — a
+        // disconnect, a cancel, a newer sign-in, the timeout) is refused: the human act that cancelled it is the later
+        // one and used to be undone by this write landing after it; a CAS write never lands on a CLEARED store.
+        const offered = identityOf(token);
+        const consent = meta.consent || null;
         const enc = box.enc(JSON.stringify(token));
-        await store.adapters.update(() => {
-          rec.auth = { ...(rec.auth || {}), tokenEnc: enc, expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || (rec.auth && rec.auth.user) || null, updatedAt: now() };
-        });
+        const supersedes = meta.supersedes === undefined ? undefined : String(meta.supersedes || '');
+        let verdict = { written: true };
+        try {
+          await store.adapters.update(() => {
+            if (consent) {
+              // verify r8: the engine's own stop is a cancel too (an injected loopback is its owner's to stop), and the
+              // refusal says what the record HOLDS (a refused sign-in on a connected record no longer reads "nothing was connected")
+              const c = (typeof consent.cancelled === 'function' ? consent.cancelled() : null) || (stopped ? 'shutdown' : null);
+              if (c) { verdict = { written: false, cancelled: String(c), held: !!read().token }; return; }
+              if (!Object.keys(offered).length) { verdict = { written: false, nameless: true }; return; }
+            }
+            const held = heldIdentity(rec, read().token);
+            const mm = identityMismatch(held, offered);
+            if (mm) { verdict = { written: false, mismatch: mm }; return; }
+            if (supersedes !== undefined) {
+              const cur = read().token; const curRt = cur ? String(cur.refresh_token || '') : '';
+              if (!cur || curRt !== supersedes) { verdict = { written: false, superseded: true, held: cur ? curRt : null }; return; }
+            }
+            rec.auth = { ...(rec.auth || {}), tokenEnc: enc, expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || (rec.auth && rec.auth.user) || null, updatedAt: now() };
+            if (Object.keys(offered).length) rec.identity = { ...(rec.identity || {}), ...offered };
+          });
+        } catch (err) { speakUnsaved(rec, err); throw err; }
+        if (verdict.mismatch) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, verdict.mismatch), { retryable: false, detail: { identityMismatch: verdict.mismatch } });
+        if (verdict.nameless) throw new ChannelError('forbidden', namelessSentence(rec.label || rec.id, 'the sign-in named no account'), { retryable: false, detail: { nameless: true } });
+        if (verdict.cancelled) throw new ChannelError('auth-expired', cancelledSentence(rec.label || rec.id, verdict.cancelled, verdict.held), { retryable: false, detail: { cancelled: verdict.cancelled } });
+        if (verdict.written) retractUnsaved(rec);
+        return verdict;
       },
       async clear() {
         await store.adapters.update(() => { rec.auth = { tokenEnc: null, expiresAt: null, scopes: [], user: null, updatedAt: now() }; });
@@ -622,7 +700,10 @@ function create(deps = {}) {
       // one kind refresh with their OWN clients whatever the row's pick says.
       // `meter` (2026-09-26): the adapter charges every request it ACTUALLY
       // sends, in its declared unit, to THIS account's budget window.
-      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id); if (x) charge(x, units); } };
+      // `pace` (lane R5): the adapter AWAITS it before every request it sends
+      // (drain rule 18's bucket, the SAME one the pass's `wait` reads) and
+      // then meters it — the per-second shape is enforced call by call.
+      const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), oauth: flows, onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec) };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -642,10 +723,21 @@ function create(deps = {}) {
         // state (`dq`: the waiters in filing order + the pass — src/channel-drain.js);
         // `waiters` maps each id to its settle-able promise (the delivery side)
         dq: Drain.empty(), waiters: new Map(), drainTimer: null, drainAfter: false, backoffEpoch: 0, ownerPressEpoch: -1, after: null,
+        // lane R5: the PER-SECOND bucket (`paceTok` = {tokens, at}; null = full,
+        // never used), the last second's charges (the card's number), the
+        // sleeps a stop / a drop must wake, and the RATE ladder beside the
+        // failure one (`rateStrikes`, the back-off's kind, the vendor's hint)
+        paceTok: null, paceRecent: [], sleepers: new Set(), rateStrikes: 0, backoffKind: null, retryAfterSec: null,
+        // lane R5 verify r2: the units `paceWait` let through that their meter has not charged yet (an ATOMIC reservation)
+        paceInflight: 0, paceInflightAt: 0, paceLeakWarnAt: 0,
         // r5 verify: the tick found the account busy while its rows were due — the
         // next pass, whatever its origin, does the timer's work (no starvation
         // of the due list by a storm of requests)
         timerDue: false };
+      // verify r4: an exit never refills — a rebuilt entry (disconnect + re-authorize, an options rebuild, a client
+      // switch, disable + enable) inherits the dropped one's minute window and per-second bucket (`paceCarry`)
+      const ghost = paceCarry.get(rec.id);
+      if (ghost) { e.win = ghost.win; e.exhaustedAt = ghost.exhaustedAt; e.paceTok = ghost.paceTok; e.paceRecent = ghost.paceRecent; e.paceLeakWarnAt = ghost.paceLeakWarnAt; paceCarry.delete(rec.id); }
       live.set(rec.id, e);
     } else { e.record = rec; e.adapter.record = rec; }
     return e;
@@ -710,6 +802,138 @@ function create(deps = {}) {
     const limit = b.settingKey ? setting(b.settingKey, dflt) : dflt;
     return { unit: b.unit === 'quota-unit' ? 'quota-unit' : 'request', limit, metered: b.metered === true, settingKey: b.settingKey || null };
   }
+  /** THE PER-SECOND PACE (lane R5, drain rule 18): the adapter DECLARES it in
+   *  `caps.pace` = `{unitsPerSec, settingKey, cost: {fetch, discover,
+   *  scanHost}}` (Gmail 40 quota units/s — one thread read a second; Lark 5
+   *  requests/s) and the setting it names is read LIVE. The bucket it drives
+   *  is COUPLED to the minute's budget: `unitsPerSec` = min(the setting,
+   *  budget/60) and `burst` = min(the setting, budget/2) — so the pace never
+   *  spends the minute faster than the minute allows, and any 60 s holds at
+   *  most the budget plus one burst (rule 9's cut stays the outer cap). `null`
+   *  = the adapter declares no pace (the built-in Agents row, the fakes). */
+  function paceDecl(rec) {
+    const p = registry.capsOf(rec.kind).pace;
+    if (!p || typeof p !== 'object') return null;
+    const dflt = Number(p.unitsPerSec) > 0 ? Number(p.unitsPerSec) : 1;
+    const perSec = p.settingKey ? setting(p.settingKey, dflt) : dflt;
+    const limit = budgetDecl(rec).limit;
+    const cost = p.cost && typeof p.cost === 'object' ? p.cost : {};
+    const c = (k) => (Number(cost[k]) >= 0 ? Number(cost[k]) : 1);
+    return { perSec, unitsPerSec: Math.min(perSec, limit / 60), burst: Math.min(perSec, limit / 2), settingKey: p.settingKey || null, cost: { fetch: c('fetch'), discover: c('discover'), scanHost: c('scanHost') } };
+  }
+  /** The account's bucket on the PACE clock (`paceTok` = {tokens, at}; unused = full) — the RAW level, what the meters charged. */
+  function bucketOf(d, e) {
+    const tok = e.paceTok || { tokens: d.burst, at: paceClock() };
+    return Drain.paceFresh(d.unitsPerSec, d.burst, tok.at, tok.tokens);
+  }
+  /** The bucket as a JUDGEMENT reads it: the raw level minus the units already
+   *  let through and not yet metered (`paceInflight`) — so two callers judged
+   *  in one instant never both see the same tokens (lane R5 verify r2). */
+  function bucketSeen(d, e) {
+    // verify r3: the raw level is CAPPED at burst first, the reservation comes off after — subtracting before the cap
+    // projected an idle bucket as over-full (tokens + dt·rate − reserved, capped at burst) and let every reservation
+    // read as spent-and-refilled; the pinned behaviour held only because a caller's charge lands (a microtask) before
+    // the next queued judgement runs
+    const t = paceClock();
+    return Drain.paceFresh(d.unitsPerSec, d.burst, t, Drain.paceLevel(bucketOf(d, e), t) - (Number(e.paceInflight) || 0));
+  }
+  /** ONE judgement at a time per account, in arrival order (a FIFO of promises keyed by the account id, outliving a rebuilt entry). */
+  const paceQueues = new Map();
+  /** The bucket as the DRAIN reads it (`null` = no pace): its level evaluated
+   *  NOW on the pace clock and handed over as of the logical `now()` — the
+   *  model's arithmetic then starts from this instant, whatever clock drove it. */
+  function paceOf(rec, e) {
+    const d = paceDecl(rec);
+    if (!d) return null;
+    return { unitsPerSec: d.unitsPerSec, burst: d.burst, tokens: Drain.paceLevel(bucketSeen(d, e), paceClock()), lastRefillAt: now(), cost: d.cost };
+  }
+  /** Charge the bucket what a call SENT (refilled first; the level may go negative — a debt). */
+  function paceCharge(e, n) {
+    const rec = e.record;
+    const d = rec ? paceDecl(rec) : null;
+    if (!d) return;
+    const t = paceClock();
+    const next = Drain.paceCharge(bucketOf(d, e), t, n);
+    e.paceTok = { tokens: next.tokens, at: t };
+    e.paceInflight = Math.max(0, (Number(e.paceInflight) || 0) - (Math.max(0, Number(n)) || 0));   // the reservation `paceWait` took for this call is now charged
+    e.paceRecent.push({ at: t, n });
+    while (e.paceRecent.length && (t - e.paceRecent[0].at > 1000 || e.paceRecent.length > 500)) e.paceRecent.shift();
+  }
+  /** Sleep `ms` on the account's behalf — WOKEN at once by a stop or a drop
+   *  (`wakeSleepers`), so neither waits for a pace. The timer is referenced
+   *  (like the drain's): a process whose only work is an awaited refresh does
+   *  not exit mid-wait. */
+  function sleepFor(e, ms) {
+    if (sleepImpl) return Promise.resolve(sleepImpl(Math.max(1, Number(ms) || 1)));   // an injected clock (a suite) — the caller re-checks stop / drop after it
+    return new Promise((resolve) => {
+      const s = { timer: null, wake: null };
+      s.wake = () => { if (s.timer) { clearTimeout(s.timer); s.timer = null; } e.sleepers.delete(s); resolve(); };
+      s.timer = setTimeout(s.wake, Math.max(1, Number(ms) || 1));
+      e.sleepers.add(s);
+    });
+  }
+  function wakeSleepers(e) { for (const s of [...e.sleepers]) s.wake(); }
+  /** THE ADAPTER'S PACE (`deps.pace(units)`): wait until the bucket holds
+   *  what this request needs (drain rule 18's arithmetic), then return — the
+   *  adapter meters it right after, with no await in between. A stop or a
+   *  drop while it waits THROWS a typed abort the pass does not count as a
+   *  failure. */
+  async function paceWait(adapterId, units, rec = null) {
+    const r0 = rec || (live.get(adapterId) || {}).record || null;
+    if (!r0 || !paceDecl(r0)) return;   // no pace declared: never waits, never throws
+    // verify r3: a PACED adapter with no live entry — or one whose entry is replaced while it queues — is an account that
+    // was removed / rebuilt under the call (`dropLive`): the call is ABORTED, typed, never let through. Returning here
+    // let every caller queued behind a removed account leave in one instant, unpaced (17 × 20 units in 1 ms after a
+    // remove()), each a vendor call the account's owner had just ended.
+    const gone = () => new ChannelError('transport', 'the account changed (removed or rebuilt) while a request waited for its pace — the request was not sent', { retryable: true, detail: { paceAborted: true, accountChanged: true } });
+    const e0 = live.get(adapterId);
+    if (!e0) throw gone();
+    // ONE JUDGEMENT AT A TIME, IN ARRIVAL ORDER, WITH AN ATOMIC RESERVATION (lane R5
+    // verify r2): N callers outside the pass — a window's N attachment thumbnails,
+    // a page-back beside the pass's fetch — each read the bucket before any of them
+    // had metered (the meter runs a microtask after this returns), so 20 fetches
+    // of 20 units left in ONE instant: 400 units in a second, the burst the vendor
+    // refuses, and a page-back starved behind the pass for the whole ingest. Now a
+    // caller waits for the callers before it (FIFO), judges, and the units it is
+    // let through with are RESERVED (`paceInflight`, released by its meter) so the
+    // next judgement sees them spent. A stop / a drop still wakes every sleeper.
+    const need = Math.max(0, Number(units) || 0);
+    const prev = paceQueues.get(adapterId) || Promise.resolve();
+    let release = null;
+    const mine = new Promise((r) => { release = r; });
+    paceQueues.set(adapterId, prev.then(() => mine, () => mine));
+    await prev;
+    try {
+      for (;;) {
+        const e = live.get(adapterId);
+        if (e !== e0) throw gone();   // THE ENTRY THIS CALL QUEUED AGAINST IS GONE OR REPLACED
+        const d = e.record ? paceDecl(e.record) : null;
+        if (!d) return;
+        if (stopped) throw new ChannelError('transport', 'the channels engine stopped while a request waited for its pace', { retryable: true, detail: { paceAborted: true } });
+        const t = paceClock();
+        const ms = Drain.paceWaitMs(bucketSeen(d, e), t, need);
+        if (!(ms > 0)) { e.paceInflight = (Number(e.paceInflight) || 0) + need; e.paceInflightAt = t; return; }   // THE RESERVATION — the same synchronous step as the judgement
+        // a reservation lives between this return and the caller's meter — the same macrotask; one older than the
+        // longest legal wait was never metered (an adapter that paced a call it did not meter): a phantom that would
+        // hold the account's bucket down for good — dropped, said by name (once a minute per account)
+        if ((Number(e.paceInflight) || 0) > 0 && t - (Number(e.paceInflightAt) || 0) > PACE_RESERVE_TTL_MS) {
+          if (t - (Number(e.paceLeakWarnAt) || 0) > 60e3) { e.paceLeakWarnAt = t; log.warn(`[channels] ${adapterId}: ${Math.round(e.paceInflight)} paced units were never metered (pace() without meter() — an adapter contract violation); the phantom reservation is dropped`); }
+          e.paceInflight = 0;
+          continue;
+        }
+        await sleepFor(e, ms);
+        if (stopped || live.get(adapterId) !== e) throw new ChannelError('transport', 'the channels engine stopped (or the account changed) while a request waited for its pace', { retryable: true, detail: { paceAborted: true } });
+      }
+    } finally { release(); }
+  }
+  /** The pace as the account card reads it. */
+  function paceView(rec, e) {
+    const d = paceDecl(rec);
+    if (!d) return null;
+    const pt = paceClock();
+    const recent = e ? e.paceRecent.filter((x) => pt - x.at <= 1000) : [];
+    return { unitsPerSec: Math.round(d.unitsPerSec * 100) / 100, perSec: d.perSec, burst: Math.round(d.burst * 100) / 100, unit: budgetDecl(rec).unit, settingKey: d.settingKey, spentLastSec: Math.round(recent.reduce((a, x) => a + x.n, 0)), fetchUnits: d.cost.fetch };
+  }
   /** The current minute window (reset once 60 s have passed). */
   function win(e) { const t = now(); if (!e.win || t - e.win.at >= 60e3) e.win = { at: t, spent: 0, by: { timer: 0, agent: 0, owner: 0 } }; return e.win; }
   /** Charge the minute, attributed to WHO is spending it (2026-09-26, lane
@@ -723,6 +947,7 @@ function create(deps = {}) {
     w.spent += x;
     const by = e.chargeBy || 'owner';
     w.by[by] = (w.by[by] || 0) + x;
+    paceCharge(e, x);   // lane R5: the same units drain the per-second bucket (rule 18)
   }
   /** AN AGENT'S SHARE OF THE MINUTE (2026-09-26, lane R2 verify): the
    *  refresh floor is per conversation, so a loop over cold rows could spend
@@ -766,7 +991,8 @@ function create(deps = {}) {
     const w = e && e.win && t - e.win.at < 60e3 ? e.win : { at: t, spent: 0 };
     const exhausted = !!(e && e.exhaustedAt && t - e.exhaustedAt < 70e3 && w.spent >= b.limit);
     const by = w.by || {};
-    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, settingKey: b.settingKey };
+    const pd = paceDecl(rec);   // lane R5: the per-second figure the budget sentence names beside the minute's
+    return { unit: b.unit, limit: b.limit, spent: Math.round(w.spent), spentBy: { timer: Math.round(by.timer || 0), agent: Math.round(by.agent || 0), owner: Math.round(by.owner || 0) }, exhausted, waiting: exhausted ? (e.waiting || 0) : 0, resetInSeconds: exhausted ? Math.max(0, Math.ceil((w.at + 60e3 - t) / 1000)) : 0, settingKey: b.settingKey, perSec: pd ? Math.round(pd.unitsPerSec * 100) / 100 : null };
   }
 
   // ── WHICH CONVERSATIONS ARE OPEN IN A WINDOW RIGHT NOW (hot, §6.2) ───────
@@ -842,6 +1068,7 @@ function create(deps = {}) {
     for (;;) {
       if (!affordable(rec, e)) break;
       const page = await vendor(rec, e, () => e.adapter.listConversations({ limit: 100, cursor: d.cursor }));
+      if (outlived(rec, e)) return { pages, complete: false };   // verify r4: a listing that outlived its entry mints no row
       const listedAt = now();
       await store.index.update((ix) => {
         for (const c of page.conversations || []) {
@@ -939,15 +1166,34 @@ function create(deps = {}) {
       const results = {};
       const early = new Set();   // keys broadcast at their fetch — a waiter was answered with their news (r8 medium: the toast said "N new" a whole pass before the window repainted)
       let failure = null;        // the pass's typed failure — what a taken waiter hears (Drain rule 3)
+      let progressAt = now();    // lane R5: the bounded progress broadcast of a long (paced) pass
       let ended = null;          // the model's `end`
       const idOf = (key) => key.slice(key.indexOf('/') + 1);
       // THE DELIVERY: exactly the waiters an action names, the moment it names them — a refusal at its judgement (r6), an `ok` at ITS fetch (r7), a settlement in one step (Drain rules 2–4). A waiter that already left (its bound's `pending`, a stop, a drop) is not in `e.waiters`: nothing to deliver
       const deliver = (list, outcome) => { for (const id of list) { const w = e.waiters.get(id); if (w && w.outcome === undefined) { w.outcome = outcome; w.resolve(outcome); } } };
       /** An ACCOUNT-level failure of a vendor call: the back-off, its window, the card, the log and the "For you" item — the model then answers every taken waiter with it (Drain rule 3). */
       const failPass = async (err) => {
+        // verify r5: a failure that lands AFTER the entry ended (a disconnect / remove / rebuild under the vendor call) is not
+        // a fact about the account — no stamp on the record, no ladder step, no "For you" item; the pass ends as the abort it is
+        if (outlived(rec, e)) return { ok: false, code: stopped ? 'stopped' : 'account-changed', error: 'the refresh was cut short (the engine stopped or the account changed) — refresh again', polledAt: null };
         const code = err instanceof ChannelError ? err.code : 'vendor-error';
-        e.failures++;
-        e.nextAt = now() + BACKOFF_MS[Math.min(e.failures, BACKOFF_MS.length - 1)];
+        // lane R5: a RATE refusal is its own short ladder (the vendor's hint, else
+        // 5 s doubling to 60 s) that never climbs the failure ladder; the bucket
+        // is EMPTIED so the pass that resumes starts paced, never with a burst
+        const rate = code === 'rate-limited';
+        const hint = rate && err && err.detail ? Number(err.detail.retryAfterSec) : NaN;
+        if (rate) {
+          e.rateStrikes++;
+          const own = RATE_BACKOFF_MS[Math.min(e.rateStrikes - 1, RATE_BACKOFF_MS.length - 1)];
+          e.nextAt = now() + (Number.isFinite(hint) && hint > 0 ? Math.min(RATE_RETRY_AFTER_MAX_MS, Math.max(1e3, Math.ceil(hint * 1000))) : own);
+          e.retryAfterSec = Number.isFinite(hint) && hint > 0 ? hint : null;
+          if (paceDecl(rec)) e.paceTok = { tokens: 0, at: paceClock() };
+        } else {
+          e.failures++;
+          e.nextAt = now() + BACKOFF_MS[Math.min(e.failures, BACKOFF_MS.length - 1)];
+          e.retryAfterSec = null;
+        }
+        e.backoffKind = rate ? 'rate' : 'failure';
         // THE WINDOW: a back-off that BEGINS here (the account was not in one)
         // opens a new window with one owner press to honour; a failure INSIDE a
         // window (the honoured press itself, a forced pass) extends it and keeps
@@ -958,14 +1204,22 @@ function create(deps = {}) {
         // A failing loop MUST reach the user (fence 8): the adapter row goes
         // amber, the log says it, and a "For you" item is FILED naming the
         // adapter and the vendor's own words — by the producer that will
-        // RETRACT it on the first passing pass (`retractFailure`).
-        if (e.failures === FAILURES_BEFORE_LOUD) {
+        // RETRACT it on the first passing pass (`retractFailure`). A RATE
+        // refusal is said on the card from the first strike ("Google is
+        // limiting the rate · resuming in N s") and filed only when it PERSISTS.
+        if (!rate && e.failures === FAILURES_BEFORE_LOUD) {
           log.warn(`[channels] ${rec.id}: ${e.failures} consecutive failures (${code}): ${(err && err.message) || err}`);
           await speakFailure(rec, code, err);
+        }
+        if (rate && e.rateStrikes === RATE_STRIKES_LOUD) {
+          log.warn(`[channels] ${rec.id}: ${e.rateStrikes} rate refusals in a row despite the pace: ${(err && err.message) || err}`);
+          await speakFailure(rec, code, err, e.rateStrikes);
         }
         // r4: a press that failed INTO a back-off hears the retry instant (the toast words it; Retry-After rides the route) — a bare "failed" invited the next press
         return { ok: false, code, error: `the refresh failed (${code})`, polledAt: null, retryAfterSec: Math.max(1, Math.ceil((e.nextAt - now()) / 1000)), backoffUntil: e.nextAt };
       };
+      /** A pace sleep a stop / a drop woke (`paceWait`'s typed abort): not a failure of the account. */
+      const aborted = (err) => !!(err && err.detail && err.detail.paceAborted) && (stopped || live.get(rec.id) !== e);
       /** The FACTS the model reads, fresh at every step (never written by it). */
       const facts = (connected) => {
         const b = budgetDecl(rec);
@@ -976,7 +1230,7 @@ function create(deps = {}) {
         const share = pct >= 100 ? Infinity : Math.max(1, Math.floor((b.limit * pct) / 100)) - (Number(w.by && w.by.agent) || 0);
         const floors = {};
         for (const r of e.dq.requests) if (!(r.key in floors)) floors[r.key] = lastPollOf(r.key) || 0;
-        return { now: now(), stopped, dropped: live.get(rec.id) !== e, connected, backoff: { epoch: e.backoffEpoch, pressEpoch: e.ownerPressEpoch }, budget: { remainingUnits }, agentShare: { remaining: share }, floors, floorMs: agentRefreshFloorSec() * 1000 };
+        return { now: now(), stopped, dropped: live.get(rec.id) !== e, connected, backoff: { epoch: e.backoffEpoch, pressEpoch: e.ownerPressEpoch }, budget: { remainingUnits }, agentShare: { remaining: share }, floors, floorMs: agentRefreshFloorSec() * 1000, pace: paceOf(rec, e) };
       };
       /** ONE conversation, the round the model named. */
       const fetchOne = async (act) => {
@@ -1028,6 +1282,7 @@ function create(deps = {}) {
           if (act.type === 'end') { ended = act; break; }
           if (act.type === 'refuse') { deliver(act.waiters, refusalFor(rec, e, act)); continue; }
           if (act.type === 'answer') { for (const id of act.waiters) { const w = e.waiters.get(id); if (w) deliver([id], settlementFor(act, failure, w.key)); } continue; }
+          if (act.type === 'wait') { await sleepFor(e, act.ms); continue; }   // Drain rule 18: the bucket refills; the next step judges and picks again (a stop / a drop wakes it)
           let result;
           try {
             if (act.type === 'fetch') result = await fetchOne(act);
@@ -1038,8 +1293,19 @@ function create(deps = {}) {
               await store.adapters.update(() => { if (!rec.scan) rec.scan = EMPTY_SCAN(); rec.scan.hostFacts = hf; });
               result = {};
             } else throw new Error(`channels: the drain named an unknown action ${act.type}`);
-          } catch (err) { failure = await failPass(err); result = { error: failure.code }; }
+          } catch (err) {
+            if (aborted(err)) result = { error: 'stopped' };   // a stop / a drop woke a pace sleep — the next step settles every waiter by name (rule 2)
+            else { failure = await failPass(err); result = { error: failure.code }; }
+          }
           e.dq = Drain.apply(e.dq, act, result);   // … and completes
+          // lane R5: a long pass says its progress at most every PROGRESS_EVERY_MS — the rows it read since (a key said here is
+          // not said again at the end: `early`) and, with them, the account's first-read count on the card
+          if (act.type === 'fetch' && now() - progressAt >= PROGRESS_EVERY_MS) {
+            const fresh = changed.filter((k) => !early.has(k));
+            notify(fresh, { full: false });
+            for (const k of fresh) early.add(k);
+            progressAt = now();
+          }
         }
         if (ended.why === 'stopped' || ended.why === 'dropped') return { ok: false, why: ended.why === 'dropped' ? 'account-changed' : 'stopped', changed, results };
         if (ended.why === 'not-connected') return { ok: false, why: 'not-connected' };
@@ -1051,12 +1317,15 @@ function create(deps = {}) {
         else if (ended.timerWork) e.waiting = 0;
         e.failures = 0;
         e.nextAt = 0;
+        e.rateStrikes = 0; e.backoffKind = null; e.retryAfterSec = null;
         await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; });
         await retractFailure(rec);
+        retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
         notify(changed.filter((k) => !early.has(k)), { full: false });
         return { ok: true, changed, results };
       } catch (err) {
         // something OUTSIDE a vendor call threw (the store, a bug): the pass fails like any failure, and every taken waiter hears it
+        if (!failure && aborted(err)) failure = { ok: false, code: stopped ? 'stopped' : 'account-changed', error: 'the refresh was cut short (the engine stopped or the account changed) — refresh again', polledAt: null };
         if (!failure) { try { failure = await failPass(err); } catch { failure = { ok: false, code: 'vendor-error', error: 'the refresh failed (vendor-error)', polledAt: null }; } }
         for (const r of Drain.takenRequests(e.dq)) deliver([r.id], { ...failure, polledAt: lastPollOf(r.key) });
         notify(changed.filter((k) => !early.has(k)), { full: false });
@@ -1147,6 +1416,9 @@ function create(deps = {}) {
       if (firstWalk) opts.initialMax = pageSize;
       if (lane.via === 'scan') opts.source = lane.source;   // HANDED DOWN, never re-derived by the adapter
       const r = await vendor(rec, e, () => e.adapter.history(convId, opts));
+      // verify r4: the entry ended under this fetch (a remove / disable / disconnect / rebuild, or the engine stopped) —
+      // the page is DROPPED, never written: a remove() mid-fetch used to resurrect the removed account's index row + log
+      if (outlived(rec, e)) return { appended, duplicates, anchorMoved: false, complete: false, why: 'account-changed' };
       if (Array.isArray(r.changed)) for (const id of r.changed.slice(0, DUE_HINTS_MAX)) if (id && String(id) !== String(convId)) hints.add(String(id));
       // 1. the LOG first — durable before anything claims progress
       const w = store.appendRecords(rec.id, convId, r.records);
@@ -1494,6 +1766,16 @@ function create(deps = {}) {
     return { awaiting: list.filter((p) => p.state === 'awaiting-approval').length, unknown: list.filter((p) => p.state === 'unknown').length, latestAt: list.length ? list[0].updatedAt || list[0].at : null };
   }
 
+  /** The vendor's DECLARED name for a record (lane R5): the module's
+   *  `vendorNameOf(record)` (a per-record brand), else `caps.vendorName`, else
+   *  null (the card then says "the vendor"). Never derived from the kind. */
+  function vendorNameOf(rec) {
+    let mod = null; try { mod = registry.get(rec.kind); } catch { mod = null; }
+    let v = null;
+    if (mod && typeof mod.vendorNameOf === 'function') { try { v = mod.vendorNameOf(rec); } catch { v = null; } }
+    if (!v && mod && mod.caps) v = mod.caps.vendorName || null;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
   /** ONE adapter row of the digest. It is the record's PUBLIC VIEW: the token
    *  (`auth.tokenEnc`) and the flow's `state` never leave this function. */
   function adapterView(rec, t = now()) {
@@ -1526,6 +1808,15 @@ function create(deps = {}) {
       // view, so a vendor 429 is said from the FIRST failure
       lastOkAt: Number(rec.lastOkAt) || (rec.lastPass && rec.lastPass.ok ? Number(rec.lastPass.at) || null : null),
       backoffUntil: (() => { const x = live.get(rec.id); return x && x.nextAt > t && rec.lastPass && rec.lastPass.ok === false ? x.nextAt : null; })(),
+      // lane R5: WHICH back-off — a vendor RATE refusal (the short ladder, said
+      // "Google is limiting the rate · resuming in N s") or a failure — and the
+      // strikes / the vendor's own hint; null while no back-off runs
+      backoff: (() => { const x = live.get(rec.id); return x && x.nextAt > t && rec.lastPass && rec.lastPass.ok === false ? { kind: x.backoffKind || 'failure', until: x.nextAt, strikes: x.backoffKind === 'rate' ? x.rateStrikes : x.failures, retryAfterSec: x.retryAfterSec } : null; })(),
+      // the VENDOR's name as the card says it (a declared label — `caps.vendorName`,
+      // or the module's `vendorNameOf(record)` for a per-record brand) — never the kind id
+      vendor: vendorNameOf(rec),
+      // the per-second pace (drain rule 18): its numbers and the last second's spend
+      pace: paceView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null),   // verify r5: a toggled account not yet rebuilt reads its ghost, not zero
       lane: { via: lane.via, why: lane.why, live: !!lane.live, carryContent: !!lane.carryContent },
       sendAs: c.sendAs, receive: c.receive, identityMarking: c.identityMarking,
       // P1: what the panel's connect / re-authorize / options controls read.
@@ -1565,7 +1856,7 @@ function create(deps = {}) {
       // 2026-09-26 (the aggregated IM): the vendor budget, the scheduler's
       // census, the attachment cache and the account / pattern grains — all
       // STRUCTURE the card words
-      budget: budgetView(rec, live.get(rec.id) || null, t),
+      budget: budgetView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null, t),
       scheduler: schedulerView(rec, t),
       attachments: { ...store.attachmentUsage(rec.id), budgetBytes: attachmentBudgetBytes(), fetch: registry.capsOf(rec.kind).attachments === 'fetch' },
       linkedAt: rec.linkedAt || null,
@@ -1589,7 +1880,8 @@ function create(deps = {}) {
   /** The account's scheduler census (the card's "N conversations · M
    *  unread" line and the tiers' counts): computed from the live index. */
   function schedulerView(rec, t = now()) {
-    const out = { conversations: 0, unread: 0, hot: 0, warm: 0, cold: 0, paused: 0, overridden: 0, unlisted: 0, due: 0, lastDiscoveryAt: null, discovering: false };
+    const out = { conversations: 0, unread: 0, hot: 0, warm: 0, cold: 0, paused: 0, overridden: 0, unlisted: 0, due: 0, lastDiscoveryAt: null, discovering: false, firstIngest: null };
+    let walked = 0, reading = 0;   // lane R5: the first-read census — conversations being read (not paused, not refused by the vendor) and those walked once
     const e = live.get(rec.id) || null;
     const T = tiers();
     const c = registry.capsOf(rec.kind);
@@ -1604,8 +1896,16 @@ function create(deps = {}) {
       if (cad.source === 'override') out.overridden++;
       const last = Number(en.lane && en.lane.lastPollAt) || 0;
       if (!cad.paused && cad.seconds && last + cad.seconds * 1000 <= t) out.due++;
+      if (!cad.paused && !(en.lane && en.lane.lastError)) { reading++; if (en.walkedAt) walked++; }
     }
     if (e) { out.lastDiscoveryAt = e.disc.lastCompleteAt || null; out.discovering = !!e.disc.cursor; }
+    // lane R5: THE FIRST READ — every listed conversation's first complete walk
+    // (`walkedAt`), and at the pace how long the rest takes; null once done
+    if (reading && walked < reading) {
+      const pv = paceView(rec, e);
+      const left = reading - walked;
+      out.firstIngest = { done: walked, total: reading, etaSec: pv && pv.unitsPerSec > 0 ? Math.ceil((left * pv.fetchUnits) / pv.unitsPerSec) : null };
+    }
     return out;
   }
 
@@ -2029,7 +2329,11 @@ function create(deps = {}) {
    *  drains nothing (the requests were settled by `stop`). */
   function pokeDrain(rec, e) {
     if (stopped) return;
-    if (e.passing) { e.drainAfter = true; return; }
+    // lane R5 verify: a pass ASLEEP on a pace wait (drain rule 18) is woken so the
+    // model judges the new request at its next step NOW — a refusal (the floor, the
+    // share, the back-off) or the owner's press never waits out the sleep (≤ 1 s);
+    // the wait resumes for what is left of the bucket's shortfall
+    if (e.passing) { e.drainAfter = true; wakeSleepers(e); return; }
     if (e.drainTimer) return;
     // the drain HOLDS the event loop (never unref'd): a process whose only pending work is an awaited refresh must not exit before the drain answers it
     e.drainTimer = setImmediate(() => {
@@ -2045,16 +2349,32 @@ function create(deps = {}) {
     if (e.drainTimer) { clearImmediate(e.drainTimer); e.drainTimer = null; }
     for (const w of [...e.waiters.values()]) w.resolve(outcome);   // the set's AND the ones a running (or hung) pass holds — the pass's later answer is a no-op, its next step ends it (Drain rule 2)
   }
-  /** Retire an account's live entry: its push lane disarmed, its waiters
-   *  answered `account-changed` by name (never left hanging on an entry the
-   *  next pass can no longer see), the entry dropped. */
+  /** THE ONE EXIT (lane R5 verify r4): every lifecycle end of an account's
+   *  right to call the vendor — remove, disable, disconnect, an options
+   *  rebuild, a client switch, a refused connect — retires the live entry
+   *  HERE: its push lane disarmed, its waiters answered `account-changed` by
+   *  name (never left hanging on an entry the next pass can no longer see),
+   *  every pace sleeper woken so a queued call aborts by name (`paceWait`
+   *  re-checks the entry after every await), the pass in flight ending at
+   *  its next step and WRITING NOTHING more (`outlived`), the entry dropped.
+   *  The account's BUCKETS outlive it in `paceCarry`: a call that passed the
+   *  gate before the drop still meters into them, and the rebuilt entry
+   *  inherits them — an exit never refills a bucket. The census in
+   *  test-channels-aggregate ③g reads this file: `live.delete(` has this ONE
+   *  site and every lifecycle verb takes it. */
   function dropLive(id, why) {
     const e = live.get(id);
     if (!e) return;
     disarmPush(e, why);
     live.delete(id);
+    paceCarry.set(id, { record: e.record, win: e.win, exhaustedAt: e.exhaustedAt, paceTok: e.paceTok, paceRecent: e.paceRecent, paceInflight: 0, paceInflightAt: 0, paceLeakWarnAt: e.paceLeakWarnAt, chargeBy: null });
     settleRequests(e, { ok: false, code: 'account-changed', error: `the account changed while the refresh waited (${why}) — refresh again` });
+    wakeSleepers(e);   // lane R5: a pace sleep of the dropped entry ends now (its pass settles on the next step)
   }
+  /** Did the account's live entry end under this call (verify r4)? A fetch
+   *  that outlives its entry — or the engine — WRITES NOTHING: no index row,
+   *  no log page, no cache file for an account the owner just ended. */
+  const outlived = (rec, e) => stopped || live.get(rec.id) !== e;
   /** r7: wait until an account has no pass in flight, none queued behind it,
    *  no drain pending and no request waiting (a suite's settle — an `ok` is
    *  delivered at its fetch now, so "every answer landed" ≠ "the pass ended"). */
@@ -2148,6 +2468,7 @@ function create(deps = {}) {
     let r;
     try { r = await vendor(rec, e, () => e.adapter.older(convId, { before: oldest ? { at: Number(oldest.at), vendorId: oldest.vendorId || null } : null, limit: n - local.length })); }
     catch (err) { return { ok: false, code: err instanceof ChannelError ? err.code : 'vendor-error', error: String((err && err.message) || err), records: local }; }
+    if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the page was fetched — nothing was kept', records: local };
     const w = store.prependRecords(adapterId, convId, r.records || []);
     const again = store.readTail(adapterId, convId, { before, beforeId, limit: n });
     const cutoff = now() - 90 * 86400e3;
@@ -2234,11 +2555,16 @@ function create(deps = {}) {
         const retryAfterSec = Number(err && err.detail && err.detail.retryAfterSec) || null;
         const ttl = Att.negativeTtlMs(code, { retryAfterSec });
         const error = String((err && err.message) || err);
-        if (ttl) attRefused.set(k, { code, error, retryAfterSec: Att.TRANSIENT.includes(code) || code === 'vendor-error' ? Math.ceil(ttl / 1000) : null, until: now() + ttl });
+        // integration 2.369.192 (R3 × R5): a call the account's END aborted (R5's dropLive — a disable, a disconnect, a new
+        // sign-in: "the account changed") is NOT the vendor's refusal — an answer that outlived its entry keeps nothing, the
+        // negative cache included (else the next ask read a remembered `transport` before the account's own `disabled`)
+        const ended = outlived(rec, e);
+        if (ttl && !ended) attRefused.set(k, { code, error, retryAfterSec: Att.TRANSIENT.includes(code) || code === 'vendor-error' ? Math.ceil(ttl / 1000) : null, until: now() + ttl });
         // a rate limit is the ACCOUNT's, not this picture's: the other thumbnails of the render wait it out too
-        if (code === 'rate-limited') e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);
+        if (code === 'rate-limited' && !ended) e.attBackoffUntil = now() + (ttl || Att.NEGATIVE_TTL.transient);
         return { ok: false, code, error, ...(Att.TRANSIENT.includes(code) || code === 'vendor-error' ? { retryAfterSec: Math.max(1, Math.ceil((ttl || Att.NEGATIVE_TTL.transient) / 1000)) } : {}) };
       }
+      if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the attachment was fetched — nothing was kept' }; // R5 verify: an answer that outlived its entry keeps nothing
       const data = r && Buffer.isBuffer(r.data) ? r.data : Buffer.from((r && r.data) || '');
       if (data.length > ATTACHMENT_MAX_BYTES) {
         attRefused.set(k, { code: 'too-large', error: 'too large', retryAfterSec: null, until: now() + Att.negativeTtlMs('too-large') });
@@ -2343,15 +2669,56 @@ function create(deps = {}) {
     const perAccount = !!(mod && rowOf(mod) && rowOf(mod).bindsPerAccount);
     switch (code) {
       case 'auth-expired': return `Re-authorize ${rec.label || rec.id} from the Channels panel (rail → Channels → ${rec.label || rec.id} → Re-authorize).${perAccount ? ' If its OAuth client was withdrawn, pick another one in the same dialog — switching the client is a re-authorization.' : ''}`;
-      case 'rate-limited': return 'The vendor is rate-limiting this instance; the loop backs off by itself (30s → 15min). Nothing to do unless it persists.';
+      case 'rate-limited': return `The vendor is limiting how fast this account may read. VibeSpace paces its calls per second and per minute (Settings → Channels) and retries after a short wait — the vendor's own Retry-After when it sends one, else 5 s doubling to 60 s — never a 15-minute park. If this persists, lower the per-second setting, or check other clients reading the same account.`;
       case 'forbidden': return 'The vendor refuses this account access to these conversations. Check the app\'s granted scopes and the account\'s membership in them.';
       case 'transport': return 'The vendor could not be reached from this machine. Check egress / DNS; the loop retries with backoff.';
       default: return 'See the adapter row in the Channels panel; the loop retries with backoff.';
     }
   }
-  async function speakFailure(rec, code, err) {
+  /** verify r6: THE OWNER IS TOLD when a sign-in the vendor answered could not reach the disk. The store's write mutates
+   *  the live record BEFORE the file write (the process keeps using the vendor's token; the disk lags until the next
+   *  successful adapters write), so the ONE thing nothing on disk can know is what a restart before that means — under
+   *  Lark's rotation the disk holds a RETIRED token and the next boot's refresh is `invalid_grant`. ONE open item per
+   *  account, in memory (the store is what failed), retracted by the next write that lands (a token write, a passing pass). */
+  const unsavedItems = new Map();   // rec.id -> {id, text}
+  function speakUnsaved(rec, err) {
+    const why = String((err && err.message) || err || 'write refused').slice(0, 200);
+    log.error(`[channels] ${rec.id}: the sign-in could not be saved to disk (${why}) — the process keeps using it; a restart before the disk is writable again needs a re-authorize`);
+    if (!userTodos || typeof userTodos.add !== 'function' || unsavedItems.has(rec.id)) return;
+    const label = rec.label || rec.id;
+    const text = `Channel ${label}: its refreshed sign-in could not be saved to disk (${why})`;
+    try {
+      const item = userTodos.add(INBOX_KEY, {
+        origin: 'channels', // B-328d
+        text,
+        detail: `Adapter: ${label} (${rec.kind})\nThe vendor answered a refreshed sign-in and VibeSpace keeps using it, but data/channels/adapters.json could not be written: ${why}\n\nIt is written again with the next change. If VibeSpace restarts before a write succeeds, the disk still holds the previous sign-in — re-authorize ${label} then.\n\nThis item is retracted automatically once a write lands.`,
+        urgency: 'high', by: 'agent', sessionName: 'Channels',
+        i18n: { text: { key: i18nKey('Channel {label}: its refreshed sign-in could not be saved to disk ({error})'), params: { label, error: why } }, source: INBOX_SOURCE },
+      });
+      if (item && item.id) unsavedItems.set(rec.id, { id: item.id, text });
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not file the unsaved sign-in in the inbox: ${(e && e.message) || e}`); }
+  }
+  function retractUnsaved(rec) {
+    const it0 = unsavedItems.get(rec.id);
+    if (!it0) return;
+    unsavedItems.delete(rec.id);
+    if (!userTodos || typeof userTodos.get !== 'function') return;
+    try {
+      const it = userTodos.get(it0.id);
+      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === it0.text) { userTodos.setStatus(it0.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: the sign-in reached the disk — retracted the inbox item`); }
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the unsaved-sign-in item: ${(e && e.message) || e}`); }
+  }
+  async function speakFailure(rec, code, err, n = FAILURES_BEFORE_LOUD) {
     if (!userTodos || typeof userTodos.add !== 'function') return;
-    const text = `Channel ${rec.label || rec.id}: ${FAILURES_BEFORE_LOUD} consecutive failed passes (${code})`;
+    // ONE OPEN ITEM PER ACCOUNT (lane R5 verify r2): the two ladders — the rate
+    // one (loud at RATE_STRIKES_LOUD) and the failure one (loud at
+    // FAILURES_BEFORE_LOUD) — are independent, so a transport failure after a
+    // rate item (or the reverse) filed a SECOND item while `rec.failureItem`
+    // could remember only one: the first outlived the recovery, open forever,
+    // its own detail promising a retraction. The standing item is retracted as
+    // SUPERSEDED before this one is filed; the first good pass retracts this one.
+    if (rec.failureItem) await retractFailure(rec, 'superseded');
+    const text = `Channel ${rec.label || rec.id}: ${n} consecutive failed passes (${code})`;
     const vendorWords = String((err && err.message) || err || '').slice(0, 600);
     try {
       const item = userTodos.add(INBOX_KEY, {
@@ -2361,14 +2728,14 @@ function create(deps = {}) {
         urgency: code === 'auth-expired' ? 'high' : 'normal',
         by: 'agent', sessionName: 'Channels',
         // the headline as structure; the detail keeps the vendor's verbatim and the remedy
-        i18n: { text: { key: i18nKey('Channel {label}: {n} consecutive failed passes ({code})'), params: { label: rec.label || rec.id, n: FAILURES_BEFORE_LOUD, code } }, source: INBOX_SOURCE },
+        i18n: { text: { key: i18nKey('Channel {label}: {n} consecutive failed passes ({code})'), params: { label: rec.label || rec.id, n, code } }, source: INBOX_SOURCE },
       });
       if (item && item.id) await store.adapters.update(() => { rec.failureItem = { id: item.id, text, code, at: now() }; });
     } catch (e) { log.warn(`[channels] ${rec.id}: could not file the failure in the inbox: ${(e && e.message) || e}`); }
   }
   /** The retraction: ONLY the item this engine filed (same id, same text),
    *  only while it is still open — the user's own resolution stands. */
-  async function retractFailure(rec) {
+  async function retractFailure(rec, why = 'recovered') {
     if (!rec.failureItem) return;
     const fi = rec.failureItem;
     await store.adapters.update(() => { rec.failureItem = null; });
@@ -2377,7 +2744,7 @@ function create(deps = {}) {
       const it = userTodos.get(fi.id);
       if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === fi.text) {
         userTodos.setStatus(fi.id, 'done', RESOLVED_BY);
-        log.log(`[channels] ${rec.id}: recovered — retracted the inbox item (${fi.code})`);
+        log.log(`[channels] ${rec.id}: ${why} — retracted the inbox item (${fi.code})`);
       }
     } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the inbox item: ${(e && e.message) || e}`); }
   }
@@ -2519,6 +2886,8 @@ function create(deps = {}) {
     for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); }
   }
   const latestPending = () => { let best = null; for (const p of pendingFlows.values()) if (!p.targetId && (!best || p.startedAt >= best.startedAt)) best = p; return best; };
+  /** verify r8: does the pending flow's TARGET hold a sign-in right now (the refusal's tail says so). */
+  const targetHolds = (p) => { const t = p.targetId ? adapterRecords().adapters.find((x) => x.id === p.targetId) : null; return !!(t && t.auth && t.auth.tokenEnc); };
   async function beginPending(mod, choice, { target = null, options = null } = {}) {
     sweepPending();
     const id = target ? target.id : `pending:${crypto.randomBytes(6).toString('hex')}`;
@@ -2534,7 +2903,14 @@ function create(deps = {}) {
         try { return { token: JSON.parse(box.dec(p.tokenEnc)), why: null }; } catch (e) { return { token: null, why: `token-undecryptable: ${(e && e.message) || e}` }; }
       },
       async write(token, meta = {}) {
+        // verify r7: a consent cancelled meanwhile writes nothing; a consent naming nobody is refused here too
+        // (verify r8: the engine's stop is a cancel too; the sentence says whether the TARGET keeps a sign-in)
+        const c = (meta.consent && typeof meta.consent.cancelled === 'function' ? meta.consent.cancelled() : null) || (stopped ? 'shutdown' : null);
+        if (c) throw new ChannelError('auth-expired', cancelledSentence(rec.label || rec.id, String(c), targetHolds(p)), { retryable: false, detail: { cancelled: String(c) } });
+        const offered = identityOf(token);
+        if (meta.consent && !Object.keys(offered).length) throw new ChannelError('forbidden', namelessSentence(rec.label || rec.id, 'the sign-in named no account'), { retryable: false, detail: { nameless: true } });
         p.tokenEnc = box.enc(JSON.stringify(token));
+        p.identity = offered;   // verify r5: judged against the target's held identity when the rebind lands
         p.tokenMeta = { expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || null };
       },
       async clear() { p.tokenEnc = null; p.tokenMeta = null; },
@@ -2547,10 +2923,17 @@ function create(deps = {}) {
     return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow) };
   }
   async function onPendingDone(p, r) {
+    // verify r8: NOTHING is written after stop — the pending's durable write (applyRebind / Connect) is dropped
+    if (stopped) { pendingFlows.delete(p.flowId); log.log(`[channels] ${p.targetId || p.kind}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent is not applied' : (r && r.error) || 'the consent flow failed'}); sign in again after the restart`); return; }
     p.done = true;
-    p.ok = !!(r && r.ok) && !!p.tokenEnc;
-    p.error = p.ok ? null : String((r && r.error) || 'the consent flow failed');
+    p.cancelled = (r && r.cancelled) || null;
+    // verify r7: a flow cancelled mid-exchange is not a consent. verify r8: HERE the durable write is still ahead
+    // (applyRebind / Connect), so a cancel the loopback carried beside ok:true — it arrived after the MEMORY write —
+    // still wins; the record's own door is the opposite case (its write is the fact, `onAuthDone` reads ok as landed)
+    p.ok = !!(r && r.ok) && !!p.tokenEnc && !p.cancelled;
+    p.error = p.ok ? null : (p.cancelled && !(r && r.error) ? cancelledSentence(p.rec.label || p.targetId || p.kind, p.cancelled, targetHolds(p)) : String((r && r.error) || 'the consent flow failed'));
     p.user = (p.tokenMeta && p.tokenMeta.user) || (r && r.result && r.result.user) || null;
+    if (p.targetId && r && r.cancelled === 'superseded') { pendingFlows.delete(p.flowId); log.log(`[channels] ${p.targetId}: an older re-authorize completed after a newer one and was refused — the newer sign-in stands`); return; }   // verify r7
     if (p.targetId) return applyRebind(p);
     if (p.ok) log.log(`[channels] ${p.kind}: signed in${p.user ? ` as ${p.user}` : ''} (${p.choice.credentialKey}) — waiting for Connect`);
     else log.warn(`[channels] ${p.kind}: consent flow failed: ${p.error}`);
@@ -2566,17 +2949,30 @@ function create(deps = {}) {
       if (!stopped) notify([]);
       return;
     }
+    // verify r5 (credential): a rebind whose consent names ANOTHER identity than the account's keeps client and token
+    // (r6: the held identity read off the token the record holds; a consent naming nobody onto a held identity refused)
+    const held = heldIdentity(rec, tokensFor(rec).read().token);
+    const offered = p.identity || {};
+    const mm = identityMismatch(held, offered) || (Object.keys(held).length && !Object.keys(offered).length ? { nameless: true } : null);
+    if (mm) {
+      const s = mm.nameless ? namelessSentence(rec.label || rec.id, 'the sign-in named no account') : mismatchSentence(rec.label || rec.id, mm);
+      await store.adapters.update(() => { rec.lastAuthError = s; rec.lastAuthAt = now(); });
+      log.warn(`[channels] ${rec.id}: re-authorize under ${p.choice.credentialKey} refused: ${s} — the account keeps its client and token`);
+      if (!stopped) notify([]);
+      return;
+    }
     await store.adapters.update(() => {
       rec.credentialKey = p.choice.credentialKey;
       if (p.choice.credential) rec.credential = p.choice.credential; else delete rec.credential;
       rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now() };
+      if (p.identity && Object.keys(p.identity).length) rec.identity = { ...(rec.identity || {}), ...p.identity };
       rec.lastAuthError = null; rec.lastAuthAt = now();
     });
     dropLive(rec.id, 'client switched');
     log.log(`[channels] ${rec.id}: re-authorized under ${rec.credentialKey}${rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     const e = adapterFor(rec);
     await refreshAuth(e);
-    e.failures = 0; e.nextAt = 0;
+    e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null;
     await retractFailure(rec);
     if (!stopped) notify([]);
     if (!stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
@@ -2649,7 +3045,7 @@ function create(deps = {}) {
     const e = adapterFor(rec);
     let flow;
     try { flow = await e.adapter.auth.begin(); }
-    catch (err) { dropLive(rec.id, 'connect refused'); throw err; }   // a refused begin on a fresh record leaves nothing behind
+    catch (err) { dropLive(rec.id, 'connect refused'); paceCarry.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind (not even its ghost bucket)
     await store.adapters.update((a) => { a.adapters.push(rec); });
     notify([]);
     return { adapter: adapterView(rec), flow: safeFlow(flow) };
@@ -2672,6 +3068,7 @@ function create(deps = {}) {
     rec.options = normalizeOptions(mod, b.options, p.rec.options);
     if (b.name) rec.label = cleanLabel(b.name) || rec.label;
     rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now() };
+    if (p.identity && Object.keys(p.identity).length) rec.identity = { ...p.identity };   // verify r5: whose account this record is, from its first consent
     rec.lastAuthAt = now();
     await store.adapters.update((a) => { a.adapters.push(rec); });
     const e = adapterFor(rec);
@@ -2752,10 +3149,20 @@ function create(deps = {}) {
   async function onAuthDone(adapterId, r) {
     const rec = adapterRecords().adapters.find((x) => x.id === adapterId);
     if (!rec) return;
+    // verify r8: NOTHING is written after stop — the door refused the late exchange by name (`shutdown`) or its
+    // consent had already landed; either way the record is left as it is and the next boot reads it
+    if (stopped) { log.log(`[channels] ${rec.id}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent had landed and stands' : (r && r.error) || 'the consent flow failed'})`); return; }
+    // verify r7: a flow a NEWER sign-in superseded and REFUSED reports its end AFTER the newer one landed — its refusal
+    // is not the record's last sign-in line (the connected record used to wear "replaced by a newer sign-in" as an
+    // error). verify r8: one whose consent LANDED before the newer began is a landed consent — the write is the fact
+    if (r && !r.ok && r.cancelled === 'superseded') { log.log(`[channels] ${rec.id}: an older sign-in completed after a newer one and was refused (${r.error || 'superseded'}) — the newer sign-in stands`); return; }
     await store.adapters.update(() => { rec.lastAuthError = r && r.ok ? null : String((r && r.error) || 'the consent flow failed'); rec.lastAuthAt = now(); });
     const e = adapterFor(rec);
     await refreshAuth(e);
-    if (r && r.ok) { e.failures = 0; e.nextAt = 0; }
+    // verify r8: THE WRITE IS THE FACT, and so is what came after it — a consent that landed and was DISCONNECTED
+    // before this report (the clear() behind it in the store's chain) is not "connected": no pass, no connected line
+    if (r && r.ok && !(rec.auth && rec.auth.tokenEnc)) { log.log(`[channels] ${rec.id}: the sign-in landed and the account was disconnected since — the disconnect stands`); if (!stopped) notify([]); return; }
+    if (r && r.ok) { e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; }
     if (r && r.ok) log.log(`[channels] ${rec.id}: connected${rec.auth && rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     else log.warn(`[channels] ${rec.id}: consent flow failed: ${(r && r.error) || 'unknown'}`);
     if (!stopped) notify([]);
@@ -2771,12 +3178,14 @@ function create(deps = {}) {
     const rec = recordOrThrow(adapterId);
     const running = flows.runningFor(rec.id);
     if (running) { flows.cancel(running.flowId, 'cancelled'); pendingFlows.delete(running.flowId); }
-    { const e = live.get(rec.id); if (e) disarmPush(e, 'disconnected'); }   // a lane cannot outlive its credential
+    // verify r4: THE exit, BEFORE the token goes — every queued paced call is aborted by name (18 × 20 units used to leave
+    // with the Bearer captured before the wait), the pass in flight ends at its next step, the lane cannot outlive its credential
+    dropLive(rec.id, 'disconnected');
     await tokensFor(rec).clear();
     await store.adapters.update(() => { rec.lastAuthError = null; rec.state = {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });
     await retractFailure(rec);
-    const e = live.get(rec.id);
-    if (e) { e.failures = 0; e.nextAt = 0; await refreshAuth(e); }
+    const e = adapterFor(rec);   // rebuilt at once (its buckets carried) so the card answers the adapter's own `unknown`
+    e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; await refreshAuth(e);
     notify([]);
     return { ok: true };
   }
@@ -2846,6 +3255,8 @@ function create(deps = {}) {
    *  else's. */
   async function removeRecord(rec) {
     dropLive(rec.id, 'removed');
+    paceCarry.delete(rec.id);   // R5: nothing left to charge
+    retractUnsaved(rec);   // R5 verify r6: the unsaved-sign-in item goes with the record (the disk holds no record to lag behind)
     // every wake window of the account: its conversations', and (R4, lane R2
     // verify A9b) its account / rule scope digests — a surviving scope timer
     // would fire into a grain that is gone
@@ -3016,6 +3427,26 @@ function create(deps = {}) {
    *  nothing offered and whose integration resolves to nothing is left
    *  unstamped (it keeps following the row's pick, as before). Idempotent: a
    *  stamped record is `already`. */
+  /** verify r6: a LEGACY record (pre-r5, no `identity`) is stamped ONCE from the evidence it holds — the token
+   *  (Gmail's email, Lark's open_id) else its `auth.user` when that is an email — at boot, so a disconnect after the
+   *  upgrade (which wipes auth.user) and a stranger's consent find the record bound to its holder, never nameless. */
+  function stampIdentities() {
+    const report = { stamped: [], skipped: [] };
+    for (const rec of adapterRecords().adapters) {
+      if (rec.identity && typeof rec.identity === 'object' && Object.keys(identityOf(rec.identity)).length) { report.skipped.push({ id: rec.id, why: 'already' }); continue; }
+      const held = heldIdentity(rec, tokensFor(rec).read().token);
+      if (!Object.keys(held).length) { report.skipped.push({ id: rec.id, why: 'no-evidence' }); continue; }
+      rec.identity = { ...held };
+      report.stamped.push({ id: rec.id, identity: held });
+    }
+    const write = report.stamped.length ? saveAdapters() : Promise.resolve();
+    write.catch((err) => log.error(`[channels] identity stamp write failed (the live records carry it; the next adapters write persists it): ${(err && err.message) || err}`));
+    // verify r7: what the stamp did is SAID — a record it cannot stamp is named, never stamped with a guess (it holds
+    // no token and its auth.user is not an address; it takes its next consent, the recorded r6 residual)
+    const unstamped = report.skipped.filter((s) => s.why === 'no-evidence').map((s) => s.id);
+    if (report.stamped.length || unstamped.length) log.log(`[channels] identity stamp: ${report.stamped.length} legacy record(s) stamped from the token they hold (${report.stamped.map((s) => s.id).join(', ') || 'none'}); ${unstamped.length} left unstamped — no token and no address in auth.user (${unstamped.join(', ') || 'none'}); an unstamped record is bound by its next consent`);
+    return { ...report, write };
+  }
   function stampCredentialKeys() {
     const report = { stamped: [], skipped: [] };
     for (const rec of adapterRecords().adapters) {
@@ -3034,7 +3465,9 @@ function create(deps = {}) {
   async function setEnabled(adapterId, enabled) {
     const rec = recordOrThrow(adapterId);
     await store.adapters.update(() => { rec.enabled = !!enabled; });
-    if (!enabled) { const e = live.get(rec.id); if (e) disarmPush(e, 'adapter disabled'); }
+    // verify r4: a disabled account takes THE exit — its queued paced calls are aborted by name (18 × 20 units used to
+    // finish, paced, after the owner disabled it), the pass in flight ends at its next step, the lane is disarmed with it
+    if (!enabled) dropLive(rec.id, 'disabled');
     else if (timer) syncPushLanes().catch(() => {});
     notify([]);
     return { ok: true, enabled: !!enabled };
@@ -5751,11 +6184,13 @@ function create(deps = {}) {
       disarmPush(e, 'engine stopped');
       if (e.pushTimer) { clearTimeout(e.pushTimer); e.pushTimer = null; }
       settleRequests(e, { ok: false, code: 'stopped', error: 'the channels engine is stopping — refresh again after the restart' });   // r5: no waiter outlives the engine
+      wakeSleepers(e);   // lane R5: no pace sleep outlives it either
     }
     if (!oauth) { try { flows.stopAll(); } catch {} }   // ours to stop; an injected machine is its owner's
     store.close();
   }
 
+  try { stampIdentities(); } catch (err) { log.warn(`[channels] identity stamp failed: ${(err && err.message) || err}`); }   // verify r6: legacy records bound to their holder at boot
   return {
     store, registry, digest, notify, pass, refreshConvCaps, markRead, messages,
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
@@ -5766,7 +6201,7 @@ function create(deps = {}) {
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
     setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
     cadenceOf: (adapterId, convId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const en = store.index.peek(`${adapterId}/${convId}`); return rec && en ? cadenceOf(rec, en) : null; },
-    budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || null) : null; },
+    budgetOf: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? budgetView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null) : null; },
     // R4: one scope digest per WATCHER — `pk` (`kind:id`) names it; without one, every watcher of that grain is flushed
     flushScope: async (adapterId, source, patternId, pk = null) => {
       const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
@@ -5788,7 +6223,7 @@ function create(deps = {}) {
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),
     // 2026-09-22 the account model: the offered credentials (key + label) and the legacy stamp
-    offeredCredentials, defaultCredentialKey, stampCredentialKeys,
+    offeredCredentials, defaultCredentialKey, stampCredentialKeys, stampIdentities,
     // P1b: the push lanes
     setPush, syncPushLanes, pushView, kick: (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); if (rec) kick(rec, adapterFor(rec)); },
     oauth: flows,

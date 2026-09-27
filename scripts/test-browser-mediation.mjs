@@ -9,9 +9,9 @@
 //   ② the CDP MEDIATION RULES (PURE, src/browser-mediation.js) over literal
 //      messages: target scoping (attach / activate / close / getTargetInfo
 //      refused out of scope; getTargets FILTERED), the session gate, the
-//      whole-browser acts refused outright, the `browser_paused` refusal of
-//      Input.* + the navigation family while the user drives (Runtime.evaluate
-//      NOT refused — stated), the scope GROWING from replies and events
+//      whole-browser acts refused outright, the `browser_interrupted` refusal of
+//      Input.* + the navigation family + script evaluation while the user drives
+//      (reads still answer — the owner's ruling of 2026-09-27), the scope GROWING from replies and events
 //      (createTarget / attachToTarget / a tab a scoped page opened / an
 //      auto-attached child / an owned context) and SHRINKING (destroyed /
 //      detached / disposed), the measured Chrome ordering (targetCreated BEFORE
@@ -35,6 +35,25 @@
 //      pointed ⇒ 503, then the same url reaches the NEW browser; shut down ⇒
 //      503, no uncaught error — each fix layer alone refuses, and the pre-fix
 //      copy (both removed) upgrades the client (CONTROLS via mutant-copy).
+//   ⑥ (verify S2 r4) THE CENSUS: src/cdp-census.js has ONE row per method of the
+//      pinned /json/protocol (scripts/fixtures/cdp-protocol-<chrome>/), every row
+//      obeys its class (input / view / page-mutation refused while paused, lease-wide
+//      — the owner's ruling of 2026-09-27 retired the r4 switch, a passed `fenceScripts`
+//      changes nothing; read / session / harmless never; refused always), an unknown
+//      method is refused BY NAME while paused; CONTROLS: a row demoted, the unknown
+//      rule dropped, the old D6 open script door (mutant-copy).
+//   ⑦ (the owner's ruling, 2026-09-27 — "直接打断所有脚本和agent操作") THE TAKEOVER
+//      INTERRUPTS: the PURE plan (what is aborted, which sessions get a
+//      Runtime.terminateExecution); the REAL keeper + the REAL proxy over the fake
+//      upstream — a Runtime.evaluate and an Input.insertText the agent has in flight
+//      when the user takes over are answered browser_interrupted within 50 ms, a read
+//      in flight is left to finish, terminateExecution reaches the evaluate's session,
+//      the browser's late answer is swallowed, a createTarget cut mid-flight still
+//      joins the scope (the revoke closes it), a new script call while the user drives
+//      is refused and a read answers, the takeover event carries the interruption;
+//      the retired `browser.fenceScriptsWhileDriven` stored as false is IGNORED and said
+//      once; CONTROL: a mediator copy whose interrupt is the old pause (nothing in
+//      flight is touched) leaves the call waiting past 50 ms.
 // The real-chrome exit proof is test-browser-mediation-chrome (heavy).
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged by
 // the proxy, never a navigation of VibeSpace's own page (§47's declared exemption).
@@ -101,10 +120,10 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   ok(at.reply.result.sessionId === 'S-A' && at.emit.length === 0 && sc.sessions.get('S-A') === 'T-A', 'the attach reply admits the session (→ its target)');
   ok(code(j({ id: 12, method: 'Page.navigate', params: { url: 'https://x' }, sessionId: 'S-A' })) === 'forward' && code(j({ id: 13, method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x: 1, y: 1 }, sessionId: 'S-A' })) === 'forward', 'while the agent holds input: navigate and input pass on an owned session');
   const P = { paused: true };
-  ok(code(j({ id: 14, method: 'Page.navigate', params: { url: 'https://x' }, sessionId: 'S-A' }, P)) === 'browser_paused' && code(j({ id: 15, method: 'Input.dispatchMouseEvent', params: {}, sessionId: 'S-A' }, P)) === 'browser_paused' && code(j({ id: 16, method: 'Input.insertText', params: { text: 'x' }, sessionId: 'S-A' }, P)) === 'browser_paused' && code(j({ id: 17, method: 'Page.reload', params: {}, sessionId: 'S-A' }, P)) === 'browser_paused' && code(j({ id: 18, method: 'DOM.setFileInputFiles', params: {}, sessionId: 'S-A' }, P)) === 'browser_paused' && code(j({ id: 19, method: 'Target.createTarget', params: { url: 'about:blank' } }, P)) === 'browser_paused', 'while the USER drives: every Input.*, the navigation family, a file upload and a new tab are browser_paused');
-  ok(code(j({ id: 20, method: 'Runtime.evaluate', params: { expression: 'document.title' }, sessionId: 'S-A' }, P)) === 'forward' && code(j({ id: 21, method: 'Page.captureScreenshot', params: {}, sessionId: 'S-A' }, P)) === 'forward', 'reads (Runtime.evaluate / captureScreenshot) are NOT refused while paused — stated, not a DOM-level fence');
+  ok(code(j({ id: 14, method: 'Page.navigate', params: { url: 'https://x' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 15, method: 'Input.dispatchMouseEvent', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 16, method: 'Input.insertText', params: { text: 'x' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 17, method: 'Page.reload', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 18, method: 'DOM.setFileInputFiles', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 19, method: 'Target.createTarget', params: { url: 'about:blank' } }, P)) === 'browser_interrupted', 'while the USER drives: every Input.*, the navigation family, a file upload and a new tab are browser_interrupted');
+  ok(code(j({ id: 20, method: 'Runtime.evaluate', params: { expression: 'document.title' }, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 22, method: 'Runtime.callFunctionOn', params: {}, sessionId: 'S-A' }, P)) === 'browser_interrupted' && code(j({ id: 21, method: 'Page.captureScreenshot', params: {}, sessionId: 'S-A' }, P)) === 'forward' && code(j({ id: 23, method: 'DOM.getDocument', params: {}, sessionId: 'S-A' }, P)) === 'forward', 'the owner\'s ruling (2026-09-27): script evaluation (Runtime.evaluate / callFunctionOn) is refused while the user drives too — reads (captureScreenshot / DOM.getDocument) still answer');
   const pr = j({ id: 14, method: 'Page.navigate', params: {}, sessionId: 'S-A' }, P).reply;
-  ok(pr.id === 14 && pr.sessionId === 'S-A' && pr.error.code === M.CDP_REFUSAL_CODE && /^browser_paused: /.test(pr.error.message) && /handback/.test(pr.error.message), 'a refusal is a CDP error by id on the same session: -32000, the typed code as the message prefix, the way out named');
+  ok(pr.id === 14 && pr.sessionId === 'S-A' && pr.error.code === M.CDP_REFUSAL_CODE && /^browser_interrupted: The user took over this browser — your operation was interrupted \(Page\.navigate\)\. Wait for the handback, then run it again\.$/.test(pr.error.message), 'a refusal is a CDP error by id on the same session: -32000, the typed code as the message prefix, the takeover, the interruption and the way out named (THE sentence, src/browser-interrupt.js)', pr.error.message);
   ok(M.judge({ method: 'Target.getTargets' }, sc).kind === 'drop' && M.judge('x', sc).kind === 'drop' && M.refusalCodeOf(M.judge({ id: 1 }, sc).reply) === 'bad_message', 'no id ⇒ dropped silently; no method with an id ⇒ bad_message');
   // createTarget: the measured Chrome ordering (targetCreated BEFORE the reply)
   const sc2 = M.newScope({});
@@ -158,10 +177,130 @@ console.log('— ② the mediation rules: scope, session gate, paused, whole-bro
   ok(/mediated CDP url/.test(M.mediationSentence({ profileLabel: 'Team', others: 2 })) && /2 other sessions/.test(M.mediationSentence({ profileLabel: 'Team', others: 2 })), 'the one-line sentence names the confinement and the others');
   // 2026-09-21 (the verifier's finding): the sentence promised "input and navigation are refused" while Runtime.evaluate passes — the words now match the fence
   const sent = M.mediationSentence({ profileLabel: 'Team' });
-  ok(/page-navigation commands are refused \(browser_paused\)/.test(sent) && /script evaluation and reads are not/.test(sent) && !/input and navigation are refused/.test(sent), 'the sentence names the fence\'s REAL scope: input + page-navigation COMMANDS refused, script evaluation and reads not (a script can navigate — said, not promised away)');
-  ok(!M.isPausedMethod('Runtime.evaluate') && !M.isPausedMethod('Runtime.callFunctionOn') && !M.isPausedMethod('DOM.getDocument') && M.isPausedMethod('Page.navigate') && M.isPausedMethod('Input.insertText'), '…and the table agrees: evaluate / callFunctionOn / DOM reads pass while paused, navigate and Input.* do not');
+  ok(/everything but reads is refused \(browser_interrupted\)/.test(sent) && /interrupted — wait for the handback, then run it again/.test(sent) && !/script evaluation and reads are not/.test(sent) && M.mediationSentence({ profileLabel: 'Team', fenceScripts: false }) === sent, 'the sentence names the fence\'s REAL scope (the owner\'s ruling): everything but reads refused, what was running interrupted, the way out — the retired switch changes nothing');
+  ok(M.isPausedMethod('Runtime.evaluate') && M.isPausedMethod('Runtime.callFunctionOn') && !M.isPausedMethod('DOM.getDocument') && M.isPausedMethod('Page.navigate') && M.isPausedMethod('Input.insertText'), '…and the table agrees: evaluate / callFunctionOn / navigate / Input.* are refused while paused, DOM reads are not');
   { const REPO_DIR = new URL('..', import.meta.url).pathname; const wrapperTxt = fs.readFileSync(path.join(REPO_DIR, 'data/bin/vibespace-browser'), 'utf8'); const manual = fs.readFileSync(path.join(REPO_DIR, 'docs/agent/browser-manual.md'), 'utf8');
-    ok(/not script evaluation/.test(wrapperTxt) && /script evaluation \(`eval`\), which is NOT fenced/.test(manual), 'the CLI\'s `watch` and the manual say the same (no surface promises a DOM-level fence)'); }
+    ok(/Taking over INTERRUPTS you/.test(wrapperTxt) && /browser_interrupted/.test(wrapperTxt) && !/not script evaluation/.test(wrapperTxt) && /Taking over interrupts you/.test(manual) && /browser_interrupted/.test(manual) && !/which is NOT fenced/.test(manual) && !/fenceScriptsWhileDriven/.test(wrapperTxt + manual), 'the CLI\'s `watch` and the manual say the same: a takeover interrupts (browser_interrupted) — no surface still says scripts pass or names the retired switch'); }
+}
+
+// ═══ ②r3 (verify S2 r3, 2026-09-26): the input side's OTHER doors ═══════════
+console.log('— ②r3 verify r3: Input.setIgnoreInputEvents refused on every lease (a pre-armed deaf page), DOM.focus paused, Page.bringToFront deliberately not; CONTROL = a rules copy without the entries');
+{
+  const REPO_R3 = path.resolve(new URL('..', import.meta.url).pathname);
+  const sc = M.newScope({ targets: ['T-A'] }); M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc);
+  const code = (mod, m, o) => { const v = mod.judge(m, sc, o); return v.kind === 'refuse' ? mod.refusalCodeOf(v.reply) : v.kind; };
+  const IGN = { id: 40, method: 'Input.setIgnoreInputEvents', params: { ignore: true }, sessionId: 'S-A' };
+  const r0 = M.judge(IGN, sc, {});
+  ok(code(M, IGN, {}) === 'method_refused' && code(M, IGN, { paused: true }) === 'method_refused' && /ignore every input/.test(r0.reply.error.message) && /every lease/.test(r0.reply.error.message), '②r3 Input.setIgnoreInputEvents is refused on every lease, paused or not, and says why (measured on 0.38.1 + Chrome: armed before a takeover, Chrome answered ok to every one of the user\'s credited dispatches while the page received none)', r0.reply.error.message);
+  ok(code(M, { id: 41, method: 'DOM.focus', params: { nodeId: 3 }, sessionId: 'S-A' }, { paused: true }) === 'browser_interrupted' && code(M, { id: 42, method: 'DOM.focus', params: { nodeId: 3 }, sessionId: 'S-A' }, {}) === 'forward', '②r3 DOM.focus is refused (browser_interrupted) while the user drives (measured: it moved their next key into another field) and passes otherwise');
+  ok(code(M, { id: 43, method: 'Target.activateTarget', params: { targetId: 'T-A' } }, { paused: true }) === 'browser_interrupted' && code(M, { id: 44, method: 'Target.closeTarget', params: { targetId: 'T-A' } }, { paused: true }) === 'browser_interrupted' && code(M, { id: 45, method: 'Page.navigateToHistoryEntry', params: { entryId: 1 }, sessionId: 'S-A' }, { paused: true }) === 'browser_interrupted', '②r3 activateTarget / closeTarget / navigateToHistoryEntry on the lease\'s OWN tab are refused while the user drives');
+  ok(code(M, { id: 46, method: 'Page.bringToFront', params: {}, sessionId: 'S-A' }, { paused: true }) === 'forward' && !M.PAUSED_METHODS.has('Page.bringToFront'), '②r3 Page.bringToFront is deliberately NOT fenced (measured r2 + r3 on 0.38.1: refusing it does not stop the daemon\'s `tab <n>` and leaves the switched-to tab HIDDEN — no frames, mouse input never answered, the stream dead after the handback; the switch is refused at the live view\'s anchor instead — test-browser-fact ③/⑤)');
+  // verify r4: the two r3 entries are ROWS of the census now (src/cdp-census.js) — the control demotes the rows and loads a
+  // rules copy bound to that census copy (mutant-copy: an absolute require path in the copy's source reaches it)
+  const MUT2 = mutantCopies('mediation-r3-rules', REPO_R3);
+  const censusSrc = fs.readFileSync(path.join(REPO_R3, 'src/cdp-census.js'), 'utf8');
+  const medSrc = fs.readFileSync(path.join(REPO_R3, 'src/browser-mediation.js'), 'utf8');
+  const n1 = "setIgnoreInputEvents: { cls: 'refused', since: '2026-09-26', why:", n2 = "focus: 'input',";
+  ok(censusSrc.split(n1).length === 2 && censusSrc.split(n2).length === 2 && medSrc.split("require('./cdp-census.js')").length === 2, '②r3 control setup: both r3 rows are found once in src/cdp-census.js, the rules module requires the census once');
+  const demoted = MUT2.write('src/cdp-census.js', censusSrc.replace(n1, "setIgnoreInputEvents: { cls: 'harmless', since: '2026-09-26', why:").replace(n2, "focus: 'read',"), 'no-r3');
+  const mut = MUT2.load('src/browser-mediation.js', medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(demoted)})`), 'no-r3');
+  ok(code(mut, IGN, {}) === 'forward' && code(mut, { id: 41, method: 'DOM.focus', params: { nodeId: 3 }, sessionId: 'S-A' }, { paused: true }) === 'forward', '②r3 CONTROL (the two rows demoted in a census copy): the deaf-page arm and DOM.focus while paused are ADMITTED — the holes the rows close');
+  for (const r of copiesCensus(MUT2.files, MUT2.dir, REPO_R3, { minCopies: 2, label: '②r3 ' })) ok(r.pass, r.name, r.detail);
+}
+
+// ═══ ⑥ THE CENSUS (verify S2 r4, 2026-09-26): the paused fence is a table over the vendor's own method list ═══
+console.log('— ⑥ the CDP census: every method of the pinned protocol has a row, the class rules, unknown = refused by name, the retired switch changes nothing; three patched-copy controls');
+{
+  const REPO6 = path.resolve(new URL('..', import.meta.url).pathname);
+  const C = M.CENSUS;
+  const fixtureFile = path.join(REPO6, 'scripts/fixtures', `cdp-protocol-${C.CENSUS_CHROME}`, 'protocol.json');
+  ok(fs.existsSync(fixtureFile), `⑥ the protocol fixture the census names exists (Chrome ${C.CENSUS_CHROME}: scripts/fixtures/cdp-protocol-${C.CENSUS_CHROME}/protocol.json — scripts/cdp-protocol-fetch.mjs writes it)`);
+  const fixture = JSON.parse(fs.readFileSync(fixtureFile, 'utf8'));
+  ok(C.validate().length === 0, '⑥ the table validates: a closed class vocabulary, dated rows, the one anchor-fenced row is a paused class', C.validate().slice(0, 5).join('; '));
+  const cmp = C.compare(fixture);
+  const cn = C.census();
+  console.log(`  (census: Chrome ${cn.chrome}, protocol ${fixture.protocolVersion}, ${fixture.domains.length} domains, ${cmp.listed} methods listed / ${cmp.rows} rows — ${Object.entries(cn.byClass).map(([k, v]) => k + ' ' + v).join(', ')})`);
+  if (cmp.unclassified.length) console.error('  UNCLASSIFIED (the protocol lists these, the census does not — write their rows in src/cdp-census.js):\n    ' + cmp.unclassified.join('\n    '));
+  if (cmp.stale.length) console.error('  STALE (rows naming no method of the pinned protocol):\n    ' + cmp.stale.join('\n    '));
+  ok(cmp.sameSet && cmp.listed >= 600, `⑥ the census covers EVERY method the pinned protocol lists and names none it lacks (${cmp.listed} = ${cmp.rows}; ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale)`);
+  ok(fixture.domains.every((d) => Array.isArray(d.commands) && d.commands.every((c) => c && typeof c.name === 'string')) && !JSON.stringify(fixture).includes('"parameters"'), '⑥ the fixture is the names-only listing (no parameter schemas — the census classes methods)');
+  // the class rules over the whole table: a scope with the anchor's tab A (S-A) and another tab B (S-B), paused / not, switch on / off
+  const sc = M.newScope({ targets: ['T-A', 'T-B'] });
+  M.admitReply({ id: 1, result: { sessionId: 'S-A' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-A' } }, sc);
+  M.admitReply({ id: 2, result: { sessionId: 'S-B' } }, { method: 'Target.attachToTarget', params: { targetId: 'T-B' } }, sc);
+  M.admitReply({ id: 3, result: { browserContextId: 'C-1' } }, { method: 'Target.createBrowserContext', params: {} }, sc);
+  const paramsFor = (m) => (M.TARGET_METHODS.has(m) ? { targetId: 'T-A' } : m === 'Target.detachFromTarget' ? { sessionId: 'S-B' } : M.CONTEXT_METHODS.has(m) ? { browserContextId: 'C-1' } : {});
+  const verdict = (mod, m, sid, o) => { const v = mod.judge({ id: 9, method: m, params: paramsFor(m), sessionId: sid }, sc, o); return v.kind === 'refuse' ? mod.refusalCodeOf(v.reply) + ':' + (v.why || '') : v.kind; };
+  const rows = C.rows(); const name = (r) => r.domain + '.' + r.method;
+  const wrong = [];
+  for (const r of rows) {
+    const m = name(r);
+    // the retired r4 switch passed either way (a stale caller) must change NOTHING — `sw` / `swFree` are the proof
+    const onA = verdict(M, m, 'S-A', { paused: true }), onB = verdict(M, m, 'S-B', { paused: true }), free = verdict(M, m, 'S-A', {}), sw = verdict(M, m, 'S-A', { paused: true, fenceScripts: false }), swFree = verdict(M, m, 'S-A', { fenceScripts: true });
+    let want;
+    if (r.cls === 'refused') want = ['method_refused:refused', 'method_refused:refused', 'method_refused:refused', 'method_refused:refused', 'method_refused:refused'];
+    else if ((r.cls === 'input' || r.cls === 'view' || r.cls === 'page-mutation') && r.fence === 'mediator') want = [`browser_interrupted:${r.cls}`, `browser_interrupted:${r.cls}`, 'forward', `browser_interrupted:${r.cls}`, 'forward'];
+    else want = ['forward', 'forward', 'forward', 'forward', 'forward'];
+    const got = [onA, onB, free, sw, swFree];
+    if (got.join() !== want.join()) wrong.push(`${m} [${r.cls}${r.fence === 'anchor' ? ', anchor' : ''}]: got ${got.join(' | ')} want ${want.join(' | ')}`);
+  }
+  const n = (cls) => rows.filter((r) => r.cls === cls).length;
+  ok(wrong.length === 0, `⑥ every row obeys its class: ${n('input')} input + ${n('view')} view + ${n('page-mutation')} page-mutation refused browser_interrupted while paused — on the anchor's tab AND on the lease's other tab alike (LEASE-WIDE: the mediator cannot tell a tab from a frame under the driven tab, the CLI rung refuses every page verb while the user drives anyway, the daemon's own tab switch moves "the other tab") — and forwarded when not paused, the retired switch passed either way changing nothing; ${n('read')} read + ${n('session')} session + ${n('harmless')} harmless never refused; ${n('refused')} refused always`, wrong.slice(0, 8).join('\n    '));
+  const btf = C.rowOf('Page.bringToFront');
+  ok(btf && btf.cls === 'view' && btf.fence === 'anchor' && /anchor/.test(btf.why) && verdict(M, 'Page.bringToFront', 'S-A', { paused: true }) === 'forward' && rows.filter((r) => r.fence === 'anchor').length === 1, '⑥ exactly ONE row is anchor-fenced — Page.bringToFront, class view, forwarded here, refused at the live view\'s anchor (its row says why)');
+  // the old lists map to rows (a control that drops one goes red on ② above)
+  const P6_REFUSED = ['Browser.close', 'Browser.crash', 'Browser.crashGpuProcess', 'Target.exposeDevToolsProtocol', 'Target.setRemoteLocations', 'Target.sendMessageToTarget', 'Input.setIgnoreInputEvents'];
+  const P6_PAUSED = ['Page.navigate', 'Page.reload', 'Page.navigateToHistoryEntry', 'Page.close', 'Page.stopLoading', 'Page.setDocumentContent', 'Page.handleJavaScriptDialog', 'DOM.setFileInputFiles', 'Target.createTarget', 'Target.closeTarget', 'Target.activateTarget', 'DOM.focus'];
+  ok(P6_REFUSED.every((m) => C.classOf(m) === 'refused' && M.ALWAYS_REFUSED.has(m)) && P6_PAUSED.every((m) => ['input', 'view'].includes(C.classOf(m)) && M.PAUSED_METHODS.has(m)) && [...M.ALWAYS_REFUSED].every((m) => C.classOf(m) === 'refused') && rows.filter((r) => r.domain === 'Input' && r.method !== 'setIgnoreInputEvents').every((r) => r.cls === 'input'), '⑥ every pre-census refusal maps to a row (the 7 always-refused, the 12 paused-while-driven), the derived sets are views of the census, every Input.* but the deaf-page arm is class input');
+  ok(P6_REFUSED.slice(0, 6).concat(P6_PAUSED.slice(0, 11)).every((m) => C.rowOf(m).since === '2026-09-21') && C.rowOf('DOM.focus').since === '2026-09-26' && C.rowOf('Input.setIgnoreInputEvents').since === '2026-09-26' && C.rowOf('Runtime.evaluate').since === C.SINCE, '⑥ rows carry their date: the P6 list 2026-09-21, the r3 doors 2026-09-26, the census itself SINCE');
+  // unknown ⇒ refused by name while paused, forwarded otherwise
+  const unk = M.judge({ id: 10, method: 'Page.zzzFutureMethod', params: {}, sessionId: 'S-A' }, sc, { paused: true });
+  ok(unk.kind === 'refuse' && unk.why === 'unclassified' && M.refusalCodeOf(unk.reply) === 'browser_interrupted' && /Page\.zzzFutureMethod/.test(unk.reply.error.message) && /src\/cdp-census\.js/.test(unk.reply.error.message) && new RegExp(C.CENSUS_CHROME.replace(/\./g, '\\.')).test(unk.reply.error.message) && /handback/.test(unk.reply.error.message) && /took over/.test(unk.reply.error.message), '⑥ a method the census does not list (a newer Chrome\'s) is refused browser_interrupted while the user drives, NAMED with the census file and the censused Chrome, the takeover and the way out said', unk.reply && unk.reply.error.message);
+  ok(M.judge({ id: 11, method: 'Zzz.newDomainMethod', params: {} }, sc, { paused: true }).why === 'unclassified' && M.judge({ id: 12, method: 'Page.zzzFutureMethod', params: {}, sessionId: 'S-A' }, sc, {}).kind === 'forward' && M.isPausedMethod('Page.zzzFutureMethod') === true && M.pausedVerdict('Page.zzzFutureMethod').why === 'unclassified', '⑥ a whole unknown domain the same; when the agent drives, an unknown method is forwarded (Chrome answers it) — the fence is about the takeover');
+  // a page-mutation refusal's words (no setting named any more — the switch is retired) + the sentence
+  const swv = M.judge({ id: 13, method: 'Runtime.evaluate', params: { expression: '1' }, sessionId: 'S-A' }, sc, { paused: true, fenceScripts: false });
+  ok(swv.kind === 'refuse' && swv.why === 'page-mutation' && M.refusalCodeOf(swv.reply) === 'browser_interrupted' && !/fenceScriptsWhileDriven/.test(swv.reply.error.message) && /took over this browser/.test(swv.reply.error.message) && /run it again/.test(swv.reply.error.message), '⑥ a page-mutation refusal (even with the retired switch passed OFF) names the takeover and the way out — never a setting', swv.reply && swv.reply.error.message);
+  ok(M.mediationSentence({ profileLabel: 'Team', fenceScripts: true }) === M.mediationSentence({ profileLabel: 'Team' }) && !/fenceScripts/.test(M.mediationSentence({ profileLabel: 'Team' })), '⑥ the one-line sentence is ONE sentence (the retired option changes nothing)');
+  ok(M.grantView({ token: TOK, profileId: 'p', browserKey: 'k', scope: M.newScope({}), conns: new Set(), unclassified: new Set(['Page.zzz']) }).unclassified.join() === 'Page.zzz' && M.grantView({ token: TOK, profileId: 'p', browserKey: 'k', scope: M.newScope({}), conns: new Set() }).unclassified.length === 0, '⑥ a grant\'s view lists the methods it refused for lacking a row (the operator\'s signal)');
+  // THREE CONTROLS (scripts/mutant-copy.mjs): a row demoted to read; the unknown rule dropped; the switch ignored
+  const MUT6 = mutantCopies('mediation-census', REPO6);
+  const censusSrc = fs.readFileSync(path.join(REPO6, 'src/cdp-census.js'), 'utf8');
+  const medSrc = fs.readFileSync(path.join(REPO6, 'src/browser-mediation.js'), 'utf8');
+  const rowAnchor = "dispatchKeyEvent: ['input', '2026-09-21'],", unkAnchor = "  if (!row) return { refuse: true, why: 'unclassified', row: null };\n", swAnchor = "'page-mutation': 'refuse',";
+  ok(censusSrc.split(rowAnchor).length === 2 && medSrc.split(unkAnchor).length === 2 && censusSrc.split(swAnchor).length === 2, '⑥ control setup: the dispatchKeyEvent row, the unknown rule and the page-mutation rule are each spelled once');
+  const bound = (censusPath) => medSrc.replace("require('./cdp-census.js')", `require(${JSON.stringify(censusPath)})`);
+  const demotedCensus = MUT6.write('src/cdp-census.js', censusSrc.replace(rowAnchor, "dispatchKeyEvent: ['read', '2026-09-21'],"), 'demoted');
+  const c1 = MUT6.load('src/browser-mediation.js', bound(demotedCensus), 'demoted');
+  ok(verdict(c1, 'Input.dispatchKeyEvent', 'S-A', { paused: true }) === 'forward' && verdict(M, 'Input.dispatchKeyEvent', 'S-A', { paused: true }) === 'browser_interrupted:input', '⑥ CONTROL 1 (Input.dispatchKeyEvent demoted to read in a census copy): the agent\'s key is ADMITTED while the user drives — the row is the fence');
+  const c2 = MUT6.load('src/browser-mediation.js', medSrc.replace(unkAnchor, "  if (!row) return { refuse: false, why: null, row: null };\n"), 'no-unknown-rule');
+  ok(verdict(c2, 'Page.zzzFutureMethod', 'S-A', { paused: true }) === 'forward' && verdict(M, 'Page.zzzFutureMethod', 'S-A', { paused: true }) === 'browser_interrupted:unclassified', '⑥ CONTROL 2 (the unknown rule dropped): a method with no row is ADMITTED while the user drives — the hole a newer Chrome would open');
+  // CONTROL 3 = the OLD D6 PAUSE (script evaluation open while the user drives — the r4 default): a census copy whose
+  // page-mutation rule is back to 'allow' admits the agent's Runtime.evaluate / DOM edit on the page the user drives
+  const d6Census = MUT6.write('src/cdp-census.js', censusSrc.replace(swAnchor, "'page-mutation': 'allow',"), 'old-d6');
+  const c3 = MUT6.load('src/browser-mediation.js', bound(d6Census), 'old-d6');
+  ok(verdict(c3, 'Runtime.evaluate', 'S-A', { paused: true }) === 'forward' && verdict(c3, 'DOM.setOuterHTML', 'S-A', { paused: true }) === 'forward' && verdict(M, 'Runtime.evaluate', 'S-A', { paused: true }) === 'browser_interrupted:page-mutation' && verdict(M, 'DOM.setOuterHTML', 'S-A', { paused: true }) === 'browser_interrupted:page-mutation', '⑥ CONTROL 3 (the old D6 pause — page-mutation open while the user drives, in a census copy): Runtime.evaluate and DOM.setOuterHTML pass on the page the user drives — the row rule is what interrupts them');
+  for (const r of copiesCensus(MUT6.files, MUT6.dir, REPO6, { minCopies: 4, label: '⑥ ' })) ok(r.pass, r.name, r.detail);
+  // the REAL proxy reads the switch live and lists the unknown method it refused
+  const fake6 = await fakeBrowser();
+  const logs6 = [];
+  const med6 = MED.create({ log: { log: (l) => logs6.push(String(l)), warn: (l) => logs6.push('W ' + String(l)) } });
+  const st = { paused: false, fence: false };
+  // the retired switch: a stale caller still handing `fenceScripts` (reading OFF) — the grant ignores it
+  const g6 = await med6.grantFor({ profileId: 'bp-00000006', browserKey: 'bk-00000006', upstream: fake6.url, targetIds: ['T-A'], paused: () => st.paused, fenceScripts: () => st.fence });
+  const c6 = cdpClient(g6.url); await c6.open;
+  const s6 = (await c6.call('Target.attachToTarget', { targetId: 'T-A', flatten: true })).result.sessionId;
+  ok((await c6.call('Runtime.evaluate', { expression: 'document.title' }, s6)).result.result.value === 'title-of-' + s6, '⑥ real proxy, the agent drives: Runtime.evaluate answers');
+  st.paused = true;
+  const r6 = await c6.call('Runtime.evaluate', { expression: 'document.title' }, s6);
+  ok(M.refusalCodeOf(r6) === 'browser_interrupted' && !/fenceScriptsWhileDriven/.test(r6.error.message), '⑥ …the user drives (the paused reader read on the NEXT message): Runtime.evaluate is browser_interrupted although the stale switch callback reads OFF — nothing re-opens the script door');
+  ok((await c6.call('Page.captureScreenshot', {}, s6)).result !== undefined && M.refusalCodeOf(await c6.call('Page.captureScreenshot', {}, s6)) === null, '⑥ …while a read (Page.captureScreenshot) still answers');
+  const u6 = await c6.call('Page.zzzFutureMethod', {}, s6);
+  ok(M.refusalCodeOf(u6) === 'browser_interrupted' && /cdp-census/.test(u6.error.message) && med6.list()[0].unclassified.join() === 'Page.zzzFutureMethod' && logs6.some((l) => /Page\.zzzFutureMethod has no row in the CDP census/.test(l)) && logs6.filter((l) => /has no row/.test(l)).length === 1, '⑥ an unknown method through the real proxy while the user drives: refused by name, listed on the grant\'s view, logged ONCE', JSON.stringify(logs6.slice(-2)));
+  await c6.call('Page.zzzFutureMethod', {}, s6);
+  ok(logs6.filter((l) => /has no row/.test(l)).length === 1 && !logs6.some((l) => l.includes(g6.token) || l.includes('RAW-ID')), '⑥ …a second refusal of the same method logs nothing more; no log line carries a token or the raw url');
+  st.paused = false;
+  ok((await c6.call('Page.zzzFutureMethod', {}, s6)).result !== undefined, '⑥ …handed back, the unknown method is forwarded (the fake answers it)');
+  c6.ws.close(); med6.shutdown(); fake6.close();
 }
 
 // ═══ ③ the real proxy over a fake CDP upstream ══════════════════════════════
@@ -173,7 +312,7 @@ console.log('— ③ the real proxy over a fake CDP upstream: two grants, cross-
  *  {} for the rest; every `Target.closeTarget` it receives is recorded. */
 function fakeBrowser() {
   const targets = new Map([['T-A', { targetId: 'T-A', type: 'page', url: 'about:a' }], ['T-B', { targetId: 'T-B', type: 'page', url: 'about:b' }], ['T-Z', { targetId: 'T-Z', type: 'page', url: 'about:z' }]]);
-  const closes = [], socks = new Set();
+  const closes = [], socks = new Set(), seen = [], held = [];
   let nextT = 1, nextS = 1, port = 0;
   const srv = http.createServer((req, res) => {
     const j = (o) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
@@ -187,8 +326,7 @@ function fakeBrowser() {
     wss.handleUpgrade(req, socket, head, (ws) => {
       socks.add(ws); ws.on('close', () => socks.delete(ws));
       const send = (o) => { try { ws.send(JSON.stringify(o)); } catch { /* gone */ } };
-      ws.on('message', (d) => {
-        const m = JSON.parse(String(d));
+      const answer = (m) => {
         const rep = (result) => send({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), result });
         switch (m.method) {
           case 'Target.getTargets': return rep({ targetInfos: [...targets.values()] });
@@ -201,10 +339,17 @@ function fakeBrowser() {
           case 'Runtime.evaluate': return rep({ result: { type: 'string', value: 'title-of-' + (m.sessionId || 'browser') } });
           default: return rep({});
         }
+      };
+      ws.on('message', (d) => {
+        const m = JSON.parse(String(d));
+        seen.push({ id: m.id, method: m.method, sessionId: m.sessionId || null, at: Date.now() });
+        // ⑦: a call marked `__hold` is answered only when the suite releases it (a script the page is still running)
+        if (m.params && m.params.__hold) { held.push(() => answer(m)); return; }
+        answer(m);
       });
     });
   });
-  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => { port = srv.address().port; resolve({ port, url: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID`, targets, closes, emit: (o) => { for (const s of socks) s.send(JSON.stringify(o)); }, close: () => { for (const s of socks) { try { s.terminate(); } catch { /* none */ } } srv.close(); } }); }));
+  return new Promise((resolve) => srv.listen(0, '127.0.0.1', () => { port = srv.address().port; resolve({ port, url: `ws://127.0.0.1:${port}/devtools/browser/RAW-ID`, targets, closes, seen, held, release: () => { const hs = held.splice(0); for (const h of hs) h(); return hs.length; }, emit: (o) => { for (const s of socks) s.send(JSON.stringify(o)); }, close: () => { for (const s of socks) { try { s.terminate(); } catch { /* none */ } } srv.close(); } }); }));
 }
 function cdpClient(url) {
   const ws = new WebSocket(url); let id = 0; const waits = new Map(); const events = [];
@@ -247,8 +392,8 @@ const upgradeStatus = (url) => new Promise((res) => { const w = new WebSocket(ur
   ok(M.refusalCodeOf(await cB.call('Runtime.evaluate', { expression: '1' }, 'S-foreign')) === 'session_out_of_scope', 'a message on a session B was never handed: session_out_of_scope');
   ok((await cB.call('Page.navigate', { url: 'about:nav' }, sid)).result.frameId === 'F1', 'B navigates its own tab');
   paused.b = true;
-  ok(M.refusalCodeOf(await cB.call('Page.navigate', { url: 'about:nav2' }, sid)) === 'browser_paused' && M.refusalCodeOf(await cB.call('Input.dispatchKeyEvent', { type: 'keyDown' }, sid)) === 'browser_paused', 'the paused reader is read LIVE: the moment the user holds B\'s input, B\'s navigate and input are browser_paused');
-  ok((await cB.call('Runtime.evaluate', { expression: 'document.title' }, sid)).result.result.value === 'title-of-' + sid, '…while a read still answers');
+  ok(M.refusalCodeOf(await cB.call('Page.navigate', { url: 'about:nav2' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Input.dispatchKeyEvent', { type: 'keyDown' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Runtime.evaluate', { expression: 'document.title' }, sid)) === 'browser_interrupted', 'the paused reader is read LIVE: the moment the user holds B\'s input, B\'s navigate, input AND script evaluation are browser_interrupted');
+  ok((await cB.call('Page.captureScreenshot', {}, sid)).result !== undefined, '…while a read still answers');
   paused.b = false;
   ok((await cB.call('Page.navigate', { url: 'about:nav3' }, sid)).result.frameId === 'F1', 'handed back: navigation works again');
   const created = await cB.call('Target.createTarget', { url: 'about:new' });
@@ -511,10 +656,11 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   ok((await cA.call('Page.navigate', { url: 'about:a2' }, sA)).result.frameId === 'F1', 'A navigates its tab');
   // ─ the takeover flips A's url (the keeper's input side is the paused reader)
   keeper.takeover({ browserKey: KEY_A, profileId: team.id, viewerId: 7, sessionId: 'sess-a' });
-  ok(M.refusalCodeOf(await cA.call('Page.navigate', { url: 'about:a3' }, sA)) === 'browser_paused' && M.refusalCodeOf(await cA.call('Input.insertText', { text: 'x' }, sA)) === 'browser_paused', 'the keeper\'s takeover makes A\'s url refuse navigate and Input.* (browser_paused) — the same state the CLI\'s cooperative refusal reads');
-  ok((await cB.call('Target.createTarget', { url: 'about:b' })).result.targetId, 'B is not paused by A\'s takeover');
+  ok(M.refusalCodeOf(await cA.call('Page.navigate', { url: 'about:a3' }, sA)) === 'browser_interrupted' && M.refusalCodeOf(await cA.call('Input.insertText', { text: 'x' }, sA)) === 'browser_interrupted' && M.refusalCodeOf(await cA.call('Runtime.evaluate', { expression: '1' }, sA)) === 'browser_interrupted', 'the keeper\'s takeover makes A\'s url refuse navigate, Input.* and script evaluation (browser_interrupted) — the same state the CLI\'s cooperative refusal reads');
+  // verify r6 (S2): a takeover is of the BROWSER — B (another conversation on the same Chrome) is taken WITH A: its own url refuses too
+  ok(M.refusalCodeOf(await cB.call('Target.createTarget', { url: 'about:b' })) === 'browser_interrupted' && keeper.inputStateFor(KEY_B, team.id).input === 'user' && keeper.inputStateFor(KEY_B, team.id).takenBy.viewerId === 7, 'r6: B IS paused by A\'s takeover (one Chrome, one user driving it) — its url refuses a new tab too, its lease reads user by the same viewer');
   keeper.handback({ browserKey: KEY_A, profileId: team.id, viewerId: 7, cause: 'explicit' });
-  ok((await cA.call('Page.navigate', { url: 'about:a3' }, sA)).result.frameId === 'F1', 'the handback lets A drive again');
+  ok((await cA.call('Page.navigate', { url: 'about:a3' }, sA)).result.frameId === 'F1' && !!(await cB.call('Target.createTarget', { url: 'about:b' })).result.targetId && keeper.inputStateFor(KEY_B, team.id).input === 'agent', 'the handback lets A drive again — and B with it');
   // ─ edits: sharing cannot flip while leased, never on the legacy record
   refused = null; try { keeper.updateProfile(team.id, { sharing: 'owner' }); } catch (e) { refused = e; }
   ok(refused && refused.code === 'leased' && /2 session/.test(refused.message), 'sharing cannot flip while sessions hold leases (their env names the kind of attachment)', refused && (refused.code + ': ' + refused.message));
@@ -567,6 +713,130 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { reapA
   ok(med.port() === null && med.list().length === 0, 'the keeper\'s shutdown shuts the proxy down (it is the keeper\'s to end)');
   bare.shutdown();
   fake.close();
+}
+
+// ═══ ⑦ THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27) ═══════════════
+console.log('— ⑦ the owner\'s ruling ("直接打断所有脚本和agent操作"): a takeover interrupts what the agent has in flight — browser_interrupted ≤ 50 ms, a running script asked to stop, a read left alone, the late answers swallowed; the retired switch ignored; CONTROL = the old pause');
+{
+  const REPO7 = path.resolve(new URL('..', import.meta.url).pathname);
+  // the PURE plan
+  const plan = M.interruptPlan([{ id: 1, method: 'Runtime.evaluate', sessionId: 'S1' }, { id: 2, method: 'DOM.getDocument', sessionId: 'S1' }, { id: 3, method: 'Input.insertText', sessionId: 'S1' }, { id: 4, method: 'Runtime.callFunctionOn', sessionId: 'S1' }, { id: 5, method: 'Runtime.evaluate', sessionId: 'S2' }, { id: 6, method: 'Page.zzzFuture', sessionId: 'S1' }, { id: 7, method: 'Target.getTargets' }, { id: 8, method: 'Runtime.evaluate', sessionId: 'S1', aborted: true }, { id: 9, method: 'Page.enable', sessionId: 'S1' }, { id: 10, method: 'Page.navigate', sessionId: 'S3' }]);
+  ok(plan.abort.map((a) => a.id).join() === '1,3,4,5,6,10' && plan.terminate.join() === 'S1,S2', '⑦ PURE interruptPlan: every call in flight of a class refused while the user drives is aborted (script, key, navigation, an unknown method) — a read, a session call, a harmless enable and an already-aborted call are not; ONE terminateExecution per session that was running a script (not for a navigation)', JSON.stringify(plan));
+  ok(M.interruptPlan([{ id: 1, method: 'Runtime.evaluate', sessionId: null }], { pageConn: true }).terminate.length === 1 && M.interruptPlan([{ id: 1, method: 'Runtime.evaluate', sessionId: null }]).terminate.length === 0 && M.interruptPlan([]).abort.length === 0, '⑦ a page endpoint\'s own script (no sessionId) is asked to stop on that connection; the browser target has no script to stop; nothing in flight ⇒ nothing');
+  // the REAL keeper + the REAL proxy over the fake upstream
+  const fake7 = await fakeBrowser();
+  const rtEnv7 = { FAKE_AB_STATE: AB_STATE, FAKE_CDP_URL: fake7.url, PATH: PATH_ENV, HOME };
+  const logs7 = [];
+  const set7 = { 'browser.idleTimeoutMs': 600000, 'browser.takeoverIdleMs': 30000, 'browser.fenceScriptsWhileDriven': false };
+  const KEY7 = 'bk-0000007a', KEY7C = 'bk-0000007c';
+  const mk7 = (medImpl, dataDir, env = rtEnv7) => { fs.mkdirSync(dataDir, { recursive: true }); return K.create({ dataDir, homeDir: HOME, env: () => env, broadcast: () => { }, serverSetting: (k) => set7[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY7, KEY7C]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: { log: (l) => logs7.push(String(l)), warn: (l) => logs7.push('W ' + String(l)), error() { } }, install: false, mediator: medImpl }); };
+  const med7 = MED.create({ log: { log: (l) => logs7.push(String(l)), warn: (l) => logs7.push('W ' + String(l)) } });
+  const k7 = mk7(med7, path.join(ROOT, 'data7'));
+  ok(logs7.filter((l) => /browser\.fenceScriptsWhileDriven \(stored: false\) is retired/.test(l) && /ignored/.test(l)).length === 1, '⑦ the retired `browser.fenceScriptsWhileDriven` stored as false is said ONCE at the keeper\'s birth — and ignored (below: scripts are interrupted anyway)', JSON.stringify(logs7.filter((l) => /retired/.test(l))));
+  const team7 = k7.createProfile({ label: 'Team7', sharing: 'instance' }, { owner: { kind: 'instance', id: null } });
+  const at7 = await k7.attach({ profileId: team7.id, browserKey: KEY7, sessionId: 'sess-7' });
+  ok(logs7.filter((l) => /is retired/.test(l)).length === 1, '⑦ …a mediated grant says nothing more (once is once)');
+  const ev7 = []; k7.onInput((e) => ev7.push(e));
+  const c7 = cdpClient(at7.cdpUrl); await c7.open;
+  const raw7 = []; c7.ws.on('message', (d) => { try { raw7.push(JSON.parse(String(d))); } catch { /* not json */ } });
+  const t7 = (await c7.call('Target.createTarget', { url: 'about:t7' })).result.targetId;
+  const s7 = (await c7.call('Target.attachToTarget', { targetId: t7, flatten: true })).result.sessionId;
+  // four calls in flight at the browser: a script, a key, a READ, a new tab
+  const stamp = (p) => p.then((r) => ({ r, at: Date.now() }));
+  const pEval = stamp(c7.call('Runtime.evaluate', { expression: 'for(;;){}', __hold: true }, s7));
+  const pKey = stamp(c7.call('Input.insertText', { text: 'hunter2', __hold: true }, s7));
+  let readDone = null; c7.call('DOM.getDocument', { depth: 1, __hold: true }, s7).then((r) => { readDone = { r, at: Date.now() }; });
+  const pNew = stamp(c7.call('Target.createTarget', { url: 'about:t7b', __hold: true }));
+  await until(() => fake7.held.length === 4, 3000);
+  ok(fake7.held.length === 4, '⑦ four calls sit in flight at the browser (a script, a key, a read, a new tab)');
+  const tTake = Date.now();
+  const tk7 = k7.takeover({ browserKey: KEY7, profileId: team7.id, viewerId: 71, sessionId: 'sess-7' });
+  const [e1, e2, e4] = await Promise.all([pEval, pKey, pNew]);
+  const took = Math.max(e1.at, e2.at, e4.at) - tTake;
+  ok(tk7.ok && M.refusalCodeOf(e1.r) === 'browser_interrupted' && M.refusalCodeOf(e2.r) === 'browser_interrupted' && M.refusalCodeOf(e4.r) === 'browser_interrupted' && took <= 50, `⑦ the takeover ABORTS the script, the key and the new tab the agent had in flight: browser_interrupted in ${took} ms (≤ 50 — the browser never answered them)`, JSON.stringify([e1.r, e2.r, e4.r]).slice(0, 400));
+  ok(e1.r.error.message === 'browser_interrupted: The user took over this browser — your operation was interrupted (Runtime.evaluate). Wait for the handback, then run it again.' && e1.r.sessionId === s7 && e4.r.sessionId === undefined, '⑦ the words: THE sentence naming the method, on the call\'s own session', e1.r.error.message);
+  await sleep(60);
+  ok(readDone === null, '⑦ a READ in flight (DOM.getDocument) is left to finish — not aborted (the live view\'s own stream rides reads)');
+  const term = fake7.seen.filter((x) => x.method === 'Runtime.terminateExecution');
+  ok(term.length === 1 && term[0].sessionId === s7 && term[0].id > MED.INTERNAL_ID_BASE - 100 && term[0].id < MED.INTERNAL_ID_BASE && term[0].at - tTake <= 50, `⑦ ONE Runtime.terminateExecution reached the browser on the script's session, under the proxy's own id, ${term[0] ? term[0].at - tTake : '?'} ms after the takeover (a running script is asked to stop; the key and the tab need none)`, JSON.stringify(term));
+  const tkEv = ev7.find((e) => e.kind === 'takeover');
+  ok(tkEv && tkEv.interruption && tkEv.interruption.fresh === true && tkEv.interruption.n === 3 && tkEv.interruption.verbs.join() === 'Runtime.evaluate,Input.insertText,Target.createTarget' && tkEv.interruption.aborted === 3, '⑦ the takeover event carries the interruption (fresh; with no trace of this browser the aborted methods name what was cut)', JSON.stringify(tkEv && tkEv.interruption));
+  ok(logs7.some((l) => /the user took over — 3 call\(s\) in flight interrupted \(Runtime\.evaluate, Input\.insertText, Target\.createTarget; browser_interrupted\), Runtime\.terminateExecution on 1 session/.test(l)) && !logs7.some((l) => l.includes(at7.cdpUrl.split('/m/')[1].slice(0, 32)) || l.includes(fake7.url)), '⑦ the proxy journals it by count and method (never a token, a url or a param)');
+  // while the user drives: a new script refused, a read answers
+  ok(M.refusalCodeOf(await c7.call('Runtime.evaluate', { expression: '1' }, s7)) === 'browser_interrupted' && (await c7.call('Page.captureScreenshot', {}, s7)).result !== undefined, '⑦ while the user drives: a new script call is refused browser_interrupted, a read answers');
+  // the browser's late answers: the read answers the client now; the three aborted ids get NO second reply; the cut tab joined the scope
+  const abortedIds = [e1.r.id, e2.r.id, e4.r.id];
+  const targetsBefore = k7.list().mediation.grants[0].targets;
+  {
+    const u = med7.interruptionOf(team7.id, KEY7);
+    const t0 = Date.now(); const waited = await k7.awaitInterruptionSettled({ browserKey: KEY7, profileId: team7.id, maxMs: 120 });
+    ok(u && u.unsettled === 3 && u.landed === 0 && waited >= 100 && waited <= 400 && Date.now() - t0 <= 400 && k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 }).landed === 0 && k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 }).unsettled === 3, `⑦ r6: before the browser answers, the three aborted calls are UNSETTLED (landed 0) and the audit's settle-wait is BOUNDED (${waited} ms of 120); r7: the keeper's audit answer SAYS so (unsettled 3 — the CLI words the uncertainty, never a definite cut)`, JSON.stringify(u));
+  }
+  ok(fake7.release() === 4, '⑦ (the browser answers the four held calls late)');
+  await until(() => readDone !== null, 2000); await sleep(100);
+  ok(readDone && readDone.r.result !== undefined && abortedIds.every((id) => raw7.filter((m) => m.id === id).length === 1), '⑦ the late answers: the read answers now, the three aborted calls get NO second reply (swallowed — the agent was told once)');
+  ok(k7.list().mediation.grants[0].targets === targetsBefore + 1, `⑦ the tab the cut createTarget made still JOINS the lease's scope (${targetsBefore} → ${k7.list().mediation.grants[0].targets}) — the revoke will close it, it is never an orphan nobody owns`);
+  const li = k7.list().mediation.grants[0].lastInterrupt;
+  ok(li && li.aborted === 3 && li.terminated === 1 && li.methods.join() === 'Runtime.evaluate,Input.insertText,Target.createTarget' && li.terminateAnswers.join() === 'ok' && !JSON.stringify(li).includes('hunter2'), '⑦ the grant\'s view says what the last takeover interrupted and the browser\'s answer to terminateExecution — never a param', JSON.stringify(li));
+  // verify r6: an aborted call the browser still answered with a SUCCESS had reached it and took effect — `landed` (the fake
+  // answers every held call with a success: all three landed); the keeper's audit answer carries it after a bounded settle-wait
+  ok(li.landed === 3 && li.landedMethods.join() === 'Runtime.evaluate,Input.insertText,Target.createTarget' && med7.interruptionOf(team7.id, KEY7).unsettled === 0, '⑦ r6: the late SUCCESS replies to the three aborted calls mark them LANDED (the agent is told they took effect), none unsettled once answered', JSON.stringify(li));
+  ok(k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 }).landed === 3 && k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 }).unsettled === 0 && (await k7.awaitInterruptionSettled({ browserKey: KEY7, profileId: team7.id })) === 0, '⑦ r6: interruptionFor carries `landed` (3, unsettled 0 once answered) and the settle-wait returns at once when nothing is unsettled');
+  // a refused verb goes on the re-run list; a SECOND takeover before the handback merges (no double count)
+  const rz = k7.resolveFor({ browserKey: KEY7, verb: 'click' });
+  ok(!rz.ok && rz.code === 'browser_paused', '⑦ the agent\'s next verb is refused browser_paused at /resolve (it did not run)');
+  k7.takeover({ browserKey: KEY7, profileId: team7.id, viewerId: 72, sessionId: 'sess-7', holderAlive: false });
+  const tk2 = ev7.filter((e) => e.kind === 'takeover')[1];
+  ok(tk2 && tk2.interruption.fresh === false && tk2.interruption.n === 3 && tk2.interruption.takeovers === 2 && k7.list().mediation.grants[0].lastInterrupt.aborted === 0, '⑦ a second viewer\'s takeover before the handback MERGES into the cycle (not fresh, nothing counted twice) — and finds nothing in flight', JSON.stringify(tk2 && tk2.interruption));
+  const hb7 = k7.handback({ browserKey: KEY7, profileId: team7.id, viewerId: 72, cause: 'explicit', url: 'https://x.test/after', sessionId: 'sess-7' });
+  const hbEv = ev7.find((e) => e.kind === 'handback');
+  ok(hb7.ok && hbEv && hbEv.rerun.join() === 'Runtime.evaluate,Input.insertText,Target.createTarget,click' && hb7.rerun.join() === hbEv.rerun.join(), '⑦ the handback carries the RE-RUN list once: what the takeover cut, then what the agent tried meanwhile', JSON.stringify(hbEv && hbEv.rerun));
+  const iv = k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: tTake - 5 });
+  ok(iv && iv.code === 'browser_interrupted' && iv.aborted === true && iv.input === 'agent' && iv.takenAt >= tTake && k7.interruptionFor({ browserKey: KEY7, profileId: team7.id, since: Date.now() + 5 }) === null, '⑦ interruptionFor: a command whose /resolve answered before the takeover WAS interrupted (and cut: aborted), one resolved after it was not');
+  ok((await c7.call('Runtime.evaluate', { expression: '1' }, s7)).result !== undefined, '⑦ handed back: the agent\'s script runs again');
+  // VERIFY r6 (S2): the SIBLING conversation on the same mediated browser — its call in flight is cut by the primary's
+  // takeover (the same viewer takes it WITH the primary), its tab switch is refused (the r3 anchor rule holds across
+  // conversations), and the handback frees both
+  const at7c = await k7.attach({ profileId: team7.id, browserKey: KEY7C, sessionId: 'sess-7c' });
+  const c7c = cdpClient(at7c.cdpUrl); await c7c.open;
+  const t7c = (await c7c.call('Target.createTarget', { url: 'about:t7c' })).result.targetId;
+  const s7c = (await c7c.call('Target.attachToTarget', { targetId: t7c, flatten: true })).result.sessionId;
+  const pSib = stamp(c7c.call('Input.insertText', { text: 'sibling-typing', __hold: true }, s7c));
+  await until(() => fake7.held.length === 1, 3000);
+  const tSib = Date.now();
+  k7.takeover({ browserKey: KEY7, profileId: team7.id, viewerId: 75, sessionId: 'sess-7' });
+  const eSib = await pSib;
+  ok(M.refusalCodeOf(eSib.r) === 'browser_interrupted' && eSib.at - tSib <= 50 && k7.inputStateFor(KEY7C, team7.id).input === 'user', `⑦ r6: the SIBLING conversation's Input.insertText in flight on the same browser is cut by the primary's takeover (browser_interrupted in ${eSib.at - tSib} ms) and its lease reads user`, JSON.stringify(eSib.r).slice(0, 300));
+  ok(M.refusalCodeOf(await c7c.call('Target.activateTarget', { targetId: t7c }, undefined)) === 'browser_interrupted' && M.refusalCodeOf(await c7c.call('Runtime.evaluate', { expression: '1' }, s7c)) === 'browser_interrupted' && (await c7c.call('Page.captureScreenshot', {}, s7c)).result !== undefined, '⑦ r6: while the user drives, the sibling cannot switch the tab the user looks at nor run a script — a read still answers');
+  const rSib = k7.resolveFor({ browserKey: KEY7C, verb: 'type' });
+  ok(!rSib.ok && rSib.code === 'browser_paused', '⑦ r6: the sibling\'s next verb is refused browser_paused at /resolve');
+  const hbSib = k7.handback({ browserKey: KEY7, profileId: team7.id, viewerId: 75, cause: 'explicit', url: 'https://x.test/sib', sessionId: 'sess-7' });
+  const hbEvSib = ev7.filter((e) => e.kind === 'handback' && e.browserKey === KEY7C).at(-1);
+  ok(hbSib.ok && hbEvSib && hbEvSib.rerun.join() === 'Input.insertText,type' && !hbSib.rerun.includes('type') && k7.inputStateFor(KEY7C, team7.id).input === 'agent' && (await c7c.call('Runtime.evaluate', { expression: '1' }, s7c)).result !== undefined, '⑦ r6: the handback frees the sibling too, with ITS OWN re-run list (what was cut, then what it tried) — nothing of it in the primary\'s', JSON.stringify({ sib: hbEvSib && hbEvSib.rerun, primary: hbSib.rerun }));
+  fake7.release(); c7c.ws.close();
+  // CONTROL — THE OLD PAUSE (the r4 world: a takeover only refuses what comes NEXT): a mediator copy whose interrupt touches nothing
+  const MUT7 = mutantCopies('mediation-interrupt', REPO7);
+  const medSrc7 = fs.readFileSync(path.join(REPO7, 'src/server/cdp-mediator.js'), 'utf8');
+  const anchor7 = "  function interrupt({ profileId, browserKey } = {}) {\n    const g = grantOf(profileId, browserKey);\n";
+  ok(medSrc7.split(anchor7).length === 2, '⑦ control setup: the interrupt is spelled once');
+  const OLD = MUT7.load('src/server/cdp-mediator.js', medSrc7.replace(anchor7, anchor7 + "    return { aborted: [], terminated: 0, at: now() }; // CONTROL: the old pause — nothing in flight is touched\n"), 'old-pause');
+  const fake7c = await fakeBrowser();
+  const medC = OLD.create({ log: { log() { }, warn() { } } });
+  const kC = mk7(medC, path.join(ROOT, 'data7c'), { ...rtEnv7, FAKE_CDP_URL: fake7c.url, FAKE_AB_STATE: AB_STATE });
+  const teamC = kC.createProfile({ label: 'Team7c', sharing: 'instance' }, { owner: { kind: 'instance', id: null } });
+  const atC = await kC.attach({ profileId: teamC.id, browserKey: KEY7C, sessionId: 'sess-7c' });
+  const cc = cdpClient(atC.cdpUrl); await cc.open;
+  const tc = (await cc.call('Target.createTarget', { url: 'about:c' })).result.targetId;
+  const sc7 = (await cc.call('Target.attachToTarget', { targetId: tc, flatten: true })).result.sessionId;
+  let ctrlDone = null; cc.call('Runtime.evaluate', { expression: 'for(;;){}', __hold: true }, sc7).then((r) => { ctrlDone = r; });
+  await until(() => fake7c.held.length === 1, 3000);
+  kC.takeover({ browserKey: KEY7C, profileId: teamC.id, viewerId: 73, sessionId: 'sess-7c' });
+  await sleep(120);
+  ok(ctrlDone === null && !fake7c.seen.some((x) => x.method === 'Runtime.terminateExecution') && M.refusalCodeOf(await cc.call('Runtime.evaluate', { expression: '1' }, sc7)) === 'browser_interrupted', '⑦ CONTROL (the old pause — interrupt a no-op in a mediator copy): the script the agent had in flight is STILL waiting 120 ms after the takeover and no terminateExecution was sent (only the next call is refused) — the interrupt is what cuts it');
+  fake7c.release(); await sleep(50);
+  for (const r of copiesCensus(MUT7.files, MUT7.dir, REPO7, { minCopies: 1, label: '⑦ ' })) ok(r.pass, r.name, r.detail);
+  cc.ws.close(); c7.ws.close();
+  kC.shutdown(); k7.shutdown(); fake7c.close(); fake7.close();
 }
 
 // ═══ ⑤ takeover C3 (design-browser-takeover §3.2 / §5.3, I2 / I3) ═══════════

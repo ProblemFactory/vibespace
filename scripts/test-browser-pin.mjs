@@ -462,8 +462,12 @@ console.log('— ③b adoption across a keeper death (§3.5 boot order: drop →
   delete settings['browser.defaultProfile'];
   ok(kB.pinForCreate({}).profileId === '' && kB.pinForCreate({}).origin === 'harness', 'nothing ⇒ ephemeral');
   kB.setPin(KEY_B, thirdId, { origin: 'chosen' });
-  kB.removeProfile(thirdId);
-  ok(!kB.pinFor(KEY_B) && kB.pinForCreate({ priorKey: KEY_B, resume: true }).origin === 'harness', 'removing a profile drops the pins that named it');
+  // lane S2 (naive study 2, T7): a PINNED profile is never removed out from under a conversation — refused `pinned`
+  // with the count; with `unpin` every pin that named it is cleared and MARKED (the browser fact says so)
+  let pinnedRefusal = null; try { kB.removeProfile(thirdId); } catch (e) { pinnedRefusal = e; }
+  ok(pinnedRefusal && pinnedRefusal.code === 'pinned' && pinnedRefusal.pinnedCount === 1 && reg(kB).profiles.some((p) => p.id === thirdId), 'removing a PINNED profile is refused `pinned` (lane S2) — the record stays');
+  kB.removeProfile(thirdId, { unpin: true });
+  ok(!kB.pinFor(KEY_B) && kB.pinForCreate({ priorKey: KEY_B, resume: true }).origin === 'harness' && reg(kB).pins[KEY_B] && reg(kB).pins[KEY_B].cleared && reg(kB).pins[KEY_B].cleared.label === 'Third', 'removing it WITH unpin drops the pins that named it, each keeping the cleared mark the browser fact reads');
   ok(kB.setPin(KEY_A, null) === null && !reg(kB).pins[KEY_A], 'setPin(null) unpins');
   kB.shutdown();
 }

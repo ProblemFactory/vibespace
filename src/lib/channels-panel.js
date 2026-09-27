@@ -240,6 +240,9 @@ function accountLines(app, a, kinds) {
     bits.push(lane.via === 'push' && lane.live ? (lane.carryContent ? t('push') : t('push + polling')) : t('polling'));
     const sc = a.scheduler || null;
     if (sc) { bits.push(t('{n} conversations', { n: sc.conversations })); if (sc.unread) bits.push(t('{n} unread', { n: sc.unread })); }
+    // lane R5: the FIRST READ, how far and (at the account's per-second pace) how long
+    const fr = sc ? chanCaps.firstReadText(sc, { t }) : '';
+    if (fr) bits.push(fr);
     // "last sync" = the last GOOD pass; a failure is said on its own line
     // from the FIRST one, with the retry (lane R2 verify, 2026-09-26)
     const ps = chanCaps.passStateText(a, { t, now: Date.now() });
@@ -508,6 +511,15 @@ function adapterNotes(app, a) {
   if (a.consecutiveFailures >= 3 && a.lastPass) {
     const s = t('{n} failed passes ({code})', { n: a.consecutiveFailures, code: chanCaps.errorCodeText((a.lastPass && a.lastPass.code) || 'failed', { t }) });
     line(s + (a.lastPass.error ? ` — ${a.lastPass.error}` : '') + (a.failureItem ? ` — ${t('a "For you" item was filed')}` : ''), { warn: true });
+  }
+  // lane R5: a SOURCE says what an account card says — the pass state (a vendor's RATE wait by its name,
+  // a failure's retry, before the third failure takes the line above) and the FIRST READ — whatever its
+  // auth line says (a source that passes without a login, the fixtures, still reads)
+  if (!a.builtin && a.enabled !== false) {
+    const ps = chanCaps.passStateText(a, { t, now: Date.now() });
+    if (ps.note && !(a.consecutiveFailures >= 3)) line(ps.note, { warn: true });
+    const fr = a.scheduler ? chanCaps.firstReadText(a.scheduler, { t }) : '';
+    if (fr) line(fr);
   }
   // P1b: THE PUSH LANE'S SENTENCE when the product has WITHDRAWN the claim or
   // the lane is unavailable — drawn WITH its numbers and the "re-declare to

@@ -746,6 +746,29 @@ function createSessionMessages(session, sessionId) {
         return null;
       });
     }
+    // lane S2 (naive study 2 — three answers to "which browser"): THE browser fact of each live conversation is
+    // computed at ONE choke point (keeper.factFor over its registry view) and published as active-sessions'
+    // `browserFact`. Any registry change (a start, a failure, a pin, a removal, a label, a lease) may move it — the
+    // facts are re-computed (debounced, never on a verb's path) and active-sessions is re-published ONLY when a
+    // conversation's fact digest moved (the ONE dirty signal = one computation rule)
+    {
+      const BFm = require('../browser-fact.js');
+      const lastFactDigest = new Map();
+      let factTimer = null;
+      const republishIfMoved = () => {
+        factTimer = null;
+        let moved = false;
+        for (const [id, s] of activeSessions) {
+          if (!s || !s._browserKey) continue;
+          let d = '';
+          try { d = BFm.factDigest(browserKeeper.factFor(BFm.sessionFactsOf(s))); } catch { d = ''; }
+          if (lastFactDigest.get(id) !== d) { lastFactDigest.set(id, d); moved = true; }
+        }
+        for (const id of [...lastFactDigest.keys()]) if (!activeSessions.has(id)) lastFactDigest.delete(id);
+        if (moved) { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] browser facts not re-published — ' + (e && e.message)); } }
+      };
+      browserKeeper.onChange(() => { if (factTimer) return; factTimer = setTimeout(republishIfMoved, 250); if (factTimer.unref) factTimer.unref(); });
+    }
     // P3 (§4.3.1): the handback announcer — hangs on the keeper's input/confirmation
     // seams; an explicit handback is delivered through the gated ladder under
     // 'browser-handback', an idle one files one inbox item and queues the
@@ -755,6 +778,8 @@ function createSessionMessages(session, sessionId) {
         keeper: browserKeeper, deliver, serverSetting, userTodos, activeSessions,
         sessionKeyFor: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : null),
         notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); },
+        // the owner's ruling (2026-09-27): the takeover's card is shown in the live session's chat — display only, the auto-resume notice's own path
+        emitCard: (session, card) => require('../normalizers').feedPeerCard(session, card),
         onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
         // lane J r2: pending approvals for a browser page command go STALE at the takeover / handback (answered browser_paused through THE one permission answer)
         approvals: (() => {
@@ -788,6 +813,7 @@ function createSessionMessages(session, sessionId) {
         // owner ruling A: a live session pinned BEFORE the ruling still has its indirection naming the profile's directory —
         // put back on its own browser (the pin stays: it is the default attachment now, opened through the keeper)
         .then(() => { try { const n = require('../routes/browser').convertPinnedDirs(); if (n) console.log(`[browser] boot: ${n} session(s) pinned before owner ruling A no longer hand their own browser the profile's directory`); } catch (e) { console.warn('[browser] pin conversion failed:', e && e.message); } })
+        .then(() => { try { const n = require('../routes/browser').healDanglingPins(); if (n) console.log(`[browser] boot: ${n} conversation pin(s) named a deleted profile — cleared`); } catch (e) { console.warn('[browser] dangling-pin heal failed:', e && e.message); } }) // lane S2: no conversation keeps a pin on a profile that is gone
         .then(() => { try { after?.(); } catch (e) { console.warn('[browser] post-boot step failed:', e && e.message); } }); // P5: the recorder taps only browsers the keeper has judged
     } catch (e) { console.warn('[browser] boot reconciliation failed:', e && e.message); }
   }
@@ -814,10 +840,12 @@ function createSessionMessages(session, sessionId) {
       const { router: traceRouter, setup: setupTraceRoutes } = require('../routes/browser-trace');
       // the bindings READER: a stopped conversation's trace is found through the key its CLI id was bound to (P0 r5/r7's store, read off the file per ask — a human's click)
       let bindings = null; try { bindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser-trace] bindings reader unavailable — ' + (e && e.message)); }
-      // owner ruling A (6): the row's Delete… = release every lease + stop, clear every pin (lane S2's `unpinProfile` seam —
-      // ONE implementation, in routes/browser.js beside the pin route), then set aside
+      // owner ruling A (6): the row's Delete… = release every lease + stop, clear every pin (lane S2's `unpinProfile` —
+      // ONE implementation, in routes/browser.js beside the pin route), then set aside. Lane S2 (naive study 2, T7): "Set
+      // aside" of a PINNED profile is refused `pinned` unless the user unpins (`pinGuard`)
       setupTraceRoutes({ keeper: browserKeeper, trace: browserTrace, activeSessions, bindings,
         releaseProfile: (id) => require('../routes/browser').releaseProfile(id), unpinProfile: (id) => require('../routes/browser').unpinProfile(id),
+        pinGuard: (id, unpin) => require('../routes/browser').pinGuardFor(id, unpin),
         // a narrowing's detached conversation hears it on its next message (§3.8 layer ②, the same queue as the pin's)
         notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); } });
       app.use(traceRouter);

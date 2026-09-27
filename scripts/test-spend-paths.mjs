@@ -566,6 +566,19 @@ function trackedServerSource() {
     ok('§2 …and every DECLARED reason has a producer (' + [...passed].sort().join(', ') + ')', unused.length === 0, 'declared with no producer: ' + unused.join(', '));
 
     ok('§2 the four wired consumers are all in the GATED set', ['src/server/auto-resume.js', 'src/server/conversation-deliver.js', 'src/agent-routes.js', 'src/server/usage-pool-engine.js'].every((f) => gatedFiles.includes(f)), gatedFiles.join(', '));
+    // THE OWNER'S RULING (2026-09-27 — "告知agent发生了打断，交还时提醒它重新运行"): the takeover now TELLS the agent and the
+    // handback reminds it to re-run — and neither grows a producer: browser-handback.js keeps its ONE ladder site (the
+    // explicit handback, the re-run sentence rides its text), and the takeover moment is the ladder's DISPLAY-only card
+    // path + a zero-spend notice (no rung, no stash, no authorizer — nothing that can open a turn)
+    {
+      const bh = hits.filter((h) => h.file === 'src/server/browser-handback.js');
+      const bsrc = read('src/server/browser-handback.js');
+      const tbody = bsrc.slice(bsrc.indexOf('  function announceTakeover('), bsrc.indexOf('  /** Which browser the user took'));
+      ok('§2 the takeover tells for FREE: browser-handback.js still holds exactly ONE ladder site (the explicit handback — the census did not grow a producer) and the takeover moment calls no rung, no stash and no authorizer — only the display-only card path and a zero-spend notice',
+        bh.length === 1 && bh[0].prim === 'deliver-ladder' && tbody.length > 400 && !/deliverToConversation|stashFor|authorizeSpend|spendReason/.test(tbody) && /const card = \{ fromName: FROM_NAME, text, kind: 'notification' \};/.test(tbody) && /emitCard\(sess\.s, card\)/.test(tbody) && /deliver\.emitPeerCard\(cid, card\)/.test(tbody) && /queueNotice\(sess, T\.takeoverNotice\(/.test(tbody)
+          && /emitCard: \(session, card\) => require\('\.\.\/normalizers'\)\.feedPeerCard\(session, card\)/.test(read('src/server/mounts-plugins-wiring.js')),
+        JSON.stringify(bh.map((h) => h.file + ':' + h.line + ' ' + h.prim)));
+    }
 
     // NEGATIVE CONTROL: a synthetic producer in a scratch tree.
     const scratch = tmpdir('vs-spend-census-');

@@ -975,9 +975,11 @@ no request (an unchanged Gmail thread) costs nothing.
 
 An exhausted budget stops the pass; the due conversations wait for the next
 window and the account card says "Vendor budget reached — {n} {unit}/min for this
-account; {k} conversations waiting, next refresh in {s} s". A vendor 429 still
-takes the exponential backoff (30 s → 15 min); `auth-expired` still stops the
-loop and says so.
+account; {k} conversations waiting, next refresh in {s} s". Since lane R5 (§6.2b)
+the minute is also PACED PER SECOND, and a vendor RATE refusal is a short wait
+(its Retry-After, else 5 s doubling to 60 s) that never climbs the failure
+ladder; transport / vendor failures keep the exponential backoff (30 s → 15 min);
+`auth-expired` still stops the loop and says so.
 
 **The arithmetic** this design owes the reader:
 
@@ -993,8 +995,13 @@ loop and says so.
   2 × 2 = 4 units/min, cold 0.13; plus 40 units per thread `history.list` names —
   and a named thread becomes **due now** through the adapter's `changed` hint, so
   new mail in a cold thread does not wait 15 minutes. Discovery: 30 units (247
-  threads) / 60 (573) per pass. The first per-thread walk: 247 × 40 = 9 880 and
-  573 × 40 = 22 920 units — spread by the 3000/min budget over 3.3 / 7.6 minutes.
+  threads) / 60 (573) per pass once the thread titles are memoised — the FIRST
+  discovery also reads each thread's metadata (10 × 40 per 100-thread page):
+  ≈ 1 230 / 2 460 units (corrected by lane R5 against production). The first
+  per-thread walk: 247 × 40 = 9 880 and 573 × 40 = 22 920 units — the 3000/min
+  budget spread them only ON AVERAGE (the real shape was 3 000 units in ~20 s,
+  then ~40 s idle, which the vendor refused); since lane R5 the pace spreads them
+  evenly: 247 s / 573 s at 40 units a second (§6.2b).
   The mailbox cursor (`historyId`) and the not-yet-fetched `changed` set are
   persisted in the account's `state` (never memory only — the old adapter
   re-walked every thread on every restart). Per-thread polling would have cost
@@ -1009,6 +1016,300 @@ conversations). Unread is maintained incrementally on append and recomputed from
 the log on mark-read (still a re-derivable derived value). A broadcast carries
 only the **changed** conversations (`partial`); the whole digest goes out only on
 a structural change.
+
+### 6.2b The per-second pace and the vendor's rate refusal (lane R5, 2026-09-26)
+
+The owner, on 2.369.185: **"gmail一直被限速 你可能要控制下gmail默认的读取速度"** (Gmail
+keeps being rate-limited — control Gmail's default read speed).
+
+**What happened** (the production journal, read only): three Gmail refusals in ten
+minutes on two accounts, each HTTP 403 "Quota exceeded for quota metric 'Total
+Query Cost' and limit 'Units per minute per user'". Every one came after ~2 000–
+2 800 units spent in ~13–26 s (fetches 150–320 ms apart, 100–200 units/s) from an
+idle quota — under our 3 000/min budget and under Google's published 6 000/min
+per user. **A per-minute budget is a sum, not a shape**, and the vendor meters
+finer than a minute. Each refusal was typed `rate-limited` and climbed the
+FAILURE ladder (30 s → 2 min → 5 min → 15 min) and filed a "For you" item at the
+third: the owner read a 15-minute park.
+
+**1. The per-second PACE — drain rule 18** (`src/channel-drain.js`). A token
+bucket per account, in the budget's unit, declared by the adapter
+(`caps.pace = {unitsPerSec, settingKey, cost: {fetch, discover, scanHost}}`,
+validated by the registry; a pace needs a budget). A discovery, host scan or
+fetch whose cost finds fewer than min(cost, burst) tokens is not sent: the
+drain's step is `wait` (≤ 1 s), after which it judges and picks AGAIN — a human
+filed during the wait goes first, a refusal (rules 5, 11, the cut) is never held
+behind a wait, and a wait moves no due row, no streak and no count. A call larger
+than the bucket waits for a full bucket and leaves a debt the next calls wait
+out. The adapter also awaits `deps.pace(units)` before EVERY request it sends
+(the exact cost from its own table), then meters it with no await in between —
+so a multi-call action (a discovery page = threads.list + ten metadata reads) is
+paced call by call. The engine couples the two settings: unitsPerSec =
+min(per-second setting, budget/60), burst = min(per-second setting, budget/2) —
+the pace never spends a minute faster than the minute's budget, and rule 9's cut
+stays the outer cap. **The exact tolerance**: any window of T seconds charges at
+most burst + unitsPerSec·T + max(0, the largest call − burst).
+
+| vendor | setting (default, range) | why |
+|---|---|---|
+| Gmail | `channels.gmailUnitsPerSec` 40 (5–100) | one thread read (40 units) a second: ≤ 80 units in any second and ≤ 2 440 in any 60 s — far inside 6 000/min (100/s) per user; the owner's 873-thread first read takes ≈ 873 s (≈ 14.6 min), evenly |
+| Lark | `channels.larkRequestsPerSec` 5 (1–50) | tier 4 (the chat / message / member / resource reads) is 1 000/min and 50/s per API per app per TENANT — a pool a cluster app shares — so 10 % of the per-second tier; the 60/min budget is then spread at ≈ 1 a second |
+
+The bucket runs on a PHYSICAL monotonic clock (`performance.now()`): the vendor
+meters real time, while the engine's logical `now` is a suite's to freeze; both
+the clock and the sleep are injectable (`paceClock`, `sleep`). A stop or an
+account's removal wakes every pace sleep at once (a typed abort the pass does
+not count as a failure). **A request filed while the pass sleeps on a `wait`
+wakes it too** (lane R5 verify): the model judges the new waiter at its very
+next step — a refusal (the floor, the share, the back-off) never waits out the
+sleep and the owner's press is taken at once; the wait then resumes for what is
+left of the bucket's shortfall (the fetch itself is still bucket-bound).
+**Outside the pass the bucket is judged ONE CALLER AT A TIME, in arrival order,
+with an atomic reservation** (lane R5 verify r2): the adapter's `await
+pace(units)` was a check-then-charge across an await — N concurrent callers (a
+window's N attachment thumbnails, a page-back beside the pass's fetch) each read
+the bucket before any of them had metered, so 20 attachment fetches of 20 units
+left in ONE instant (400 units in a second on the real Gmail adapter — the burst
+the vendor refuses) and a page-back starved behind the pass for the whole ingest
+(5.7 s of an 8-row one; 14 min of the owner's). `paceWait` now serves callers
+FIFO per account and RESERVES the units it lets through (`paceInflight`,
+released by the meter that follows), so the next judgement sees them spent:
+20 × 20 units take 9 s at 40/s, ≤ 80 in any second, and a page-back filed
+mid-ingest takes the next slot. **A caller queued behind a removed or rebuilt
+account is aborted, never let through** (lane R5 verify r3): `paceWait` used to
+return — "no live entry, nothing to pace against" — so every caller queued
+behind a `remove()` (or an option rebuild) left in ONE instant, unpaced (17 × 20
+units within 1 ms), each a vendor call the owner had just ended; it now throws
+the typed abort ("the account changed … the request was not sent") whenever the
+entry it queued against is gone or replaced. The judged bucket is capped at
+`burst` BEFORE the reservation comes off (subtracting first projected an idle
+bucket as over-full — latent, masked by the charge landing a microtask before
+the next judgement); a reservation no meter released within 2 s is a contract
+violation (an adapter that paced a call it never metered), dropped with a log
+line rather than holding the account's bucket down for good. Recorded lows: the
+adapter's FIFO is arrival order — a 100-unit send-shaped call queued behind the
+user's own 30 thumbnails waits ~15 s (the drain's humans-first orders REQUESTS,
+not the adapter's queue); after Disable / Disconnect the calls already queued
+finish paced (Stop refuses them).
+**The bucket is per ACCOUNT, never per vendor user** (a documented low): two
+accounts over one Google user — or one mailbox connected twice under two OAuth
+clients — pace independently, so the user-level rate is their sum (2 × 40
+units/s, 2 × 2 440/min at the defaults — still inside 6 000/min); lower the
+per-second setting when several accounts share one vendor user.
+
+**2. A vendor RATE refusal is a SHORT wait** (engine `failPass`): the vendor's own
+hint first (`Retry-After`, delta-seconds or an HTTP-date; Lark's
+`x-ogw-ratelimit-reset`, carried as `detail.retryAfterSec` — honoured up to 15
+min), else 5 s doubling to 60 s. It never advances `consecutiveFailures` nor the
+3-strike "For you" item, and it EMPTIES the bucket so the pass that resumes
+starts paced, never with a burst. A refusal that persists through 10 strikes in
+a row (≈ 7 min despite the pace) is filed once in "For you"; the first good pass
+retracts it. Auth / transport / vendor errors keep the failure ladder (30 s →
+15 min, loud at 3). **One open item per account** (lane R5 verify r2): the two
+ladders are independent and the record remembers one item, so a failure on the
+other ladder (a transport failure after a rate item, or the reverse) retracts
+the standing item as *superseded* before filing its own — the inbox names the
+CURRENT failure, and the first good pass retracts that one (two items had been
+filed and the first outlived the recovery, open forever). A persistent
+daily-limit 403 (Google's `dailyLimitExceeded`, no `Retry-After`) is retried on
+the same ladder: 5 → 60 s, then at most ONE vendor call a minute per account
+(the tick's own guard), one item at the 10th strike, healed by the day's turn. Gmail's classifier: 429, a rate or usage reason
+(`rateLimitExceeded`, `userRateLimitExceeded`, `quotaExceeded`,
+`dailyLimitExceeded`), or a 403 in the `usageLimits` domain or whose message
+names a quota metric ⇒ `rate-limited`; any other 403 stays `forbidden`. Lark:
+429 or its frequency codes (99991400 …) ⇒ `rate-limited`, as before.
+
+**3. The words.** From the first strike the account card says **"Google is
+limiting the rate · resuming in 12 s"** (zh "Google 限速中 · 12 秒后继续") — the
+vendor by its DECLARED name (`caps.vendorName`; Lark's per-record brand through
+the module's `vendorNameOf(record)`: Feishu / Lark), never by the kind id, never
+"paused" (a row pill's "refresh paused" is the owner's override alone) and never
+a failed-passes count. While conversations are read for the first time the
+health line says **"reading for the first time · 120/873 conversations · about 13
+min left"** (zh "首次读取中 · 已 120/873 个会话 · 约剩 13 分钟";
+`scheduler.firstIngest {done, total, etaSec}`, at the pace), and a long paced pass
+broadcasts its progress at most every 5 s (never one per fetch). The budget
+sentence names units/min AND units/s.
+
+Gates: test-channel-drain (rule 18 at every step of a PACED walk profile against
+the sim's own bucket; ②b the owner's 873-row first read — ≤ 80 units in any
+second, ≤ 2 440 in any minute, ≈ 872 s — with the pace-off burst as the control;
+five mutants: a bucket that never refills, a fetch that ignores the wait, a wait
+that counts against the bound, a refusal held behind a wait, an unbounded
+wait), test-channels-aggregate ③d (the rate ladder + its pre-R5 control) / ③e
+(the pace in the real engine + its control), test-channel-caps,
+test-channel-adapter-contract, test-channels-gmail-shape ⑥b (the vendor's cost
+table, pinned), test-channels-lark-shape ⑥b, test-channels-e2e ⑰ (heavy: the
+zh card over a paced, rate-refused fake).
+
+**One gate, one exit — both a census (lane R5 verify r4, 2026-09-27).** Four
+verify rounds each found one more path around the pace (r1 a request judged
+only when the sleep ended, r2 a check-then-charge across an await, r3 a caller
+queued behind a removed account let through), so round 4 stopped hunting and
+enumerated. THE GATE: every Gmail / Lark request goes through the adapter's
+`api()` — token → pace → meter → the bearer RE-READ after the wait → send. The
+re-read is what a disconnect or a re-authorize that lands during the wait meets:
+a dropped token refuses the request by name (nothing sent; the units already
+metered stay charged), a newer token is the one sent — never the bearer
+captured before the wait (20 requests used to leave with the dropped / old
+one). The token refresh is single-flight (20 concurrent thumbnails at one expiry
+were 20 refresh POSTs; under Lark's rotating refresh token 11 of 12 were
+`invalid_grant`, each stamping the stale token back over the sibling's fresh one
+— the account logged itself out); a refused refresh stamps `invalidGrantAt` only
+while the stored token is still the one it tried. A Lark send is paced and
+metered like every other request (it was neither). Every other outbound call in
+the two adapter files (and the Gmail push lane) carries a marker the suites read
+off the code — `// gated-inline: <id>` (its own pace + meter right above it) or
+`// ungated: <id>` with a row in the module's frozen `UNGATED` naming a reason an
+agent or a loop cannot multiply: a human consent (once, keyed by the flow's
+one-time state), the Pub/Sub long-poll (another API, one pull in flight), the
+integrations Test button. A new outbound call outside the gate, a marker with no
+row, a row with no marker, a gated-inline site without its pace — each is red
+(test-channels-gmail-shape ⑥c / test-channels-lark-shape ⑥c, with patched
+copies as controls). THE EXIT: every lifecycle end of an account's right to call
+the vendor — remove, disable, disconnect, an options rebuild, a client switch, a
+refused connect, the engine's stop — takes the engine's ONE `dropLive`: the
+queued pace waiters abort by name (`paceWait` re-checks the entry after every
+await), the pass in flight ends at its next step, a fetch that OUTLIVED its entry
+writes nothing (a remove() mid-fetch used to resurrect the removed account's
+index row and log page and write its attachment cache file), and the account's
+buckets outlive the entry so an exit never refills them (a disable/enable was a
+fresh 80-unit burst). r3 had recorded `setEnabled(false)` and `disconnect()`
+letting 18 queued fetches (360 units) finish, paced, with the captured Bearer
+after the owner had ended the account — both take the exit now. The exit census
+(test-channels-aggregate ③g (v)) fails a second `live.delete` site, a lifecycle
+verb without its exit, a `dropLive` call in an unlisted verb, or a
+vendor-then-write path without its guard. Recorded, unchanged: the adapter FIFO
+is arrival order — a 100-unit send behind 30 of the user's own thumbnails waits
+≈ 15 s; the only agent-class caller outside the pass is the pass's own single
+fetch, so a human is never more than one slot (≈ 1 s) behind an agent, and a
+two-class queue would buy that one slot at the cost of a scheduling decision
+spread across awaits (the shape r9 removed). Nothing about a bucket, a
+reservation, a queue or a sleeper is persisted: a SIGKILL mid-wait starves
+nothing after the next boot.
+
+**The token is the gate's other input, and its writers raced the owner (lane R5
+verify r5, 2026-09-27).** Round 4 closed every vendor CALL; round 5 attacked the
+closure's own edges and found the token's writers unordered: the single-flight
+refresh wrote what it had captured, unconditionally, so a re-authorize that
+landed while a refresh was in flight was reverted (25 of 50 trials), a
+disconnect was undone (the late write put the token back; the next pass called
+the vendor 4 times on an account the owner had ended), and a client-switch
+rebind ended with the old client's token on the new client's record — the next
+refresh `invalid_grant`, the owner's fresh consent logged out (10 of 10). Now a
+refresh writes ONLY while the store still holds the token it tried: cleared ⇒
+discarded and refused by name, replaced ⇒ superseded (the caller re-reads the
+store; a straggler's `invalid_grant` for a since-replaced token is superseded
+the same way and its caller served). A write the store refuses (a full disk)
+keeps the vendor's token in memory and flushes it at the next request — under
+Lark's rotating refresh token one lost write used to retire the only valid token
+(`invalid_grant` ⇒ needs-reauth). The gate gained a check after the wait: a
+bearer that EXPIRED while the request queued (50 thumbnails at the 5 units/s
+floor = 200 s against a 60 s margin: 34 went out expired, 401) is refreshed
+once, single-flight, before the send. And the record now names WHOSE it is: a
+consent naming another Google / Lark user than the account's (the wrong account
+in the vendor's chooser) is refused at the ONE token door and at the rebind —
+client and token kept, the card's last sign-in line naming both identities
+(`src/channel-identity.js`: Gmail by email; Lark by open_id / union_id /
+user_id, so a rebind under another app still matches the same person); the
+identity is stamped by the first consent and survives a disconnect — to read
+another account, add it as a new account. Held: a network failure mid-refresh
+refuses every waiter once and the next call starts a new refresh; two accounts
+of one kind refresh independently; the ghost bucket survives ten toggles a
+minute without granting a bucket and a parked debt dies with time; stop() under
+twenty queued callers settles every promise and writes nothing after (a refresh
+in flight at stop still persists its token — a real vendor fact); a disable
+between a call's pace and its send refuses it. Pinned: test-channels-gmail-shape
+/ -lark-shape ⑥c (d)–(g) with the r4 write as the control; test-channels-accounts
+⑫ with an engine copy without the identity door as the control.
+
+**Round 6 attacked round 5's own three fixes (lane R5 verify r6, 2026-09-27).**
+The identity door had three edges and the write rule one mechanism. A consent
+the vendor could not NAME (the profile / user_info read failed) was stored: a
+brand-new account was unbound and took ANYONE's next consent; a stranger's
+nameless consent landed on a bound record unjudged ("no common key"). Now a
+consent must name its account — the adapter refuses it by name, nothing is
+written, the owner retries. The migration edge: a LEGACY Lark record's
+`auth.user` is a display name, so it held no identity and a stranger's consent
+bound it; a legacy Gmail record disconnected after the upgrade lost its
+`auth.user` and took a stranger too — the door now judges by the token the
+record HOLDS and every legacy record is stamped once at boot. The write rule
+("only while the store holds the token you tried") was implemented as a
+synchronous re-read followed by an enqueue, correct only while no await sat
+between the two; it is now a compare-and-swap INSIDE the store's serialized
+door (`supersedes`, judged at apply time), and a persist for another token
+queues behind an in-flight one instead of being handed its promise (under
+Lark's rotation the dropped write left a retired token in the store). Lark's
+paced refresh re-reads the token after its wait (a disconnect during it no
+longer POSTs the dropped refresh token). A refreshed sign-in the disk refuses
+is SAID when it happens (one "For you" item per account, retracted when a write
+lands) — the residual, a restart before that, stays needs-reauth by name.
+Measured: 50 trials × {re-authorize, disconnect, rebind, remove} × {gmail,
+lark} with the refresh POST held, and 50 same-tick microtask orderings — 0
+reverted, 0 vendor calls with a wrong bearer. The identity rules, by vendor:
+Gmail compares the profile's canonical address after case-folding (a `+tag` or
+alias spelling is another string — the profile never answers one for the same
+person); Lark accepts a rebind under another app when union_id or user_id
+matches and refuses an open_id-only consent under another app (the same person
+is not provable); a record with no stamp is judged by its stored token; a
+disconnected legacy Lark record holds no evidence and takes the next consent;
+an attacker holding the owner's browser mid-consent is out of scope (the owner
+drives the consent). Pinned: gmail-shape / lark-shape ⑥c (h)–(k) with the r5
+persist restored in a copy as the control; accounts ⑫ (f)–(i) with an engine
+copy without the compare-and-swap and an adapter copy with an await in the gap
+as the controls.
+
+**Round 7 attacked round 6's closure (lane R5 verify r7, 2026-09-27).** The
+CAS door, the boot stamp and the nameless refusal held; the flow around them
+did not. A human act landing WHILE the consent was being completed (the
+profile read in flight) was undone by the consent landing late: a disconnect
+⇒ the record connected again and the pass it kicked made 4 vendor calls on
+the account the owner had ended; a newer sign-in ⇒ overwritten by the older
+flow's late completion; a cancel ⇒ ignored; a client-switch rebind ⇒ landed
+after the disconnect. The loopback's `cancel()` only marked the flow. Now the
+exchange is handed the flow's own `cancelled()`, the adapters pass it through
+to the door, and the door refuses INSIDE its serialized write a consent whose
+flow was ended meanwhile — the human act that cancelled it is the later one;
+a flow cancelled mid-exchange ends `{ok:false, cancelled}` whatever the
+exchange returned. Every judgement of the door (cancelled, nameless, identity,
+the compare-and-swap) now runs at apply time (the identity check sat before
+the store's await: two consents of one tick on an unbound record were both
+judged against nothing); a CAS write never lands on a cleared store; an
+`email` is an identity only when it looks like an address (a whitespace or
+bare-word profile answer was a truthy nobody — the r6 hole back through an
+off-contract vendor; a Lark display name with an '@' was stamped at boot as
+an email); Lark ids are trimmed; the boot stamp says what it stamped and
+names what it could not. Held: the ENOSPC shape on the real store (the item
+names EACCES, the next request flushes and retracts it), an 8 s profile read
+(nothing stored until it answers), a hanging one bounded at 20 s (nameless),
+the 15-shape legacy table, an idempotent second boot. Pinned: accounts ⑫
+(j)–(k) with an engine copy without the cancelled check and one with the
+judgement hoisted as the controls; gmail-shape ⑥c (l)–(m); lark-shape ⑥c (l);
+oauth-loopback ⑥.
+
+**Round 8, the closing round on `cancelled()` (lane R5 verify r8, 2026-09-27).**
+One medium: r7's loopback overrode its report whenever a cancel was marked —
+`{ok:false, "nothing was connected"}` over a consent already on disk — so a
+cancel, the timer's cancel, a newer sign-in or a stop() landing between the
+door's serialized callback and `finish()`'s report left the record connected
+on the consent's token with a last sign-in line saying nothing was connected,
+and no pass kicked; a stop() mid-exchange had the door refuse by name and
+then `onAuthDone` stamp adapters.json after `store.close()`. THE WRITE IS THE
+FACT: `finish()` reports `ok` = the exchange resolved (it cannot undo a write)
+and carries a late cancel beside `ok:true` for the consumer whose durable
+write is still ahead; `onAuthDone` reads `ok` as landed, judges a
+disconnect-since by the record, skips only a refused superseded flow;
+`onPendingDone` keeps refusing the carried cancel (its durable write is
+`applyRebind` / Connect); both doors read the engine's `stopped` as
+`shutdown`; nothing is written after `stop()`. The refusal's tail says what
+the record holds ("keeps its current sign-in" / "nothing was connected").
+Held: 20 orderings of A in flight / B superseding under cancel and
+disconnect on both paths (never a second write; B cancelled ⇒ the pre-flow
+record), the real deadline before and after the write. Recorded: a refused
+door still rides the store's unconditional atomic rewrite (same bytes, new
+inode); `flows.take()` is never called. Pinned: accounts ⑫ (l) with a
+loopback copy carrying r7's override and an engine copy without the stop
+guard as controls; oauth-loopback ⑥; gmail-shape ⑥c (m) re-pinned.
 
 ### 6.3 Per-adapter ingest
 
@@ -1362,7 +1663,7 @@ at the front of a pass are served FIFO across boundaries, humans before agents,
 and a re-request rides the one still queued — one vendor call — so a stream
 never starves the earliest waiter either; r9: every one of these decisions is
 now PURE `src/channel-drain.js` — a step function over a snapshot whose 17
-numbered rules the engine only drives, pinned by a seeded invariant walk —
+(18 since lane R5's per-second pace, §6.2b) numbered rules the engine only drives, pinned by a seeded invariant walk —
 "each key at most once per pass" is precisely once per ROUND (a request filed
 during its key's fetch is a new round), a pass with no due row ends after 25
 request fetches in a row so a stream never keeps one pass alive, the agent

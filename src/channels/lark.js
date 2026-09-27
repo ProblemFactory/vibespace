@@ -56,7 +56,8 @@
  */
 const crypto = require('crypto');
 const { makeRecord, makeConversation } = require('../channel-record.js');
-const { ChannelError } = require('./index.js');
+const { ChannelError, retryAfterSeconds } = require('./index.js');
+const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
 const { createLarkLive, NAMES_WAIT_MS } = require('./live/lark.js');
 
 const KIND = 'lark';
@@ -117,6 +118,21 @@ const WALK_TTL_MS = 5 * 60 * 1000;
 const MEMBERS_TTL_MS = 6 * 60 * 60 * 1000;
 /** Refresh the access token when it is inside this margin of expiring. */
 const REFRESH_MARGIN_MS = 60 * 1000;
+/**
+ * EVERY OUTBOUND CALL THIS ADAPTER MAKES OUTSIDE `api()` — THE GATE (lane R5
+ * verify r4). The census in test-channels-lark-shape reads the markers off the
+ * code: `// gated-inline: <id>` = a raw send with its own `await pace(1);
+ * meter(1)` right above it (the token refresh, the two send forms, the
+ * resource bytes); `// ungated: <id>` = a call that stands outside the pace
+ * for a reason an agent or a loop cannot multiply, named HERE. A new outbound
+ * call with no marker, a gated-inline site without its pace, or an ungated id
+ * with no row, is red.
+ */
+const UNGATED = Object.freeze([
+  { id: 'consent-exchange', why: 'the fixed-mode loopback consent flow: once per human consent, taken by the flow\'s one-time state' },
+  { id: 'consent-user-info', why: 'ONE user_info read inside that same consent (who signed in); once' },
+  { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): one tenant token per brand, no user token, nothing listed or sent' },
+]);
 
 const caps = Object.freeze({
   receive: 'push',
@@ -145,7 +161,23 @@ const caps = Object.freeze({
   attachments: 'fetch',
   olderHistory: 'page',
   budget: { unit: 'request', default: 60, settingKey: 'channels.budgetLarkPerMin', metered: true },
+  // lane R5 (2026-09-26): PACED PER SECOND as well (drain rule 18). The
+  // vendor's frequency tiers are per API, per app, per TENANT — the chat /
+  // message / member / resource reads are tier 4, "1000/min, 50/s" — and a
+  // cluster app shares that pool with every instance and user, so the
+  // default is 5 requests/s (10 % of the per-second tier); the engine also
+  // spreads the minute's budget (60 ⇒ about one a second).
+  pace: { unitsPerSec: 5, settingKey: 'channels.larkRequestsPerSec', cost: { fetch: 1, discover: 1, scanHost: 1 } },
+  vendorName: i18nKey('Lark'),
 });
+/** The vendor's name for ONE record (lane R5): the brand it was created in —
+ *  Feishu (open.feishu.cn, the default) or Lark international. A declared
+ *  label the client words with t(), never derived from the kind. */
+function vendorNameOf(record) {
+  const r = record || {};
+  const b = BRANDS.includes(r.brand) ? r.brand : (r.options && BRANDS.includes(r.options.brand) ? r.options.brand : 'feishu');
+  return b === 'lark' ? i18nKey('Lark') : i18nKey('Feishu');
+}
 /** The refresh token is valid for 7 days and RE-ISSUED at every automatic
  *  refresh (`tokenFromExchange` slides `refreshExpiresAt`), so a running
  *  instance never needs a re-authorization — only one off for longer. */
@@ -298,11 +330,12 @@ const CODE_AUTH = new Set([99991661, 99991663, 99991664, 99991665, 99991667, 999
 const CODE_RATE = new Set([99991400, 99991401, 99991402, 99991403, 11232, 230020]);
 const CODE_FORBIDDEN = new Set([99991672, 99991679, 230002, 230006, 230011, 230013, 230014]);
 const CODE_NOT_FOUND = new Set([230001, 230003, 230026]);
-function typedFailure(status, body, what) {
+function typedFailure(status, body, what, retryAfterSec = null) {
   const code = body && Number(body.code);
   const msg = (body && (body.msg || body.error_description || body.error)) || `HTTP ${status}`;
   if (status === 401 || CODE_AUTH.has(code)) return new ChannelError('auth-expired', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
-  if (status === 429 || CODE_RATE.has(code)) return new ChannelError('rate-limited', `${what}: ${msg} (${code || status})`, { retryable: true, detail: { code, status } });
+  // lane R5: the vendor's `x-ogw-ratelimit-reset` (seconds) rides the refusal — the engine waits exactly that, never a 15-minute park
+  if (status === 429 || CODE_RATE.has(code)) return new ChannelError('rate-limited', `${what}: ${msg} (${code || status})`, { retryable: true, detail: { code, status, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403 || CODE_FORBIDDEN.has(code)) return new ChannelError('forbidden', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
   if (status === 404 || CODE_NOT_FOUND.has(code)) return new ChannelError('not-found', `${what}: ${msg} (${code || status})`, { retryable: false, detail: { code, status } });
   if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { code, status } });
@@ -323,7 +356,7 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = nul
   }
   let parsed = null;
   try { parsed = await r.json(); } catch { parsed = null; }
-  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what);
+  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));
   return parsed;
 }
 
@@ -340,6 +373,7 @@ function create(record = {}, deps = {}) {
   const H = HOSTS[brand];
 
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: one unit per request SENT
+  const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
   const walks = new Map();      // convId -> { stopAt, pageToken, newest, at, count }
   const members = new Map();    // convId -> { names: Map, at }
   const sleep = (ms) => new Promise((r) => { const t = setTimeout(r, ms); if (t.unref) t.unref(); });
@@ -362,27 +396,80 @@ function create(record = {}, deps = {}) {
     return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };
   }
 
+  let unsaved = null;   // verify r5: {token, supersedes} — a refreshed token the store could not persist, held until the store's next chance
   function readToken() {
     if (!tokens) return { token: null, why: 'no token store was handed to this adapter' };
     const t = tokens.read();
-    if (!t || !t.token) return { token: null, why: (t && t.why) || 'never-authenticated' };
+    if (!t || !t.token) { unsaved = null; return { token: null, why: (t && t.why) || 'never-authenticated' }; }
+    // verify r5: a refreshed token the store could not persist stands in for the one it superseded (the vendor
+    // ROTATED it — the old one is retired) until the store holds anything else (cleared, re-authorized)
+    if (unsaved) { if (String(t.token.refresh_token || '') === unsaved.supersedes) return { token: unsaved.token, why: null }; unsaved = null; }
     return { token: t.token, why: null };
   }
 
   /** A live access token — refreshed through the app credential when inside
-   *  the margin. `auth-expired` when the refresh token is dead. */
+   *  the margin. `auth-expired` when the refresh token is dead.
+   *  ONE REFRESH IN FLIGHT PER ADAPTER (lane R5 verify r4): the vendor ROTATES
+   *  the refresh token (the v2 refresh answers a new one and retires the old),
+   *  so 12 concurrent callers at one expiry were 12 paced refresh POSTs with
+   *  the SAME old token — the first succeeded, the other eleven were
+   *  `invalid_grant` and each stamped the STALE token back over the fresh one
+   *  (`invalidGrantAt`): the account logged itself out and asked the owner to
+   *  re-authorize. Now siblings wait for the one refresh and read what it wrote. */
+  let refreshing = null;
   async function accessToken() {
     const cred = credential();
     if (!cred.values) throw new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
     if (!token) throw new ChannelError('auth-expired', `Lark is not connected (${why})`, { retryable: false });
+    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
+    if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false });
     if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false });
+    if (refreshing) { await refreshing; return accessToken(); }   // a sibling's refresh: wait for it, then read what it wrote
+    refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
+    const got = await refreshing;
+    return got || accessToken();   // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use
+  }
+  /** Persist a token the vendor answered (verify r5). The v2 refresh ROTATES the refresh token — the old one is retired
+   *  the moment the vendor answers — so a write the store refuses (a full disk) used to mean the next refresh POSTed a
+   *  retired token: `invalid_grant`, stamped, the account logged itself out (measured: ONE failed write ⇒ needs-reauth).
+   *  The token is kept in memory as the truth and written again at the next request; a restart before it lands loses it. */
+  let persisting = null;   // {token, p}: ONE write in flight PER TOKEN — the waiters of a refresh each re-enter accessToken() and share it; a write of ANOTHER token queues behind it (verify r6: it used to be handed the earlier token's promise and DROPPED — under a rotating vendor the store then kept a retired token)
+  /** `supersedes` = the refresh token this write replaces (what the refresh tried / what the unsaved token stood in for):
+   *  the store lands the write only while it holds that token at apply time (the door's compare-and-swap, verify r6)
+   *  and answers `{superseded:true}` otherwise — nothing of ours is then in memory either. */
+  function persistToken(next, supersedes) {
+    if (persisting && persisting.token === next) return persisting.p;
+    const prev = persisting ? persisting.p.catch(() => {}) : Promise.resolve();
+    const p = prev.then(async () => {
+      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';
+      const over = supersedes === undefined ? storeRt : String(supersedes || '');
+      try {
+        const w = await tokens.write(next, { expiresAt: next.refreshExpiresAt, scopes: next.scopes, supersedes: over });
+        if (w && w.superseded) { if (unsaved && unsaved.token === next) unsaved = null; return { written: false, superseded: true }; }
+        unsaved = null; return { written: true };
+      } catch (e) {
+        unsaved = { token: next, supersedes: over };
+        log.warn && log.warn(`[channels] lark: the refreshed token could not be persisted (${(e && e.message) || e}) — held in memory and written again at the next request`);
+        return { written: false, failed: true };
+      }
+    }).finally(() => { if (persisting && persisting.p === p) persisting = null; });
+    persisting = { token: next, p };
+    return p;
+  }
+  async function refreshAccessToken(cred, token) {
     let d;
     try {
+      await pace(1);
+      // verify r6: the token was captured BEFORE the pace wait — a disconnect / re-authorize that landed meanwhile would
+      // send this POST with a dropped or superseded refresh token (one vendor call the owner had ended); re-read first
+      const t2 = readToken().token;
+      if (!t2) throw new ChannelError('auth-expired', 'Lark was disconnected while its refresh waited for its pace — the refresh was not sent', { retryable: false, detail: { tokenDropped: true } });
+      if (String(t2.refresh_token || '') !== String(token.refresh_token || '')) return null;
       meter(1);
-      d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {
+      d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {   // gated-inline: token-refresh
         method: 'POST', what: 'lark token refresh',
         body: { grant_type: 'refresh_token', client_id: cred.values.appId, client_secret: cred.values.appSecret, refresh_token: token.refresh_token },
       });
@@ -390,14 +477,41 @@ function create(record = {}, deps = {}) {
       // A refresh the vendor REFUSES is a fact about the token record, so it
       // is stamped on it: `auth.state()` answers `needs-reauth` from now on
       // (the row's re-authorize control), instead of retrying a dead grant
-      // on every pass.
-      if (e instanceof ChannelError && e.code === 'auth-expired' && tokens) await tokens.write({ ...token, invalidGrantAt: now() }, { expiresAt: token.refreshExpiresAt || null, scopes: token.scopes || [] });
+      // on every pass — ONLY while the stored token is still the one this
+      // refresh tried (a newer one, written meanwhile, is never overwritten
+      // with a stale copy).
+      if (e instanceof ChannelError && e.code === 'auth-expired' && tokens) {
+        const cur = readToken().token;
+        // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
+        // that landed first — the straggler of a rotation) is superseded, not a fact about the account
+        if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now() }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') });
+      }
       throw e;
     }
     const next = tokenFromExchange(d, token);
-    await tokens.write(next, { expiresAt: next.refreshExpiresAt, scopes: next.scopes });
+    // verify r5: written ONLY while the store still holds the token this refresh tried — a disconnect (cleared) or a
+    // re-authorize (a different token) that landed while the POST was in flight is never overwritten by this late
+    // write (25 of 50 trials reverted a re-authorize to the old family's rotated token). Superseded ⇒ re-read.
+    const cur = readToken().token;
+    if (!cur) throw new ChannelError('auth-expired', 'Lark was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });
+    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
+    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads
+    if (w && w.superseded) return null;
     return next.access_token;
   }
+  /** THE BEARER AS IT IS NOW (lane R5 verify r4): the store, re-read
+   *  synchronously AFTER the pace wait — a disconnect that landed meanwhile
+   *  refuses the request by name (never sent with a token the owner dropped);
+   *  a re-authorize's or a sibling's refresh's newer token is the one sent. */
+  function bearerNow(at) {
+    const t = readToken().token;
+    if (!t || !t.access_token) throw new ChannelError('auth-expired', 'Lark was disconnected while the request waited for its pace — the request was not sent', { retryable: false, detail: { tokenDropped: true } });
+    return t.access_token !== at && Number(t.expiresAt) > now() ? t.access_token : at;
+  }
+  /** Is the token the store holds NOW past its expiry (verify r5)? A queue longer than the token's remaining life is
+   *  refreshed ONCE (single-flight) before the send — never an expired bearer on the wire. */
+  const bearerExpired = () => { const t = readToken().token; return !!(t && t.access_token) && !(Number(t.expiresAt) > now()); };
 
   function tokenFromExchange(d, prev = {}) {
     const t = now();
@@ -407,14 +521,21 @@ function create(record = {}, deps = {}) {
       refresh_token: String(d.refresh_token || prev.refresh_token || ''),
       refreshExpiresAt: d.refresh_token_expires_in ? t + Number(d.refresh_token_expires_in) * 1000 : (prev.refreshExpiresAt || null),
       scopes: String(d.scope || (prev.scopes || []).join(' ')).split(/\s+/).filter(Boolean),
-      openId: prev.openId || null, name: prev.name || null, brand,
+      openId: prev.openId || null, name: prev.name || null, unionId: prev.unionId || null, userId: prev.userId || null, brand,
     };
   }
 
+  // THE GATE: every Lark request goes token → pace → meter → send, with the
+  // bearer re-read after the wait. The census in test-channels-lark-shape
+  // reads this file: an outbound call outside it is `// gated-inline: <id>`
+  // (its own pace + meter right above it) or `// ungated: <id>` with a row in
+  // `UNGATED` naming the reason — or the suite is red.
   const api = async (pathq, opts = {}) => {
-    const at = await accessToken();
+    let at = await accessToken();
+    await pace(1);   // lane R5: the per-SECOND shape — then charged the moment it is sent
     meter(1);
-    return callJson(fetchFn, `${H.open}/open-apis${pathq}`, { ...opts, headers: { Authorization: `Bearer ${at}`, ...(opts.headers || {}) } });
+    if (bearerExpired()) at = await accessToken();   // verify r5: the bearer EXPIRED while the request waited — one refresh before the send
+    return callJson(fetchFn, `${H.open}/open-apis${pathq}`, { ...opts, headers: { Authorization: `Bearer ${bearerNow(at)}`, ...(opts.headers || {}) } });
   };
 
   /** Chat member names, ONCE per conversation per MEMBERS_TTL_MS — best
@@ -471,12 +592,16 @@ function create(record = {}, deps = {}) {
     if (!hasSendScopes(readToken().token)) throw new ChannelError('forbidden', 'lark: the held token has no send scopes (im:message + im:message.send_as_user) — reconnect to request them', { retryable: false, detail: { why: 'send-scope-not-granted' } });
     const uuid = uuidFor(idemKey);
     const body = { msg_type: 'text', content: JSON.stringify({ text: String(text == null ? '' : text) }), uuid };
-    const at0 = await accessToken();
+    let at0 = await accessToken();
     let d;
     try {
+      await pace(1);   // lane R5 verify r4: a send is a vendor request like any other — paced, then metered (it was neither)
+      meter(1);
+      if (bearerExpired()) at0 = await accessToken();   // verify r5: an expired bearer is refreshed before the send, never sent
+      const at = bearerNow(at0);
       d = replyTo
-        ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at0}` }, body })
-        : await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages?receive_id_type=chat_id`, { method: 'POST', what: 'lark send', headers: { Authorization: `Bearer ${at0}` }, body: { receive_id: convId, ...body } });
+        ? await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(replyTo))}/reply`, { method: 'POST', what: 'lark reply', headers: { Authorization: `Bearer ${at}` }, body })   // gated-inline: send-reply
+        : await callJson(fetchFn, `${H.open}/open-apis/im/v1/messages?receive_id_type=chat_id`, { method: 'POST', what: 'lark send', headers: { Authorization: `Bearer ${at}` }, body: { receive_id: convId, ...body } });   // gated-inline: send
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'transport') throw new ChannelError('transport', `${e.message} — the request left and the answer was lost`, { retryable: true, detail: { ...(e.detail || {}), lost: true, uuid } });
       throw e;
@@ -516,18 +641,26 @@ function create(record = {}, deps = {}) {
           id: adapterId, mode: 'fixed', label: 'Lark',
           successText: 'VibeSpace: Lark connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state }) => `${H.accounts}/open-apis/authen/v1/authorize?` + new URLSearchParams({ client_id: appId, redirect_uri: redirectUri, scope: SCOPES.join(' '), state }),
-          exchange: async ({ code, redirectUri }) => {
-            const d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {
+          exchange: async ({ code, redirectUri, cancelled = null }) => {
+            const d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {   // ungated: consent-exchange
               method: 'POST', what: 'lark token exchange',
               body: { grant_type: 'authorization_code', client_id: appId, client_secret: appSecret, code, redirect_uri: redirectUri },
             });
             const tok = tokenFromExchange(d);
+            // verify r6: A CONSENT MUST NAME ITS ACCOUNT — a token user_info could not name bound nothing (the record
+            // then took anyone's next consent) and, on a bound record, landed unjudged; refused, nothing stored
             try {
-              const me = await callJson(fetchFn, `${H.open}/open-apis/authen/v1/user_info`, { what: 'lark user info', headers: { Authorization: `Bearer ${tok.access_token}` } });
-              tok.openId = (me.data && me.data.open_id) || null;
+              const me = await callJson(fetchFn, `${H.open}/open-apis/authen/v1/user_info`, { what: 'lark user info', headers: { Authorization: `Bearer ${tok.access_token}` } });   // ungated: consent-user-info
+              const idOf = (v) => (v == null ? null : String(v).trim() || null);   // verify r7: a whitespace id is NOBODY
+              tok.openId = idOf(me.data && me.data.open_id);
               tok.name = (me.data && me.data.name) || null;
-            } catch (e) { log.warn && log.warn('[channels] lark: user_info unavailable after consent:', (e && e.message) || e); }
-            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes });
+              tok.unionId = idOf(me.data && me.data.union_id);   // verify r5: the identity the record is bound to — open_id is per app, union_id per developer, user_id per tenant
+              tok.userId = idOf(me.data && me.data.user_id);
+            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Lark', `user_info: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }
+            if (!tok.openId) throw new ChannelError('vendor-error', namelessSentence('Lark', 'user_info carried no open_id'), { retryable: false, detail: { nameless: true } });
+            // verify r7: `consent.cancelled` — the door refuses, INSIDE its serialized write, a consent whose flow was
+            // cancelled meanwhile (a disconnect / cancel / newer sign-in used to be undone by this write landing late)
+            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes, consent: { cancelled } });
             return { ok: true, user: tok.name || tok.openId || null, scopes: tok.scopes };
           },
           onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
@@ -704,17 +837,19 @@ function create(record = {}, deps = {}) {
      */
     async fetchAttachment(convId, { messageId, attachmentId, mime = null } = {}) {
       if (!messageId || !attachmentId) throw new ChannelError('not-found', 'lark: an attachment needs its message id and key', { retryable: false });
-      const at = await accessToken();
+      let at = await accessToken();
       const type = /^image\//.test(String(mime || '')) ? 'image' : 'file';
+      await pace(1);
       meter(1);
+      if (bearerExpired()) at = await accessToken();   // verify r5: an expired bearer is refreshed before the send
       let r;
       try {
-        r = await fetchFn(`${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(messageId))}/resources/${encodeURIComponent(String(attachmentId))}?type=${type}`, { headers: { Authorization: `Bearer ${at}` }, signal: AbortSignal.timeout(60000) });
+        r = await fetchFn(`${H.open}/open-apis/im/v1/messages/${encodeURIComponent(String(messageId))}/resources/${encodeURIComponent(String(attachmentId))}?type=${type}`, { headers: { Authorization: `Bearer ${bearerNow(at)}` }, signal: AbortSignal.timeout(60000) });   // gated-inline: resource
       } catch (e) { throw new ChannelError('transport', `lark resource: ${(e && e.message) || e}`, { retryable: true }); }
       const ct = String((r.headers && r.headers.get && r.headers.get('content-type')) || '');
       if (!r.ok || /application\/json/.test(ct)) {
         let body = null; try { body = await r.json(); } catch { body = null; }
-        throw typedFailure(r.status || 500, body, 'lark resource');
+        throw typedFailure(r.status || 500, body, 'lark resource', retryAfterSeconds(r.headers));
       }
       const len = Number((r.headers && r.headers.get && r.headers.get('content-length')) || 0);
       if (len > 100 * 1024 * 1024) throw new ChannelError('too-large', `lark resource: ${len} bytes is over the 100 MB bound`, { retryable: false });
@@ -742,7 +877,7 @@ async function integrationTest({ resolved, signal } = {}, fetchFn = null) {
   const errors = [];
   for (const b of BRANDS) {
     try {
-      const d = await callJson(f, `${HOSTS[b].open}/open-apis/auth/v3/tenant_access_token/internal`, { method: 'POST', what: `lark tenant token (${b})`, body: { app_id: r.values.appId, app_secret: r.values.appSecret }, signal: signal || null });
+      const d = await callJson(f, `${HOSTS[b].open}/open-apis/auth/v3/tenant_access_token/internal`, { method: 'POST', what: `lark tenant token (${b})`, body: { app_id: r.values.appId, app_secret: r.values.appSecret }, signal: signal || null });   // ungated: integration-test
       if (d && d.tenant_access_token) return { ok: true, detail: { brand: b, source: r.source, expire: d.expire || null } };
       errors.push(`${b}: no tenant_access_token in the answer`);
     } catch (e) { errors.push(`${b}: ${(e && e.message) || e}`); }
@@ -750,9 +885,9 @@ async function integrationTest({ resolved, signal } = {}, fetchFn = null) {
   return { ok: false, error: errors.join('; ') };
 }
 
-const adapter = { kind: KIND, caps, create };
+const adapter = { kind: KIND, caps, create, vendorNameOf };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS,
+  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
-  toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes,
+  toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes, vendorNameOf,
 };

@@ -3,6 +3,7 @@ import { t as tr } from './i18n.js';
 import { registerCommand, registerMenuItem, menuItems } from './contributions.js';
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { UI_ICONS } from './icons.js';
+import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -390,20 +391,20 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     stateChip?.after(gchip);
   }
   // AGENT BROWSER CHIP (lane H, 2026-09-25 — the owner watched an agent's
-  // ephemeral browser start and nothing said so): the browser this session's
-  // agent holds LIVE right now (`browserLive`: 'ephemeral' = its own managed
-  // ephemeral browser, else a profile id). Click = the live view. The label
-  // is a session name / a profile label — escaped; SVG icon (the icon law).
-  if (s.browserLive && (s.status === 'live' || s.status === 'tmux') && s.webuiId) {
+  // ephemeral browser start and nothing said so): shown while a browser of this
+  // session runs (`browserFact.live`). lane S2: its words are THE browser fact's
+  // (src/browser-fact.js) — the same line the status-bar chip, the live view and
+  // Session Properties print; amber when the pin and the browser in use differ.
+  // Click = the live view. Escaped; SVG icon (the icon law).
+  const bfact = s.browserFact && typeof s.browserFact === 'object' ? s.browserFact : null;
+  if (bfact && bfact.live && (s.status === 'live' || s.status === 'tmux') && s.webuiId) {
+    const bw = browserFactWords(bfact, tr);
     const bchip = document.createElement('span');
-    bchip.className = 'sess-state-chip sess-state-derived sess-browser-chip';
-    bchip.style.setProperty('--chip-color', 'var(--accent)');
-    const blabel = s.browserLive === 'ephemeral'
-      ? tr('(ephemeral) {name}', { name: s.webuiName || s.name || tr('this conversation') })
-      : (((app && app._browserProfiles && app._browserProfiles.profiles) || []).find((p) => p && p.id === s.browserLive)?.label || s.browserLive);
-    const btext = tr('Agent browser') + ' · ' + blabel;
+    bchip.className = 'sess-state-chip sess-state-derived sess-browser-chip' + (bw.amber ? ' amber' : '');
+    bchip.style.setProperty('--chip-color', bw.amber ? 'var(--yellow, #e5c07b)' : 'var(--accent)');
+    const btext = tr('Agent browser') + ' · ' + bw.line;
     bchip.innerHTML = `<span class="chip-icon">${UI_ICONS.browserLive || ''}</span><span class="chip-text">${escHtml(btext)}</span>`;
-    bchip.dataset.tip = tr('{what} is running — click for the live view', { what: btext });
+    bchip.dataset.tip = tr('{what} is running — click for the live view', { what: tr('Agent browser') + ' · ' + bw.name }) + '\n' + bw.tooltip;
     bchip.onclick = (e) => { e.stopPropagation(); app?.openBrowserLive?.({ sessionId: s.webuiId }); };
     stateChip?.after(bchip);
   }

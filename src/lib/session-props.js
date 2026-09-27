@@ -254,20 +254,24 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     // The pinned profile + WHICH rung chose it + how many sessions share it,
     // and the same picker the card menu opens. Only for a live local session
     // with a browser key while the client holds the profile digest.
-    if (app._browserProfiles && s.browserKey && s.status === 'live' && s.webuiId && !s.host) {
+    // lane S2 (naive study 2, T5): the section prints THE browser fact (`browserFact`, the same line the chip and the
+    // live view print — "work", or "pinned work · running nothing — work could not start"); it re-renders on the
+    // active-sessions broadcast the fact rides (a pin shows at once, never only after a reopen); ONE line (a name never
+    // wraps mid-word — the whole sentence is the tooltip); the window's own buttons (never the browser's white default)
+    if (app._browserProfiles && s.browserFact && s.status === 'live' && s.webuiId && !s.host) {
       const brSec = section(t('Agent browser'));
-      row(brSec, t('Pinned profile'), app.browserPinSummaryHtml(s), { wrap: true });
+      row(brSec, t('Browser'), app.browserPinSummaryHtml(s));
       const brRow = document.createElement('div');
       brRow.className = 'session-detail-row';
       brRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Pin'))}</span>`;
       const brBtn = document.createElement('button');
-      brBtn.className = 'toolbar-btn';
+      brBtn.className = 'task-detail-btn session-props-browser-pin';
       brBtn.textContent = t('Agent browser profile…');
       brBtn.onclick = (e) => app.showBrowserProfilePicker(s, { x: e.clientX, y: e.clientY });
       brRow.appendChild(brBtn);
       // P2 (§4.4): the live view — the same window the card menu and the status-bar chip open
       const lvBtn = document.createElement('button');
-      lvBtn.className = 'toolbar-btn';
+      lvBtn.className = 'task-detail-btn session-props-browser-live';
       lvBtn.style.marginLeft = '6px';
       lvBtn.textContent = t('Live view');
       lvBtn.onclick = () => app.openBrowserLive({ sessionId: s.webuiId });
@@ -692,6 +696,17 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
   };
   app.ws.onGlobal(onMsg);
+  // lane S2 (naive study 2, T5: "Esc does not close it"): Esc closes the Properties window when focus is inside it
+  // and nothing of its own is open — a floating popover / an open <select> list takes the key first (the global
+  // `data-popover` protocol in app.js runs on the same keydown and removes those; a composing IME keeps it)
+  winInfo.element?.addEventListener?.('keydown', (e) => {
+    if (e.key !== 'Escape' || e.isComposing || e.defaultPrevented) return;
+    if (document.querySelector('[data-popover]')) return;
+    if (e.target && e.target.tagName === 'SELECT') return;
+    e.preventDefault(); e.stopPropagation();
+    try { if (typeof app.wm.requestClose === 'function') app.wm.requestClose(winInfo.id); else app.wm.closeWindow(winInfo.id); } catch { /* already closing */ }
+  }, { signal: winInfo._listenerCtl?.signal });
+  if (winInfo.element && !winInfo.element.hasAttribute('tabindex')) winInfo.element.tabIndex = -1; // focusable, so a click in it gives it the key
   const prevClose = winInfo.onClose;
   winInfo.onClose = () => { app.ws.offGlobal(onMsg); prevClose?.(); };
   return winInfo;

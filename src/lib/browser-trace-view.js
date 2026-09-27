@@ -163,7 +163,7 @@ export function openTraceEntryDialog(app, entry, list = null) {
     row(t('Result'), statusText(e));
     if (e.url) row(t('Page'), String(e.url));
     if (e.profileId) row(t('Profile'), (app && app._browserProfiles && (app._browserProfiles.profiles || []).find((p) => p.id === e.profileId) || {}).label || e.profileId);
-    else row(t('Profile'), t('ephemeral (no profile)'));
+    else row(t('Profile'), t('no profile (temporary browser)')); // lane S2: plain words
   }
   prev.onclick = () => show(index - 1);
   next.onclick = () => show(index + 1);

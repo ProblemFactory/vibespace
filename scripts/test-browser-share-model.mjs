@@ -249,7 +249,7 @@ try {
   // directory and a bare command falls to its own browser ⇒ a second Chrome on work's directory: exit 21 SingletonLock
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const preRepoint = rsrc.replace('  const repoint = clearPinnedDir(k, f);\n', "  let repoint = null;\n  try { repoint = ctx.browserEnv?.()?.repointPin?.(f.browserKey, p ? p.dir : null) || null; } catch (e) { repoint = { ok: false, why: String(e && e.message) }; }\n")
-    .replace("    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v);\n", "    if (v.ok && v.kind === 'pin') v = { ...v, kind: 'none' };\n");
+    .replace("    if (v.ok && v.kind === 'pin') v = await attachPin(k, f, v, verb);\n", "    if (v.ok && v.kind === 'pin') v = { ...v, kind: 'none' };\n"); // integration 2.369.192: the route threads S2's refused verb through attachPin
   ok(preRepoint !== rsrc && preRepoint.includes("repointPin?.(f.browserKey, p ? p.dir : null)") && preRepoint.includes("v = { ...v, kind: 'none' };"), 'control: the patched copy carries both pre-ruling edits (the directory re-point, no pin branch)');
   {
     const Rpre = M.load('src/routes/browser.js', preRepoint, 'pre-ruling');
@@ -315,10 +315,13 @@ try {
   clock += B.DRIVE_HOLD_MS + 1000;
   v = k.resolveFor({ browserKey: KA, handle: 'work' });
   ok(v.ok && k.list().drivers[work.id].browserKey === KA, `a driver that sent no command for ${B.DRIVE_HOLD_MS / 1000} s lets go even mid-turn`);
-  // the user takes over from conversation 2's live view: its own command is browser_paused; conversation 1's is busy (the user drives)
+  // the user takes over from conversation 2's live view: the takeover is of the BROWSER (lane S2 r6, the owner's ruling
+  // B-7199 "直接打断所有脚本和agent操作") — conversation 2 AND conversation 1 are browser_paused (1 taken WITH 2's view);
+  // who drives still names the VIEW (integration 2.369.192: the sibling state's `with`)
   const to = k.takeover({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', sessionId: 'sess-2' });
   const vB = k.resolveFor({ browserKey: KB, handle: 'work' }), vA = k.resolveFor({ browserKey: KA, handle: 'work' });
-  ok(to && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_busy' && vA.by === 'user' && /driven by the user/.test(vA.error) && /"Second chat"/.test(vA.error), 'the USER takes over from conversation 2\'s live view: conversation 2 is browser_paused (as today), conversation 1 is browser_busy — the user drives it, named by the view', { to, vB: vB.code, vA });
+  ok(to && to.ok !== false && vB.code === 'browser_paused' && vA.code === 'browser_paused', 'the USER takes over from conversation 2\'s live view: conversation 2 is browser_paused (as today), conversation 1 is browser_paused too — a takeover is of the browser (lane S2), never a one-conversation pause', { to, vB: vB.code, vA });
+  ok(k.list().drivers !== undefined && (k.statusFor(KA).leases.find((l) => l.profileId === work.id) || {}).driver?.browserKey === KB, 'who drives conversation 1\'s lease names conversation 2 — the view the user drives FROM (never conversation 1 itself)', k.statusFor(KA).leases.map((l) => l.driver));
   const rowA = S.browserListFor(k.statusFor(KA)).find((x) => x.profileId === work.id);
   ok(rowA && rowA.driver === 'other-user' && rowA.driverKey === KB, 'the strip of conversation 1 says the user drives it in conversation 2\'s view', rowA);
   k.handback({ browserKey: KB, profileId: work.id, viewerId: 'viewer-b', cause: 'explicit', sessionId: 'sess-2' });

@@ -262,6 +262,8 @@ const NOTICE_RENDERERS = Object.freeze({
   'browser-pin': (n) => require('./browser-profiles').renderProfileChangeNotice({ ...n, by: n.by || 'user' }),
   // agent browser P3 (§4.3.1): the zero-spend twin of the handback announcement — rides the user's next message
   'browser-handback': (n) => require('./browser-takeover').renderHandbackNotice(n),
+  // the owner's ruling (2026-09-27 — "告知agent发生了打断"): the takeover's zero-spend notice — what it interrupted, read at the agent's next turn
+  'browser-takeover': (n) => require('./browser-takeover').renderTakeoverNotice(n),
 });
 
 module.exports = { SessionStatusManager, SESSION_STATES: STATES, SESSION_URGENCIES: URGENCIES, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

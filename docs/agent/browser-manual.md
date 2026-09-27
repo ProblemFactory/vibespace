@@ -135,11 +135,22 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   a login that survives, use a named profile (section 3).
 * **The user can watch it and take over.** They open **Agent browser** from
   your session card or the status bar, see what you do, and can **Take over**.
-  While they drive, every page verb you run is refused `browser_paused` (who
-  took over, when) — do **not** retry in a loop; wait. Control returns when
-  they press **Hand back**, announced into your conversation as a message
-  naming the **current URL** — re-orient before continuing (a login, a captcha
-  or a navigation may have happened). A takeover the user walks away from
+  **Taking over interrupts you.** The command you had running on that browser
+  ends with `[browser_interrupted]` ("The user took over this browser — your
+  operation was interrupted. Wait for the handback, then run it again."; the
+  tool exits 1 like any refusal). On an instance-shared profile its CDP calls
+  in flight are cut at once and a script it was RUNNING is asked to stop — a
+  script AWAITING a timer or a fetch cannot be recalled and may still finish;
+  on your own browser nothing sits between you and the page, so the command
+  ran on to its end — check the page before trusting its result. A notice in
+  your conversation says what was interrupted ("…; 2 operations were
+  interrupted: fill, eval"). While they drive, every page verb you run is
+  refused `browser_paused` (who took over, when) — do **not** retry in a loop;
+  wait. Control returns when they press **Hand back**, announced into your
+  conversation as a message naming the **current URL** and — when anything was
+  interrupted or refused — "Re-run what was interrupted: …": re-read the page
+  (refs from before the takeover are stale), then run those again (a login, a
+  captcha or a navigation may have happened). A takeover the user walks away from
   hands back by itself after an idle window; that is not announced by default —
   your next command simply succeeds again. If the user STOPS the browser while
   driving it, control comes back to you too (a note rides your next message):
@@ -289,11 +300,23 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   not "who may use it": it confines every attached session to its own tabs
   through a mediated connection: `tab
   list` is yours alone, another session's tab answers `target_out_of_scope`,
-  and while the user drives your tab every input and page-navigation COMMAND
-  is refused `browser_paused` while reads (`get title`, a snapshot) still
-  answer — and so does script evaluation (`eval`), which is NOT fenced: a
-  script that sets `location.href` moves the page the user is looking at, so
-  do not navigate by script while they drive.
+  and while the user drives your tab the mediated connection refuses
+  everything but pure reads — input, navigation, script evaluation (`eval`,
+  and on 0.38.1 even `get title`, which reads the title by script), DOM / CSS
+  edits, cookies — with `browser_interrupted`. What you had in flight when
+  they took over was cut the same moment (a fill whose one text insertion had
+  already reached the page stays typed — the refusal then says "but one of its
+  calls had already reached the page and took effect: check the page"; a `type`
+  stops mid-word; a call the page had not answered when the refusal was written
+  says "had not been answered by the page when this was written, so whether it
+  took effect is unknown: check the page" — treat it as unknown, never as cut). The takeover is of the BROWSER: when the user takes it over
+  from ANY conversation's live view, every conversation attached to that
+  profile is interrupted and paused with it (each told by its own card, each
+  reminded of its own verbs at the handback), and attaching while they drive
+  gives you a paused lease until the handback. The handback wakes you only when
+  something of yours was interrupted or refused; otherwise it reaches you as a
+  notice on your next turn. Only one view holds the browser at a time: a second
+  view's Take over is refused `held` while the first is live.
 
 ### One session, several browsers — handles
 
@@ -335,9 +358,10 @@ default with `*`.
 * **Never echo a cookie, a token or an `Authorization` header** into your reply
   or into a file. The OUTPUT of `cookies get`, `state save` and `storage` is a
   secret; so are screenshots of logged-in pages and HAR captures.
-* **`browser_paused` is never retried in a loop.** Wait for the handback. The
-  same for `browser_busy` (another conversation drives a shared browser): run
-  the command again once, after the wait it names — or tell the user.
+* **`browser_paused` / `browser_interrupted` are never retried in a loop.**
+  Wait for the handback; it names what to re-run. The same for `browser_busy`
+  (another conversation drives a shared browser): run the command again once,
+  after the wait it names — or tell the user.
 * **A refusal that names a button is the user's to press.** Relay it in your
   own words ("switch 'work' to All my conversations in the Agent browser
   panel"); never offer the user a `vibespace-browser` command line, and never
@@ -375,7 +399,9 @@ default with `*`.
   a running one never trips the machine's ceiling).
 * **Your own ephemeral browser is not CDP-mediated** — it has one conversation.
   While the user drives it, your verbs are refused at the server
-  (`browser_paused`) before they run; there is no second fence inside it.
+  (`browser_paused`) before they run; there is no second fence inside it, so a
+  command already running when they took over runs on to its end — it still
+  answers `[browser_interrupted]` so you know to re-check the page.
 * **A reached (`--provider cdp`) or remote profile has no live view yet** — say
   so rather than working around it.
 * **The browser CLI may be missing.** A command that answers `binary_absent`

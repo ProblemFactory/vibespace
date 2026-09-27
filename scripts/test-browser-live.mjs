@@ -69,6 +69,15 @@
 //      composer is empty; the CONTROL is the same client rebuilt with the
 //      keyboard owner neutered (one edit, esbuild in the leg's worktree) ⇒ the
 //      composer gets "tomsmith" and the page gets nothing.
+//   ⑧ THE OWNER'S RULING (2026-09-27, "直接打断所有脚本和agent操作，告知agent发生了打断，
+//      交还时提醒它重新运行") on the same real rung: the agent's `snapshot` while
+//      the user drives is refused [browser_paused] and goes on the re-run list —
+//      the explicit Hand back reminds the agent ONCE ("Re-run what was interrupted:
+//      snapshot"); then, the chat window attached, the agent's `wait` is IN FLIGHT
+//      when the user takes over: VibeSpace's card shows in the conversation at once
+//      ("The user took over your browser; 1 operation was interrupted: wait." —
+//      nothing delivered), the command ends [browser_interrupted] and the Hand back
+//      reminds "Re-run what was interrupted: wait" once.
 // Heavy: chrome + a worktree server + (optionally) a real chromium; free ports,
 // per-pid scratch paths only.
 import fs from 'node:fs';
@@ -356,15 +365,23 @@ function viewer(port, q, { cookie = 'vs=1', pauseAfterOpen = false } = {}) {
   // before B's server-side bufferedAmount rises at all, so each phase blasts
   // ~50 KB frames every 20 ms (inside nobody's fps gate) until its own
   // condition holds.
+  const acks0 = [a, b].map((v) => v.byType('config-ack').length);
   a.ws.send(JSON.stringify({ type: 'config', maxFps: 0 })); b.ws.send(JSON.stringify({ type: 'config', maxFps: 0 }));
-  await sleep(50);
+  await until(() => [a, b].every((v, i) => v.byType('config-ack').length > acks0[i]), 3000); // B-b122 sweep: the bridge's own config-ack, never a 50 ms nap
   b.ws.pause();
   const aBefore = a.frames;
-  // phase 1: B climbs past the LOW-water mark (32 KiB) ⇒ frames are DROPPED for B, A keeps them, nothing pauses
+  // phase 1: B climbs past the LOW-water mark (32 KiB) ⇒ frames are DROPPED for B, A keeps them, nothing pauses.
+  // B-b122 sweep (red twice under a pinned load: "B: 0 queued, 1 dropped"): `dropped` has TWO causes — the per-viewer
+  // fps gate too (two blasts 20 ms apart can reach the bridge in ONE read on a starved loop, the second inside the
+  // 16.7 ms gap) — so the loop waits for the state the assertion is about (B's queue past the mark), THEN counts the
+  // drops that happen there; never the counter's first change
   let blasted = 0, bStat = null;
-  while (blasted < 800 && !((bStat = bridge.stats()[0]?.viewers.find((v) => v.id === 2)) && bStat.dropped > 0)) { up.blast(1, 40 * 1024); blasted++; await sleep(20); }
+  while (blasted < 800 && !((bStat = bridge.stats()[0]?.viewers.find((v) => v.id === 2)) && bStat.bufferedAmount > LIM.resumeBelow)) { up.blast(1, 40 * 1024); blasted++; await sleep(20); }
+  const d0 = bStat ? bStat.dropped : 0;
+  for (let i = 0; i < 3; i++) { up.blast(1, 40 * 1024); blasted++; await sleep(20); }
+  await until(() => { bStat = bridge.stats()[0]?.viewers.find((v) => v.id === 2); return !!bStat && bStat.dropped > d0; }, 3000);
   const st0 = bridge.stats()[0];
-  ok(bStat && bStat.dropped > 0 && bStat.bufferedAmount > LIM.resumeBelow, `the slow viewer gets frames DROPPED once it has more than ${LIM.resumeBelow} bytes queued (B: ${bStat && bStat.bufferedAmount} queued, ${bStat && bStat.dropped} dropped after ${blasted} frames)`);
+  ok(bStat && bStat.dropped > d0 && bStat.bufferedAmount > LIM.resumeBelow, `the slow viewer gets frames DROPPED once it has more than ${LIM.resumeBelow} bytes queued (B: ${bStat && bStat.bufferedAmount} queued, ${bStat && bStat.dropped - d0} dropped past the mark after ${blasted} frames)`);
   ok(st0 && st0.paused === false, 'and the upstream is NOT paused for that — one slow tab does not stall the others');
   ok(a.frames > aBefore, `the fast viewer kept receiving (${a.frames - aBefore} frames) while the slow one was dropped`);
   // phase 2: ORDERED records are never dropped (every viewer must see every
@@ -483,6 +500,20 @@ console.log('— ②b MULTIVIEW: a helper\'s browser through the real bridge (it
 }
 
 // ═══ ③ headless chrome: the WINDOW on a worktree server ═══════════════════
+// integration 2.369.192 (B-b122, the .190 heavy red): the boot splash fades at opacity 0 over everything (z-index 999999)
+// for 300 ms after app.ready and took the first press of a freshly loaded page. SOURCE PIN: its pointer-events go the
+// moment the fade starts (the same statement, BEFORE the opacity); the behavioural pin is ⑥'s negative control — its
+// press right after a reload (clickOnce waits for elementFromPoint to be the picture, which a pointer-events:none
+// splash never is)
+{
+  const cj = fs.readFileSync(path.join(repo, 'src/client.js'), 'utf8');
+  const line = cj.split('\n').find((l) => /getElementById\('loading-screen'\)/.test(l) ? false : /\bsplash\.style\.opacity = '0'/.test(l)) || '';
+  const pe = line.indexOf("splash.style.pointerEvents = 'none'"), op = line.indexOf("splash.style.opacity = '0'");
+  ok(pe >= 0 && op > pe && /setTimeout\(\(\) => splash\.remove\(\), 300\)/.test(line), 'the fading boot splash takes no clicks: pointer-events none is set in the statement that starts the fade, before the opacity (src/client.js)', line.trim());
+  const pre = line.replace("splash.style.pointerEvents = 'none'; ", '');
+  ok(pre !== line && pre.indexOf("splash.style.pointerEvents = 'none'") < 0, 'CONTROL: the pre-fix statement (opacity only) carries no pointer-events — the pin above can go red');
+}
+
 console.log('— ③ the browser-live window in headless chrome (worktree server, fake claude + fake agent-browser)');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
@@ -602,7 +633,7 @@ else await (async () => {
   // MULTIVIEW §2 A1: the strip lists EVERY browser of the session — two attachments, its own, its helper's
   const stripOk = await (async () => { for (let i = 0; i < 40; i++) { if (await q("return L.el().querySelectorAll('.browser-live-strip-tab').length === 4")) return true; await sleep(150); } return false; })();
   const stripRows = await q("return [...L.el().querySelectorAll('.browser-live-strip-tab')].map((b) => ({ ref: b.dataset.ref, kind: b.dataset.kind, text: b.textContent.trim(), active: b.classList.contains('active') }))");
-  ok(stripOk && stripRows.map((r) => r.kind).join() === 'attachment,attachment,ephemeral,child' && stripRows[0].active && stripRows[0].text.startsWith('Work') && /^This session/.test(stripRows[2].text) && /Helper 1/.test(stripRows[3].text) && stripRows[3].ref === KID1, 'MULTIVIEW: the strip shows FOUR tabs — Work (default, active), Personal, this conversation\'s own browser, Helper 1 (no witness from a fake claude ⇒ numbered)', JSON.stringify(stripRows));
+  ok(stripOk && stripRows.map((r) => r.kind).join() === 'attachment,attachment,ephemeral,child' && stripRows[0].active && stripRows[0].text.startsWith('Work') && /^Temp browser/.test(stripRows[2].text) && /Helper 1/.test(stripRows[3].text) && stripRows[3].ref === KID1, 'MULTIVIEW: the strip shows FOUR tabs — Work (in use, active), Personal, this conversation\'s own browser ("Temp browser" — lane S2: THE fact\'s name, the pin being attached), Helper 1 (no witness from a fake claude ⇒ numbered)', JSON.stringify(stripRows));
   ok(await q("return /\\d\\/6/.test(L.el().querySelector('.browser-live-strip-cap').textContent)"), 'MULTIVIEW D4: the own/cap chip reads N/6 (the conversation\'s raised cap)');
   const title = await q('return w.element.querySelector(".window-title")?.textContent || w.title || ""');
   ok(/Work/.test(title), `the title names the profile of the pane you are looking at (${JSON.stringify(title).slice(0, 60)})`);
@@ -918,8 +949,10 @@ else await (async () => {
   const e0 = (o.entries || [])[0];
   ok(o.entries && o.entries.length >= 1 && e0.action === 'navigate' && e0.sessionId === o.sessionId && /lane-h-real/.test(JSON.stringify(e0)) && e0.profileId === null, `data/browser-trace/ephemeral holds the navigation (${(o.entries || []).length} entr${(o.entries || []).length === 1 ? 'y' : 'ies'}) — recorded by the viewer-less tap armed at the browser's start`, JSON.stringify(e0).slice(0, 400));
   ok(o.thumb && o.thumbFrame && o.thumbFrame.status === 200 && /image\/jpeg/.test(o.thumbFrame.type || '') && o.thumbFrame.magic === 'ffd8' && (o.entries || []).some((e) => o.thumbFrame.src.includes('/' + e.id + '/')) && /1 action/.test((o.traceRow && o.traceRow.text) || ''), `the tool card's Browser actions row shows the entry's thumbnail — "${o.traceRow && o.traceRow.text}", ${o.thumbFrame && o.thumbFrame.src} = ${o.thumbFrame && o.thumbFrame.bytes} bytes of JPEG`, JSON.stringify({ row: o.traceRow, frame: o.thumbFrame }));
-  ok(!!o.rowName && o.statusChip === 'Agent browser · (ephemeral) ' + o.rowName, `the status-bar chip: "${o.statusChip}" (the session is "${o.rowName}")`);
-  ok(!!o.rowName && o.cardChip === 'Agent browser · (ephemeral) ' + o.rowName, `the session card's chip: "${o.cardChip}"`);
+  // lane S2 (naive study 2): THE browser fact's words — the conversation's own browser in plain words (the chip sits in
+  // that conversation's own status bar / card, so its name is never repeated there; "ephemeral" is gone from these surfaces)
+  ok(!!o.rowName && o.statusChip === 'Agent browser · no profile (temporary browser)', `the status-bar chip: "${o.statusChip}" (the session is "${o.rowName}")`);
+  ok(!!o.rowName && o.cardChip === 'Agent browser · no profile (temporary browser)', `the session card's chip: "${o.cardChip}"`);
   ok(o.greyed && /^Stopped — the agent's next browser command starts it again/.test(o.greyedText || ''), `the browser stopped ⇒ the view GREYS by name (browser_stopped: "${String(o.greyedText || '').slice(0, 120)}")`);
   ok(o.stoppedView && o.stoppedView.stopped === true && o.stoppedView.badge === 'Browser stopped' && o.stoppedView.frameKept && o.stoppedView.rootStopped, 'naive study 2 (finding 3): the stopped view keeps its LAST frame (greyed) and the badge says "Browser stopped" — never "Agent is driving" over a blank page as if a new browser had started', JSON.stringify(o.stoppedView));
   ok(o.menuFound && o.menuFound2 && o.liveAfterOpens === 1 && o.activeIsLive, `naive study 2 (finding 2): "Open live view" from the status-bar chip, clicked twice, FOCUSES the one live view — ${o.liveAfterOpens} window(s) (every click opened a new one)`, JSON.stringify({ menu: [o.menuFound, o.menuFound2], windows: o.liveAfterOpens, active: o.activeIsLive }));
@@ -1172,15 +1205,23 @@ await (async () => {
   fs.writeFileSync(path.join(BIN5, 'claude'), `#!/bin/sh\ncase " $* " in *" --output-format "*) env > "${ENVS}/$$.env"; sleep 1; printf '%s\\n%s\\n%s\\n%s\\n' '${hook5}' '${init5}' '${toolUse5}' '${ctlReq5}'; exec cat > "${ENVS}/$$.stdin";; esac\necho '2.1.281 (Claude Code)'\n`, { mode: 0o755 });
   // the grid page + the collector: the page reports its own viewport and every mousedown, same-origin (loopback)
   const vps = new Map(), clicks = [], kbds = new Map();
+  // B-b122 (the .189 heavy red "the page held 'tomsmit'", 'h' long landed): every report is its OWN fetch, so two in
+  // flight ARRIVE in any order and the last ARRIVAL used to win. The page stamps each report (its load's timeOrigin + a
+  // per-page count, taken when the report is MADE); a state keeps only the NEWEST, and `same` counts the page reports in
+  // a row that carried one value — the form re-says its value every 250 ms, so a typed value is judged once the page SAID
+  // it twice (the settle), never on one arrival.
+  const STAMP = "const O=performance.timeOrigin;let Q=0;const rep=(p)=>fetch(p+'&o='+O+'&q='+(++Q),{cache:'no-store'}).catch(()=>{});";
+  const newest = new Map();
+  const fresh = (kind, sp, v) => { const n = sp.get('n'), o = Number(sp.get('o')) || 0, q = Number(sp.get('q')) || 0, k = kind + ':' + n, cur = newest.get(k); if (cur && (o < cur.o || (o === cur.o && q <= cur.q))) return false; newest.set(k, { o, q, v, same: cur && cur.o === o && cur.v === v ? cur.same + 1 : 1, at: Date.now() }); return true; };
   // lane J r2 (⑥): a form page — an input at page (20,20) 300×40 reporting every value it holds, and every mousedown
-  const form = (n) => `<!doctype html><title>form ${n}</title><style>html,body{margin:0;background:#fff}</style><input id=u autocomplete=off style="position:absolute;left:20px;top:20px;width:300px;height:40px;font-size:18px;box-sizing:border-box"><script>const N=${JSON.stringify(n)};const rep=(p)=>fetch(p,{cache:'no-store'}).catch(()=>{});const u=document.getElementById('u');u.addEventListener('input',()=>rep('/kbd?n='+N+'&v='+encodeURIComponent(u.value)));addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);</script>`;
-  const grid = (n) => `<!doctype html><title>grid ${n}</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}body{background-image:linear-gradient(#999 1px,transparent 1px),linear-gradient(90deg,#999 1px,transparent 1px);background-size:50px 50px}</style><script>const N=${JSON.stringify(n)};const rep=(p)=>fetch(p,{cache:'no-store'}).catch(()=>{});const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));</script>`;
+  const form = (n) => `<!doctype html><title>form ${n}</title><style>html,body{margin:0;background:#fff}</style><input id=u autocomplete=off style="position:absolute;left:20px;top:20px;width:300px;height:40px;font-size:18px;box-sizing:border-box"><script>const N=${JSON.stringify(n)};${STAMP}const u=document.getElementById('u');const kv=()=>rep('/kbd?n='+N+'&v='+encodeURIComponent(u.value));u.addEventListener('input',kv);setInterval(kv,250);addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);</script>`;
+  const grid = (n) => `<!doctype html><title>grid ${n}</title><style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}body{background-image:linear-gradient(#999 1px,transparent 1px),linear-gradient(90deg,#999 1px,transparent 1px);background-size:50px 50px}</style><script>const N=${JSON.stringify(n)};${STAMP}const vp=()=>rep('/vp?n='+N+'&w='+innerWidth+'&h='+innerHeight+'&dpr='+devicePixelRatio);addEventListener('load',vp);addEventListener('resize',vp);setInterval(vp,1500);addEventListener('mousedown',(e)=>rep('/click?n='+N+'&x='+e.clientX+'&y='+e.clientY));</script>`;
   const col = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
     if (u.pathname === '/grid') { res.setHeader('Content-Type', 'text/html'); res.end(grid(u.searchParams.get('n') || '')); return; }
     if (u.pathname === '/form') { res.setHeader('Content-Type', 'text/html'); res.end(form(u.searchParams.get('n') || '')); return; }
-    if (u.pathname === '/kbd') kbds.set(u.searchParams.get('n'), u.searchParams.get('v'));
-    if (u.pathname === '/vp') vps.set(u.searchParams.get('n'), { w: Number(u.searchParams.get('w')), h: Number(u.searchParams.get('h')), dpr: Number(u.searchParams.get('dpr')), at: Date.now() });
+    if (u.pathname === '/kbd' && fresh('kbd', u.searchParams, u.searchParams.get('v'))) kbds.set(u.searchParams.get('n'), u.searchParams.get('v'));
+    if (u.pathname === '/vp' && fresh('vp', u.searchParams, ['w', 'h', 'dpr'].map((k) => u.searchParams.get(k)).join())) vps.set(u.searchParams.get('n'), { w: Number(u.searchParams.get('w')), h: Number(u.searchParams.get('h')), dpr: Number(u.searchParams.get('dpr')), at: Date.now() });
     if (u.pathname === '/click') clicks.push({ n: u.searchParams.get('n'), x: Number(u.searchParams.get('x')), y: Number(u.searchParams.get('y')), at: Date.now() });
     res.statusCode = 204; res.end();
   });
@@ -1234,6 +1275,8 @@ await (async () => {
     const send = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params })); });
     const evaluate = async (expr) => { const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(r.result.exceptionDetails.exception?.description || 'eval threw'); return r.result?.result?.value; };
     const metrics = (dsf) => send('Emulation.setDeviceMetricsOverride', { width: 1920, height: 963, deviceScaleFactor: dsf, mobile: false });
+    /** B-b122: wait for the view's OWN receipt of a transition (its `mode` record, its sent count) — never a fixed nap after the send. */
+    const untilQ = async (qf, js, ms = 5000, every = 50) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await qf(js)) return true; await sleep(every); } return !!(await qf(js)); };
     await send('Page.enable'); await send('Runtime.enable');
     await send('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
     await metrics(2);
@@ -1242,7 +1285,7 @@ await (async () => {
     if (!ok(ready, '⑤ the app booted in the client chrome (1920×963, DPR 2)')) return;
     await evaluate('window.app.ready');
     /** ⑥ lane J r2 on the real rung (headless shape): letterbox pixels, input feedback, THE KEYBOARD, the stale card, and the control. */
-    const laneJ2 = async ({ q, clickOnce, created, vb }) => {
+    const laneJ2 = async ({ q, clickOnce, created, vb, senv }) => {
       const sid = created.sessionId;
       // ── the letterbox, in PIXELS: the band above the picture (the pane at 700×900, DPR 1, UI 100 %) ──
       const band = async () => {
@@ -1264,17 +1307,22 @@ await (async () => {
       ok(b0 && b0.above > 100 && Math.abs(b0.above - b0.below) <= 6, `⑥ control: the pre-fix centred picture measures ${b0 && b0.above} px of band ABOVE and ${b0 && b0.below} below with the same measure (the study's "a third of the pane")`, JSON.stringify(b0));
       // ── a form page; the user takes over and clicks its input ──
       await q('L.send({ type: "handback" }); return true;');
-      await sleep(300);
+      await untilQ(q, 'return L.state().mode !== "takeover"'); // the handback's own mode record: the agent's `open` is never refused browser_paused by a late one
+      const fr0 = await q('return L.state().frames');
       const fo = await vb(['open', `http://127.0.0.1:${CP}/form?n=kb1`]);
       await until(() => vps.has('kb1'), 20000, 100);
       ok(fo.ok && vps.has('kb1'), `⑥ the agent opened a form page (${vps.get('kb1') ? vps.get('kb1').w + '×' + vps.get('kb1').h : 'no report'})`, (fo.stderr || fo.stdout).slice(0, 300));
       await (async () => { for (let i = 0; i < 60; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH }'); const v = vps.get('kb1'); if (g && v && Math.abs(g.w - v.w) <= 1 && Math.abs(g.h - v.h) <= 1) return; await sleep(150); } })();
-      await sleep(600); // a frame of the form page
+      await untilQ(q, `return L.state().frames > ${fr0} && /\\/form\\?n=kb1/.test(L.state().url || '')`, 5000, 100); // a frame drawn after the form page's navigation (the view's own url + frame count)
       await q('L.send({ type: "takeover" }); return true;');
       const mineAgain = await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine && L.ownsKeyboard()')) return true; await sleep(100); } return false; })();
       ok(mineAgain, '⑥ Take over ⇒ this view OWNS the keyboard (the claim, the ring, "Typing goes to the browser")');
+      // ⑧ the owner's ruling (2026-09-27): the agent's verb while the user drives is refused — and goes on the handback's re-run list
+      const snap8 = await vb(['snapshot'], 30000);
+      ok(!snap8.ok && /\[browser_paused\]/.test(snap8.stderr) && /what to re-run/.test(snap8.stderr), '⑧ the agent\'s `snapshot` while the user drives is refused [browser_paused] (it did not run) — the CLI says the handback names what to re-run', (snap8.stderr || '').slice(0, 400));
       const own0 = await q(`const s = L.state(); return { chip: s.kbdChip, ring: L.el().classList.contains('kbd-owned'), sink: document.activeElement === L.kbd(), text: L.el().querySelector('.browser-live-kbd-chip').textContent };`);
-      ok(own0.chip && own0.ring && own0.sink && /Typing goes to the browser/.test(own0.text), `⑥ …the bar says "${own0.text}", the picture wears the ring, and focus sits in the view's own sink`, JSON.stringify(own0));
+      // verify S2 r3 (r2 F3): this rung is a DIRECT lease (the ephemeral browser's own stream, `via:'stream'`) — the chip claims only what the last delivered receipt proved: "Typing is sent to the browser" (a mediated lease says "goes" — test-browser-identity 5)
+      ok(own0.chip && own0.ring && own0.sink && /Typing (is sent|goes) to the browser/.test(own0.text), `⑥ …the bar says "${own0.text}" (a direct lease: "is sent" — VibeSpace sees its own write, not the page's answer), the picture wears the ring, and focus sits in the view's own sink`, JSON.stringify(own0));
       const sent0 = await q('return L.state().sent');
       const hit = await clickOnce({ dsf: 1, scale: 1, win: [1000, 800], px: 170, py: 40, n: 'kb1' });
       ok(!hit.lost && hit.off <= 2, `⑥ a click on the form's input lands on it (${hit.lost ? 'LOST' : `(${hit.x},${hit.y}), off ${hit.off.toFixed(1)} px`})`);
@@ -1300,15 +1348,21 @@ await (async () => {
       ok(rc >= 1, `⑥ …the raw focus was RECLAIMED (${rc} reclaim(s)) — the backstop for every focus site the guard does not sit on`);
       // ── type into the CLIENT: real key events, an IME commit, a paste ──
       const typeKeys = async (text) => { for (const ch of text) { const up = ch.toUpperCase(); await send('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, code: 'Key' + up, text: ch, unmodifiedText: ch, windowsVirtualKeyCode: up.charCodeAt(0) }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: ch, code: 'Key' + up, windowsVirtualKeyCode: up.charCodeAt(0) }); } };
+      /** B-b122: the page SAID `want` in two reports in a row (the newest by the page's own stamp) — or the deadline, naming what it said last. */
+      const pageSaid = async (n, want, ms) => { const said = () => { const c = newest.get('kbd:' + n); return !!c && c.v === want && c.same >= 2; }; await until(said, ms, 25); const c = newest.get('kbd:' + n); if (!said()) console.error(`    ⑥ settle: the page's input last said ${JSON.stringify(c ? c.v : null)} (${c ? c.same : 0} report(s) in a row), not ${JSON.stringify(want)}`); return said(); };
+      const sentK = await q('return L.state().sent');
       await typeKeys('tomsmith');
-      await until(() => kbds.get('kb1') === 'tomsmith', 8000, 50);
+      // the settle the assertion is about: the view's own count says the LAST key left it (8 acts), then the page's
+      // input says "tomsmith" in two reports in a row — never the first arrival (.189: a stale 'tomsmit' arrived last)
+      if (!(await untilQ(q, `return L.state().sent >= ${sentK} + 8`, 8000, 25))) console.error(`    ⑥ settle: the view sent ${(await q('return L.state().sent')) - sentK} of the 8 keys`);
+      await pageSaid('kb1', 'tomsmith', 8000);
       const comp1 = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
       ok(kbds.get('kb1') === 'tomsmith' && comp1 === '', `⑥ "tomsmith" typed with the composer attached and focused by hand: the PAGE's input holds "${kbds.get('kb1')}", the chat composer holds ${JSON.stringify(comp1)} — nothing typed while you drive reaches a chat box`);
       await send('Input.imeSetComposition', { text: 'にほん', selectionStart: 3, selectionEnd: 3 }).catch(() => null);
       await send('Input.insertText', { text: '日本' });
-      await until(() => /日本$/.test(kbds.get('kb1') || ''), 6000, 50);
+      await pageSaid('kb1', 'tomsmith日本', 6000);
       await evaluate(`(() => { const dt = new DataTransfer(); dt.setData('text/plain', '!Pw'); (document.activeElement || document.body).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); return true; })()`);
-      await until(() => /!Pw$/.test(kbds.get('kb1') || ''), 6000, 50);
+      await pageSaid('kb1', 'tomsmith日本!Pw', 6000);
       const comp2 = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
       ok(kbds.get('kb1') === 'tomsmith日本!Pw' && comp2 === '', `⑥ an IME commit ("日本") and a paste ("!Pw") reach the page as TEXT (${JSON.stringify(kbds.get('kb1'))}); the composer is still ${JSON.stringify(comp2)}`);
       const fin = await q('const s = L.state(); return { sent: s.sent, echo: s.echo }');
@@ -1318,8 +1372,49 @@ await (async () => {
       ok(card && /Not run — you took over the browser, so this step went stale/.test(card) && !(await evaluate(`(() => { ${composerQ} return !!(cw && cw.element.querySelector('.chat-perm-allow')); })()`)),
         `⑥ the chat card of the queued click says so — "${card}" — and offers no Allow`);
       // ── CONTROL: the same client with the keyboard owner neutered (one edit, rebuilt here) ⇒ the composer gets it ──
+      // integration 2.369.192: a Hand back is waited for by its OWN records — the view's mode record (it left takeover) and the
+      // announcer's journal line for it (delivered, or not, with the carrier it chose) — never a fixed nap (was 300 + 900 ms)
+      const handedBack = async (j0) => {
+        const viewSaid = await untilQ(q, 'return L.state().mode !== "takeover"', 8000, 50);
+        const annSaid = await until(() => /\[browser\] handback \(explicit\) for [^\n]*: /.test(journal.slice(j0)), 8000, 50); // every outcome of the announcer logs this head (delivered / not / the carrier)
+        if (!viewSaid || !annSaid) console.error(`    ⑧ settle: the Hand back's records — view mode record ${viewSaid ? 'seen' : 'MISSING'}, announcer line ${annSaid ? 'seen' : 'MISSING'}`);
+        return viewSaid && annSaid;
+      };
+      const jHb8 = journal.length;
       await q('L.send({ type: "handback" }); return true;');
-      await sleep(300);
+      // ⑧ THE HANDBACK REMINDS (the owner's ruling): the explicit Hand back's words end "Re-run what was interrupted: snapshot" — said ONCE
+      await handedBack(jHb8);
+      const pc8 = senv ? await fetch(senv.VIBESPACE_API + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + senv.VIBESPACE_SESSION_TOKEN } }).then((r) => r.json()).catch((e) => ({ error: e.message })) : { error: 'no session env' };
+      const ctx8 = String((pc8 && pc8.context) || '');
+      const inCtx8 = (ctx8.match(/Re-run what was interrupted: snapshot/g) || []).length;
+      const cards8 = await evaluate(`(() => { ${composerQ} return cw ? [...cw.element.querySelectorAll('.chat-peer-message, .chat-vs-notice')].map((e) => [...e.children].map((c) => c.textContent).join(' ')).filter((t) => /Re-run what was interrupted: snapshot/.test(t)) : []; })()`);
+      ok((inCtx8 === 1) || (inCtx8 === 0 && cards8.length === 1), `⑧ the explicit Hand back reminds the agent ONCE: "Re-run what was interrupted: snapshot" — ${inCtx8 ? 'in its next prompt\'s context (the delivery was held: one carrier, the stash)' : cards8.length ? 'delivered into the conversation' : 'NOWHERE'} (context ×${inCtx8}, cards ×${cards8.length})`, ctx8.slice(0, 700));
+      // ⑧ a NEW cycle with the chat window attached and loaded (the everyday shape: the chat beside the live view): the agent's
+      // `wait` is IN FLIGHT when the user takes over — the card says so in the conversation, the command ends
+      // [browser_interrupted], and the handback reminds the agent to re-run it
+      const chatMsgs = () => evaluate(`(() => { ${composerQ} return cw ? [...cw.element.querySelectorAll('.chat-peer-message, .chat-vs-notice')].map((e) => [...e.children].map((c) => c.textContent).join(' ').replace(/\\s+/g, ' ')) : null; })()`); // integration 2.369.192: S3 renders VibeSpace's own card as `.chat-vs-notice` ("VibeSpace · <what happened>"), a peer's as `.chat-peer-message`; head and body joined by a space (a folded body is in the DOM)
+      const cardsBefore = (await chatMsgs()) || [];
+      const wait8 = vb(['wait', '4000'], 60000);
+      await sleep(1500);
+      await q('L.send({ type: "takeover" }); return true;');
+      const took8 = await (async () => { for (let i = 0; i < 50; i++) { if (await q('return L.state().mode === "takeover" && L.state().mine')) return true; await sleep(100); } return false; })();
+      // …and the live view's own toast says what the takeover interrupted (the human's words, t()-wrapped — the bundle's English here)
+      const toast8 = await (async () => { for (let i = 0; i < 30; i++) { const t = await evaluate(`(() => { const s = document.getElementById('global-toasts'); return s ? s.textContent : ''; })()`); if (/agent operation\(s\) interrupted: wait/.test(t)) return t; await sleep(100); } return null; })();
+      ok(!!toast8 && /You took over — 1 agent operation\(s\) interrupted: wait\. The agent waits until you hand back/.test(toast8), `⑧ the live view's toast names what the takeover interrupted: "${toast8 ? toast8.replace(/\s+/g, ' ').slice(0, 160) : 'none'}"`);
+      const tcard8 = await (async () => { for (let i = 0; i < 60; i++) { const c = ((await chatMsgs()) || []).slice(cardsBefore.length).filter((t) => /The user took over your browser; /.test(t)); if (c.length) return c; await sleep(150); } return null; })();
+      ok(took8 && tcard8 && tcard8.length === 1 && /The user took over your browser; 1 operation was interrupted: wait\. Wait for the handback, then run it again\./.test(tcard8[0]) && /(^|\s)VibeSpace · The user took over your browser/.test(tcard8[0]), `⑧ the TAKEOVER TELLS: the conversation shows VibeSpace's card at once — "${tcard8 ? tcard8[0].slice(0, 220) : 'none'}" (the agent's \`wait\`, in flight on the trace, named; nothing delivered, no billed turn)`, JSON.stringify(((await chatMsgs()) || []).slice(-4)) + '\n' + (journal || '').split('\n').filter((l) => /\[browser\] .*(takeover|took over)/.test(l)).slice(-3).join('\n'));
+      const w8 = await wait8;
+      ok(!w8.ok && /\[browser_interrupted\]/.test(w8.stderr) && /The user took over this browser — your operation was interrupted/.test(w8.stderr) && /ran to its end/.test(w8.stderr), '⑧ the `wait` the takeover caught ends [browser_interrupted] (exit 1): THE sentence, and — the ephemeral browser has no proxy — that it ran to its end while the user drove', (w8.stderr || '').slice(-500));
+      const jHb9 = journal.length;
+      await q('L.send({ type: "handback" }); return true;');
+      const toast9 = await (async () => { for (let i = 0; i < 30; i++) { const t = await evaluate(`(() => { const s = document.getElementById('global-toasts'); return s ? s.textContent : ''; })()`); if (/it was told to re-run: wait/.test(t)) return t; await sleep(100); } return null; })();
+      ok(!!toast9 && /Control handed back to the agent — it was told to re-run: wait/.test(toast9), `⑧ the Hand back's toast says what the agent was told to re-run: "${toast9 ? toast9.replace(/\s+/g, ' ').slice(-120) : 'none'}"`);
+      await handedBack(jHb9); // integration 2.369.192: the Hand back's own records, never a 900 ms nap
+      const pc9 = await fetch(senv.VIBESPACE_API + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + senv.VIBESPACE_SESSION_TOKEN } }).then((r) => r.json()).catch((e) => ({ error: e.message }));
+      const ctx9 = String((pc9 && pc9.context) || '');
+      ok((ctx9.match(/Re-run what was interrupted: wait/g) || []).length === 1 && (ctx9.match(/The user handed your browser back to you after/g) || []).length === 1, '⑧ …and its explicit Hand back reminds the agent ONCE: "Re-run what was interrupted: wait" in its next prompt (one carrier — never the stash AND a notice)', ctx9.slice(0, 700));
+      const hcard9 = await (async () => { for (let i = 0; i < 40; i++) { const c = ((await chatMsgs()) || []).filter((t) => /Re-run what was interrupted: wait/.test(t)); if (c.length) return c; await sleep(150); } return null; })();
+      ok(hcard9 && hcard9.length === 1, '⑧ …the words the agent was given show in the conversation once (the held delivery\'s card at the drain)', JSON.stringify(((await chatMsgs()) || []).slice(-3)));
       const KO = path.join(wt, 'src/lib/keyboard-owner.js');
       const koSrc = fs.readFileSync(KO, 'utf8');
       const mark = 'export function keyboardOwner() {\n';
@@ -1346,11 +1441,16 @@ await (async () => {
         const before = kbds.get('kb1');
         const hitC = await clickOnce({ dsf: 1, scale: 1, win: [1000, 800], px: 170, py: 40, n: 'kb1' });
         const stC = await steal();
+        const sentC = await q('return L.state().sent');
         await typeKeys('tomsmith');
-        await sleep(1500);
-        const compC = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`);
-        ok(!hitC.lost && stC.after1.onComposer && compC === 'tomsmith' && kbds.get('kb1') === before,
-          `⑥ NEGATIVE CONTROL (the keyboard owner neutered — the pre-fix client): the attach puts the caret in the composer and "tomsmith" lands in the CHAT COMPOSER (${JSON.stringify(compC)}) while the page keeps ${JSON.stringify(kbds.get('kb1'))} — the study's password-in-the-chat-box`, JSON.stringify({ hitC, stC, compC, page: kbds.get('kb1') }));
+        const qEnd = (newest.get('kbd:kb1') || { q: 0 }).q;
+        // B-b122: the composer's value read the same twice in a row (its settle); the view's own count says no key left it;
+        // and the page SPOKE after the last key (a report made after it) with its old value — positive evidence, no window
+        const compC = await (async () => { let last = null; const t0 = Date.now(); while (Date.now() - t0 < 8000) { const v = await evaluate(`(() => { ${composerQ} return ta ? ta.value : null; })()`); if (v && v === last) return v; last = v; await sleep(100); } return last; })();
+        const spoke = await until(() => (newest.get('kbd:kb1') || { q: 0 }).q > qEnd, 5000, 25);
+        const sentAfterC = await q('return L.state().sent');
+        ok(!hitC.lost && stC.after1.onComposer && compC === 'tomsmith' && spoke && sentAfterC === sentC && kbds.get('kb1') === before,
+          `⑥ NEGATIVE CONTROL (the keyboard owner neutered — the pre-fix client): the attach puts the caret in the composer and "tomsmith" lands in the CHAT COMPOSER (${JSON.stringify(compC)}) while the page keeps ${JSON.stringify(kbds.get('kb1'))} — the study's password-in-the-chat-box`, JSON.stringify({ hitC, stC, compC, page: kbds.get('kb1'), pageSpokeAfter: spoke, viewSent: sentAfterC - sentC }));
         await evaluate(`(() => { ${composerQ} if (ta) { ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); } return true; })()`); // never sent: cleared in place
         await q('L.send({ type: "handback" }); return true;');
       } finally { await restore(); }
@@ -1372,8 +1472,13 @@ await (async () => {
       const created = msgs.filter((m) => m.type === 'created').length > nCreated ? msgs.filter((m) => m.type === 'created').at(-1) : null;
       if (!ok(created && created.sessionId, `⑤ ${shape.name}: a chat session was created`, journal.slice(-500))) continue;
       createdIds.push(created.sessionId);
-      await until(() => fs.readdirSync(ENVS).some((f) => !envBefore.has(f) && f.endsWith('.env')), 15000, 100);
-      const envFile = fs.readdirSync(ENVS).find((f) => !envBefore.has(f) && f.endsWith('.env'));
+      // verify r5 (B-b122 class): the fake `claude` writes its env with a shell `env > $$.env` — the file EXISTS
+      // (truncated, empty) before env finishes writing it; wait for the SETTLE marker (the pair the assert reads), not
+      // the file's mere existence, or a mid-write read is `[]` (once seen under load 11). `envReady` picks the new .env
+      // that already holds AGENT_BROWSER_SESSION= AND VIBESPACE_SESSION_TOKEN=.
+      const envReady = () => { for (const f of fs.readdirSync(ENVS)) { if (envBefore.has(f) || !f.endsWith('.env')) continue; let t = ''; try { t = fs.readFileSync(path.join(ENVS, f), 'utf8'); } catch { continue; } if (/^AGENT_BROWSER_SESSION=/m.test(t) && /^VIBESPACE_SESSION_TOKEN=/m.test(t)) return f; } return null; };
+      await until(() => envReady() !== null, 15000, 100);
+      const envFile = envReady() || fs.readdirSync(ENVS).find((f) => !envBefore.has(f) && f.endsWith('.env'));
       const stdinFile = path.join(ENVS, envFile.replace(/\.env$/, '.stdin')); // lane J r2: what the server wrote to the fake CLI
       const senv = {}; for (const line of fs.readFileSync(path.join(ENVS, envFile), 'utf8').split('\n')) { const i = line.indexOf('='); if (i > 0) senv[line.slice(0, i)] = line.slice(i + 1); }
       const pairs = Object.fromEntries(Object.entries(senv).filter(([k]) => k.startsWith('AGENT_BROWSER_')));
@@ -1419,7 +1524,8 @@ await (async () => {
         await evaluate(`(() => { document.body.style.zoom = ${scale} === 1 ? '' : '${scale}'; document.documentElement.style.setProperty('--ui-scale', '${scale}'); return true; })()`);
         // the live window at the requested VIEWPORT size (layout px = viewport px / the UI scale)
         await q(`const s = ${scale}; const el = w.element; w.gridBounds = null; window.app.wm.focusWindow?.(w.id); el.style.left = (24 / s) + 'px'; el.style.top = (12 / s) + 'px'; el.style.width = (${win[0]} / s) + 'px'; el.style.height = (${win[1]} / s) + 'px'; w.onResize && w.onResize(); return true;`);
-        await sleep(250);
+        // B-b122 sweep: the picture's rect is read once it holds still (the same in two reads in a row), never 250 ms after the resize
+        { let prev = null; const tR = Date.now(); while (Date.now() - tR < 3000) { await sleep(50); const cur = await q('const r = L.img().getBoundingClientRect(); return [r.left, r.top, r.width, r.height, L.img().naturalWidth, L.img().naturalHeight].join()'); if (cur === prev) break; prev = cur; } }
         const t0 = vps.get(n);
         const g = await q('const r = L.img().getBoundingClientRect(); const op = getComputedStyle(L.img()).objectPosition; return { left: r.left, top: r.top, width: r.width, height: r.height, natW: L.img().naturalWidth, natH: L.img().naturalHeight, claim: L.frameClaim(), page: L.pageReading(), op };');
         const k = Math.min(g.width / g.natW, g.height / g.natH); const dw = g.natW * k, dh = g.natH * k;
@@ -1430,6 +1536,12 @@ await (async () => {
         const cx = g.left + (g.width - dw) * frac(opx, g.width - dw) + px * dw / t0.w, cy = g.top + (g.height - dh) * frac(opy, g.height - dh) + py * dh / t0.h;
         const before = clicks.length;
         if (!control) {
+          // B-b122 (the .190 heavy red: the control's press was LOST): a press is sent only once the point IS the live
+          // picture and the view drives — both in two reads in a row. The boot splash (client.js) fades for 300 ms AFTER
+          // app.ready, at opacity 0 over everything, and took the press a freshly reloaded client sent in that window.
+          let held = 0, seen = null; const tH = Date.now();
+          while (held < 2 && Date.now() - tH < 5000) { seen = await q(`const e = document.elementFromPoint(${cx}, ${cy}); return { on: e === L.img(), drives: L.state().mode === 'takeover' && L.state().mine, top: e ? (e.id ? '#' + e.id : e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className ? '.' + e.className.split(' ')[0] : '')) : 'nothing' };`); held = seen && seen.on && seen.drives ? held + 1 : 0; if (held < 2) await sleep(50); }
+          if (held < 2) { console.error(`    clickOnce: page (${px},${py}) of "${n}" was never pressable — at (${Math.round(cx)},${Math.round(cy)}) the top element is ${seen && seen.top}, the view ${seen && seen.drives ? 'drives' : 'does not drive'}`); return { lost: true, covered: seen }; }
           await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: cx, y: cy });
           await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: cx, y: cy, button: 'left', clickCount: 1 });
           await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: cx, y: cy, button: 'left', clickCount: 1 });
@@ -1456,7 +1568,7 @@ await (async () => {
       if (shape.key === 'hl') {
         // the ephemeral browser's viewport after the agent opens a tab and after it resizes the page
         await q('L.send({ type: "handback" }); return true;');
-        await sleep(300);
+        await untilQ(q, 'return L.state().mode !== "takeover"'); // the handback's own mode record (an agent verb under a late one is refused browser_paused)
         const tabRes = await vb(['tab', 'new', `http://127.0.0.1:${CP}/grid?n=hl2`]);
         await until(() => vps.has('hl2'), 20000, 100);
         const setRes = tabRes.ok ? await vb(['set', 'viewport', '1000', '700']) : { ok: false };
@@ -1465,14 +1577,14 @@ await (async () => {
         const settled = await (async () => { for (let i = 0; i < 100; i++) { const g = await q('const g = L.geometry(); return g && { w: g.cssW, h: g.cssH, src: g.source, nat: L.img().naturalWidth }'); if (g && tv && Math.abs(g.w - tv.w) <= 1 && Math.abs(g.h - tv.h) <= 1 && g.src !== 'picture-stale') return g; await sleep(150); } return null; })();
         ok(tabRes.ok && setRes.ok && tv && tv.w === 1000 && settled, `⑤ a NEW TAB then \`set viewport 1000 700\`: the view re-reads the page (${settled ? Math.round(settled.w) + '×' + Math.round(settled.h) + ' from ' + settled.src : 'no'}; the page says ${tv ? tv.w + '×' + tv.h : '?'})`, JSON.stringify({ tab: tabRes.stderr.slice(0, 200), set: setRes.stderr && setRes.stderr.slice(0, 200) }));
         await q('L.send({ type: "takeover" }); return true;');
-        await sleep(300);
+        await untilQ(q, 'return L.state().mode === "takeover" && L.state().mine'); // the takeover's own mode record
         const after = await clickOnce({ dsf: 2, scale: 1.25, win: [700, 900], n: 'hl2' });
         results.push({ kind: 'combo-extra', fixed: after });
         ok(!after.lost && after.off <= 2, `⑤ …and a click on grid cell (10,5) of the new tab at its new viewport lands within 2 px (${after.lost ? 'LOST' : `(${after.x},${after.y}) off ${after.off.toFixed(1)} px`})`);
-        await laneJ2({ q, clickOnce, created, vb });
+        await laneJ2({ q, clickOnce, created, vb, senv });
       }
       await q('L.send({ type: "handback" }); return true;');
-      await sleep(200);
+      await untilQ(q, 'return L.state().mode !== "takeover"');
       await vb(['close'], 30000).catch(() => { });
     }
     try { cdp.close(); } catch { }

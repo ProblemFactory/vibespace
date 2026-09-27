@@ -312,7 +312,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // machine turn and hold the next-turn group reports for the owner's own.
       const machineTurn = () => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
       const spent = () => { machineTurn(); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
-      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, kind }); } catch (e) { log('[deliver] card emit failed:', e.message); } }; // `kind` rides the card (S3 verify F3): a peer's card is never a VibeSpace notice, whatever its name or first sentence
+      // `kind` rides the card (S3 verify F3): a peer's card is never a VibeSpace notice, whatever its name or first sentence.
+      // verify r6 (S2): `recorded` = the exact text the CLI's transcript now holds for this delivery — a first-attach rebuild
+      // renders THAT record and skips the held card (normalizers.replayCard), never both; the card's own text may be a summary
+      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, recorded: text, kind }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
         if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {

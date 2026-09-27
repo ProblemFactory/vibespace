@@ -60,5 +60,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   await window.app.ready;
   reportBootTime(); // nav start → workspace restored (telemetry metric)
   const splash = document.getElementById('loading-screen');
-  if (splash) { splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
+  // the fade takes no clicks: at opacity 0 the splash still covers everything (z-index 999999) until the 300 ms timer
+  // removes it — a starved loop stretches that — and it swallowed the first press after the page loaded (B-b122, the
+  // .190 heavy red); pointer-events go the moment the fade starts
+  if (splash) { splash.style.pointerEvents = 'none'; splash.style.opacity = '0'; setTimeout(() => splash.remove(), 300); }
 });

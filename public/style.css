@@ -3501,6 +3501,9 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .session-detail-path { font-family: var(--font-mono, monospace); font-size: 11px; word-break: break-all; }
 .session-detail-row.sp-wrap { align-items: flex-start; }
 .session-detail-row.sp-wrap .session-detail-value { white-space: normal; overflow: visible; text-overflow: clip; }
+/* lane S2: the Agent browser row prints THE browser fact's line — amber when the pin and the browser in use differ */
+.session-props-browser-line.amber { color: var(--yellow, #e5c07b); }
+.sess-browser-chip.amber .chip-text { color: var(--yellow, #e5c07b); }
 .session-props-group { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; cursor: pointer; color: var(--text-secondary); }
 .session-props-group input { margin: 0; width: 12px; height: 12px; }
 .session-props .session-history-list, .session-props .session-steps-list { max-height: 180px; overflow-y: auto; }
@@ -4678,6 +4681,9 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-strip-tab.state-released .browser-live-strip-label, .browser-live-strip-tab.state-ended .browser-live-strip-label { color: var(--text-dim); }
 .browser-live-strip-driver { font-size: 10px; color: var(--text-dim); padding: 0 4px; border-radius: var(--radius-sm); background: var(--hover-overlay); }
 .browser-live-strip-tab.driven .browser-live-strip-driver { color: var(--accent); }
+/* lane S2: THE browser fact's marker on the tab the conversation uses now — an accent underline on its name, zero width
+   (a wider tab would fold its neighbour out of a split pane's strip); the words are its tooltip */
+.browser-live-strip-tab.in-use .browser-live-strip-label { text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
 .browser-live-strip-more, .browser-live-strip-cap { flex: none; align-self: center; margin-bottom: 2px; padding: 1px 7px; font-size: 11px; line-height: 16px; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .browser-live-strip-more:hover, .browser-live-strip-cap:hover { background: var(--hover-overlay); color: var(--text); }
 .browser-live-strip-cap.full { color: var(--red); border-color: color-mix(in srgb, var(--red) 60%, transparent); }
@@ -4747,6 +4753,8 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 .browser-live-echo { white-space: nowrap; color: var(--text-dim); font-variant-numeric: tabular-nums; transition: color 300ms; }
 .browser-live-echo.fresh { color: var(--text); }
 .browser-live-echo.error { color: var(--red, #e55); }
+/* lane S2: an input that did not reach the browser — the chip says so instead of "Typing goes to the browser" */
+.browser-live-kbd-chip.failing { color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 14%, transparent); }
 .browser-live-ripple { position: absolute; z-index: 3; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; animation: browser-live-ripple 650ms ease-out forwards; }
 @keyframes browser-live-ripple { from { transform: scale(0.3); opacity: 1; } to { transform: scale(1.4); opacity: 0; } }
 .browser-live-you-cursor { position: absolute; z-index: 2; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 2px solid var(--bg); background: var(--accent); box-shadow: 0 0 0 1px var(--accent); pointer-events: none; }

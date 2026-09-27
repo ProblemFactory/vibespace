@@ -155,7 +155,7 @@ ok(await until(async () => { const c = await chipState(); return c && /Work/.tes
 // the three browser faces (design-browser-faces direction B): the chip says WHOSE browser it is — the agent's — and wears the browser-live glyph, never the web view's globe
 ok(await Q("return chip.textContent.trim().startsWith('Agent browser · Work') && chip.title.startsWith('Agent browser · ') && !!chip.querySelector('svg rect') && !chip.querySelector('svg circle[r=\"6\"]')"), "the chip reads 'Agent browser · Work', its tooltip's first line carries the same 'Agent browser · ' prefix, and its icon is the window-with-a-dot (no globe)");
 let c0 = await chipState();
-ok(c0 && !c0.amber && /nothing yet/.test(c0.title), 'NEUTRAL before the agent has used anything — the tooltip says so', JSON.stringify(c0));
+ok(c0 && !c0.amber && /The agent has not used a browser yet/.test(c0.title), 'NEUTRAL before the agent has used anything — the tooltip says so (lane S2: THE browser fact\'s words)', JSON.stringify(c0));
 const digest0 = await evaluate('window.app.sidebar._sessionDigest');
 const winId0 = await evaluate("[...window.app.wm.windows.values()].find((x) => x.type === 'chat').id");
 await evaluate("window.__chipEl = [...window.app.wm.windows.values()].find((x) => x.type === 'chat').element; window.__barEl = window.__chipEl.querySelector('.chat-status-bar'); true");
@@ -166,7 +166,7 @@ if (r.status === 409 && r.json.code === 'profile_changed') { ok(true, 'layer ①
 ok(r.status === 200 && r.json.ok && r.json.kind === 'attachment' && r.json.handle === 'personal', 'the agent\'s command resolved onto Personal (the real agent route, the session\'s own token)', JSON.stringify(r.json).slice(0, 200));
 ok(await until(async () => { const c = await chipState(); return c && c.amber; }, 10000, 200), 'the chip flips to AMBER on the broadcast — no reload, no click');
 const c1 = await chipState();
-ok(c1 && /Personal/.test(c1.text) && /pinned: Work/.test(c1.title) && /Remind it\?/.test(c1.title), 'and names what the agent last used (Personal) beside the pin (Work) with the remind question', JSON.stringify(c1));
+ok(c1 && c1.text === 'Agent browser · pinned Work · running Personal — the agent is still on Personal' && /Pinned: Work/.test(c1.title) && /The agent last used: Personal/.test(c1.title), 'and names what the agent is on (Personal) beside the pin (Work) in ONE line — THE browser fact\'s words (lane S2)', JSON.stringify(c1));
 const digest1 = await evaluate('window.app.sidebar._sessionDigest');
 ok(digest1 !== digest0, 'the sidebar\'s render gate OPENED: its digest moved on a change of `active` alone (the row projects to a string; an object-valued row would never have)');
 ok(await evaluate(`[...window.app.wm.windows.values()].find((x) => x.type === 'chat').id === ${JSON.stringify(winId0)} && window.__chipEl === [...window.app.wm.windows.values()].find((x) => x.type === 'chat').element && window.__barEl === window.__chipEl.querySelector('.chat-status-bar')`), 'nothing was rebuilt: the same chat window element and the same status-bar element carry the flipped chip');
@@ -206,7 +206,7 @@ r = await agent('POST', '/api/agent/browser/resolve', { handle: '', argv: ['snap
 if (r.status === 409 && r.json.code === 'profile_changed') r = await agent('POST', '/api/agent/browser/resolve', { handle: '', argv: ['snapshot'] });
 // browser takeover chunk 2 (T3): the conversation's own browser is a MANAGED ephemeral record now — `/resolve` answers kind 'ephemeral' with the `(ephemeral) <session name>` record (was kind 'none' before the keeper watched it)
 ok(r.status === 200 && r.json.kind === 'ephemeral' && r.json.handle === null && /^\(ephemeral\) /.test(r.json.profile?.label || ''), 'with no attachment the agent\'s command resolves to its own MANAGED ephemeral browser (kind ephemeral, the `(ephemeral) <session>` record)', JSON.stringify(r).slice(0, 400));
-ok(await until(async () => { const c = await chipState(); return c && !c.amber && /ephemeral/.test(c.text); }, 10000, 200), 'the chip names the ephemeral browser, neutral (nothing pinned, nothing else used)');
+ok(await until(async () => { const c = await chipState(); return c && !c.amber && /no profile \(temporary browser\)/.test(c.text); }, 10000, 200), 'the chip names the conversation\'s own browser in plain words — "no profile (temporary browser)", neutral (nothing pinned, nothing else used; lane S2: never "ephemeral")');
 
 try { cdp.close(); } catch { }
 try { chrome.kill('SIGKILL'); } catch { }

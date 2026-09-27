@@ -78,7 +78,8 @@
  * the census reads code.
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
-const { ChannelError } = require('./index.js');
+const { ChannelError, retryAfterSeconds } = require('./index.js');
+const { namelessSentence, looksLikeEmail } = require('../channel-identity.js');   // verify r6: a consent must name its account; r7: an address by the ONE rule
 const { createGmailLive, PUBSUB_SCOPE } = require('./live/gmail.js');
 
 const KIND = 'gmail';
@@ -144,6 +145,23 @@ const OPTIONS = Object.freeze([
     help: i18nKey('THIS instance\'s own pull subscription of that topic — one per instance is what makes push exclusive here. Only read when push is enabled.') },
 ]);
 
+/**
+ * EVERY OUTBOUND CALL THIS ADAPTER MAKES OUTSIDE `api()` — THE GATE (lane R5
+ * verify r4). Four rounds of the pace each found one more path around it, so
+ * the set is CLOSED here: the census in test-channels-gmail-shape reads the
+ * `// ungated: <id>` markers off the code (this file + src/channels/live/
+ * gmail.js) and this list must name exactly those ids, each with the reason it
+ * may stand outside the pace — and it must be a reason an agent or a loop
+ * cannot multiply. A new outbound call with no marker, or a marker with no
+ * row, is red.
+ */
+const UNGATED = Object.freeze([
+  { id: 'token-refresh', why: 'oauth2.googleapis.com is not Gmail quota; ONE refresh in flight per adapter (`refreshing`), so N callers at one expiry are one POST' },
+  { id: 'consent-exchange', why: 'the loopback consent flow: once per human consent, taken by the flow\'s one-time state' },
+  { id: 'consent-profile', why: 'ONE profile read inside that same consent (who signed in); 1 unit, once' },
+  { id: 'pubsub', why: 'src/channels/live/gmail.js: the push lane\'s Pub/Sub pull + acknowledge — a different API and quota; one pull in flight per lane, PULL_BACKOFF_MS on failure, the lane parked on a permanent refusal' },
+]);
+
 const REQUEST_TIMEOUT_MS = 20000;
 const REFRESH_MARGIN_MS = 60 * 1000;
 /** The mailbox sync is memoised for one pass's worth of history() calls. */
@@ -187,6 +205,16 @@ const caps = Object.freeze({
   attachments: 'fetch',
   olderHistory: 'none',
   budget: { unit: 'quota-unit', default: 3000, settingKey: 'channels.budgetGmailPerMin', metered: true },
+  // lane R5 (2026-09-26, the owner: "gmail一直被限速 你可能要控制下gmail默认的读
+  // 取速度"): the vendor refused whole passes that stayed under the minute's
+  // budget but spent ~2 000–2 800 units in ~20 s (100–200 units/s) — it meters
+  // finer than a minute. PACED PER SECOND (drain rule 18): 40 units/s = one
+  // thread read a second (Google's per-user cap is 6 000/min = 100/s), every
+  // request awaited on the account's bucket before it is sent. `cost` = what
+  // the drain expects one action to charge: a thread read (threads.get 40), a
+  // discovery page (threads.list 10 + up to META_PER_LIST metadata reads).
+  pace: { unitsPerSec: 40, settingKey: 'channels.gmailUnitsPerSec', cost: { fetch: 40, discover: 10 + 40 * 10, scanHost: 1 } },
+  vendorName: i18nKey('Google'),
 });
 
 /** THE QUOTA COST of one Gmail API call (units, the vendor's published table
@@ -362,12 +390,21 @@ function replyHeaders(anchor, selfEmail = null) {
 }
 
 // ── typed failures ─────────────────────────────────────────────────────
-function typedFailure(status, body, what) {
+/** Google's RATE words (lane R5): a 403 whose reason is a rate/usage limit, or
+ *  whose message names a quota metric ("Quota exceeded for quota metric 'Total
+ *  Query Cost' and limit 'Units per minute per user'", the production refusal)
+ *  is a RATE refusal, never `forbidden` — the engine's short back-off, not the
+ *  failure ladder. `dailyLimitExceeded` stays rate-limited too (a retry every
+ *  ≤ 60 s costs nothing and heals at the day's turn). */
+const RATE_REASONS = Object.freeze(['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded', 'dailyLimitExceeded']);
+const RATE_WORDS = /quota exceeded|rate limit|quota metric|too many requests/i;
+function typedFailure(status, body, what, retryAfterSec = null) {
   const err = body && body.error;
   const msg = (err && (err.message || err.status)) || (body && (body.error_description || body.error)) || `HTTP ${status}`;
   const reason = err && Array.isArray(err.errors) && err.errors[0] && err.errors[0].reason;
+  const domain = err && Array.isArray(err.errors) && err.errors[0] && err.errors[0].domain;
   if (status === 401 || body && body.error === 'invalid_grant') return new ChannelError('auth-expired', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason: reason || (body && body.error) || null } });
-  if (status === 429 || reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded') return new ChannelError('rate-limited', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, reason } });
+  if (status === 429 || RATE_REASONS.includes(reason) || (status === 403 && (domain === 'usageLimits' || RATE_WORDS.test(String(msg))))) return new ChannelError('rate-limited', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, reason: reason || null, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403) return new ChannelError('forbidden', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
   if (status === 404) return new ChannelError('not-found', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
   if (status >= 500) return new ChannelError('transport', `${what}: ${msg} (${status})`, { retryable: true, detail: { status } });
@@ -386,7 +423,7 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = nul
   }
   let parsed = null;
   try { parsed = await r.json(); } catch { parsed = null; }
-  if (!r.ok) throw typedFailure(r.status, parsed, what);
+  if (!r.ok) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));   // lane R5: the vendor's own wait, when it says one
   return parsed || {};
 }
 
@@ -404,6 +441,7 @@ function create(record = {}, deps = {}) {
    *  engine mutates that object in place when the panel edits it. */
   const query = () => queryOf(record.options);
   const meter = typeof deps.meter === 'function' ? deps.meter : () => {};   // 2026-09-26: quota units per request SENT
+  const pace = typeof deps.pace === 'function' ? deps.pace : async () => {};   // lane R5: awaited BEFORE every request (drain rule 18's bucket)
   /** The push switch and its two resource names, read LIVE from the record. */
   const pushEnabled = () => !!(record.push && record.push.enabled === true);
   const pushOptions = () => ({ topic: String((record.options && record.options.pushTopic) || '').trim(), subscription: String((record.options && record.options.pushSubscription) || '').trim() });
@@ -468,39 +506,121 @@ function create(record = {}, deps = {}) {
     }
     return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };
   }
+  let unsaved = null;   // verify r5: {token, supersedes} — a refreshed token the store could not persist, held until the store's next chance
   function readToken() {
     if (!tokens) return { token: null, why: 'no token store was handed to this adapter' };
     const t = tokens.read();
-    if (!t || !t.token) return { token: null, why: (t && t.why) || 'never-authenticated' };
+    if (!t || !t.token) { unsaved = null; return { token: null, why: (t && t.why) || 'never-authenticated' }; }
+    // verify r5: a refreshed token the store could not persist stands in for the one it superseded (the vendor's
+    // answer is the truth, the store a cache that lagged) — until the store holds anything else (cleared, re-authorized)
+    if (unsaved) { if (String(t.token.refresh_token || '') === unsaved.supersedes) return { token: unsaved.token, why: null }; unsaved = null; }
     return { token: t.token, why: null };
   }
-  /** A live access token, refreshed with the CLIENT the resolver answers. */
+  /** A live access token, refreshed with the CLIENT the resolver answers.
+   *  ONE REFRESH IN FLIGHT PER ADAPTER (lane R5 verify r4): N callers that find
+   *  the token expired in the same instant share one POST and re-read the
+   *  store after it — 20 concurrent thumbnails were 20 refresh POSTs, and
+   *  under a vendor that ROTATES the refresh token every one after the first
+   *  is `invalid_grant`, whose stamp then overwrote the sibling's fresh token
+   *  with the stale one (the account logged itself out). */
+  let refreshing = null;
   async function accessToken() {
     const cred = credential();
     if (!cred.values) throw new ChannelError('auth-expired', `Google OAuth client missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
     if (!token) throw new ChannelError('auth-expired', `Gmail is not connected (${why})`, { retryable: false });
     if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Gmail refresh token was refused — re-authorize', { retryable: false });
+    if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Gmail access token expired and no refresh token is held — re-authorize', { retryable: false });
+    if (refreshing) { await refreshing; return accessToken(); }   // a sibling's refresh: wait for it, then read what it wrote
+    refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
+    const got = await refreshing;
+    return got || accessToken();   // verify r5: a refresh SUPERSEDED while in flight (a re-authorize landed, a sibling entry's rotation won) wrote nothing — the store's token is the one to use
+  }
+  /** Persist a token the vendor answered (verify r5). A write the store refuses (a full disk) used to lose it — and
+   *  under a ROTATING refresh token the old one is already retired at the vendor, so the next refresh was
+   *  `invalid_grant` and the account logged itself out (measured on Lark: ONE failed write ⇒ needs-reauth). The
+   *  token is kept in memory as the truth and written again at the next request; a restart before it lands loses it. */
+  let persisting = null;   // {token, p}: ONE write in flight PER TOKEN — the waiters of a refresh each re-enter accessToken() and share it; a write of ANOTHER token queues behind it (verify r6: it used to be handed the earlier token's promise and DROPPED — under a rotating vendor the store then kept a retired token)
+  /** `supersedes` = the refresh token this write replaces (what the refresh tried / what the unsaved token stood in for):
+   *  the store lands the write only while it holds that token at apply time (the door's compare-and-swap, verify r6)
+   *  and answers `{superseded:true}` otherwise — nothing of ours is then in memory either. */
+  function persistToken(next, supersedes) {
+    if (persisting && persisting.token === next) return persisting.p;
+    const prev = persisting ? persisting.p.catch(() => {}) : Promise.resolve();
+    const p = prev.then(async () => {
+      const raw = tokens.read(); const storeRt = raw && raw.token ? String(raw.token.refresh_token || '') : '';
+      const over = supersedes === undefined ? storeRt : String(supersedes || '');
+      try {
+        const w = await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null, supersedes: over });
+        if (w && w.superseded) { if (unsaved && unsaved.token === next) unsaved = null; return { written: false, superseded: true }; }
+        unsaved = null; return { written: true };
+      } catch (e) {
+        unsaved = { token: next, supersedes: over };
+        log.warn && log.warn(`[channels] gmail: the refreshed token could not be persisted (${(e && e.message) || e}) — held in memory and written again at the next request`);
+        return { written: false, failed: true };
+      }
+    }).finally(() => { if (persisting && persisting.p === p) persisting = null; });
+    persisting = { token: next, p };
+    return p;
+  }
+  async function refreshAccessToken(cred, token) {
     let d;
     try {
-      d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token refresh', form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } });
+      d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token refresh', form: { grant_type: 'refresh_token', client_id: cred.values.clientId, client_secret: cred.values.clientSecret, refresh_token: token.refresh_token } });   // ungated: token-refresh
     } catch (e) {
       // `invalid_grant` = the refresh token is dead (revoked, or a Testing
       // client's 7-day lifetime): stamped on the record so `auth.state()`
-      // says `needs-reauth` instead of retrying a dead grant every pass.
-      if (e instanceof ChannelError && e.code === 'auth-expired' && tokens) await tokens.write({ ...token, invalidGrantAt: now() }, { expiresAt: null, scopes: token.scopes || [], user: token.email || null });
+      // says `needs-reauth` instead of retrying a dead grant every pass —
+      // ONLY while the stored token is still the one this refresh tried (a
+      // newer one, written meanwhile, is never overwritten with a stale copy).
+      if (e instanceof ChannelError && e.code === 'auth-expired' && tokens) {
+        const cur = readToken().token;
+        // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
+        // that landed first) is superseded, not a fact about the account — the caller re-reads the store
+        if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now() }, { expiresAt: null, scopes: cur.scopes || [], user: cur.email || null, supersedes: String(cur.refresh_token || '') });
+      }
       throw e;
     }
     const next = { ...token, access_token: String(d.access_token || ''), expiresAt: now() + Number(d.expires_in || 3600) * 1000, refresh_token: String(d.refresh_token || token.refresh_token) };
-    await tokens.write(next, { expiresAt: null, scopes: next.scopes || [], user: next.email || null });
+    // verify r5: the store is written ONLY while it still holds the token this refresh tried. A disconnect (cleared)
+    // or a re-authorize (a different token) that landed while the POST was in flight is never overwritten by this
+    // late write — measured before: 25 of 50 trials reverted a re-authorize to the old refresh token, a disconnected
+    // account reconnected itself, a client-switch rebind ended with the OLD client's token on the record (⇒ the next
+    // refresh `invalid_grant`, the owner's fresh consent undone). Superseded ⇒ the caller re-reads the store.
+    const cur = readToken().token;
+    if (!cur) throw new ChannelError('auth-expired', 'Gmail was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });
+    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
+    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads
+    if (w && w.superseded) return null;
     return next.access_token;
   }
+  /** THE BEARER AS IT IS NOW (lane R5 verify r4): the store, re-read
+   *  synchronously AFTER the pace wait. A disconnect that landed meanwhile
+   *  refuses the request by name (it was captured before the wait and would
+   *  have gone out with a token the owner had dropped); a re-authorize's or a
+   *  sibling's refresh's newer token is the one sent, never the captured one. */
+  function bearerNow(at) {
+    const t = readToken().token;
+    if (!t || !t.access_token) throw new ChannelError('auth-expired', 'Gmail was disconnected while the request waited for its pace — the request was not sent', { retryable: false, detail: { tokenDropped: true } });
+    return t.access_token !== at && Number(t.expiresAt) > now() ? t.access_token : at;
+  }
+  /** Is the token the store holds NOW past its expiry (verify r5)? A queue longer than the token's remaining life
+   *  (34 of 50 thumbnails at 5 units/s went out expired, 401) is refreshed ONCE (single-flight) before the send. */
+  const bearerExpired = () => { const t = readToken().token; return !!(t && t.access_token) && !(Number(t.expiresAt) > now()); };
+  // THE GATE: every Gmail request goes token → pace → meter → send, with the
+  // bearer re-read after the wait. The census in test-channels-gmail-shape
+  // reads this file: an outbound call outside it carries `// ungated: <id>`
+  // and `UNGATED` names the id with its reason, or the suite is red.
   const api = async (pathq, opts = {}) => {
-    const at = await accessToken();
-    meter(unitsFor(pathq, opts.method));
-    return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${at}`, ...(opts.headers || {}) } });
+    let at = await accessToken();
+    const units = unitsFor(pathq, opts.method);
+    await pace(units);   // lane R5: the per-SECOND shape — the bucket holds this request's cost (or is full) before it goes
+    meter(units);        // …charged the moment it is sent, no await in between
+    if (bearerExpired()) at = await accessToken();   // verify r5: the bearer EXPIRED while the request waited — one refresh before the send, never an expired bearer on the wire
+    return callJson(fetchFn, `${API}${pathq}`, { ...opts, headers: { Authorization: `Bearer ${bearerNow(at)}`, ...(opts.headers || {}) } });
   };
   const selfEmail = () => { const t = readToken().token; return (t && t.email) || mailbox.self || null; };
 
@@ -623,16 +743,21 @@ function create(record = {}, deps = {}) {
             client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopesFor().join(' '),
             access_type: 'offline', prompt: 'consent', state,
           }),
-          exchange: async ({ code, redirectUri }) => {
-            const d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token exchange', form: { code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' } });
+          exchange: async ({ code, redirectUri, cancelled = null }) => {
+            const d = await callJson(fetchFn, TOKEN_URL, { method: 'POST', what: 'gmail token exchange', form: { code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' } });   // ungated: consent-exchange
             if (!d.refresh_token) throw new ChannelError('vendor-error', 'no refresh_token returned — remove the app from myaccount.google.com/permissions and retry', { retryable: false });
             const tok = { access_token: String(d.access_token || ''), expiresAt: now() + Number(d.expires_in || 3600) * 1000, refresh_token: String(d.refresh_token), scopes: String(d.scope || SCOPE).split(/\s+/).filter(Boolean), email: null, clusterKey: cred.clusterKey || null };
+            // verify r6: A CONSENT MUST NAME ITS ACCOUNT — a token the profile read could not name bound nothing (the
+            // record then took anyone's next consent) and, on a bound record, landed unjudged; refused, nothing stored
             try {
-              const me = await callJson(fetchFn, `${API}/profile`, { what: 'gmail profile', headers: { Authorization: `Bearer ${tok.access_token}` } });
-              tok.email = me.emailAddress ? String(me.emailAddress).toLowerCase() : null;
+              const me = await callJson(fetchFn, `${API}/profile`, { what: 'gmail profile', headers: { Authorization: `Bearer ${tok.access_token}` } });   // ungated: consent-profile
+              tok.email = looksLikeEmail(me.emailAddress) ? String(me.emailAddress).trim().toLowerCase() : null;   // verify r7: whitespace / a bare word is NOBODY
               mailbox.self = tok.email;
-            } catch (e) { log.warn && log.warn('[channels] gmail: profile unavailable after consent:', (e && e.message) || e); }
-            if (tokens) await tokens.write(tok, { expiresAt: null, scopes: tok.scopes, user: tok.email });
+            } catch (e) { throw new ChannelError('vendor-error', namelessSentence('Google', `profile: ${(e && e.message) || e}`), { retryable: false, detail: { nameless: true } }); }
+            if (!tok.email) throw new ChannelError('vendor-error', namelessSentence('Google', 'the profile carried no email address'), { retryable: false, detail: { nameless: true } });
+            // verify r7: `consent.cancelled` — the door refuses, INSIDE its serialized write, a consent whose flow was
+            // cancelled meanwhile (a disconnect / cancel / newer sign-in used to be undone by this write landing late)
+            if (tokens) await tokens.write(tok, { expiresAt: null, scopes: tok.scopes, user: tok.email, consent: { cancelled } });
             return { ok: true, user: tok.email, scopes: tok.scopes };
           },
           onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
@@ -950,7 +1075,7 @@ async function integrationTest({ resolved } = {}) {
 
 const adapter = { kind: KIND, caps, create };
 module.exports = {
-  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS,
+  kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader,
 };

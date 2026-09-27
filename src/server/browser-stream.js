@@ -124,7 +124,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   const unsubInput = keeper && typeof keeper.onInput === 'function' ? keeper.onInput((ev) => {
     for (const r of relays.values()) {
       if (r.browserKey !== ev.browserKey || (r.target.profileId || null) !== (ev.profileId || null)) continue;
-      applyInputState(r, ev.state, ev.cause || (ev.kind === 'takeover' ? 'takeover' : 'handback'));
+      // the owner's ruling (2026-09-27): the mode record says what the takeover interrupted and what the handback asks to re-run
+      applyInputState(r, ev.state, ev.cause || (ev.kind === 'takeover' ? 'takeover' : 'handback'), { interrupted: ev.kind === 'takeover' && ev.interruption && ev.interruption.fresh !== false ? { n: ev.interruption.n || 0, verbs: ev.interruption.verbs || [], terminated: ev.interruption.terminated || 0 } : null, rerun: ev.kind === 'handback' && Array.isArray(ev.rerun) ? ev.rerun : null });
     }
   }) : null;
   // VERIFY S5 (2026-09-26): a NAMED profile's lease that goes (the user's "Only <other chat>" narrowing, a Delete…, an
@@ -225,7 +226,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       taps: new Set(),
       paused: false, resumePoll: null, mode: 'watch', holder: null, modeSince: 0, lastInputNoteAt: 0, upstreamMaxFps: null, port: null,
       // lane J (inc-muhgv0fb-9i4u): the picture's own size (off each frame's JPEG) and the page's own viewport reading
-      picture: null, viewport: null, activeTab: '', activeUrl: '', vp: { busy: false, again: null, warned: false },
+      picture: null, viewport: null, activeTab: '', activeUrl: '', activeTarget: null, vp: { busy: false, again: null, warned: false }, // verify r2: activeTarget = the active tab's CDP targetId off the `tabs` record (0.38.1 names it) — what a takeover credit is bound to
+      anchor: null, // verify r3: the tab the takeover BEGAN on (PURE S.takeoverAnchorStep) — a switch while the user drives is refused here, never followed
       // lane S4: frame sequence (the trailing gate), the panes (fit), the navigation clock (the fresh frame)
       frameSeq: 0, firstFrameAt: 0, fits: new Map(), fitTimer: null, fitBusy: false, fitAgain: null, fitForce: false, fitCheck: null, lastFit: null, fitWarned: false,
       navAt: 0, lastUpFrameAt: 0, freshTimer: null, freshBusy: false, lastRefreshAt: 0, lastUrl: '', ordSeq: 0, // ordSeq: the position of every ordered upstream record (verify r1: two viewport sets in flight are judged by the daemon's ORDER)
@@ -233,7 +235,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     };
     // P3: the keeper may already say somebody drives (an HTTP takeover, a
     // sibling relay that ended) — mirror it rather than assume Watch.
-    if (keeper && typeof keeper.inputStateFor === 'function') { try { const st = keeper.inputStateFor(relay.browserKey, target.profileId || null); if (st && st.input === 'user') { relay.mode = 'takeover'; relay.holder = st.takenBy ? st.takenBy.viewerId : null; relay.modeSince = st.takenAt || 0; } } catch { /* optional */ } }
+    if (keeper && typeof keeper.inputStateFor === 'function') { try { const st = keeper.inputStateFor(relay.browserKey, target.profileId || null); if (st && st.input === 'user') { relay.mode = 'takeover'; relay.holder = st.takenBy ? st.takenBy.viewerId : null; relay.modeSince = st.takenAt || 0; relay.anchor = S.takeoverAnchor(null, now()); } } catch { /* optional */ } } // verify r3: a takeover already on when the relay is born anchors to the first tab the stream names
     relay.ensureUpstream = () => {
       if (relay.upstream) return Promise.resolve();
       if (relay.connecting) return relay.connecting;
@@ -323,12 +325,16 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   /** P3: the keeper's (or the relay-local) answer becomes the relay's mode —
    *  ONE `mode` record per viewer (`mine` differs), the badge's words. */
-  function applyInputState(relay, state, cause) {
+  function applyInputState(relay, state, cause, extra = {}) {
     const user = !!(state && state.input === 'user');
+    // verify r3: a takeover is ANCHORED to the tab it begins on (a pass keeps it — the same takeover goes on); a handback drops it
+    if (user && relay.mode !== 'takeover') relay.anchor = S.takeoverAnchor(relay.activeTarget, now());
+    else if (!user) relay.anchor = null;
     relay.mode = user ? 'takeover' : 'watch';
     relay.holder = user && state.takenBy ? state.takenBy.viewerId : null;
     relay.modeSince = user ? (state.takenAt || now()) : (state && state.handedBackAt) || now();
-    for (const v of relay.viewers.values()) send(v.ws, { type: 'mode', mode: relay.mode, holder: relay.holder, mine: relay.holder === v.id, since: relay.modeSince, cause: cause || null, url: (state && state.url) || null });
+    const more = { ...(extra && extra.interrupted ? { interrupted: extra.interrupted } : {}), ...(extra && Array.isArray(extra.rerun) ? { rerun: extra.rerun.slice(0, 20) } : {}) };
+    for (const v of relay.viewers.values()) send(v.ws, { type: 'mode', mode: relay.mode, holder: relay.holder, mine: relay.holder === v.id, since: relay.modeSince, cause: cause || null, url: (state && state.url) || null, ...more });
     if (relay.fits.size) scheduleFit(relay, 'mode'); // lane S4: the holder's pane rules while somebody drives
   }
   function lastUrlOf(relay) {
@@ -338,10 +344,16 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   }
   /** Take over / hand back — through the keeper when it has the P3 surface,
    *  else relay-local (a stub keeper in the heavy suite). Never throws. */
+  /** verify r7 (S2): is a viewer's socket live on ANY relay. A sibling conversation's holder (a browser taken WITH a
+   *  primary takeover, or driven from its own view) sits on ANOTHER relay by construction, so a per-relay `viewers.has`
+   *  read every such holder as gone and a second view RE-SEIZED a lease of a browser somebody was driving — two holders,
+   *  both inputs forwarded to one Chrome, the handback from one view leaving the other's lease paused. Viewer ids are
+   *  minted from one counter, so the answer is exact. */
+  function viewerAlive(id) { if (id === null || id === undefined) return false; for (const r of relays.values()) if (r.viewers.has(id)) return true; return false; }
   function takeoverFor(relay, viewer) {
-    const holderAlive = relay.holder !== null && relay.viewers.has(relay.holder);
+    const holderAlive = relay.holder !== null && viewerAlive(relay.holder);
     if (keeper && typeof keeper.takeover === 'function') {
-      const r = keeper.takeover({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, viewerId: viewer.id, sessionId: relay.sessionId, holderAlive });
+      const r = keeper.takeover({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, viewerId: viewer.id, sessionId: relay.sessionId, holderAlive, viewerAlive });
       if (r.ok && !unsubInput) applyInputState(relay, r.state, 'takeover');
       if (r.ok && r.already) send(viewer.ws, { type: 'mode', mode: relay.mode, holder: relay.holder, mine: true, since: relay.modeSince, cause: 'takeover', url: null });
       return r;
@@ -386,6 +398,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
+      relay.activeTarget = act && act.targetId ? String(act.targetId) : null; // verify r2: every `tabs` record re-says which tab the user is looking at
+      if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
+        const next = S.takeoverAnchorStep(relay.anchor, { activeTarget: relay.activeTarget, now: now() });
+        if (next && next.switched && !relay.anchor.switched) log.log?.(`[browser-live] ${relay.key}: the browser moved to tab ${next.switched.to.slice(0, 8)} while the user drives tab ${String(next.switched.from).slice(0, 8)} — the user's input is refused (tab_switched) until they hand back and take over again`);
+        relay.anchor = next;
+      }
       if (act && (String(act.tabId || '') + '|' + u) !== relay.activeTab) { const first = !relay.activeTab; relay.activeTab = String(act.tabId || '') + '|' + u; relay.activeUrl = u; if (!first && relay.picture) scheduleViewport(relay, 'tab'); if (!first) noteNavigation(relay, u); }
     }
   }
@@ -714,11 +732,31 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (v.kind === 'ack') return;
     if (v.kind === 'ping') { send(viewer.ws, { type: 'pong', at: now() }); return; }
     if (v.kind === 'input') {
+      // lane S2 (naive study 2 T4): a record carrying `rid` is ANSWERED — an input-receipt from the browser's own
+      // reply (a mediated lease: the credit minted here BEFORE the forward is what lets the user's own input past the
+      // mediator's paused fence), or from the stream server's write (a direct lease), or the refusal. Never silence.
+      const rid = Number.isInteger(msg.rid) ? msg.rid : null;
+      const receipt = (r) => { if (rid !== null) send(viewer.ws, { type: 'input-receipt', rid, ok: !!r.ok, via: r.via || null, code: r.code || null, error: r.error || null }); };
+      if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; } // verify r3: the takeover is on another tab than the one on show — nothing forwarded, said by name
       if (v.forward && relay.upstream && relay.upstream.readyState === 1) {
-        try { relay.upstream.send(JSON.stringify(msg)); } catch { /* closing */ }
+        let credit = null;
+        const record = S.withoutRid(msg); // what goes upstream — and what the credit is bound to (lane S2 verify)
+        try { credit = keeper && typeof keeper.creditUserInput === 'function' ? keeper.creditUserInput(relay.target, record, { targetId: relay.activeTarget || null }) : null; } catch (e) { credit = null; log.warn?.(`[browser-live] ${relay.key}: input credit failed — ${e && e.message}`); } // verify r2: the credit names the tab the user is looking at
+        const up = relay.upstream;
+        try {
+          up.send(JSON.stringify(record), (err) => {
+            if (err) { receipt({ ok: false, code: 'upstream_gone', error: String(err && err.message || err) }); return; }
+            if (credit && typeof credit.then === 'function') credit.then((r) => receipt({ ...r, via: 'browser' }), (e) => receipt({ ok: false, code: 'no_reply', error: String(e && e.message) }));
+            else receipt({ ok: true, via: 'stream' });
+          });
+        } catch (e) { receipt({ ok: false, code: 'upstream_gone', error: String(e && e.message) }); }
         const t = now();
         if (t - relay.lastInputNoteAt >= INPUT_NOTE_MS) { relay.lastInputNoteAt = t; try { keeper?.noteUserInput?.(relay.browserKey, relay.target.profileId || null, t); } catch { /* optional */ } }
-      } else send(viewer.ws, v.refusal || { type: 'refused', code: 'watch-mode', error: 'no upstream' });
+      } else {
+        const r = v.refusal || { type: 'refused', code: 'watch-mode', error: 'no upstream' }; // (the pre-S2 shape: the view does not toast a per-key refusal — the receipt below says it once in the bar)
+        send(viewer.ws, r);
+        receipt({ ok: false, code: v.forward ? 'no-upstream' : (r.code || 'watch-mode'), error: v.forward ? 'the browser stream is not connected' : r.error });
+      }
       return;
     }
     // P3 (§4.3): the control verbs

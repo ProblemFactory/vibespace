@@ -24,6 +24,13 @@
 //   ⑩b g3 (design §22.2 ①): the composer SENDS the owner's own words at once,
 //      as the user — no approval card, no approve line in the audit; a user
 //      proposal the owner wants reviewed goes through the /propose route
+//   ⑰ lane R5 (the owner, 2026-09-26: "gmail一直被限速 你可能要控制下gmail默认的读取速度"):
+//      on a server whose poll fake is PACED (2 requests/s), declares its vendor
+//      ("Google"), refuses its first read with the per-user minute quota
+//      (Retry-After 20 s) and has 40 new rooms to read, the zh account card says
+//      "Google 限速中 · N 秒后继续" (never "paused", never a failure count), then
+//      "首次读取中 · 已 N/M 个会话" rising, then nothing once every room was read (the
+//      poll fake is a SOURCE section — it says what an account card says)
 //   ⑪ P4 (design §9.4/§9.5): a send whose answer was LOST lands as `unknown`
 //      (never failed, never re-sent) with ONE For-you item and a Check
 //      outcome button; Check outcome from the card settles it to sent, the
@@ -82,9 +89,9 @@ execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format
   { cwd: wt, stdio: 'ignore' });
 
 let srv = null;
-const bootServer = () => spawn(process.execPath, ['server.js'], {
+const bootServer = (extra = {}) => spawn(process.execPath, ['server.js'], {
   cwd: wt, stdio: 'ignore',
-  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' },
+  env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1', ...extra },
 });
 srv = bootServer();
 
@@ -1202,6 +1209,53 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
   ok(/only/.test(r.error || '') , 'a question about ANOTHER machine gets a NAMED refusal, never this machine\'s answer (hostId is a parameter from day one — decision 15)', JSON.stringify(r));
   const ok404 = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/not-a-conversation`)).json();
   ok(/No such conversation/.test(ok404.error || ''), 'an unknown conversation is a 404 with a reason');
+}
+
+// ── ⑰ LANE R5: a vendor RATE refusal and the FIRST READ, said on the account's section (zh) ──
+{
+  try { srv.kill('SIGKILL'); } catch {}
+  await sleep(400);
+  srv = bootServer({ VIBESPACE_CHANNELS_FAKE_PACE: '2', VIBESPACE_CHANNELS_FAKE_VENDOR: 'Google', VIBESPACE_CHANNELS_FAKE_RATE_LIMIT: '1:20', VIBESPACE_CHANNELS_FAKE_CONVS: '40' });
+  ok(await waitServer(), '⑰ the server rebooted with the fixture seams: the poll fake paced at 2/s, named Google, refusing its first read (Retry-After 20 s), 40 new rooms');
+  await p1.evaljs(`(() => { localStorage.setItem('vibespace.lang', 'zh'); return 1; })()`);
+  ok(await p1.load(), '⑰ page 1 reloaded in zh');
+  const CARD = `(async () => {
+    const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels');
+    const sec = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]');
+    if (!sec) return { none: [...document.querySelectorAll('.rail-panel-channels .chan-sec[data-adapter]')].map((x) => x.dataset.adapter) };
+    const notes = [...sec.querySelectorAll('.chan-sec-note')].map((n) => n.textContent.trim());
+    return { health: [((sec.querySelector('.chan-sec-health-text') || {}).textContent) || '', ...notes].join(' | '), notes, pills: [...sec.querySelectorAll('.chan-row')].map((r) => ({ conv: r.dataset.conv, pill: ((r.querySelector('.chan-row-line .chan-chip') || {}).textContent) || '' })) };
+  })()`;
+  const seen = { rate: null, reads: [], gone: null, pausedJudged: null, failLine: false, first: undefined };
+  const t0 = Date.now();
+  while (Date.now() - t0 < 100e3) {
+    const c = await p1.evaljs(CARD).catch((e) => ({ threw: String(e.message).slice(0, 200) }));
+    if (seen.first === undefined) seen.first = c;
+    if (c && !c.none && !c.threw) {
+      const rn = c.notes.find((n) => /限速中/.test(n));
+      if (rn && !seen.rate) seen.rate = rn;
+      // a "暂停" pill during the wait must be the owner's OWN override (the ④ leg paused a room) — never the vendor's wait: judged against the server's digest
+      if (rn && !seen.pausedJudged) {
+        const d = await (await fetch(`http://127.0.0.1:${PORT}/api/channels`)).json();
+        const byKey = new Map((d.conversations || []).filter((x) => x.adapterId === 'fake-poll').map((x) => [`${x.adapterId}/${x.id}`, x]));
+        const pausedPills = c.pills.filter((x) => /暂停/.test(x.pill));
+        const serverPaused = [...byKey.values()].filter((x) => x.freshness && x.freshness.state === 'paused');
+        seen.pausedJudged = { pills: pausedPills.length, notOverride: pausedPills.filter((x) => !(byKey.get(x.conv) && byKey.get(x.conv).refresh && byKey.get(x.conv).refresh.every === 'paused')).map((x) => x.conv), serverPaused: serverPaused.length, serverNotOverride: serverPaused.filter((x) => !(x.refresh && x.refresh.every === 'paused')).map((x) => x.id), rows: byKey.size };
+      }
+      if (c.notes.some((n) => /次抓取失败/.test(n))) seen.failLine = true;
+      const m = /首次读取中 · 已 (\d+)\/(\d+) 个会话/.exec(c.health);
+      if (m) seen.reads.push([Number(m[1]), Number(m[2])]);
+      else if (seen.reads.length && !seen.gone) { seen.gone = c.health; break; }
+    }
+    await sleep(700);
+  }
+  console.log(`    ⑰ card: rate "${seen.rate}", first-read samples ${JSON.stringify(seen.reads.slice(0, 3))} … ${JSON.stringify(seen.reads.slice(-2))}, after: "${seen.gone}" (first read of the card: ${JSON.stringify(seen.first).slice(0, 300)})`);
+  ok(!!seen.rate && /^Google 限速中 · \d+ 秒后继续$/.test(seen.rate), `⑰ the account card says the vendor's rate refusal by its name with the wait: "${seen.rate}"`);
+  const pj = seen.pausedJudged || {};
+  ok(!!seen.pausedJudged && pj.notOverride.length === 0 && pj.serverNotOverride.length === 0 && pj.rows >= 40 && !seen.failLine, `⑰ …never as a paused pill — during the wait ${pj.serverPaused} of ${pj.rows} rooms read "paused" on the server and ${pj.pills} on the card, every one the owner's OWN override (④) — and never as a failed-passes line (a rate wait is not a failure)`, JSON.stringify({ pj, failLine: seen.failLine }));
+  const rising = seen.reads.every((x, i) => i === 0 || x[0] >= seen.reads[i - 1][0]);
+  ok(seen.reads.length >= 2 && rising && seen.reads[0][1] >= 40 && seen.reads[seen.reads.length - 1][0] > seen.reads[0][0], `⑰ during the paced first read the card says "首次读取中 · 已 N/M 个会话", rising (${seen.reads.length} samples: ${seen.reads[0] && seen.reads[0].join('/')} → ${seen.reads.length && seen.reads[seen.reads.length - 1].join('/')})`, JSON.stringify(seen.reads));
+  ok(!!seen.gone && !/首次读取中/.test(seen.gone), `⑰ …and says nothing of it once every room was read ("${seen.gone}")`);
 }
 
 p1.close(); p2.close();

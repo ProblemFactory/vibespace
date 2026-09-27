@@ -37,6 +37,19 @@
 //      conversation inherits within one pass; wakes count against ONE ledger
 //      per assignment; an inherited digest is ONE block per window
 //   ⑩ a restart keeps all of it; the migration turns tracked into hot
+//   ③d (lane R5, the owner: "gmail一直被限速 你可能要控制下gmail默认的读取速度") a
+//      vendor RATE refusal is a SHORT wait said by the vendor's name — 5 s
+//      doubling to 60 s, or the vendor's own Retry-After — never the failure
+//      ladder, never a 15-minute park, filed in "For you" only when it
+//      persists; an auth refusal still climbs 30 s → 15 min and speaks at 3
+//   ③e the PER-SECOND pace in the real engine (drain rule 18): 873 first
+//      reads at 40 units each under the Gmail defaults — ≤ 80 units in any
+//      second, ≤ 2440 in any minute, the first-read line mid-way; the pace
+//      off (the control) is the burst the vendor refused; a real-time watchdog
+//      turns a driver that spins on `wait` into a red, never a hang
+//   ③f (lane R5 verify) a request filed DURING a pace wait is judged at sight:
+//      the sleeping pass is woken, a refusal never waits out the ≤ 1 s sleep;
+//      the no-wake engine (the R5 build) is the control
 //   ⑪ negative controls (patched copies outside the tree): the old discovery
 //      bound hides conversation 501+; a scheduler that polls everything each
 //      pass breaks the arithmetic
@@ -130,7 +143,7 @@ function makeWorld(t0, { n = 873, hot = 50, warm = 200, perConv = 3, deep = [] }
 }
 /** A scripted adapter MODULE. `worlds` = one world, or `{<adapterId>: world}`
  *  so two ACCOUNTS of the same kind read two different mailboxes. */
-function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null } = {}) {
+function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budgetDefault = 100000, budgetSettingKey = null, live = null, pace = null, vendorName = null } = {}) {
   const worldOf = (id) => (worlds && worlds.convs ? worlds : (worlds[id] || Object.values(worlds)[0]));
   const c = {
     ...fake.fakePoll.caps,
@@ -140,6 +153,8 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
     pollInterval: { hot: 30, cold: 300, floor: 10 },
     attachments: 'fetch', olderHistory: 'page',
     budget: { unit: unitsPerHistory > 1 ? 'quota-unit' : 'request', default: budgetDefault, settingKey: budgetSettingKey, metered: true },
+    // lane R5: a scripted module may declare the per-second pace (drain rule 18) and the vendor's name
+    ...(pace ? { pace } : {}), ...(vendorName ? { vendorName } : {}),
   };
   return {
     kind, caps: c,
@@ -147,12 +162,16 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
       const adapterId = record.id;
       const world = worldOf(adapterId);
       const meter = deps.meter || (() => {});
+      const pace = deps.pace || (async () => {});   // lane R5: awaited before every call (a no-op unless caps.pace is declared)
+      // lane R5: a scripted refusal — `failNext` its code; a rate refusal may carry the vendor's Retry-After (`failRetryAfter`)
+      const refusal = (code) => new CH.ChannelError(code, code === 'rate-limited' ? "HTTP 403 Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user'" : code === 'auth-expired' ? 'HTTP 401 invalid_grant' : 'HTTP 503 Service Unavailable', { retryable: code !== 'auth-expired', detail: code === 'rate-limited' ? { retryAfterSec: Number.isFinite(world.failRetryAfter) ? world.failRetryAfter : null } : null });
       const rec = (id, m) => makeRecord({ adapterId, convId: id, vendorId: m.vendorId, at: m.at, author: { ...m.author, isSelf: false, isBot: false }, text: m.text, mentions: [], attachments: m.attachments || [], replyTo: null, threadKey: id, raw: {} });
       return {
         auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
         async listConversations({ cursor = null, limit = 100 } = {}) {
-          meter(1); world.calls.list++;
-          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; throw new CH.ChannelError(code, 'HTTP 429 Too Many Requests'); }
+          await pace(1); meter(1); world.calls.list++;
+          if (world.sends) world.sends.push({ at: world.paceNow ? world.paceNow() : 0, units: 1 });
+          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; throw refusal(code); }
           const all = [...world.convs.values()];
           const from = cursor ? Number(cursor) : 0;
           const page = all.slice(from, from + limit);
@@ -161,11 +180,13 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
         },
         async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
         async history(id, { anchor = null, limit = 50, initialMax = null } = {}) {
-          meter(unitsPerHistory); world.hit('history', id);
+          await pace(unitsPerHistory); meter(unitsPerHistory); world.hit('history', id);
+          if (world.sends) world.sends.push({ at: world.paceNow ? world.paceNow() : 0, units: unitsPerHistory });
+          if (world.onHistory) world.onHistory(id);
           const startedAt = Date.now();
           if (world.beforeHistory) await world.beforeHistory(id);
           if (world.delayMs) await sleep(world.delayMs);
-          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; world.log.push({ id, startedAt, endedAt: Date.now(), failed: code }); throw new CH.ChannelError(code, 'HTTP 429 Too Many Requests'); }
+          if (world.failNext) { const code = world.failNext; if (!world.failSticky) world.failNext = null; world.log.push({ id, startedAt, endedAt: Date.now(), failed: code }); throw refusal(code); }
           world.log.push({ id, startedAt, endedAt: Date.now() });
           const x = world.convs.get(id);
           if (!x) return { records: [], anchor, reachedAnchor: true, complete: true };
@@ -200,12 +221,12 @@ function worldModule(kind, worlds, { receive = 'poll', unitsPerHistory = 1, budg
     },
   };
 }
-function mkEngine(name, { kinds, settings = {}, now, deliver = null, sessions = [], dataDir = null, env = {}, log = quiet } = {}) {
+function mkEngine(name, { kinds, settings = {}, now, deliver = null, sessions = [], dataDir = null, env = {}, log = quiet, extra = {}, mod = ENG } = {}) {
   const registry = CH.createChannelRegistry();
   for (const m of kinds) registry.register(m);
   const events = [];
   const dir = dataDir || path.join(ROOT, name);
-  const eng = ENG.create({ dataDir: dir, registry, env, now, broadcast: (m) => events.push(m), serverSetting: (k) => settings[k], liveSessions: () => sessions, deliver, log });
+  const eng = mod.create({ dataDir: dir, registry, env, now, broadcast: (m) => events.push(m), serverSetting: (k) => settings[k], liveSessions: () => sessions, deliver, log, ...extra });
   return { eng, events, dataDir: dir };
 }
 function seedAccounts(dataDir, records) {
@@ -319,12 +340,14 @@ console.log('③ the budget is the account\'s, in the vendor\'s unit; exhaustion
   eb.stop();
 }
 
-// ONE VENDOR 429 IS SAID FROM THE FIRST FAILURE (lane R2 verify, 2026-09-26):
+// ONE FAILED PASS IS SAID FROM THE FIRST FAILURE (lane R2 verify, 2026-09-26):
 // the account card read "Connected · polling · … · last sync 12 s ago" while
 // the pass had just failed and nothing was being fetched — `last sync` came
 // from a FAILED pass, the failure line waited for the third one, and the
-// retry instant lived only in memory.
-console.log('③b a rate-limited pass is said at once: the retry instant, no "last sync" from a failure');
+// retry instant lived only in memory. (Lane R5: the leg's failure is a
+// TRANSPORT one — the failure ladder; a vendor RATE refusal is its own short
+// ladder, pinned in ③d.)
+console.log('③b a failed pass is said at once: the retry instant, no "last sync" from a failure');
 {
   const Wr = makeWorld(clock, { n: 3, hot: 3, warm: 0 });
   const kr = worldModule('ratey', Wr);
@@ -332,13 +355,13 @@ console.log('③b a rate-limited pass is said at once: the retry instant, no "la
   seedAccounts(dirR, [['ratey', 'ratey']]);
   const { eng: er } = mkEngine('ratey', { kinds: [kr], now, dataDir: dirR });
   const recOf = () => er.adapterRecords().adapters.find((r) => r.id === 'ratey');
-  Wr.failNext = 'rate-limited';
+  Wr.failNext = 'transport';
   const p1 = await er.pass('ratey', { force: true });
   const v1 = er.adapterView(recOf());
-  ok(p1.ok === false && p1.why === 'rate-limited' && v1.consecutiveFailures === 1, 'FIXTURE: one scripted 429 fails the pass with rate-limited', JSON.stringify(p1));
-  ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt, 'after ONE rate-limited pass the view carries the retry instant (backoffUntil) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, lastOkAt: v1.lastOkAt }));
+  ok(p1.ok === false && p1.why === 'transport' && v1.consecutiveFailures === 1, 'FIXTURE: one scripted 503 fails the pass with transport', JSON.stringify(p1));
+  ok(Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1] && !v1.lastOkAt && v1.backoff && v1.backoff.kind === 'failure', 'after ONE failed pass the view carries the retry instant (backoffUntil), the back-off\'s kind (failure) and no last GOOD sync', JSON.stringify({ backoffUntil: v1.backoffUntil, backoff: v1.backoff, lastOkAt: v1.lastOkAt }));
   const ps1 = typeof caps.passStateText === 'function' ? caps.passStateText(v1, { now: clock }) : { note: '', lastOkAt: 'n/a' };
-  ok(/rate limited/.test(ps1.note) && /retrying in 30 s/.test(ps1.note) && ps1.lastOkAt === null, 'the card\'s line builder says "rate limited — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
+  ok(/transport failure/.test(ps1.note) && /retrying in 30 s/.test(ps1.note) && ps1.lastOkAt === null, 'the card\'s line builder says "transport failure — retrying in 30 s" from the FIRST failure, and there is no "last sync" to print', JSON.stringify(ps1));
   const panelSrc = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
   ok(/chanCaps\.passStateText\(a, /.test(panelSrc) && !/last sync \{ago\}', \{ ago: agoText\(a\.lastPass\.at\)/.test(panelSrc), 'the panel words its sync + retry through that builder (never "last sync" from lastPass.at, which a failure stamps)');
   const waited = await er.pass('ratey');
@@ -347,8 +370,523 @@ console.log('③b a rate-limited pass is said at once: the retry instant, no "la
   const p2 = await er.pass('ratey', { force: true });
   const v2 = er.adapterView(recOf());
   const ps2 = typeof caps.passStateText === 'function' ? caps.passStateText(v2, { now: clock }) : { note: 'n/a', lastOkAt: null };
-  ok(p2.ok && Number(v2.lastOkAt) === clock && !v2.backoffUntil && ps2.note === '' && ps2.lastOkAt === clock, 'the next GOOD pass stamps lastOkAt, clears the retry instant and the note', JSON.stringify({ lastOkAt: v2.lastOkAt, backoffUntil: v2.backoffUntil, ps2 }));
+  ok(p2.ok && Number(v2.lastOkAt) === clock && !v2.backoffUntil && !v2.backoff && ps2.note === '' && ps2.lastOkAt === clock, 'the next GOOD pass stamps lastOkAt, clears the retry instant and the note', JSON.stringify({ lastOkAt: v2.lastOkAt, backoffUntil: v2.backoffUntil, ps2 }));
   er.stop();
+}
+
+// A VENDOR RATE REFUSAL IS A SHORT WAIT, SAID BY THE VENDOR'S NAME (lane R5,
+// 2026-09-26 — the owner: "gmail一直被限速 你可能要控制下gmail默认的读取速度").
+// Production: three Gmail refusals of "Units per minute per user" climbed the
+// failure ladder (30 s → 2 min → 5 min) to its 15-minute maximum while the
+// per-minute budget was never exceeded — the vendor meters finer than a
+// minute — and filed a "For you" item for what was a few seconds' wait.
+console.log('③d a vendor RATE refusal is a short wait: 5 s doubling to 60 s (or its Retry-After), never the failure ladder, never a 15-minute park');
+async function rateLadder(ENGmod, label) {
+  const Wq = makeWorld(clock, { n: 3, hot: 3, warm: 0 });
+  const kq = worldModule('rq', Wq, { vendorName: 'Google' });
+  const dirQ = path.join(ROOT, `rate-${label}`);
+  seedAccounts(dirQ, [['rq', 'rq']]);
+  const todos = [];
+  const userTodos = { add: (key, it) => { const x = { id: `ut-${todos.length + 1}`, status: 'open', sessionKey: key, ...it }; todos.push(x); return x; }, get: (id) => todos.find((x) => x.id === id) || null, setStatus: (id, st) => { const x = todos.find((y) => y.id === id); if (x) x.status = st; } };
+  const { eng: eq } = mkEngine(`rate-${label}`, { kinds: [kq], now, dataDir: dirQ, mod: ENGmod, extra: { userTodos } });
+  const recOf = () => eq.adapterRecords().adapters.find((r) => r.id === 'rq');
+  const out = { strikes: [], todosAt: [], views: [] };
+  await ingestAll(eq, 'rq');   // the three conversations exist (their pills are read below)
+  clock += 1000;
+  Wq.failNext = 'rate-limited'; Wq.failSticky = true; Wq.failRetryAfter = null;
+  for (let i = 0; i < 11; i++) {
+    const t0 = clock;
+    const p = await eq.pass('rq', { force: true });
+    const v = eq.adapterView(recOf());
+    out.strikes.push({ why: p.why, waitSec: v.backoffUntil ? (v.backoffUntil - t0) / 1000 : null, failures: v.consecutiveFailures, kind: v.backoff && v.backoff.kind });
+    out.todosAt.push(todos.length);
+    if (i === 0) { out.first = v; out.firstNote = caps.passStateText(v, { now: clock }); out.freshness = eq.digest().conversations.filter((c) => c.adapterId === 'rq').map((c) => c.freshness && c.freshness.state); }
+    clock = Math.max(clock, v.backoffUntil || clock) + 1;
+  }
+  // the vendor's own hint: Retry-After 7 ⇒ exactly 7 s
+  Wq.failRetryAfter = 7;
+  const tHint = clock;
+  await eq.pass('rq', { force: true });
+  out.hintWaitSec = (eq.adapterView(recOf()).backoffUntil - tHint) / 1000;
+  // it recovers: a good pass clears the strikes, the note, and RETRACTS the item it filed
+  Wq.failNext = null; Wq.failSticky = false; Wq.failRetryAfter = null;
+  clock += 61e3;
+  const good = await eq.pass('rq', { force: true });
+  const vg = eq.adapterView(recOf());
+  out.recovered = { ok: good.ok, backoff: vg.backoff, note: caps.passStateText(vg, { now: clock }).note, retracted: todos.length ? todos[0].status : null };
+  // an AUTH refusal still climbs the failure ladder: 30 s → 2 min → 5 min, loud at the third
+  Wq.failNext = 'auth-expired'; Wq.failSticky = true;
+  out.auth = [];
+  const todosBefore = todos.length;
+  for (let i = 0; i < 4; i++) {
+    const t0 = clock;
+    const p = await eq.pass('rq', { force: true });
+    const v = eq.adapterView(recOf());
+    out.auth.push({ why: p.why, waitSec: v.backoffUntil ? (v.backoffUntil - t0) / 1000 : null, failures: v.consecutiveFailures, kind: v.backoff && v.backoff.kind });
+    clock = Math.max(clock, v.backoffUntil || clock) + 1;
+  }
+  out.authTodos = todos.length - todosBefore;
+  Wq.failNext = null; Wq.failSticky = false;
+  eq.stop();
+  return out;
+}
+{
+  const r = await rateLadder(ENG, 'real');
+  const waits = r.strikes.map((x) => x.waitSec);
+  ok(r.strikes.every((x) => x.why === 'rate-limited' && x.kind === 'rate' && x.failures === 0), `eleven scripted "Units per minute per user" refusals in a row: every one a RATE back-off and consecutiveFailures stays 0 — the failure ladder never moves (${JSON.stringify(r.strikes.map((x) => x.failures))})`, JSON.stringify(r.strikes.slice(0, 3)));
+  ok(JSON.stringify(waits) === JSON.stringify([5, 10, 20, 40, 60, 60, 60, 60, 60, 60, 60]), `the waits are 5 s doubling to 60 s and never past it (${JSON.stringify(waits)}) — the old ladder went 30 s → 2 min → 5 min → 15 min`, JSON.stringify(waits));
+  ok(r.todosAt.slice(0, 9).every((n) => n === 0) && r.todosAt[9] === 1 && r.todosAt[10] === 1, `no "For you" item for a short wait: nothing through strike 9, ONE item at strike 10 (a refusal that persists ≈ 7 min despite the pace) — ${JSON.stringify(r.todosAt)}`);
+  ok(r.firstNote.rate === true && r.firstNote.note === 'Google is limiting the rate · resuming in 5 s' && r.first.vendor === 'Google', `the card says it by the VENDOR's declared name from the FIRST strike: "${r.firstNote.note}"`, JSON.stringify(r.firstNote));
+  const zh = await import(path.join(REPO, 'src/lib/i18n-zh.js'));
+  const Z = zh.default || zh.zh || zh.ZH || Object.values(zh).find((x) => x && typeof x === 'object');
+  const tz = (k, p) => { const v = (Z && Z[k]) || k; return p ? v.replace(/\{(\w+)\}/g, (m, q) => (q in p ? String(p[q]) : m)) : v; };
+  const zNote = caps.passStateText(r.first, { now: r.first.backoffUntil - 5000, t: tz }).note;
+  ok(zNote === 'Google 限速中 · 5 秒后继续', `…and in Chinese: "${zNote}"`);
+  ok(r.freshness.length === 3 && r.freshness.every((f) => f !== 'paused'), `no conversation pill reads "paused" during a rate back-off (${JSON.stringify(r.freshness)}) — "refresh paused" is the owner's own override, never a vendor's wait`);
+  ok(r.hintWaitSec === 7, `the vendor's own Retry-After (7 s) is the wait, exactly (${r.hintWaitSec} s)`);
+  ok(r.recovered.ok && !r.recovered.backoff && r.recovered.note === '' && r.recovered.retracted === 'done', 'the first good pass clears the strikes and the note and RETRACTS the item it filed', JSON.stringify(r.recovered));
+  const aw = r.auth.map((x) => x.waitSec);
+  ok(JSON.stringify(aw) === JSON.stringify([30, 120, 300, 900]) && r.auth.map((x) => x.failures).join() === '1,2,3,4' && r.auth.every((x) => x.kind === 'failure') && r.authTodos === 1, `an AUTH refusal still climbs the failure ladder (${JSON.stringify(aw)} s, consecutiveFailures ${r.auth.map((x) => x.failures).join('→')}) and speaks once at the third (${r.authTodos} item)`, JSON.stringify(r.auth));
+  // CONTROL: the pre-R5 failPass (a rate refusal on the failure ladder) — the owner's 15-minute park
+  const Mr = mutantCopies('chan-agg-rate', REPO);
+  const cwr = closedWorld(Mr, 'rate-on-ladder', { engine: [['        const rate = code === \'rate-limited\';', '        const rate = false;']] });
+  ok(cwr.setup, 'CONTROL setup: the engine with a rate refusal on the failure ladder (before lane R5) is reconstructed', cwr.missing);
+  const rc = await rateLadder(cwr.mod, 'ctl');
+  const cw = rc.strikes.map((x) => x.waitSec);
+  ok(cw[0] === 30 && cw[3] === 900 && rc.strikes[2].failures === 3 && rc.todosAt[2] === 1, `CONTROL: on the failure ladder the same refusals park the account ${JSON.stringify(cw.slice(0, 5))} s and file "For you" at the third — the legs above would go red`, JSON.stringify(cw));
+  for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// TWO LADDERS, ONE OPEN ITEM (lane R5 verify r2): the rate ladder (loud at 10)
+// and the failure ladder (loud at 3) are independent, and `rec.failureItem`
+// remembers ONE item — a transport failure after a rate item filed a second
+// item and the first outlived the recovery (open forever, its own detail
+// promising a retraction). The standing item is retracted as SUPERSEDED before
+// the next is filed; the first good pass retracts that one.
+console.log("③d′ two ladders, one open item: a failure on the other ladder supersedes the standing item, the good pass retracts the last");
+async function twoLadders(ENGmod, label) {
+  const Wt = makeWorld(clock, { n: 3, hot: 3, warm: 0 });
+  const kt = worldModule('tl', Wt, { vendorName: 'Google' });
+  const dirT = path.join(ROOT, `twoladders-${label}`);
+  seedAccounts(dirT, [['tl', 'tl']]);
+  const todos = [];
+  const userTodos = { add: (key, it) => { const x = { id: `ut-${todos.length + 1}`, status: 'open', sessionKey: key, ...it }; todos.push(x); return x; }, get: (id) => todos.find((x) => x.id === id) || null, setStatus: (id, st) => { const x = todos.find((y) => y.id === id); if (x) x.status = st; } };
+  const { eng: et } = mkEngine(`twoladders-${label}`, { kinds: [kt], now, dataDir: dirT, mod: ENGmod, extra: { userTodos } });
+  const open = () => todos.filter((x) => x.status === 'open').map((x) => x.text);
+  await ingestAll(et, 'tl');
+  Wt.failNext = 'rate-limited'; Wt.failSticky = true;
+  for (let i = 0; i < 10; i++) { clock += 61e3; await et.pass('tl', { force: true }); }
+  const afterRate = open();
+  Wt.failNext = 'transport';
+  for (let i = 0; i < 3; i++) { clock += 16 * 60e3; await et.pass('tl', { force: true }); }
+  const afterTransport = open();
+  Wt.failNext = null; Wt.failSticky = false;
+  clock += 16 * 60e3;
+  const good = await et.pass('tl', { force: true });
+  const afterGood = open();
+  et.stop();
+  return { afterRate, afterTransport, afterGood, filed: todos.length, good: good.ok };
+}
+{
+  const r = await twoLadders(ENG, 'real');
+  ok(r.afterRate.length === 1 && /rate-limited/.test(r.afterRate[0]), `10 rate strikes ⇒ one open item (${r.afterRate[0]})`);
+  ok(r.afterTransport.length === 1 && /transport/.test(r.afterTransport[0]) && r.filed === 2, `3 transport failures behind it ⇒ still ONE open item, the transport one — the rate item was retracted as superseded (${r.afterTransport[0]})`, JSON.stringify(r));
+  ok(r.good && r.afterGood.length === 0, 'the first good pass leaves no open item');
+  const Mt = mutantCopies('chan-agg-twoladders', REPO);
+  const cwt = closedWorld(Mt, 'no-supersede', { engine: [["    if (rec.failureItem) await retractFailure(rec, 'superseded');", '']] });
+  ok(cwt.setup, 'CONTROL setup: speakFailure without the superseded retraction is reconstructed', cwt.missing);
+  const c = await twoLadders(cwt.mod, 'ctl');
+  ok(c.afterTransport.length === 2 && c.afterGood.length === 1 && /rate-limited/.test(c.afterGood[0]), `CONTROL: without it two items stay open and the rate one outlives the recovery (${c.afterGood.join(' | ')}) — the legs above would go red`, JSON.stringify(c));
+  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// THE BUCKET UNDER CONCURRENT CALLERS OUTSIDE THE PASS (lane R5 verify r2):
+// the adapter's `await pace(units)` was a check-then-charge across an await —
+// N callers (a window's N attachment thumbnails, a page-back beside the pass)
+// each read the bucket before any had metered, so 20 fetches of 20 units left
+// in ONE instant (400 units in a second on the real Gmail adapter, the burst the
+// vendor refuses), and a page-back starved behind the pass for the whole ingest.
+// `paceWait` now judges one caller at a time in arrival order and RESERVES the
+// units it lets through (`paceInflight`, released by the meter). Real timers.
+console.log('③g the bucket under concurrent callers outside the pass: an attachment burst is paced, a page-back takes one slot');
+function pacedOutsideModule(kind, world, { unitsPerAttach = 20, unitsPerOlder = 40 } = {}) {
+  const c = { ...fake.fakePoll.caps, receive: 'poll', pushTransport: null, pushAckBudgetMs: null, pollInterval: { hot: 30, cold: 300, floor: 10 }, attachments: 'fetch', olderHistory: 'page', budget: { unit: 'quota-unit', default: 3000, settingKey: null, metered: true }, pace: { unitsPerSec: 40, settingKey: null, cost: { fetch: 40, discover: 1, scanHost: 1 } }, vendorName: 'Google' };
+  return {
+    kind, caps: c,
+    create(record, deps) {
+      const adapterId = record.id;
+      const meter = deps.meter || (() => {});
+      const pace = deps.pace || (async () => {});
+      const rec = (id, m) => makeRecord({ adapterId, convId: id, vendorId: m.vendorId, at: m.at, author: { ...m.author, isSelf: false, isBot: false }, text: m.text, mentions: [], attachments: m.attachments || [], replyTo: null, threadKey: id, raw: {} });
+      const send = async (kindOf, units) => { await pace(units); meter(units); world.sends.push({ at: performance.now(), units, kind: kindOf }); };
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
+        async listConversations() { await send('list', 1); const all = [...world.convs.values()]; return { conversations: all.map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.title, kind: x.kind, participants: x.participants, lastAt: x.recs[x.recs.length - 1].at })), cursor: null, complete: true }; },
+        async convCaps() { return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
+        async history(id, { anchor = null, limit = 50, initialMax = null } = {}) {
+          await send('history', 40); world.hit('history', id); if (world.onHistoryDone) world.onHistoryDone(id);
+          if (world.delay && world.delay.history) await sleep(world.delay.history);   // verify r4: a slow vendor, for the in-flight legs
+          const x = world.convs.get(id); let idx = 0;
+          if (anchor) { const at = x.recs.findIndex((m) => m.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; } else if (Number(initialMax) > 0) idx = Math.max(0, x.recs.length - Number(initialMax));
+          const pending = x.recs.slice(idx), page = pending.slice(0, limit), drained = page.length === pending.length;
+          return { records: page.map((m) => rec(id, m)), anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
+        },
+        async older(id, { before = null, limit = 50 } = {}) { await send('older', unitsPerOlder); const all = world.convs.get(id).recs; const olderOnes = before ? all.filter((m) => m.at < before.at) : all; const page = olderOnes.slice(-limit); return { records: page.map((m) => rec(id, m)), exhausted: page.length === olderOnes.length }; },
+        async fetchAttachment(id, { messageId, attachmentId } = {}) { await send('attach', unitsPerAttach); if (world.delay && world.delay.attach) await sleep(world.delay.attach); return { data: Buffer.from(`bytes of ${attachmentId}\n`), mime: 'text/plain', name: String(attachmentId) }; },
+      };
+    },
+  };
+}
+const maxUnitsIn = (L, T) => { let best = 0, sum = 0, i = 0; const S = [...L].sort((a, b) => a.at - b.at); for (let j = 0; j < S.length; j++) { sum += S[j].units; while (S[j].at - S[i].at > T) { sum -= S[i].units; i++; } best = Math.max(best, sum); } return best; };
+async function outsideThePass(ENGmod, label) {
+  // (i) 6 concurrent attachment fetches of 20 units at 40/s: two at once, then one every 0.5 s ⇒ ≥ 2 s, never above 80 in a second
+  const Wo = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 });
+  const conv = Wo.convs.get('c0000'); conv.recs[conv.recs.length - 1].attachments = Array.from({ length: 6 }, (_, k) => ({ id: `att${k}`, name: `f${k}.txt`, mime: 'text/plain' }));
+  Wo.sends = [];
+  const ko = pacedOutsideModule('po', Wo);
+  const dirO = path.join(ROOT, `outside-${label}`);
+  seedAccounts(dirO, [['po', 'po']]);
+  const { eng: eo } = mkEngine(`outside-${label}`, { kinds: [ko], now: () => Date.now(), dataDir: dirO, mod: ENGmod });
+  await eo.pass('po', { force: true });
+  await sleep(1100);
+  const t0 = performance.now(); const b0 = Wo.sends.length;
+  const rs = await Promise.all(Array.from({ length: 6 }, (_, k) => eo.attachment('po', 'c0000', `att${k}`, { msg: conv.recs[conv.recs.length - 1].vendorId })));
+  const burst = { ok: rs.every((x) => x.ok && x.cached === false), wall: performance.now() - t0, max1s: maxUnitsIn(Wo.sends.slice(b0), 1000), n: Wo.sends.length - b0 };
+  eo.stop();
+  // (ii) a page-back filed 300 ms after the 3rd read of a paced ingest takes the NEXT slot, the ingest keeps its cadence
+  const Wp = makeWorld(Date.now(), { n: 6, hot: 0, warm: 0, deep: [2] });
+  Wp.sends = [];
+  const kp = pacedOutsideModule('pp', Wp);
+  const dirP = path.join(ROOT, `pageback-${label}`);
+  seedAccounts(dirP, [['pp', 'pp']]);
+  const { eng: ep } = mkEngine(`pageback-${label}`, { kinds: [kp], now: () => Date.now(), dataDir: dirP, mod: ENGmod });
+  let older = null, olderMs = 0;
+  Wp.onHistoryDone = (id) => { if (id !== 'c0002' || older) return; older = new Promise((res) => setTimeout(async () => { const local = ep.store.readTail('pp', 'c0002', { limit: 200 }); const s = performance.now(); const r = await ep.loadOlder('pp', 'c0002', { before: local[0].at, beforeId: local[0].vendorId, limit: 50 }); olderMs = performance.now() - s; res(r); }, 300)); };
+  const r = await ep.pass('pp', { force: true });
+  const or = await older; ep.stop();
+  const seq = Wp.sends.filter((s) => s.kind !== 'list').sort((a, b) => a.at - b.at);
+  const g = []; for (let i = 1; i < seq.length; i++) g.push(seq[i].at - seq[i - 1].at);
+  return { burst, pageBack: { ok: r.ok && or && or.ok && or.source === 'vendor' && or.fetched === 50, olderMs, pos: seq.findIndex((s) => s.kind === 'older'), n: seq.length, minGap: Math.min(...g), max1s: maxUnitsIn(Wp.sends, 1000) } };
+}
+{
+  const r = await outsideThePass(ENG, 'real');
+  ok(r.burst.ok && r.burst.n === 6 && r.burst.wall >= 1900 && r.burst.max1s <= 80, `6 concurrent attachment fetches of 20 units: all served by the vendor in ${(r.burst.wall / 1000).toFixed(1)} s (≥ 2 s at 40/s), ≤ ${r.burst.max1s} units in any second`, JSON.stringify(r.burst));
+  ok(r.pageBack.ok && r.pageBack.pos >= 2 && r.pageBack.pos <= 4 && r.pageBack.olderMs < 2200 && r.pageBack.minGap >= 940 && r.pageBack.max1s <= 80, `a page-back filed mid-ingest takes the next slot (position ${r.pageBack.pos} of ${r.pageBack.n}, answered in ${r.pageBack.olderMs.toFixed(0)} ms) and the ingest keeps its cadence (min gap ${r.pageBack.minGap.toFixed(0)} ms, ≤ ${r.pageBack.max1s} units/s)`, JSON.stringify(r.pageBack));
+  // verify r3 (iii): the bucket judged after the account sat IDLE (a window opened on an account read a while ago) —
+  // the judged level is capped at burst BEFORE the reservation comes off, so 8 fetches of 20 units after 3 s idle still
+  // leave two at once and one every 0.5 s (≥ 3 s, ≤ 80 in any second)
+  {
+    const Wi = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 });
+    const ci = Wi.convs.get('c0000'); ci.recs[ci.recs.length - 1].attachments = Array.from({ length: 8 }, (_, k) => ({ id: `att${k}`, name: `f${k}.txt`, mime: 'text/plain' }));
+    Wi.sends = [];
+    const ki = pacedOutsideModule('pi', Wi);
+    const dirI = path.join(ROOT, 'idle-burst'); seedAccounts(dirI, [['pi', 'pi']]);
+    const { eng: ei } = mkEngine('idle-burst', { kinds: [ki], now: () => Date.now(), dataDir: dirI });
+    await ei.pass('pi', { force: true });
+    await sleep(3000);
+    const bi = Wi.sends.length; const ti = performance.now();
+    const ri = await Promise.all(Array.from({ length: 8 }, (_, k) => ei.attachment('pi', 'c0000', `att${k}`, { msg: ci.recs[ci.recs.length - 1].vendorId })));
+    const wi = performance.now() - ti; const mi = maxUnitsIn(Wi.sends.slice(bi), 1000);
+    ok(ri.every((x) => x.ok) && wi >= 2900 && mi <= 80, `8 concurrent 20-unit fetches after 3 s idle: ${(wi / 1000).toFixed(1)} s (≥ 3 s), ≤ ${mi} units in any second — an idle bucket is judged at burst, never as its projection`, JSON.stringify({ wi, mi }));
+    ei.stop();
+  }
+  // verify r3 (iv): a remove() under a FULL queue — the callers queued behind the removed account are ABORTED by name,
+  // never let through (returning "nothing to pace against" let 17 × 20 units leave within 1 ms of the remove)
+  async function removeUnderQueue(ENGmod, label) {
+    const Wr = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 });
+    const cr = Wr.convs.get('c0000'); cr.recs[cr.recs.length - 1].attachments = Array.from({ length: 12 }, (_, k) => ({ id: `att${k}`, name: `f${k}.txt`, mime: 'text/plain' }));
+    Wr.sends = [];
+    const kr = pacedOutsideModule('pr', Wr);
+    const dirR = path.join(ROOT, `remove-${label}`); seedAccounts(dirR, [['pr', 'pr']]);
+    const { eng: er } = mkEngine(`remove-${label}`, { kinds: [kr], now: () => Date.now(), dataDir: dirR, mod: ENGmod });
+    await er.pass('pr', { force: true });
+    await sleep(1100);
+    const br = Wr.sends.length;
+    const ps = Array.from({ length: 12 }, (_, k) => er.attachment('pr', 'c0000', `att${k}`, { msg: cr.recs[cr.recs.length - 1].vendorId }));
+    await sleep(150);   // two left at once, the third sleeps, nine queue
+    const tr = performance.now();
+    await er.remove('pr');
+    const rs = await Promise.race([Promise.all(ps), sleep(9000).then(() => null)]);
+    const after = Wr.sends.slice(br).filter((s) => s.at >= tr);
+    const out = { hung: rs === null, sentBefore: Wr.sends.length - br - after.length, after: after.length, unitsAfter: after.reduce((a, s) => a + s.units, 0), within50ms: after.filter((s) => s.at - tr <= 50).length, aborted: rs ? rs.filter((x) => !x.ok && x.code === 'transport' && /account changed/.test(x.error)).length : 0, okAfter: rs ? rs.filter((x) => x.ok).length : 0 };
+    try { er.stop(); } catch {}
+    return out;
+  }
+  {
+    const r3 = await removeUnderQueue(ENG, 'real');
+    ok(!r3.hung && r3.after === 0 && r3.aborted === 12 - r3.sentBefore && r3.okAfter === r3.sentBefore, `remove() under a full queue: ${r3.sentBefore} had left, 0 vendor calls after the removal, the ${r3.aborted} queued callers aborted by name ("the account changed")`, JSON.stringify(r3));
+    const Mr = mutantCopies('chan-agg-remove', REPO);
+    const cwr = closedWorld(Mr, 'pre-r3-pace', { engine: [
+      ['    if (!e0) throw gone();', '    if (!e0) return;'],
+      ['        if (e !== e0) throw gone();   // THE ENTRY THIS CALL QUEUED AGAINST IS GONE OR REPLACED\n        const d = e.record ? paceDecl(e.record) : null;', '        const d = e && e.record ? paceDecl(e.record) : null;'],
+    ] });
+    ok(cwr.setup, 'CONTROL setup: the r2 build\'s paceWait (a gone entry = "nothing to pace against" = return) is reconstructed', cwr.missing);
+    const c3 = await removeUnderQueue(cwr.mod, 'ctl');
+    ok(c3.after >= 8 && c3.within50ms >= 8 && c3.unitsAfter >= 160, `CONTROL: ${c3.after} calls = ${c3.unitsAfter} units leave within 50 ms of the remove (${c3.within50ms}) — the leg above would go red`, JSON.stringify(c3));
+    for (const r2 of copiesCensus(Mr.files, Mr.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+  }
+  // CONTROL: the R5 build's paceWait — no arrival order, no reservation (the two are one fix: with the FIFO alone the
+  // race is only MASKED by microtask ordering, with the reservation alone the fairness hangs on timer granularity)
+  const Mo = mutantCopies('chan-agg-outside', REPO);
+  const cwo = closedWorld(Mo, 'pre-fix-pace', { engine: [
+    ['        if (!(ms > 0)) { e.paceInflight = (Number(e.paceInflight) || 0) + need; e.paceInflightAt = t; return; }   // THE RESERVATION — the same synchronous step as the judgement', '        if (!(ms > 0)) return;'],
+    ['    await prev;\n    try {', '    try {'],
+  ] });
+  ok(cwo.setup, 'CONTROL setup: the R5 build\'s paceWait (no arrival order, no reservation) is reconstructed', cwo.missing);
+  const c = await outsideThePass(cwo.mod, 'ctl');
+  ok(c.burst.max1s >= 120 && c.burst.wall < 1000, `CONTROL: the 6 fetches leave in ${c.burst.wall.toFixed(0)} ms — ${c.burst.max1s} units in one second — the burst leg above would go red`, JSON.stringify(c.burst));
+  // the pre-fix page-back loses a round only when its own timer fires a hair EARLY (Node arms a timer at the loop
+  // iteration's cached clock) and re-sleeps 1 ms while the pass's fetch passes — timer-phase dependent (5.7 s of an
+  // 8-row ingest in verify r2's attack log, a clean slot in other runs), so it is PRINTED here, not asserted; the
+  // FIFO is what makes the fixed leg's position exact, and the burst control above is this mutant's red
+  console.log(`    (pre-fix page-back: position ${c.pageBack.pos} of ${c.pageBack.n}, ${c.pageBack.olderMs.toFixed(0)} ms — timer-phase dependent, see the comment)`);
+  for (const r2 of copiesCensus(Mo.files, Mo.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// ── lane R5 verify r4: THE EXIT CENSUS + the lifecycle ends that let queued calls through + the in-flight write ──
+console.log('③g (v) THE EXIT CENSUS: live.delete has ONE site (dropLive) and every lifecycle verb takes it; (vi) disable / disconnect under a full queue; (vii) a fetch that outlived its entry writes nothing; (viii) an exit never refills the bucket');
+/** Every lifecycle end of an account's right to call the vendor takes the ONE exit (`dropLive`): a grep over the
+ *  engine's CODE (comments stripped). `live.delete(` / `live.set(` have one site each; every listed verb's body
+ *  (its indent-2 block) carries its `dropLive(` (stop: the flag + the wake); every `dropLive(` CALL lies inside a
+ *  listed verb; every vendor-then-write path (ingest / discover / loadOlder / attachment) carries `outlived(rec, e)`. */
+function exitCensus(src) {
+  const lines = src.split('\n'); const code = (l) => l.replace(/\/\/.*$/, ''); const isComment = (l) => /^\s*(\*|\/\/|\/\*)/.test(l);
+  const problems = [];
+  const count = (re) => lines.filter((l) => !isComment(l) && re.test(code(l))).length;
+  if (count(/\blive\.delete\(/) !== 1) problems.push(`live.delete( has ${count(/\blive\.delete\(/)} sites (must be 1, inside dropLive)`);
+  if (count(/\blive\.set\(/) !== 1) problems.push(`live.set( has ${count(/\blive\.set\(/)} sites (must be 1, inside adapterFor)`);
+  const block = (name) => { const i = lines.findIndex((l) => new RegExp(`^  (async )?function ${name}\\(`).test(l)); if (i < 0) return null; let j = i + 1; while (j < lines.length && !/^  }/.test(lines[j])) j++; return { from: i, to: j, text: lines.slice(i, j + 1).filter((l) => !isComment(l)).map(code).join('\n') }; };
+  const EXITS = { dropLive: /\blive\.delete\(id\)/, removeRecord: /dropLive\(rec\.id, 'removed'\)/, setEnabled: /if \(!enabled\) dropLive\(rec\.id, 'disabled'\)/, disconnect: /dropLive\(rec\.id, 'disconnected'\)/, setOptions: /if \(rebuild\) dropLive\(rec\.id, 'options changed'\)/, applyRebind: /dropLive\(rec\.id, 'client switched'\)/, inlineLegacyClient: /dropLive\(rec\.id, 'client moved onto the account'\)/, connect: /dropLive\(rec\.id, 'connect refused'\)/, stop: /stopped = true[\s\S]*wakeSleepers\(e\)/ };
+  const blocks = {};
+  for (const [fn, re] of Object.entries(EXITS)) { const b = block(fn); blocks[fn] = b; if (!b) problems.push(`no function ${fn}()`); else if (!re.test(b.text)) problems.push(`${fn}() does not take the exit (${re.source.slice(0, 48)})`); }
+  lines.forEach((l, i) => { if (isComment(l) || !/\bdropLive\(/.test(code(l)) || /function dropLive\(/.test(l)) return; if (!Object.values(blocks).some((b) => b && i >= b.from && i <= b.to)) problems.push(`line ${i + 1}: a dropLive( call outside every listed verb (a new lifecycle end must be listed)`); });
+  for (const fn of ['ingest', 'discover', 'loadOlder', 'attachment']) { const b = block(fn); if (!b || !/outlived\(rec, e\)/.test(b.text)) problems.push(`${fn}() has no outlived(rec, e) guard after its vendor call`); }
+  if (!/const outlived = \(rec, e\) => stopped \|\| live\.get\(rec\.id\) !== e;/.test(src)) problems.push('outlived is not the one rule (stopped || the entry changed)');
+  if (!/live\.get\(rec\.id\) \|\| paceCarry\.get\(rec\.id\)/.test(src)) problems.push('the meter dep does not charge the ghost of a dropped entry');
+  return problems;
+}
+{
+  const c0 = exitCensus(ENGINE_SRC);
+  ok(c0.length === 0, 'THE EXIT CENSUS on the shipped engine: one live.delete (dropLive), one live.set (adapterFor), removeRecord / setEnabled / disconnect / setOptions / applyRebind / inlineLegacyClient / connect / stop take it, every dropLive call inside a listed verb, the four vendor-then-write paths guarded', c0.join(' ; '));
+  // the census must SEE each miss (text-level copies; the two verbs below are also driven for real)
+  const noDisable = ENGINE_SRC.replace("    if (!enabled) dropLive(rec.id, 'disabled');", "    if (!enabled) { const e = live.get(rec.id); if (e) disarmPush(e, 'adapter disabled'); }");
+  ok(noDisable !== ENGINE_SRC && exitCensus(noDisable).some((x) => /setEnabled\(\) does not take the exit/.test(x)), 'CONTROL (text): the r3 setEnabled (disarm only) is RED by name');
+  const selfDelete = ENGINE_SRC.replace("    dropLive(rec.id, 'removed');\n    paceCarry.delete(rec.id);", "    { const e = live.get(rec.id); if (e) { disarmPush(e, 'removed'); live.delete(rec.id); } }");
+  const cs = exitCensus(selfDelete);
+  ok(selfDelete !== ENGINE_SRC && cs.some((x) => /live\.delete\( has 2 sites/.test(x)) && cs.some((x) => /removeRecord\(\) does not take the exit/.test(x)), 'CONTROL (text): a removeRecord that deletes the entry itself is RED twice (a second live.delete site, the verb without its exit)');
+  const noGuard = ENGINE_SRC.replace("      if (outlived(rec, e)) return { appended, duplicates, anchorMoved: false, complete: false, why: 'account-changed' };\n", '');
+  ok(noGuard !== ENGINE_SRC && exitCensus(noGuard).some((x) => /ingest\(\) has no outlived/.test(x)), 'CONTROL (text): an ingest that writes whatever came back is RED');
+  const strayDrop = ENGINE_SRC.replace("  async function setLabel(adapterId, label) {\n", "  async function setLabel(adapterId, label) {\n    dropLive(adapterId, 'renamed');\n");
+  ok(strayDrop !== ENGINE_SRC && exitCensus(strayDrop).some((x) => /dropLive\( call outside every listed verb/.test(x)), 'CONTROL (text): a new verb that drops without being listed is RED (the list is the census)');
+  ok(!exitCensus(ENGINE_SRC + "\n// live.delete(id) live.set(x) dropLive(rec.id, 'in a comment')\n").length, 'a comment spelling live.delete / live.set / dropLive is not counted (a census that counts its documentation is silenced by rewording it)');
+  // the pending-flow adapter (beginPending) is constructed WITHOUT pace/meter — its only calls may be the consent's
+  const pend = ENGINE_SRC.split('\n').filter((l) => /\bp\.adapter\.\w+/.test(l.replace(/\/\/.*$/, '')));
+  ok(pend.length >= 2 && pend.every((l) => /p\.adapter\.auth\./.test(l)), `the transient consent adapter (no pace, no meter) is only ever asked for auth.begin / auth.finish (${pend.length} uses), never a read`, pend.join(' | '));
+}
+// (vi) THE TWO LIFECYCLE ENDS r3 RECORDED: disable / disconnect under a full queue ⇒ 0 vendor calls after, every queued caller
+//      aborted by name, a fresh call after a disable refused `disabled`; the pass in flight ends at its next step
+async function underQueue(ENGmod, label, event, { n = 12, atMs = 150, delay = null } = {}) {
+  const W = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 });
+  const conv = W.convs.get('c0000'); conv.recs[conv.recs.length - 1].attachments = Array.from({ length: n }, (_, k) => ({ id: `att${k}`, name: `f${k}.txt`, mime: 'text/plain' }));
+  W.sends = []; if (delay) W.delay = delay;
+  const K = pacedOutsideModule('pq', W);
+  const dir = path.join(ROOT, `uq-${label}`); seedAccounts(dir, [['pq', 'pq']]);
+  const { eng } = mkEngine(`uq-${label}`, { kinds: [K], now: () => Date.now(), dataDir: dir, mod: ENGmod });
+  await eng.pass('pq', { force: true });
+  await sleep(1100);
+  const b = W.sends.length; const msg = conv.recs[conv.recs.length - 1].vendorId;
+  const ps = Array.from({ length: n }, (_, k) => eng.attachment('pq', 'c0000', `att${k}`, { msg }));
+  await sleep(atMs);
+  const tr = performance.now();
+  await event(eng);
+  const rs = await Promise.race([Promise.all(ps), sleep(9000).then(() => null)]);
+  const after = W.sends.slice(b).filter((s) => s.at >= tr);
+  const out = { hung: rs === null, sentBefore: W.sends.length - b - after.length, after: after.length, unitsAfter: after.reduce((a, s) => a + s.units, 0), aborted: rs ? rs.filter((x) => !x.ok && x.code === 'transport' && /account changed/.test(x.error)).length : 0, okBefore: rs ? rs.filter((x) => x.ok).length : 0 };
+  const b2 = W.sends.length;
+  const fresh = await eng.attachment('pq', 'c0000', `att${n - 1}`, { msg });   // a never-fetched part (the two that left are cached, and a cache hit is local)
+  out.fresh = { code: fresh.ok ? (fresh.cached ? 'ok-cached' : 'ok-vendor') : fresh.code, sends: W.sends.length - b2 };
+  out.budget = eng.budgetOf('pq');
+  return { out, eng, W };
+}
+{
+  const d = await underQueue(ENG, 'disable', (e) => e.setEnabled('pq', false));
+  ok(!d.out.hung && d.out.after === 0 && d.out.aborted === 12 - d.out.sentBefore && d.out.fresh.code === 'disabled' && d.out.fresh.sends === 0, `setEnabled(false) under a full queue: ${d.out.sentBefore} had left, 0 vendor calls after, the ${d.out.aborted} queued callers aborted by name, a fresh fetch refused '${d.out.fresh.code}' with no call (r3 recorded 18 × 20 units finishing, paced, after the owner disabled the account)`, JSON.stringify(d.out));
+  await d.eng.setEnabled('pq', true);
+  const again = await d.eng.pass('pq', { force: true });
+  ok(again.ok === true, 'setEnabled(true) after it: the next pass runs again (the exit is not a removal)', JSON.stringify(again));
+  d.eng.stop();
+  const x = await underQueue(ENG, 'disconnect', (e) => e.disconnect('pq'));
+  ok(!x.out.hung && x.out.after === 0 && x.out.aborted === 12 - x.out.sentBefore, `disconnect() under a full queue: ${x.out.sentBefore} had left, 0 vendor calls after, the ${x.out.aborted} queued callers aborted by name (r3 recorded them finishing with the Bearer captured before the wait)`, JSON.stringify(x.out));
+  ok(x.out.budget && x.out.budget.spent >= 40 * x.out.sentBefore, `the minute's spend survives the disconnect (${x.out.budget && x.out.budget.spent} units on the rebuilt entry — an exit never refills)`, JSON.stringify(x.out.budget));
+  x.eng.stop();
+  // CONTROL (driven): the r3 setEnabled (disarm only) lets the queue finish, paced — calls AFTER the disable
+  const Mx = mutantCopies('chan-agg-exit', REPO);
+  const cwx = closedWorld(Mx, 'pre-r4-disable', { engine: [["    if (!enabled) dropLive(rec.id, 'disabled');", "    if (!enabled) { const e = live.get(rec.id); if (e) disarmPush(e, 'adapter disabled'); }"]] });
+  ok(cwx.setup, 'CONTROL setup: the r3 build\'s setEnabled (disarm only, no exit) is reconstructed', cwx.missing);
+  const c = await underQueue(cwx.mod, 'disable-ctl', (e) => e.setEnabled('pq', false), { n: 6 });
+  ok(c.out.after >= 3 && c.out.aborted === 0, `CONTROL: ${c.out.after} calls = ${c.out.unitsAfter} units leave AFTER the disable, none aborted — the leg above would go red`, JSON.stringify(c.out));
+  c.eng.stop();
+  for (const r2 of copiesCensus(Mx.files, Mx.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+// (vii) A FETCH THAT OUTLIVED ITS ENTRY WRITES NOTHING: remove() while a pass's history() is in flight ⇒ no index row, no
+//       log file of the removed account; remove() while an attachment fetch is in flight ⇒ no cache file
+{
+  const Wr = makeWorld(Date.now(), { n: 3, hot: 0, warm: 0 }); Wr.sends = []; Wr.delay = { history: 600 };
+  const kr = pacedOutsideModule('pv', Wr);
+  const dirV = path.join(ROOT, 'outlive-pass'); seedAccounts(dirV, [['pv', 'pv']]);
+  const { eng: ev } = mkEngine('outlive-pass', { kinds: [kr], now: () => Date.now(), dataDir: dirV });
+  const pp = ev.pass('pv', { force: true });
+  await sleep(300);   // discovery done, the first history() in flight (600 ms)
+  await ev.remove('pv');
+  const r = await pp;
+  await sleep(900);
+  const rows = Object.keys(ev.store.index.snapshot().conversations).filter((k) => k.startsWith('pv/'));
+  const files = fs.existsSync(path.join(dirV, 'channels', 'msgs')) ? fs.readdirSync(path.join(dirV, 'channels', 'msgs')).filter((f) => f.startsWith('pv')) : [];
+  ok(r.ok === false && r.why === 'account-changed' && rows.length === 0 && files.length === 0 && !ev.adapterRecords().adapters.some((a) => a.id === 'pv'), `remove() under an in-flight pass fetch: the pass ends '${r.why}', ${rows.length} index rows and ${files.length} log files of the removed account (r3: the page landed after the remove and resurrected pv/c0000 + its log)`, JSON.stringify({ r, rows, files }));
+  ev.stop();
+  const Wa = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 }); const ca = Wa.convs.get('c0000'); ca.recs[ca.recs.length - 1].attachments = [{ id: 'att0', name: 'f0.txt', mime: 'text/plain' }];
+  Wa.sends = []; Wa.delay = { attach: 600 };
+  const ka = pacedOutsideModule('pw', Wa);
+  const dirA = path.join(ROOT, 'outlive-att'); seedAccounts(dirA, [['pw', 'pw']]);
+  const { eng: ea } = mkEngine('outlive-att', { kinds: [ka], now: () => Date.now(), dataDir: dirA });
+  await ea.pass('pw', { force: true }); await sleep(1100);
+  const pa = ea.attachment('pw', 'c0000', 'att0', { msg: ca.recs[ca.recs.length - 1].vendorId });
+  await sleep(200);
+  await ea.remove('pw');
+  const ra = await pa;
+  const attDir = path.join(dirA, 'channels', 'attachments');
+  const cached = fs.existsSync(attDir) ? fs.readdirSync(attDir, { recursive: true }).map(String).filter((f) => /^pw/.test(f)) : [];
+  ok(ra.ok === false && ra.code === 'account-changed' && cached.length === 0, `remove() under an in-flight attachment fetch: answered '${ra.code}', ${cached.length} cache files under the removed account (r3: five)`, JSON.stringify({ ra, cached }));
+  ea.stop();
+  // CONTROL (driven): the r3 ingest writes the page that came back after the remove
+  const Mw = mutantCopies('chan-agg-outlive', REPO);
+  const cww = closedWorld(Mw, 'pre-r4-write', { engine: [["      if (outlived(rec, e)) return { appended, duplicates, anchorMoved: false, complete: false, why: 'account-changed' };\n", '']] });
+  ok(cww.setup, 'CONTROL setup: the r3 build\'s ingest (no outlived guard) is reconstructed', cww.missing);
+  const Wc = makeWorld(Date.now(), { n: 3, hot: 0, warm: 0 }); Wc.sends = []; Wc.delay = { history: 600 };
+  const kc = pacedOutsideModule('px', Wc);
+  const dirC = path.join(ROOT, 'outlive-ctl'); seedAccounts(dirC, [['px', 'px']]);
+  const { eng: ec } = mkEngine('outlive-ctl', { kinds: [kc], now: () => Date.now(), dataDir: dirC, mod: cww.mod });
+  const pc = ec.pass('px', { force: true }); await sleep(300); await ec.remove('px'); await pc; await sleep(900);
+  const rowsC = Object.keys(ec.store.index.snapshot().conversations).filter((k) => k.startsWith('px/'));
+  ok(rowsC.length >= 1, `CONTROL: ${rowsC.length} index row(s) of the removed account resurrected by the in-flight page — the leg above would go red`, JSON.stringify(rowsC));
+  ec.stop();
+  for (const r2 of copiesCensus(Mw.files, Mw.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+// (viii) AN EXIT NEVER REFILLS THE BUCKET: a burst that empties it, then disable + enable ⇒ the next two fetches WAIT;
+//        the control (no carry) has a full bucket after the toggle and they leave at once
+async function toggleBurst(ENGmod, label) {
+  const W = makeWorld(Date.now(), { n: 1, hot: 0, warm: 0 }); const cv = W.convs.get('c0000'); cv.recs[cv.recs.length - 1].attachments = Array.from({ length: 4 }, (_, k) => ({ id: `att${k}`, name: `f${k}.txt`, mime: 'text/plain' }));
+  W.sends = [];
+  const K = pacedOutsideModule('pt', W);
+  const dir = path.join(ROOT, `toggle-${label}`); seedAccounts(dir, [['pt', 'pt']]);
+  const { eng } = mkEngine(`toggle-${label}`, { kinds: [K], now: () => Date.now(), dataDir: dir, mod: ENGmod });
+  await eng.pass('pt', { force: true }); await sleep(1100);
+  const msg = cv.recs[cv.recs.length - 1].vendorId;
+  await Promise.all([eng.attachment('pt', 'c0000', 'att0', { msg }), eng.attachment('pt', 'c0000', 'att1', { msg })]);   // 40 units: the bucket is empty now
+  await eng.setEnabled('pt', false); await eng.setEnabled('pt', true);
+  const spentAfterToggle = eng.budgetOf('pt').spent;   // verify r5: read through the ghost before any call rebuilds the entry
+  const t0 = performance.now();
+  await Promise.all([eng.attachment('pt', 'c0000', 'att2', { msg }), eng.attachment('pt', 'c0000', 'att3', { msg })]);
+  const wall = performance.now() - t0;
+  const spent = eng.budgetOf('pt').spent;
+  eng.stop();
+  return { wall, spent, spentAfterToggle, max1s: maxUnitsIn(W.sends, 1000) };
+}
+{
+  const r = await toggleBurst(ENG, 'real');
+  ok(r.wall >= 400 && r.max1s <= 80 && r.spent >= 121, `disable + enable after an emptying burst: the next two fetches wait ${r.wall.toFixed(0)} ms (≥ 400: the bucket came back with the rebuilt entry), ≤ ${r.max1s} units in any second, the minute's spend kept (${r.spent})`, JSON.stringify(r));
+  ok(r.spentAfterToggle >= 41, `verify r5: the budget read right after the toggle (before any call rebuilt the entry) is the ghost's ${r.spentAfterToggle}, not zero`);
+  const Mt = mutantCopies('chan-agg-carry', REPO);
+  const cwt = closedWorld(Mt, 'no-carry', { engine: [['      if (ghost) { e.win = ghost.win; e.exhaustedAt = ghost.exhaustedAt; e.paceTok = ghost.paceTok; e.paceRecent = ghost.paceRecent; e.paceLeakWarnAt = ghost.paceLeakWarnAt; paceCarry.delete(rec.id); }', '      if (ghost) paceCarry.delete(rec.id);']] });
+  ok(cwt.setup, 'CONTROL setup: an exit that forgets the buckets is reconstructed', cwt.missing);
+  const c = await toggleBurst(cwt.mod, 'ctl');
+  ok(c.wall < 300, `CONTROL: after the toggle the two fetches leave in ${c.wall.toFixed(0)} ms (a full bucket per toggle — a fresh 80-unit burst on every disable/enable, ${c.max1s} units in one second) — the leg above would go red`, JSON.stringify(c));
+  for (const r2 of copiesCensus(Mt.files, Mt.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
+}
+
+// THE PER-SECOND PACE IN THE REAL ENGINE (lane R5, drain rule 18): the
+// owner's first ingest — 873 conversations at 40 units a thread read — under
+// the Gmail defaults (40 units/s, 3000/min), on a pace clock the injected
+// sleep advances together with the logical one (as real time moves both).
+console.log('③e the per-second pace in the real engine: 873 first reads at 40 units — ≤ 80 in any second, ≤ 2440 in any minute, the first-read line mid-way');
+async function pacedIngest(label, { pace = true } = {}) {
+  const Wp = makeWorld(clock, { n: 873, hot: 0, warm: 0 });
+  let pt = 0;
+  Wp.sends = []; Wp.paceNow = () => pt;
+  const kp = worldModule('pc', Wp, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: 'channels.budgetPcTestPerMin', pace: pace ? { unitsPerSec: 40, settingKey: 'channels.pcTestUnitsPerSec', cost: { fetch: 40, discover: 1, scanHost: 1 } } : null, vendorName: 'Google' });
+  const dirP = path.join(ROOT, `paced-${label}`);
+  seedAccounts(dirP, [['pc', 'pc']]);
+  const sleeps = [];
+  const { eng: ep, events: evs } = mkEngine(`paced-${label}`, { kinds: [kp], now, dataDir: dirP, extra: { paceClock: () => pt, sleep: (ms) => new Promise((res) => { sleeps.push(ms); pt += ms; clock += ms; setImmediate(res); }) } });   // a sleep moves BOTH clocks, as real time does
+  let mid = null;
+  Wp.onHistory = () => { if (!mid && historyCalls(Wp) === 101) { const v = ep.adapterView(ep.adapterRecords().adapters.find((a) => a.id === 'pc')); mid = { firstIngest: v.scheduler.firstIngest, text: caps.firstReadText(v.scheduler), pace: v.pace, budgetPerSec: v.budget.perSec }; } };
+  const ev0 = evs.length;
+  // lane R5 verify: a REAL-TIME watchdog — a driver that ignores the drain's `wait` (re-asks without sleeping) never moves
+  // the injected pace clock and would HANG this pass (a suite timeout, not a red assertion); 120 s of wall time is the bound
+  let watchdog = null;
+  const first = await Promise.race([ep.pass('pc', { force: true }), new Promise((res) => { watchdog = setTimeout(() => res({ ok: false, why: 'WATCHDOG: the paced pass did not finish in 120 s of real time — a driver that spins on `wait`' }), 120e3); })]);
+  if (watchdog) clearTimeout(watchdog);
+  const upd = evs.slice(ev0).filter((m) => m.type === 'channels-updated');
+  const progress = upd.map((m) => { const a = (m.digest.adapters || []).find((x) => x.id === 'pc'); return a && a.scheduler && a.scheduler.firstIngest ? a.scheduler.firstIngest.done : null; }).filter((x) => x !== null);
+  const L = Wp.sends;
+  const maxIn = (T) => { let best = 0, sum = 0, i = 0; for (let j = 0; j < L.length; j++) { sum += L[j].units; while (L[j].at - L[i].at > T) { sum -= L[i].units; i++; } best = Math.max(best, sum); } return best; };
+  const walked = Object.values(ep.store.index.live()).filter((en) => en.adapterId === 'pc' && en.walkedAt).length;
+  const after = ep.adapterView(ep.adapterRecords().adapters.find((a) => a.id === 'pc'));
+  ep.stop();
+  return { first, reads: historyCalls(Wp), walked, max1s: maxIn(1000), max60s: maxIn(60e3), wallSec: L.length ? (L[L.length - 1].at - L[0].at) / 1000 : 0, maxSleep: sleeps.length ? Math.max(...sleeps) : 0, sleeps: sleeps.length, mid, doneFirstIngest: after.scheduler.firstIngest, broadcasts: upd.length, progress };
+}
+{
+  const r = await pacedIngest('on');
+  ok(r.first.ok && r.reads === 873 && r.walked === 873 && r.doneFirstIngest === null, `ONE forced pass reads all 873 conversations once (${r.reads} reads, ${r.walked} walked) — never cut by the minute's budget`, JSON.stringify({ first: r.first.ok, why: r.first.why, reads: r.reads }));
+  ok(r.max1s <= 80 && r.max60s <= 2440, `no second of the pace clock holds more than 80 units (${r.max1s}) and no minute more than 2440 (${r.max60s}) — Google's cap is 6000/min per user`);
+  ok(r.wallSec >= 870 && r.wallSec <= 875 && r.maxSleep <= 1000, `one thread read a second: the first read takes ${r.wallSec.toFixed(0)} s of pace clock, in sleeps of ≤ 1 s (${r.sleeps} sleeps, the longest ${r.maxSleep} ms)`);
+  const m = r.mid || {};
+  ok(m.firstIngest && m.firstIngest.done === 100 && m.firstIngest.total === 873 && Math.abs(m.firstIngest.etaSec - 773) <= 1 && m.text === 'reading for the first time · 100/873 conversations · about 13 min left', `mid-way the account row says how far and how long: "${m.text}"`, JSON.stringify(m.firstIngest));
+  ok(m.pace && m.pace.unitsPerSec === 40 && m.pace.spentLastSec <= 80 && m.budgetPerSec === 40, 'the account row carries the pace (40 units/s, the last second\'s spend) and the budget carries the per-second figure its sentence names', JSON.stringify({ pace: m.pace, budgetPerSec: m.budgetPerSec }));
+  const rising = r.progress.every((x, i) => i === 0 || x >= r.progress[i - 1]);
+  ok(r.broadcasts >= 150 && r.broadcasts <= Math.ceil(r.wallSec / 5) + 3 && r.progress.length >= 150 && rising && r.progress[r.progress.length - 1] >= 860, `a long paced pass says its progress at most every 5 s (${r.broadcasts} broadcasts over ${r.wallSec.toFixed(0)} s — never one per fetch), each carrying the first-read count, rising (${r.progress.slice(0, 3).join(', ')} … ${r.progress.slice(-2).join(', ')})`, JSON.stringify({ n: r.broadcasts, head: r.progress.slice(0, 5) }));
+  const b = caps.budgetText({ exhausted: true, unit: 'quota-unit', limit: 3000, perSec: 40, waiting: 12, resetInSeconds: 30 });
+  ok(b === 'Vendor budget reached — 3000 quota units/min (at most 40/s) for this account; 12 conversations waiting, next refresh in 30 s', `the budget sentence names units/min AND units/s: "${b}"`);
+  // CONTROL: the same pass with no pace declared is the burst the vendor refused
+  const c = await pacedIngest('off', { pace: false });
+  ok(c.max1s >= 2000 && c.reads < 873, `CONTROL: with no pace the minute's 3000 units leave inside ONE second of the same clock (${c.max1s} units, ${c.reads} reads before the cut) — the shape Google refused; the legs above would go red`);
+}
+
+// A REQUEST FILED DURING A PACE WAIT IS JUDGED AT SIGHT (lane R5 verify): the
+// pass slept ≤ 1 s on the drain's `wait` and nothing woke it, so an agent's
+// refresh inside the floor — a refusal the model answers at the next STEP —
+// waited out the sleep (~0.9 s measured) and the owner's press was taken only
+// then. `pokeDrain` now wakes the sleeping pass; the wait resumes for what is
+// left. Real timers on purpose: the wake is a timer's cancellation.
+console.log('③f a request filed during a pace wait is judged at sight: the sleeping pass wakes, a refusal never waits out the sleep');
+async function judgedAtSight(ENGmod, label) {
+  const Wj = makeWorld(Date.now(), { n: 4, hot: 0, warm: 0 });
+  Wj.delayMs = 20;
+  const kj = worldModule('js', Wj, { unitsPerHistory: 40, budgetDefault: 3000, budgetSettingKey: 'channels.budgetJsTestPerMin', pace: { unitsPerSec: 40, settingKey: 'channels.jsTestUnitsPerSec', cost: { fetch: 40, discover: 1, scanHost: 1 } }, vendorName: 'Google' });
+  const dirJ = path.join(ROOT, `sight-${label}`);
+  seedAccounts(dirJ, [['js', 'js']]);
+  const { eng: ej } = mkEngine(`sight-${label}`, { kinds: [kj], settings: { 'channels.agentRefreshFloorSec': 60 }, now: () => Date.now(), dataDir: dirJ, mod: ENGmod });
+  let firstRead = null;
+  Wj.onHistory = (id) => { if (!firstRead) firstRead = id; };
+  const p = ej.pass('js', { force: true });
+  for (let i = 0; i < 200 && historyCalls(Wj) < 1; i++) await sleep(10);   // the first read went; the drain now sleeps ~1 s for the next
+  await sleep(60);
+  const t0 = performance.now();
+  const r = await ej.refresh('js', firstRead, { origin: 'agent' });   // inside the floor ⇒ a refusal, judged at the next step
+  const ms = performance.now() - t0;
+  await p; ej.stop();
+  return { code: r.code, ms, reads: historyCalls(Wj) };
+}
+{
+  const r = await judgedAtSight(ENG, 'real');
+  ok(r.code === 'refresh-floor' && r.ms < 250, `an agent refresh of the row just read, filed ~60 ms into the ~1 s pace wait, is refused AT SIGHT (${r.ms.toFixed(0)} ms, ${r.code}) — the sleeping pass was woken`, JSON.stringify(r));
+  ok(r.reads === 4, `…and the pass still reads every row exactly once (${r.reads})`);
+  const Ms = mutantCopies('chan-agg-sight', REPO);
+  const cws = closedWorld(Ms, 'no-wake', { engine: [['    if (e.passing) { e.drainAfter = true; wakeSleepers(e); return; }', '    if (e.passing) { e.drainAfter = true; return; }']] });
+  ok(cws.setup, 'CONTROL setup: pokeDrain without the wake (the R5 build) is reconstructed', cws.missing);
+  const c = await judgedAtSight(cws.mod, 'ctl');
+  ok(c.code === 'refresh-floor' && c.ms >= 400, `CONTROL: without the wake the same refusal waits out the sleep (${c.ms.toFixed(0)} ms) — the leg above would go red`, JSON.stringify(c));
+  for (const r2 of copiesCensus(Ms.files, Ms.dir, REPO, { minCopies: 1 })) ok(r2.pass, r2.name, r2.detail);
 }
 
 // A SETTING OUT OF ITS RANGE IS NEVER CLAMPED SILENTLY (lane R2 verify): the
@@ -589,11 +1127,11 @@ async function backoffBurst(ENGmod, label) {
   const X = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: [] };
   await eb.setScopeAssignment('bo', { kind: 'account' }, { principal: { kind: 'agent', id: 'agent-A', name: 'Alpha' }, mode: 'all', notify: 'digest', digestMinutes: 30 });
   clock += 30e3;
-  Wb.failNext = 'rate-limited'; Wb.failSticky = true;
+  Wb.failNext = 'transport'; Wb.failSticky = true;   // lane R5: the failure ladder (a RATE refusal is its own short ladder that never counts — ③d)
   const p1 = await eb.pass('bo', { force: true });
   const recOf = () => eb.adapterRecords().adapters.find((r) => r.id === 'bo');
   const v1 = eb.adapterView(recOf());
-  const fixture = p1.ok === false && p1.why === 'rate-limited' && v1.consecutiveFailures === 1 && Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1];
+  const fixture = p1.ok === false && p1.why === 'transport' && v1.consecutiveFailures === 1 && Number(v1.backoffUntil) === clock + ENG.BACKOFF_MS[1];
   const before = historyCalls(Wb);
   const answers = [];
   for (let i = 0; i < 40; i++) answers.push(await eb.agentRefresh(X, 'bo', `c${String(i).padStart(4, '0')}`));
@@ -615,14 +1153,14 @@ async function backoffBurst(ENGmod, label) {
 }
 {
   const r = await backoffBurst(ENG, 'real');
-  ok(r.fixture, 'FIXTURE: one scripted 429 fails the pass with rate-limited, consecutiveFailures 1, backoffUntil = +30 s');
+  ok(r.fixture, 'FIXTURE: one scripted 503 fails the pass with transport, consecutiveFailures 1, backoffUntil = +30 s');
   const codes = r.answers.reduce((m, a) => { m[a.code || 'ok'] = (m[a.code || 'ok'] || 0) + 1; return m; }, {});
   ok(r.agentCalls === 0 && codes.backoff === 40, `40 agent refreshes over 40 conversations inside the back-off make ZERO vendor calls (${r.agentCalls}) — every one answers code backoff (${JSON.stringify(codes)})`);
   const a0 = r.answers[0];
-  ok(a0.retryAfterSec > 0 && a0.retryAfterSec <= 30 && Number(a0.backoffUntil) === r.backoffAfterAgents && /rate-limited/.test(a0.error) && /retried in \d+ s/.test(a0.error), 'the refusal names the vendor\'s code, the wait and the retry instant', JSON.stringify(a0));
+  ok(a0.retryAfterSec > 0 && a0.retryAfterSec <= 30 && Number(a0.backoffUntil) === r.backoffAfterAgents && /transport/.test(a0.error) && /retried in \d+ s/.test(a0.error), 'the refusal names the vendor\'s code, the wait and the retry instant', JSON.stringify(a0));
   ok(r.failuresAfterAgents === 1, `…and consecutiveFailures stays 1 (${r.failuresAfterAgents}) — the back-off is not escalated by the agent`);
   ok(r.watch.ok && r.watch.fetched === false && r.watchCalls === 0, `a window opened during the back-off is hot but pokes nothing (fetched:false, ${r.watchCalls} calls)`, JSON.stringify(r.watch));
-  ok(r.ownerCalls === 1 && r.owner.ok === false && r.owner.code === 'rate-limited' && r.failuresAfterOwner === 2, `the owner's OWN Refresh press still runs (human-gated: ${r.ownerCalls} call), fails by name and counts as one more failure (${r.failuresAfterOwner})`, JSON.stringify(r.owner));
+  ok(r.ownerCalls === 1 && r.owner.ok === false && r.owner.code === 'transport' && r.failuresAfterOwner === 2, `the owner's OWN Refresh press still runs (human-gated: ${r.ownerCalls} call), fails by name and counts as one more failure (${r.failuresAfterOwner})`, JSON.stringify(r.owner));
   // r4: the failed press answers the wait it just escalated into (Retry-After rides readerAnswer; the toast words it) — a bare "failed" invited the next press
   ok(r.owner.retryAfterSec > 0 && r.owner.retryAfterSec <= ENG.BACKOFF_MS[2] / 1000 && Number(r.owner.backoffUntil) === Number(r.backoffAfterOwner), `…and its answer carries the retry instant of the back-off it escalated into (retry in ${r.owner.retryAfterSec} s)`, JSON.stringify({ owner: r.owner, backoffAfterOwner: r.backoffAfterOwner }));
   const words = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
@@ -749,7 +1287,7 @@ async function run6f({ cell, Wf, SF, ef }) {
   if (state !== 'floor') news();
   // ── the STATE ──
   let release = null, timerPass = null;
-  if (state === 'backoff') { Wf.failNext = 'rate-limited'; Wf.failSticky = true; await ef.pass('tab', { force: true }); }
+  if (state === 'backoff') { Wf.failNext = 'transport'; Wf.failSticky = true; await ef.pass('tab', { force: true }); }   // lane R5: the failure ladder (a rate refusal never counts — ③d)
   if (state === 'budget') SF['channels.budgetTabTestPerMin'] = 1;   // the minute already spent more than that
   if (state === 'share') { SF['channels.budgetTabTestPerMin'] = 200; SF['channels.agentBudgetSharePct'] = 5; for (let i = 30; i < 40; i++) await ef.agentRefresh(X6F, 'tab', `c00${i}`); }   // 5 % (the setting's minimum) of 200 = 10 units: ten agent fetches spend it (the minute's 46 so far are the timer's)
   if (state === 'floor') { await ef.pass('tab', { force: true }); news(); }   // every key fetched THIS instant; the news lands after
@@ -794,7 +1332,7 @@ function expect6f({ state, origin, key }) {
     case 'idle': return ok1;
     case 'timer-not-fetching-key': return ok1;
     case 'timer-fetching-key': return key === 'c0000' ? (agent ? { calls: 1, code: 'refresh-floor' } : { calls: 2, ok: true, appended: 0 }) : ok1;   // the r4 boundary: filed mid-fetch ⇒ judged by the NEXT drain (the floor; the owner's second fetch) — every other key rides the timer's fetch
-    case 'backoff': return agent ? { calls: 0, code: 'backoff' } : { calls: 'one-key', code: 'backoff', pressed: 'rate-limited' };
+    case 'backoff': return agent ? { calls: 0, code: 'backoff' } : { calls: 'one-key', code: 'backoff', pressed: 'transport' };
     case 'budget': return { calls: 0, code: 'vendor-budget' };
     case 'share': return agent ? { calls: 0, code: 'vendor-budget', share: true } : ok1;
     case 'floor': return agent ? { calls: 0, code: 'refresh-floor' } : ok1;

@@ -161,6 +161,26 @@ function toRecord(adapterId, convId, m, { synthetic = false } = {}) {
  * Build one fake adapter MODULE. `receive` picks the axis-1 behaviour; the
  * caps are otherwise the same declaration a real adapter would make.
  */
+/** LANE R5's FIXTURE SEAMS (test-channels-e2e ⑰ boots a server with them;
+ *  nothing else sets them), read ONCE at module load because a declaration
+ *  is static — the POLL fake only:
+ *   VIBESPACE_CHANNELS_FAKE_PACE=<n>   declares `caps.pace` at n requests a
+ *                                       second (drain rule 18 shapes its reads)
+ *   VIBESPACE_CHANNELS_FAKE_VENDOR=<s> declares `caps.vendorName` (the card
+ *                                       says "<s> is limiting the rate")
+ *  and, per adapter at create(), VIBESPACE_CHANNELS_FAKE_RATE_LIMIT=<n>[:<s>]
+ *  = the first n history() calls refuse like Gmail's per-user minute quota,
+ *  carrying Retry-After s. */
+function fakeR5Caps(receive, env = process.env) {
+  if (receive !== 'poll') return {};
+  const out = {};
+  const r = Number(env.VIBESPACE_CHANNELS_FAKE_PACE) || 0;
+  if (r > 0) out.pace = { unitsPerSec: r, settingKey: null, cost: { fetch: 1, discover: 1 } };   // (an unpriced action costs 1)
+  const v = String(env.VIBESPACE_CHANNELS_FAKE_VENDOR || '').trim();
+  if (v) out.vendorName = v.slice(0, 40);
+  return out;
+}
+
 function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.now() }) {
   const caps = {
     receive,
@@ -190,6 +210,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     // R4 (B-6acc): the poll fake can start a NEW conversation (`compose`) —
     // the suites drive the compose verb through it; the push fake is read-only
     compose: receive === 'poll' && sendAs.length > 0,
+    ...fakeR5Caps(receive),
   };
 
   function create(record = {}, deps = {}) {
@@ -201,6 +222,10 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
     const getWorld = () => (world || (world = worldFor(kind, { now: clock(), convs: extraConvs })));
     const meter = typeof deps.meter === 'function' ? deps.meter : () => {};
     const refusedOnce = new Set();   // R3: the `-flaky` pictures refused once already
+    // lane R5's rate seam (see fakeR5Caps): the first n history() calls refuse with the vendor's per-minute words
+    const rateSeam = receive === 'poll' ? String((deps.env || process.env).VIBESPACE_CHANNELS_FAKE_RATE_LIMIT || '') : '';
+    let rateLeft = Number(rateSeam.split(':')[0]) || 0;
+    const rateAfter = Number(rateSeam.split(':')[1]);
     // THE SCAN SOURCE ARRIVES AS `opts.source` ON EVERY history() CALL — the
     // engine resolves it with `scanState()` and hands it down, and the registry
     // refuses a scan-adapter page that carries none. This module used to keep
@@ -262,6 +287,7 @@ function makeFakeAdapter({ kind, receive, sendAs = ['user'], now = () => Date.no
        */
       async history(convId, { anchor = null, limit = 50, source = null, initialMax = null } = {}) {
         meter(1);
+        if (rateLeft > 0) { rateLeft--; const { ChannelError } = require('./index.js'); throw new ChannelError('rate-limited', "fake: Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' (403)", { retryable: true, detail: { status: 403, reason: 'rateLimitExceeded', retryAfterSec: Number.isFinite(rateAfter) && rateAfter > 0 ? rateAfter : null } }); }
         const c = getWorld().get(convId);
         if (!c) return { records: [], anchor: null, reachedAnchor: true, complete: true };
         // `source` is the RESOLVED one the engine handed down (see above).

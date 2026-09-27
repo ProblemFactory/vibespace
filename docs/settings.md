@@ -206,6 +206,8 @@ A linked Lark or Gmail account is an aggregated IM (2026-09-26, docs/design-comm
 | `channels.attachmentBudgetMB` | number | `5120` | Attachment cache per account; least recently opened files go first (64–102400). Files are 0600 and never executed |
 | `channels.budgetLarkPerMin` | number | `60` | Lark requests per minute per account (Lark allows 1000/min per API for the whole app); a spent budget waits for the next minute and the account card says so with the numbers |
 | `channels.budgetGmailPerMin` | number | `3000` | Gmail quota units per minute per account (Gmail allows 6000 per user; a thread read costs 40, a change check 2) |
+| `channels.gmailUnitsPerSec` | number | `40` | Gmail reads are spread evenly: at most this many quota units a second per account (5–100; 40 = one thread read a second), never faster than the per-minute budget allows. Google refuses bursts well inside its per-minute cap; when it does, the account waits a few seconds (the vendor's Retry-After, else 5 s doubling to 60 s) and the card says "Google is limiting the rate · resuming in N s" |
+| `channels.larkRequestsPerSec` | number | `5` | Lark requests are spread evenly: at most this many a second per account (1–50; Lark allows 50/s per API for the whole app), never faster than the per-minute budget allows |
 
 The other Channels settings (push coalescing, the outbox guards, off-hours, the sender line) are in Settings → Channels with their own descriptions.
 

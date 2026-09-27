@@ -24,6 +24,7 @@ import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel 
 import { TEXT_WINDOW } from '../text-window.js';
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
 import { heldText } from './jobs-layout.js';
+import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
@@ -4661,26 +4662,22 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
    * ruling 9). Carries-the-key guarded like every other live fact: a frame
    * that says nothing about the worktree must not clear a badge.
    */
-  /** §3.8 ③: the Browser chip's two facts off the live payload — the profile
-   *  the agent LAST USED (`browserProfileActive`: null never / '' ephemeral /
-   *  id) and the PINNED one (`browserProfileId`). Labels come from the
-   *  client's profile digest; ids the digest does not know print as ids. */
+  /** lane S2 (naive study 2 — three answers to "which browser"): the Browser chip prints THE browser fact the
+   *  server publishes on `active-sessions` (`browserFact`, src/browser-fact.js) in ITS words — which browser this
+   *  conversation uses now, its pin and why they differ. No surface derives its own answer from the raw fields. */
   _onActiveSessions(list) {
     const row = Array.isArray(list) ? list.find((s) => s && s.id === this.sessionId) : null;
     if (!row) return;
-    if (!row.browserKey) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
-    this._browserFacts = { key: row.browserKey, active: row.browserProfileActive === undefined ? null : row.browserProfileActive, pinned: row.browserProfileId || '', input: row.browserInput || null, live: row.browserLive || '', name: row.webuiName || row.name || '' };
+    const fact = row.browserFact || null;
+    if (!fact) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
+    if (this._browserFacts && this._browserFacts.fact.digest === fact.digest) return;
+    this._browserFacts = { fact };
     this._renderBrowserChip();
   }
   _renderBrowserChip() {
     const f = this._browserFacts;
     if (!f) return;
-    // lane H (2026-09-25): the agent's OWN ephemeral browser is named the way its record is —
-    // "(ephemeral) <this session>" — never an anonymous "ephemeral (no profile)" the owner cannot place
-    const ephLabel = t('(ephemeral) {name}', { name: f.name || t('this conversation') });
-    const labelOf = (id) => (id ? ((this.app?._browserProfiles?.profiles || []).find((p) => p.id === id)?.label || id) : ephLabel);
-    const pinnedLabel = f.pinned ? labelOf(f.pinned) : t('ephemeral (no profile)');
-    this._statusBar?.setBrowserProfile?.({ key: f.key, active: f.active, pinned: f.pinned, activeLabel: f.active == null ? null : labelOf(f.active), pinnedLabel, input: f.input || null, live: f.live || '' });
+    this._statusBar?.setBrowserProfile?.({ key: f.fact.key, fact: f.fact, words: browserFactWords(f.fact, t) });
   }
   _onBrowserAction(what, ev) {
     const row = (this.app?.sidebar?._allSessions || []).find((s) => s.webuiId === this.sessionId) || null;

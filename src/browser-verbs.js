@@ -186,6 +186,21 @@ function splitWords(line) {
  *  newer than this table may navigate too). */
 const NAV_VERBS = Object.freeze(['open', 'goto', 'navigate', 'tab', 'window', 'pushstate', 'diff', 'read', 'vitals', 'record', 'a11y']); // 0.38.1: + `a11y [url]`
 const NAV_SET = new Set(NAV_VERBS);
+/** VERIFY S2 r3 (r2 F2): the verbs that would CHANGE WHAT THE USER IS LOOKING AT — another tab or window, another page
+ *  in this tab. Every page verb is refused `browser_paused` by /resolve while the user drives (the keeper's
+ *  `resolveFor`); these are said BY NAME so the agent reads why it must not retry: it would move the user's view. */
+const SWITCH_VERBS = Object.freeze(['tab', 'window', 'open', 'goto', 'navigate', 'nav', 'back', 'forward', 'reload', 'pushstate']);
+const SWITCH_SET = new Set(SWITCH_VERBS);
+/** The extra line a `browser_paused` refusal carries for a switching verb (`tab t2`, `open <url>`…), else null.
+ *  `tab list` only reads and is not one. */
+function pausedSwitchNote(verb, sub = null) {
+  const v = String(verb || '');
+  if (!SWITCH_SET.has(v)) return null;
+  if (v === 'tab' && (sub === 'list' || sub === null)) return null;
+  if (v === 'window' && (sub === 'list' || sub === null)) return null;
+  const what = v === 'tab' || v === 'window' ? `\`${v} ${sub}\` would switch what the user is looking at to another ${v}` : `\`${v}\` would move the page the user is looking at`;
+  return `${what} — refused while they drive, never queued; the handback names the page they left you on, re-orient there`;
+}
 /** Schemes whose pages are the browser's own or this machine's — never the
  *  web. Measured on 0.32.0 + Chrome 153: `open chrome://version` shows the
  *  browser's command line and profile directory, `open file://<that dir>/
@@ -1122,6 +1137,7 @@ module.exports = {
   KEEPER_MARK, // lane H verify r4: the keeper's launch mark (only the keeper writes it)
   // r4
   TABLE_VERSION, versionDrift, NAV_VERBS, localSchemeOf, stateFileVerdict, parseBatchStdin,
+  SWITCH_VERBS, pausedSwitchNote, // verify S2 r3: a paused refusal names a verb that would move the user's view
   // lane L r2
   SECRET_HOME_DIRS, SECRET_DATA_DIRS, secretUploadRoots, uploadPathVerdict,
   // lane L r4

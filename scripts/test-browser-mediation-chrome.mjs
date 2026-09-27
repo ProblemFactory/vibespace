@@ -8,8 +8,8 @@
 //      B holds tab B), raw CDP clients: through B's url `Target.getTargets`
 //      lists only B, `attachToTarget(A)` / `closeTarget(A)` are
 //      target_out_of_scope, B navigates its own tab, a takeover turns B's
-//      navigate / Input.* into browser_paused while `Runtime.evaluate` still
-//      answers, B creates a tab and sees it, `Browser.close` is method_refused,
+//      navigate / Input.* / Runtime.evaluate into browser_interrupted while a
+//      read still answers, B creates a tab and sees it, `Browser.close` is method_refused,
 //      A's page endpoint for B's tab is 403 — and the browser's OWN target
 //      list shows A's tab untouched throughout; revoke closes B's tabs and
 //      leaves A's;
@@ -17,8 +17,16 @@
 //      through its own mediated url in its own namespace: A opens a page, B
 //      opens two; B's `tab list` shows only B's, A's only A's, the browser
 //      holds all three; a takeover of B makes B's `open` and `click` fail
-//      with the typed `browser_paused` INSIDE agent-browser's own JSON while
-//      `get title` still answers; after the handback B works again.
+//      with the typed `browser_interrupted` INSIDE agent-browser's own JSON
+//      (`get title` measured: answered or refused, printed); after the handback B works again.
+//   ⑦ THE OWNER'S RULING (2026-09-27, "直接打断所有脚本和agent操作") on the REAL
+//      0.38.1 + the REAL chrome through a mediated url: an `eval` running a 5 s
+//      busy loop when the takeover lands — the CLI's call is answered
+//      browser_interrupted at once and the loop is MEASURED through the raw
+//      endpoint (terminated: the page answers at once and the loop's last
+//      statement never runs); a `fill` / a `type` caught in flight — measured
+//      (a fill's single insertText that already reached Chrome completes, a
+//      `type` stops mid-word), the agent told browser_interrupted either way.
 //   ③ r1/r2 (takeover): the real binary's own answers the router and the CLI stand
 //      on — every `get … cdp-url` spelling run for real (a boolean flag's optional
 //      true/false included) with the router held to it, `get attr #e cdp-url`
@@ -35,6 +43,14 @@
 //      is refused for (the control); through vibespace-browser each is refused
 //      locally; the stdin batch (bare plain lines are the binary's own `Invalid
 //      JSON input`; through the CLI both forms run).
+//   ⑥ verify S2 r4 (2026-09-27): the CDP CENSUS (src/cdp-census.js) compared against
+//      the launched Chrome's OWN /json/protocol (a newer Chrome's extra methods PRINT
+//      and fail until classified), then every class's representative methods against
+//      a REAL paused lease with the raw endpoint as the oracle: input / view / page-
+//      mutation refused and the page unmoved (the owner's ruling of 2026-09-27: a
+//      stale `fenceScripts` callback reading OFF changes nothing), read / session /
+//      harmless answering, an unknown method refused by name while paused and
+//      forwarded to Chrome's own -32601 after.
 // SKIPs with evidence when no chrome / no agent-browser / a launch fails.
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged
 // by the proxy against a real chrome, never a navigation of VibeSpace's page.
@@ -169,8 +185,8 @@ if (world) {
   await sleep(150);
   ok((await cB.call('Runtime.evaluate', { expression: 'document.title' }, sid)).result.result.value === 'bravo-2', '…and reads the new title');
   paused.b = true;
-  ok(M.refusalCodeOf(await cB.call('Page.navigate', { url: 'data:text/html,<title>x</title>' }, sid)) === 'browser_paused' && M.refusalCodeOf(await cB.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 }, sid)) === 'browser_paused' && M.refusalCodeOf(await cB.call('Input.insertText', { text: 'x' }, sid)) === 'browser_paused', 'while the user holds B: navigate and Input.* are browser_paused');
-  ok((await cB.call('Runtime.evaluate', { expression: 'document.title' }, sid)).result.result.value === 'bravo-2', '…a read still answers, and the page did not move');
+  ok(M.refusalCodeOf(await cB.call('Page.navigate', { url: 'data:text/html,<title>x</title>' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5 }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Input.insertText', { text: 'x' }, sid)) === 'browser_interrupted' && M.refusalCodeOf(await cB.call('Runtime.evaluate', { expression: 'document.title = "x"' }, sid)) === 'browser_interrupted', 'while the user holds B: navigate, Input.* and script evaluation are browser_interrupted');
+  ok((await raw.call('Target.getTargets')).result.targetInfos.find((t) => t.targetId === Bt).title === 'bravo-2', '…and the page did not move (the browser\'s own title, read through the raw endpoint)');
   paused.b = false;
   ok((await cB.call('Target.setDiscoverTargets', { discover: true })).result !== undefined && !cB.events.some((e) => e.method === 'Target.targetCreated' && e.params.targetInfo.targetId === A), 'B turns discovery on and the burst of announcements never names A\'s tab');
   const created = await cB.call('Target.createTarget', { url: 'data:text/html,<title>bravo-new</title>' });
@@ -190,6 +206,77 @@ if (world) {
   const after = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.targetId);
   ok(c2.code === 1008 && closing.closed === 2 && !after.includes(Bt) && !after.includes(C) && after.includes(A), 'revoking B closes its connection 1008 and its TWO tabs in the browser; A\'s tab stays');
   cA.ws.close();
+}
+
+// ═══ ⑥ verify S2 r4 (2026-09-27): THE CENSUS vs the launched Chrome's OWN protocol + the classes' effects on a real paused lease ═══
+console.log('— ⑥ verify r4: the CDP census against this Chrome\'s /json/protocol (extras print and fail); input / view / page-mutation / read / session / harmless / unknown against a REAL paused lease — the fence\'s effect seen through the raw endpoint; the switch');
+if (!world) skip('⑥ needs the real chrome');
+else {
+  const C = M.CENSUS;
+  const proto = await getJson(`http://127.0.0.1:${world.port}/json/protocol`);
+  ok(proto.status === 200 && proto.json && Array.isArray(proto.json.domains) && proto.json.domains.length > 40, '⑥ the launched Chrome answers GET /json/protocol (its own method list)');
+  const cmp = C.compare(proto.json);
+  const cv = (/Chrome\/(\d+\.\d+\.\d+\.\d+)/.exec(world.ver.Browser) || [])[1] || '?';
+  console.log(`  (census ${C.CENSUS_CHROME} vs live Chrome ${cv}: ${cmp.listed} methods listed, ${cmp.rows} rows — ${cmp.unclassified.length} unclassified, ${cmp.stale.length} stale)`);
+  if (cmp.unclassified.length) console.error('  UNCLASSIFIED — this Chrome lists methods the census has no row for (each is refused BY NAME while the user drives until it gets a row in src/cdp-census.js; re-run scripts/cdp-protocol-fetch.mjs for the fixture):\n    ' + cmp.unclassified.join('\n    '));
+  if (cmp.stale.length) console.log('  (stale — rows this Chrome lacks, an older Chrome than the census: ' + cmp.stale.slice(0, 10).join(', ') + (cmp.stale.length > 10 ? ` … +${cmp.stale.length - 10}` : '') + ')');
+  ok(cmp.unclassified.length === 0, `⑥ every method this Chrome (${cv}) lists has a census row — ${cmp.unclassified.length} unclassified (a newer Chrome's methods are PRINTED above and fail here until classified)`);
+  ok(cv !== C.CENSUS_CHROME || cmp.sameSet, `⑥ on the censused Chrome (${C.CENSUS_CHROME}) the table names exactly the protocol's methods (${cmp.stale.length} stale)`);
+  // the fence's OBSERVABLE effect: A's tab under A's grant; the ORACLE is the raw endpoint (never the lease's own fence). The retired r4 switch:
+  // a stale caller still hands a `fenceScripts` callback reading OFF — the grant ignores it (the owner's ruling, 2026-09-27)
+  const fence6 = { on: false };
+  const g6 = await med.grantFor({ profileId: 'bp-0000000a', browserKey: 'bk-0000000a', upstream: world.ver.webSocketDebuggerUrl, paused: () => paused.a, fenceScripts: () => fence6.on });
+  const c6 = cdpClient(g6.url); await c6.open;
+  const s6 = (await c6.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
+  const rs = (await raw.call('Target.attachToTarget', { targetId: A, flatten: true })).result.sessionId;
+  const oracle = async (expr) => { const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs); return r.result && r.result.result ? r.result.result.value : undefined; };
+  const codeOf = (r) => M.refusalCodeOf(r);
+  await c6.call('Page.navigate', { url: 'data:text/html,<title>census</title><input id=i autofocus><script>window.k=0;addEventListener("keydown",()=>{window.k++});</script>' }, s6);
+  await sleep(400);
+  const KEY = { type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, text: 'a' };
+  ok((await c6.call('Input.dispatchKeyEvent', KEY, s6)).result !== undefined && (await oracle('window.k')) === 1, '⑥ not paused: the agent\'s Input.dispatchKeyEvent reaches the page (the oracle counts 1 keydown)');
+  const w0 = await oracle('innerWidth');
+  paused.a = true;
+  // input
+  const ki = await c6.call('Input.dispatchKeyEvent', KEY, s6);
+  ok(codeOf(ki) === 'browser_interrupted' && (await oracle('window.k')) === 1, '⑥ PAUSED · input: Input.dispatchKeyEvent is browser_interrupted and the page saw no keydown (still 1)');
+  // view (the P6 family + a row the old list never had)
+  ok(codeOf(await c6.call('Page.navigate', { url: 'data:text/html,<title>moved</title>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · view: Page.navigate is browser_interrupted and the page did not move (title still "census")');
+  const dm = await c6.call('Emulation.setDeviceMetricsOverride', { width: 300, height: 200, deviceScaleFactor: 1, mobile: false }, s6);
+  ok(codeOf(dm) === 'browser_interrupted' && (await oracle('innerWidth')) === w0, `⑥ PAUSED · view: Emulation.setDeviceMetricsOverride (a row the hand-written list never had) is browser_interrupted and the viewport stayed ${w0} px wide`);
+  const before6 = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').length;
+  ok(codeOf(await c6.call('Target.createTarget', { url: 'about:blank' })) === 'browser_interrupted' && (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').length === before6, '⑥ PAUSED · view: Target.createTarget is browser_interrupted and the browser holds the same number of pages');
+  // page-mutation: refused (the owner's ruling, 2026-09-27 — D6's open door is closed; the stale switch callback reads OFF and changes nothing)
+  const ev = await c6.call('Runtime.evaluate', { expression: 'document.title = "mutated"; document.title', returnByValue: true }, s6);
+  ok(codeOf(ev) === 'browser_interrupted' && /took over this browser/.test(ev.error.message) && !/fenceScriptsWhileDriven/.test(ev.error.message) && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Runtime.evaluate is browser_interrupted and did NOT change the page (title still "census") — the stale switch callback reading OFF re-opens nothing', ev.error && ev.error.message);
+  // read / session / harmless
+  const shot = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
+  ok(shot.result && typeof shot.result.data === 'string' && shot.result.data.length > 100, '⑥ PAUSED · read: Page.captureScreenshot answers with a picture');
+  ok((await c6.call('DOM.getDocument', { depth: 1 }, s6)).result !== undefined && (await c6.call('Page.getLayoutMetrics', {}, s6)).result !== undefined, '⑥ PAUSED · read: DOM.getDocument and Page.getLayoutMetrics answer');
+  ok(((await c6.call('Target.getTargets')).result || {}).targetInfos.map((t) => t.targetId).join() === A, '⑥ PAUSED · session: Target.getTargets answers (the lease\'s own tab only)');
+  ok((await c6.call('Page.enable', {}, s6)).result !== undefined && (await c6.call('Runtime.enable', {}, s6)).result !== undefined, '⑥ PAUSED · harmless: Page.enable / Runtime.enable answer');
+  // unknown: refused BY NAME while the user drives
+  const unk = await c6.call('Page.zzzFutureMethod', {}, s6);
+  ok(codeOf(unk) === 'browser_interrupted' && /Page\.zzzFutureMethod/.test(unk.error.message) && /cdp-census/.test(unk.error.message), '⑥ PAUSED · unknown: a method with no census row is browser_interrupted BY NAME (the refusal names the method and the census file)', unk.error && unk.error.message);
+  ok(codeOf(await c6.call('Network.setCookie', { name: 'vs6', value: '1', url: 'https://example.invalid/' }, s6)) === 'browser_interrupted' && codeOf(await c6.call('DOM.setOuterHTML', { nodeId: 1, outerHTML: '<html></html>' }, s6)) === 'browser_interrupted' && (await oracle('document.title')) === 'census', '⑥ PAUSED · page-mutation: Network.setCookie and DOM.setOuterHTML are browser_interrupted too (the whole class) — the page unchanged');
+  const shot2 = await c6.call('Page.captureScreenshot', { format: 'jpeg', quality: 30 }, s6);
+  ok(shot2.result && typeof shot2.result.data === 'string' && (await c6.call('Runtime.getHeapUsage', {}, s6)).result !== undefined, '⑥ PAUSED · a read (Page.captureScreenshot, Runtime.getHeapUsage) still answers');
+  // the deaf-page arm: refused on a live lease, paused or not
+  ok(codeOf(await c6.call('Input.setIgnoreInputEvents', { ignore: true }, s6)) === 'method_refused', '⑥ Input.setIgnoreInputEvents is method_refused on a live lease while paused…');
+  // handback: everything of the agent's flows again
+  paused.a = false;
+  ok(codeOf(await c6.call('Input.setIgnoreInputEvents', { ignore: true }, s6)) === 'method_refused', '⑥ …and after the handback (refused on every lease)');
+  ok((await c6.call('Input.dispatchKeyEvent', KEY, s6)).result !== undefined && (await oracle('window.k')) === 2, '⑥ handed back: the agent\'s key lands again (the oracle counts 2 — the page was never made deaf)');
+  const ev3 = await c6.call('Runtime.evaluate', { expression: 'document.title = "mutated-3"; document.title', returnByValue: true }, s6);
+  ok(ev3.result && ev3.result.result && ev3.result.result.value === 'mutated-3' && (await oracle('document.title')) === 'mutated-3', '⑥ handed back: Runtime.evaluate goes through (the fence bites only while the user drives)');
+  const dm2 = await c6.call('Emulation.setDeviceMetricsOverride', { width: 300, height: 200, deviceScaleFactor: 1, mobile: false }, s6);
+  await sleep(150);
+  ok(dm2.result !== undefined && (await oracle('innerWidth')) === 300, '⑥ handed back: Emulation.setDeviceMetricsOverride goes through and the viewport is 300 px wide (the view row is honest both ways)');
+  await c6.call('Emulation.clearDeviceMetricsOverride', {}, s6);
+  const unk2 = await c6.call('Page.zzzFutureMethod', {}, s6);
+  ok(codeOf(unk2) === null && unk2.error && unk2.error.code === -32601, `⑥ handed back: the unknown method is FORWARDED and Chrome itself answers ${unk2.error && unk2.error.code} (method not found) — the census fences only while the user drives`, JSON.stringify(unk2).slice(0, 200));
+  try { await raw.call('Target.detachFromTarget', { sessionId: rs }); } catch { /* gone */ }
+  c6.ws.close();
 }
 
 // ═══ ② the real agent-browser as two sessions through two mediated urls ═════
@@ -305,14 +392,81 @@ else if (AB) {
     const po = await ab('d', g2, ['open', 'data:text/html,<title>nope</title>']);
     const pc = await ab('d', g2, ['click', 'body']);
     const pt = await ab('d', g2, ['get', 'title']);
-    ok(!po.ok && po.json && po.json.success === false && /browser_paused/.test(po.json.error) && /Page\.navigate/.test(po.json.error), 'a takeover of D: `open` fails with the typed browser_paused inside agent-browser\'s own JSON');
-    ok(!pc.ok && pc.json && /browser_paused/.test(pc.json.error) && /Input\./.test(pc.json.error), '`click` too (Input.* refused)');
-    ok(pt.ok && pt.json && pt.json.success === true, '…while `get title` still answers (a read)');
+    ok(!po.ok && po.json && po.json.success === false && /browser_interrupted/.test(po.json.error) && /Page\.navigate/.test(po.json.error), 'a takeover of D: `open` fails with the typed browser_interrupted inside agent-browser\'s own JSON', JSON.stringify(po).slice(0, 400));
+    ok(!pc.ok && pc.json && /browser_interrupted/.test(pc.json.error) && /(Input\.|Runtime\.|DOM\.)/.test(pc.json.error), '`click` too (its first fenced call refused)', JSON.stringify(pc).slice(0, 400));
+    // MEASURED (the owner's ruling): `get title` is a read to the agent — on 0.38.1 it is answered from a READ method (it answers) or through script
+    // evaluation (refused browser_interrupted like every script while the user drives); either is honest, and the CLI rung refuses the verb anyway
+    const ptWay = pt.ok && pt.json && pt.json.success === true ? 'answered (a read method)' : (pt.json && /browser_interrupted/.test(String(pt.json.error)) ? 'refused browser_interrupted (0.38.1 reads the title by script)' : null);
+    console.log(`  (measured: \`get title\` while the user drives on ${AB}: ${ptWay || JSON.stringify(pt).slice(0, 300)})`);
+    ok(!!ptWay, '…`get title` is either answered or refused browser_interrupted — never a hang, never a third answer', JSON.stringify(pt).slice(0, 300));
     paused.b = false;
     const after = await ab('d', g2, ['open', 'data:text/html,<title>delta-3</title>']);
     ok(after.ok && after.json && after.json.data && after.json.data.title === 'delta-3', 'handed back: D drives again');
     const cpages = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);
     ok(cpages.includes('charlie') && !cpages.includes('nope'), 'C\'s page was never touched and the refused navigation never happened');
+    // ═══ ⑦ THE OWNER'S RULING (2026-09-27 — "直接打断所有脚本和agent操作") on the REAL binary + the REAL chrome ═══
+    console.log('— ⑦ the owner\'s ruling on the real 0.38.1 + chrome: an `eval` busy loop, a `fill` and a `type` caught in flight by a takeover — the call answered browser_interrupted, the effect MEASURED through the raw endpoint');
+    {
+      paused.e = false;
+      const PID7 = 'bp-0000000c', BK7 = 'bk-0000000e';
+      const g7 = await med.grantFor({ profileId: PID7, browserKey: BK7, upstream: ver.webSocketDebuggerUrl, paused: () => paused.e });
+      const o7 = await ab('e', g7, ['open', 'data:text/html,<title>seven</title><input id=f>']);
+      ok(o7.ok && o7.json && o7.json.data && o7.json.data.title === 'seven', '⑦ session E opens a page through its own mediated url', JSON.stringify(o7).slice(0, 300));
+      const T7 = (await raw.call('Target.getTargets')).result.targetInfos.find((t) => t.type === 'page' && t.title === 'seven');
+      const rs7 = (await raw.call('Target.attachToTarget', { targetId: T7.targetId, flatten: true })).result.sessionId;
+      const probe = async (expr) => { const s = Date.now(); const r = await raw.call('Runtime.evaluate', { expression: expr, returnByValue: true }, rs7); return { v: r.result && r.result.result ? r.result.result.value : undefined, ms: Date.now() - s }; };
+      // a hook on the grant's upstream sends: the daemon's call of interest has JUST left the proxy (it is in flight) when `fire` runs
+      const g7o = med._grant(PID7, BK7);
+      const seen7 = []; let trigger = null;
+      const hook = () => { for (const c of g7o.conns) if (!c.__hooked7) { c.__hooked7 = true; const orig = c.up.send.bind(c.up); c.up.send = (data, ...rest) => { let m = null; try { m = JSON.parse(String(data)); } catch { m = null; } const r = orig(data, ...rest); if (m && m.method) { seen7.push({ method: m.method, id: m.id, at: Date.now(), awaitPromise: !!(m.params && m.params.awaitPromise), internal: m.id > MED.INTERNAL_ID_BASE - 1000 && m.id <= MED.INTERNAL_ID_BASE }); if (trigger && trigger.match(m)) { const t = trigger; trigger = null; t.fire(m); } } return r; }; } };
+      hook();
+      let tk = null; const takeover = (why) => { tk = { at: Date.now(), why }; paused.e = true; tk.r = med.interrupt({ profileId: PID7, browserKey: BK7 }); };
+      // (1) an `eval` RUNNING a 5 s busy loop when the takeover lands (300 ms after its script call left the proxy)
+      const LOOP = '(()=>{const t=Date.now(); while(Date.now()-t<5000){} document.title="loop-finished"; return 1})()';
+      trigger = { match: (m) => /^Runtime\.(evaluate|callFunctionOn)$/.test(m.method) && JSON.stringify(m.params || {}).includes('loop-finished'), fire: (m) => { setTimeout(() => takeover('eval:' + m.method), 300); } };
+      const tEval = Date.now();
+      const ev7 = await ab('e', g7, ['eval', LOOP]);
+      const evDone = Date.now();
+      const pr1 = await probe('document.title');
+      const evCall = seen7.find((x) => /^Runtime\.(evaluate|callFunctionOn)$/.test(x.method) && !x.internal && x.at >= tEval);
+      console.log(`  (measured on ${AB}: \`eval\` = ${evCall ? evCall.method + ' awaitPromise=' + evCall.awaitPromise : '?'}; takeover ${tk ? tk.at - tEval : '?'} ms after the CLI started; the CLI answered ${tk ? evDone - tk.at : '?'} ms after the takeover; the page answered a probe ${pr1.ms} ms after that, title ${JSON.stringify(pr1.v)}; interrupt: ${JSON.stringify(tk && tk.r)})`);
+      ok(!!tk && tk.r.aborted.some((a) => /^Runtime\./.test(a.method)) && tk.r.terminated === 1, '⑦ eval: the takeover found the script call in flight — aborted, and ONE Runtime.terminateExecution sent on its session', JSON.stringify(tk && tk.r));
+      ok(!ev7.ok && ev7.json && ev7.json.success === false && /browser_interrupted/.test(String(ev7.json.error)) && /took over this browser/.test(String(ev7.json.error)) && tk && evDone - tk.at < 2000, `⑦ eval: the real CLI's own JSON carries browser_interrupted (THE sentence) ${tk ? evDone - tk.at : '?'} ms after the takeover — not 5 s later`, JSON.stringify(ev7).slice(0, 400));
+      await sleep(Math.max(0, 5600 - (Date.now() - tEval)));
+      const pr2 = await probe('document.title');
+      const loopOutcome = pr1.ms < 1000 && pr2.v === 'seven' ? 'terminated' : (pr2.v === 'loop-finished' ? 'ran to completion' : `unclear (${JSON.stringify([pr1, pr2])})`);
+      console.log(`  (measured: the 5 s busy loop ${loopOutcome} — the page's title 5.6 s after the CLI started: ${JSON.stringify(pr2.v)}; the browser's answer to terminateExecution: ${JSON.stringify(g7o.lastInterrupt && g7o.lastInterrupt.terminateAnswers)})`);
+      ok(loopOutcome === 'terminated' && JSON.stringify(g7o.lastInterrupt && g7o.lastInterrupt.terminateAnswers) === '["ok"]', `⑦ eval MEASURED: the RUNNING busy loop was terminated — the page answered a probe in ${pr1.ms} ms and the loop's last statement never ran (title still "seven" after 5.6 s); Chrome answered terminateExecution ok`);
+      paused.e = false;
+      const back7 = await ab('e', g7, ['eval', 'document.title']);
+      ok(back7.ok && back7.json && back7.json.data && /seven/.test(JSON.stringify(back7.json.data)), '⑦ handed back: the agent\'s next eval runs (the page is alive)', JSON.stringify(back7).slice(0, 300));
+      // (2) a `fill` caught in flight: the takeover lands the moment its first INPUT call leaves the proxy
+      const LONG = 'x'.repeat(4000);
+      hook();
+      trigger = { match: (m) => /^Input\./.test(m.method), fire: (m) => takeover('fill:' + m.method) };
+      const tFill = Date.now(); tk = null;
+      const fl = await ab('e', g7, ['fill', '#f', LONG]);
+      const fillCalls = seen7.filter((x) => x.at >= tFill && !x.internal).map((x) => x.method);
+      const fv = await probe('document.getElementById("f").value.length');
+      const fillOutcome = fv.v === LONG.length ? 'completed (its Input call had already reached Chrome — it cannot be recalled)' : fv.v === 0 ? 'stopped (nothing typed)' : `stopped part-way (${fv.v} of ${LONG.length} chars)`;
+      console.log(`  (measured on ${AB}: \`fill\` sent ${JSON.stringify(fillCalls.slice(0, 12))}; the takeover landed on ${tk ? tk.why : 'nothing (no Input.* call seen)'}; the input then held ${fv.v} chars — ${fillOutcome})`);
+      ok(!!tk && !fl.ok && /browser_interrupted/.test(String(fl.json && fl.json.error)) && Number.isInteger(fv.v), `⑦ fill MEASURED: caught in flight, the CLI answers browser_interrupted and the field is ${fillOutcome}`, JSON.stringify(fl).slice(0, 300));
+      paused.e = false;
+      await probe('document.getElementById("f").value = ""');
+      // (3) a `type` caught mid-word: the takeover lands after its 20th key left the proxy — the keys after it never reach the page
+      hook();
+      let keys = 0;
+      trigger = { match: (m) => (m.method === 'Input.insertText' || (m.method === 'Input.dispatchKeyEvent' && m.params && (m.params.type === 'keyDown' || m.params.type === 'rawKeyDown'))) && ++keys >= 20, fire: (m) => takeover('type:' + m.method) };
+      const tType = Date.now(); tk = null;
+      const ty = await ab('e', g7, ['type', '#f', 'y'.repeat(300)]);
+      const tv = await probe('document.getElementById("f").value.length');
+      const typeCalls = seen7.filter((x) => x.at >= tType && !x.internal);
+      console.log(`  (measured on ${AB}: \`type\` sent ${typeCalls.length} calls (${[...new Set(typeCalls.map((x) => x.method))].join(', ')}); the takeover landed on ${tk ? tk.why : 'nothing'} after ${keys} keyDowns; the field then held ${tv.v} of 300 chars)`);
+      ok((!!tk && !ty.ok && /browser_interrupted/.test(String(ty.json && ty.json.error)) && tv.v >= 1 && tv.v < 300) || (!tk && keys < 20), `⑦ type MEASURED: cut mid-word — the CLI answers browser_interrupted and the field holds ${tv.v} of 300 chars (the keys after the takeover never reached the page)${!tk ? ' [0.38.1 typed with fewer than 20 key events — nothing to cut]' : ''}`, JSON.stringify(ty).slice(0, 300));
+      paused.e = false;
+      try { await raw.call('Target.detachFromTarget', { sessionId: rs7 }); } catch { /* gone */ }
+      med.revoke({ profileId: PID7, browserKey: BK7 });
+    }
     const ca = await ab('d', g2, ['close', '--all']);
     await sleep(300);
     const kept = (await raw.call('Target.getTargets')).result.targetInfos.filter((t) => t.type === 'page').map((t) => t.title);

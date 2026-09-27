@@ -111,6 +111,11 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // now — '' none, 'ephemeral' its own managed ephemeral browser, else a
   // profile id. The card's Agent browser chip and the status-bar chip read it.
   browserLive: { digest: (v) => v || '' },
+  // lane S2 (naive study 2 — three answers to "which browser"): THE browser fact — which browser this conversation
+  // uses now, its pin and why they differ (src/browser-fact.js; computed ONCE server-side over the keeper's registry).
+  // Every surface prints ITS words (chip, card chip, strip tab, live view title, Session Properties, the pin menu);
+  // the digest is the fact's own projection (a string — never the object, the `[object Object]` trap above)
+  browserFact: { digest: (v) => (v && typeof v === 'object' ? String(v.digest || '') : '') },
   worktree: { digest: (v) => (v ? '1' : '0') },       // owner ruling 9 badge
   worktreePath: { digest: (v) => v || '' },           // …and the path its tooltip names
   // design-unknown-records (2026-09-21): the last VCS fact (git chip) and the

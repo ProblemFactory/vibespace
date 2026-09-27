@@ -22,6 +22,14 @@
  *   · `browserPausedRefusal` — the typed refusal an agent command gets while
  *     the user drives (the `tab_gone` precedent): who took over, when, and
  *     what to do — never a timeout, never a guess.
+ *   · THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27 — "直接打断所有脚本和
+ *     agent操作，告知agent发生了打断，交还时提醒它重新运行"; the words and the cycle are
+ *     PURE src/browser-interrupt.js, re-exported here): `takeoverNotice` /
+ *     `renderTakeoverNotice` = the zero-spend notice the agent reads at its next
+ *     turn ("…; N operations were interrupted: …"), the handback's words carry
+ *     `rerun` ("Re-run what was interrupted: …" — absent when nothing was in flight
+ *     and nothing was refused, so those strings stay byte-identical), and so does
+ *     the idle handback's For-you item.
  *   · `announceVerdict` — §4.3.1's THREE MOMENTS: take-over delivers nothing
  *     (the agent is told by the refusal, free); an EXPLICIT handback delivers
  *     through the ladder (the agent may be idle and only a turn wakes it);
@@ -74,6 +82,9 @@
  * scripts/test-window-target.mjs; the real rung in test-browser-live ⑥.
  */
 
+const INT = require('./browser-interrupt.js'); // PURE: the interruption's words + cycle (the owner's ruling, 2026-09-27)
+// re-exported under their own names (shorthand keeps node's CJS named-export detection whole: the client imports this file as ESM)
+const { INTERRUPTED_CODE, INTERRUPTED_TEXT, inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence } = INT;
 const INPUT_SIDES = Object.freeze(['agent', 'user']);
 // lane H verify r6 LOW 3: `stop` — the browser the takeover was on was STOPPED (a panel Stop while the user drove it): the
 // takeover cannot outlive its browser, so control goes back with the stop (a state change, never a delivered turn)
@@ -182,8 +193,13 @@ function idleHandbackVerdict({ state = null, now = 0, idleMs = DEFAULT_TAKEOVER_
  * §4.3.1's three moments, as one verdict: does THIS handback open a billed
  * turn through the ladder? `announceIdle` = setting browser.announceIdleHandback.
  */
-function announceVerdict({ cause = 'explicit', announceIdle = false } = {}) {
+function announceVerdict({ cause = 'explicit', announceIdle = false, sibling = false, rerun = [] } = {}) {
   const c = HANDBACK_CAUSES.includes(cause) ? cause : 'explicit';
+  // verify r7 (S2, spend): a handback MIRRORED to a sibling conversation (taken WITH the primary — the user never looked at
+  // its view) is delivered only when ITS cycle interrupted or refused something (its agent was told to wait for the handback
+  // that names it); with nothing of its own to re-run, a billed wake would tell an idle agent nothing it needs now — the
+  // zero-spend notice rides its next turn. One click on one view never wakes every conversation leased on the browser.
+  if (c === 'explicit' && sibling && !(Array.isArray(rerun) && rerun.length)) return { deliver: false, reason: null, why: 'a handback mirrored from another conversation\'s view, with nothing of this conversation\'s interrupted or refused: zero-spend — the notice rides its next turn' };
   if (c === 'explicit') return { deliver: true, reason: SPEND_REASON, why: 'an explicit handback is a per-occurrence owner act, and the agent may be idle — only a turn wakes it (it still takes the ceiling)' };
   if (c === 'idle' || c === 'viewer-left') return announceIdle
     ? { deliver: true, reason: SPEND_REASON, why: `browser.announceIdleHandback is ON — a ${c} handback is announced under the same reason and the same ceiling` }
@@ -207,8 +223,10 @@ function browserPausedRefusal({ state = null, label = null, handles = [], now = 
 }
 
 /** The announcement the ladder delivers (a turn the agent is billed for —
- *  say the whole thing once, with the URL first). */
-function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null } = {}) {
+ *  say the whole thing once, with the URL first). `rerun` (the owner's ruling,
+ *  2026-09-27 — "交还时提醒它重新运行") = the verbs the takeover interrupted or
+ *  refused: said LAST, once; absent/empty ⇒ the words are byte-identical to before. */
+function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, target = 'browser', handle = null, rerun = [] } = {}) {
   const tg = targetOf(target);
   const who = whoOf(label, tg);
   const c = HANDBACK_CAUSES.includes(cause) ? cause : 'explicit';
@@ -217,11 +235,13 @@ function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, 
       : c === 'viewer-left' ? `The user closed the live view that held ${who}; control is back with you.`
         : c === 'stop' ? `The user stopped ${who} while they were driving it; control is back with you.`
           : `Control of ${who} is back with you (${c}).`;
+  const again = tg === 'browser' ? INT.rerunSentence(rerun) : '';
+  const tail = again ? ` ${again}` : '';
   // lane H verify r6 LOW 3: a stopped browser has no page to re-orient on — its pages are gone; the next command starts it
-  if (c === 'stop' && tg === 'browser') return `${head} Its open pages are closed — your next browser command starts it again${url ? ` (the user was last on ${url})` : ''}.`;
+  if (c === 'stop' && tg === 'browser') return `${head} Its open pages are closed — your next browser command starts it again${url ? ` (the user was last on ${url})` : ''}.${tail}`;
   if (tg === 'window') return `${head} Snapshot it before continuing (\`vibespace-window snapshot ${handle || '<handle>'}\`) — the window may have changed (something typed, a dialog opened, a different state); refs from before the takeover are stale.`;
   const where = url ? `Current URL: ${url}` : 'Current URL: unknown (read it with `vibespace-browser -- get url`)';
-  return `${head} ${where}. Re-orient before continuing — the page may have changed (a login, a captcha, a navigation).`;
+  return `${head} ${where}. Re-orient before continuing — the page may have changed (a login, a captcha, a navigation).${tail}`;
 }
 
 /**
@@ -264,21 +284,35 @@ function handbackFacts(text) {
 
 /** The zero-spend notice (session-status `pushNotice`, kind `browser-handback`)
  *  that rides the user's own next message when nothing is delivered. */
-function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null } = {}) {
+function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null, rerun = [] } = {}) {
   const tg = targetOf(target);
-  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}) };
+  const again = tg === 'browser' && Array.isArray(rerun) ? rerun.map(String).filter(Boolean).slice(0, 20) : [];
+  return { kind: 'browser-handback', cause: HANDBACK_CAUSES.includes(cause) ? cause : 'idle', label: label || null, url: url || null, heldMs: num(heldMs), idleMs: num(idleMs), at: num(at), ...(tg === 'window' ? { target: tg, handle: handle || null } : {}), ...(again.length ? { rerun: again } : {}) };
 }
 function renderHandbackNotice(n) {
   return '<system-reminder>\n' + handbackText(n || {}) + '\n</system-reminder>';
 }
 
-/** The "For you" item an idle handback files (§4.3.1: "file one item saying the takeover lapsed"). */
-function idleInboxItem({ label = null, idleMs = DEFAULT_TAKEOVER_IDLE_MS, url = '', sessionName = '', target = 'browser' } = {}) {
+/** THE TAKEOVER'S NOTICE (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): zero-spend (session-status
+ *  `pushNotice`, kind `browser-takeover`) — the agent reads it at its next turn; the conversation card carries the
+ *  same words at the takeover (the handback announcer, never the delivery ladder: nothing is billed). */
+function takeoverNotice({ label = null, n = 0, verbs = [], at = 0 } = {}) {
+  return { kind: 'browser-takeover', label: label || null, n: Math.max(0, Math.floor(num(n))), verbs: (Array.isArray(verbs) ? verbs : []).map(String).filter(Boolean).slice(0, 20), at: num(at) };
+}
+function takeoverNoticeText(n) { const x = n || {}; return INT.takeoverText({ label: x.label || null, n: x.n || 0, verbs: x.verbs || [] }); }
+function renderTakeoverNotice(n) {
+  return '<system-reminder>\n' + takeoverNoticeText(n) + '\n</system-reminder>';
+}
+
+/** The "For you" item an idle handback files (§4.3.1: "file one item saying the takeover lapsed"). `rerun` = what the
+ *  takeover interrupted (the owner's ruling, 2026-09-27): the agent is told with the notice; the owner sees the same list. */
+function idleInboxItem({ label = null, idleMs = DEFAULT_TAKEOVER_IDLE_MS, url = '', sessionName = '', target = 'browser', rerun = [] } = {}) {
   const tg = targetOf(target);
   const who = label ? `the "${label}" ${tg}` : `the agent's ${tg}`;
+  const again = tg === 'browser' && Array.isArray(rerun) ? rerun.map(String).filter(Boolean) : [];
   return {
     text: `Your takeover of ${who}${sessionName ? ` (${sessionName})` : ''} lapsed after ${spellDur(idleMs)} without input — the agent is driving again`,
-    detail: `${url ? `Page you left it on: ${url}. ` : ''}Nothing was sent to the agent (browser.announceIdleHandback is off); it learns of the handback when its next ${tg} command succeeds, or with your next message. Take over again from the live view if you were not done.`,
+    detail: `${url ? `Page you left it on: ${url}. ` : ''}Nothing was sent to the agent (browser.announceIdleHandback is off); it learns of the handback when its next ${tg} command succeeds, or with your next message. Take over again from the live view if you were not done.${again.length ? ` Interrupted when you took over — the agent is told to re-run: ${again.join(', ')}.` : ''}`,
     urgency: 'low',
   };
 }
@@ -537,6 +571,9 @@ module.exports = {
   INPUT_SIDES, HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
   inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
   browserPausedRefusal, handbackText, handbackFacts, handbackNotice, renderHandbackNotice, idleInboxItem,
+  // the owner's ruling (2026-09-27): the takeover interrupts, tells, and the handback reminds (PURE browser-interrupt.js)
+  takeoverNotice, takeoverNoticeText, renderTakeoverNotice, INTERRUPTED_CODE, INTERRUPTED_TEXT,
+  inFlightAt, openInterruption, noteRefused, closeInterruption, interruptedVerbs, interruptionView, takeoverText, rerunSentence,
   confirmationFromUpstream, confirmationResolvedFromUpstream, confirmationView, decisionArgv, decisionVerdict,
   agentCursorFromCommand, modeBadge, inputSummary,
   // lane J r2: the keyboard while you drive; stale approvals

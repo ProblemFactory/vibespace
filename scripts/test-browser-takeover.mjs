@@ -38,6 +38,20 @@
 //      /api/agent/browser/resolve answers 409 browser_paused with takenAt.
 //   ⑥ THE SHIPPED CLI: `vibespace-browser -- snapshot` exits 1 and prints
 //      `[browser_paused]` + the waiting instruction (never a retry).
+//   ⑧ THE OWNER'S RULING (2026-09-27, "直接打断所有脚本和agent操作，告知agent发生了
+//      打断，交还时提醒它重新运行"): PURE src/browser-interrupt.js — what was in flight
+//      is a function of the trace ring + the takeover instant (launch / the
+//      recorder's probe are no operation; a result after the instant keeps it in
+//      flight), the cycle (a second takeover merges, never double-counts; the
+//      handback closes it), the words; the REAL recorder's ring + the REAL keeper
+//      (the event carries the trace's verbs, a refused verb joins the re-run list);
+//      the announcer — ONE card (the ladder's card path, kind notification, never a
+//      delivery) + ONE zero-spend notice per cycle, the explicit handback's text
+//      ends "Re-run what was interrupted: …" once, a cycle with nothing in flight
+//      and nothing refused is byte-identical to before, the idle item carries the
+//      list; CONTROL: an announcer copy without the takeover card stays silent. The
+//      shipped CLI end to end (⑥): a verb running when the user takes over prints
+//      [browser_interrupted] and exits 1.
 //   ⑦ lane J r2 (the 2026-09-25 naive-user study): the keyboard while you
 //      drive (ownership / key routes / reserved chords / paste / IME / focus
 //      reclaim / one owner per client, and the focus guards' placement), the
@@ -93,6 +107,7 @@ const out = (o) => { process.stdout.write(JSON.stringify(o) + '\\n'); };
 const argv = process.argv.slice(2).filter((x) => x !== '--pin-tab');
 const [a, b] = argv;
 if (a === '--version') { console.log('agent-browser 0.38.0'); process.exit(0); }
+if (a === 'wait') { setTimeout(() => { out({ success: true, data: { waited: Number(b) || 0 } }); process.exit(0); }, Number(b) || 0); return; }
 if (a === 'session' && b === 'info') { const s = read(); const act = !!(s && alive(s.pid)); out({ success: true, data: { active: act, namespace: ns, pid: act ? s.pid : null, session: process.env.AGENT_BROWSER_SESSION || null, socketDir: path.join(st, ns, 'run'), version: act ? '0.38.0' : null } }); process.exit(0); }
 if (a === 'open') { let s = read(); if (!(s && alive(s.pid))) { const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref(); s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null }; fs.writeFileSync(f, JSON.stringify(s)); fs.appendFileSync(path.join(st, 'launches.log'), JSON.stringify({ ns, ...s }) + '\\n'); } out({ success: true, data: { url: b } }); process.exit(0); }
 if (a === 'get' && b === 'cdp-url') { const s = read(); if (!(s && alive(s.pid))) { out({ success: false, error: 'fake: no browser' }); process.exit(1); } out({ success: true, data: { cdpUrl: 'ws://127.0.0.1:19222/devtools/browser/fake-' + ns } }); process.exit(0); }
@@ -440,10 +455,15 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   settings2['browser.announceIdleHandback'] = false;
   refuse = true;
   const r5 = await ann.announce(ev('explicit'));
-  ok(!r5.delivered && r5.stashed && stashed.length === 1 && stashed[0].cid === 'conv-1' && /Current URL/.test(stashed[0].env.text) && r5.noticed && /spend budget/.test(r5.why), 'a REFUSED delivery loses nothing: stashed on the ladder\'s own stash + the notice queued, the reason journalled');
+  ok(!r5.delivered && r5.stashed && stashed.length === 1 && stashed[0].cid === 'conv-1' && /Current URL/.test(stashed[0].env.text) && !r5.noticed && notices.length === 3 && /spend budget/.test(r5.why), 'a REFUSED delivery loses nothing: stashed on the ladder\'s own stash (the words ride the next prompt), the reason journalled — and NO second carrier (the owner\'s ruling, 2026-09-27: one handback per cycle; the notice rode the same prompt and the agent read it twice)');
+  {
+    const noStash = H.create({ keeper, deliver: { deliverToConversation: deliver.deliverToConversation }, serverSetting: (k) => settings2[k], activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => notices.push({ id, n }), log: { log() { }, warn() { } } });
+    const r5b = await noStash.announce(ev('explicit'));
+    ok(!r5b.delivered && !r5b.stashed && r5b.noticed && notices.length === 4, '…a refused delivery the stash cannot take (no stash on this ladder) is carried by the zero-spend notice instead — never lost');
+  }
   refuse = false;
   const r6 = await ann.announce(ev('explicit', { sessionId: 'sess-noid', browserKey: KEY_B }));
-  ok(!r6.delivered && r6.noticed && /no id yet/.test(r6.why) && delivered.length === 3, 'a conversation with no id yet gets the notice (nothing to deliver into), never a throw — the ladder saw r1, r4 and the REFUSED r5, nothing more');
+  ok(!r6.delivered && r6.noticed && /no id yet/.test(r6.why) && delivered.length === 4, 'a conversation with no id yet gets the notice (nothing to deliver into), never a throw — the ladder saw r1, r4, the REFUSED r5 and r5b, nothing more');
   ok(!(await ann.announce(ev('explicit', { sessionId: 'sess-gone', browserKey: 'bk-deadbeef' }))).delivered, 'no live session ⇒ nothing delivered');
   ok(ann.noteConfirmation({ kind: 'pending', browserKey: KEY_A, sessionId: 'sess-1', profileId: null, confirmation: { id: 'c_1', action: 'download' } }) && /confirm "download"/.test(inbox.at(-1).item.text) && /auto-denies/.test(inbox.at(-1).item.detail), 'a pending confirmation files ONE inbox item pointing at the live view');
   // the declaration, the literal and the census row
@@ -708,7 +728,18 @@ console.log('— ⑤ the routes in-process and ⑥ the shipped CLI\'s refusal');
   ok(dz.status === 409 && dz.json.code === 'browser_paused' && cliD.status === 1 && /\[browser_paused\]/.test(cliD.stderr) && keeper.leasesFor(KEY_A).some((l) => l.profileId === p.id) && keeper.inputStateFor(KEY_A, p.id).input === 'user', 'r2 L8: the agent\'s detach route answers 409 browser_paused and `vibespace-browser detach` exits 1 printing it — the lease and the takeover stand', JSON.stringify({ dz: dz.status, code: dz.json.code, cli: cliD.status, se: cliD.stderr.slice(0, 300) }));
   keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit' });
   const cli2 = await runCli(['watch']);
-  ok(cli2.status === 0 && /browser_paused/.test(cli2.stdout) && /Take over/.test(cli2.stdout), '`watch` explains the takeover contract to the agent');
+  ok(cli2.status === 0 && /browser_paused/.test(cli2.stdout) && /Take over/.test(cli2.stdout) && /INTERRUPTS/.test(cli2.stdout) && /browser_interrupted/.test(cli2.stdout) && /what to re-run/.test(cli2.stdout), '`watch` explains the takeover contract to the agent — a takeover INTERRUPTS (browser_interrupted), the handback names what to re-run');
+  // ⑧ END TO END (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): a verb RUNNING when the user takes over ends
+  // with [browser_interrupted], exit 1 — on the server's clock (the /resolve instant rides the audit)
+  const cliW = runCli(['wait', '1500']);
+  await until(() => keeper.statusFor(KEY_A) && true, 100); await sleep(700);
+  keeper.takeover({ browserKey: KEY_A, profileId: p.id, viewerId: 43, sessionId: 'sess-1' });
+  const w = await cliW;
+  ok(w.status === 1 && /The user took over this browser — your operation was interrupted\. Wait for the handback, then run it again\. \[browser_interrupted\]/.test(w.stderr) && /taken over at:/.test(w.stderr) && /the user still drives/.test(w.stderr) && /not shared instance-wide/.test(w.stderr) && /"waited":1500/.test(w.stdout), '⑧ E2E: `vibespace-browser wait 1500` running when the user takes over prints THE sentence [browser_interrupted], when, that they still drive, that nothing stood between it and the page (it ran to its end) — and exits 1 like any refusal', JSON.stringify({ st: w.status, se: w.stderr.slice(0, 700), so: w.stdout.slice(0, 200) }));
+  keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit' });
+  clock += 1000; // (the keeper's injected clock: this command resolves AFTER that takeover)
+  const w2 = await runCli(['wait', '10']);
+  ok(w2.status === 0 && !/browser_interrupted/.test(w2.stderr), '⑧ …a verb nobody interrupted exits 0 and says nothing of it (a takeover BEFORE its /resolve is not an interruption of it)', w2.stderr.slice(0, 300));
 }
 
 // ═══ ⑦ lane J r2: THE KEYBOARD WHILE YOU DRIVE · STALE APPROVALS · THE PICTURE'S PLACEMENT ═══
@@ -907,6 +938,335 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ok(/approvals: \(\(\) => \{[\s\S]{0,900}HA\.answerFrame\(\{ \.\.\.data, sessionId \}, \{ activeSessions, adapterRegistry, feedLive: N\.feedLive \}, \{ serverDeny: true \}\)/.test(src('src/server/mounts-plugins-wiring.js')) && /activeSessions, adapterRegistry,\n\}\);/.test(src('server.js')),
       'WIRING PIN: the announcer is handed the approvals seam over the one answer (through the ask table\'s lookup, verify r3), and server.js hands the wiring the adapter registry');
   }
+}
+
+// ═══ ⑧ THE OWNER'S RULING (2026-09-27): a takeover interrupts, tells, and the handback reminds ═══
+console.log('— ⑧ the owner\'s ruling: in flight = PURE(trace, instant); one cycle per takeover → handback; one card + one notice at the takeover (free), one re-run reminder at the handback');
+{
+  const I = require('../src/browser-interrupt.js');
+  // PURE: in flight at the instant
+  const log = [];
+  for (const r of [
+    { kind: 'command', id: 'L1', action: 'launch', at: 100 }, { kind: 'result', id: 'L1', action: 'launch', at: 105 },
+    { kind: 'command', id: 'c1', action: 'fill', at: 110 },
+    { kind: 'command', id: 'c2', action: 'navigate', at: 120 }, { kind: 'result', id: 'c2', action: 'navigate', at: 150 },
+    { kind: 'command', id: 'c3', action: 'evaluate', at: 160 },
+    { kind: 'command', id: 'bx', action: 'boundingbox', at: 170 },
+    { kind: 'result', id: 'c3', action: 'evaluate', at: 205 },
+    { kind: 'command', id: 'c4', action: 'click', at: 230 },
+  ]) I.noteRecord(log, r);
+  const at200 = I.inFlightAt(log, 200);
+  ok(at200.map((x) => x.verb).join() === 'fill,eval' && at200.map((x) => x.id).join() === 'c1,c3', '⑧ PURE inFlightAt(ring, 200): fill (no result yet) and eval (its result lands AFTER the instant — the interrupted call\'s own error) were in flight; the finished navigation, the launch pair, the recorder\'s boundingbox probe and a click issued after the instant were not', JSON.stringify(at200));
+  ok(I.inFlightAt(log, 210).map((x) => x.verb).join() === 'fill' && I.inFlightAt(log, 99).length === 0 && I.inFlightAt(log, 231).map((x) => x.verb).join() === 'fill,click', '⑧ …the same ring at other instants answers by the instant alone (a PURE function of the trace + the instant)');
+  ok(log.length === 6 && !log.some((r) => r.action === 'launch' || r.action === 'boundingbox') && I.verbOfAction('navigate') === 'open' && I.verbOfAction('evaluate') === 'eval' && I.verbOfAction('fill') === 'fill', '⑧ the ring keeps no `launch` pair and no probe; the daemon\'s action names read as the verbs the agent typed (navigate → open, evaluate → eval)', JSON.stringify(log));
+  const big = []; for (let i = 0; i < 200; i++) I.noteRecord(big, { kind: 'command', id: 'x' + i, action: 'click', at: i });
+  ok(big.length === 64 && big[0].id === 'x136', '⑧ the ring is bounded (64, oldest out)');
+  // the cycle
+  const o1 = I.openInterruption(null, { takenAt: 200, inFlight: at200, aborted: [{ method: 'Runtime.evaluate', sessionId: 'S' }] });
+  ok(o1.fresh && o1.cycle.takeovers === 1 && I.operationsOf(o1.cycle).n === 2 && I.operationsOf(o1.cycle).verbs.join() === 'fill,eval', '⑧ a takeover OPENS a cycle: the trace\'s operations are what was interrupted (the aborted CDP methods are the same operations, not counted again)');
+  const o2 = I.openInterruption(o1.cycle, { takenAt: 400, inFlight: [{ id: 'c1', verb: 'fill', at: 110 }, { id: 'c9', verb: 'hover', at: 390 }], aborted: [] });
+  ok(!o2.fresh && o2.cycle.takeovers === 2 && I.operationsOf(o2.cycle).n === 3 && I.operationsOf(o2.cycle).verbs.join() === 'fill,eval,hover' && o2.cycle.openedAt === 200, '⑧ a SECOND takeover before the handback MERGES: not fresh (no second card), the same operation (c1) never counted twice');
+  const r1 = I.noteRefused(I.noteRefused(o2.cycle, { verb: 'click', at: 410 }), { verb: 'fill', at: 420 });
+  ok(I.interruptedVerbs(r1).join() === 'fill,eval,hover,click', '⑧ the re-run list: what was interrupted, then what the agent tried meanwhile — each verb once, in order');
+  const closed = I.closeInterruption(r1, { at: 500 });
+  ok(closed.closedAt === 500 && I.noteRefused(closed, { verb: 'scroll' }) === closed && I.openInterruption(closed, { takenAt: 600 }).fresh === true, '⑧ the handback CLOSES it: a closed cycle takes no refusal, the next takeover opens a NEW one');
+  const next = I.openInterruption(closed, { takenAt: 600, inFlight: I.inFlightAt(log, 600) }).cycle;
+  ok(I.operationsOf(next).verbs.join() === 'click' && I.openInterruption(I.closeInterruption(next, { at: 700 }), { takenAt: 800, inFlight: I.inFlightAt(log, 800) }).cycle.inFlight.length === 0, '⑧ a command whose result the trace never got (fill) is told ONCE: the next cycle counts only what it had not counted (click), the one after nothing');
+  ok(I.inFlightAt(log, 110 + I.IN_FLIGHT_MAX_MS).map((x) => x.verb).join() === 'fill,click' && I.inFlightAt(log, 111 + I.IN_FLIGHT_MAX_MS).map((x) => x.verb).join() === 'click', `⑧ a command "in flight" longer than ${I.IN_FLIGHT_MAX_MS / 60000} min at the instant is a lost result, never an interruption`);
+  const onlyCdp = I.openInterruption(null, { takenAt: 1, aborted: [{ method: 'Runtime.evaluate' }, { method: 'Runtime.evaluate' }, { method: 'Input.insertText' }] }).cycle;
+  ok(I.operationsOf(onlyCdp).n === 2 && I.operationsOf(onlyCdp).verbs.join() === 'Runtime.evaluate,Input.insertText' && I.interruptedVerbs(I.openInterruption(null, { takenAt: 1 }).cycle).length === 0 && I.interruptedVerbs(null).length === 0, '⑧ with no trace of the browser the aborted methods name what was cut; nothing in flight and nothing refused ⇒ an empty re-run list');
+  // the words
+  ok(I.takeoverText({ label: 'Work', n: 2, verbs: ['fill', 'eval'] }) === 'The user took over the "Work" browser; 2 operations were interrupted: fill, eval. Wait for the handback, then run them again.' && I.takeoverText({ n: 1, verbs: ['eval'] }) === 'The user took over your browser; 1 operation was interrupted: eval. Wait for the handback, then run it again.' && I.takeoverText({ label: 'Work' }) === 'The user took over the "Work" browser; nothing of yours was running there. Wait for the handback before using it again.', '⑧ the takeover\'s words: the browser, how many, which — or that nothing was running');
+  ok(I.rerunSentence([]) === '' && I.rerunSentence(['fill', 'eval', 'fill']) === 'Re-run what was interrupted: fill, eval — read the page first; refs from before the takeover are stale.' && I.INTERRUPTED_TEXT === 'The user took over this browser — your operation was interrupted. Wait for the handback, then run it again.' && T.INTERRUPTED_TEXT === I.INTERRUPTED_TEXT && T.INTERRUPTED_CODE === 'browser_interrupted', '⑧ the re-run sentence (empty when there is nothing), THE interrupted sentence (one spelling, re-exported by the takeover model)');
+  const base = { cause: 'explicit', label: 'Work', url: 'https://x.test/p', heldMs: 12000 };
+  ok(T.handbackText(base) === T.handbackText({ ...base, rerun: [] }) && T.handbackText({ ...base, rerun: ['fill', 'eval'] }) === T.handbackText(base) + ' Re-run what was interrupted: fill, eval — read the page first; refs from before the takeover are stale.', '⑧ the handback\'s words: byte-identical when nothing is to re-run; otherwise the reminder is said LAST, once');
+  ok(T.handbackText({ ...base, target: 'window', handle: 'w1', rerun: ['fill'] }) === T.handbackText({ ...base, target: 'window', handle: 'w1' }) && /Its open pages are closed[\s\S]*Re-run what was interrupted: fill/.test(T.handbackText({ ...base, cause: 'stop', rerun: ['fill'] })), '⑧ a window target carries no browser re-run list; a STOP handback still names what to re-run');
+  const hn = T.handbackNotice({ cause: 'idle', label: 'Work', rerun: ['eval'] });
+  ok(hn.rerun.join() === 'eval' && /Re-run what was interrupted: eval/.test(T.renderHandbackNotice(hn)) && !('rerun' in T.handbackNotice({ cause: 'idle' })), '⑧ the zero-spend handback notice carries the list (absent when empty) and renders it');
+  const ii = T.idleInboxItem({ label: 'Work', rerun: ['fill', 'eval'] });
+  ok(/Interrupted when you took over — the agent is told to re-run: fill, eval\./.test(ii.detail) && !/Interrupted/.test(T.idleInboxItem({ label: 'Work' }).detail), '⑧ the idle handback\'s For-you item carries the same list (and says nothing of it when empty)');
+  const tn = T.takeoverNotice({ label: 'Work', n: 2, verbs: ['fill', 'eval'], at: 5 });
+  const SS = require('../src/session-status.js');
+  ok(tn.kind === 'browser-takeover' && T.renderTakeoverNotice(tn) === '<system-reminder>\n' + I.takeoverText({ label: 'Work', n: 2, verbs: ['fill', 'eval'] }) + '\n</system-reminder>' && SS.NOTICE_KINDS.includes('browser-takeover'), '⑧ the takeover\'s zero-spend notice is a registered kind (session-status) rendering the same words');
+  { fs.mkdirSync(path.join(ROOT, 'status8'), { recursive: true }); const st = new SS.SessionStatusManager({ dataDir: path.join(ROOT, 'status8'), onChange: () => { } }); st.pushNotice('k8', tn); const got = st.consumeNotices('k8'); ok(got.length === 1 && SS.SessionStatusManager.renderNotices(got).includes('2 operations were interrupted: fill, eval'), '⑧ …pushNotice accepts it and the prompt-context renderer says it'); }
+  // the REAL recorder's ring + the REAL keeper: the takeover event carries the trace's verbs; a refused verb joins the re-run list
+  const R = require('../src/server/browser-trace.js');
+  const rec = R.create({ dataDir: path.join(ROOT, 'trace8'), homeDir: HOME, keeper, bridge: { tap: async () => ({ ok: false }) }, serverSetting: () => undefined, log: { log() { }, warn() { } }, now: () => clock }); // ONE clock with the keeper (production: both Date.now)
+  rec.install();
+  const p8 = keeper.profile(keeper.list().profiles[0].id);
+  const tp = { key: `sess-1|${p8.id}`, sessionId: 'sess-1', profileId: p8.id, browserKey: KEY_A, pending: new Map(), frames: [], timers: new Set(), ops: [], lastUrl: '', entries: 0 };
+  rec._taps.set(tp.key, tp);
+  const t8 = clock;
+  rec._onRecord(tp, { type: 'command', id: 'k1', action: 'launch' }); rec._onRecord(tp, { type: 'result', id: 'k1', action: 'launch' });
+  rec._onRecord(tp, { type: 'command', id: 'k2', action: 'fill', params: { selector: '@e1', value: 'x' } });
+  rec._onRecord(tp, { type: 'command', id: 'k3', action: 'evaluate', params: {} });
+  const ev8 = []; const unsub8 = keeper.onInput((e) => ev8.push(e));
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 81, sessionId: 'sess-1' });
+  const tk8 = ev8.find((e) => e.kind === 'takeover');
+  ok(tk8 && tk8.interruption.fresh && tk8.interruption.n === 2 && tk8.interruption.verbs.join() === 'fill,eval' && keeper.interruptionOf(KEY_A, p8.id).n === 2, '⑧ REAL recorder + keeper: the takeover event carries what the TRACE saw in flight (fill, eval — the launch pair is no operation)', JSON.stringify(tk8 && tk8.interruption));
+  keeper.resolveFor({ browserKey: KEY_A, verb: 'click' });
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 82, sessionId: 'sess-1', holderAlive: false });
+  ok(ev8.filter((e) => e.kind === 'takeover').length === 2 && ev8.filter((e) => e.kind === 'takeover')[1].interruption.fresh === false && keeper.interruptionOf(KEY_A, p8.id).n === 2, '⑧ a second viewer\'s takeover before the handback: not fresh, still 2 (no double count)');
+  const hb8 = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/8', sessionId: 'sess-1' });
+  ok(hb8.rerun.join() === 'fill,eval,click' && ev8.find((e) => e.kind === 'handback').rerun.join() === 'fill,eval,click' && keeper.interruptionOf(KEY_A, p8.id) === null, '⑧ the handback carries the re-run list (what was cut + what was refused) and closes the cycle');
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 83, sessionId: 'sess-1' });
+  const hb8b = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', sessionId: 'sess-1' });
+  ok(hb8b.rerun.length === 0 && ev8.filter((e) => e.kind === 'takeover')[2].interruption.fresh === true && ev8.filter((e) => e.kind === 'takeover')[2].interruption.n === 0, '⑧ the next cycle starts fresh: nothing in flight (the old operations are not re-counted), nothing to re-run');
+  unsub8();
+  ok(clock === t8, '(the injected clock did not move)');
+  // THE ANNOUNCER: one card + one zero-spend notice per cycle, one reminder at the handback
+  const delivered = [], cards = [], notices = [], inbox = [];
+  const deliver = { deliverToConversation: async (cid, text, opts) => { delivered.push({ cid, text, opts }); return { ok: true, via: 'cli-inbox' }; }, stashFor: () => { }, emitPeerCard: (cid, card) => { cards.push({ cid, card }); } };
+  const active = new Map([['sess-1', { _browserKey: KEY_A, claudeSessionId: 'conv-8', name: 'eight' }]]);
+  const ann = H.create({ keeper, deliver, serverSetting: () => undefined, userTodos: { add: (key, item) => inbox.push({ key, item }) }, activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => notices.push({ id, n }), log: { log() { }, warn() { } } });
+  ann.install();
+  rec._onRecord(tp, { type: 'command', id: 'k5', action: 'fill', params: {} });
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 84, sessionId: 'sess-1' });
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 85, sessionId: 'sess-1', holderAlive: false });
+  ok(cards.length === 1 && cards[0].cid === 'conv-8' && cards[0].card.fromName === H.FROM_NAME && cards[0].card.kind === 'notification' && /^The user took over the "Work" browser; 1 operation was interrupted: fill\. /.test(cards[0].card.text) && delivered.length === 0, '⑧ the takeover TELLS: ONE conversation card per cycle (the second viewer\'s takeover says nothing more), VibeSpace\'s sender, kind notification — and NOTHING is delivered (no billed turn)', JSON.stringify(cards));
+  ok(notices.filter((x) => x.n.kind === 'browser-takeover').length === 1 && notices[0].n.verbs.join() === 'fill' && notices[0].id === 'sess-1', '⑧ …and ONE zero-spend `browser-takeover` notice the agent reads at its next turn');
+  keeper.resolveFor({ browserKey: KEY_A, verb: 'snapshot' });
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/done', sessionId: 'sess-1' });
+  await until(() => delivered.length === 1, 2000);
+  ok(delivered.length === 1 && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && delivered[0].text.endsWith('Re-run what was interrupted: fill, snapshot — read the page first; refs from before the takeover are stale.') && (delivered[0].text.match(/Re-run what was interrupted/g) || []).length === 1, '⑧ the EXPLICIT handback is delivered ONCE under browser-handback (the spend site unchanged) and ends with ONE re-run reminder: what was cut, then what was refused', delivered[0] && delivered[0].text);
+  // a cycle with NOTHING in flight and nothing refused: the handback is byte-identical to before
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 86, sessionId: 'sess-1' });
+  ok(cards.length === 2 && /nothing of yours was running there/.test(cards[1].card.text), '⑧ a takeover with nothing in flight still tells (a card saying nothing was running)');
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/idle', sessionId: 'sess-1' });
+  await until(() => delivered.length === 2, 2000);
+  ok(delivered.length === 2 && delivered[1].text === T.handbackText({ cause: 'explicit', label: 'Work', url: 'https://x.test/idle', heldMs: 0 }) && !/Re-run/.test(delivered[1].text), '⑧ …and its handback carries NO re-run sentence (byte-identical to the pre-ruling words)', delivered[1] && delivered[1].text);
+  // idle: the For-you item and the notice carry the list
+  rec._onRecord(tp, { type: 'command', id: 'k6', action: 'evaluate', params: {} });
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 87, sessionId: 'sess-1' });
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'idle', url: 'https://x.test/lapsed', sessionId: 'sess-1' });
+  await until(() => inbox.length === 1, 2000);
+  const hbN = notices.filter((x) => x.n.kind === 'browser-handback').at(-1);
+  ok(inbox.length === 1 && /re-run: eval\./.test(inbox[0].item.detail) && hbN && hbN.n.rerun.join() === 'eval' && delivered.length === 2, '⑧ an IDLE handback: nothing delivered, the For-you item and the zero-spend notice carry the re-run list (eval — the fill whose result the trace never got was told at the earlier cycle, never again)', JSON.stringify([inbox[0] && inbox[0].item.detail, hbN && hbN.n]));
+  ann.shutdown();
+  // the wired card path: the LIVE session's chat (normalizers.feedPeerCard) — a conversation with NO id yet still sees the card
+  {
+    const N = require('../src/normalizers.js');
+    const got = [];
+    const sNoId = { _browserKey: KEY_A, name: 'no-id', _normalizer: { injectPeerCard: (c) => got.push(c) } };
+    const activeN = new Map([['sess-1', sNoId]]);
+    const annN = H.create({ keeper, deliver: { deliverToConversation: async () => ({ ok: false, reason: 'x' }) }, emitCard: (session, card) => N.feedPeerCard(session, card), serverSetting: () => undefined, activeSessions: activeN, sessionKeyFor: (s, id) => 'key:' + id, notice: () => { }, log: { log() { }, warn() { } } });
+    const out = annN.announceTakeover({ kind: 'takeover', browserKey: KEY_A, profileId: p8.id, sessionId: 'sess-1', cause: null, interruption: { fresh: true, n: 1, verbs: ['eval'] } });
+    ok(out.carded && got.length === 1 && got[0].fromName === H.FROM_NAME && got[0].kind === 'notification' && /1 operation was interrupted: eval/.test(got[0].text) && /emitCard: \(session, card\) => require\('\.\.\/normalizers'\)\.feedPeerCard\(session, card\)/.test(fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8')), '⑧ WIRED: the takeover card goes into the LIVE session\'s chat (normalizers.feedPeerCard, display only) — a conversation with no id yet sees it too', JSON.stringify(got));
+  }
+  // CONTROL: an announcer copy without the takeover card (the pre-ruling announcer: take-over "delivers nothing") stays silent
+  const REPO8 = path.resolve(REPO);
+  const M8 = mutantCopies('takeover-interrupt', REPO8);
+  const hsrc = fs.readFileSync(path.join(REPO8, 'src/server/browser-handback.js'), 'utf8');
+  const hAnchor = "      if (ev.kind === 'takeover') { try { announceTakeover(ev); } catch (e) { log.warn?.(`[browser] takeover announce failed — ${e && e.message}`); } return; }\n";
+  ok(hsrc.split(hAnchor).length === 2, '⑧ control setup: the takeover moment is wired once');
+  const Hc = M8.load('src/server/browser-handback.js', hsrc.replace(hAnchor, ''), 'no-takeover-card');
+  const cardsC = [], noticesC = [];
+  const annC = Hc.create({ keeper, deliver: { ...deliver, emitPeerCard: (cid, card) => cardsC.push(card) }, serverSetting: () => undefined, activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => noticesC.push(n), log: { log() { }, warn() { } } });
+  annC.install();
+  rec._onRecord(tp, { type: 'command', id: 'k7', action: 'fill', params: {} });
+  keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 88, sessionId: 'sess-1' });
+  ok(cardsC.length === 0 && noticesC.length === 0, '⑧ CONTROL (the pre-ruling announcer: the takeover moment wired out, in a copy): the fill it cut is told to NOBODY — no card, no notice; the wiring is the telling');
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'viewer-left', sessionId: 'sess-1' });
+  annC.shutdown();
+  for (const r of copiesCensus(M8.files, M8.dir, REPO8, { minCopies: 1, label: '⑧ ' })) ok(r.pass, r.name, r.detail);
+  rec.shutdown();
+}
+
+// ═══ ⑨ VERIFY r6 (S2): a takeover is of the BROWSER — the sibling conversations on a shared profile; the audit join; the terminate count ═══
+console.log('— ⑨ verify r6: every conversation leased on the taken browser is taken over WITH it (its own cycle, card, reminder); the audit joins only an OPEN cycle; a page script stopped is said');
+{
+  const KEY_S1 = 'bk-00000091', KEY_S2 = 'bk-00000092', KEY_S3 = 'bk-00000093';
+  const set9 = { 'browser.takeoverIdleMs': 30000, 'browser.idleTimeoutMs': 600000 };
+  const logs9 = [];
+  const k9 = K.create({ dataDir: path.join(ROOT, 'data9'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2, KEY_S3]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log: (l) => logs9.push(String(l)), warn() { }, error() { } }, now, install: false });
+  const ev9 = []; k9.onInput((e) => ev9.push(e));
+  const shared = k9.createProfile({ label: 'Shared9' }, { owner: { kind: 'instance', id: null } }); // an owner-shared (cooperative) profile: three conversations may lease it
+  await k9.attach({ profileId: shared.id, browserKey: KEY_S1, sessionId: 'sess-91' });
+  await k9.attach({ profileId: shared.id, browserKey: KEY_S2, sessionId: 'sess-92' });
+  await k9.attach({ profileId: shared.id, browserKey: KEY_S3, sessionId: 'sess-93' });
+  const own = k9.createProfile({ label: 'Own9' }, { owner: { kind: 'session', id: KEY_S1 } });
+  await k9.attach({ profileId: own.id, browserKey: KEY_S1, sessionId: 'sess-91' });
+  // the real recorder: S2's fill is in flight when S1's user takes over
+  const R9 = require('../src/server/browser-trace.js');
+  const rec9 = R9.create({ dataDir: path.join(ROOT, 'trace9'), homeDir: HOME, keeper: k9, bridge: { tap: async () => ({ ok: false }) }, serverSetting: () => undefined, log: { log() { }, warn() { } }, now: () => clock });
+  rec9.install();
+  const tp92 = { key: `sess-92|${shared.id}`, sessionId: 'sess-92', profileId: shared.id, browserKey: KEY_S2, pending: new Map(), frames: [], timers: new Set(), ops: [], lastUrl: '', entries: 0 };
+  rec9._taps.set(tp92.key, tp92);
+  rec9._onRecord(tp92, { type: 'command', id: 'f1', action: 'fill', params: {} });
+  // the announcer over the three sessions
+  const cards9 = [], notices9 = [], delivered9 = [];
+  const active9 = new Map([['sess-91', { _browserKey: KEY_S1, claudeSessionId: 'conv-91', name: 'one' }], ['sess-92', { _browserKey: KEY_S2, claudeSessionId: 'conv-92', name: 'two' }], ['sess-93', { _browserKey: KEY_S3, claudeSessionId: 'conv-93', name: 'three' }]]);
+  const ann9 = H.create({ keeper: k9, deliver: { deliverToConversation: async (cid, text, opts) => { delivered9.push({ cid, text, opts }); return { ok: true, via: 'x' }; }, stashFor: () => { }, emitPeerCard: (cid, card) => cards9.push({ cid, card }) }, serverSetting: () => undefined, activeSessions: active9, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => notices9.push({ id, n }), log: { log() { }, warn() { } } });
+  ann9.install();
+  const t9 = k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 911, sessionId: 'sess-91' });
+  const st2 = k9.inputStateFor(KEY_S2, shared.id), st3 = k9.inputStateFor(KEY_S3, shared.id);
+  ok(t9.ok && st2.input === 'user' && st2.takenBy.viewerId === 911 && st3.input === 'user' && st3.takenBy.viewerId === 911, '⑨ the siblings (S2, S3) are taken over WITH S1 by the same viewer — a takeover is of the BROWSER', JSON.stringify({ st2, st3 }));
+  const heldS3 = k9.takeover({ browserKey: KEY_S3, profileId: shared.id, viewerId: 933, sessionId: 'sess-93' });
+  ok(!heldS3.ok && heldS3.code === 'held' && heldS3.holder.viewerId === 911, '⑨ S3\'s own viewer clicking Take over now is `held` (one user drives one browser — never taken from them)');
+  ok(k9.inputStateFor(KEY_S1, own.id).input === 'agent', '⑨ S1\'s OTHER profile (its own) is untouched — the takeover is of the shared browser, not of the conversation');
+  const tk2 = ev9.find((e) => e.kind === 'takeover' && e.browserKey === KEY_S2);
+  ok(tk2 && tk2.sibling === KEY_S1 && tk2.sessionId === 'sess-92' && tk2.interruption.fresh && tk2.interruption.n === 1 && tk2.interruption.verbs.join() === 'fill', '⑨ the sibling\'s takeover event names the primary (`sibling`), its own session, and what the TRACE saw in flight for IT (fill)', JSON.stringify(tk2 && tk2.interruption));
+  ok(cards9.filter((c) => c.cid === 'conv-92').length === 1 && /1 operation was interrupted: fill/.test(cards9.find((c) => c.cid === 'conv-92').card.text) && cards9.filter((c) => c.cid === 'conv-91').length === 1 && /nothing of yours was running/.test(cards9.find((c) => c.cid === 'conv-91').card.text) && cards9.filter((c) => c.cid === 'conv-93').length === 1 && /nothing of yours was running/.test(cards9.find((c) => c.cid === 'conv-93').card.text), '⑨ each conversation gets ITS OWN card: S2\'s names S2\'s fill, S1\'s and S3\'s say nothing of theirs was running', JSON.stringify(cards9.map((c) => c.cid + ':' + c.card.text.slice(0, 60))));
+  ok(notices9.filter((x) => x.n.kind === 'browser-takeover' && x.id === 'sess-92').length === 1, '⑨ …and its own zero-spend notice');
+  // a FOURTH conversation attaching while the user drives is paused from birth (it joins the takeover; its own card)
+  const KEY_S4 = 'bk-00000094';
+  active9.set('sess-94', { _browserKey: KEY_S4, claudeSessionId: 'conv-94', name: 'four' }); // the announcer reads the live map
+  await k9.attach({ profileId: shared.id, browserKey: KEY_S4, sessionId: 'sess-94' });
+  const st4 = k9.inputStateFor(KEY_S4, shared.id);
+  ok(st4.input === 'user' && st4.takenBy.viewerId === 911 && !k9.resolveFor({ browserKey: KEY_S4, verb: 'open' }).ok && cards9.some((c) => c.cid === 'conv-94' && /nothing of yours was running/.test(c.card.text)) && logs9.some((l) => /bk-00000094 on .*: attached while the user drives this browser \(from bk-00000091/.test(l)), '⑨ a conversation ATTACHING while the user drives is paused from birth (the same viewer), refused at /resolve, told by its own card — never a fresh seat beside the user', JSON.stringify({ st4, r: k9.resolveFor({ browserKey: KEY_S4, verb: 'open' }).code }));
+  const r2 = k9.resolveFor({ browserKey: KEY_S2, verb: 'click' });
+  const r1 = k9.resolveFor({ browserKey: KEY_S1, handle: shared.id, verb: 'scroll' }); // S1 holds two attachments: the shared one by handle
+  ok(!r2.ok && r2.code === 'browser_paused' && !r1.ok && r1.code === 'browser_paused', '⑨ while the user drives, BOTH conversations\' page verbs are refused browser_paused (each noted on its OWN cycle)');
+  ok(logs9.some((l) => /bk-00000092 on .*: taken over WITH bk-00000091/.test(l)), '⑨ the journal says the sibling was taken over WITH the primary');
+  // the idle clock is the holder's: S1's input at +29 s keeps S2 too; both lapse together at +31 s after the last input
+  clock += 29000; k9.noteUserInput(KEY_S1, shared.id, clock); await k9.tick();
+  ok(k9.inputStateFor(KEY_S2, shared.id).input === 'user' && k9.inputStateFor(KEY_S2, shared.id).lastUserInputAt === clock, '⑨ the holder\'s input restarts the SIBLING\'s idle clock too (one user drives one browser)');
+  // a pass (fold-back) moves the holder of the siblings with it
+  const ps = k9.passControl({ browserKey: KEY_S1, profileId: shared.id, from: 911, to: 912, sessionId: 'sess-91' });
+  ok(ps.ok && [KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).takenBy.viewerId === 912), '⑨ a pass (fold-back) moves every sibling\'s holder with the primary\'s');
+  // the handback from S1's view hands the sibling back too — each with ITS OWN reminder (S2's fill + click; never S1's scroll)
+  const hb1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91' });
+  await until(() => delivered9.length === 3, 2000);
+  const d2 = delivered9.find((d) => d.cid === 'conv-92'), d1 = delivered9.find((d) => d.cid === 'conv-91');
+  // verify r7 (spend): S3 had NOTHING interrupted or refused — its mirrored handback is the zero-spend notice, never a billed wake
+  ok(hb1.ok && hb1.rerun.join() === 'scroll' && [KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).input === 'agent') && delivered9.length === 3 && !delivered9.some((d) => d.cid === 'conv-93') && notices9.some((x) => x.id === 'sess-93' && x.n.kind === 'browser-handback'), '⑨ the handback from S1\'s view hands every sibling back with it — four conversations, THREE delivered (S1 the primary, S2 with its cut fill, S4 with its refused open — each through the one ladder site); S3, with nothing of its own to re-run, gets the zero-spend notice (verify r7)', JSON.stringify({ delivered: delivered9.map((d) => d.cid), notices: notices9.filter((x) => x.n.kind === 'browser-handback').map((x) => x.id) }));
+  ok(d2 && /Re-run what was interrupted: fill, click/.test(d2.text) && !/scroll/.test(d2.text) && d1 && /Re-run what was interrupted: scroll/.test(d1.text) && !/fill/.test(d1.text) && d2.opts.spendReason === 'browser-handback', '⑨ each conversation is reminded of ITS OWN verbs through the SAME ladder site (browser-handback) — S2: fill, click; S1: scroll; nothing crosses', JSON.stringify(delivered9.map((d) => d.cid + ': ' + d.text.slice(-90))));
+  const hb2 = ev9.find((e) => e.kind === 'handback' && e.browserKey === KEY_S2);
+  ok(hb2 && hb2.cause === 'explicit' && hb2.sessionId === 'sess-92' && hb2.rerun.join() === 'fill,click', '⑨ the sibling\'s handback event carries its own session and re-run list');
+  // an ephemeral key has no siblings; a `stop` of the profile hands every state back once
+  ok(k9.takeover({ browserKey: KEY_S1, profileId: null, viewerId: 950, sessionId: 'sess-91' }).ok && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', '⑨ a takeover of the conversation\'s EPHEMERAL browser takes no sibling (an ephemeral record is one conversation\'s)');
+  k9.handback({ browserKey: KEY_S1, profileId: null, viewerId: 950, cause: 'explicit', sessionId: 'sess-91' });
+  // THE AUDIT JOIN (r5's fix, r6 pinned): a verb whose audit lands AFTER the handback joins nothing (order A) — the CLI's own
+  // line says control is back; one whose audit lands while the user drives AGAIN joins that OPEN cycle (order B) — the CLI's
+  // line said "wait for the handback (it names what to re-run)", so it does, once; the same audit repeated names it once
+  {
+    const since = clock; clock += 5;
+    k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 960, sessionId: 'sess-91' }); clock += 5;
+    const h1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 960, cause: 'explicit', sessionId: 'sess-91' }); clock += 2000;
+    const auA = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since, verb: 'fill' }); clock += 1000;
+    k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 961, sessionId: 'sess-91' }); clock += 5;
+    const h2 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 961, cause: 'explicit', sessionId: 'sess-91' }); clock += 5;
+    ok(auA && auA.handedBackAt > 0 && h1.rerun.length === 0 && h2.rerun.length === 0, '⑨ order A: the audit says interrupted + handed back; it joins NEITHER the closed cycle nor the next one');
+    const since2 = clock; clock += 5;
+    k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 962, sessionId: 'sess-91' }); clock += 5;
+    const h3 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 962, cause: 'explicit', sessionId: 'sess-91' }); clock += 1000;
+    k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 963, sessionId: 'sess-91' }); clock += 5;
+    const auB = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since: since2, verb: 'fill' });
+    const auB2 = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since: since2, verb: 'fill' }); clock += 5;
+    const h4 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 963, cause: 'explicit', sessionId: 'sess-91' }); clock += 5;
+    ok(auB && auB.input === 'user' && auB.handedBackAt === 0 && auB2 && h3.rerun.length === 0 && h4.rerun.join() === 'fill', '⑨ order B: an audit landing while the user drives AGAIN joins that OPEN cycle (the CLI said the handback names it) — once, even audited twice');
+  }
+  // `terminated` in the view: one per CDP session that had an aborted SCRIPT call (the mediator's plan) — the toast's "a script running in the page was stopped"
+  const I9 = require('../src/browser-interrupt.js');
+  const v9 = I9.interruptionView(I9.openInterruption(null, { takenAt: 1, aborted: [{ method: 'Runtime.evaluate', sessionId: 'S1' }, { method: 'Input.insertText', sessionId: 'S1' }, { method: 'Runtime.callFunctionOn', sessionId: 'S1' }, { method: 'Runtime.evaluate', sessionId: 'S2' }, { method: 'Page.reload', sessionId: 'S3' }] }).cycle);
+  ok(v9.terminated === 2 && I9.interruptionView(I9.openInterruption(null, { takenAt: 1, aborted: [{ method: 'Input.insertText', sessionId: 'S1' }] }).cycle).terminated === 0, '⑨ interruptionView.terminated counts the sessions a terminateExecution went to (script calls only, one per session)');
+  const bsSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lwSrc = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  ok(/terminated: ev\.interruption\.terminated \|\| 0/.test(bsSrc) && /A script running in the page was stopped with it\./.test(lwSrc) && ['zh', 'ja'].every((l) => fs.readFileSync(path.join(REPO, `src/lib/i18n-${l}.js`), 'utf8').includes('"A script running in the page was stopped with it."')), '⑨ WIRED: the mode record carries `terminated` and the live view\'s takeover toast says a page script was stopped (zh + ja)');
+  // ═ VERIFY r7 (S2): ONE BROWSER, ONE HOLDER — across leases, and on the WIRED path ═
+  {
+    // (a) S2's OWN viewer drives (S1, S3, S4 taken with it); S1's viewer clicking Take over is `held` naming S2's holder
+    const holdersOf = () => new Set([KEY_S1, KEY_S2, KEY_S3, KEY_S4].map((kk) => { const s = k9.inputStateFor(kk, shared.id); return s.input === 'user' && s.takenBy ? s.takenBy.viewerId : null; }).filter((x) => x !== null));
+    const t2 = k9.takeover({ browserKey: KEY_S2, profileId: shared.id, viewerId: 921, sessionId: 'sess-92' });
+    ok(t2.ok && [...holdersOf()].join() === '921', '⑨ r7 setup: S2\'s own viewer drives — S1, S3, S4 taken with it (one holder: 921)', JSON.stringify([...holdersOf()]));
+    const t1 = k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, sessionId: 'sess-91' });
+    ok(!t1.ok && t1.code === 'held' && t1.holder.viewerId === 921 && t1.heldBy === KEY_S2 && [...holdersOf()].join() === '921', '⑨ r7: S1\'s viewer clicking Take over while S2\'s LIVE viewer drives the same browser is `held` naming that holder (heldBy the sibling) — never a second holder of one Chrome', JSON.stringify(t1));
+    const cardsBefore = cards9.length;
+    // (b) that holder's socket is GONE (the bridge's fact across every relay): S1's viewer takes the browser WHOLE — every sibling re-seized by 922, no new card (their cycles go on)
+    const t1b = k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, sessionId: 'sess-91', viewerAlive: (id) => id !== 921 });
+    ok(t1b.ok && [...holdersOf()].join() === '922' && cards9.length === cardsBefore, '⑨ r7: a holder whose socket is gone never blocks — the new viewer re-seizes the browser WHOLE (S2, S3, S4 move with S1 to 922), no second card (the same takeover goes on)', JSON.stringify({ holders: [...holdersOf()], cards: cards9.length - cardsBefore }));
+    delivered9.length = 0; notices9.length = 0;
+    const hb = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, cause: 'explicit', sessionId: 'sess-91' });
+    await sleep(80);
+    ok(hb.ok && holdersOf().size === 0, '⑨ r7: …and one handback releases all four');
+    // (c) THE SPEND RULE (PURE): a sibling's mirrored handback with nothing of its own to re-run is a zero-spend notice, never a billed wake
+    ok(T.announceVerdict({ cause: 'explicit', sibling: true, rerun: [] }).deliver === false && T.announceVerdict({ cause: 'explicit', sibling: true, rerun: ['fill'] }).deliver === true && T.announceVerdict({ cause: 'explicit', sibling: false, rerun: [] }).deliver === true && T.announceVerdict({ cause: 'explicit' }).deliver === true && T.announceVerdict({ cause: 'idle', sibling: true, rerun: ['fill'] }).deliver === false, '⑨ r7 PURE announceVerdict: a MIRRORED (sibling) explicit handback delivers only with something to re-run; the primary\'s explicit handback delivers as before; idle stays zero-spend');
+    ok(delivered9.map((d) => d.cid).join() === 'conv-91' && notices9.filter((n) => n.n.kind === 'browser-handback').map((n) => n.id).sort().join() === 'sess-92,sess-93,sess-94', '⑨ r7 WIRED: that handback delivered ONE turn (the primary) — the three siblings, nothing of theirs interrupted or refused, got the zero-spend notice (one click never wakes every conversation on the browser)', JSON.stringify({ delivered: delivered9.map((d) => d.cid), notices: notices9.map((n) => n.id + ':' + n.n.kind) }));
+    // (d) THE WIRED PATH: the real bridge over a fake upstream — two views of two conversations on the one browser
+    const up9 = await fakeUpstream();
+    k9.streamPortFor = async () => ({ ok: true, port: up9.port, error: null, code: null });
+    const bridge9 = BS.create({ keeper: k9, activeSessions: active9, requestAuthed: (req) => /vs=1/.test(String(req.headers.cookie || '')), log: { warn() { }, log() { } }, now });
+    const srv9 = http.createServer((_q, res) => { res.statusCode = 404; res.end(); });
+    srv9.on('upgrade', (req, socket, head) => bridge9.handleUpgrade(req, socket, head));
+    const PORT9 = await freePort(); await new Promise((r) => srv9.listen(PORT9, '127.0.0.1', r)); servers.push(srv9);
+    const v1 = viewer(PORT9, `session=sess-91&profile=${shared.id}`), v2 = viewer(PORT9, `session=sess-92&profile=${shared.id}`);
+    await v1.until((v) => !!v.last('hello')); await v2.until((v) => !!v.last('hello'));
+    v2.send({ type: 'takeover' }); await v2.until((v) => !!v.last('mode-ack'));
+    await v1.until((v) => !!v.last('mode') && v.last('mode').mode === 'takeover');
+    ok(v1.last('mode').holder === v2.last('hello').you && v1.last('mode').mine === false, '⑨ r7 bridge: S2\'s view takes over — S1\'s view is told the browser is driven (holder = S2\'s viewer, not mine)');
+    v1.send({ type: 'takeover' }); await v1.until((v) => v.by('refused').length >= 1 || !!v.last('mode-ack'));
+    ok(v1.last('refused') && v1.last('refused').code === 'held' && v1.last('refused').holder === v2.last('hello').you && !v1.last('mode-ack') && k9.inputStateFor(KEY_S1, shared.id).takenBy.viewerId === v2.last('hello').you, '⑨ r7 bridge: S1\'s view clicking Take over is `held` ON THE WIRED PATH (the holder sits on ANOTHER relay — its liveness is read across every relay)', JSON.stringify(v1.last('refused')));
+    up9.got.length = 0;
+    v1.send({ type: 'input_mouse', eventType: 'mousePressed', x: 11, y: 11, button: 'left', clickCount: 1 }); v2.send({ type: 'input_mouse', eventType: 'mousePressed', x: 22, y: 22, button: 'left', clickCount: 1 });
+    await until(() => up9.got.length >= 1, 1500); await sleep(100);
+    ok(up9.got.length === 1 && up9.got[0].x === 22, '⑨ r7 bridge: exactly ONE view\'s input reaches the browser (the holder\'s)', JSON.stringify(up9.got.map((g) => g.x)));
+    v2.ws.close();
+    await until(() => k9.inputStateFor(KEY_S1, shared.id).input === 'agent' && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', 3000);
+    ok(k9.inputStateFor(KEY_S1, shared.id).input === 'agent' && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', '⑨ r7 bridge: the holder\'s window closing (viewer-left) hands the browser back — S1 with S2');
+    v1.ws.close(); await sleep(30); await up9.close();
+  }
+  ann9.shutdown(); rec9.shutdown(); k9.shutdown();
+  // CONTROL (scripts/mutant-copy.mjs): the r5 keeper — the sibling call wired out: S2 keeps driving under the user's hands, told nothing
+  const M9 = mutantCopies('takeover-siblings', REPO);
+  const ksrc9 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const line9 = "      if (profileId) siblingTakeover({ browserKey, profileId, viewerId, at, alive });\n";
+  ok(ksrc9.split(line9).length === 2, '⑨ control setup: the sibling takeover is wired once');
+  const K9c = M9.load('src/server/browser-keeper.js', ksrc9.replace(line9, ''), 'no-siblings');
+  const kc = K9c.create({ dataDir: path.join(ROOT, 'data9c'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false });
+  const sc = kc.createProfile({ label: 'Shared9c' }, { owner: { kind: 'instance', id: null } });
+  await kc.attach({ profileId: sc.id, browserKey: KEY_S1, sessionId: 'sess-91' }); await kc.attach({ profileId: sc.id, browserKey: KEY_S2, sessionId: 'sess-92' });
+  const evc = []; kc.onInput((e) => evc.push(e));
+  kc.takeover({ browserKey: KEY_S1, profileId: sc.id, viewerId: 971, sessionId: 'sess-91' });
+  // integration 2.369.192: master's S5 one-driver layer (owner ruling A (2)) now refuses S2's NEXT command browser_busy "the
+  // user drives it" in this copy — a refusal with no interrupt of what S2 had in flight, no cycle, no card, no reminder —
+  // so the control reads the facts the sibling call alone makes: S2 not paused, not taken, told nothing
+  const rc9 = kc.resolveFor({ browserKey: KEY_S2, verb: 'click' });
+  ok(kc.inputStateFor(KEY_S2, sc.id).input === 'agent' && rc9.code !== 'browser_paused' && evc.filter((e) => e.kind === 'takeover').length === 1, '⑨ CONTROL (the sibling call wired out, in a copy): the other conversation is not taken over, never paused and told nothing (its next command meets only S5\'s browser_busy) — the wiring is the rule', { input: kc.inputStateFor(KEY_S2, sc.id).input, code: rc9.code || 'ok' });
+  kc.shutdown();
+  // CONTROL r7 (the keeper half): the keeper IGNORES the bridge's cross-relay liveness fact (the r6 keeper: `holderAlive`
+  // alone, which the bridge reads PER RELAY — false for a holder on another relay) ⇒ a second view takes a browser a LIVE
+  // viewer is driving; the real keeper, handed the same arguments, is `held`
+  const aliveLine9 = "    const alive = typeof viewerAlive === 'function' ? (id) => { try { return !!viewerAlive(id); } catch { return holderAlive; } } : () => holderAlive;\n";
+  ok(ksrc9.split(aliveLine9).length === 2, '⑨ r7 control setup: the keeper consults the cross-relay liveness fact once');
+  const mkPair = async (Kimpl, name) => {
+    const kx = Kimpl.create({ dataDir: path.join(ROOT, name), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false });
+    const sx = kx.createProfile({ label: 'Shared-' + name }, { owner: { kind: 'instance', id: null } });
+    await kx.attach({ profileId: sx.id, browserKey: KEY_S1, sessionId: 'sess-91' }); await kx.attach({ profileId: sx.id, browserKey: KEY_S2, sessionId: 'sess-92' });
+    kx.takeover({ browserKey: KEY_S2, profileId: sx.id, viewerId: 981, sessionId: 'sess-92' }); // S2's own view drives; S1 taken with it
+    // S1's view: the bridge's per-relay reading says "no holder here" (holderAlive false) while the cross-relay fact says 981 is live
+    const t = kx.takeover({ browserKey: KEY_S1, profileId: sx.id, viewerId: 982, sessionId: 'sess-91', holderAlive: false, viewerAlive: (id) => id === 981 });
+    const out = { ok: t.ok, code: t.code, s1: kx.inputStateFor(KEY_S1, sx.id).takenBy.viewerId, s2: kx.inputStateFor(KEY_S2, sx.id).takenBy.viewerId };
+    kx.shutdown(); return out;
+  };
+  const real9 = await mkPair(K, 'data9r');
+  ok(!real9.ok && real9.code === 'held' && real9.s1 === 981 && real9.s2 === 981, '⑨ r7 the REAL keeper: with the per-relay reading false but the cross-relay fact live, the second view is `held` (981 keeps the browser)', JSON.stringify(real9));
+  const K9h = M9.load('src/server/browser-keeper.js', ksrc9.replace(aliveLine9, '    const alive = () => holderAlive; // MUTANT r7: the cross-relay fact ignored\n'), 'no-alive');
+  const mut9 = await mkPair(K9h, 'data9h');
+  ok(mut9.ok && mut9.s1 === 982 && mut9.s2 === 982, '⑨ CONTROL r7 (the cross-relay fact ignored, in a copy): the second view TAKES the browser from a live viewer (981 → 982 on both leases) — consulting the fact is the rule', JSON.stringify(mut9));
+  // CONTROL r7 (the bridge half): a bridge copy reading the holder's liveness PER RELAY (the r6 bridge, no cross-relay fact for the keeper) ⇒ a second view takes a browser a LIVE viewer is driving
+  {
+    const bsSrc9 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+    const bsLine9 = "    const holderAlive = relay.holder !== null && viewerAlive(relay.holder);\n";
+    ok(bsSrc9.split(bsLine9).length === 2 && bsSrc9.split('holderAlive, viewerAlive });').length === 2, '⑨ r7 control setup: the bridge reads the holder\'s liveness across every relay, once, and hands the keeper the fact');
+    const BS9c = M9.load('src/server/browser-stream.js', bsSrc9.replace(bsLine9, "    const holderAlive = relay.holder !== null && relay.viewers.has(relay.holder);\n").replace('holderAlive, viewerAlive });', 'holderAlive });'), 'per-relay');
+    const kb = K.create({ dataDir: path.join(ROOT, 'data9b'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false });
+    const sb = kb.createProfile({ label: 'Shared9b' }, { owner: { kind: 'instance', id: null } });
+    await kb.attach({ profileId: sb.id, browserKey: KEY_S1, sessionId: 'sess-91' }); await kb.attach({ profileId: sb.id, browserKey: KEY_S2, sessionId: 'sess-92' });
+    const upb = await fakeUpstream();
+    kb.streamPortFor = async () => ({ ok: true, port: upb.port, error: null, code: null });
+    const activeB = new Map([['sess-91', { _browserKey: KEY_S1, name: 'one' }], ['sess-92', { _browserKey: KEY_S2, name: 'two' }]]);
+    const bridgeB = BS9c.create({ keeper: kb, activeSessions: activeB, requestAuthed: (req) => /vs=1/.test(String(req.headers.cookie || '')), log: { warn() { }, log() { } }, now });
+    const srvB = http.createServer((_q, res) => { res.statusCode = 404; res.end(); });
+    srvB.on('upgrade', (req, socket, head) => bridgeB.handleUpgrade(req, socket, head));
+    const PORTB = await freePort(); await new Promise((r) => srvB.listen(PORTB, '127.0.0.1', r)); servers.push(srvB);
+    const w1 = viewer(PORTB, `session=sess-91&profile=${sb.id}`), w2 = viewer(PORTB, `session=sess-92&profile=${sb.id}`);
+    await w1.until((v) => !!v.last('hello')); await w2.until((v) => !!v.last('hello'));
+    w2.send({ type: 'takeover' }); await w2.until((v) => !!v.last('mode-ack'));
+    await w1.until((v) => !!v.last('mode') && v.last('mode').mode === 'takeover');
+    w1.send({ type: 'takeover' }); await w1.until((v) => v.by('refused').length >= 1 || !!v.last('mode-ack'));
+    ok(w1.last('mode-ack') && w1.last('mode-ack').ok === true && !w1.last('refused') && kb.inputStateFor(KEY_S2, sb.id).takenBy.viewerId === w1.last('hello').you, '⑨ CONTROL r7 (a per-relay bridge, in a copy): the second view TAKES the browser a live viewer is driving (the holder read as gone) — the cross-relay fact is the rule', JSON.stringify({ ack: w1.last('mode-ack'), refused: w1.last('refused') }));
+    w1.ws.close(); w2.ws.close(); await sleep(30); await upb.close(); kb.shutdown();
+  }
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1, label: '⑨ ' })) ok(r.pass, r.name, r.detail);
 }
 
 keeper.shutdown();

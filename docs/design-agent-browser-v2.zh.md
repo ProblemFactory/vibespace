@@ -1769,6 +1769,141 @@ vibespace-window detach <handle>                 # drop the lease; the app keeps
 同时 §6.5 又承认了那个执行缺口；owner 请求 (1.b) 里"一个 profile 被多个会话同时驱动"今天由
 `sharing: "owner"` 交付，在 D6/P6 之后由 `"instance"` 交付。
 
+#### 6.2.1 CDP 普查 —— 用户驾驶期间中介代理拒绝什么（verify r4，2026-09-27）
+
+三轮 verify 每一轮都发现接管围栏少了一个方法，因为那道围栏是一张手写的清单：r1 拦了 `Input.*` +
+导航一族，r2 加了标签页动作，r3 加了"让页面失聪"的 `Input.setIgnoreInputEvents` 和焦点移动
+`DOM.focus` —— 却仍然把 `Emulation.setDeviceMetricsOverride`、`setScriptExecutionDisabled`、
+`Debugger.pause`、`Target.openDevTools`、`Cast.startTabMirroring`…… 留在用户驾驶期间敞开。清单写的是
+某个人想到的东西；普查写的是厂商发货的东西。所以围栏现在是一份 **普查**（`src/cdp-census.js`，
+PURE）：已安装 Chrome 自己 `GET /json/protocol` 列出的 664 个方法（153.0.8010.47，钉成只含名字的
+fixture `scripts/fixtures/cdp-protocol-153.0.8010.47/`，由 `scripts/cdp-protocol-fetch.mjs` 写出）
+每一个都有 **一行**，落在七个封闭类别之一：
+
+| 类别 | 行数 | 用户驾驶一个共享（中介）浏览器期间 |
+|---|---|---|
+| `input` | 15 | 拒绝 `browser_interrupted`（2026-09-27 起，§6.2.2；此前是 `browser_paused`）—— 把键盘 / 指针 / 触摸 / 拖拽 / 文本 / 文件 / 焦点 / 自动填充送进页面；用户自己的接管输入凭它的 credit 通过（§4.3.1，verify r1/r2） |
+| `view` | 106 | 拒绝 —— 看哪个标签页、页面本身（导航 / 重载 / 历史 / 对话框 / 文档）、视口 / 缩放 / 屏幕 / 模拟媒体、冻住页面（Debugger pause、断点、虚拟时间、关闭脚本执行）、覆盖层、投屏。其中一行 `Page.bringToFront` 改由实时视图的接管锚点拦（r2 + r3 实测：在代理拦它会让切过去的标签页变成隐藏） |
+| `page-mutation` | 195 | 拒绝（2026-09-27 起 —— §6.2.2：owner 的裁定取代了 D6 敞开的脚本之门，并退役了 r4 的开关 `browser.fenceScriptsWhileDriven`，仍存着的值被忽略）；r4 曾把这一类放在那个开关后面默认敞开 |
+| `read` | 176 | 照常应答（截图、AX 树、布局、读 cookie、tracing……） |
+| `session` | 11 | 走既有的 `Target.*` 作用域规则（租约只看到、只够到自己的 target），从不走这道围栏 |
+| `harmless` | 147 | 照常应答（enable / disable / ack / release） |
+| `refused` | 14 | 任何租约、驾驶与否一律拒绝（`method_refused`）：Browser.close / crash*、逃出中介的后门、Tethering、加载未打包扩展、桌面镜像、渲染进程崩溃、让页面失聪 |
+
+**没有行**的方法（更新的 Chrome 的）在用户驾驶期间 **点名拒绝** —— 拒绝语写出方法名、普查所依据的
+Chrome 版本和文件，代理每个 grant 记一次日志 —— 其他时候照常转发：缺口看得见，永远不是一个洞。
+标签页作用域对每个类别都是 **整租约**（代理分不清一个标签页和被驾驶标签页之下的跨进程 iframe；CLI
+这一级拒绝所有页面动词；守护进程自己的 `tab <n>` 会移动活动标签页）。换了 Chrome：跑
+`scripts/cdp-protocol-fetch.mjs`，改 `CENSUS_CHROME`，给快速门打印出的每个方法写一行。同一轮把接管
+锚点的宽限（r3）从整整一秒降到 62 ms = 守护进程 tabs 记录延迟实测 p99 的 3 倍
+（`scripts/measure-anchor-grace.mjs`，agent-browser 0.38.1 + 这个 Chrome 上 2 × 100 次真实切换：p99
+15.4 / 20.4 ms）。门：test-browser-mediation ⑥（fixture ⇔ 表、每一行的判决、未知规则、退役开关被忽略、三份
+补丁副本对照）+ test-browser-mediation-chrome ⑥（启动的那个 Chrome 自己的协议 —— 多出来的打印并变红 ——
+以及每个类别对着真实的暂停租约，以原始端点为 oracle）。
+
+#### 6.2.2 接管即打断 —— owner 的裁定（2026-09-27）
+
+> "关于接管浏览器的时候agent脚本，其实应该直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行"
+
+它取代了 D6 的"用户驾驶期间不拦脚本执行"（r4 把这扇门放在 `browser.fenceScriptsWhileDriven` 后面、默认关；
+这个开关退役 —— 仍存着的值被忽略，并在日志里说一次）。三部分，各有其门：
+
+**1. 打断。** 在接管的那一刻（keeper 的 `takeover`，在宣布任何东西之前），中介代理把这个（profile，对话）
+租约里仍在等浏览器应答、且其普查类别在用户驾驶期间被拒绝的每一个调用 —— `input`、`view`、`page-mutation`
+以及每个没有行的方法 —— **立刻**以 `browser_interrupted` 作答（"The user took over this browser — your
+operation was interrupted (<method>). Wait for the handback, then run it again."；快速门里的真实代理实测
+≤ 2 ms）。在途的 `read` / `session` / `harmless` 调用让它跑完（实时视图自己的画面流就靠这些）。浏览器对被
+打断调用迟到的应答被吞掉，但它带来的作用域增长照样生效（被切断的 `createTarget` 建出的标签页仍归这个租约，
+所以撤销时会被关掉）。正在跑某个被打断的**脚本**调用（`Runtime.evaluate` / `callFunctionOn` / `runScript`）
+的那个 CDP 会话，会收到**一次**用代理自己 id 发出的 `Runtime.terminateExecution`。用户驾驶期间，除了
+`read` / `session` / `harmless`，每个调用都被拒绝为 `browser_interrupted`（普查的暂停集合 = input + view +
+page-mutation）。
+**收不回来的 —— 在 Chrome 153.0.8010.47 + agent-browser 0.38.1 上实测：** 页面里**正在运行**的脚本（0.38.1
+的 `eval` = 带 `awaitPromise: true` 的 `Runtime.evaluate`；一个 5 秒忙循环）在 `terminateExecution` 之后约
+2 ms 停下 —— CLI 的 JSON 在接管后 2 ms 就带上了 `browser_interrupted`，页面立刻回应下一次探测，循环的最后一句
+从未执行；没有脚本在跑时发 `terminateExecution` 什么也不改变（页面自己 400 ms 后的定时器照样执行）；但一个
+**正在等待**定时器或 fetch 的脚本并没有在运行 —— 它的后续仍会在之后执行，收不回来（调用被拒绝、agent 被告知）。**波及范围（verify r5，真代理 + Chrome 153 实测）：`Runtime.terminateExecution` 停的是那一刻在页面上下文里正在执行的那段代码 —— 通常是 agent 的脚本，但它是页面级原语：若被切断的调用只是在**等待**（agent 自己没有在跑），而用户**自己页面**的脚本恰好在执行，那一次同步执行会被中止（实测：强制忙碌下 6/6 各杀掉一个 setInterval 迭代；定时器继续、在途导航照样落地、页面停在 complete 不残）。这是 CDP 的固有限制（没有按脚本粒度的 terminate），且有界（一次执行、短暂）；永不 terminate 会让 owner 的“打断所有脚本”对一个正在跑的忙循环落空，所以接管照发并接受这次短暂波及。在途的读永不被 terminate。**
+已经离开代理的 `Input.*` 调用已经到了 Chrome：0.38.1 的 `fill` 是**一次** `Input.insertText` —— 在途被抓住时它
+**照样完成**（输入框里 4000 个字符都在），同时 agent 被告知 `browser_interrupted`；它的 `type` 是每个字符一次
+`insertText` —— 在词中间被抓住时**停下**（300 个字符里只有 20 个）。在 0.38.1 上，连 `get title` 都是用脚本读的，
+用户驾驶期间同样被拒绝。一个不是全实例共享的浏览器（对话自己的临时浏览器、owner 共享的 profile）在 agent
+的守护进程和 Chrome 之间没有代理：它在途的命令会跑到它自己的终点 —— agent 仍然会被告知（见下），之后的每个
+命令都在 `/resolve` 被拒绝（`browser_paused`）。
+
+**2. 告知 agent。** (a) agent 正在跑的那条命令通过 `vibespace-browser` 以 `[browser_interrupted]` 结束（退出码
+1，和所有拒绝一样）：CLI 在审计时把它的 `/resolve` 应答时刻（`since`，keeper 的时钟）交给服务器，在它之后（含）
+开始的接管就回答 `interrupted` —— 被切断（中介租约：它的调用被打断了）或跑到了终点（没有代理）。(b) 对话里在
+接管时出现 VibeSpace 的卡片（"The user took over the "Work" browser; 2 operations were interrupted: fill, eval.
+Wait for the handback, then run them again." —— 或 "nothing of yours was running there"），走实时会话的卡片通道
+（`normalizers.feedPeerCard`，auto-resume 通知自己的那条：只显示）—— 每个接管 → 交还周期**一张**；(c) agent
+在它的下一轮以零花费的 `browser-takeover` 通知读到同样的话。什么都不投递：不走梯子的任何一级，不开计费回合。
+什么在途，是动作轨迹和那个时刻的一个 PURE 函数（`src/browser-interrupt.js` 的 `inFlightAt`：录制器保留守护进程
+画面流里每一条 command / result 记录的环 —— 包括 `eval` 和 `wait`，排除 `launch` 对和录制器自己的探测；一条超过
+5 分钟没有结果的命令是丢了结果，不是一次打断；一个操作跨周期只算一次）；没有这个浏览器的轨迹时，由被打断的
+CDP 方法名说明切断了什么。
+
+**3. 交还时提醒。** keeper 关闭这个周期并把重跑清单交给宣布者 —— 先是被打断的，然后是用户驾驶期间 agent 试过
+（在 `/resolve` 被拒绝）的每个动词，各一次。显式交还投递的话（§4.3.1，`spendReason: 'browser-handback'` 不变 ——
+普查没有长出新的生产者）以 "Re-run what was interrupted: fill, eval — read the page first; refs from before the
+takeover are stale." 结尾；idle / viewer-left 的通知和 idle 的"For you"条目带同一份清单；一个什么都不在途、什么都
+没被拒绝的周期对重跑只字不提（话语与之前逐字节相同）。被拒绝或失败的投递现在只由**一个**载体携带 —— stash（只有
+stash 收不下时才用通知）：stash 和通知搭的是同一个下一次 prompt，agent 会读到两遍交还。实时视图的 toast 对人说同样
+的事（t()，zh + ja）："You took over — 2 agent operation(s) interrupted: fill, eval…" / "Control handed back to the
+agent — it was told to re-run: …"。
+
+**4. 共享浏览器整个被接管（verify r6，2026-09-27）。** 接管的是**浏览器**，不是用户点了哪个对话的实况视图。
+同一具名 profile 上租着的每个其他对话（一个 Chrome，各自的标签页）由同一个 viewer **一起**接管 —— 它在途的调用被切断，
+它自己的周期打开（自己的卡、自己的提醒，只点名**它自己**的动词；对话之间什么都不串），它接下来的动词被拒绝
+`browser_paused`，它的 `tab` 切换和主对话一样被拒绝（r3 的锚定规则，现在跨对话成立 —— 修前实测：兄弟对话的 `fill`
+在用户手底下照跑，它的 `Target.activateTarget` 被转发）。用户驾驶期间才 attach 上来的对话从出生起就是暂停的（加入
+正在进行的接管，自己的卡）。从驾驶视图交还时每个兄弟一起交还（四个对话 ⇒ 四次交还，都走那一个 ladder 站点），pass
+把它们的持有者一起挪走，持有者的输入重启它们的空闲时钟；同一浏览器的第二个 viewer 遇到 `held`（一个用户开一个浏览器）。
+对话自己的临时浏览器和 helper 的浏览器没有兄弟。**审计的归并（r5 的修复，已钉住）：** 交还之后才到的审计什么都不加入
+（它自己的那行说控制权已回来）；用户**再次**驾驶期间到的审计加入那个**开着的**周期 —— CLI 说过"等交还（它会点名要重跑
+的）"，于是它点名，一次；重复的审计只点名一次。**话跟着事实走：** 被切断但浏览器仍以成功应答的调用其实**落地了**
+（实测：`fill` 在它唯一的 `Input.insertText` 上被抓住 —— 输入框里 4000 个字符全在；`type` 在第 20 个键之后 —— 300 个里
+20 个）—— 代理记下它（`landed`），审计最多等 250 ms 让这些迟到的应答落定，CLI 说"cut short … but one of its calls had
+already reached the page and took effect: check the page"；一条下一个调用撞上接管的中介命令（没有被切断的，二进制退出 1）
+说"the takeover came between its calls: what it had done before it stands, its calls after it were refused"。发出过
+`terminateExecution` 的接管在实况视图的 toast 里告诉人：页面里正在运行的一段脚本也随之被停止。**第一次 attach 之前的
+接管卡：** 聊天窗口第一次 attach 之前喂进去的卡被扣住（32 张）、在历史之后重放；**已投递**的通知（ladder 的卡，
+`recorded` = CLI 转录里持有的那段文本）由渲染出的记录来回答、绝不在它旁边再重放一张（每条记录回答一张卡 —— 同文重复
+投递各保留一张）；只用于显示的卡总是重放。
+
+**5. 一个浏览器一个持有者 —— 在接线的路径上；兄弟对话的交还不是计费唤醒；没有应答的调用说"未知"（verify r7，
+2026-09-27）。** 第 4 部分的"第二个 viewer 遇到 `held`"是在 keeper 的 `holderAlive` 默认为 true 下钉的，而桥按**每个
+relay** 算它（`relay.viewers.has(relay.holder)`）—— 兄弟对话的持有者按构造就坐在**另一个** relay 上，于是在接线的
+路径上它读成"已离开"：第二个视图（同一个人在手机上，或 A 驾驶时对话 C 的视图）**重新夺走**了自己的租约 —— 一个
+Chrome 两个持有者，两个视图的输入都被转发，从驾驶视图交还后另一条租约还在它自己的 viewer 下暂停着（经真实桥实测：
+持有者 [1, 2]，x=10 与 x=20 两个输入都到了上游；随后 A 的交还放开 A + B，C 仍是 `user`）。现在桥跨**每一个** relay
+回答 `viewerAlive(id)`（viewer id 出自同一个计数器）并把这个事实交给 keeper；keeper 对自己租约的持有者、也在门口对每个
+兄弟的持有者都查它 —— 浏览器上任何地方的**活**持有者都按名 `held`（`heldBy` 点名兄弟），socket 已经没了的持有者绝不
+阻拦、浏览器**整个**移到新 viewer 名下（`siblingTakeover` 重新夺取持有者已死的兄弟；它的周期继续 —— 不发第二张卡）。
+**花费：** 镜像的交还事件点名主对话（`sibling`），PURE `announceVerdict({cause, sibling, rerun})` 只在兄弟自己的周期
+里打断或拒绝过什么时才投递它的显式交还（它的 agent 被告知等那个会点名的交还）；自己没什么要重跑的，零花费的通知随
+它下一轮走 —— 在一个视图上点一下永远不会唤醒租在这个浏览器上的每个对话（修前实测：一个"记住登录"的共享 profile 上
+N 个对话 ⇒ 每次交还 N 次计费唤醒，其中 N−1 次给的是闲着的 agent）。**话：** `interruptionFor` 也带 `unsettled`
+（审计 ≤ 250 ms 的落定等待用完时浏览器还没应答的被切断调用 —— 实测：接管后 450 ms 才落地的点击成功应答读成
+`landed: 0` 且没有任何标记），CLI 说"— and one of its calls had not been answered by the page when this was
+written, so whether it took effect is unknown: check the page before running it again"而不是一句确定的 cut。
+保持不变（记录）：child handle 指的是 helper **自己的**临时浏览器 —— 从不在共享浏览器上，没有兄弟；helper 对共享
+浏览器动手时用的是父对话的 key，和父对话一起暂停（keeper 的 `attach` 会接受具名 profile 上的 child KEY，但没有路由
+会递进来 —— 记录，不建）。
+
+门：test-browser-mediation ⑦（PURE 计划；真实 keeper + 代理：在途的脚本、按键和新标签页 ≤ 50 ms 被打断，在途的读
+不动，terminateExecution 发到脚本的会话，迟到的应答被吞，被切断的标签页留在作用域里，退役开关被忽略；r6：兄弟对话的
+调用被切断、它的标签切换被拒绝、交还时带自己的清单一起放开；`landed` / `unsettled` / 有界的落定等待；对照：用旧的
+暂停逻辑的中介副本让调用一直等着），test-browser-takeover ⑧（在途 = PURE(轨迹, 时刻)、周期的合并与关闭、话语、真实
+录制器 + keeper、一张卡 + 一条通知、一次提醒；对照：去掉接管时刻的宣布者副本谁也不告诉；随发的 CLI 端到端）+ ⑨（r6：
+兄弟对话、接管中的 attach、pass / 空闲 / 交还的镜像、两种顺序下的审计归并、视图里的 `terminated`、toast 的接线；对照：
+去掉兄弟调用的 keeper 副本让另一个对话继续开；r7：跨租约一个持有者 —— `held` 点名兄弟的活持有者、持有者已死的
+浏览器整个被重新夺取、PURE 花费规则 + 它的接线（一次投递、三条通知）、假上游之上的真实桥：接线路径上 `held`、只转发
+一个视图的输入、viewer-left 一起放开；对照：忽略跨 relay 事实的 keeper 副本和按 relay 算的桥副本各自都让第二个视图
+夺走一个活 viewer 正在开的浏览器），test-attach-rebuild ④（扣住的卡：上限 + 日志行、被杀会话可回收、
+重放对照转录里的记录），test-browser-verbs（CLI 的话：cut / landed / unanswered（r7）/ came-between / ran-to-end），test-spend-paths §2
+（接管的告知免费 —— 没有新的生产者），test-browser-mediation-chrome ⑦（heavy，真实 0.38.1 + Chrome：上面的数字），
+test-browser-live ⑧（heavy：聊天里的卡、toast、只提醒一次）。
+
 ### 6.3 域名限制，诚实版
 
 因为 `--allowed-domains` 拒绝 profile / CDP / restore（§1.5），一个持久 profile 带不了它。所以：
@@ -2557,7 +2692,7 @@ P1 是对的，而 P1 在本轮长出了附着集合与 handle 寻址，所以�
 | **D3** | **一个什么都没要求的会话，默认 profile 策略是什么。** | (a) 临时的，不保留 cookie；(b) 每会话自动创建一个持久 profile；(c) 保持今天这个共享默认。 | **(a) 临时** —— 并见 **D12**，那是同一个问题在它真正被决定的那个层面上被问出来。持久化应该是一次请求，因为一次请求正是这个 profile 拿到 owner 和 label 的方式。(b) 是把那 53 个孤儿的问题自动地、按计划地重造出来；D12 的变体 C *不是* (b)，因为那些目录是有名字、有主、会被清扫的 —— 但前提是清扫和它们一起发布。 |
 | **D4** | **现在采纳 CloakBrowser 吗，用哪一档？** | (a) 免费档，自托管，按 profile 可选开启，**在 §7.2.1 的出网测量被执行并记录之后**；(b) Solo $19/月；(c) Team $49/月；(d) 还不要 —— 先用"通过实时视图人工登录"。 | **(a)，并且把那次测量当作一个硬前置条件而不是一个旁注** —— 它不花钱，而且能告诉我们那些站点到底需不需要它。只有在一个被点名的站点上有一次被测量到的失败时，才升到付费档。永远不要作为全局默认。第一轮把 `test-vendor-whitelist` 点名为回传风险的控制；那是错的（§9），所以现在的控制是一条被记录的证明记录，加上容器上一份被强制执行的出网白名单。 |
 | **D5** | **浏览器会不会跑在本机之外的机器上？** | (a) 暂时只有本机；(b) 通过 `browser-serve` op + `tcpForward` 跑在配对设备上（P4）；(c) 带 API key 的云 provider。 | **(b)，在 P4，而且只对已经配对的机器。** (c) 把一个供应商 key 和我们访问的每一个页面放到别人的基础设施上，它应该有它自己的决定和它自己的 §ban-safety 审查。 |
-| **D6** | **协作式租约还是硬 CDP 中介？** | (a) 对 `sharing: "owner"` 用协作式，`sharing: "instance"` 在 P6 之前一律**拒绝**；(b) 现在就建 P6 并把两个都提供出来；(c) 两个都用协作式并在 UI 里说清楚。 | **(a)。** 在同一个 owner 自己的会话之间，一个协作式租约和这里其它每一个面是匹配的，而 §5.1 去掉了那个让它更糟的意外。在*不同* owner 之间它根本不是一条边界（§3.4），所以 `"instance"` 是带理由地被拒绝，而不是带着一个承诺机制守不住的隔离的徽标发出去。这是相对第一轮的一个改动，第一轮把两个值都列为可用，同时在 §6.5 里承认了那个缺口。 |
+| **D6** | **协作式租约还是硬 CDP 中介？**（**2026-09-27 部分被取代**：owner 的裁定"直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行" —— 用户驾驶期间不再放行脚本执行，接管即打断、告知、提醒，§6.2.2） | (a) 对 `sharing: "owner"` 用协作式，`sharing: "instance"` 在 P6 之前一律**拒绝**；(b) 现在就建 P6 并把两个都提供出来；(c) 两个都用协作式并在 UI 里说清楚。 | **(a)。** 在同一个 owner 自己的会话之间，一个协作式租约和这里其它每一个面是匹配的，而 §5.1 去掉了那个让它更糟的意外。在*不同* owner 之间它根本不是一条边界（§3.4），所以 `"instance"` 是带理由地被拒绝，而不是带着一个承诺机制守不住的隔离的徽标发出去。这是相对第一轮的一个改动，第一轮把两个值都列为可用，同时在 §6.5 里承认了那个缺口。 |
 | **D7** | **录制默认值。** | (a) 关，按 profile 可选开启；(b) 对 attach 着的 profile 开启；(c) 缩略图一直有，视频可选开启。 | **(c)。** 每个 agent 动作一张 JPEG 几乎免费，而且让转录变得有用；一个已登录 profile 的 30 fps 视频是一个带存储账单的秘密。 |
 | **D8** | **那些孤儿 profile 目录（53–56 个，98 GB —— §1.2）怎么办？** | (a) 列出来，让用户收编或删除；(b) 全部自动收编；(c) 自动删除超过 N 天的。 | **(a)。** 一个 cookie 罐就是某个人的登录；一次删掉它的清扫，和那次 `(deleted)` 匹配杀掉一个活会话的事故是同一类错误。 |
 | **D9** | **实时视图拿自己的窗口类型，还是 chat 窗口里的一个面板？** | (a) 窗口类型 `browser-live`；(b) 一个像 Codex desktop 右侧面板那样的 chat 面板。 | **(a) 窗口类型。** VibeSpace *就是*一个窗口管理器；一个窗口可以平铺在 chat 旁边、被移到某个桌面、在手机上打开、跨客户端共享 —— 这些注册表全都白送给我们，而一个 chat 面板一样都没有。 |

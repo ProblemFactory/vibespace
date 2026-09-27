@@ -122,6 +122,8 @@ import { createTraceTimeline } from './browser-trace-view.js'; // agent browser 
 import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's never-fold badge words (the full sentence is its tooltip)
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
 import { fitChipState, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
+import { browserFactWords, liveFollowPlan } from '../browser-fact.js'; // lane S2: THE browser fact — the view's names, and a view FOLLOWS its session's browser
+import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 
 const CONSOLE_CAP = 200;
 const RECONNECT_MAX = 5;
@@ -251,8 +253,14 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     // lane S4: the bridge's last `fit` record, the report last sent, the picture clocks, the pinch transform + its touches
     fit: null, fitSent: null, fitTimer: null, lastFrameAt: 0, navAt: 0, openAt: 0, pictureTimer: null, refreshSent: false, picture: 'ok', pictureStale: false,
     zoom: { ...ZOOM_NONE }, touches: new Map(), pinch: null, pan: null, lastTap: null, lastPinchHintAt: 0,
+    // lane S2 (naive study 2): THE session's browser fact this view last saw (it FOLLOWS it), the input receipts
+    fact: null, followed: 0, receipts: receiptBook(), receiptTimer: null,
   };
   const row = () => sessionRow(app, sessionId);
+  /** lane S2: THE browser fact of this view's session (active-sessions' `browserFact`, carried onto the merged row). */
+  const factNow = () => { const r = row(); return r && r.browserFact && typeof r.browserFact === 'object' ? r.browserFact : null; };
+  const wordsNow = () => { const f = st.fact || factNow(); return f ? browserFactWords(f, t) : null; };
+  st.fact = factNow();
 
   // ── DOM ──
   const root = document.createElement('div'); root.className = 'browser-live';
@@ -293,7 +301,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   moreBtn.title = t('More'); moreBtn.setAttribute('aria-label', t('More'));
   // lane J r2: "typing goes to the browser" while this view owns the keyboard, and the "input sent · n" echo
   const kbdChip = document.createElement('span'); kbdChip.className = 'browser-live-kbd-chip'; kbdChip.style.display = 'none';
-  kbdChip.innerHTML = KBD_SVG; { const w = document.createElement('span'); w.textContent = t('Typing goes to the browser'); kbdChip.appendChild(w); }
+  kbdChip.innerHTML = KBD_SVG; const kbdText = document.createElement('span'); kbdText.textContent = t('Typing goes to the browser'); kbdChip.appendChild(kbdText);
   kbdChip.title = t('While you drive, every key goes to the page — nothing reaches a chat box. Hand back to type anywhere else (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
   const echoEl = document.createElement('span'); echoEl.className = 'browser-live-echo'; echoEl.style.display = 'none'; echoEl.setAttribute('aria-live', 'polite');
   // lane S4: the FIT chip — the page's size when it is NOT this pane's (words by kind; click = "Fit to this window" when the agent chose it)
@@ -377,26 +385,57 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   function focusSink() { try { if (document.activeElement !== kbd) kbd.focus({ preventScroll: true }); } catch { /* detached */ } }
   function renderKbd() {
     const own = st.claimed && iOwn();
-    kbdChip.style.display = own ? '' : 'none';
+    // lane S2 (naive study 2 T4): the bar never claims "Typing goes to the browser" while nothing reaches it — the
+    // chip shows only over an OPEN stream, and after an input that was NOT DELIVERED (a receipt said so, or none came
+    // in 1.5 s) it says that instead until an input lands again
+    const failing = st.receipts.failing;
+    // verify r3 (r2 F3): the chip claims only what the last delivered receipt PROVED — over a direct lease (`via:'stream'`)
+    // VibeSpace sees its own write to the stream, not the page's answer, so it says "sent", never "goes"
+    const sentOnly = st.receipts.via === 'stream';
+    kbdChip.style.display = own && st.connected ? '' : 'none';
+    kbdChip.classList.toggle('failing', !!failing);
+    kbdText.textContent = failing ? t('Input is not reaching the browser') : sentOnly ? t('Typing is sent to the browser') : t('Typing goes to the browser');
+    kbdChip.title = failing ? receiptWhy(failing) : (sentOnly ? t('This browser streams directly: VibeSpace sees each key written to its stream, not the page’s answer.') + ' ' : '') + t('While you drive, every key goes to the page — nothing reaches a chat box. Hand back to type anywhere else (Ctrl+Backslash and Ctrl+Alt+Left/Right stay the app’s).');
     root.classList.toggle('kbd-owned', own);
     if (!(st.mode === 'takeover' && st.mine)) { echoEl.style.display = 'none'; youEl.style.display = 'none'; }
   }
   /** lane J r2: the bar's "input sent · n" — bright for ECHO_MS after each act, then dim (still the count). */
-  function echo(ok = true, why = '') {
+  function echo(ok = true, why = '', { verbatim = false } = {}) {
     echoEl.style.display = '';
     echoEl.classList.toggle('error', !ok);
     echoEl.classList.add('fresh');
-    echoEl.textContent = ok ? t('input sent · {n}', { n: st.sent }) : t('not sent — {why}', { why: why || t('no connection') });
+    echoEl.textContent = ok ? t('input sent · {n}', { n: st.sent }) : (verbatim ? why : t('not sent — {why}', { why: why || t('no connection') }));
     if (st.echoTimer) clearTimeout(st.echoTimer);
     st.echoTimer = setTimeout(() => { st.echoTimer = null; echoEl.classList.remove('fresh'); }, ECHO_MS);
   }
-  /** Every input record goes through here: `act` = one user act (a press, a key, a paste) counted in the echo. */
-  function sendInput(rec, act = false) {
+  /** Every input record goes through here: `act` = one user act (a press, a key, a paste) counted in the echo.
+   *  lane S2: a record that carries a user act asks for a RECEIPT (`rid`) — the bridge answers `input-receipt` from
+   *  the browser's own reply (a mediated lease) or the stream's write (a direct one); none in 1.5 s = NOT DELIVERED. */
+  function sendInput(rec, act = false, { receipt = act } = {}) {
     if (!rec) return false;
     const open = !!(st.ws && st.ws.readyState === 1);
-    if (open) send(rec);
-    if (act) { if (open) st.sent++; echo(open, open ? '' : t('the live view is disconnected')); }
+    if (open) { if (receipt) { rec = { ...rec, rid: noteInputSent(st.receipts, Date.now()) }; armReceiptSweep(); } send(rec); }
+    if (act) { if (open) st.sent++; if (!open) echo(false, t('the live view is disconnected')); else if (!st.receipts.failing) echo(true); }
     return open;
+  }
+  /** lane S2: the words of a failed receipt (the bridge's code, never a raw error first). */
+  function receiptWhy(f) {
+    const byCode = { no_answer: t('no answer from the browser'), no_reply: t('the browser has not answered it'), not_dispatched: t('the browser was never asked to act on it'), browser_refused: t('the browser refused it'), upstream_gone: t('the browser stream closed'), 'no-upstream': t('the browser stream is not connected'), 'watch-mode': t('you are not driving this browser'), no_grant: t('this conversation no longer holds that browser'),
+      other_tab: t('it reached another tab than the one you are looking at and was refused there'), tab_switched: t('the browser moved to another tab while you were driving — hand back and take over again to drive it') }; // verify r3
+    return (byCode[f && f.code] || t('it was refused')) + (f && f.error && !byCode[f.code] ? ' — ' + String(f.error).slice(0, 160) : '');
+  }
+  function onReceiptsChanged() {
+    const f = st.receipts.failing;
+    if (f) echo(false, t('not delivered — {why}', { why: receiptWhy(f) }), { verbatim: true });
+    renderKbd();
+  }
+  function armReceiptSweep() {
+    if (st.receiptTimer) return;
+    st.receiptTimer = setInterval(() => {
+      if (st.closed) { clearInterval(st.receiptTimer); st.receiptTimer = null; return; }
+      if (sweepInputReceipts(st.receipts, Date.now())) onReceiptsChanged();
+      if (!st.receipts.pending.size) { clearInterval(st.receiptTimer); st.receiptTimer = null; }
+    }, 250);
   }
   /** Where a page point is drawn, in the canvas's own layout px (the overlay basis shared with the agent cursor). */
   function pagePointToLocal(p) {
@@ -500,7 +539,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     const name = sessionName();
     const tg = st.target;
     const row = (st.rows || []).find((x) => x.ref === curRef());
-    const title = liveTitle({ label: tg && tg.kind === 'child' && row ? rowName(row) : (tg ? tg.label : null), alias: tg ? tg.alias : null, sessionName: name, ephemeralWord: t('ephemeral (no profile)') });
+    // lane S2: the conversation's own browser is named by THE browser fact ("work" when it opens the pin, else "no profile (temporary browser)")
+    const title = liveTitle({ label: tg && tg.kind === 'child' && row ? rowName(row) : (tg ? tg.label : null), alias: tg ? tg.alias : null, sessionName: name, ephemeralWord: (wordsNow() || {}).ownName || t('no profile (temporary browser)') });
     try { app.wm.setTitle(winInfo.id, title); } catch { /* window gone */ }
   };
   // ── P7 (§4.6 / §3.7): the OWNERSHIP badge + the strip's per-pane owner dots, from the digest's leases ──
@@ -542,19 +582,24 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (tg) return tg.ref || (tg.kind === 'attachment' ? tg.profileId : tg.kind === 'child' ? tg.handle : EPHEMERAL_REF);
     return st.profileRef || null;
   };
-  /** A row's words: a profile's label (+ default), the session's own browser, a helper by its witnessed name or number. */
-  const rowLabel = (r) => {
+  /** lane S2: is this row the browser THE fact says the conversation uses now? (the strip's one marker — never the
+   *  attachment set's own "default", which disagreed with the chip in the study) */
+  const inUse = (r) => { const f = st.fact || factNow(); const u = f && f.using; if (!u || !r) return false; return (u.kind === 'profile' && r.kind === 'attachment' && r.profileId === u.id) || (u.kind === 'own' && r.kind === 'ephemeral'); };
+  /** A row's words: a profile's label (+ in use), the session's own browser (THE fact's name for it), a helper by its witnessed name or number. */
+  /** The tab's own words, WITHOUT the marker (the marker is its own element, so a long name never cuts it off). */
+  const rowBase = (r) => {
     if (!r) return '';
-    if (r.kind === 'ephemeral') return t('This session'); // short on the tab (≤16 chars); the title says it whole
+    if (r.kind === 'ephemeral') return String((wordsNow() || {}).ownShort || t('Temp browser')); // short on the tab; the title says it whole
     if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
-    return String(r.label || r.alias || r.ref) + (r.isDefault ? ' ' + t('(default)') : '');
+    return String(r.label || r.alias || r.ref);
   };
+  const rowLabel = (r) => (r ? rowBase(r) + (inUse(r) ? ' ' + t('(in use)') : '') : '');
   /** A row's full name, for a title / a menu / the window title. */
   const rowName = (r) => {
     if (!r) return '';
-    if (r.kind === 'ephemeral') return t('This conversation’s browser');
+    if (r.kind === 'ephemeral') return t('This conversation’s browser') + ' — ' + String((wordsNow() || {}).ownName || t('no profile (temporary browser)')) + (inUse(r) ? ' ' + t('(in use)') : '');
     if (r.kind === 'child') return r.helper && r.helper.name ? t('Helper: {name}', { name: r.helper.name }) : t('Helper {n}', { n: (r.helper && r.helper.n) || '?' });
-    return String(r.label || r.alias || r.ref) + (r.isDefault ? ' ' + t('(default)') : '');
+    return String(r.label || r.alias || r.ref) + (inUse(r) ? ' ' + t('(in use)') : '');
   };
   // owner ruling A (2): a shared profile's browser names the OTHER conversation driving it (its name from this client's rows)
   const keyName = (k) => { const s = (app.sidebar?._allSessions || []).find((x) => x && x.browserKey === k); return s ? (s.webuiName || s.name || '') : ''; };
@@ -625,12 +670,15 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       if (r.profileId) b.dataset.profileId = r.profileId;
       const dot = document.createElement('span'); dot.className = 'browser-live-strip-dot'; dot.title = stateTitle(r);
       const full = rowName(r);
-      const label = document.createElement('span'); label.className = 'browser-live-strip-label'; label.textContent = shortLabel(rowLabel(r));
+      const label = document.createElement('span'); label.className = 'browser-live-strip-label'; label.textContent = shortLabel(rowBase(r));
       b.append(dot, label);
+      // lane S2: THE fact's "in use" marker — a CLASS (an accent underline on the name), never extra words: a wider tab
+      // would fold its neighbour out of a split pane's strip; the words ride the tooltip / the menus (rowName)
+      if (inUse(r)) b.classList.add('in-use');
       const dt = driverText(r);
       if (dt) { const d = document.createElement('span'); d.className = 'browser-live-strip-driver'; d.textContent = dt; b.appendChild(d); }
       if (r.kind === 'attachment') b.appendChild(ownersEl(dotsFor(r.profileId))); // §3.7: who else this profile's browser belongs to
-      b.title = (current ? t('You are looking at this browser') : t('Switch this window to {name}', { name: full })) + '\n' + stateTitle(r);
+      b.title = (current ? t('You are looking at this browser') : t('Switch this window to {name}', { name: full })) + (inUse(r) ? '\n' + t('This conversation uses this browser now') : '') + '\n' + stateTitle(r);
       b.onclick = () => { if (r.ref !== curRef()) switchTo(r.ref); };
       b.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); stripMenu(r, e.clientX, e.clientY); };
       stripTabs.appendChild(b);
@@ -823,8 +871,26 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       if (row && (row.state === 'idle' || row.state === 'running')) { st.error = null; st.reconnects = 0; connect(); }
     }
   }
+  /** lane S2 (naive study 2, T4): A VIEW FOLLOWS ITS SESSION'S BROWSER — a moved fact (the profile recreated /
+   *  adopted / detached / pinned) retargets a following view to the browser in use now (PURE liveFollowPlan: a view
+   *  the user pointed at another browser that still exists, a helper's view and a view the user DRIVES stay put). */
+  const viewFacts = () => ({ ref: st.profileRef, shown: st.target ? curRef() : '', errorCode: st.error ? st.error.code || null : null, sessionEnded: st.sessionEnded, driving: st.mode === 'takeover' && st.mine });
+  function applyFollow(plan) {
+    if (!plan || st.closed) return;
+    if (plan.act === 'retarget') { st.followed++; switchTo(plan.ref); }
+    else if (plan.act === 'reconnect' && !st.connected && !(st.ws && st.ws.readyState === 0)) { st.reconnects = 0; connect(); }
+  }
+  function onFact(next) {
+    if (st.closed || !next) return;
+    const prev = st.fact;
+    if (prev && prev.digest === next.digest) return;
+    st.fact = next;
+    renderTitle(); renderStrip();
+    applyFollow(liveFollowPlan({ view: viewFacts(), prev, next }));
+  }
   const onGlobal = (msg) => {
     if (st.closed || !msg) return;
+    if (msg.type === 'active-sessions' && Array.isArray(msg.sessions)) { const r = msg.sessions.find((x) => x && x.id === sessionId); if (r && r.browserFact) onFact(r.browserFact); return; }
     if (msg.type === 'browser-profiles-updated') {
       refreshSet(); renderBackend(); renderRec(); renderOwner();
       // naive study 2 (finding 3): a STOPPED view resumes when the digest says its browser runs again (a view never starts one)
@@ -850,7 +916,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     ws.onopen = () => { if (ws !== st.ws) return; send({ type: 'config', maxFps: document.hidden ? HIDDEN_FPS : MAX_FPS_DEFAULT }); };
     ws.onmessage = (ev) => { if (ws !== st.ws) return; let m = null; try { m = JSON.parse(ev.data); } catch { return; } onMessage(m); };
     ws.onclose = () => {
-      if (ws !== st.ws) return; st.connected = false;
+      if (ws !== st.ws) return; st.connected = false; renderKbd(); // lane S2: no "Typing goes to the browser" over a closed stream
       // lane J r2: the server hands a takeover back when the holder's socket goes (`viewer-left`) — so do we: the
       // keyboard is released at once (a dead socket must never swallow what you type next)
       if (st.mine) { st.mode = 'watch'; st.mine = false; st.holder = null; renderMode(); }
@@ -877,13 +943,21 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         const was = st.mode, wasMine = st.mine;
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
         renderMode();
+        // the owner's ruling (2026-09-27): the takeover INTERRUPTS the agent and the handback asks it to re-run — both said here
+        const rerunList = Array.isArray(m.rerun) ? m.rerun.map(String).filter(Boolean).slice(0, 8).join(', ') : '';
+        st.lastRerun = rerunList;
         if (was === 'takeover' && st.mode === 'watch' && wasMine) {
-          if (m.cause === 'idle') showToast(t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
+          if (m.cause === 'idle') showToast(rerunList ? t('Your takeover lapsed (no input) — the agent is driving again and was told to re-run: {verbs}', { verbs: rerunList }) : t('Your takeover lapsed (no input) — the agent is driving again'), { duration: 5000 });
           else if (m.cause !== 'explicit') showToast(t('Control returned to the agent'), { duration: 3500 });
-        } else if (st.mode === 'takeover' && st.mine && !wasMine && m.cause !== 'pass') showToast(t('You took over — the agent is paused until you hand back'), { duration: 4000 }); // a PASS (fold-back) says its own words
+        } else if (st.mode === 'takeover' && st.mine && !wasMine && m.cause !== 'pass') { // a PASS (fold-back) says its own words
+          const it = m.interrupted && Number(m.interrupted.n) > 0 ? m.interrupted : null;
+          // verify r6: a script running in the page was stopped with the agent's call (Runtime.terminateExecution is page-context) — said to the human
+          const stopped = it && Number(it.terminated) > 0 ? ' ' + t('A script running in the page was stopped with it.') : '';
+          showToast(it ? t('You took over — {n} agent operation(s) interrupted: {verbs}. The agent waits until you hand back', { n: Number(it.n), verbs: (Array.isArray(it.verbs) ? it.verbs : []).map(String).slice(0, 8).join(', ') }) + stopped : t('You took over — the agent is paused until you hand back'), { duration: it ? 6000 : 4000 });
+        }
         break;
       }
-      case 'mode-ack': if (m.ok && m.mode === 'watch') showToast(t('Control handed back to the agent'), { duration: 3500 }); break;
+      case 'mode-ack': if (m.ok && m.mode === 'watch') showToast(st.lastRerun ? t('Control handed back to the agent — it was told to re-run: {verbs}', { verbs: st.lastRerun }) : t('Control handed back to the agent'), { duration: st.lastRerun ? 5000 : 3500 }); break;
       case 'confirmation': if (m.id) { st.confirmations.set(m.id, { id: m.id, action: m.action, category: m.category || null, expiresAt: Number(m.expiresAt) || (Date.now() + 60000) }); renderConfirms(); } break;
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'confirmation-ack': if (!m.ok) showToast(t('Could not answer the confirmation: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); else st.confirmations.delete(m.id), renderConfirms(); break;
@@ -914,18 +988,21 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
           setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
         } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
-        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); }
+        else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); renderKbd(); }
         else if (m.state === 'upstream-closed') { st.connected = false; setStatus(t('Stream ended'), { error: true, reconnect: true }); }
         else if (m.state === 'ended') { st.error = m; if (/session ended/.test(String(m.error || ''))) st.sessionEnded = true; setStatus(String(m.error || t('Stream ended')), { error: true, reconnect: true }); }
         else if (m.connected !== undefined) { // the upstream's own status record
           if (m.viewportWidth && m.viewportHeight && !st.meta) st.meta = { width: Number(m.viewportWidth), height: Number(m.viewportHeight) }; // lane J: a CLAIM, used only where it fits the picture
         }
         break;
+      case 'input-receipt': if (noteInputReceipt(st.receipts, m)) onReceiptsChanged(); break; // lane S2: the bridge's answer for one input
       case 'frame': {
         const data = typeof m.data === 'string' ? m.data : '';
         if (!data) break;
         st.frames++;
         st.lastFrameAt = Date.now(); st.refreshSent = false; // lane S4: the picture clocks restart
+        // lane S2 (naive study 2, T5): a stale error never outlives the picture — a frame is proof the stream works
+        if (st.error && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); }
         if (st.picture !== 'ok' || st.pictureStale) { st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); if (!st.error && !st.stopped) setStatus('', { hide: true }); }
         if (!st.connected) { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); } // a LATE viewer of a relay already open (a tap kept it) hears no upstream-open — its first frame is the proof
         const md = m.metadata || {};
@@ -939,7 +1016,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         { const act = st.tabs.find((x) => x.active); if (act && act.url && !st.url) { st.url = act.url; renderUrl(); } }
         renderTabs();
         break;
-      case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); break; } // lane S4: a navigation starts the picture clock
+      case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); if (st.error && st.connected && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); } break; } // lane S4: a navigation starts the picture clock; lane S2: a navigation clears a stale error too
       // lane S4: the page's size and whose pane it follows (the bridge's ruling; replayed to a late viewer)
       case 'fit': st.fit = { state: m.state, width: Number(m.width) || 0, height: Number(m.height) || 0, viewerId: m.viewerId ?? null, rule: m.rule || null, drawScale: Number(m.drawScale) || 1, floor: m.floor || null, device: m.device || null, error: m.error || null, why: m.why || null }; renderFit(); break;
       // lane J: the page's own layout viewport (the bridge reads it over CDP on the first frame, a picture/tab change and a takeover)
@@ -1101,7 +1178,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
 
   // ── chrome actions ──
   openBtn.onclick = () => { if (st.url) app.openBrowser(st.url); };
-  reBtn.onclick = () => { st.reconnects = 0; connect(); };
+  // lane S2 (naive study 2, T4: "Reconnect does nothing"): Reconnect RE-RESOLVES the target — a view whose browser is
+  // gone (a stale refusal) moves to the browser in use now; otherwise it reconnects as before
+  reBtn.onclick = () => { st.reconnects = 0; const f = st.fact || factNow(); const plan = liveFollowPlan({ view: viewFacts(), prev: f, next: f, force: true }); if (plan.act === 'retarget') { st.followed++; switchTo(plan.ref); } else connect(); };
   tabsBtn.onclick = () => { st.sidePane = st.sidePane === 'tabs' ? null : 'tabs'; renderSide(); };
   consBtn.onclick = () => { st.sidePane = st.sidePane === 'console' ? null : 'console'; renderSide(); };
   traceBtn.onclick = () => { st.sidePane = st.sidePane === 'trace' ? null : 'trace'; renderSide(); };
@@ -1188,8 +1267,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     const r = textRecords(text);
     if (!r.ok) { if (r.code === 'too_long') showToast(t('Not pasted into the page: {n} characters is more than one paste may carry ({max})', { n: r.length, max: r.max }), { type: 'warn' }); return; }
     let okAll = true;
-    for (const rec of r.records) okAll = sendInput(rec) && okAll;
-    st.sent += okAll ? 1 : 0; echo(okAll, okAll ? '' : t('the live view is disconnected'));
+    r.records.forEach((rec, i) => { okAll = sendInput(rec, false, { receipt: i === r.records.length - 1 }) && okAll; }); // lane S2: the paste's LAST record carries its receipt
+    st.sent += okAll ? 1 : 0; if (!okAll) echo(false, t('the live view is disconnected')); else if (!st.receipts.failing) echo(true);
   }
   document.addEventListener('paste', (e) => {
     if (!iOwn()) return;
@@ -1242,6 +1321,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (st.echoTimer) { clearTimeout(st.echoTimer); st.echoTimer = null; }
     if (st.pictureTimer) { clearInterval(st.pictureTimer); st.pictureTimer = null; } // lane S4
     if (st.fitTimer) { clearTimeout(st.fitTimer); st.fitTimer = null; }
+    if (st.receiptTimer) { clearInterval(st.receiptTimer); st.receiptTimer = null; } // lane S2
     if (foldRaf) { cancelAnimationFrame(foldRaf); foldRaf = 0; }
     try { app.wm.setOwnerBadge?.(winInfo.id, null); } catch { /* window gone */ }
     if (st.confirmTimer) { clearInterval(st.confirmTimer); st.confirmTimer = null; }
@@ -1268,7 +1348,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       bound: isBound(), bindText: bindLabel(), owners: dotsFor(st.target && st.target.profileId ? st.target.profileId : null).map((d) => ({ sessionId: d.sessionId, name: d.name, color: d.color })), // P7
       you: st.you, mine: st.mine, holder: st.holder, modeSince: st.modeSince, modeCause: st.modeCause, cursor: st.cursor ? { ...st.cursor } : null, cursorShown: cursorEl.style.display !== 'none', confirmations: [...st.confirmations.values()].map((c) => ({ ...c })), badge: modeBadge.textContent, badgeFull: modeBadge.title,
       // lane J r2
-      ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent, echo: echoEl.style.display === 'none' ? null : echoEl.textContent, ripples: st.ripples.map((r) => ({ ...r })), youPt: st.youPt ? { ...st.youPt } : null, youShown: youEl.style.display !== 'none', reclaims: st.reclaims, align: LIVE_ALIGN,
+      ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent,
+      // lane S2: the fact this view follows, how often it moved, the receipts (pending / delivered / failed / failing) and the chip's words
+      fact: st.fact ? { digest: st.fact.digest, using: { ...(st.fact.using || {}) } } : null, followed: st.followed, receipts: { pending: st.receipts.pending.size, delivered: st.receipts.delivered, failed: st.receipts.failed, failing: st.receipts.failing ? { ...st.receipts.failing } : null }, kbdText: kbdText.textContent, echo: echoEl.style.display === 'none' ? null : echoEl.textContent, ripples: st.ripples.map((r) => ({ ...r })), youPt: st.youPt ? { ...st.youPt } : null, youShown: youEl.style.display !== 'none', reclaims: st.reclaims, align: LIVE_ALIGN,
       // MULTIVIEW (design-browser-multiview §2 / D3 / D4) — the STRIP's folds are `stripFolded` (`folded` is lane I's bar)
       currentRef: curRef(), rows: st.rows.map((r) => ({ ...r, text: rowLabel(r), name: rowName(r) })), order: st.order.slice(), stripFolded: st.folded.slice(), stripShown: strip.style.display !== 'none', capText: capBtn.textContent, capFull: capBtn.classList.contains('full'), machineFull: capBtn.classList.contains('machine-full'), sessionEnded: st.sessionEnded, released: !!(st.error && st.hollow), notStarted: !!(st.error && st.error.browserState === 'not-started'), statusText: statusEl ? statusEl.textContent : null,
       bar: fold.last(), folded: fold.folded(), foldedRows: foldedRows().map((r) => ({ label: r.label, disabled: !!r.disabled })), // lane I: the census re-runs barLayout on `bar`

@@ -7,8 +7,9 @@
 // suite pins it with no engine, no store, no clock of its own:
 //   ① THE WALK — a simulated driver that drives the model EXACTLY as the engine does (facts before
 //      every step, the vendor call between two steps, arrivals only while a call is in flight,
-//      engine-like stop / drop settlement), ≥ 36 seeds × 3000 steps over three profiles (mixed,
-//      storms, tight budget + back-offs), asserting every one of the model's 17 rules at EVERY step
+//      engine-like stop / drop settlement), ≥ 48 seeds × 3000 steps over four profiles (mixed,
+//      storms, tight budget + back-offs, PACED — lane R5's per-second bucket, rule 18),
+//      asserting every one of the model's 18 rules at EVERY step
 //      against an independent oracle (the judgement, the pick, the round, the merge), plus
 //      exactly-once answers, honest `ok`s and liveness once the arrivals stop — and that each rule
 //      was actually EXERCISED (a walk that never met a back-off proves nothing about it);
@@ -20,6 +21,15 @@
 //      (r7), the forced passes run thrice (r7), the interleave (r7), LIFO / owner-last / no-ride
 //      (r8), the stop that kept fetching (r8 low), discovery ahead of a human (r8 low), the share
 //      per fetch and the bound (r9);
+//   ②b THE PACE (rule 18, lane R5 — the owner: "gmail一直被限速 你可能要控制下gmail默认的读取速度") —
+//      the first ingest of 873 conversations at 40 units each under the Gmail defaults (40 units/s,
+//      a 3000/min budget): every row fetched once, no second holds more than 80 units (one second's
+//      worth + one fetch), no 60 s more than 2440, ≈ 872 s of wall clock — and the SAME walk with the
+//      pace off is the burst the vendor refused — the minute's 3000 units in 1.5 s, 2040 of them inside one
+//      second (the control); a human filed
+//      during a wait is the next fetch, a refusal is never held behind a wait, a wait never counts
+//      toward the bound, a call larger than the bucket waits for a full one, the minute stays the
+//      outer cap;
 //   ③ FAIRNESS — under a saturating request stream the i-th due row is fetched after at most i
 //      request-class fetches; a lone request behind 873 due rows waits for at most ONE due fetch;
 //      with the due rows exhausted a pass ends after exactly STREAK_MAX request fetches;
@@ -46,6 +56,8 @@ const J = (x) => JSON.stringify(x);
 const CAP = 200, RESERVE = 20, K = 25;
 const T0 = Date.UTC(2026, 8, 26, 12, 0, 0);
 const BACKOFF = [0, 30e3, 120e3, 300e3, 900e3];
+/** Rule 18's owner-facing numbers (lane R5): the Gmail adapter's default pace — 40 quota units a second, a one-second bucket. */
+const GMAIL_PACE = Object.freeze({ unitsPerSec: 40, burst: 40 });
 function mulberry32(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const isHuman = (o) => o === 'owner' || o === 'open';
 const idsOf = (rs) => rs.map((r) => r.id);
@@ -63,7 +75,13 @@ function createSim(D, o = {}) {
     stopped: false, dropped: false, connected: true, discoveryDue: false, timerDue: false,
     fail: o.fail || null, refuse: o.refuse || null, hints: o.hints || null,
     latency: o.latency ?? 20, units: o.units ?? 1, hostScan: !!o.hostScan,
+    // rule 18 (lane R5): the per-second bucket — the SIM's own arithmetic (never the model's helpers), `sends` = every vendor call's instant + units
+    pace: o.pace ? { unitsPerSec: o.pace.unitsPerSec, burst: o.pace.burst } : null, discoverUnits: o.discoverUnits ?? 1, sends: [], waits: [],
   };
+  if (W.pace) W.bucket = { tokens: W.pace.burst, at: W.now };
+  const lvl = (t) => Math.min(W.pace.burst, W.bucket.tokens + ((t - W.bucket.at) * W.pace.unitsPerSec) / 1000);
+  const costOf = (type) => (type === 'fetch' ? W.units : type === 'discover' ? W.discoverUnits : 1);
+  const needOf = (type) => Math.min(costOf(type), W.pace.burst);
   const nKeys = o.keys ?? 45;
   for (let i = 0; i < nKeys; i++) W.keys.set(keyOf(i), { key: keyOf(i), cadence: o.cadenceOf ? o.cadenceOf(i) : 30e3, last: o.lastOf ? o.lastOf(i) : W.now - 31e3, named: false });
   let snap = D.empty();
@@ -76,15 +94,18 @@ function createSim(D, o = {}) {
   const V = (rule, msg) => { bump('violation:' + rule); if (violations.length < 40) violations.push(`${rule}: ${msg}`); };
   let nextId = 1, steps = 0, passNo = 0, evt = 0, queued = null;
   const queuedList = [];       // rule 17: the passes queued behind the running one (never more than one)
-  const minute = () => { if (W.now - W.minuteAt >= 60e3) { W.minuteAt = W.now; W.spent = 0; W.agent = 0; } };
+  let maxCost = 1;
+  let charged = 0;   // the units THIS sim's calls charged in the current window (a table may pre-spend W.spent by hand)
+  const minute = () => { if (W.now - W.minuteAt >= 60e3) { if (charged >= W.limit + maxCost) V('9-window', `a minute window's calls charged ${charged} of ${W.limit} (a call may start while units remain, so < limit + one call)`); W.minuteAt = W.now; W.spent = 0; W.agent = 0; charged = 0; } };
   const shareLimit = () => (W.sharePct >= 100 ? Infinity : Math.max(1, Math.floor((W.limit * W.sharePct) / 100)));
   const facts = () => {
     minute();
     const floors = {};
     for (const r of snap.requests) floors[r.key] = (W.keys.get(r.key) || {}).last || 0;
-    return { now: W.now, stopped: W.stopped, dropped: W.dropped, connected: W.connected, backoff: { epoch: W.backoff.epoch, pressEpoch: W.backoff.pressEpoch }, budget: { remainingUnits: W.limit - W.spent }, agentShare: { remaining: shareLimit() - W.agent }, floors, floorMs: W.floorMs };
+    const pace = W.pace ? { unitsPerSec: W.pace.unitsPerSec, burst: W.pace.burst, tokens: W.bucket.tokens, lastRefillAt: W.bucket.at, cost: { fetch: W.units, discover: W.discoverUnits, scanHost: 1 } } : null;
+    return { now: W.now, stopped: W.stopped, dropped: W.dropped, connected: W.connected, backoff: { epoch: W.backoff.epoch, pressEpoch: W.backoff.pressEpoch }, budget: { remainingUnits: W.limit - W.spent }, agentShare: { remaining: shareLimit() - W.agent }, floors, floorMs: W.floorMs, pace };
   };
-  const charge = (by, units) => { minute(); W.spent += units; if (by === 'agent') W.agent += units; };
+  const charge = (by, units) => { minute(); W.spent += units; charged += units; if (by === 'agent') W.agent += units; };
   const dueList = (all) => {
     const out = [];
     for (const k of W.keys.values()) {
@@ -204,6 +225,36 @@ function createSim(D, o = {}) {
       if (s.requests.length) { if (!(act.type === 'refuse' && act.rule === 'cut' && sameSet(act.waiters, idsOf(s.requests)))) V('9-cut', `the minute spent with ${s.requests.length} accepted waiters, the step was ${J(act).slice(0, 160)}`); else bump('9-cut'); }
       else if (act.type !== 'end' || !act.cut) V('9-cut', `the minute spent, nothing to refuse, the step was ${act.type}`);
     }
+    // RULE 18 — THE PACE, from the sim's own bucket
+    if (s.pace) {
+      const level = lvl(s.now);
+      if (vendorCall) {
+        if (level + 1e-6 < needOf(act.type)) V('18-pace', `a ${act.type} sent with ${level.toFixed(3)} tokens, it needs ${needOf(act.type)} (cost ${costOf(act.type)}, burst ${W.pace.burst})`);
+        else bump('18-sent-paced');
+        if (costOf(act.type) > W.pace.burst) bump('18-over-burst');
+        if (pv.lastWait && (pv.lastWait.next !== act.type || (pv.lastWait.key || null) !== (act.key || null))) bump('18-repick');
+        pv.lastWait = null;
+      }
+      if (act.type === 'wait') {
+        bump('18-wait');
+        const short = needOf(act.next) - level;
+        if (!(short > 1e-6)) V('18-needless-wait', `a wait for a ${act.next} with ${level.toFixed(3)} tokens ≥ the ${needOf(act.next)} it needs`);
+        const exact = W.pace.unitsPerSec > 0 ? Math.ceil((short * 1000) / W.pace.unitsPerSec) : 1000;
+        if (!(act.ms >= 1 && act.ms <= 1000) || act.ms > Math.min(1000, exact) + 1) V('18-wait-ms', `waited ${act.ms} ms for a shortfall of ${short.toFixed(3)} at ${W.pace.unitsPerSec}/s (≤ min(1000, ${exact}))`);
+        if (act.next === 'fetch') {
+          const pk = O.pick;
+          if (!pk || act.key !== pk.key) V('18-wait-pick', `the wait holds ${act.key}, the rules pick ${pk && pk.key}`);
+          else if ((s.pass.backoff && !pk.reqs.some((r) => r.origin === 'owner')) || (!pk.due && !pk.human && !(s.agentShare.remaining > 0))) V('18-wait-before-refusal', `a wait before ${pk.key}'s refusal at the fetch`);
+          else bump('18-wait-fetch');
+        } else if (act.next === 'discover') {
+          if (pv.discovered || !pv.timerWork || O.waitingItems.some((it) => it.human)) V('18-wait-pick', 'a wait for a discovery the rules do not run');
+          else bump('18-wait-discover');
+        } else if (act.next === 'scanHost') {
+          if (pv.scanned || pv.calls || !W.hostScan) V('18-wait-pick', 'a wait for a host scan the rules do not run');
+        } else V('18-wait-pick', `a wait for ${act.next}`);
+        pv.lastWait = { next: act.next, key: act.key || null };
+      }
+    } else if (act.type === 'wait') V('18-pace', 'a wait with no pace declared');
     if (act.type === 'discover') {
       bump('12-discover');
       if (pv.discovered) V('12-once', 'a second discovery in one pass');
@@ -263,18 +314,23 @@ function createSim(D, o = {}) {
     bump(rule);
   };
   /** The engine's failure bookkeeping (failPass). */
-  const failPass = (pv) => { W.backoff.failures++; W.backoff.until = W.now + BACKOFF[Math.min(W.backoff.failures, BACKOFF.length - 1)]; if (!pv.wasInBackoff) W.backoff.epoch++; };
+  const failPass = (pv, code) => { W.backoff.failures++; W.backoff.until = W.now + BACKOFF[Math.min(W.backoff.failures, BACKOFF.length - 1)]; if (!pv.wasInBackoff) W.backoff.epoch++; if (W.pace && code === 'rate-limited') W.bucket = { tokens: 0, at: W.now }; };
   const settleAll = (code) => { for (const r of [...snap.requests]) withdraw(r.id, { code }); };
   const hooks = { during: null, afterFetch: null, onStep: null };
   /** One vendor call (between two steps: the world moves while it is in flight). */
   const perform = (act, pv, beginTick) => {
+    // rule 18: the call is SENT now — the bucket is charged its cost at this instant (the engine's `pace` → `meter`)
+    const units = costOf(act.type);
+    maxCost = Math.max(maxCost, units);
+    if (W.pace) { const l = lvl(W.now); W.bucket = { tokens: l - units, at: W.now }; }
+    W.sends.push({ at: W.now, units });
     if (hooks.during) hooks.during(act, pv); else if (o.during) o.during(act, pv, api);
     W.now += W.latency;
     pv.vendorCalls++;
     vendorLog.push({ type: act.type, key: act.key || null, pass: passNo });
-    if (act.type === 'fetch') charge(act.chargeTo, W.units); else charge('timer', 1);
+    if (act.type === 'fetch') charge(act.chargeTo, W.units); else charge('timer', units);
     const code = W.fail ? W.fail(act, api) : null;
-    if (code) { failPass(pv); pv.failed = code; return { error: code }; }
+    if (code) { failPass(pv, code); pv.failed = code; return { error: code }; }
     if (act.type === 'discover') { pv.discovered = true; W.discoveryDue = false; return { due: dueList(snap.pass && snap.pass.force) }; }
     if (act.type === 'scanHost') { pv.scanned = true; return {}; }
     const refused = W.refuse ? W.refuse(act, api) : null;
@@ -337,6 +393,13 @@ function createSim(D, o = {}) {
         lostCheck(beforeIds, act.type);
         continue;
       }
+      if (act.type === 'wait') {   // rule 18: the engine sleeps — the clock moves, the world may move with it (a request, a stop), nothing is sent
+        lostCheck(beforeIds, 'wait');
+        W.waits.push(act.ms);
+        W.now += act.ms;
+        if (hooks.during) hooks.during(act, pv); else if (o.during) o.during(act, pv, api);
+        continue;
+      }
       const beginTick = ++evt;
       if (act.type === 'fetch') {
         const k = W.keys.get(act.key); if (k) k.named = false;
@@ -377,8 +440,20 @@ function createSim(D, o = {}) {
   };
   /** Run the queued pass, if any (the engine's `.then(after)`). */
   const runQueued = () => { if (!queued) return null; const q = queued; queued = null; queuedList.length = 0; if (q.force) bump('17-forced-ran'); return runPass({ origin: q.origin, force: q.force }); };
+  /** RULE 18's windows over every call SENT: the most units any window of `T` ms held. */
+  const maxIn = (T) => { let best = 0, sum = 0, i = 0; const L = W.sends; for (let j = 0; j < L.length; j++) { sum += L[j].units; while (L[j].at - L[i].at > T) { sum -= L[i].units; i++; } if (sum > best) best = sum; } return best; };
+  /** …checked against the exact tolerance: burst + rate·T + max(0, the largest call − burst). */
+  const windowCheck = () => {
+    if (!W.pace) return;
+    for (const T of [1000, 10e3, 60e3]) {
+      const bound = W.pace.burst + (W.pace.unitsPerSec * T) / 1000 + Math.max(0, maxCost - W.pace.burst) + 1e-6;
+      const got = maxIn(T);
+      if (got > bound) V('18-window', `${got} units inside ${T / 1000} s — the bound is ${bound.toFixed(2)} (burst ${W.pace.burst}, ${W.pace.unitsPerSec}/s, largest call ${maxCost})`);
+      else bump('18-window-' + T / 1000 + 's');
+    }
+  };
   const api = {
-    W, file, withdraw, runPass, runQueued, ask, settleAll, dueList, facts, waiters, fetches, vendorLog, violations, cover, bump, V, rnd, ri,
+    W, file, withdraw, runPass, runQueued, ask, settleAll, dueList, facts, waiters, fetches, vendorLog, violations, cover, bump, V, rnd, ri, maxIn, windowCheck,
     get snap() { return snap; }, set snap(x) { snap = x; }, get steps() { return steps; }, get passNo() { return passNo; }, get lastPass() { return lastPass; }, hooks,
     /** run request / timer passes until nothing waits (bounded) */
     settle(max = 200) { for (let i = 0; i < max && (D.hasRequests(snap) || queued); i++) { if (queued) { runQueued(); continue; } runPass({ origin: 'request' }); if (D.hasRequests(snap) && W.backoff.until > W.now) W.now = W.backoff.until + 1; if (D.hasRequests(snap) && !(W.limit - W.spent > 0)) W.now += 61e3; } return !D.hasRequests(snap); },
@@ -391,6 +466,8 @@ const PROFILES = {
   mixed: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.008, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100] },
   storms: { storm: 0.08, arrivals: 0.6, rerequest: 0.2, p429: 0.004, sticky: 0.005, limit: [600, 1e6], share: [25, 100] },
   tight: { storm: 0.02, arrivals: 0.5, rerequest: 0.12, p429: 0.03, sticky: 0.04, limit: [12, 25, 40], share: [5, 25] },
+  // lane R5: rule 18 on — [unitsPerSec, burst] (a burst of 1 with 2-unit calls = a call larger than the bucket)
+  paced: { storm: 0.02, arrivals: 0.45, rerequest: 0.12, p429: 0.01, sticky: 0.01, limit: [40, 120, 600, 1e6], share: [5, 25, 100], pace: [[1, 1], [2, 4], [5, 5], [3, 10], [20, 20]] },
 };
 function walk(D, seed, profileName, steps = 3000) {
   const P = PROFILES[profileName];
@@ -421,8 +498,10 @@ function walk(D, seed, profileName, steps = 3000) {
     sim.W.now += ri(3) === 0 ? ri(40) : 0;
     if (rnd() < 0.03) sim.W.now += 31e3;   // a slow vendor call: rows this pass fetched come due AGAIN (rule 13)
   };
+  const pc = P.pace ? P.pace[ri(P.pace.length)] : null;
   const sim = createSim(D, {
     rnd, walk: true, keys: nKeys, limit: P.limit[ri(P.limit.length)], sharePct: P.share[ri(P.share.length)],
+    pace: pc ? { unitsPerSec: pc[0], burst: pc[1] } : null, discoverUnits: pc ? 1 + ri(8) : 1,
     floorMs: [5e3, 20e3, 60e3][ri(3)], hostScan: rnd() < 0.2, latency: 5 + ri(40), units: 1 + ri(2),
     cadenceOf: (i) => (i % 3 === 0 ? 300e3 : 30e3), lastOf: () => T0 - ri(400e3), during,
     fail: () => (sticky ? 'rate-limited' : rnd() < P.p429 ? (rnd() < 0.5 ? 'rate-limited' : 'transport') : null),
@@ -447,6 +526,7 @@ function walk(D, seed, profileName, steps = 3000) {
   // LIVENESS: the arrivals stop, the vendor behaves — every waiter is answered within bounded passes
   sticky = false;
   const settled = createSettle(sim);
+  sim.windowCheck();
   const unanswered = [...sim.waiters.values()].filter((w) => !w.answer).length;
   return { sim, settled, unanswered, nKeys };
 }
@@ -464,8 +544,10 @@ const RULE_COVER = [
   ['10-new-round', 'rule 10: a new round of a fetched key'], ['12-discover', 'rule 12: discovery'], ['13-turn', 'rule 13: the timer\'s turn merged'],
   ['13-merged-due-again', 'rule 13: a due-again row merged'], ['13-hints', 'rule 13: hints merged'], ['14-scan', 'rule 14: the host scan'], ['15-carry', 'rule 15: the bound carried a pass'],
   ['16-backoff-end', 'rule 16: a fetchless back-off pass'], ['17-joined', 'rule 17: an ask joined the queued pass'], ['17-forced-ran', 'rule 17: a forced queued pass ran'],
+  ['18-wait', 'rule 18: a wait for the bucket'], ['18-wait-fetch', 'rule 18: a wait holding the pick'], ['18-wait-discover', 'rule 18: a wait holding a discovery'], ['18-over-burst', 'rule 18: a call larger than the bucket sent on a full one'],
+  ['18-repick', 'rule 18: the step after a wait picked something else (a new arrival, a refusal, a stop)'], ['18-window-1s', 'rule 18: every 1 s window within the tolerance'], ['18-window-60s', 'rule 18: every 60 s window within the tolerance'],
 ];
-console.log('① THE WALK: 36 seeds × 3000 steps over three profiles, every rule at every step against the oracle');
+console.log('① THE WALK: 48 seeds × 3000 steps over four profiles, every rule at every step against the oracle');
 const WALK_STEPS = 3000;
 const totals = {};
 let totalSteps = 0, totalPasses = 0, totalFetches = 0;
@@ -486,17 +568,17 @@ let totalSteps = 0, totalPasses = 0, totalFetches = 0;
   }
   for (const [key, label] of RULE_COVER) ok((totals[key] || 0) > 0 && !totals['violation:' + key.split('-')[0]], `${label} — exercised ${totals[key] || 0}× across the walk, never violated`);
   const vio = Object.entries(totals).filter(([k]) => k.startsWith('violation:'));
-  ok(vio.length === 0 && totalSteps >= 36 * WALK_STEPS, `the walk: ${totalSteps} steps, ${totalPasses} passes, ${totalFetches} vendor fetches, ${Date.now() - t0} ms — zero violations of the 17 rules + exactly-once + honest ok + no lost answer`, J(vio));
+  ok(vio.length === 0 && totalSteps >= 48 * WALK_STEPS, `the walk: ${totalSteps} steps, ${totalPasses} passes, ${totalFetches} vendor fetches, ${Date.now() - t0} ms — zero violations of the 18 rules + exactly-once + honest ok + no lost answer`, J(vio));
   for (const prof of Object.keys(PROFILES)) {
     const c = byProfile[prof];
-    ok((c['5-refused'] || 0) > 0 && (c.fetch || 0) > 1000 && (c['13-turn'] || 0) > 0, `profile ${prof}: ${c.fetch || 0} fetches, ${c['5-refused'] || 0} refusals at sight, ${c['13-turn'] || 0} turns, ${c['9-cut'] || 0} cuts, ${c['5-refused-backoff'] || 0} back-off refusals, ${c['15-carry'] || 0} bound ends, ${c.storm || 0} storms`);
+    ok((c['5-refused'] || 0) > 0 && (c.fetch || 0) > 1000 && (c['13-turn'] || 0) > 0 && (prof !== 'paced' || (c['18-wait'] || 0) > 1000), `profile ${prof}: ${c.fetch || 0} fetches, ${c['5-refused'] || 0} refusals at sight, ${c['13-turn'] || 0} turns, ${c['9-cut'] || 0} cuts, ${c['5-refused-backoff'] || 0} back-off refusals, ${c['15-carry'] || 0} bound ends, ${c.storm || 0} storms, ${c['18-wait'] || 0} pace waits`);
   }
 }
 
 // ═══ ② THE TABLES — the r2–r8 repros in the model's own terms ══════════════════════════════════
 /** A scripted account: 45 conversations, every one due at +31 s unless `dueOnly`. */
 function account(D, o = {}) {
-  return createSim(D, { keys: o.keys ?? 45, now: T0 + 31e3, lastOf: o.lastOf || (() => T0), cadenceOf: o.cadenceOf || ((i) => (o.dueOnly === undefined || o.dueOnly.includes(i) ? 30e3 : 900e3)), limit: o.limit ?? 1e6, sharePct: o.sharePct ?? 25, floorMs: o.floorMs ?? 20e3, latency: o.latency ?? 20, units: 1, fail: o.fail, refuse: o.refuse, hostScan: o.hostScan, backoffUntil: o.backoffUntil, epoch: o.epoch, failures: o.failures });
+  return createSim(D, { keys: o.keys ?? 45, now: T0 + 31e3, lastOf: o.lastOf || (() => T0), cadenceOf: o.cadenceOf || ((i) => (o.dueOnly === undefined || o.dueOnly.includes(i) ? 30e3 : 900e3)), limit: o.limit ?? 1e6, sharePct: o.sharePct ?? 25, floorMs: o.floorMs ?? 20e3, latency: o.latency ?? 20, units: o.units ?? 1, fail: o.fail, refuse: o.refuse, hostScan: o.hostScan, backoffUntil: o.backoffUntil, epoch: o.epoch, failures: o.failures, pace: o.pace || null, discoverUnits: o.discoverUnits });
 }
 /** callsPerKey over a list of fetches. */
 const callsOn = (sim, key) => sim.fetches.filter((f) => f.key === key).length;
@@ -731,6 +813,68 @@ const REPROS = {
     sim.runPass({ origin: 'timer', force: true });
     return { twice: callsOn(sim, keyOf(3)), total: sim.fetches.length };
   },
+  // ── rule 18 (lane R5): the PACE — the Gmail defaults: 40 units/s (burst 40), a thread read = 40 units, a 3000/min budget ──
+  /** the owner's case: the first ingest of 873 conversations, one timer pass */
+  firstIngest(D, { pace = GMAIL_PACE } = {}) {
+    const sim = account(D, { keys: 873, limit: 3000, units: 40, pace, latency: 20 });
+    const first = sim.runPass({ origin: 'timer' });
+    const keys = sim.fetches.map((f) => f.key);
+    const sends = sim.W.sends;
+    return { calls: sim.fetches.length, distinct: new Set(keys).size, inOrder: keys.every((k, i) => k === keyOf(i)), max1s: sim.maxIn(1000), max10s: sim.maxIn(10e3), max60s: sim.maxIn(60e3), wallSec: sends.length ? (sends[sends.length - 1].at - sends[0].at) / 1000 : 0, cut: !!first.cut, ok: !!first.ok, waits: sim.W.waits.length, maxWait: sim.W.waits.length ? Math.max(...sim.W.waits) : 0, violations: sim.violations.slice(0, 3) };
+  },
+  /** the owner's press filed during a pace wait (a not-due conversation) — the NEXT call is its fetch */
+  humanDuringWait(D) {
+    const sim = account(D, { keys: 874, limit: 3000, units: 40, pace: GMAIL_PACE, cadenceOf: (i) => (i < 873 ? 30e3 : 900e3) });
+    let w = null, at = null;
+    sim.hooks.during = (act) => { if (!w && act.type === 'wait' && sim.fetches.length >= 100) { w = sim.file('owner', keyOf(873)); at = sim.fetches.length; } };
+    sim.runPass({ origin: 'timer' });
+    const pos = sim.fetches.findIndex((f) => f.key === keyOf(873));
+    return { filedAfter: at, pos, ok: !!(w && w.answer && w.answer.ok), calls: sim.fetches.length };
+  },
+  /** an agent's floor-refused request filed during a fetch that drained the bucket — refused at the next step, never held behind a wait */
+  refusalDuringWait(D) {
+    const sim = account(D, { keys: 60, limit: 3000, units: 40, pace: GMAIL_PACE, floorMs: 900e3 });
+    let w = null;
+    sim.hooks.during = (act) => { if (!w && act.type === 'fetch' && sim.fetches.length >= 5) w = sim.file('agent', keyOf(1)); };
+    sim.runPass({ origin: 'timer' });
+    return { code: w && w.answer && w.answer.code, heldMs: w && w.answer ? w.answeredAt - w.filedAt : null, fetchesBetween: w && w.answer ? w.answeredFetch - w.filedFetch : null };
+  },
+  /** a paced request stream with no due row: the pass still ends after exactly K request FETCHES — a wait never counts */
+  pacedBound(D) {
+    const sim = account(D, { keys: 60, dueOnly: [], units: 40, pace: GMAIL_PACE });
+    let k = 0;
+    sim.hooks.during = (act) => { if (act.type === 'fetch' && k < 120) sim.file('owner', keyOf(k++ % 60)); };
+    sim.file('owner', keyOf(59));
+    const first = sim.runPass({ origin: 'request' });
+    return { carry: !!first.carry, firstFetches: sim.fetches.length, waits: sim.W.waits.length };
+  },
+  /** a discovery larger than the bucket (a 410-unit page on a 40-unit bucket): it waits for a FULL bucket, the next fetch waits out the debt one ≤ 1 s step at a time */
+  overBurst(D) {
+    const sim = account(D, { keys: 5, limit: 1e6, units: 40, pace: GMAIL_PACE, discoverUnits: 410 });
+    sim.W.discoveryDue = true;
+    sim.runPass({ origin: 'timer' });
+    const log = sim.W.sends.map((x) => x.units);
+    const gap = sim.W.sends.length > 1 ? sim.W.sends[1].at - sim.W.sends[0].at : null;
+    return { first: log[0], gapMs: gap, maxWait: sim.W.waits.length ? Math.max(...sim.W.waits) : 0, waits: sim.W.waits.length, calls: sim.fetches.length };
+  },
+  /** the minute stays the OUTER cap: a pace faster than the budget (100/s against 600/min) is still cut at the minute */
+  minuteOuterCap(D) {
+    const sim = account(D, { keys: 45, limit: 600, units: 40, pace: { unitsPerSec: 100, burst: 100 } });
+    const first = sim.runPass({ origin: 'timer' });
+    return { calls: sim.fetches.length, cut: !!first.cut, why: first.why };
+  },
+  /** fairness under the pace: a saturating owner stream beside 35 due rows — the i-th due row after at most i request fetches */
+  pacedFairness(D) {
+    const sim = account(D, { dueOnly: Array.from({ length: 35 }, (_, i) => 10 + i), units: 40, pace: GMAIL_PACE });
+    let k = 0, reqFetches = 0;
+    const firstDueAt = new Map();
+    sim.hooks.during = (act) => { if (reqFetches < 400) sim.file('owner', keyOf(k++ % 10)); };
+    sim.hooks.afterFetch = (act) => { if (!act.due) reqFetches++; else if (!firstDueAt.has(act.key)) firstDueAt.set(act.key, reqFetches); };
+    sim.file('owner', keyOf(0));
+    sim.runPass({ origin: 'timer' });
+    const order = Array.from({ length: 35 }, (_, i) => keyOf(10 + i));
+    return { all: order.every((key) => firstDueAt.has(key)), worst: Math.max(...order.map((key, i) => (firstDueAt.get(key) ?? Infinity) - (i + 1))), waits: sim.W.waits.length };
+  },
 };
 const R = {};
 for (const [name, fn] of Object.entries(REPROS)) R[name] = fn(D0);
@@ -753,6 +897,28 @@ ok(R.humanBeforeDiscovery.humanAt >= 0 && R.humanBeforeDiscovery.discoverAt > R.
 ok(R.sharePerFetch.agentFetches === 5 && R.sharePerFetch.refused === 15, `r9 · twenty agent requests judged together under a share of 5: exactly ${R.sharePerFetch.agentFetches} agent fetches, ${R.sharePerFetch.refused} refused by name (r8 judged the share at the boundary only)`, J(R.sharePerFetch));
 ok(R.bound.carry && R.bound.firstFetches === K && R.bound.all, `r9 · a request stream with no due row: the first pass ends after exactly ${R.bound.firstFetches} (K = ${K}) request fetches, carrying the rest — every request answered ok`, J(R.bound));
 ok(R.dueAgain.twice === 1 && R.dueAgain.total === 10, `rule 13 · a forced pass whose human request was fetched before discovery never fetches it twice (${R.dueAgain.twice} call, ${R.dueAgain.total} in all)`, J(R.dueAgain));
+
+// ═══ ②b THE PACE (rule 18, lane R5) ═══════════════════════════════════════════════════════════
+console.log('②b THE PACE (rule 18): the owner\'s 873-conversation first ingest under the Gmail defaults, and what a wait may never do');
+{
+  const I = R.firstIngest;
+  ok(I.calls === 873 && I.distinct === 873 && I.inOrder && I.ok && !I.cut && I.violations.length === 0, `the first ingest of 873 conversations at 40 units each is ONE timer pass: every row fetched once, most overdue first, never cut by the minute (${I.calls} calls, cut ${I.cut})`, J(I));
+  ok(I.max1s <= 80, `no second holds more than 80 units — one second's worth + one thread read (the rule's exact tolerance: burst 40 + 40·1 s + 0) — measured ${I.max1s}`, J(I));
+  ok(I.max10s <= 440 && I.max60s <= 2440 && I.max60s <= 3000, `no 10 s holds more than 440, no 60 s more than 2440 — inside the 3000/min budget and far inside Google's 6000/min per user (measured ${I.max10s} / ${I.max60s})`, J(I));
+  ok(I.wallSec >= 871 && I.wallSec <= 874, `…so the first read takes ≈ 873 × 40 / 40 = 873 s of wall clock (${I.wallSec.toFixed(1)} s from the first call to the last) — one thread a second, as the setting says`, J(I));
+  ok(I.maxWait <= 1000 && I.waits >= 872, `every wait is one step of ≤ 1 s (${I.waits} waits, longest ${I.maxWait} ms) — the drain is asked again at least once a second`, J(I));
+  const C = REPROS.firstIngest(D0, { pace: null });
+  ok(C.calls < 873 && C.cut && C.max1s >= 2000, `CONTROL · the SAME pass with the pace off is the shape the vendor refused: ${C.max1s} units inside one second before the minute's cut (${C.calls} calls, then nothing for the rest of the minute) — the legs above would go red`, J({ calls: C.calls, max1s: C.max1s, cut: C.cut }));
+  ok(R.humanDuringWait.ok && R.humanDuringWait.pos === R.humanDuringWait.filedAfter, `the owner's press filed during a pace wait (after ${R.humanDuringWait.filedAfter} fetches) is the NEXT call (position ${R.humanDuringWait.pos}) — a wait re-picks, humans first`, J(R.humanDuringWait));
+  ok(R.refusalDuringWait.code === 'refresh-floor' && R.refusalDuringWait.fetchesBetween === 0 && R.refusalDuringWait.heldMs <= 20, `an agent's floor-refused request filed while the bucket is empty is refused at the next step: ${R.refusalDuringWait.fetchesBetween} calls, ${R.refusalDuringWait.heldMs} ms (the fetch in flight) — never held behind a wait`, J(R.refusalDuringWait));
+  ok(R.pacedBound.carry && R.pacedBound.firstFetches === K && R.pacedBound.waits > 0, `a paced request stream still ends after exactly K = ${K} request FETCHES (${R.pacedBound.firstFetches}, with ${R.pacedBound.waits} waits between them) — a wait never counts toward the bound`, J(R.pacedBound));
+  ok(R.overBurst.first === 410 && R.overBurst.gapMs >= 10250 && R.overBurst.gapMs <= 10300 && R.overBurst.maxWait <= 1000, `a 410-unit discovery on a 40-unit bucket goes on a FULL bucket; the next fetch waits out the debt (${R.overBurst.gapMs} ms ≈ (410 − 40 + 40) / 40 s) in ${R.overBurst.waits} steps of ≤ 1 s`, J(R.overBurst));
+  ok(R.minuteOuterCap.cut && R.minuteOuterCap.calls === 15, `the minute stays the OUTER cap: a 100/s pace against a 600/min budget is still cut at the minute (${R.minuteOuterCap.calls} × 40 units, cut ${R.minuteOuterCap.cut})`, J(R.minuteOuterCap));
+  ok(R.pacedFairness.all && R.pacedFairness.worst <= 0 && R.pacedFairness.waits > 0, `under the pace a saturating owner stream still serves the i-th of 35 due rows after at most i request fetches (worst slack ${R.pacedFairness.worst}, ${R.pacedFairness.waits} waits)`, J(R.pacedFairness));
+  const D = D0;
+  const P = D.paceFresh(40, 40, 0);
+  ok(D.paceWaitMs(P, 0, 40) === 0 && D.paceWaitMs(D.paceCharge(P, 0, 40), 0, 40) === 1000 && D.paceWaitMs(D.paceCharge(P, 0, 40), 500, 40) === 500 && D.paceWaitMs(D.paceCharge(P, 0, 410), 0, 410) === 1000 && D.paceLevel(D.paceCharge(P, 0, 410), 10250) === 40 && D.paceWaitMs(null, 0, 1e9) === 0, 'the bucket arithmetic: a full bucket sends at once, an empty one waits the shortfall (≤ 1 s per ask), a debt is waited out, a full bucket is capped, no pace never waits');
+}
 
 // ═══ ③ FAIRNESS ═══════════════════════════════════════════════════════════════════════════════
 console.log('③ FAIRNESS: the due list under a saturating stream, a lone request behind 873 due rows, the bound');
@@ -819,6 +985,12 @@ const MUTANTS = [
   { tag: 'no-bound', rule: 15, why: 'r8: a stream kept one pass alive forever', edits: [["  if (!duePending && p.streak >= STREAK_MAX) return { ...base, type: 'end', ok: true, why: null, carry: true, waiting: 0, timerWork: p.timerWork };   // THE BOUND", '']], walk: ['15-bound'], repro: () => { const r = REPROS.bound(DM); return { red: !r.carry, said: J(r) }; } },
   { tag: 'stop-ignored', rule: 2, why: 'r8 low: a stopped pass kept fetching', edits: [['  if (s.stopped || s.dropped) {', '  if (false) {']], walk: ['2-stop'], repro: () => { const r = REPROS.stopMidPass(DM); return { red: r.callsAfterStop > 0, said: J(r) }; } },
   { tag: 'due-again-lost', rule: 13, why: 'a key fetched twice for one epoch', edits: [['    if (f !== undefined && !(dueAt > f)) continue;   // fetched this pass and not due again', '']], walk: ['13-refetch', '13-turn'], repro: () => { const r = REPROS.dueAgain(DM); return { red: r.twice > 1, said: J(r) }; } },
+  // rule 18 (lane R5) — the pace's own mutants
+  { tag: 'pace-no-refill', rule: 18, why: 'a bucket that never refills', edits: [['  return Math.min(Number(pace.burst) || 0, (Number(pace.tokens) || 0) + (dt * (Number(pace.unitsPerSec) || 0)) / 1000);', '  return Math.min(Number(pace.burst) || 0, (Number(pace.tokens) || 0) + dt * 0);']], walk: ['18-needless-wait', '16-end'], repro: () => { const r = REPROS.firstIngest(DM); return { red: r.calls < 873, said: J({ calls: r.calls, waits: r.waits }) }; } },
+  { tag: 'pace-ignored', rule: 18, why: 'a fetch that ignores the wait — the burst the vendor refused', edits: [['  if (!(ms > 0)) return act;', '  return act;']], walk: ['18-pace', '18-window'], repro: () => { const r = REPROS.firstIngest(DM); return { red: r.max1s > 80, said: J({ max1s: r.max1s, calls: r.calls }) }; } },
+  { tag: 'wait-counts', rule: 18, why: 'a wait that counts against the request cap (rule 15\'s bound)', edits: [['    case \'wait\':   // rule 18: the engine sleeps between two steps — nothing about the pass moves\n      break;', '    case \'wait\':\n      if (p) p.streak++;\n      break;']], walk: ['15-bound'], repro: () => { const r = REPROS.pacedBound(DM); return { red: r.firstFetches < K, said: J(r) }; } },
+  { tag: 'wait-before-refusal', rule: 18, why: 'a refusal held behind the pace (rule 5 answers at sight)', edits: [["  if (first) return { ...none, type: 'refuse',", "  if (first && s.pace && paceWaitMs(s.pace, s.now, paceCost(s.pace, 'fetch')) > 0) return { ...none, type: 'wait', ms: paceWaitMs(s.pace, s.now, paceCost(s.pace, 'fetch')), next: 'fetch', key: null };\n  if (first) return { ...none, type: 'refuse',"]], walk: ['5-at-sight'], repro: () => { const r = REPROS.refusalDuringWait(DM); return { red: r.heldMs === null || r.heldMs > 500, said: J(r) }; } },
+  { tag: 'wait-unbounded', rule: 18, why: 'one wait for the whole shortfall (the drain not asked again for 10 s)', edits: [['  return Math.max(1, Math.min(PACE_WAIT_MAX_MS, Math.ceil((short * 1000) / r)));', '  return Math.max(1, Math.ceil((short * 1000) / r));']], walk: ['18-wait-ms'], repro: () => { const r = REPROS.overBurst(DM); return { red: r.maxWait > 1000, said: J(r) }; } },
 ];
 let DM = null;
 for (const m of MUTANTS) {
@@ -851,7 +1023,8 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   ok(!/Date\.now|new Date|setTimeout|setImmediate|setInterval|Math\.random|process\./.test(code), 'the model reads no clock, sets no timer, draws no randomness and touches no process — `now` is a fact the driver hands in');
   ok(/^'use strict';/.test(SRC) && /module\.exports = \{/.test(SRC), 'the model is CJS (the engine requires it, this suite and a patched copy load it the same way)');
   const rules = [...SRC.matchAll(/^ \* {1,2}(\d{1,2})\. [A-Z]/gm)].map((m) => Number(m[1]));
-  ok(J(rules) === J(Array.from({ length: 17 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–17 (${rules.join(',')})`);
+  ok(J(rules) === J(Array.from({ length: 18 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–18 (${rules.join(',')})`);
+  ok(J(D0.REFUSAL_CODES) === J(['backoff', 'vendor-budget', 'refresh-floor', 'refresh-queue-full']) && !D0.ANSWER_OUTCOMES.includes('wait') && D0.PACE_WAIT_MAX_MS === 1000, 'rule 18 adds NO refusal code and no settlement — a wait is neither (REFUSAL_CODES unchanged; PACE_WAIT_MAX_MS 1000)');
   const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const line = asrc.split('\n').find((l) => l.includes('const status = code === \'not-found\' ? 404') && l.includes('refresh-queue-full')) || '';
   const segs = line.slice(line.indexOf('const status = ') + 15, line.indexOf(';')).split(' : ');

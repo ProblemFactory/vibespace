@@ -84,8 +84,17 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (st.done || st.exchanging) return;
     st.exchanging = true;
     try {
-      st.result = await st.exchange({ code, redirectUri: st.redirectUri, state: st.state });
+      // verify r7 (channels lane R5): the exchange is handed `cancelled()` — a disconnect, a cancel, a newer begin()
+      // or the timeout landing WHILE the vendor round trips used to be undone by the token the exchange then stored;
+      // the exchange consults it before writing and THROWS to refuse (its own sentence names the cause).
+      // verify r8: THE WRITE IS THE FACT. An exchange that RESOLVED has landed its consent and this machine cannot
+      // undo a write, so the report says ok:true whatever cancel arrived between that write and this line (r7 said
+      // {ok:false, "nothing was connected"} over a token on disk — the record connected, its card contradicting it,
+      // no pass kicked). The late cancel is CARRIED (`cancelled`) for a consumer whose DURABLE write is still ahead
+      // (the engine's pending path refuses it there); the record door's consumer reads ok as landed.
+      st.result = await st.exchange({ code, redirectUri: st.redirectUri, state: st.state, flowId: st.flowId, cancelled: () => st.cancelled || null });
       st.error = null;
+      if (st.cancelled) log.warn && log.warn(`[oauth-loopback] ${st.id}: a ${st.cancelled} arrived after the exchange had completed — the consent stands, the report says ok`);
     } catch (e) {
       st.error = String((e && e.message) || e);
       st.result = null;
@@ -95,7 +104,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       st.finishedAt = now();
       release(st);
       if (byId.get(st.id) === st.flowId) byId.delete(st.id);
-      if (typeof st.onDone === 'function') { try { await st.onDone({ ok: !st.error, result: st.result, error: st.error, flowId: st.flowId, id: st.id }); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
+      if (typeof st.onDone === 'function') { try { await st.onDone({ ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id }); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
     }
   }
 
@@ -115,10 +124,15 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *   mode            'ephemeral' | 'fixed'
    *   callbackUrl     fixed mode only; defaults to the registry's Lark literal
    *   buildConsentUrl ({redirectUri, state}) => the vendor consent URL
-   *   exchange        async ({code, redirectUri, state}) => the token record (opaque here)
+   *   exchange        async ({code, redirectUri, state, flowId, cancelled}) => the token record (opaque here);
+   *                   RESOLVING MEANS THE CONSENT LANDED (verify r8: the report is ok:true and this machine cannot
+   *                   undo a write) — consult `cancelled()` right before writing and THROW to refuse a flow ended
+   *                   meanwhile (a disconnect / cancel / newer begin() / the timeout / stopAll)
    *   successText     what the browser tab says after the redirect landed
    *   timeoutMs       the flow's own budget (default FLOW_TIMEOUT_MS)
-   *   onDone          async ({ok, result, error, flowId, id}) — the adapter's finish hook
+   *   onDone          async ({ok, result, error, cancelled, flowId, id}) — the adapter's finish hook; `cancelled`
+   *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
+   *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
   async function begin({ id, mode, callbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');

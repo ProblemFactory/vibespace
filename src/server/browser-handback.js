@@ -14,12 +14,29 @@
  *
  * THE THREE MOMENTS (the design's table), decided by PURE
  * `browser-takeover.announceVerdict`:
- *   · take over        — nothing is delivered (the agent is told by the typed
- *                        `browser_paused` refusal on its next command: free);
+ *   · take over        — nothing is DELIVERED (no turn is billed). THE OWNER'S
+ *                        RULING (2026-09-27, verbatim: "关于接管浏览器的时候agent脚本，
+ *                        其实应该直接打断所有脚本和agent操作，告知agent发生了打断，
+ *                        交还时提醒它重新运行"): the keeper has already interrupted
+ *                        what was in flight (the mediator's `browser_interrupted`),
+ *                        and this module TELLS: ONE conversation card per takeover
+ *                        → handback cycle ("…; N operations were interrupted: …" —
+ *                        the ladder's card path, `emitPeerCard`, display only) and
+ *                        the zero-spend `browser-takeover` notice the agent reads at
+ *                        its next turn; a command it was running ends with
+ *                        `browser_interrupted` (the CLI's audit), the next ones are
+ *                        refused `browser_paused` — free;
  *   · explicit handback — DELIVERED through the ladder, `kind:'notification'`
+ *                        (verify r7: a handback MIRRORED to a sibling conversation
+ *                        — taken WITH the primary, the user never on its view — is
+ *                        delivered only when ITS cycle has something to re-run;
+ *                        else the zero-spend notice rides its next turn)
  *                        (VibeSpace is speaking, nobody waits for a reply — on
  *                        a codex turn in flight that is the steer lane), with
- *                        the CURRENT URL so the agent re-orients;
+ *                        the CURRENT URL so the agent re-orients and — the
+ *                        owner's ruling — "Re-run what was interrupted: …" when
+ *                        the cycle interrupted or refused anything (ONE reminder
+ *                        per cycle; none when nothing was);
  *   · idle / viewer-left — NOTHING by default (zero-spend): the lease flips,
  *                        the live view and the card update, ONE "For you" item
  *                        says the takeover lapsed (idle only), the zero-spend
@@ -28,9 +45,12 @@
  *                        (default OFF) routes it through the same reason and
  *                        the same ceiling.
  * A REFUSAL LOSES NOTHING: a refused or failed delivery is stashed on the
- * ladder's own stash (the words ride the next injection) AND the zero-spend
- * notice is queued; the lease flip already happened regardless. Every
- * outcome is journalled with its cause.
+ * ladder's own stash (the words ride the next injection); only when the stash
+ * cannot take it is the zero-spend notice queued instead — ONE carrier per
+ * takeover → handback cycle (the owner's ruling, 2026-09-27: the re-run
+ * reminder is said once; stash + notice both rode the same next prompt and the
+ * agent read the handback twice). The lease flip already happened regardless.
+ * Every outcome is journalled with its cause.
  *
  * WINDOW TARGETS (P9b, design §4.9 / §6.6): a window's handback is the same
  * moment under the same reason — `installWindow(engine)` hangs on the
@@ -62,6 +82,9 @@ const FROM_NAME = 'VibeSpace browser';
 
 function create({ keeper = null, deliver = null, serverSetting = () => undefined, userTodos = null, activeSessions = null,
   sessionKeyFor = null, notice = null, onLiveFactsChanged = null, log = console,
+  // the owner's ruling (2026-09-27): the takeover's card goes to the LIVE session's chat (normalizers.feedPeerCard — the
+  // auto-resume notice's own path: display only, no rung); absent ⇒ the ladder's card path by conversation id
+  emitCard = null,
   // lane J r2: the stale sweep's seam — {pending(session) → [{requestId, toolName, input, kind}], answer(sessionId, session, data) → {ok}, note(session, requestId, staleBy)}
   approvals = null } = {}) {
   const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
@@ -102,11 +125,14 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     const sess = sessionFor(ev.sessionId, ev.browserKey);
     const label = win ? (ev.label || ev.handle || null) : labelOf(ev.profileId);
     const idleMs = keeper && typeof keeper.takeoverIdleMs === 'function' ? keeper.takeoverIdleMs() : T.DEFAULT_TAKEOVER_IDLE_MS;
-    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}) };
-    const verdict = T.announceVerdict({ cause, announceIdle: announceIdle() });
+    // the owner's ruling (2026-09-27): the cycle's re-run list (the keeper closed it at this handback) rides every word below
+    const rerun = !win && Array.isArray(ev.rerun) ? ev.rerun.map(String).filter(Boolean) : [];
+    const args = { cause, label, url: ev.url || '', heldMs: ev.heldMs || 0, idleMs, ...(win ? { target: 'window', handle: ev.handle || null } : {}), ...(rerun.length ? { rerun } : {}) };
+    const verdict = T.announceVerdict({ cause, announceIdle: announceIdle(), sibling: !win && !!ev.sibling, rerun }); // verify r7: a sibling's handback with nothing to re-run is zero-spend
     const out = { cause, target: win ? 'window' : 'browser', sessionId: sess ? sess.id : null, verdict, delivered: false, stashed: false, noticed: false, inbox: false, why: null };
     if (!sess) { out.why = win ? 'no live session holds this window' : 'no live session carries this browser key'; log.log?.(`[browser] handback (${cause}) for ${win ? ev.handle : ev.browserKey}: ${out.why}`); return out; }
-    if (cause === 'idle') out.inbox = fileInbox(sess, T.idleInboxItem({ label, idleMs, url: ev.url || '', sessionName: sess.s.name || '', ...(win ? { target: 'window' } : {}) }));
+    out.rerun = rerun;
+    if (cause === 'idle') out.inbox = fileInbox(sess, T.idleInboxItem({ label, idleMs, url: ev.url || '', sessionName: sess.s.name || '', ...(win ? { target: 'window' } : { rerun }) }));
     if (!verdict.deliver) {
       out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
       out.why = verdict.why;
@@ -135,8 +161,40 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     // next injection, and the zero-spend notice rides the next message too.
     out.why = (r && r.reason) || 'delivery refused';
     try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); out.stashed = true; } } catch (e) { log.warn?.(`[browser] handback stash failed — ${e && e.message}`); }
-    out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
+    // ONE carrier (the owner's ruling, 2026-09-27): the stash rides the same next prompt the notice would — the notice only when the stash could not take the words
+    if (!out.stashed) out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
     log.log?.(`[browser] handback (${cause}) for ${sess.id}: NOT delivered (${out.why})${out.stashed ? ' — stashed for the next injection' : ''}${out.noticed ? '; the notice rides the next message' : ''}`);
+    return out;
+  }
+
+  /**
+   * THE TAKEOVER TELLS (the owner's ruling, 2026-09-27 — "告知agent发生了打断"). `ev` = the keeper's `takeover` event
+   * with its `interruption` view (the PURE cycle: what was in flight at the instant, what the mediator aborted). ONE
+   * card per cycle (`fresh` — a second viewer's takeover before the handback merges and says nothing), shown in the
+   * conversation through the ladder's CARD path (`emitPeerCard`: display only — no rung, no turn, no spend) with the
+   * sender VibeSpace speaks as (`FROM_NAME`, src/notification-senders.js) and `kind:'notification'`; and ONE
+   * zero-spend `browser-takeover` notice the agent reads at its next turn. A window target is not a browser: nothing.
+   */
+  function announceTakeover(ev) {
+    const out = { sessionId: null, carded: false, noticed: false, why: null, text: null };
+    if (!ev || isWindow(ev) || ev.cause === 'pass') { out.why = 'not a browser takeover'; return out; }
+    const iv = ev.interruption || null;
+    if (!iv || iv.fresh === false) { out.why = iv ? 'the same takeover goes on (a second viewer before the handback) — said once' : 'no interruption view'; return out; }
+    const sess = sessionFor(ev.sessionId, ev.browserKey);
+    if (!sess) { out.why = 'no live session carries this browser key'; return out; }
+    out.sessionId = sess.id;
+    const label = labelOf(ev.profileId);
+    const text = T.takeoverText({ label, n: iv.n || 0, verbs: iv.verbs || [] });
+    out.text = text;
+    // the card is display only — to the live session we hold (a conversation with no id yet still sees it), else by conversation id
+    const card = { fromName: FROM_NAME, text, kind: 'notification' };
+    const cid = conversationIdOf(sess.s);
+    try {
+      if (typeof emitCard === 'function') out.carded = emitCard(sess.s, card) !== false;
+      else if (cid && deliver && typeof deliver.emitPeerCard === 'function') { deliver.emitPeerCard(cid, card); out.carded = true; }
+    } catch (e) { log.warn?.(`[browser] takeover card not shown — ${e && e.message}`); }
+    out.noticed = queueNotice(sess, T.takeoverNotice({ label, n: iv.n || 0, verbs: iv.verbs || [], at: Date.now() }));
+    log.log?.(`[browser] takeover on ${ev.browserKey}${ev.profileId ? ' ' + ev.profileId : ' (ephemeral)'} for ${sess.id}: ${iv.n ? `${iv.n} operation(s) interrupted (${(iv.verbs || []).join(', ')})` : 'nothing in flight'}${out.carded ? '; card shown' : ''}${out.noticed ? '; the notice rides the next turn' : ''} (free — nothing delivered)`);
     return out;
   }
 
@@ -230,6 +288,8 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       try { onLiveFactsChanged?.(ev); } catch { /* optional */ }
       // lane J r2: both moments sweep the conversation's pending browser approvals (answered stale, browser_paused)
       if (ev.kind === 'takeover' || ev.kind === 'handback') { try { sweepStale(ev, ev.kind); } catch (e) { log.warn?.(`[browser] stale-approval sweep failed — ${e && e.message}`); } }
+      // the owner's ruling (2026-09-27): the takeover TELLS — one card + one zero-spend notice per cycle, nothing billed
+      if (ev.kind === 'takeover') { try { announceTakeover(ev); } catch (e) { log.warn?.(`[browser] takeover announce failed — ${e && e.message}`); } return; }
       if (ev.kind !== 'handback') return;
       announce(ev).catch((e) => log.warn?.(`[browser] handback announce failed — ${e && e.message}`));
     });
@@ -238,7 +298,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   }
   function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; }
 
-  return { announce, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, FROM_NAME };
+  return { announce, announceTakeover, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, FROM_NAME };
 }
 
 module.exports = { create, FROM_NAME };

@@ -55,6 +55,15 @@
 //      carries the secret
 //   ⑪ the Lark keyed rung over the keyed JSON env: the account's key read
 //      LIVE off the record, the refresh naming ITS app
+//   ⑫ verify r5 (credential): a refresh IN FLIGHT when a disconnect or a
+//      client-switch rebind lands writes nothing back (the disconnected
+//      account used to reconnect itself; the rebind ended with the OLD
+//      client's token ⇒ invalid_grant); a consent that NAMES another identity
+//      than the account's is refused by name at the ONE token door (same-client
+//      re-auth, rebind, re-connect after a disconnect), the same person under
+//      another client accepted, a Lark rebind matching on user_id across apps;
+//      the PURE table (src/channel-identity.js). Control: an engine copy
+//      without the check stores the stranger's consent
 //
 // Zero vendor calls: every fetch is the fake below; the consent runs against
 // the engine's own loopback on an ephemeral port. Per-pid scratch dirs
@@ -88,6 +97,9 @@ const ENGINE_PATH = path.join(REPO, 'src/server/channels-engine.js');
 const PRE_R4 = '348aa226';
 
 const ROOT = scratch('chan-accounts');
+// lane R5 (drain rule 18): the per-second PACE runs on a private clock this suite's sleep advances —
+// exact and instantaneous, so a leg about something else never waits a real second per Gmail thread
+const FAST_PACE = (() => { let t = 0; return { paceClock: () => t, sleep: (ms) => new Promise((r) => { t += ms; setImmediate(r); }) }; })();
 // The pre-fix engine copy is written OUTSIDE the tree (scripts/mutant-copy.mjs,
 // `require` re-bound on line 1 to the real module's path); its scratch dir is
 // removed at exit.
@@ -202,7 +214,7 @@ const integrations = STORE.create({ dataDir: storeDir, env: {}, now, broadcast: 
 const v = mkVendor();
 const engDir = path.join(ROOT, 'eng'); fs.mkdirSync(engDir, { recursive: true });
 const frames = [];
-const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capLog });
+const eng = ENG.create({ dataDir: engDir, env: {}, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capLog , ...FAST_PACE });
 const engines = [eng];
 process.on('exit', () => { for (const e of engines) { try { e.oauth.stopAll(); e.stop(); } catch {} } });
 const chBox = SB.secretBox(path.join(engDir, ENG.KEY_FILE));   // the engine's own key file — reading the seal back
@@ -276,7 +288,7 @@ console.log('② the row\'s pick vs the account\'s own');
   const store0 = STORE.create({ dataDir: path.join(ROOT, 'store0'), env: {}, now, broadcast: () => {}, drivePresets: () => holder0.list, log: quiet });
   const v0 = mkVendor();
   const d0 = path.join(ROOT, 'eng0'); fs.mkdirSync(d0, { recursive: true });
-  const eng0 = ENG0.create({ dataDir: d0, env: {}, now, broadcast: () => {}, integrations: store0, fetch: v0.fetchFn, log: quiet });
+  const eng0 = ENG0.create({ dataDir: d0, env: {}, now, broadcast: () => {}, integrations: store0, fetch: v0.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng0);
   const A0 = await consent(eng0, 'gmail', { credentialKey: 'cluster:org1' }, 'c-a');
   ok(A0.clientId === 'org1.apps.googleusercontent.com', 'CONTROL: the copy consents A under org1 like the real engine');
@@ -361,7 +373,7 @@ let idC = null;
   // CONTROL 1: a copy without the custom rung cannot serve the account
   const ENG1 = patchedEngine([["      if (row && row.bindsPerAccount && k === CUSTOM_KEY) return customClientOf(rec, row, CUSTOM_KEY);\n", '']]);
   const d1 = path.join(ROOT, 'eng1'); fs.mkdirSync(d1, { recursive: true });
-  const eng1 = ENG1.create({ dataDir: d1, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet });
+  const eng1 = ENG1.create({ dataDir: d1, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng1);
   const c1 = await threw(() => eng1.connect('gmail', { credentialKey: 'custom', credential: { appId: CUSTOM_ID, appSecret: CUSTOM_SECRET }, newAccount: true }));
   ok(c1 && (c1.code === 'needs-credentials' || c1.code === 'auth-expired') && /unknown credential key 'custom'/.test(c1.message), 'CONTROL: a copy with no custom rung sends the adapter to the store, which knows no `custom` — the consent cannot begin', c1 && c1.message);
@@ -372,7 +384,7 @@ let idC = null;
     ['    try { secret = box.dec(c.appSecretEnc); }\n', '    try { secret = c.appSecretEnc; }\n'],   // …and reads it back unopened, so the copy runs end to end
   ]);
   const d2 = path.join(ROOT, 'eng2'); fs.mkdirSync(d2, { recursive: true });
-  const eng2 = ENG2.create({ dataDir: d2, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet });
+  const eng2 = ENG2.create({ dataDir: d2, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng2);
   await eng2.connect('gmail', { credentialKey: 'custom', credential: { appId: CUSTOM_ID, appSecret: CUSTOM_SECRET }, newAccount: true });
   ok(rawDisk(d2).includes(CUSTOM_SECRET), 'CONTROL: a copy that skips the seal writes the plaintext — the disk check above would be red');
@@ -458,7 +470,7 @@ console.log('⑦ re-authorize = rebind');
   else {
     const dp = path.join(ROOT, 'engp'); fs.mkdirSync(dp, { recursive: true });
     const vp = mkVendor();
-    const ep = PRE.create({ dataDir: dp, env: {}, now, broadcast: () => {}, integrations, fetch: vp.fetchFn, log: quiet });
+    const ep = PRE.create({ dataDir: dp, env: {}, now, broadcast: () => {}, integrations, fetch: vp.fetchFn, log: quiet , ...FAST_PACE });
     engines.push(ep);
     const Ap = await consent(ep, 'gmail', { credentialKey: 'cluster:org1' }, 'c-a');
     const pe = await threw(() => ep.reauthorize(Ap.id, { credentialKey: 'cluster:channels' }));
@@ -530,7 +542,7 @@ console.log('⑧ duplicate');
   fs.mkdirSync(path.join(d3, 'channels'), { recursive: true });
   fs.copyFileSync(path.join(engDir, 'channels', 'adapters.json'), path.join(d3, 'channels', 'adapters.json'));
   fs.copyFileSync(path.join(engDir, ENG.KEY_FILE), path.join(d3, ENG.KEY_FILE));
-  const eng3 = ENG3.create({ dataDir: d3, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet });
+  const eng3 = ENG3.create({ dataDir: d3, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng3);
   const r3 = await eng3.duplicate(idC);
   ok(eng3.adapterRecords().adapters.find((x) => x.id === r3.adapter.id).auth.tokenEnc, 'CONTROL: a copy that also copies `auth` hands the duplicate the token — the NEVER check above would be red');
@@ -581,7 +593,7 @@ console.log('⑨ remove');
   const ENG4 = patchedEngine([['    const refs = referencesOf(rec.id);\n', '    const refs = [];\n']]);
   const d4 = path.join(ROOT, 'eng4'); fs.mkdirSync(path.join(d4, 'channels'), { recursive: true });
   for (const f of ['adapters.json', 'index.json']) fs.copyFileSync(path.join(engDir, 'channels', f), path.join(d4, 'channels', f));
-  const eng4 = ENG4.create({ dataDir: d4, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet });
+  const eng4 = ENG4.create({ dataDir: d4, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet , ...FAST_PACE });
   engines.push(eng4);
   const r4 = await threw(() => eng4.remove(idA));
   ok(!r4 && !eng4.adapterRecords().adapters.some((x) => x.id === idA), 'CONTROL: a copy with no reference check removes an ASSIGNED account — the defect the refusal exists for');
@@ -593,7 +605,7 @@ console.log('⑨ remove');
   if (PRE) {
     const dp = path.join(ROOT, 'engq'); fs.mkdirSync(dp, { recursive: true });
     const vp = mkVendor();
-    const ep = PRE.create({ dataDir: dp, env: {}, now, broadcast: () => {}, integrations, fetch: vp.fetchFn, log: quiet });
+    const ep = PRE.create({ dataDir: dp, env: {}, now, broadcast: () => {}, integrations, fetch: vp.fetchFn, log: quiet , ...FAST_PACE });
     engines.push(ep);
     await consent(ep, 'gmail', { credentialKey: 'cluster:org1' }, 'c-a');
     const Bp = await consent(ep, 'gmail', { credentialKey: 'cluster:channels', newAccount: true }, 'c-b');
@@ -704,6 +716,433 @@ console.log('⑪ lark');
 }
 
 eng.oauth.stopAll(); eng.stop();
+
+// ── ⑫ verify r5: a refresh in flight vs disconnect / rebind; whose account a consent may land on ──
+console.log('⑫ verify r5: refresh races + the identity door');
+{
+  const P12 = [{ key: 'org1', label: 'Org 1', clientId: 'org1.apps.googleusercontent.com', clientSecret: 'org1-secret-000000' }, { key: 'channels', label: 'Channels', clientId: 'ch.apps.googleusercontent.com', clientSecret: 'channels-secret-0000' }];
+  /** a scripted Google that KNOWS which client issued each refresh token, which person each consent code is, and when each access token expires */
+  function google12() {
+    const st = { refreshes: 0, sends: 0, holdRefresh: null, holdFor: null, issued: new Map(), access: new Map(), who: new Map(), n: 0, refreshLog: [], profileFail: false };
+    const client = (id) => (id || '').split('.')[0];
+    const emailFor = (code) => (/intruder/.test(code) ? 'intruder@example.com' : 'member.a@example.com');
+    const issue = (c, who) => { st.n++; const at = `ya29.${c}-${st.n}`; st.access.set(at, clock + 3599e3); if (who) st.who.set(at, who); return at; };
+    const fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url)); const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      if (u.hostname === 'oauth2.googleapis.com') {
+        if (form.grant_type === 'authorization_code') { const c = client(form.client_id); const rt = `1//${c}-${++st.n}`; st.issued.set(rt, c); return jsonRes({ access_token: issue(c, emailFor(form.code)), expires_in: 3599, refresh_token: rt, scope: gmail.SCOPE, token_type: 'Bearer' }); }
+        st.refreshes++; const c = client(form.client_id); st.refreshLog.push({ client: c, token: form.refresh_token, family: st.issued.get(form.refresh_token) || null });
+        if (st.holdRefresh && (!st.holdFor || st.holdFor(form))) { const h = st.holdRefresh; await h; }
+        if (st.issued.get(form.refresh_token) !== c) return jsonRes({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
+        return jsonRes({ access_token: issue(c, st.who.get(form.refresh_token) || null), expires_in: 3599, scope: gmail.SCOPE, token_type: 'Bearer' });
+      }
+      const at = String((init.headers || {}).Authorization || '').replace(/^Bearer /, ''); const exp = st.access.get(at);
+      if (!exp || exp <= clock) return jsonRes({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
+      st.sends++;
+      const p = u.pathname.replace('/gmail/v1/users/me', '');
+      if (p === '/profile') {
+        st.profileCalls = (st.profileCalls || 0) + 1;
+        if (st.holdProfile) { const h = st.holdProfile; await h; }   // verify r7: the consent's completion held mid-flight
+        return st.profileFail ? jsonRes({ error: { code: 500, message: 'Backend Error' } }, 500) : jsonRes({ emailAddress: st.who.get(at) || 'member.a@example.com', historyId: '100' });
+      }
+      if (p === '/threads') return jsonRes({ threads: [{ id: 'thr_a' }] });
+      if (/^\/threads\/[^/]+$/.test(p)) return jsonRes({ id: 'thr_a', messages: [{ id: 'm1', internalDate: String(T0), payload: { headers: [{ name: 'Subject', value: 'S' }, { name: 'From', value: 'x@example.com' }] } }] });
+      if (p === '/history') return jsonRes({ historyId: '100' });
+      return jsonRes({ error: { code: 404, message: 'unrouted' } }, 404);
+    };
+    return { st, fetchFn };
+  }
+  const boot12 = (name) => { const v = google12(); const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true }); const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet }); const e = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE }); return { eng: e, v, dir }; };
+  const row = (e) => e.adapterRecords().adapters.find((x) => x.id === 'gmail');
+  // (a) a DISCONNECT while the entry's refresh is in flight: the late refresh writes nothing back, the record carries no failure of a pass that outlived it
+  {
+    const { eng: e, v, dir } = boot12('r5-dc');
+    const r = await e.connect('gmail', { credentialKey: 'cluster:channels' }); await land(r.flow, 'c1');
+    await e.pass('gmail', { force: true }); clock += 3600e3;
+    let release; v.st.holdRefresh = new Promise((x) => { release = x; });
+    const p = e.pass('gmail', { force: true }); await sleep(30);
+    ok(v.st.refreshes === 1, 'fixture: the pass\'s refresh POST is in flight (held)');
+    await e.disconnect('gmail'); release(); await p; await sleep(50);
+    const rec = row(e); const disk = diskOf(dir).find((x) => x.id === 'gmail'); const view = e.adapterView(rec);
+    const s0 = v.st.sends; clock += 10e3; await e.pass('gmail', { force: true });
+    ok(!rec.auth.tokenEnc && !disk.auth.tokenEnc && rec.lastPass === null && rec.consecutiveFailures === 0 && view.auth.state !== 'connected' && view.auth.state !== 'expired' && v.st.sends === s0, `a disconnect during the refresh: no token written back (live ${!!rec.auth.tokenEnc} / disk ${!!disk.auth.tokenEnc}), the late failure stamped nothing (lastPass ${JSON.stringify(rec.lastPass)}), state ${view.auth.state}, ${v.st.sends - s0} vendor calls by the next pass`);
+    e.stop();
+  }
+  // (b) a CLIENT-SWITCH rebind that lands while the OLD client's refresh is in flight: the record ends with the rebind's token, the next refresh carries the new client and ITS family
+  {
+    const { eng: e, v } = boot12('r5-rebind');
+    const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+    await e.pass('gmail', { force: true }); clock += 3600e3;
+    let release; v.st.holdRefresh = new Promise((x) => { release = x; }); v.st.holdFor = (form) => /org1/.test(form.client_id);
+    const p = e.pass('gmail', { force: true }); await sleep(20);
+    const rb = await e.reauthorize('gmail', { credentialKey: 'cluster:channels' }); await land(rb.flow, 'c2');
+    release(); await p; await sleep(40);
+    clock += 3600e3; v.st.refreshLog.length = 0; await e.pass('gmail', { force: true });
+    const rec = row(e); const view = e.adapterView(rec); const last = v.st.refreshLog[v.st.refreshLog.length - 1];
+    ok(view.credentialKey === 'cluster:channels' && view.auth.state === 'connected' && last && last.client === 'ch' && last.family === 'ch' && rec.lastPass && rec.lastPass.ok === true, `a rebind landing during the old client's refresh: connected under ${view.credentialKey}, the next refresh carried ${last && last.client} + a token issued by ${last && last.family} (never the old client's), the pass ok`, JSON.stringify({ state: view.auth.state, last, lastPass: rec.lastPass }));
+    e.stop();
+  }
+  // (c) WHOSE ACCOUNT: a consent naming another identity is refused at the ONE token door; the same person under another client is what re-authorize is for
+  {
+    const { eng: e } = boot12('r5-id');
+    const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+    const rec0 = row(e); const tok0 = rec0.auth.tokenEnc;
+    ok(rec0.auth.user === 'member.a@example.com' && rec0.identity && rec0.identity.email === 'member.a@example.com', `connected as member.a, the identity stamped on the record (${JSON.stringify(rec0.identity)})`);
+    const r1 = await e.reauthorize('gmail', {}); await land(r1.flow, 'c-intruder');
+    const rec1 = row(e);
+    ok(rec1.auth.tokenEnc === tok0 && rec1.auth.user === 'member.a@example.com' && /connected as member\.a@example\.com; this sign-in is intruder@example\.com/.test(rec1.lastAuthError || ''), 'a same-client re-authorize as another Google user: refused by name (the token is the old one, the last sign-in line names both)', rec1.lastAuthError);
+    const r2 = await e.reauthorize('gmail', { credentialKey: 'cluster:channels' }); await land(r2.flow, 'c-intruder');
+    const rec2 = row(e);
+    ok(rec2.credentialKey === 'cluster:org1' && rec2.auth.tokenEnc === tok0 && /this sign-in is intruder@example\.com/.test(rec2.lastAuthError || ''), `a rebind as another user keeps the client (${rec2.credentialKey}) and the token, refused by name`);
+    const r3 = await e.reauthorize('gmail', { credentialKey: 'cluster:channels' }); await land(r3.flow, 'c-same');
+    const rec3 = row(e);
+    ok(rec3.credentialKey === 'cluster:channels' && rec3.auth.tokenEnc !== tok0 && rec3.lastAuthError === null && e.adapterView(rec3).auth.state === 'connected', 'the same person under the other client: client + token replaced, connected');
+    await e.disconnect('gmail');
+    const r4 = await e.reauthorize('gmail', {}); await land(r4.flow, 'c-intruder');
+    const rec4 = row(e);
+    ok(!rec4.auth.tokenEnc && rec4.identity && rec4.identity.email === 'member.a@example.com' && /this sign-in is intruder@example\.com/.test(rec4.lastAuthError || ''), 'the identity survives a disconnect: a re-connect as another user is refused, no token stored');
+    const r5 = await e.reauthorize('gmail', {}); await land(r5.flow, 'c-same');
+    ok(!!row(e).auth.tokenEnc && e.adapterView(row(e)).auth.state === 'connected', '…and the same person re-connects');
+    const r6 = await e.connect('gmail', { credentialKey: 'cluster:org1', newAccount: true }); await land(r6.flow, 'c-intruder');
+    const other = e.adapterRecords().adapters.find((x) => x.id !== 'gmail');
+    ok(other && other.auth.user === 'intruder@example.com' && other.identity.email === 'intruder@example.com', 'a NEW account connects as the other person — its own record, its own identity');
+    e.stop();
+  }
+  // (d) the PURE table
+  {
+    const ID = require(path.join(REPO, 'src/channel-identity.js'));
+    const T = [
+      [{ email: 'A@x.com' }, { email: 'a@x.com' }, null, 'the same email, case-folded'],
+      [{ email: 'a@x.com' }, { email: 'b@x.com' }, 'email', 'another email'],
+      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on2', userId: 'u1' }, null, 'lark: a new app, the same tenant user'],
+      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on1', userId: 'u2' }, null, 'lark: the same developer union id'],
+      [{ openId: 'ou1', unionId: 'on1', userId: 'u1' }, { openId: 'ou2', unionId: 'on2', userId: 'u2' }, 'openId', 'lark: another person'],
+      [{ openId: 'ou1' }, { email: 'a@x.com' }, null, 'no common key: nothing to judge'],
+      [{}, { email: 'a@x.com' }, null, 'a record with no identity accepts the first'],
+      [{ email: 'a@x.com' }, {}, null, 'a token naming nobody: nothing for identityMismatch to judge (verify r6: the CONSENT rule refuses it upstream — (f))'],
+    ];
+    const bad = T.filter(([h, o, k]) => { const m = ID.identityMismatch(h, o); return k === null ? m !== null : !(m && m.key === k); });
+    ok(bad.length === 0, `the PURE identity table: ${T.length} rows — ${bad.length} wrong`, JSON.stringify(bad.map((r) => r[3])));
+    ok(ID.heldIdentity({ auth: { user: 'Legacy@X.com' } }).email === 'legacy@x.com' && Object.keys(ID.heldIdentity({ auth: { user: 'Member A' } })).length === 0 && ID.heldIdentity({ identity: { email: 'S@x.com' }, auth: { user: 'other@x.com' } }).email === 's@x.com', 'a legacy record (no stamp) is judged by its auth.user only when that is an email; a stamp outranks auth.user');
+    ok(ID.heldIdentity({ auth: { user: 'Member A' } }, { openId: 'ou1', name: 'Member A' }).openId === 'ou1' && ID.heldIdentity({ identity: { email: 'S@x.com' } }, { email: 'o@x.com' }).email === 's@x.com' && ID.heldIdentity({ identity: {}, auth: { user: 'L@x.com' } }, null).email === 'l@x.com' && /did not say which account signed in \(profile: 500\)/.test(ID.namelessSentence('Google', 'profile: 500')), 'verify r6: the held identity is read off the token the record HOLDS when it carries no stamp (a legacy Lark record: its open_id; the display name is never an id); a stamp outranks the token; an empty stamp falls through; the nameless sentence');
+    ok(/connected as a@x\.com; this sign-in is b@x\.com/.test(ID.mismatchSentence('Mail', { key: 'email', held: 'a@x.com', offered: 'b@x.com' })), 'the refusal sentence names both identities');
+    // verify r7: an `email` is an identity only when it LOOKS LIKE AN ADDRESS — a Lark display name with an '@' in it was stamped at boot as an email (a guess), a whitespace / bare-word profile answer bound nothing
+    ok(Object.keys(ID.heldIdentity({ auth: { user: 'Alice @ Sales' } })).length === 0 && Object.keys(ID.heldIdentity({ auth: { user: 'alice@corp' } })).length === 0 && Object.keys(ID.identityOf({ email: '   ' })).length === 0 && Object.keys(ID.identityOf({ email: 'not-an-email' })).length === 0 && ID.identityOf({ email: ' A@X.com ' }).email === 'a@x.com' && ID.looksLikeEmail('a@x.com') && !ID.looksLikeEmail('a @ x.com'), 'verify r7: a display name with an @ / a bare word / whitespace is NOBODY (never a guessed email); an address is trimmed + case-folded');
+    ok(/was cancelled while it was being completed — nothing was connected/.test(ID.cancelledSentence('Gmail', 'cancelled')) && /replaced by a newer sign-in/.test(ID.cancelledSentence('Gmail', 'superseded')) && /past its time limit/.test(ID.cancelledSentence('Gmail', 'timeout')), 'verify r7: the cancelled-consent sentence names the cause');
+  }
+  // (e) CONTROL: an engine copy without the identity check stores the stranger's consent (RED as asserted)
+  {
+    const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const noCheck = src.replace("            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '');   // verify r7: the check sits INSIDE the serialized callback
+    ok(noCheck !== src, 'CONTROL fixture: the token door\'s identity check removed from a copy');
+    const ENG2 = require(MUTA.write(ENGINE_PATH, noCheck, 'no-identity'));
+    const v = google12(); const dir = path.join(ROOT, 'r5-ctl'); fs.mkdirSync(dir, { recursive: true });
+    const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
+    const e = ENG2.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
+    const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+    const r1 = await e.reauthorize('gmail', {}); await land(r1.flow, 'c-intruder');
+    const rec = row(e);
+    ok(rec.auth.user === 'intruder@example.com' && !rec.lastAuthError, `CONTROL: without the check the stranger's consent is STORED on member.a's record (user ${rec.auth.user})`);
+    e.stop();
+  }
+  // ── verify r6 ──
+  // (f) A CONSENT MUST NAME ITS ACCOUNT: the profile read fails ⇒ refused, nothing bound (a nameless token used to bind nothing and the record then took ANYONE's next consent); a stranger's nameless consent never lands on a bound record (it used to: "no common key")
+  {
+    const { eng: e, v } = boot12('r6-nameless');
+    v.st.profileFail = true;
+    const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+    const rec0 = row(e);
+    ok(rec0 && !rec0.auth.tokenEnc && !rec0.identity && /did not say which account signed in/.test(rec0.lastAuthError || ''), `(f) a first consent the profile could not name: refused by name, no token, no identity (${rec0 && rec0.lastAuthError})`);
+    v.st.profileFail = false;
+    const r1 = await e.reauthorize('gmail', {}); await land(r1.flow, 'c1');
+    const rec1 = row(e); const tok1 = rec1.auth.tokenEnc;
+    ok(!!tok1 && rec1.identity && rec1.identity.email === 'member.a@example.com' && rec1.lastAuthError === null, 'the owner signs in again: bound to member.a');
+    v.st.profileFail = true;
+    const r2 = await e.reauthorize('gmail', {}); await land(r2.flow, 'c-intruder');
+    const rec2 = row(e);
+    ok(rec2.auth.tokenEnc === tok1 && rec2.identity.email === 'member.a@example.com' && /did not say which account signed in/.test(rec2.lastAuthError || ''), '(f) a stranger\'s consent whose profile read failed never lands on the bound record (member.a\'s token kept)');
+    v.st.profileFail = false;
+    e.stop();
+  }
+  // (g) a LEGACY record (pre-r5, no stamp) is stamped at boot from the token it holds, so a disconnect after the upgrade (auth.user wiped) still refuses a stranger
+  {
+    const { eng: e0, v, dir } = boot12('r6-legacy');
+    const r = await e0.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1'); e0.stop();
+    const file = path.join(dir, 'channels', 'adapters.json'); const j = JSON.parse(fs.readFileSync(file, 'utf-8')); delete j.adapters.find((x) => x.id === 'gmail').identity; fs.writeFileSync(file, JSON.stringify(j));
+    const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
+    const e = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
+    await sleep(30);
+    const rec0 = row(e); const disk0 = diskOf(dir).find((x) => x.id === 'gmail');
+    ok(rec0.identity && rec0.identity.email === 'member.a@example.com' && disk0.identity && disk0.identity.email === 'member.a@example.com', `(g) a legacy record is stamped at boot from the token it holds (live + disk: ${JSON.stringify(disk0.identity)})`);
+    const rep = e.stampIdentities(); await rep.write;
+    ok(rep.stamped.length === 0 && rep.skipped.some((x) => x.id === 'gmail' && x.why === 'already'), 'the stamp runs once (a second run skips the record as already stamped)');
+    await e.disconnect('gmail');
+    const r1 = await e.reauthorize('gmail', {}); await land(r1.flow, 'c-intruder');
+    const rec1 = row(e);
+    ok(!rec1.auth.tokenEnc && rec1.identity.email === 'member.a@example.com' && /this sign-in is intruder@example\.com/.test(rec1.lastAuthError || ''), '(g) disconnected after the upgrade (auth.user wiped), a stranger is still refused — the boot stamp holds');
+    e.stop();
+  }
+  // (h) a LEGACY LARK record — auth.user is the display NAME, never an id (heldIdentity read {} and a stranger's consent BOUND it): judged by the open_id its token holds, stamped at boot; a stranger under the same app refused, the holder accepted
+  {
+    const OAUTH = require(path.join(REPO, 'src/oauth-loopback.js'));
+    const LENV = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'tA', label: 'Tenant app A', values: { appId: 'cli_appa', appSecret: 'fs-a' } }]) };
+    const larkV = () => { const st = { n: 0, access: new Map() }; const who = (code) => (/-x\b/.test(code) ? 'x' : 'a'); const fetchFn = async (url, init = {}) => { const u = new URL(String(url)); let body = null; try { body = init.body ? JSON.parse(String(init.body)) : null; } catch {} const at = String((init.headers || {}).Authorization || '').replace(/^Bearer /, ''); if (u.pathname === '/open-apis/authen/v2/oauth/token') { const w = body.grant_type === 'authorization_code' ? who(body.code) : (st.access.get(body.refresh_token) || 'a'); const atk = `u-${w}-${++st.n}`; const rt = `ur-${w}-${st.n}`; st.access.set(atk, w); st.access.set(rt, w); return jsonRes({ code: 0, access_token: atk, expires_in: 7200, refresh_token: rt, refresh_token_expires_in: 2592000, scope: 'im:message' }); } const w = st.access.get(at); if (!w) return jsonRes({ code: 99991668, msg: 'Invalid access token' }, 401); if (u.pathname === '/open-apis/authen/v1/user_info') return jsonRes({ code: 0, data: { open_id: `ou_appa_${w}`, union_id: `on_${w}`, user_id: `uid_${w}`, name: w === 'a' ? 'Member A' : 'Stranger X' } }); if (u.pathname === '/open-apis/im/v1/chats') return jsonRes({ code: 0, data: { items: [], has_more: false } }); return jsonRes({ code: 404, msg: 'unrouted' }, 404); }; return { st, fetchFn }; };
+    const bootL = async (dir, v) => { fs.mkdirSync(dir, { recursive: true }); const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: LENV, now, broadcast: () => {}, log: quiet }); const port = await freePort(); const oauth = OAUTH.createOAuthLoopback({ now, log: quiet, fixedCallbackUrl: `http://127.0.0.1:${port}/lark/cb` }); const e = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, oauth, ...FAST_PACE }); return { e, stop: () => { oauth.stopAll(); e.stop(); } }; };
+    const landL = async (flow, code) => { const cu = new URL(flow.consentUrl); const u = new URL(flow.redirectUri); u.searchParams.set('state', cu.searchParams.get('state')); u.searchParams.set('code', code); const r = await get(u.toString()); await sleep(80); return r; };
+    const dir = path.join(ROOT, 'r6-lark-legacy'); const v = larkV();
+    const b0 = await bootL(dir, v); const r = await b0.e.connect('lark', { credentialKey: 'cluster:tA' }); await landL(r.flow, 'c-a'); b0.stop();
+    const box = SB.secretBox(path.join(dir, '.channels-key'));
+    const file = path.join(dir, 'channels', 'adapters.json'); const j = JSON.parse(fs.readFileSync(file, 'utf-8')); const lr = j.adapters.find((x) => x.id === 'lark');
+    ok(lr && lr.auth.tokenEnc && lr.identity && lr.identity.openId === 'ou_appa_a', `fixture: a Lark account connected through the engine (${JSON.stringify(lr && lr.identity)}; ${lr && lr.lastAuthError})`);
+    delete lr.identity; const t = JSON.parse(box.dec(lr.auth.tokenEnc)); delete t.unionId; delete t.userId; lr.auth.user = t.name; lr.auth.tokenEnc = box.enc(JSON.stringify(t)); fs.writeFileSync(file, JSON.stringify(j));
+    const b1 = await bootL(dir, v); await sleep(30);
+    const lrow = () => b1.e.adapterRecords().adapters.find((x) => x.id === 'lark');
+    const rec0 = lrow(); const tok0 = rec0.auth.tokenEnc;
+    ok(rec0.identity && rec0.identity.openId === 'ou_appa_a' && !rec0.identity.unionId, `(h) the legacy Lark record (auth.user "${rec0.auth.user}") is stamped at boot from its token's open_id`);
+    const r1 = await b1.e.reauthorize('lark', {}); await landL(r1.flow, 'c-x');
+    const rec1 = lrow();
+    ok(rec1.auth.tokenEnc === tok0 && /connected as ou_appa_a; this sign-in is ou_appa_x/.test(rec1.lastAuthError || ''), `(h) a stranger under the same app: refused by name (${rec1.lastAuthError})`);
+    const r2 = await b1.e.reauthorize('lark', {}); await landL(r2.flow, 'c-a');
+    const rec2 = lrow();
+    ok(rec2.auth.tokenEnc !== tok0 && rec2.lastAuthError === null && rec2.identity.unionId === 'on_a' && rec2.identity.userId === 'uid_a', '(h) the holder re-authorizes: accepted, the stamp completed with union_id / user_id');
+    b1.stop();
+  }
+  // (i) THE DOOR'S COMPARE-AND-SWAP IS LOAD-BEARING: an adapter copy with a 150 ms await between its re-read and its persist (the shape one edit reopens — r5 relied on there being none) still cannot revert a re-authorize on the real engine; an engine copy without the CAS does
+  {
+    const gsrc = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const gap = gsrc.replace("    const w = await persistToken(next, String(token.refresh_token || ''));", "    await new Promise((r) => setTimeout(r, 150));   // CONTROL: an await between the refresh's re-read and its persist\n    const w = await persistToken(next, String(token.refresh_token || ''));");
+    ok(gap !== gsrc, 'CONTROL fixture: a gmail copy with a 150 ms await between the refresh\'s re-read and its persist');
+    const gmailGap = MUTA.load('src/channels/gmail.js', gap, 'await-gap');
+    const esrc = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const noCas = esrc.replace("            if (supersedes !== undefined) {\n              const cur = read().token; const curRt = cur ? String(cur.refresh_token || '') : '';\n              if (!cur || curRt !== supersedes) { verdict = { written: false, superseded: true, held: cur ? curRt : null }; return; }\n            }\n", '');
+    ok(noCas !== esrc, 'CONTROL fixture: the door\'s compare-and-swap removed from an engine copy');
+    const ENG3 = require(MUTA.write(ENGINE_PATH, noCas, 'no-cas'));
+    const run = async (engineModule, tag) => {
+      const v = google12(); const dir = path.join(ROOT, 'r6-cas-' + tag); fs.mkdirSync(dir, { recursive: true });
+      const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
+      const reg = CH.createChannelRegistry(); reg.register(gmailGap.adapter);
+      const e = engineModule.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, registry: reg, ...FAST_PACE });
+      const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+      await e.pass('gmail', { force: true }); clock += 3600e3;
+      let release; v.st.holdRefresh = new Promise((x) => { release = x; });
+      const p = e.pass('gmail', { force: true }).catch(() => {});
+      for (let w = 0; w < 40 && v.st.refreshes === 0; w++) await sleep(5);
+      release(); await sleep(10);   // the refresh re-reads (the old token) and enters its gap…
+      const rr = await e.reauthorize('gmail', {}); await land(rr.flow, 'c1');   // …the re-authorize lands inside it
+      await p; await sleep(60);
+      const box = SB.secretBox(path.join(dir, '.channels-key')); const rec = row(e); const held = JSON.parse(box.dec(rec.auth.tokenEnc)); const disk = diskOf(dir).find((x) => x.id === 'gmail');
+      const consentRt = [...v.st.issued.keys()].pop();
+      e.stop();
+      return { held: held.refresh_token, consentRt, reverted: held.refresh_token !== consentRt, diskSame: disk.auth.tokenEnc === rec.auth.tokenEnc, refreshes: v.st.refreshes };
+    };
+    const real = await run(ENG, 'real'); const ctl = await run(ENG3, 'nocas');
+    ok(real.refreshes === 1 && !real.reverted && real.diskSame, `(i) the real door: a re-authorize landing inside the adapter's gap is KEPT (held ${real.held} = the consent's; the late persist superseded at apply time)`, JSON.stringify(real));
+    ok(ctl.reverted, `CONTROL: without the compare-and-swap the late persist REVERTS the re-authorize (held ${ctl.held}, the consent's ${ctl.consentRt})`, JSON.stringify(ctl));
+  }
+  // ── verify r7 ──
+  // (j) A HUMAN ACT DURING THE CONSENT'S COMPLETION WINS: a disconnect / a cancel / a newer sign-in / a client-switch
+  // rebind's disconnect landing while the consent's profile read is in flight — the consent that completes late
+  // writes nothing (live + disk), the record stays as the owner left it, no vendor call on an account the owner ended
+  // (it used to: the token landed after the disconnect, the pass ran 4 calls; an older flow overwrote the newer sign-in's token)
+  {
+    const landAsync = (flow, code) => { const cu = new URL(flow.consentUrl); return get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`); };
+    const rtOf = (dir, rec) => JSON.parse(SB.secretBox(path.join(dir, '.channels-key')).dec(rec.auth.tokenEnc)).refresh_token;
+    const run = async (engineModule, act, tag) => {
+      const v = google12(); const dir = path.join(ROOT, `r7-cancel-${tag}-${act}`); fs.mkdirSync(dir, { recursive: true });
+      const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
+      const e = engineModule.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
+      const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
+      await e.pass('gmail', { force: true });
+      if (act === 'cancel') await e.disconnect('gmail');
+      let release; v.st.holdProfile = new Promise((x) => { release = x; }); const pc0 = v.st.profileCalls || 0;
+      const r1 = await e.reauthorize('gmail', act === 'rebind' ? { credentialKey: 'cluster:channels' } : {}); const landing = landAsync(r1.flow, 'c1');
+      for (let w = 0; w < 60 && (v.st.profileCalls || 0) === pc0; w++) await sleep(5);
+      const held = (v.st.profileCalls || 0) === pc0 + 1;
+      let newerRt = null;
+      if (act === 'disconnect' || act === 'rebind') await e.disconnect('gmail');
+      else if (act === 'cancel') await e.cancelAuth('gmail');
+      else if (act === 'newer') { v.st.holdProfile = null; const r2 = await e.reauthorize('gmail', {}); await land(r2.flow, 'c1'); newerRt = rtOf(dir, row(e)); }
+      const s0 = v.st.sends; release(); await landing; await sleep(150);
+      const rec = row(e); const disk = diskOf(dir).find((x) => x.id === 'gmail'); const view = e.adapterView(rec);
+      const out = { held, live: !!rec.auth.tokenEnc, disk: !!disk.auth.tokenEnc, state: view.auth.state, key: rec.credentialKey, calls: v.st.sends - s0, err: rec.lastAuthError, rt: rec.auth.tokenEnc ? rtOf(dir, rec) : null, newerRt };
+      e.stop();
+      return out;
+    };
+    for (const act of ['disconnect', 'cancel', 'newer', 'rebind']) {
+      const o = await run(ENG, act, 'real');
+      const good = o.held && (act === 'newer' ? o.rt === o.newerRt && o.err === null && o.state === 'connected' : !o.live && !o.disk && o.state !== 'connected' && o.calls === 0 && /was cancelled while it was being completed/.test(o.err || '') && (act !== 'rebind' || o.key === 'cluster:org1'));
+      ok(good, `(j) ${act} while the consent's profile read is in flight: ${act === 'newer' ? `the NEWER sign-in's token is held (${o.rt}), connected, no error line from the older flow` : `nothing written (live ${o.live} / disk ${o.disk}), state ${o.state}, ${o.calls} vendor calls after`}; the late consent refused by name`, JSON.stringify(o));
+    }
+    // CONTROL: an engine copy whose door ignores `consent.cancelled` — the disconnect is undone by the late consent (RED as asserted)
+    const ENG5 = patchedEngine([["              if (c) { verdict = { written: false, cancelled: String(c), held: !!read().token }; return; }\n", '']]);
+    const c = await run(ENG5, 'disconnect', 'nocancel');
+    ok(c.held && c.live && c.disk && c.state === 'connected', `CONTROL: without the door's cancelled check the consent lands after the disconnect (live ${c.live} / disk ${c.disk}, state ${c.state} — the record the owner ended is connected again)`, JSON.stringify(c));
+  }
+  // (k) THE DOOR HELD DIRECTLY (a wrapper kind captures the deps.tokens the engine hands its adapter): every judgement
+  // runs INSIDE the serialized write — two consents of one tick on an UNBOUND record end with exactly ONE written
+  // (the second judged against the first's stamp; the record used to end bound to whichever was enqueued last);
+  // a CAS write (`supersedes`) never lands on a CLEARED store, even one naming '' (a writer that read nothing)
+  {
+    const fake = require(path.join(REPO, 'src/channels/fake.js'));
+    const run = async (engineModule, tag) => {
+      const captured = {};
+      const wrap = { ...fake.fakePoll, create(record, deps) { captured.tokens = deps.tokens; captured.rec = record; return fake.fakePoll.create(record, deps); } };
+      const reg = CH.createChannelRegistry(); reg.register(wrap);
+      const dir = path.join(ROOT, `r7-door-${tag}`); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'fp', kind: 'fake-poll', label: 'fp', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: true, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] }));
+      const e = engineModule.create({ dataDir: dir, registry: reg, env: {}, now, broadcast: () => {}, log: quiet, ...FAST_PACE });
+      await e.pass('fp', { force: true }).catch(() => {});
+      const door = captured.tokens; const rt = () => { const t = door.read().token; return t ? t.refresh_token : null; };
+      const w = (t, meta) => door.write(t, meta).then((x) => x, (err) => ({ err: err.code }));
+      const [c1, c2] = await Promise.all([w({ refresh_token: 'P', access_token: 'p', email: 'person@x.com' }, { consent: true }), w({ refresh_token: 'Q', access_token: 'q', email: 'stranger@x.com' }, { consent: true })]);
+      const twoConsents = { c1, c2, held: rt(), identity: captured.rec.identity && captured.rec.identity.email };
+      await door.clear();
+      const cleared = { named: await w({ refresh_token: 'C', access_token: 'c', email: 'person@x.com' }, { supersedes: 'P' }), blank: await w({ refresh_token: 'D', access_token: 'd', email: 'person@x.com' }, { supersedes: null }), held: rt() };
+      e.stop();
+      return { twoConsents, cleared };
+    };
+    const real = await run(ENG, 'real');
+    ok(real.twoConsents.c1.written === true && real.twoConsents.c2.err === 'forbidden' && real.twoConsents.held === 'P' && real.twoConsents.identity === 'person@x.com', `(k) two consents in one tick on an unbound record: the first lands, the second is judged against ITS stamp and refused (held ${real.twoConsents.held}, bound to ${real.twoConsents.identity})`, JSON.stringify(real.twoConsents));
+    ok(real.cleared.named.superseded === true && real.cleared.named.held === null && real.cleared.blank.superseded === true && real.cleared.held === null, '(k) a CAS write never lands on a CLEARED store — naming the old token or naming nothing (a writer that read no token has nothing to persist; a landing would resurrect a disconnected account)', JSON.stringify(real.cleared));
+    // CONTROL: the identity judgement lifted out of the serialized callback (judged once, before the store's await — the r6 shape) ⇒ both consents land, the record ends bound to the stranger
+    const src = fs.readFileSync(ENGINE_PATH, 'utf-8');
+    const hoisted = src.replace("            const held = heldIdentity(rec, read().token);\n            const mm = identityMismatch(held, offered);\n            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '')
+      .replace("        let verdict = { written: true };\n        try {\n          await store.adapters.update(() => {\n            if (consent) {", "        let verdict = { written: true };\n        { const held0 = heldIdentity(rec, read().token); const mm0 = identityMismatch(held0, offered); if (mm0) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, mm0), { retryable: false, detail: { identityMismatch: mm0 } }); }\n        try {\n          await store.adapters.update(() => {\n            if (consent) {");
+    ok(hoisted !== src && hoisted.split('heldIdentity(rec, read().token)').length === src.split('heldIdentity(rec, read().token)').length, 'CONTROL fixture: the identity judgement hoisted out of the serialized callback in an engine copy');
+    const ENG6 = require(MUTA.write(ENGINE_PATH, hoisted, 'hoisted-judgement'));
+    const ctl = await run(ENG6, 'hoisted');
+    ok(ctl.twoConsents.c1.written === true && ctl.twoConsents.c2.written === true && ctl.twoConsents.identity === 'stranger@x.com', `CONTROL: judged before the await, BOTH consents land and the record ends bound to the stranger (${ctl.twoConsents.identity})`, JSON.stringify(ctl.twoConsents));
+  }
+  // ── verify r8 ──
+  // (l) THE WRITE IS THE FACT — a cancel landing BETWEEN the door's callback (the consent on disk) and the loopback's
+  // report: r7's loopback overrode the report ({ok:false, "nothing was connected"}) over a token on disk — the record
+  // connected, its last sign-in line contradicting it, no pass kicked; a stop() there stamped adapters.json AFTER
+  // store.close(). Now the loopback reports what the exchange DID (resolved = landed; a late cancel is CARRIED for the
+  // pending path, whose durable write is still ahead), onAuthDone judges a disconnect-since by the record, and nothing
+  // is written after stop() — the engine's stop is a cancel the door reads too.
+  {
+    const OL_PATH = path.join(REPO, 'src/oauth-loopback.js'); const OL8 = require(OL_PATH);
+    const landAsync = (flow, code) => { const cu = new URL(flow.consentUrl); return get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`); };
+    const rtOf = (dir, rec) => (rec && rec.auth && rec.auth.tokenEnc ? JSON.parse(SB.secretBox(path.join(dir, '.channels-key')).dec(rec.auth.tokenEnc)).refresh_token : null);
+    /** a WRITE is the atomic rename (a new inode) — the same bytes rewritten are still a write after stop */
+    const stamp = (dir) => { const f = path.join(dir, 'channels', 'adapters.json'); const st = fs.statSync(f); return `${st.ino}:${st.mtimeMs}:${fs.readFileSync(f, 'utf-8')}`; };
+    /** google12 with PER-CODE profile holds (two consents in flight at once) and a per-code refresh token */
+    const googleR8 = () => {
+      const st = { sends: 0, n: 0, issued: new Map(), access: new Map(), codeOf: new Map(), holds: new Map(), profileCalls: new Map() };
+      const client = (id) => (id || '').split('.')[0];
+      const issue = (c, code) => { st.n++; const at = `ya29.${c}-${st.n}`; st.access.set(at, clock + 3599e3); if (code) st.codeOf.set(at, code); return at; };
+      const fetchFn = async (url, init = {}) => {
+        const u = new URL(String(url)); const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+        if (u.hostname === 'oauth2.googleapis.com') {
+          if (form.grant_type === 'authorization_code') { const c = client(form.client_id); const rt = `1//${c}-${form.code}-${++st.n}`; st.issued.set(rt, c); return jsonRes({ access_token: issue(c, form.code), expires_in: 3599, refresh_token: rt, scope: gmail.SCOPE, token_type: 'Bearer' }); }
+          const c = client(form.client_id); if (st.issued.get(form.refresh_token) !== c) return jsonRes({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
+          return jsonRes({ access_token: issue(c, null), expires_in: 3599, scope: gmail.SCOPE, token_type: 'Bearer' });
+        }
+        const at = String((init.headers || {}).Authorization || '').replace(/^Bearer /, ''); const exp = st.access.get(at);
+        if (!exp || exp <= clock) return jsonRes({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
+        st.sends++;
+        const p = u.pathname.replace('/gmail/v1/users/me', '');
+        if (p === '/profile') { const code = st.codeOf.get(at) || null; st.profileCalls.set(code, (st.profileCalls.get(code) || 0) + 1); const h = st.holds.get(code); if (h) await h.p; return jsonRes({ emailAddress: 'member.a@example.com', historyId: '100' }); }
+        if (p === '/threads') return jsonRes({ threads: [{ id: 'thr_a' }] });
+        if (/^\/threads\/[^/]+$/.test(p)) return jsonRes({ id: 'thr_a', messages: [{ id: 'm1', internalDate: String(T0), payload: { headers: [{ name: 'Subject', value: 'S' }, { name: 'From', value: 'x@example.com' }] } }] });
+        if (p === '/history') return jsonRes({ historyId: '100' });
+        return jsonRes({ error: { code: 404, message: 'unrouted' } }, 404);
+      };
+      const hold = (code) => { let release; const p = new Promise((x) => { release = x; }); st.holds.set(code, { p, release }); return () => { st.holds.delete(code); release(); }; };
+      const waitHeld = async (code) => { for (let w = 0; w < 200 && !(st.profileCalls.get(code) > 0); w++) await sleep(5); return st.profileCalls.get(code) > 0; };
+      return { st, fetchFn, hold, waitHeld };
+    };
+    /** the real loopback (or a copy), `exchange` wrapped so a human act runs AFTER the adapter's write and BEFORE the exchange returns */
+    const wrapped = (OL, { timeoutMs = null } = {}) => { const real = OL.createOAuthLoopback({ now: () => Date.now(), log: quiet }); const h = { after: null }; return { ...real, h, begin: (o) => real.begin({ ...o, ...(timeoutMs ? { timeoutMs } : {}), exchange: async (a) => { const r = await o.exchange(a); if (h.after) { const f = h.after; h.after = null; await f(); } return r; } }) }; };
+    const boot = (engineModule, name, { OL = null, timeoutMs = null } = {}) => {
+      const v = googleR8(); const dir = path.join(ROOT, `r8-${name}`); fs.mkdirSync(dir, { recursive: true });
+      const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
+      const lines = []; const log = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error: (...a) => lines.push(a.join(' ')) };
+      const oauth = OL ? wrapped(OL, { timeoutMs }) : null;
+      const e = engineModule.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log, ...(oauth ? { oauth } : {}), ...FAST_PACE });
+      return { e, v, dir, oauth, lines };
+    };
+    const connected = async (c) => { const r = await c.e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c0'); await c.e.pass('gmail', { force: true }); return rtOf(c.dir, row(c.e)); };
+    const snap = (c, s0) => { const rec = row(c.e); const disk = diskOf(c.dir).find((x) => x.id === 'gmail'); const view = c.e.adapterView(rec); return { live: rtOf(c.dir, rec), disk: rtOf(c.dir, disk), state: view.auth.state, key: rec.credentialKey, err: rec.lastAuthError, calls: c.v.st.sends - s0, connectedLine: c.lines.some((l) => /: connected as member/.test(l)) }; };
+    // (l1) the five acts in the window — cancel / a newer sign-in / the timer's cancel / disconnect / stop()
+    const late = async (engineModule, OL, act, tag) => {
+      const c = boot(engineModule, `late-${act}-${tag}`, { OL }); const { e, v, dir, oauth, lines } = c;
+      const t0 = await connected(c);
+      const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const flowA = r1.flow.flowId; const landing = landAsync(r1.flow, 'cA'); const held = await v.waitHeld('cA');
+      let stampAtStop = null; let acted = false;
+      oauth.h.after = async () => { acted = true; if (act === 'cancel') await e.cancelAuth('gmail'); else if (act === 'newer') await e.reauthorize('gmail', {}); else if (act === 'timeout') e.oauth.cancel(flowA, 'timeout'); else if (act === 'disconnect') await e.disconnect('gmail'); else if (act === 'shutdown') { e.stop(); e.oauth.stopAll(); stampAtStop = stamp(dir); } };
+      const s0 = v.st.sends; lines.length = 0; rel(); await landing; await sleep(120);
+      const o = { held, acted, t0, ...snap(c, s0) }; const st = e.oauth.status(flowA) || {}; o.flowOk = st.ok; o.flowCancelled = st.cancelled; o.landed = o.disk !== null && o.disk !== t0;
+      o.newerRunning = !!e.oauth.runningFor('gmail'); o.writtenAfterStop = stampAtStop !== null && stamp(dir) !== stampAtStop;
+      if (act !== 'shutdown') { if (act === 'newer') await e.cancelAuth('gmail'); e.stop(); }
+      return o;
+    };
+    for (const act of ['cancel', 'timeout']) {
+      const o = await late(ENG, OL8, act, 'real');
+      ok(o.held && o.acted && o.landed && o.flowOk === true && o.flowCancelled === (act === 'cancel' ? 'cancelled' : act) && o.err === null && o.state === 'connected' && o.connectedLine && o.calls > 0, `(l) ${act} between the door's callback and the report: the write stands (${o.disk}), the flow reports ok:${o.flowOk} (cancelled carried: ${o.flowCancelled}), no error line, connected, the pass kicked (${o.calls} calls)`, JSON.stringify(o));
+    }
+    { const o = await late(ENG, OL8, 'newer', 'real');
+      ok(o.held && o.acted && o.landed && o.flowOk === true && o.err === null && o.state === 'connected' && o.newerRunning, `(l) a NEWER sign-in begun after the older's write: the older's consent stands (${o.disk}) and reports ok, no error line, the newer flow running`, JSON.stringify(o)); }
+    { const o = await late(ENG, OL8, 'disconnect', 'real');
+      ok(o.held && o.acted && o.live === null && o.disk === null && o.state !== 'connected' && o.err === null && !o.connectedLine && o.calls === 0 && o.flowOk === true, `(l) a disconnect after the write, before the report: the disconnect stands (live ${o.live} / disk ${o.disk}), no "connected" line, no pass (${o.calls} calls), no error line — the flow itself reports ok (its consent DID land)`, JSON.stringify(o)); }
+    { const o = await late(ENG, OL8, 'shutdown', 'real');
+      ok(o.held && o.acted && o.landed && !o.writtenAfterStop && o.calls === 0 && !o.connectedLine, `(l) stop() after the write, before the report: the write stands (${o.disk}), NOTHING written after stop, no pass, no "connected" line`, JSON.stringify(o)); }
+    // CONTROL: a loopback copy with r7's override (a cancel mid-exchange ⇒ {ok:false} whatever the exchange did) ⇒ the report contradicts the disk (RED as asserted)
+    { const src = fs.readFileSync(OL_PATH, 'utf-8'); const needle = "      st.error = null;\n      if (st.cancelled) log.warn && log.warn(`[oauth-loopback] ${st.id}: a ${st.cancelled} arrived after the exchange had completed — the consent stands, the report says ok`);\n";
+      if (src.split(needle).length !== 2) throw new Error('control needle (loopback r8 report) not found exactly once');
+      const OL7 = require(MUTA.write(OL_PATH, src.replace(needle, "      st.error = st.cancelled ? 'the sign-in was cancelled while it was being completed — nothing was connected' : null;\n      if (st.cancelled) st.result = null;\n"), 'r7-override'));
+      const o = await late(ENG, OL7, 'cancel', 'ctl');
+      ok(o.held && o.acted && o.landed && o.flowOk === false && o.state === 'connected' && /nothing was connected/.test(o.err || '') && !o.connectedLine && o.calls === 0, `CONTROL: with r7's override the report says cancelled ("${o.err}") while the token is on disk (${o.disk}, state ${o.state}) and no pass runs — the contradiction`, JSON.stringify(o)); }
+    // CONTROL: an engine copy without onAuthDone's stop guard ⇒ adapters.json written after store.close() (RED as asserted)
+    { const ENG7 = patchedEngine([["    if (stopped) { log.log(`[channels] ${rec.id}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent had landed and stands' : (r && r.error) || 'the consent flow failed'})`); return; }\n", '']]);
+      const o = await late(ENG7, OL8, 'shutdown', 'ctl');
+      ok(o.held && o.acted && o.writtenAfterStop, `CONTROL: without the stop guard onAuthDone writes adapters.json after stop() (written after stop: ${o.writtenAfterStop})`, JSON.stringify(o)); }
+    // (l2) stop() while the exchange is IN FLIGHT, the engine's OWN loopback: refused by name, nothing written after stop, the listener closed
+    { const c = boot(ENG, 'stop-inflight'); const { e, v, dir, lines } = c; const t0 = await connected(c);
+      const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA');
+      const s0 = v.st.sends; lines.length = 0; e.stop(); const b0 = stamp(dir); const st0 = e.oauth.status(r1.flow.flowId);
+      rel(); await landing; await sleep(150);
+      const o = snap(c, s0); const st = e.oauth.status(r1.flow.flowId) || {}; const port = await get(`${r1.flow.redirectUri}/`);
+      ok(st0 && st0.cancelled === 'shutdown' && o.disk === t0 && o.live === t0 && st.ok === false && /ended by a shutdown/.test(st.error || '') && stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':') && o.calls === 0 && port.status === 0, `(l2) stop() mid-exchange: the door refused by name ("${st.error}"), the token untouched (${o.disk}), adapters.json's STATE unchanged after stop (the refused door still rides the store's unconditional atomic rewrite — same bytes, new inode: recorded), no vendor call, the listener closed (${port.body})`, JSON.stringify({ o, st, st0, sameBytes: stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':'), sameInode: stamp(dir).split(':')[0] === b0.split(':')[0] })); }
+    // (l3) the flow's OWN deadline (a real 300 ms one): mid-exchange ⇒ refused by name, untouched; after the write ⇒ stands
+    { const c = boot(ENG, 'deadline-mid', { OL: OL8, timeoutMs: 300 }); const { e, v } = c; const t0 = await connected(c);
+      const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA'); await sleep(450);
+      const st0 = e.oauth.status(r1.flow.flowId); const s0 = v.st.sends; rel(); await landing; await sleep(120);
+      const o = snap(c, s0);
+      ok(st0 && st0.cancelled === 'timeout' && o.disk === t0 && /past its time limit/.test(o.err || '') && o.calls === 0 && o.state === 'connected', `(l3) the deadline fired mid-exchange: refused by name ("${o.err}"), the record untouched (${o.disk}), no pass`, JSON.stringify(o)); e.stop();
+      const c2 = boot(ENG, 'deadline-after', { OL: OL8, timeoutMs: 300 }); const t02 = await connected(c2);
+      const r2 = await c2.e.reauthorize('gmail', {}); const s02 = c2.v.st.sends; await land(r2.flow, 'cA'); const w = snap(c2, s02); await sleep(450); const a = snap(c2, s02); const st2 = c2.e.oauth.status(r2.flow.flowId) || {};
+      ok(w.disk !== t02 && a.disk === w.disk && a.err === null && st2.ok === true && st2.cancelled === null, `(l3) the deadline after the write: the write stands (${a.disk}), no refusal, the flow ok:${st2.ok} cancelled:${st2.cancelled}`, JSON.stringify({ w, a, st2 })); c2.e.stop(); }
+    // (l4) THE PENDING PATH UNDER `superseded` — 20 orderings on the real engine (10 the record's door = a same-client
+    // re-authorize, 10 the pending path = a client-switch rebind): A's exchange in flight, B (same account) begins ⇒ A
+    // superseded; A answering first / after B's write is refused (never a second write); B cancelled or the account
+    // disconnected while A is in flight ⇒ nothing written, the record as the owner left it; the refusal's tail says
+    // what the record holds ("keeps its current sign-in" on a connected one, "nothing was connected" after a disconnect)
+    const SEQS = [['A', 'B', 'rA', 'Bl', 'rB'], ['A', 'B', 'Bl', 'rB', 'rA'], ['A', 'B', 'Bl', 'rA', 'rB'], ['A', 'B', 'cB', 'rA'], ['A', 'B', 'Bl', 'cB', 'rB', 'rA'], ['A', 'B', 'Bl', 'cB', 'rA', 'rB'], ['A', 'B', 'dc', 'rA'], ['A', 'B', 'Bl', 'dc', 'rB', 'rA'], ['A', 'B', 'Bl', 'dc', 'rA', 'rB'], ['A', 'B', 'Bl', 'rB', 'dc', 'rA']];
+    for (const pth of ['door', 'pend']) for (const [i, seq] of SEQS.entries()) {
+      const c = boot(ENG, `ord-${pth}-${i}`); const { e, v } = c; const t0 = await connected(c); const key0 = row(e).credentialKey;
+      const flows = {}; const rels = {}; const landings = {}; let cancelledB = false, disconnected = false; let sDc = 0; let tokenWrites = 0;
+      const orig = e.store.adapters.update; e.store.adapters.update = (fn) => orig((ad) => { const rec = ad.adapters.find((x) => x.id === 'gmail'); const b = rec && rec.auth && rec.auth.tokenEnc; const r = fn(ad); const a = rec && rec.auth && rec.auth.tokenEnc; if (a && a !== b) tokenWrites++; return r; });
+      const s0 = v.st.sends;
+      for (const step of seq) {
+        if (step === 'A' || step === 'B') { rels[step] = v.hold(`c${step}`); const r = await e.reauthorize('gmail', pth === 'pend' ? { credentialKey: 'cluster:channels' } : {}); flows[step] = r.flow; if (step === 'A') { landings.A = landAsync(r.flow, 'cA'); await v.waitHeld('cA'); } }
+        else if (step === 'Bl') { landings.B = landAsync(flows.B, 'cB'); await v.waitHeld('cB'); }
+        else if (step === 'rA' || step === 'rB') { rels[step[1]](); await landings[step[1]]; await sleep(60); }
+        else if (step === 'cB') { cancelledB = true; await e.cancelAuth('gmail'); }
+        else if (step === 'dc') { disconnected = true; await e.disconnect('gmail'); sDc = v.st.sends; }
+      }
+      await sleep(60);
+      const r = snap(c, disconnected ? sDc : s0); const wroteA = /cA/.test(r.disk || ''); const wroteB = /cB/.test(r.disk || '');
+      const bLanded = seq.includes('rB'); const bCancelled = cancelledB && (seq.indexOf('cB') < seq.indexOf('rB') || !bLanded); const dcAfterB = disconnected && bLanded && seq.indexOf('dc') > seq.indexOf('rB');
+      let good, why;
+      if (disconnected) { good = r.live === null && r.disk === null && r.state !== 'connected' && !wroteA && r.calls === 0 && tokenWrites === (dcAfterB ? 1 : 0) && (r.err === null || /nothing was connected/.test(r.err)); why = `disconnected — nothing of A written, token writes ${tokenWrites}, ${r.calls} calls after the disconnect, line ${JSON.stringify(r.err)}`; }
+      else if (bCancelled) { good = r.disk === t0 && r.live === t0 && r.state === 'connected' && r.key === key0 && tokenWrites === 0 && (r.err === null || /keeps its current sign-in/.test(r.err)); why = `B cancelled — the pre-flow record (${r.disk}, ${r.key}), 0 token writes, line ${JSON.stringify(r.err)}`; }
+      else { good = wroteB && !wroteA && tokenWrites === 1 && r.state === 'connected' && r.err === null && r.key === (pth === 'pend' ? 'cluster:channels' : key0); why = `B's consent is the ONE write (${r.disk}, ${r.key}), A refused, no error line`; }
+      ok(good, `(l4) [${pth}] ${seq.join(' ')} ⇒ ${why}`, JSON.stringify({ ...r, tokenWrites, t0 }));
+      e.stop();
+    }
+  }
+}
 
 // ── THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──────────────
 // Measured HERE, while the patched engine copies still exist (the scratch dir

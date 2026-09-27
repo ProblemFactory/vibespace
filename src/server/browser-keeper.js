@@ -64,7 +64,9 @@ const B = require('../browser-profiles.js');
 const SW = require('../browser-switch.js');
 const F = require('../browser-facts.js');
 const T = require('../browser-takeover.js');
+const BF = require('../browser-fact.js'); // lane S2: THE browser fact (one answer per conversation) + the delete's refuse-or-warn
 const M = require('../browser-mediation.js'); // P6: the per-session url + env of a MEDIATED lease
+const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
 const VERBS = require('../browser-verbs.js'); // takeover r3: the ONE config rule (sanctionedConfig)
 const LIMITS = require('../keeper-limits.js');
 const RG = require('../runaway-guard.js'); // the ONE resource verdict + per-provider numbers + report level (2026-09-25: report only)
@@ -197,6 +199,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // P6: is a mediating proxy available in THIS process (the §6.2 verdict's
   // `mediation` fact), and is this record's attachment mediated?
   const mediationOn = () => !!(mediator && (typeof mediator.available !== 'function' || mediator.available()));
+  /** RETIRED (the owner's ruling, 2026-09-27 — "直接打断所有脚本和agent操作"): the r4 switch `browser.fenceScriptsWhileDriven`
+   *  is gone; the census refuses scripts and page edits while the user drives on every instance. A value still stored in
+   *  data/settings.json is IGNORED and said once (never read again). */
+  let retiredSwitchSaid = false;
+  const sayRetiredSwitch = () => {
+    if (retiredSwitchSaid) return;
+    retiredSwitchSaid = true;
+    let v; try { v = serverSetting('browser.fenceScriptsWhileDriven'); } catch { v = undefined; }
+    if (v !== undefined && v !== null && v !== '') log.log?.(`[browser] browser.fenceScriptsWhileDriven (stored: ${JSON.stringify(v)}) is retired — a takeover now interrupts every script and page edit of the agent on that browser on every instance (the owner's ruling, 2026-09-27); the stored value is ignored`);
+  };
+  sayRetiredSwitch(); // at the keeper's birth — once; the grant sites only re-ask the flag
   const isMediated = (p) => B.isMediatedProfile(p);
   // owner ruling A: `scope` = who may use it ('all' | 'one' | 'task'), DERIVED from `owner` (one field), never stored twice
   const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), scope: B.scopeOf(p), createdBy: p.createdBy || null } : null);
@@ -233,6 +246,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // persisted; `inputs` keys are browser-takeover.inputKeyFor(browserKey,
   // profileId) with profileId null for the ephemeral browser (no lease).
   const inputs = new Map();     // key → input state (browser-takeover.newInputState)
+  // THE INTERRUPTION CYCLE of each pair (the owner's ruling, 2026-09-27; PURE src/browser-interrupt.js): from the
+  // takeover to the handback — what was in flight (the recorder's trace), what the mediator aborted, what the agent
+  // tried while the user drove. In memory like `inputs` (a restart is a handback by construction).
+  const cycles = new Map();     // key → cycle
+  const lastClosed = new Map(); // key → the last CLOSED cycle (the CLI's after-the-fact question outlives the handback)
+  // the recorder's reader of what was IN FLIGHT at an instant (src/server/browser-trace.js installs it; absent = nothing known)
+  let inFlightReader = null;
   const pending = new Map();    // key → Map(confirmationId → {id, action, category, at, expiresAt})
   const inputListeners = new Set();
   const confirmListeners = new Set();
@@ -242,6 +262,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // `digestExtras` lets them add their facts (recording state) to `list()`.
   const leaseListeners = new Set();
   const digestExtras = new Set();
+  const changeListeners = new Set(); // lane S2: `onChange` — the browser fact's re-publish hook (notify() fans out)
   function emitLease(ev) {
     const out = [];
     for (const fn of leaseListeners) {
@@ -278,7 +299,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, reg); dirty = false; }
     catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); }
   }
-  function notify() { try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); } }
+  function notify() {
+    try { broadcast?.({ type: 'browser-profiles-updated', ...list() }); } catch (e) { log.warn?.(`[browser] broadcast failed: ${e.message}`); }
+    // lane S2: every registry change (a start, a failure, a pin, a removal, a label) may move a conversation's
+    // BROWSER FACT — the wiring re-computes the facts and re-publishes active-sessions when a digest moved
+    for (const fn of changeListeners) { try { fn(); } catch (e) { log.warn?.(`[browser] change listener failed: ${e && e.message}`); } }
+  }
+  function onChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); }
   function commit() { save(); notify(); }
 
   // ── views ──
@@ -550,18 +577,33 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const p = createProfile({ label }, { owner, dir, legacy, createdBy });
     return { profile: p, created: true };
   }
+  /** lane S2: may this profile's record go at all (leases / a running browser) — asked BEFORE any pin is cleared for it. */
+  function removeVerdict(id) {
+    ensureLoaded();
+    const p = profile(id);
+    if (!p) return { ok: false, code: 'not-found', error: `no profile ${id}` };
+    const held = reg.leases.filter((l) => l.profileId === id);
+    if (held.length) return { ok: false, code: 'leased', error: `profile "${p.label}" is attached by ${held.length} session(s) (${held.map((l) => l.browserKey).join(', ')}) — detach them first` };
+    if (B.isLiveBrowser(reg.browsers[id])) return { ok: false, code: 'running', error: `profile "${p.label}" has a running browser — stop it first` };
+    return { ok: true };
+  }
   /** Removal is refused while anything holds or runs it — a cookie jar is
    *  somebody's login; the directory itself is NEVER deleted by this (D8). */
-  function removeProfile(id) {
+  function removeProfile(id, { unpin = false } = {}) {
     ensureLoaded();
     const p = profile(id);
     if (!p) throw namedError('not-found', `no profile ${id}`);
-    const held = reg.leases.filter((l) => l.profileId === id);
-    if (held.length) throw namedError('leased', `profile "${p.label}" is attached by ${held.length} session(s) (${held.map((l) => l.browserKey).join(', ')}) — detach them first`);
-    if (B.isLiveBrowser(reg.browsers[id])) throw namedError('running', `profile "${p.label}" has a running browser — stop it first`);
+    // lane S2 (naive study 2, T7): a profile a conversation PINS is never removed out from under it — refused
+    // `pinned` with the count (the UI asks "N conversations use this profile — unpin them?"); with `unpin` every
+    // such pin is cleared and MARKED (the conversation's browser fact says "work was deleted — its pin was cleared")
+    // (the pin is judged LAST: a leased / running profile is refused first, so an unpin never runs for a removal that cannot happen)
+    const rv = removeVerdict(id);
+    if (!rv.ok) throw namedError(rv.code, rv.error);
+    const pv = BF.deletePinnedVerdict({ label: p.label, pinnedBy: pinnedBy(id), unpin });
+    if (!pv.ok) throw namedError(pv.code, pv.error, { pinnedCount: pv.count, pinnedNames: pv.names });
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
     delete reg.browsers[id];
-    for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) delete reg.pins[k];
+    for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); drivers.delete(id);
     // r4: the keeper's own marked config for this record goes with it (nothing runs on it — removal needs a stopped browser)
     { const mk = markOf(p); if (mk && MARK_RE.test(String(mk))) { try { fs.rmSync(path.join(CONFIG_DIR, markFileName(isEph(p) ? 'ephemeral' : 'machine', mk)), { force: true }); } catch { /* best effort */ } configMemo.delete((isEph(p) ? 'ephemeral' : 'machine') + '|' + mk); } }
@@ -640,6 +682,23 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!p || isEph(p)) return null;
     return { profileId: p.id, label: p.label, dir: p.dir, origin: v.origin || 'chosen', at: v.at || 0, by: v.by === 'agent' ? 'agent' : 'user' };
   }
+  /** lane S2: the conversations whose pin names this profile — [{browserKey}] (the delete's refuse-or-warn). */
+  function pinnedBy(profileId) {
+    ensureLoaded();
+    const id = String(profileId || '');
+    return Object.entries(reg.pins).filter(([, v]) => v && v.profileId === id).map(([k, v]) => ({ browserKey: k, origin: v.origin || 'chosen', by: v.by === 'agent' ? 'agent' : 'user' })); // + origin/by (owner ruling A's seam shape)
+  }
+  /** lane S2: clear ONE conversation's pin because its profile is going (or is already gone) — with `cleared`, the
+   *  entry keeps the mark `{id, label, at}` the browser fact reads ("work was deleted — its pin was cleared"). */
+  function clearPin(browserKey, { cleared = null } = {}) {
+    ensureLoaded();
+    const bk = String(browserKey || '');
+    if (!B.isBrowserKey(bk)) return false;
+    if (!cleared && (!reg.pins[bk] || !reg.pins[bk].profileId)) return false;
+    reg.pins[bk] = { profileId: null, origin: 'harness', at: now(), ...(cleared ? { cleared: { id: cleared.id || null, label: String(cleared.label || ''), at: now() } } : {}) };
+    commit();
+    return true;
+  }
   /** Owner ruling A (4): does THIS conversation's pin — one the USER chose (the New Session dialog, Session properties,
    *  a default the user configured) — name `profileId`? That pin IS the authorization; an agent's own pin never is. THE
    *  USER'S LATEST CHOICE WINS: a pin older than the profile's last "Who can use it" change (`scopeAt`) authorizes nothing
@@ -687,20 +746,6 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     commit();
     log.log?.(`[browser] ${toKey}: inherits the pin of ${fromKey} (${p.id} "${p.label}", ${reg.pins[toKey].by}'s) — a fork's copy`);
     return pinFor(toKey);
-  }
-  /** Lane S2's seam name (the dangling-pin half): the conversations whose pin names `profileId` → [{browserKey, origin, by}]. */
-  function pinnedBy(profileId) {
-    ensureLoaded();
-    return Object.entries(reg.pins).filter(([, v]) => v && v.profileId === profileId).map(([k, v]) => ({ browserKey: k, origin: v.origin || 'chosen', by: v.by === 'agent' ? 'agent' : 'user' }));
-  }
-  /** Lane S2's seam name: clear ONE conversation's pin (the Delete… of the profile it names). */
-  function clearPin(browserKey) {
-    ensureLoaded();
-    const k = String(browserKey || '');
-    if (!reg.pins[k]) return false;
-    delete reg.pins[k]; pinFailures.delete(k);
-    commit();
-    return true;
   }
   // owner ruling A (5): a pin that did not OPEN is said — to the agent in its refusal (typed, `pinned:true`, never a
   // silent fall-back to a temporary browser: the study's path B), and here for the conversation's facts (the chip,
@@ -1352,6 +1397,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (l.sessionId) ephSessions.set(p.id, l.sessionId); // VERIFY r1 L2
     ephPairs.set(p.id, v.pairs);
     turnIdleSince.delete(p.id); // MULTIVIEW B-325a: a verb is activity — the release clock starts again at the next idle turn
+    p.lastVerbAt = now(); // lane S2: a pin set before this verb has applied now (the browser fact's `pin_pending` ends here)
     commit();
     if (created) log.log?.(`[browser] ${bk}${sessionId ? ' (' + sessionId + ')' : ''}: managed ephemeral browser ${p.id} "${p.label}" recorded (rung ${variant || '?'}, ns ${B.sessionNameFor(bk)})`);
     const rec0 = reg.browsers[p.id] || null;
@@ -1761,6 +1807,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     p.lastUsedAt = now();
     commit();
     log.log?.(`[browser] ${browserKey}${sessionId ? ' (' + sessionId + ')' : ''} ${d.created ? 'attached to' : (d.resumed ? 're-carries its lease on' : 'already holds')} ${p.id} "${p.label}" (${d.others} other session(s) on it)`);
+    // verify r6 (S2): a lease taken while the USER drives this browser (from another conversation's view) is paused from
+    // birth — it joins the running takeover (its own cycle, card and reminder), never a fresh 'agent' seat beside the user
+    joinTakeoverIfDriven(browserKey, p.id, sessionId || d.lease.sessionId || null);
     await settleArming(emitLease({ kind: 'attach', browserKey, profileId: p.id, sessionId: sessionId || d.lease.sessionId || null, created: !!d.created, resumed: !!d.resumed })); // lane H: the recorder's tap is armed before the verb runs (bounded)
     const rec = reg.browsers[p.id];
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
@@ -1772,6 +1821,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (isMediated(p)) {
       if (!mediationOn()) throw namedError('mediation_unavailable', `"${p.label}" is shared instance-wide and this instance has no mediating CDP proxy — it cannot be attached here`);
       if (!rec || !rec.cdpUrl) throw namedError('mediation_no_cdp', `"${p.label}" is shared instance-wide but its browser answered no CDP url — nothing to mediate; stop it and attach again`);
+      sayRetiredSwitch();
       const g = await mediator.grantFor({ profileId: p.id, browserKey, upstream: rec.cdpUrl, targetIds: d.lease.targetId ? [d.lease.targetId] : [], paused: () => inputStateFor(browserKey, p.id).input === 'user' });
       return { lease: leaseView(d.lease), created: d.created, resumed: d.resumed, others: d.others, profile: pview(p), browser, mediated: true, env: M.mediatedEnvFor({ browserKey, profileId: p.id, url: g.url, idleMs: idleMs() }), cdpUrl: g.url, pinTab, note: M.mediationSentence({ profileLabel: p.label, others: d.others }) };
     }
@@ -1910,7 +1960,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * typed `held` when another live viewer drives. `holderAlive` is the
    * bridge's fact (a holder whose socket is gone never blocks).
    */
-  function takeover({ browserKey, profileId = null, viewerId, sessionId = null, holderAlive = true } = {}) {
+  function takeover({ browserKey, profileId = null, viewerId, sessionId = null, holderAlive = true, viewerAlive = null } = {}) {
     ensureLoaded();
     // VERIFY S5 (2026-09-26): a takeover of a NAMED profile's browser needs a LEASE of this conversation on it — a live
     // view left open after the user's "Only <other chat>" (or an agent's detach) took the profile from this conversation
@@ -1921,32 +1971,142 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (p && !isEph(p) && !B.findLease(reg.leases, profileId, browserKey)) return { ok: false, code: 'no_lease', error: `this conversation no longer holds "${p.label}" (the user kept it to another conversation, or it was detached) — the live view cannot take it over; pick it for this conversation in Session properties → Agent browser to use it again` };
     }
     const k = inputKey(browserKey, profileId);
-    const d = T.decideTakeover({ state: inputs.get(k) || null, viewerId, now: now(), holderAlive });
+    const alive = typeof viewerAlive === 'function' ? (id) => { try { return !!viewerAlive(id); } catch { return holderAlive; } } : () => holderAlive;
+    // verify r7 (S2): ONE BROWSER, ONE HOLDER. A sibling conversation's LIVE holder (driving from its own view, or holding
+    // this lease WITH a primary takeover) blocks this takeover by name exactly as this lease's own would — the bridge's
+    // per-relay `holderAlive` read every sibling's holder as gone (it sits on another relay), so a second view re-seized a
+    // browser somebody was driving: two holders, both inputs forwarded, the handback from one view leaving the other's
+    // lease paused. A holder whose socket IS gone never blocks: the whole browser moves to the new viewer (siblingTakeover).
+    if (profileId) {
+      for (const sib of siblingLeases(browserKey, profileId)) {
+        const s = inputs.get(inputKey(sib.browserKey, profileId));
+        if (!s || s.input !== 'user' || !s.takenBy || s.takenBy.viewerId === viewerId) continue;
+        const sd = T.decideTakeover({ state: s, viewerId, now: now(), holderAlive: alive(s.takenBy.viewerId) });
+        if (!sd.ok) { log.log?.(`[browser] ${browserKey} on ${profileId}: takeover refused (${sd.code}) — ${sib.browserKey}, the same browser, is driven by viewer ${s.takenBy.viewerId}`); return { ...sd, heldBy: sib.browserKey }; }
+      }
+    }
+    const own = inputs.get(k) || null;
+    const d = T.decideTakeover({ state: own, viewerId, now: now(), holderAlive: own && own.takenBy ? alive(own.takenBy.viewerId) : holderAlive });
     if (!d.ok) return d;
+    if (!d.already) delete d.state.with; // integration 2.369.192: a takeover from THIS view is its own, never a sibling's mark (below)
     inputs.set(k, d.state);
     mirrorLeaseInput(browserKey, profileId, 'user');
     ensureTimer();
     if (!d.already) {
-      log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user took over (viewer ${viewerId}) — agent commands are refused with browser_paused until the handback`);
-      emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: null, url: d.state.url || '' });
+      // THE TAKEOVER INTERRUPTS (the owner's ruling, 2026-09-27 — "直接打断所有脚本和agent操作，告知agent发生了打断"): the
+      // mediated lease's calls in flight are answered browser_interrupted NOW (a running script is asked to stop), then
+      // what was in flight is read off the trace AT the instant — both before anything is announced
+      const at = d.state.takenAt;
+      let ab = null;
+      if (profileId && mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey }); } catch (e) { log.warn?.(`[browser] ${browserKey} on ${profileId}: the takeover's interrupt failed — ${e && e.message}`); } }
+      let inFlight = [];
+      if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId, browserKey, profileId: profileId || null, at }) || []; } catch (e) { log.warn?.(`[browser] ${browserKey}: the in-flight reader failed — ${e && e.message}`); inFlight = []; } }
+      const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] }); // a closed cycle hands on the ids it counted (told once)
+      cycles.set(k, oc.cycle);
+      const view = INT.interruptionView(oc.cycle);
+      log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user took over (viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of the agent interrupted (${view.verbs.join(', ')})` : 'nothing of the agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted${ab.terminated ? `, ${ab.terminated} running script(s) asked to stop` : ''}` : ''}${oc.fresh ? '' : ' (the same takeover goes on: a second viewer took it before the handback)'}; agent commands are refused until the handback`);
+      emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: null, url: d.state.url || '', interruption: { ...view, fresh: oc.fresh } });
+      // verify r6 (S2, MEDIUM): a takeover is of the BROWSER — every OTHER conversation leased on this named profile (one
+      // Chrome, its own tabs) is taken over WITH it by the same viewer: its calls in flight cut, its own cycle opened (its
+      // own card, its own reminder naming ITS verbs), its next verbs refused browser_paused. Measured before: the sibling's
+      // fill ran on under the user's hands, its `tab` switch moved what the user was looking at (the r3 F2 class across
+      // conversations), and nobody told it. A sibling already driven by its own user keeps its own takeover.
+      if (profileId) siblingTakeover({ browserKey, profileId, viewerId, at, alive });
     }
     return { ok: true, already: !!d.already, state: inputStateFor(browserKey, profileId) };
+  }
+  /** The other conversations leased on a NAMED profile's browser (never an ephemeral record's, never a child's own). */
+  function siblingLeases(browserKey, profileId) {
+    const p = profileId ? profile(profileId) : null;
+    if (!p || isEph(p)) return [];
+    return reg.leases.filter((l) => l && l.profileId === profileId && l.browserKey !== browserKey);
+  }
+  function siblingTakeover({ browserKey, profileId, viewerId, at, alive = () => true }) {
+    const taken = [];
+    for (const l of siblingLeases(browserKey, profileId)) {
+      const sk = inputKey(l.browserKey, profileId);
+      const prev = inputs.get(sk);
+      // its own user drives it (its own cycle is open) — never taken from them; verify r7: unless that holder's socket is
+      // GONE (a reload, a closed window — `takeover` let this one through for the same reason): the browser moves whole
+      if (prev && prev.input === 'user' && (!prev.takenBy || prev.takenBy.viewerId === viewerId || alive(prev.takenBy.viewerId))) continue;
+      const sd = T.decideTakeover({ state: prev || null, viewerId, now: at, holderAlive: false });
+      if (!sd.ok || sd.already) continue;
+      // integration 2.369.192 (S2 × S5): the sibling state names the conversation whose VIEW holds the takeover (`with`) —
+      // owner ruling A (2)'s "who drives" (userDrivingOf, the strip's "you, in <chat>") names that view, never a sibling
+      sd.state.with = browserKey;
+      inputs.set(sk, sd.state);
+      mirrorLeaseInput(l.browserKey, profileId, 'user');
+      let ab = null;
+      if (mediator && typeof mediator.interrupt === 'function') { try { ab = mediator.interrupt({ profileId, browserKey: l.browserKey }); } catch (e) { log.warn?.(`[browser] ${l.browserKey} on ${profileId}: the sibling's interrupt failed — ${e && e.message}`); } }
+      let inFlight = [];
+      if (typeof inFlightReader === 'function') { try { inFlight = inFlightReader({ sessionId: l.sessionId || null, browserKey: l.browserKey, profileId, at }) || []; } catch { inFlight = []; } }
+      const oc = INT.openInterruption(cycles.get(sk) || lastClosed.get(sk) || null, { takenAt: at, inFlight, aborted: ab ? ab.aborted : [] });
+      cycles.set(sk, oc.cycle);
+      const view = INT.interruptionView(oc.cycle);
+      log.log?.(`[browser] ${l.browserKey} on ${profileId}: taken over WITH ${browserKey} (the same browser; viewer ${viewerId}) — ${view.n ? `${view.n} operation(s) of its agent interrupted (${view.verbs.join(', ')})` : 'nothing of its agent\'s was in flight'}${ab && ab.aborted.length ? `; ${ab.aborted.length} mediated call(s) aborted` : ''}; its commands are refused until the handback`);
+      emitInput({ kind: 'takeover', browserKey: l.browserKey, profileId, sessionId: l.sessionId || null, state: { ...sd.state }, cause: null, url: sd.state.url || '', interruption: { ...view, fresh: oc.fresh }, sibling: browserKey });
+      taken.push(l.browserKey);
+    }
+    return taken;
+  }
+  /** A new lease on a browser the user is driving (any sibling state 'user'): taken by that viewer at once (nothing in flight). */
+  function joinTakeoverIfDriven(browserKey, profileId, sessionId = null) {
+    const p = profileId ? profile(profileId) : null;
+    if (!p || isEph(p)) return false;
+    const k = inputKey(browserKey, profileId);
+    const mine = inputs.get(k);
+    if (mine && mine.input === 'user') return false;
+    let holder = null, holderKey = null;
+    for (const [sk, s] of inputs) { if (s && s.input === 'user' && s.takenBy && sk.endsWith('|' + profileId) && sk !== k) { holder = s.takenBy; holderKey = s.with || sk.slice(0, sk.length - String(profileId).length - 1); break; } } // a sibling's `with` names the view's conversation
+    if (!holder) return false;
+    const at = now();
+    const sd = T.decideTakeover({ state: mine || null, viewerId: holder.viewerId, now: at, holderAlive: false });
+    if (!sd.ok) return false;
+    sd.state.with = holderKey; // integration 2.369.192: taken WITH the view's conversation (userDrivingOf names that one)
+    inputs.set(k, sd.state);
+    mirrorLeaseInput(browserKey, profileId, 'user');
+    const oc = INT.openInterruption(cycles.get(k) || lastClosed.get(k) || null, { takenAt: at, inFlight: [], aborted: [] });
+    cycles.set(k, oc.cycle);
+    log.log?.(`[browser] ${browserKey} on ${profileId}: attached while the user drives this browser (from ${holderKey}, viewer ${holder.viewerId}) — paused from birth until the handback`);
+    emitInput({ kind: 'takeover', browserKey, profileId, sessionId, state: { ...sd.state }, cause: null, url: sd.state.url || '', interruption: { ...INT.interruptionView(oc.cycle), fresh: oc.fresh }, sibling: holderKey });
+    return true;
+  }
+  /** The sibling states this viewer holds (taken WITH a primary takeover): a handback, a pass and the idle clock follow it. */
+  function siblingsHeldBy(browserKey, profileId, viewerId) {
+    const out = [];
+    if (viewerId === null || viewerId === undefined) return out;
+    for (const l of siblingLeases(browserKey, profileId)) {
+      const sk = inputKey(l.browserKey, profileId);
+      const s = inputs.get(sk);
+      if (s && s.input === 'user' && s.takenBy && s.takenBy.viewerId === viewerId) out.push({ lease: l, key: sk, state: s });
+    }
+    return out;
   }
   /**
    * Control goes back to the agent. `cause` ∈ browser-takeover.HANDBACK_CAUSES;
    * `url` is the page the human left it on. The lease flip is a STATE CHANGE
    * and happens regardless of what the announcer later decides to deliver.
    */
-  function handback({ browserKey, profileId = null, viewerId = null, cause = 'explicit', url = '', sessionId = null } = {}) {
+  function handback({ browserKey, profileId = null, viewerId = null, cause = 'explicit', url = '', sessionId = null, mirror = true, sibling = null } = {}) {
     ensureLoaded();
     const k = inputKey(browserKey, profileId);
+    const held = (inputs.get(k) || {}).takenBy || null; // who drove — the siblings taken WITH this one follow (verify r6)
     const d = T.decideHandback({ state: inputs.get(k) || null, viewerId, cause, now: now(), url });
     if (!d.ok) return d;
+    delete d.state.with; // integration 2.369.192: the sibling mark ends with the takeover
     inputs.set(k, d.state);
+    // verify r7: the mirrored event names the primary (`sibling`) — the announcer delivers a sibling's handback only when ITS
+    // cycle has something to re-run (a billed wake of an idle agent that was doing nothing is not this click's to spend)
+    if (mirror && profileId && held) for (const sib of siblingsHeldBy(browserKey, profileId, held.viewerId)) handback({ browserKey: sib.lease.browserKey, profileId, viewerId, cause: d.cause, url: '', sessionId: sib.lease.sessionId || null, mirror: false, sibling: browserKey });
     mirrorLeaseInput(browserKey, profileId, 'agent');
-    log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + d.state.url : ''}`);
-    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder });
-    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, state: inputStateFor(browserKey, profileId) };
+    // the handback CLOSES the cycle: ONE re-run reminder per takeover → handback (the owner's ruling: "交还时提醒它重新运行")
+    const closed = INT.closeInterruption(cycles.get(k) || null, { at: d.state.handedBackAt });
+    cycles.delete(k);
+    if (closed) lastClosed.set(k, closed);
+    const rerun = INT.interruptedVerbs(closed);
+    log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + d.state.url : ''}${rerun.length ? ` — to re-run: ${rerun.join(', ')}` : ''}`);
+    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}) });
+    return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, state: inputStateFor(browserKey, profileId) };
   }
   /**
    * lane P verify (finding 3): the viewer driving PASSES the controls to another view of the same browser (a
@@ -1961,6 +2121,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     inputs.set(k, d.state);
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: the user's control passed from view ${from} to view ${to} (a fold-back — nothing handed back)`);
     emitInput({ kind: 'takeover', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: 'pass', url: d.state.url || '' });
+    // verify r6: the siblings taken WITH it follow the holder (their handback rides the new view's)
+    if (profileId) for (const sib of siblingsHeldBy(browserKey, profileId, from)) { const ns = { ...sib.state, takenBy: { ...d.state.takenBy } }; inputs.set(sib.key, ns); emitInput({ kind: 'takeover', browserKey: sib.lease.browserKey, profileId, sessionId: sib.lease.sessionId || null, state: { ...ns }, cause: 'pass', url: ns.url || '' }); }
     return { ok: true, state: inputStateFor(browserKey, profileId) };
   }
   /** The bridge forwarded an input from the holder — the idle clock restarts. Cheap, in memory. */
@@ -1969,6 +2131,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const s = inputs.get(k);
     if (!s || s.input !== 'user') return false;
     s.lastUserInputAt = Number(at) || now();
+    // verify r6: the siblings taken WITH this one (the same viewer) share its idle clock — one user drives one browser
+    if (profileId && s.takenBy) for (const sib of siblingsHeldBy(browserKey, profileId, s.takenBy.viewerId)) sib.state.lastUserInputAt = s.lastUserInputAt;
     return true;
   }
   /** The bridge learned the page the user is on (the `url` mirror) — carried into the handback. */
@@ -1989,14 +2153,76 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (l.lastUrl !== url.slice(0, 2048)) { l.lastUrl = url.slice(0, 2048); dirty = true; }
     return true;
   }
-  /** The typed refusal an agent command gets while the user drives, or null. */
-  function pausedVerdictFor(browserKey, profileId = null, { handles = [] } = {}) {
+  /** The typed refusal an agent command gets while the user drives, or null. `verb` (the command the agent ran) goes
+   *  on the cycle's re-run list — the handback names it (the owner's ruling, 2026-09-27). */
+  /** verify r5: a verb joins a cycle's re-run list by NAME only when it is one of the CLI's own (browser-verbs.known — the
+   *  page verbs + the refused ones); an agent-chosen first word that is none of them (a direct POST) is never spelled
+   *  inside VibeSpace's own handback sentence, the zero-spend notice or the owner's For-you item. */
+  const rerunVerb = (v) => { const s = String(v || '').trim().slice(0, 40); return s && VERBS.known(s) ? s : null; };
+  function pausedVerdictFor(browserKey, profileId = null, { handles = [], verb = null } = {}) {
     const k = inputKey(browserKey, profileId);
     const s = inputs.get(k);
     if (!s || s.input !== 'user') return null;
+    const rv = rerunVerb(verb);
+    if (rv && cycles.has(k)) cycles.set(k, INT.noteRefused(cycles.get(k), { verb: rv, at: now() }));
     const p = profileId ? profile(profileId) : null;
     return T.browserPausedRefusal({ state: s, label: p ? p.label : null, handles, now: now(), idleMs: takeoverIdleMs() });
   }
+  /**
+   * WAS THIS COMMAND INTERRUPTED? (the owner's ruling, 2026-09-27 — "告知agent发生了打断"). The CLI asks after its
+   * command ended (the audit), naming the server instant its /resolve answered (`since`): a takeover that BEGAN at or
+   * after it caught the command in flight. A managed ephemeral / child browser's record id maps to its pair like a
+   * detach's (`ephEventFields`). → null | {code:'browser_interrupted', error, takenAt, input, aborted}
+   *   `aborted` = the mediator answered a call of this lease browser_interrupted at that takeover (the command was
+   *   cut); false = nothing sat between the agent's daemon and Chrome (a browser that is not shared instance-wide):
+   *   the command ran on to its own end — the refusal still stands (the user drives; wait, then run it again).
+   */
+  function interruptionFor({ browserKey, profileId = null, since = 0, verb = null } = {}) {
+    ensureLoaded();
+    const ev = profileId ? ephEventFields(profileId) : {};
+    const bk = ev.ephemeral ? ev.browserKey : browserKey;
+    const pid = ev.ephemeral ? null : (profileId || null);
+    const kk = inputKey(bk, pid);
+    const s = inputs.get(kk);
+    const t0 = Number(since) || 0;
+    if (!s || !(Number(s.takenAt) > 0) || !(t0 > 0) || Number(s.takenAt) < t0) return null;
+    // verify r5 (MEDIUM): the verb this audit names WAS interrupted — it joins the OPEN cycle's re-run list here, because the
+    // ring cannot: a command resolved before the takeover whose daemon record lands after the instant is in flight to
+    // nobody but the CLI (the card said nothing was running, the CLI says browser_interrupted, and the handback's reminder
+    // omitted it). A closed cycle (the handback already went out) takes nothing — the CLI's own line says control is back.
+    const rv = rerunVerb(verb);
+    if (rv && cycles.has(kk)) cycles.set(kk, INT.noteRefused(cycles.get(kk), { verb: rv, at: now() }));
+    const c = cycles.get(kk) || lastClosed.get(kk) || null;
+    const p = pid ? profile(pid) : null;
+    // `mediated`: a proxy stood between the agent's daemon and this browser (the CLI words "cut" vs "ran to its end" by it —
+    // verify r5: `aborted` alone read a mediated takeover that found nothing in flight as "not shared instance-wide")
+    // verify r6: `landed` = how many of this lease's aborted calls the browser still answered with a success — they had reached
+    // the page and TOOK EFFECT (measured on 0.38.1 + Chrome 153: a `fill` caught on its one Input.insertText holds all 4000 chars
+    // while the CLI said "cut short"); the CLI's words carry it so the agent checks the page before running it again
+    // verify r7: `unsettled` = aborted calls the browser had NOT answered when this was written (the audit's settle-wait is
+    // bounded; measured: a click's reply landed 200 ms after it) — whether they took effect is UNKNOWN, and the CLI says so
+    // instead of a definite "cut" the agent would act on (a re-run of a call that then lands is a double click)
+    let landed = 0, unsettled = 0;
+    if (p && isMediated(p) && mediator && typeof mediator.interruptionOf === 'function') { try { const li = mediator.interruptionOf(pid, bk); if (li && Number(li.at) >= Number(s.takenAt) - 50) { landed = Number(li.landed) || 0; unsettled = Number(li.unsettled) || 0; } } catch { landed = 0; unsettled = 0; } }
+    return { code: INT.INTERRUPTED_CODE, error: INT.INTERRUPTED_TEXT, takenAt: Number(s.takenAt), input: s.input, handedBackAt: Number(s.handedBackAt) || 0, aborted: !!(c && c.aborted.length), mediated: !!(p && isMediated(p)), landed, unsettled };
+  }
+  /** verify r6: the audit's answer waits — bounded — for the browser's late replies to the calls the takeover aborted (a
+   *  fill's insertText answered `browser_interrupted` to the agent 1 ms after it left the proxy; Chrome's own reply, which
+   *  says it LANDED, follows by a few ms — after the CLI's audit had already asked). ≤ maxMs, 20 ms steps, never throws. */
+  async function awaitInterruptionSettled({ browserKey, profileId = null, maxMs = 250 } = {}) {
+    const p = profileId ? profile(profileId) : null;
+    if (!p || isEph(p) || !isMediated(p) || !mediator || typeof mediator.interruptionOf !== 'function') return 0;
+    const t0 = Date.now();
+    for (;;) {
+      let li = null; try { li = mediator.interruptionOf(profileId, browserKey); } catch { li = null; }
+      if (!li || !(Number(li.unsettled) > 0) || Date.now() - t0 >= maxMs) return Date.now() - t0;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+  /** The recorder installs its in-flight reader (`({sessionId, browserKey, profileId, at}) → [{id, verb, at}]`). */
+  function setInFlightReader(fn) { inFlightReader = typeof fn === 'function' ? fn : null; }
+  /** The open cycle of a pair (a route / the suite): the PURE view, or null. */
+  function interruptionOf(browserKey, profileId = null) { return INT.interruptionView(cycles.get(inputKey(browserKey, profileId)) || null); }
   /** What the session card / status bar publish for ONE conversation:
    *  {input:'user'|'agent', takenAt} or null when it has no browser at all. */
   function inputSummaryFor(browserKey, { hasBrowser = null } = {}) {
@@ -2060,6 +2286,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!s) return;
     if (s.input === 'user') handback({ browserKey, profileId, cause: 'detach', url: s.url || '' });
     inputs.delete(k);
+    cycles.delete(k);
+    lastClosed.delete(k);
     pending.delete(k);
   }
 
@@ -2199,6 +2427,51 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return eph ? 'ephemeral' : '';
   }
 
+  /**
+   * lane S2 (naive study 2 — three answers to "which browser"): the registry VIEW the ONE browser fact is computed
+   * over (src/browser-fact.js browserFactFor). Everything a surface would otherwise read from a different raw field —
+   * the pin (with its cleared mark), the attachment set's default, each named browser's state + last failure, the
+   * conversation's own browser (+ when its last verb ran), who drives, what runs live — in ONE read.
+   */
+  function factView(browserKey, { active = null } = {}) {
+    ensureLoaded();
+    const bk = String(browserKey || '');
+    const set = setFor(bk);
+    const ids = new Set(set.attachments.map((a) => a.profileId));
+    const pin = reg.pins[bk] || null;
+    if (pin && pin.profileId) ids.add(pin.profileId);
+    const browsers = {};
+    for (const id of ids) { const r = reg.browsers[id]; if (r) browsers[id] = { state: r.state, lastError: r.lastError || null, closed: !!r.closed, startedAt: r.startedAt || 0 }; }
+    const e = ephemeralFor(bk);
+    const ownP = e ? profile(e.profileId) : null;
+    const own = e ? { profileId: e.profileId, state: e.state, lastError: e.lastError || null, startedAt: e.startedAt || 0, lastVerbAt: (ownP && ownP.lastVerbAt) || 0 } : null;
+    let input = null; try { input = inputSummaryFor(bk).input || null; } catch { input = null; }
+    let live = ''; try { live = liveHoldingFor(bk, active) || ''; } catch { live = ''; }
+    return { profiles: named().map((p) => ({ id: p.id, label: p.label })), pin: pin ? { ...pin } : null, attachments: set.attachments.map((a) => ({ profileId: a.profileId, alias: a.alias, label: a.label, isDefault: a.isDefault })), browsers, own, input, live, now: now() };
+  }
+  /** lane S2: THE browser fact of one live session (`sessionFacts` = browser-fact.sessionFactsOf(session)). */
+  function factFor(sessionFacts) {
+    if (!sessionFacts || !sessionFacts.browserKey) return null;
+    return BF.browserFactFor(sessionFacts, factView(sessionFacts.browserKey, { active: sessionFacts.active }));
+  }
+  /**
+   * lane S2 (naive study 2 T4 — "typed input during a takeover was not delivered, and nothing said so"). MEASURED on
+   * agent-browser 0.38.1 through the real mediator: ONE viewer input record becomes exactly ONE CDP `Input.*` call
+   * (mousePressed / mouseReleased / keyDown / char / keyUp / mouseWheel, 6 of 6), the stream server answers NOTHING
+   * for it, and a MEDIATED lease's live view streams from the session's own daemon THROUGH the mediator — whose
+   * paused fence refused every one of the user's own `Input.*` calls while the user drove (the page got nothing).
+   * The bridge now mints ONE credit per forwarded record on the lease's grant before it forwards; the mediator admits
+   * the next `Input.*` on that credit and answers Chrome's own reply as the receipt. A non-mediated target answers
+   * null (the bridge's receipt is then the upstream's own write).
+   */
+  function creditUserInput(target, record = null, { targetId = null } = {}) {
+    if (!target || target.kind !== 'attachment' || !mediator || typeof mediator.creditInput !== 'function') return null;
+    const p = profile(target.profileId);
+    if (!p || !isMediated(p)) return null;
+    const bk = String(target.sessionName || '').replace(/^vs-/, '');
+    return mediator.creditInput({ profileId: p.id, browserKey: bk, record, targetId }); // lane S2 verify: the credit is bound to THIS record's own CDP call; verify r2: and to the tab the user is looking at
+  }
+
   // ── §3.7 the attachment set + handles; §3.8 layer ① the one-time refusal ──
   function childrenOf(browserKey) {
     return Object.entries(reg.children).filter(([k, c]) => c && B.parentKeyOf(k) === browserKey && k !== browserKey).map(([k, c]) => ({ handle: k, since: c.since || 0, sessionId: c.sessionId || null }));
@@ -2231,7 +2504,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const me = B.parentKeyOf(String(exceptKey || ''));
     for (const [k, s] of inputs) {
       if (!s || s.input !== 'user' || !k.endsWith('|' + profileId)) continue;
-      const bk = k.slice(0, k.length - profileId.length - 1);
+      // integration 2.369.192 (S2 × S5): a lease taken WITH another view's takeover (lane S2 r6: a takeover is of the
+      // BROWSER) names that view's conversation in `with` — the one the user drives FROM, never the sibling itself
+      const bk = s.with || k.slice(0, k.length - profileId.length - 1);
       if (B.parentKeyOf(bk) !== me) return { browserKey: bk };
     }
     return null;
@@ -2288,7 +2563,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * now) and the session is told; every other outcome is `resolveHandle`'s.
    * Never throws: the answer is a typed verdict the route maps to a status.
    */
-  function resolveFor({ browserKey, handle = '', subagent = false } = {}) {
+  function resolveFor({ browserKey, handle = '', subagent = false, verb = null } = {}) {
     ensureLoaded();
     const bk = String(browserKey || '');
     const set = setFor(bk);
@@ -2303,7 +2578,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (v.ok && v.kind !== 'child') {
       // P4 (§7.4): mid-switch the gap is a NAMED refusal, not a timeout
       if (v.kind === 'attachment' && switching.has(v.attachment.profileId)) { const rr = SW.restartingRefusal(profile(v.attachment.profileId)); return { ...rr, handles: v.handles || [] }; }
-      const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [] });
+      const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [], verb }); // the refused verb goes on the handback's re-run list
       if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return paused; }
       // OWNER RULING A (2): one driver at a time on a SHARED profile's browser — another conversation mid-work on it (or
       // the user driving it from another conversation's live view) refuses this command `browser_busy`, BY NAME
@@ -2316,7 +2591,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // MULTIVIEW §4: a helper's browser is watchable and can be taken over in the
     // live view — then IT is paused (keyed by the child handle), never by its parent's takeover
     if (v.ok && v.kind === 'child') {
-      const paused = pausedVerdictFor(v.handle, null, { handles: v.handles || [] });
+      const paused = pausedVerdictFor(v.handle, null, { handles: v.handles || [], verb });
       if (paused) { log.log?.(`[browser] ${v.handle}: refused with browser_paused (the user drives this helper's browser)`); return paused; }
     }
     return v;
@@ -2856,6 +3131,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const bk = String(target.sessionName || '').replace(/^vs-/, '');
       const rec = reg.browsers[p.id];
       if (!mediationOn() || !rec || !rec.cdpUrl) return { ok: false, port: null, code: 'stream_unavailable', error: `"${p.label}" is shared instance-wide and ${mediationOn() ? 'its browser answered no CDP url' : 'this instance has no mediating proxy'}` };
+      sayRetiredSwitch();
       const g = await mediator.grantFor({ profileId: p.id, browserKey: bk, upstream: rec.cdpUrl, paused: () => inputStateFor(bk, p.id).input === 'user' });
       const r = await rt.streamPort(M.mediatedNamespace(p.id, bk), { session: target.sessionName, extraEnv: { AGENT_BROWSER_CDP: g.url, AGENT_BROWSER_IDLE_TIMEOUT_MS: String(idleMs()) } });
       return r.ok ? { ok: true, port: r.port, error: null, code: null } : { ok: false, port: null, code: 'stream_unavailable', error: r.error };
@@ -3002,6 +3278,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // takeover C3 (design-browser-takeover §5): the managed ephemeral browser + the ceiling's count seam
     ensureEphemeral, retireEphemeral, ephemerals, ephemeralFor, isEphemeral: (id) => isEph(profile(id)), nsOf,
     liveHoldingFor, // lane H: the session card / status chip's `browserLive` fact
+    factView, factFor, pinnedBy, clearPin, removeVerdict, onChange, creditUserInput, // lane S2: THE browser fact, the delete's refuse-or-warn, the re-publish hook, the input receipt's credit
     holdersFor: (browserKey) => { ensureLoaded(); return holders(B.leasesOf(reg.leases, String(browserKey || ''), { children: true })); }, // lane H: THE holder rows of one conversation (the recorder arms only on a holder)
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
@@ -3017,12 +3294,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
     pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
-    // owner ruling A: the user's pin authorizes; lane S2's seam names (pinnedBy / clearPin); a pin that did not open is said;
-    // one driver at a time; Delete… releases everything first; the adopt stops the conversation's own browser first
-    userPinned, pinnedBy, clearPin, copyPin, notePinFailure, pinFailureOf, clearPinFailure, driveVerdictFor, activeDrivers, releaseAll, stopEphemeralOf,
+    // owner ruling A: the user's pin authorizes (lane S2's pinnedBy / clearPin are exported above); a pin that did not open
+    // is said; one driver at a time; Delete… releases everything first; the adopt stops the conversation's own browser first
+    userPinned, copyPin, notePinFailure, pinFailureOf, clearPinFailure, driveVerdictFor, activeDrivers, releaseAll, stopEphemeralOf,
     start, stop, attach: attachTimed, detach, statusFor,
     // P3 (§4.3 / §4.3.1): the input side — takeover/handback/idle, the typed paused refusal, the confirmation registry
     takeoverIdleMs, inputStateFor, inputsFor, inputSummaryFor, takeover, handback, passControl, noteUserInput, noteUserUrl, pausedVerdictFor, onInput,
+    interruptionFor, interruptionOf, setInFlightReader, awaitInterruptionSettled, // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
+    clock: () => now(), // the ONE clock a takeover's instant and a /resolve's instant are compared on (the route stamps with it)
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,
     // P1 second half (§3.7/§3.8): the set, handles, the one-time refusal, children, the audit, adopt
     setFor, tell, resolveFor, newChild, dropChild, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),

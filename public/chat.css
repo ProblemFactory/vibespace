@@ -42,6 +42,8 @@
 .chat-status-browser { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; }
 .chat-status-browser.amber { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); border-radius: 999px; padding: 0 6px; }
 .chat-status-browser svg { width: 10px; height: 10px; flex-shrink: 0; }
+/* lane S2: the fact's line can name both the pin and the browser in use — one line, ellipsis, the whole sentence in the tooltip */
+.chat-status-browser-text { max-width: 52ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-status-dropdown-item.chat-status-browser-nudge { color: var(--yellow, #e5c07b); }
 /* The row carries BOTH classes, and `.chat-status-dropdown-item` (declared
    further down this file, same 0,1,0 specificity) sets `white-space: nowrap`

@@ -51,6 +51,13 @@
  *   agentShare { remaining } — agent units left in the minute (Infinity when
  *             the share is 100 %)
  *   floors    { key: lastFetchAt } for the keys of waiting requests · floorMs
+ *   pace      null (no pacing — the adapter declares no `caps.pace`) | the
+ *             account's PER-SECOND bucket (rule 18): { unitsPerSec, burst,
+ *             tokens, lastRefillAt, cost: { fetch, discover, scanHost } } —
+ *             `tokens` at `lastRefillAt` (it may be NEGATIVE: a call larger
+ *             than the bucket leaves a debt), refilled at `unitsPerSec` up to
+ *             `burst`; `cost` = what one action of each kind is expected to
+ *             charge, in the budget's unit
  * Deviations from the r9 brief, each with its reason: the due rows carry no
  * `tier` (the cadence already folded it into `dueAt` — the scheduler never
  * reads a tier); `budget` has no `unitsPerFetch` (above); `discovery` is a
@@ -69,6 +76,11 @@
  *   { type: 'scanHost' }                                   the scan lane's host facts
  *   { type: 'fetch', key, chargeTo: 'timer'|'owner'|'agent', waiters, due,
  *     rider, pressed }                                     ONE conversation
+ *   { type: 'wait', ms, next, key }                        rule 18: the bucket
+ *                                                          is short — sleep
+ *                                                          `ms` (≤ 1 s), then ask
+ *                                                          again (`next` / `key`
+ *                                                          = the action it holds)
  *   { type: 'end', ok, why, cut?, carry?, waiting, timerWork }
  * `apply(snap, act)` with no result BEGINS an async action (fetch / discover /
  * scanHost); `apply(snap, act, result)` completes it. Results: fetch
@@ -137,6 +149,28 @@
  * 17. ONE QUEUED PASS: a timer / forced ask while a pass runs is queued ONCE
  *     per account; later asks JOIN it and `force` is sticky (N presses of
  *     Re-authorize = one forced ingest after the running pass).
+ * 18. THE PACE (lane R5, 2026-09-26 — the owner: "gmail一直被限速 你可能要控制
+ *     下gmail默认的读取速度"; the vendor refused whole passes that stayed
+ *     under the minute's budget but spent it in ~20 s): a vendor call is also
+ *     paced PER SECOND. The bucket (the `pace` fact) refills continuously at
+ *     `unitsPerSec` up to `burst`; a discovery, a host scan or a fetch whose
+ *     cost `c` finds fewer than min(c, burst) tokens is NOT sent — the step is
+ *     `wait` for the shortfall, at most PACE_WAIT_MAX_MS, and the next step
+ *     judges and picks AGAIN (a human filed during it goes first, rule 7).
+ *     A call larger than the bucket waits for a FULL bucket and leaves a debt
+ *     the following calls wait out. A wait is never a refusal and never a
+ *     skip: every refusal (rules 5, 11, the cut of rule 9), settlement and
+ *     end is answered at once, the minute's budget is judged BEFORE the pace
+ *     (rule 9 stays the outer cap), and a wait moves no due row, no streak
+ *     (rule 15) and no count. THE TOLERANCE, exact: over ANY window of T
+ *     seconds the calls charge at most burst + unitsPerSec·T + max(0,
+ *     c_max − burst) — with burst = unitsPerSec and a call of one second's
+ *     worth, at most one second's worth plus ONE call in any second. The
+ *     engine sets unitsPerSec = min(perSecond, budget/60) and burst =
+ *     min(perSecond, budget/2): the pace never spends a minute faster than
+ *     the minute's budget (any 60 s ≤ the budget + one burst; rule 9's cut
+ *     still caps each minute window). Gmail's defaults (40/s, 3000/min):
+ *     ≤ 80 units in any second, ≤ 2440 in any 60 s, one thread read a second.
  */
 
 const REFRESH_QUEUE_CAP = 200;
@@ -148,6 +182,10 @@ const ORIGINS = Object.freeze(['owner', 'open', 'agent']);
 const REFUSAL_CODES = Object.freeze(['backoff', 'vendor-budget', 'refresh-floor', 'refresh-queue-full']);
 /** Every settlement `next` can name (`failed` carries the account's own vendor code). */
 const ANSWER_OUTCOMES = Object.freeze(['stopped', 'account-changed', 'not-connected', 'failed']);
+/** Rule 18's longest single wait: the model is asked again at least this often. */
+const PACE_WAIT_MAX_MS = 1000;
+/** Float slack of the bucket arithmetic (tokens are fractional). */
+const PACE_EPS = 1e-6;
 
 const isHuman = (o) => o === 'owner' || o === 'open';
 const ids = (rs) => rs.map((r) => r.id);
@@ -190,6 +228,47 @@ function queueAsk(prev, ask) {
   const force = !!(ask && ask.force);
   if (prev) return { queued: { force: prev.force || force, origin: prev.origin }, joined: true };
   return { queued: { force, origin: (ask && ask.origin) || 'timer' }, joined: false };
+}
+
+// ── RULE 18: THE PER-SECOND BUCKET (pure arithmetic, shared with the engine) ──
+/** A fresh bucket `{unitsPerSec, burst, tokens, lastRefillAt}` (full unless told). */
+function paceFresh(unitsPerSec, burst, at, tokens = null) {
+  const r = Math.max(0, Number(unitsPerSec) || 0), b = Math.max(0, Number(burst) || 0);
+  return { unitsPerSec: r, burst: b, tokens: tokens === null || tokens === undefined ? b : Number(tokens) || 0, lastRefillAt: Number(at) || 0 };
+}
+/** The bucket's level at `now`: refilled since `lastRefillAt`, capped at `burst`. */
+function paceLevel(pace, now) {
+  if (!pace) return Infinity;
+  const dt = Math.max(0, (Number(now) || 0) - (Number(pace.lastRefillAt) || 0));
+  return Math.min(Number(pace.burst) || 0, (Number(pace.tokens) || 0) + (dt * (Number(pace.unitsPerSec) || 0)) / 1000);
+}
+/** What a call of `cost` must find in the bucket: the cost, or a FULL bucket when it is larger. */
+function paceNeed(pace, cost) { return Math.min(Math.max(0, Number(cost) || 0), Number(pace && pace.burst) || 0); }
+/** Milliseconds until a call of `cost` may be sent (0 = now), at most PACE_WAIT_MAX_MS
+ *  per ask — the caller asks again. A bucket that never refills waits the maximum. */
+function paceWaitMs(pace, now, cost) {
+  if (!pace) return 0;
+  const short = paceNeed(pace, cost) - paceLevel(pace, now);
+  if (short <= PACE_EPS) return 0;
+  const r = Number(pace.unitsPerSec) || 0;
+  if (!(r > 0)) return PACE_WAIT_MAX_MS;
+  return Math.max(1, Math.min(PACE_WAIT_MAX_MS, Math.ceil((short * 1000) / r)));
+}
+/** The bucket after a call of `units` was SENT at `now` (the level may go negative — a debt). */
+function paceCharge(pace, now, units) {
+  if (!pace) return pace;
+  return { ...pace, tokens: paceLevel(pace, now) - Math.max(0, Number(units) || 0), lastRefillAt: Number(now) || 0 };
+}
+/** The cost the model expects of one action of `type` (1 when undeclared). */
+function paceCost(pace, type) {
+  const c = pace && pace.cost && Number(pace.cost[type]);
+  return Number.isFinite(c) && c >= 0 ? c : 1;
+}
+/** RULE 18 at a vendor action: the action itself, or the wait for the bucket. */
+function paced(s, base, act) {
+  const ms = paceWaitMs(s.pace || null, s.now, paceCost(s.pace, act.type));
+  if (!(ms > 0)) return act;
+  return { ...base, type: 'wait', ms, next: act.type, key: act.key || null };   // THE PACE
 }
 
 /** A pass begins. `backoff` = the account is inside a vendor back-off and the
@@ -332,7 +411,7 @@ function next(s) {
   if (p.cut) return { ...base, type: 'end', ok: p.vendorCalls > 0, why: p.vendorCalls > 0 ? null : 'budget', cut: true, waiting: queue.length, timerWork: p.timerWork };
   // 12. discovery — once, with the timer's work, never ahead of a waiting human
   const humanWaiting = waiting.some((it) => it.human);
-  if (p.discovery.wanted && !p.discovery.done && !humanWaiting && s.budget.remainingUnits > 0) return { ...base, type: 'discover' };
+  if (p.discovery.wanted && !p.discovery.done && !humanWaiting && s.budget.remainingUnits > 0) return paced(s, base, { ...base, type: 'discover' });
   // 16. nothing pending
   if (!queue.length) {
     const idle = p.backoff && p.fetches === 0;
@@ -347,7 +426,7 @@ function next(s) {
   const duePending = queue.some((it) => it.due);
   if (!duePending && p.streak >= STREAK_MAX) return { ...base, type: 'end', ok: true, why: null, carry: true, waiting: 0, timerWork: p.timerWork };   // THE BOUND
   // 14. the host scan, before the first fetch
-  if (p.hostScan.wanted && !p.hostScan.done) return { ...base, type: 'scanHost' };
+  if (p.hostScan.wanted && !p.hostScan.done) return paced(s, base, { ...base, type: 'scanHost' });
   // 7 + 8. the pick: the queue's head, or — right after a request-class fetch — the first due row
   let pick = queue[0];
   if (p.last === 'request' && !pick.due) { const t = queue.find((it) => it.due); if (t) pick = t; }   // THE INTERLEAVE
@@ -355,12 +434,13 @@ function next(s) {
   if (p.backoff && !pick.reqs.some((r) => r.origin === 'owner')) return { ...base, type: 'refuse', key: pick.key, code: 'backoff', rule: 'backoff', waiters: ids(pick.reqs) };
   // 11. the share per fetch
   if (!pick.due && !pick.human && !(s.agentShare.remaining > 0)) return { ...base, type: 'refuse', key: pick.key, code: 'vendor-budget', rule: 'share', waiters: ids(pick.reqs) };
-  return {
+  // 18. the pace — the pick waits for the bucket; the next step picks again
+  return paced(s, base, {
     ...base, type: 'fetch', key: pick.key,
     chargeTo: pick.due ? 'timer' : pick.human ? 'owner' : 'agent',
     waiters: ids(pick.reqs),   // THE ROUND
     due: pick.due, rider: pick.due && pick.reqs.length > 0, pressed: press !== null && pick.key === press,
-  };
+  });
 }
 
 /** THE NEXT SNAPSHOT. `result` omitted = an async action BEGINS. */
@@ -383,6 +463,8 @@ function apply(snap, act, result) {
       break;
     case 'end':
       return { ...snap, requests, pass: null };
+    case 'wait':   // rule 18: the engine sleeps between two steps — nothing about the pass moves
+      break;
     case 'discover':
     case 'scanHost':
       if (!p) break;
@@ -420,7 +502,8 @@ function apply(snap, act, result) {
 }
 
 module.exports = {
-  REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES,
+  REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,
   open, wantsTurn, turn, close, next, apply,
+  paceFresh, paceLevel, paceNeed, paceWaitMs, paceCharge, paceCost,
 };

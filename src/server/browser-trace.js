@@ -51,6 +51,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const T = require('../browser-trace.js');
+const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): what was IN FLIGHT at a takeover is read off this recorder's ring
 const B = require('../browser-profiles.js');
 const S = require('../browser-stream.js');
 
@@ -146,7 +147,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
 
   // ── the tap listener ──
   function tapState(key, { sessionId, profileId, browserKey, target }) {
-    return { key, sessionId, profileId: profileId || null, browserKey: browserKey || null, target, untap: null, pending: new Map(), frames: [], lastUrl: '', ended: false, timers: new Set(), entries: 0 };
+    // `ops` = every command / result record of an agent OPERATION (traced or not — `eval` is an observation to the trace,
+    // an operation to a takeover), bounded: PURE browser-interrupt.inFlightAt reads it at the takeover instant
+    return { key, sessionId, profileId: profileId || null, browserKey: browserKey || null, target, untap: null, pending: new Map(), frames: [], lastUrl: '', ended: false, timers: new Set(), entries: 0, ops: [] };
   }
   /** lane J: the page size a frame shows — the picture's own size + the relay's page reading (src/browser-stream.js). */
   function pageOf(msg, relay) {
@@ -166,6 +169,8 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
       for (const p of tp.pending.values()) if (p.resultAt && !p.afterDone) { p.since.push({ at: rec.at, seq: rec.seq, rec }); checkAfter(tp, p); }
       return;
     }
+    // the owner's ruling (2026-09-27): EVERY operation's command / result lands on the ring a takeover reads (bounded)
+    if ((msg.type === 'command' || msg.type === 'result') && msg.id != null) INT.noteRecord(tp.ops, { kind: msg.type, id: msg.id, action: msg.action, at: now() });
     if (msg.type === 'command') {
       if (!T.isTracedCommand(msg)) return;
       if (tp.pending.size >= T.PENDING_CAP) { const oldest = tp.pending.keys().next().value; finalizeNow(tp, tp.pending.get(oldest), 'too many actions in flight'); }
@@ -484,19 +489,21 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return row;
   }
   /** `forget` a registry profile: verdict → RENAME the directory beside itself → ledger row → the record goes. */
-  async function forgetProfile(id) {
+  async function forgetProfile(id, { unpin = false } = {}) {
     if (!keeper) throw namedError('unavailable', 'no keeper');
     const p = keeper.profile(id);
     const reg = keeper._reg();
     const v = T.forgetVerdict({ profile: p, leases: reg.leases, browsers: reg.browsers });
     if (!v.ok) throw namedError(v.code, v.error);
+    // lane S2: a profile a conversation still PINS is never moved aside (the rename would come before the removal's own refusal)
+    if (!unpin && typeof keeper.pinnedBy === 'function' && keeper.pinnedBy(id).length) { const pv = require('../browser-fact.js').deletePinnedVerdict({ label: p.label, pinnedBy: keeper.pinnedBy(id) }); throw namedError(pv.code, pv.error); }
     for (const tp of [...taps.values()]) if (tp.profileId === id) unwatch({ sessionId: tp.sessionId, profileId: id });
     const bytes = sizeCache.get(p.dir) ? sizeCache.get(p.dir).bytes : null;
     let to = null;
     let exists = false; try { exists = fs.statSync(p.dir).isDirectory(); } catch { exists = false; }
     if (exists) { to = T.forgottenDirName(p.dir, now()); try { fs.renameSync(p.dir, to); } catch (e) { throw namedError('forget_failed', `could not move ${p.dir} aside (${e.message}) — nothing was removed`); } }
     const row = fileForgotten({ profileId: id, label: p.label, dir: p.dir, to, bytes, why: exists ? 'forgotten by the user (directory moved aside, never deleted by itself)' : 'forgotten by the user (its directory was already gone)' });
-    const r = keeper.removeProfile(id);
+    const r = keeper.removeProfile(id, { unpin });
     log.log?.(`[browser-trace] profile ${id} "${p.label}" forgotten: ${p.dir} → ${to || '(no directory)'} (ledger ${row.id})`);
     bc({ type: 'browser-housekeeping-updated', forgotten: row });
     return { ok: true, removed: r.removed, from: p.dir, to, ledger: row };
@@ -604,12 +611,28 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (!timer && sweepEveryMs > 0) { timer = setInterval(() => { try { sweep(); } catch (e) { log.warn?.(`[browser-trace] sweep failed: ${e && e.message}`); } }, sweepEveryMs); if (timer.unref) timer.unref(); }
     return { armed, sweep: sw ? { removed: sw.removed, recordingsRemoved: sw.recordingsRemoved } : null };
   }
-  function install() { if (keeper && typeof keeper.onLease === 'function' && !unsubLease) unsubLease = keeper.onLease(onLeaseEvent); if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest); }
+  /**
+   * WHAT WAS IN FLIGHT AT A TAKEOVER (the owner's ruling, 2026-09-27): the keeper asks at the instant; the tap of that
+   * (conversation, browser) — a profile's, the conversation's ephemeral one, a helper's (`child:<key>`) — answers PURE
+   * `inFlightAt(ring, at)`. No tap (the trace is off, or the browser was never tapped) ⇒ [] (the mediator's aborted
+   * calls then name what was cut).
+   */
+  function inFlightFor({ sessionId = null, browserKey = null, profileId = null, at = 0 } = {}) {
+    const childKey = !profileId && browserKey && B.isChildKey(browserKey) ? String(browserKey) : null;
+    let tp = sessionId ? taps.get(tapKey(sessionId, profileId, childKey)) : null;
+    if (!tp) tp = [...taps.values()].find((x) => (profileId ? x.profileId === profileId : !x.profileId && (childKey ? x.childKey === childKey : !x.childKey)) && (x.browserKey === browserKey || x.wantKey === browserKey)) || null;
+    return tp ? INT.inFlightAt(tp.ops, at) : [];
+  }
+  function install() {
+    if (keeper && typeof keeper.onLease === 'function' && !unsubLease) unsubLease = keeper.onLease(onLeaseEvent);
+    if (keeper && typeof keeper.addDigest === 'function') keeper.addDigest(digest);
+    if (keeper && typeof keeper.setInFlightReader === 'function') keeper.setInFlightReader(inFlightFor); // the owner's ruling (2026-09-27)
+  }
   function shutdown() { if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
     enabled, watch, unwatch, list, entry, framePath, sweep, housekeeping, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
-    maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown,
+    maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
     traceRoot, recRoot, forgottenFile, abBase, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep,
   };
 }

@@ -318,9 +318,13 @@ const tagOf = (fr) => { const b = Buffer.from(fr.data, 'base64'); const i = b.in
   C.send({ type: 'fit', width: 1010, height: 700, dpr: 1, visible: true });
   await sleep(FIT.RESTORE_AFTER_MS);
   ok(!calls.set.some((c) => c.join() === '1280,577'), 'a viewer that comes back inside the grace (a reload) cancels the restore — the page never bounces');
-  await C.close();
+  // integration 2.369.192 (a fast-tier red, 1 run in 5): the restore's set is RECORDED before its ~10 ms fake call returns and
+  // the journal line is written after it — a 50 ms poll could land between them; and the server arms the grace when it SEES
+  // the close, which can be before the client's close() resolves. So: the clock starts before the close (the true lower
+  // bound), and the wait is for the restore's own journal line (its completion), never the first sight of the set
   const tLeft = Date.now();
-  await until(() => calls.set.at(-1).join() === '1280,577', FIT.RESTORE_AFTER_MS + 3000, 50);
+  await C.close();
+  await until(() => calls.set.at(-1).join() === '1280,577' && B.logs.some((l) => /back to its own 1280×577/.test(l)), FIT.RESTORE_AFTER_MS + 3000, 50);
   ok(calls.set.at(-1).join() === '1280,577' && Date.now() - tLeft >= FIT.RESTORE_AFTER_MS - 50 && B.logs.some((l) => /back to its own 1280×577/.test(l)), `nobody watches for ${FIT.RESTORE_AFTER_MS} ms ⇒ the page goes back to its own 1280×577 (the size before the first fit)`, JSON.stringify(calls.set.slice(-3)));
   await B.close(); await U.close();
 }

@@ -176,5 +176,33 @@ const quiet = { warn() {}, log() {}, error() {} };
   ok(!fs.readFileSync(new URL(import.meta.url).pathname, 'utf-8').includes(LIT), 'this suite never spells the literal either — every fixed port under test is a FREE one built at runtime');
 }
 
+// ── ⑥ A CANCEL DURING THE EXCHANGE (channels lane R5 verify r7 + r8): the exchange is handed `cancelled()` + `flowId` and consults it before writing — THROWING to refuse ⇒ {ok:false, cancelled}; an exchange that RESOLVED has landed its consent, so the report is ok:true with the late cancel CARRIED (r8: the loopback cannot undo a write; r7 said {ok:false, "nothing was connected"} over a token on disk) ──
+{
+  const ol = OL.createOAuthLoopback({ now: () => Date.now(), log: quiet });
+  let release; const hold = new Promise((r) => { release = r; }); const seen = []; const dones = [];
+  const st = await ol.begin({ id: 'g', mode: 'ephemeral', buildConsentUrl: ({ redirectUri, state }) => `https://x/?r=${encodeURIComponent(redirectUri)}&state=${state}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { seen.push({ before: args.cancelled(), flowId: args.flowId }); await hold; seen.push({ after: args.cancelled() }); return { access_token: 'u' }; } });
+  const state = new URL(st.consentUrl).searchParams.get('state');
+  const landing = get(`${st.redirectUri}/?state=${state}&code=c1`); await sleep(30);
+  ok(seen.length === 1 && seen[0].before === null && seen[0].flowId === st.flowId, 'the exchange is handed the flow id and a cancelled() that reads null while the flow is live');
+  ok(ol.cancel(st.flowId, 'cancelled') === true, 'the flow is cancelled while its exchange is in flight');
+  release(); await landing; await sleep(30);
+  const s = ol.status(st.flowId);
+  ok(seen.length === 2 && seen[1].after === 'cancelled', 'cancelled() inside the exchange reads the cancel that landed meanwhile (the exchange checks it before storing anything)');
+  ok(s && s.done === true && s.ok === true && s.error === null && s.cancelled === 'cancelled', `r8: an exchange that RESOLVED after the cancel is a landed consent — the report is ok:true with the cancel carried (ok ${s && s.ok}, cancelled ${s && s.cancelled}, error ${s && s.error})`);
+  ok(dones.length === 1 && dones[0].ok === true && dones[0].cancelled === 'cancelled' && dones[0].result && dones[0].result.access_token === 'u', 'onDone carries {ok:true, cancelled} + the result — the record door reads ok as landed, the pending path refuses the carried cancel itself');
+  // the door's shape: an exchange that consults cancelled() and THROWS ⇒ {ok:false, cancelled} with the exchange's own sentence
+  { let rel; const h2 = new Promise((r) => { rel = r; });
+    const st3 = await ol.begin({ id: 'g3', mode: 'ephemeral', buildConsentUrl: ({ state: s3 }) => `https://x/?state=${s3}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { await h2; const c = args.cancelled(); if (c) throw new Error(`the Gmail sign-in was ${c} while it was being completed — nothing was connected`); return { access_token: 'v' }; } });
+    const l3 = get(`${st3.redirectUri}/?state=${new URL(st3.consentUrl).searchParams.get('state')}&code=c3`); await sleep(30);
+    ok(ol.cancel(st3.flowId, 'cancelled') === true, 'the door-shaped flow is cancelled while its exchange is in flight'); rel(); await l3; await sleep(30);
+    const s3 = ol.status(st3.flowId); const d3 = dones[dones.length - 1];
+    ok(s3 && s3.done === true && s3.ok === false && s3.cancelled === 'cancelled' && /was cancelled while it was being completed/.test(s3.error || ''), `an exchange that consulted cancelled() and refused ends {ok:false, cancelled} with ITS sentence (${s3 && s3.error})`);
+    ok(d3 && d3.ok === false && d3.cancelled === 'cancelled' && d3.result === null, 'onDone carries {ok:false, cancelled} for the refused exchange'); }
+  const st2 = await ol.begin({ id: 'g2', mode: 'ephemeral', buildConsentUrl: ({ state: s2 }) => `https://x/?state=${s2}`, onDone: (r) => { dones.push(r); }, exchange: async () => ({ access_token: 'u' }) });
+  await get(`${st2.redirectUri}/?state=${new URL(st2.consentUrl).searchParams.get('state')}&code=c2`); await sleep(30);
+  ok(dones.length === 3 && dones[2].ok === true && dones[2].cancelled === null, 'a flow that was not cancelled reports cancelled: null');
+  ol.stopAll();
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
