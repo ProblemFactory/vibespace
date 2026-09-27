@@ -133,6 +133,12 @@ function principalChoices(app, stored = []) {
  * adapter}` | `{kind:'pattern', adapter, id?}` (no id = a NEW rule).
  */
 async function grainState(target) {
+  const st = await readGrain(target);
+  // the STAMP of the two lists as drawn (mirror-193, PURE `grainStamp`) — every whole-list save sends it as `base`
+  if (st) st.stamp = F.grainStamp({ access: st.access, watchers: st.watchers });
+  return st;
+}
+async function readGrain(target) {
   if (target.kind === 'conversation') {
     const c0 = target.conv;
     const base = `/api/channels/${encodeURIComponent(c0.adapterId)}/${encodeURIComponent(c0.id)}`;
@@ -155,7 +161,12 @@ async function grainState(target) {
       },
     };
   }
-  const a = target.adapter;
+  // THE ACCOUNT AND RULE GRAINS ARE RE-READ TOO (mirror-193): `target.adapter` is the panel's broadcast-fed copy,
+  // a frame behind any write it has not heard of yet — drawn from it, the dialog showed (and its whole-list save
+  // WROTE) a list the server had already moved on from: a principal granted a moment earlier lost its access.
+  const fresh = await fetchJson(`/api/channels/adapters/${encodeURIComponent(target.adapter.id)}/view`);
+  if (!fresh || fresh.error || !fresh.adapter) { showToast(routeErrorText(fresh), { type: 'error' }); return null; }
+  const a = fresh.adapter;
   const aid = encodeURIComponent(a.id);
   const caps = { offersSend: (a.sendAs || []).length > 0, sendWhy: (a.sendAs || []).length ? null : 'read-only-adapter', policyRequiresReview: !(a.policy && a.policy.mode === 'direct') };
   const scopeEstimate = (kind, pattern) => async (filter, how, principal) => {
@@ -183,8 +194,11 @@ async function grainState(target) {
     estimate: scopeEstimate('pattern', () => pat),
   };
 }
-async function put(url, body, method = 'PUT') {
+/** `onChanged` (mirror-193): a whole-list write refused `grain-changed` — the lists moved since the dialog read
+ *  them — is not an error to read and dismiss: the caller re-opens the dialog on the lists as they are now. */
+async function put(url, body, method = 'PUT', { onChanged = null } = {}) {
   const r = await fetchJson(url, { method, headers: JSON_HDR, body: JSON.stringify(body) });
+  if (r && r.code === 'grain-changed' && onChanged) { showToast(t('The list changed while this dialog was open (another window, or an agent) — here it is as it is now; nothing was saved'), { type: 'error' }); onChanged(); return null; }
   if (!r || r.error) { showToast(routeErrorText(r, { ruleLabel: (k, which) => (which === 'pattern' ? PATTERN_LABELS()[k] : RULE_LABELS()[k]) || k }), { type: 'error' }); return null; }
   return r;
 }
@@ -317,9 +331,12 @@ export async function showGrantAccessDialog(app, target) {
     if (st.kind === 'pattern' && !access.length) { showToast(t('A rule needs at least one agent or group with access'), { type: 'error' }); return; }
     save.disabled = true;
     try {
+      // the STAMP of the lists this dialog drew rides with the whole list (mirror-193): a grain that moved since is
+      // refused by name and the dialog re-opens on it — never written over
+      const again = { onChanged: () => { close(); showGrantAccessDialog(app, target); } };
       const r = st.kind === 'pattern'
-        ? (st.id ? await put(st.accessUrl, { access, pattern: st.pattern }) : await put(st.accessUrl, { pattern: st.pattern, access }, 'POST'))
-        : await put(st.accessUrl, { access });
+        ? (st.id ? await put(st.accessUrl, { access, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access }, 'POST'))
+        : await put(st.accessUrl, { access, base: st.stamp }, 'PUT', again);
       if (!r) return;
       const names = access.map((a) => principalText(a.principal)).join(', ');
       showToast(access.length ? t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }) : t('Access removed'));
@@ -575,7 +592,7 @@ export async function showNotifyDialog(app, target) {
     save.disabled = true;
     try {
       if (!st.watchersUrl) { showToast(t('Save the rule\'s access first'), { type: 'error' }); return; }
-      const r = await put(st.watchersUrl, { watchers });
+      const r = await put(st.watchersUrl, { watchers, base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
       if (!r) return;
       showToast(watchers.length ? t('Notifications saved: {list}', { list: watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ') }) + (clamped ? ' · ' + t('numbers past their bounds were kept at the bound') : '') : t('Nobody is notified here any more'));
       close();

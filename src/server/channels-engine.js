@@ -5570,6 +5570,11 @@ function create(deps = {}) {
     const { rec, kind } = site;
     const cur = site.kind === 'conversation' ? convGrainOf(site.holder) : F.grainOf(site.holder);
     const p = patch && typeof patch === 'object' ? patch : {};
+    // mirror-193: a dialog's whole-list write carries the STAMP of the lists it drew (`base`); a grain that moved
+    // since — a route write its copy had not heard of, another window, an approval — is refused BY NAME and
+    // nothing is written (never a newer grant silently replaced). No base = unconditional (agents, scripts).
+    const bv = F.grainBaseVerdict(cur, p.base);
+    if (!bv.ok) return bv;
     // the rule itself (a NEW rule needs one; an edit may change it)
     let pattern = site.holder && site.holder.pattern ? site.holder.pattern : null;
     if (kind === 'pattern' && (p.pattern !== undefined || site.isNew)) {
@@ -5731,10 +5736,10 @@ function create(deps = {}) {
     return { grain: { kind: site.kind, id: site.id }, access: v ? v.access : [], watchers: v ? v.watchers : [], assignment: v };
   }
   /** GRANT ACCESS — the first operation: a grain's whole ACCESS list. */
-  function setAccess(adapterId, grain, list, opts) { return setGrain(adapterId, grain, { access: list }, opts); }
+  function setAccess(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { access: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}) }, opts); }
   /** NOTIFY — the second operation: a grain's whole WATCHERS list; every
    *  principal must already hold access there. */
-  function setWatchers(adapterId, grain, list, opts) { return setGrain(adapterId, grain, { watchers: list }, opts); }
+  function setWatchers(adapterId, grain, list, opts = {}) { return setGrain(adapterId, grain, { watchers: list, ...(opts && opts.base !== undefined ? { base: opts.base } : {}) }, opts); }
   /** REMOVE a rule (its access rows, its watchers, its derived reach). */
   async function removePattern(adapterId, id, { by = 'user' } = {}) {
     const pa = patternById(id);

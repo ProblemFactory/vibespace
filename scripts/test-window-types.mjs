@@ -49,15 +49,16 @@ if (!fs.existsSync(path.join(repo, 'src/lib/build-version.js'))) {
 //   channel-outbox — THE approval outbox, a singleton (docs/design-communication-panel.zh.md §9.2 / §10.1, P3)
 //   channels / system / ports — the rail-panel WINDOW FALLBACKS (docs/design-mobile-gaps.md #2/#9, 2026-09-20): the very same panel
 //     renderer in a singleton window wherever the rail is not built (a phone, sidebar.activityRail off)
-const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'channel', 'channel-outbox', 'channels', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'integrations', 'job-interact', 'jobs',
+//   inbox — THE For-you window, a singleton (docs/design-user-inbox-reply.md §9, 2026-09-27): the inbox as a mail client
+const CORE_TYPES = ['browser', 'browser-live', 'browser-profiles', 'channel', 'channel-outbox', 'channels', 'chat', 'desktop', 'desktop-app', 'editor', 'files', 'hex-viewer', 'inbox', 'integrations', 'job-interact', 'jobs',
   'ports', 'settings', 'stage-placeholder', 'system', 'task', 'terminal', 'usage', 'viewer', 'workflow'];
 const CORE_ACTIONS = ['attachSession', 'openFileExplorer', 'openFile', 'openEditor', 'openBrowser', 'openBrowserLive', 'openBrowserProfiles', 'openDesktop', 'openDesktopApp',
   'openTaskDetail', 'openTaskLog', 'openJobs', 'openJobInteract', 'openUsage', 'openSettings', 'openSessionProps',
-  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts'];
+  'openWorkflowDetail', 'attachTmuxSession', 'viewSession', 'viewSubagent', 'openChannel', 'openChannelOutbox', 'openIntegrations', 'openChannels', 'openSystem', 'openPorts', 'openInbox'];
 // layout.js's former `TRANSIENT_WINDOW_TYPES = new Set(['chat', 'terminal', 'stage-placeholder'])`
 const CORE_TRANSIENT = ['chat', 'terminal', 'stage-placeholder'];
 // kinds whose opener focuses an existing window of the kind instead of opening a second
-const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'integrations', 'jobs', 'ports', 'settings', 'system', 'usage'];
+const CORE_SINGLETONS = ['browser-profiles', 'channel-outbox', 'channels', 'desktop', 'inbox', 'integrations', 'jobs', 'ports', 'settings', 'system', 'usage'];
 
 console.log('window-type registry — functional (node, DOM-free)');
 ok(typeof document === 'undefined' && typeof window === 'undefined', 'harness has no DOM (the import below must not need one)');
@@ -241,7 +242,7 @@ const EXPECTED_OWNER = { chat: 'session-lifecycle.js', terminal: 'session-lifecy
   viewer: 'file-viewer.js', 'hex-viewer': 'file-viewer.js', browser: 'browser-window.js', 'browser-live': 'browser-live-window.js', 'browser-profiles': 'browser-trace-view.js', desktop: 'desktop-window.js', 'desktop-app': 'desktop-app-window.js',
   task: 'task-detail.js', jobs: 'jobs-panel.js', 'job-interact': 'jobs-panel.js', usage: 'usage-window.js',
   settings: 'settings-ui.js', workflow: 'workflow-detail.js', 'stage-placeholder': 'stage-manager.js', integrations: 'integrations-window.js',
-  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js' };
+  channels: 'channels-panel.js', system: 'sidebar-rail.js', ports: 'sidebar-rail.js', inbox: 'inbox-window.js' };
 ok(Object.entries(EXPECTED_OWNER).every(([t, f]) => owner[t] === f), 'each kind registers in its owning module',
   Object.entries(EXPECTED_OWNER).filter(([t, f]) => owner[t] !== f).map(([t, f]) => `${t}: ${owner[t]} (expected ${f})`).join('; '));
 ok(regs.some((r) => r.file === 'task-log.js' && r.fn === 'registerOpenAction' && r.actions.includes('openTaskLog') && r.type === 'task')

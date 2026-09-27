@@ -1237,6 +1237,7 @@ require('./src/server/helper-asks').install({ userTodos, sessionKeyFor: (s, id) 
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
 app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
 require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id
+require('./src/routes/user-todos-reply.js').registerItemReadRoute(app, { userTodos }); // GET /api/user-todos/:id — ONE item whole (the snapshot previews a resolved item's detail at 300 chars; the For-you window fetches the rest here)
 app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: done / dismissed / open (reopen)
   try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user') }); }
   catch (e) { res.status(400).json({ error: e.message }); }

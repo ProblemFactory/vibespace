@@ -14,6 +14,8 @@
  * append at the END of their group and a new group at the END of the list.
  * The ordinary sorted layout is rebuilt on the next open.
  *
+ *   sortGroups(open)              — the open items → the sorted [[key, items]] (2026-09-27: moved
+ *                                   out of the panel so the For-you window orders by the same rule)
  *   openLayout(sortedGroups)      — from the panel's own sorted [[key, items]]
  *   nextLayout(layout, todos)     — after a broadcast: keep, append, purge
  *   entriesFor(layout, todos)     — [{key, entries:[{item, resolved}], openCount}]
@@ -58,6 +60,57 @@ export function trayWhere(rect, vw, vh) {
   if (!rect || !(rect.width > 0 || rect.height > 0) || !(vw > 0) || !(vh > 0)) return null;
   const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
   return `${cy >= vh / 2 ? 'bottom' : 'top'} ${cx >= vw / 2 ? 'right' : 'left'}`;
+}
+
+/** The popup's GROUP ORDER on an open (moved verbatim out of the panel's
+ *  renderPanel, 2026-09-27, so the For-you window lays its list out by the
+ *  SAME rule — design-user-inbox-reply §9): the open items grouped by
+ *  sessionKey (store order kept inside a group), Background Work ('jobs')
+ *  always last, then the worst urgency first (a missing or `low` urgency ranks
+ *  as normal — the panel's `|| 1`, kept), then the newest item first.
+ *  → [[key, items]] — openLayout's input. */
+const GROUP_URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
+export function sortGroups(open) {
+  const groups = new Map();
+  for (const i of open || []) (groups.get(i.sessionKey) || groups.set(i.sessionKey, []).get(i.sessionKey)).push(i);
+  return [...groups.entries()].sort((a, b) => {
+    // Background Work is its OWN section, always after session groups
+    // (owner report: it read as a weird phantom session mixed in)
+    if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1;
+    const w = (items) => Math.max(...items.map((i) => GROUP_URG_RANK[i.urgency || 'normal'] || 1));
+    return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map((i) => i.createdAt)) - Math.max(...a[1].map((i) => i.createdAt)));
+  });
+}
+
+/** THE WHOLE DETAIL THIS CLIENT ALREADY SAW (2026-09-27, the For-you window's
+ *  verify round). A snapshot carries a RESOLVED item's detail as a 300-char
+ *  preview (`detailTruncated: true` — the store's previewOf), so the item the
+ *  reader has OPEN in the window would shrink under them the moment another
+ *  client resolves it. `restoreDetails(next, fullById)` puts back every whole
+ *  detail this client holds: `fullById` (id → the whole detail) remembers each
+ *  non-truncated detail the snapshots carried (and what ensureDetail fetched),
+ *  pruned to the ids the snapshot still lists (a purged id must not keep its
+ *  8 000 chars for ever); a truncated item whose remembered whole text STARTS
+ *  WITH its preview gets it back and drops the flag. Returns {todos, fullById}
+ *  — new objects, the inputs untouched; garbage in ⇒ empty lists. */
+export function restoreDetails(next, fullById) {
+  const src = next && typeof next === 'object' ? next : {};
+  const prev = fullById instanceof Map ? fullById : new Map();
+  const out = new Map();
+  const open = Array.isArray(src.open) ? src.open : [], resolved = Array.isArray(src.resolved) ? src.resolved : [];
+  for (const i of [...open, ...resolved]) if (i && typeof i.detail === 'string' && !i.detailTruncated) out.set(i.id, i.detail);
+  const fix = (i) => {
+    if (!i || !i.detailTruncated) return i;
+    const whole = out.get(i.id) || prev.get(i.id);
+    if (typeof whole !== 'string' || !whole.startsWith(String(i.detail || ''))) return i;
+    out.set(i.id, whole);
+    const { detailTruncated, ...rest } = i;
+    return { ...rest, detail: whole };
+  };
+  const todos = { ...src, open: open.map(fix), resolved: resolved.map(fix) };
+  const ids = new Set([...todos.open, ...todos.resolved].map((i) => i && i.id));
+  for (const id of [...out.keys()]) if (!ids.has(id)) out.delete(id);
+  return { todos, fullById: out };
 }
 
 /** @param {Array<[string, Array<{id:string}>]>} sortedGroups */

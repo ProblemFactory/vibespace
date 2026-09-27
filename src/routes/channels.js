@@ -167,6 +167,17 @@ router.delete('/api/channels/adapters/:id', async (req, res) => {
 router.get('/api/channels/adapters/:id/config', (req, res) => {
   try { forHost(req); res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }
 });
+/** ONE ACCOUNT AS IT STANDS NOW (mirror-193): the same adapter view the digest carries, read fresh — the Grant
+ *  access… / Notify… dialogs of the account and rule grains draw from THIS, never from the panel's broadcast-fed
+ *  copy (a frame behind a route write, the copy made the dialog write a stale list over a newer one). */
+router.get('/api/channels/adapters/:id/view', (req, res) => {
+  try {
+    forHost(req);
+    const rec = engine().adapterRecords().adapters.find((r) => r.id === req.params.id);
+    if (!rec) return bad(res, 404, 'no such account', { code: 'no-such-adapter' });
+    res.json({ adapter: engine().adapterView(rec) });
+  } catch (e) { fail(res, e); }
+});
 /** PASTE-BACK: the user pastes the redirect URL their browser landed on. */
 router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {
   try {
@@ -197,7 +208,7 @@ const GRAIN_400 = ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filte
 function scopeAnswer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : GRAIN_400.includes(code) ? 400 : 500;
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' || code === 'grain-changed' ? 409 : GRAIN_400.includes(code) ? 400 : 500;
   return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}), ...(r && r.principal ? { principal: r.principal } : {}), ...(r && r.index !== undefined ? { index: r.index } : {}) });
 }
 // ── R4 (2026-09-27): TWO OPERATIONS PER GRAIN, ACCESS FIRST ─────────────
@@ -214,7 +225,7 @@ router.put('/api/channels/adapters/:id/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list));
+    scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list, { base: req.body.base }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
@@ -222,7 +233,7 @@ router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list));
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list, { base: req.body.base }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) => {
@@ -230,7 +241,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) =
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}) }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}), ...(req.body.base !== undefined ? { base: req.body.base } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res) => {
@@ -238,7 +249,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res)
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list));
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list, { base: req.body.base }));
   } catch (e) { fail(res, e); }
 });
 /** THE ACCOUNT GRAIN — `{assignment}` or `{assignment:null}`; the filter
@@ -270,7 +281,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
-    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}) }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...(b.base !== undefined ? { base: b.base } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.delete('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
@@ -464,7 +475,7 @@ router.get('/api/channels/:adapterId/:convId/attachment/:id', async (req, res) =
 function answer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : code === 'filter-in-use' || GRAIN_400.includes(code) ? 400 : 500;
+  const status = code === 'not-found' ? 404 : code === 'authority-capped' || code === 'grain-changed' ? 409 : code === 'filter-in-use' || GRAIN_400.includes(code) ? 400 : 500;
   return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}), ...(r && r.principal ? { principal: r.principal } : {}), ...(r && r.index !== undefined ? { index: r.index } : {}) });
 }
 
@@ -487,7 +498,7 @@ router.put('/api/channels/:adapterId/:convId/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
-    answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list));
+    answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
@@ -495,7 +506,7 @@ router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list));
+    answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base }));
   } catch (e) { fail(res, e); }
 });
 /** FILTER — `{filter:{match, rules[]}}` or `{filter:null}`; `estimate` may

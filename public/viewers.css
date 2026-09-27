@@ -465,8 +465,23 @@
 .markdown-preview a { color: var(--accent-hover); }
 .markdown-preview table { border-collapse: collapse; margin: 8px 0; }
 .markdown-preview th, .markdown-preview td { padding: 4px 8px; border: 1px solid var(--border); }
-.docx-preview { padding: 16px 24px; font-size: 14px; line-height: 1.6; overflow-y: auto; height: 100%; color: var(--text); user-select: text; cursor: text; }
-.docx-preview * { user-select: text !important; }
+/* ── Word document viewer (src/lib/docx-viewer.js) — the pages live in a shadow
+   root (.docx-host); these rules are the frame around them. The surround is the
+   workspace colour like the image viewer's; the page is var(--paper). */
+.docx-viewer { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; }
+.docx-toolbar { padding-right: 44px; } /* the viewer window's floating ⟳ reload sits at the bar's right end */
+.docx-toolbar .file-tool-btn.media-btn { height: 24px; }
+.docx-toolbar .file-tool-btn.media-btn:disabled { opacity: 0.45; cursor: default; }
+.docx-toolbar .docx-tool-out, .docx-toolbar .docx-tool-in { padding: 3px 6px; font-size: 13px; }
+.docx-toolbar .docx-zoom { min-width: 44px; }
+.docx-toolbar .docx-spacer { flex: 1; }
+.docx-toolbar .docx-pages { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.docx-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; position: relative; background: var(--bg-workspace); padding: 16px 24px; }
+.docx-sizer { position: relative; margin: 0 auto; overflow: hidden; }
+.docx-host { position: absolute; top: 0; left: 0; width: max-content; transform-origin: 0 0; cursor: text; }
+.docx-host.docx-pending { visibility: hidden; }
+.docx-status { padding: 24px; }
+.docx-refusal { padding: 24px; line-height: 1.6; max-width: 560px; margin: 0 auto; font-size: 13px; color: var(--text-secondary); }
 
 /* ── CodeMirror Editor ── */
 .editor-container { display: flex; flex-direction: column; height: 100%; }

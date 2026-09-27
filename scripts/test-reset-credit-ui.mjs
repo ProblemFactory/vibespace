@@ -209,7 +209,8 @@ console.log('\n§4 THE three entry points open ONE dialog');
   const callers = {
     'src/lib/manage-agents.js': /openResetCreditDialog\(this, \{ accountKey: useBtn\.dataset\.resetKey \}\)/g,
     'src/lib/chat-renderers.js': /openResetCreditDialog\(this\.app, \{ accountKey: rc\.accountKey, sessionId: this\.sessionId \|\| null \}\)/g,
-    'src/lib/user-todos-panel.js': /openResetCreditDialog\(app, \{ accountKey: rec\.action\.accountKey, sessionId: rec\.action\.sessionId \|\| null, todoId: rec\.id \}\)/g,
+    // §9 (2026-09-27): the For-you button's verb moved VERBATIM into THE client model (the popup and the For-you window both call it)
+    'src/lib/user-todos-actions.js': /openResetCreditDialog\(app, \{ accountKey: rec\.action\.accountKey, sessionId: rec\.action\.sessionId \|\| null, todoId: rec\.id \}\)/g,
   };
   for (const [f, re] of Object.entries(callers)) {
     const s = read(f);
@@ -219,6 +220,8 @@ console.log('\n§4 THE three entry points open ONE dialog');
   ok('chat-renderers: the button rides a peer card only when the offer names an account', /if \(rc && rc\.accountKey && Number\(rc\.available\) > 0\) \{/.test(read('src/lib/chat-renderers.js')));
   // 2.369.169: the row markup moved to THE row renderer (src/lib/user-todos-row.js) the panel imports
   ok('user-todos-panel: the button only on a reset-credit action item (drawn by THE row renderer the panel imports)', /i\.action\.type === 'reset-credit' && i\.action\.accountKey/.test(read('src/lib/user-todos-row.js')) && /from '\.\/user-todos-row\.js'/.test(read('src/lib/user-todos-panel.js')));
+  ok('…the popup\'s button and the For-you window\'s producer action both run THE model\'s verb (no second dialog call)', /model\.runAction\(todos\.open\.find\(\(i\) => i\.id === id\)\)/.test(read('src/lib/user-todos-panel.js')) && /if \(a === 'producer'\) \{ model\.runAction\(it\); return; \}/.test(read('src/lib/inbox-window.js'))
+    && !/openResetCreditDialog/.test(read('src/lib/user-todos-panel.js')) && !/openResetCreditDialog/.test(read('src/lib/inbox-window.js')));
   const all = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js') && !/^i18n/.test(f)).map((f) => ['src/lib/' + f, read('src/lib/' + f)]);
   const definers = all.filter(([, s]) => /function openResetCreditDialog\b/.test(s)).map(([f]) => f);
   ok('exactly ONE client file defines the dialog', JSON.stringify(definers) === '["src/lib/reset-credit-dialog.js"]', JSON.stringify(definers));

@@ -4,7 +4,8 @@ import { CodeEditor } from './code-editor.js';
 import { formatSize, escHtml, showConfirmDialog, showInputDialog, showToast, uiScale } from './utils.js';
 import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js';
 import { FILE_ICONS } from './icons.js';
-import { renderAsync as renderDocx } from 'docx-preview';
+import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
+import { viewerVerdict, refusalText } from './docx-viewer-model.js';
 import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -113,7 +114,7 @@ class FileViewer {
     // listeners; window close aborts the last one (openFile onClose). Without
     // this, every image/PPTX ever viewed left permanent document listeners.
     if (container._viewerCtl) { try { container._viewerCtl.abort(); } catch {} }
-    container._viewerCtl = new AbortController();
+    const ctl = container._viewerCtl = new AbortController();
     const ext = (fileName || filePath.split('/').pop()).split('.').pop().toLowerCase();
     const viewerType = getViewerType(ext);
     const hq = host ? '&host=' + encodeURIComponent(host) : '';
@@ -174,11 +175,13 @@ class FileViewer {
         renderSheet(data.sheets[0]);
         container.appendChild(viewer);
       } else if (viewerType === 'docx') {
-        const res = await fetch(rawUrl);
-        const blob = await res.blob();
-        const wrapper = document.createElement('div'); wrapper.className = 'docx-preview';
-        container.appendChild(wrapper);
-        await renderDocx(blob, wrapper, wrapper, { inWrapper: true, ignoreWidth: false, ignoreHeight: false, renderHeaders: true, renderFooters: true, renderFootnotes: true });
+        // Word documents (src/lib/docx-viewer.js; decisions in the PURE
+        // docx-viewer-model.js). A legacy binary .doc is refused BY NAME before
+        // any fetch — docx-preview reads Office Open XML only, and the old path
+        // ended in JSZip's "Can't find end of central directory".
+        const verdict = viewerVerdict(ext);
+        if (verdict.kind === 'refuse') showDocxRefusal(container, refusalText(verdict.code, t));
+        else await renderDocxViewer(container, rawUrl, { signal: ctl.signal });
       } else if (viewerType === 'pptx') {
         FileViewer._renderPptx(container, filePath, rawUrl);
       } else {
@@ -186,6 +189,9 @@ class FileViewer {
       }
       return true;
     } catch (err) {
+      // a render superseded mid-flight (window closed, the explorer preview
+      // moved on) must not paint its error over the render that replaced it
+      if (ctl.signal.aborted) return true;
       container.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(t('Error: {msg}', { msg: err.message }))}</div>`;
       return true; // error shown, don't fall through to editor
     }

@@ -97,4 +97,20 @@ function registerResolveManyRoute(app, { userTodos }) {
   });
 }
 
-module.exports = { registerUserTodoReplyRoutes, registerResolveManyRoute, RESOLVE_MANY_MAX, STATUS, sessionForItem };
+/** GET /api/user-todos/:id → {item} — ONE item WHOLE, whatever its status (2026-09-27, the
+ *  For-you window's verify round). The snapshot every client receives carries a RESOLVED
+ *  item's detail as a 300-char preview (`detailTruncated: true`, src/user-todos.js previewOf)
+ *  so history never grows the broadcast; the window fetches the whole record here when it
+ *  shows one (src/lib/user-todos-actions.js ensureDetail). Cookie-only like the routes above
+ *  — an agent token is refused by name (an agent reads its OWN items through
+ *  `vibespace-ask show`); an unknown id is 404 `not_found`. */
+function registerItemReadRoute(app, { userTodos }) {
+  app.get('/api/user-todos/:id', (req, res) => {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\'s inbox is read with the user\'s cookie — an agent token reads its own items through vibespace-ask show', code: 'agent_forbidden' });
+    const item = userTodos.get(String(req.params.id));
+    if (!item) return res.status(404).json({ error: 'item not found', code: 'not_found' });
+    res.json({ item });
+  });
+}
+
+module.exports = { registerUserTodoReplyRoutes, registerResolveManyRoute, registerItemReadRoute, RESOLVE_MANY_MAX, STATUS, sessionForItem };

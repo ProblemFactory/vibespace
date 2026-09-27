@@ -1855,6 +1855,80 @@ function chainCensus(src) {
 
 for (const e of engines) { try { e.stop(); } catch {} }
 
+// ── ⑬ mirror-193: A WHOLE-LIST WRITE FROM A STALE COPY IS REFUSED BY NAME ──
+// The 2.369.193 mirror (test-channels-aggregate-ui, attempt 1): the agent Xi was granted the account through the
+// route; the Grant access… dialog opened on the panel's broadcast-fed copy, which had not heard of Xi yet (empty ⇒
+// the dialog's default row = the first live agent), and its Save — the grain's WHOLE access list — replaced Xi with
+// [reader, 工作]: Xi's access was revoked by a write nobody meant as a revocation. A dialog's write now carries the
+// STAMP of the lists it drew (`base`, PURE F.grainStamp); a grain that moved since is refused `grain-changed` (409)
+// and nothing is written; the dialogs draw from a fresh read (`GET …/adapters/:id/view`).
+console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by name (grain-changed), nothing written');
+{
+  const F = require(path.join(REPO, 'src/channel-filter.js'));
+  const A = 'fake-poll', ACC = { kind: 'account' };
+  const XI = { kind: 'agent', id: 'agent-xi', name: 'Xi' }, READER = { kind: 'agent', id: 'a99e0001-reader', name: 'reader' }, WORK = { kind: 'group', id: 'tg-work', name: '工作' };
+  const call = (eng, method, url, body) => new Promise((resolve) => {
+    routes.setup({ getEngine: () => eng });
+    const req = { method, url, params: url.params, query: {}, body: body || {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; } };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === url.path && l.route.methods[method.toLowerCase()]);
+    if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
+  });
+  const VIEW = { path: '/api/channels/adapters/:id/view', params: { id: A } };
+  const ACCESS = { path: '/api/channels/adapters/:id/access', params: { id: A } };
+  const WATCH = { path: '/api/channels/adapters/:id/watchers', params: { id: A } };
+  const { eng } = mkEngine({ name: 'grain-stamp' });
+  await eng.pass(A, { force: true });
+  const stored = () => F.grainOf(eng.store.index.table('accountAssignments')[A] || {});
+  const names = () => stored().access.map((r) => r.principal.name).sort().join();
+  const STALE = F.grainStamp({ access: [], watchers: [] });   // the copy that had not heard of Xi
+  const seed = await eng.setAccess(A, ACC, [{ principal: XI, authority: 'draft' }]);   // the route seed: no base = unconditional
+  ok(seed.ok && names() === 'Xi', 'FIXTURE: Xi holds access to the account (a write that states no base is unconditional, as before)', JSON.stringify(seed));
+  const r1 = await call(eng, 'PUT', ACCESS, { access: [{ principal: READER, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: STALE });
+  ok(r1.status === 409 && r1.body.code === 'grain-changed' && names() === 'Xi', `THE MIRROR'S WRITE (the dialog's whole list [reader, 工作] from the copy that had not heard of Xi) is refused 409 grain-changed and NOTHING is written — Xi keeps access (stored: ${names()})`, JSON.stringify(r1));
+  const vr = F.grainBaseVerdict(stored(), STALE);
+  ok(!vr.ok && vr.added.join() === 'agent:agent-xi' && vr.removed.length === 0, 'the refusal names who arrived since the read (agent:agent-xi)', JSON.stringify(vr));
+  const v1 = await call(eng, 'GET', VIEW);
+  ok(v1.status === 200 && v1.body.adapter && v1.body.adapter.id === A && v1.body.adapter.accountGrain && v1.body.adapter.accountGrain.access.map((r) => r.principal.name).join() === 'Xi', 'GET …/adapters/:id/view: the account as it stands NOW (the view the digest carries), Xi in its access', JSON.stringify(v1.body.adapter && v1.body.adapter.accountGrain));
+  const fresh = F.grainStamp(v1.body.adapter.accountGrain);
+  ok(fresh === F.grainStamp(stored()), 'the stamp of the VIEW the dialog draws equals the stamp of the STORED lists the engine judges (one function, both sides)');
+  const r2 = await call(eng, 'PUT', ACCESS, { access: [{ principal: XI, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: fresh });
+  ok(r2.status === 200 && r2.body.ok && names() === 'Xi,工作', 'a write whose base is the fresh read is accepted: Xi + 工作', JSON.stringify(r2.body));
+  const r3 = await call(eng, 'PUT', WATCH, { watchers: [{ principal: WORK, notify: 'wake' }], base: fresh });
+  ok(r3.status === 409 && r3.body.code === 'grain-changed' && stored().watchers.length === 0, 'the NOTIFY write from the pre-grant read (工作 was added since) is refused the same way — nothing written', JSON.stringify(r3.body));
+  const fresh2 = F.grainStamp((await call(eng, 'GET', VIEW)).body.adapter.accountGrain);
+  const r4 = await call(eng, 'PUT', WATCH, { watchers: [{ principal: XI, notify: 'wake' }], base: fresh2 });
+  ok(r4.status === 200 && stored().watchers.map((w) => w.principal.name).join() === 'Xi', '…and from a fresh read it lands (Xi woken)', JSON.stringify(r4.body));
+  const wakeBefore = F.grainStamp(stored());
+  await eng.store.index.update((ix) => { const h = ix.accountAssignments[A]; h.watchers[0].stats = { wakes: [Date.now()], hits: [Date.now()] }; });
+  ok(F.grainStamp(stored()) === wakeBefore, 'a WAKE (the pace ledger moving) is not an edit: the stamp stays, an open Notify… still saves');
+  const vNo = await call(eng, 'GET', { path: '/api/channels/adapters/:id/view', params: { id: 'no-such' } });
+  ok(vNo.status === 404 && vNo.body.code === 'no-such-adapter', 'the view of an account that does not exist is 404 no-such-adapter (the dialog says "That account no longer exists")', JSON.stringify(vNo));
+  // the conversation grain: the same rule on its own route
+  const C = 'fake-poll-ops', CONV = { path: '/api/channels/:adapterId/:convId/access', params: { adapterId: A, convId: C } };
+  const cv0 = F.grainStamp(eng.conversationView(A, C).own);
+  await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: XI }]);
+  const rc = await call(eng, 'PUT', CONV, { access: [{ principal: READER }], base: cv0 });
+  ok(rc.status === 409 && rc.body.code === 'grain-changed' && eng.conversationView(A, C).own.access.map((r) => r.principal.name).join() === 'Xi', 'the CONVERSATION grain: a stale write is refused 409 and Xi keeps its access', JSON.stringify(rc.body));
+  ok(F.grainStamp(eng.conversationView(A, C).own) === F.grainStamp(F.grainOf(eng.store.index.peek(`${A}/${C}`))), '…and its view (rows clamped by the caps carry authorityStored) stamps like the stored lists');
+  // NEGATIVE CONTROL: the engine without the verdict line writes the mirror's outcome
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const LINE = '    const bv = F.grainBaseVerdict(cur, p.base);\n    if (!bv.ok) return bv;\n';
+  ok(esrc.split(LINE).length === 2, 'the verdict line is present once (the control removes exactly it)');
+  const engCopy = patchPath('src/server', 'channels-engine');
+  writeCopy(engCopy, esrc.replace(LINE, ''));
+  const PE = require(engCopy);
+  const pre = PE.create({ dataDir: path.join(ROOT, 'grain-stamp-pre'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {} });
+  engines.push(pre);
+  await pre.pass(A, { force: true });
+  await pre.setAccess(A, ACC, [{ principal: XI, authority: 'draft' }]);
+  const rp = await call(pre, 'PUT', ACCESS, { access: [{ principal: READER, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: STALE });
+  const preNames = F.grainOf(pre.store.index.table('accountAssignments')[A] || {}).access.map((r) => r.principal.name).sort().join();
+  ok(rp.status === 200 && preNames === 'reader,工作', `NEGATIVE CONTROL: without the verdict the stale write REPLACES Xi — the mirror's wire exactly (${preNames}) — the refusal leg above would go red`, JSON.stringify(rp.body));
+  routes.setup({ getEngine: () => eng });
+}
+
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit
 // handlers remove them — a census taken after exit passes on the pre-fix
@@ -1863,7 +1937,7 @@ for (const e of engines) { try { e.stop(); } catch {} }
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 13 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 14 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

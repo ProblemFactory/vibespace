@@ -96,6 +96,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     // R4 (2026-09-27): access and notification — two operations, access first
     case 'bad-access': case 'bad-watcher': { const w = assignmentRefusalText(r.why); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
     case 'duplicate-principal': return t('{who} is listed twice — one row per agent or group', { who: principalText(r.principal) });
+    // mirror-193: a whole-list write whose base (the lists it was drawn from) the grain has moved past — nothing written
+    case 'grain-changed': return t('The list changed since this dialog opened — open it again to see it as it is now; nothing was saved');
     case 'watcher-needs-access': return t('{who} has no access here — grant access first (Grant access…), then notify', { who: principalText(r.principal) });
     case 'too-many-rows': return t('At most {n} rows per list', { n: Number(r.max) || 16 });
     case 'compose-not-available': return t('This account cannot start a new conversation — reply inside an existing one');

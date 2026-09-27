@@ -328,7 +328,7 @@ console.log('⑤ wiring');
     }
     const mpw = read('src/server/mounts-plugins-wiring.js');
     check('⑤ (r2→r3) ONE answer path: answerPermission is called ONLY by helper-asks.answerFrame (the table\'s lookup); the ws case and the takeover seam both go through it; nothing else formats a permission answer', JSON.stringify(callers.sort()) === JSON.stringify(['src/server/helper-asks.js']) && formatters.length === 0 && /pending: \(session\) => N\.pendingPermissions\(session\)/.test(mpw) && /HA\.answerFrame\(\{ \.\.\.data, sessionId \}, \{ activeSessions, adapterRegistry, feedLive: N\.feedLive \}, \{ serverDeny: true \}\)/.test(mpw), { callers, formatters });
-    const up2 = read('src/lib/user-todos-panel.js'), row = read('src/lib/user-todos-row.js');
+    const up2 = read('src/lib/user-todos-panel.js') + read('src/lib/user-todos-actions.js') + read('src/lib/inbox-window.js'), row = read('src/lib/user-todos-row.js'); // §9: the model + the For-you window too
     check('⑤ (r2) For you has no Allow / Deny of its own for a helper ask (the row never names permission-response; the item jumps to the card)', !/permission-response/.test(up2) && !/permission-response/.test(row));
   }
   const srv = read('server.js');
@@ -342,8 +342,8 @@ console.log('⑤ wiring');
   check('⑤ the status bar words the chip through waitingChip and routes its click', /waitingChip\(this\._pendingAsks, t\)/.test(sb) && /chat-status-turnstate\.chat-status-clickable/.test(sb));
   const rr = read('src/lib/chat-renderers.js');
   check('⑤ the renderer draws helper asks on the Agent card with THE permission card, and a stopped Agent call in words', /this\.renderHelperAsks\(el, msg\)/.test(rr) && /this\.renderPermissionOverlay\(row, \{ permission: ask \}, \{ mount \}\)/.test(rr) && /isStopRejection\(resultText\)/.test(rr));
-  const up = read('src/lib/user-todos-panel.js');
-  check('⑤ a helper-ask item in For you lands on the card (not only the conversation)', /item\?\.action\?\.type === 'helper-ask'/.test(up) && /view\.jumpToPendingAsk\(rid\)/.test(up));
+  const up = read('src/lib/user-todos-panel.js'), ua = read('src/lib/user-todos-actions.js'); // §9 (2026-09-27): jump moved VERBATIM into THE client model — the popup and the For-you window both call it
+  check('⑤ a helper-ask item in For you lands on the card (not only the conversation)', /item\?\.action\?\.type === 'helper-ask'/.test(ua) && /view\.jumpToPendingAsk\(rid\)/.test(ua) && /const jump = \(key, item\) => model\.jump\(key, item, \{ close: hidePopup \}\);/.test(up));
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Helper “{name}” needs your approval to use {tool} — click to go there', 'Helper “{name}” needs your approval', 'No longer waiting — the helper was stopped', 'Stopped before it finished', 'Helper “{name}” needs your approval to use {tool}'];
   check('⑤ the new words have zh + ja entries', keys.every((k) => zh.includes(JSON.stringify(k) + ':') && ja.includes(JSON.stringify(k) + ':')));

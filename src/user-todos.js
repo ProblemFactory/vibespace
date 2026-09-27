@@ -80,6 +80,26 @@ function normalizeAction(x) {
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
+// THE SIZE OF AN ITEM (2026-09-27, the For-you window's verify round — the owner's
+// complaint IS long agent messages, and the window reads them whole): a question up
+// to TEXT_MAX chars, its detail up to DETAIL_MAX. add() cuts past them and SAYS SO
+// on the record it RETURNS (`textCut` / `detailCut` = the cap it hit — never stored)
+// so `vibespace-ask` can name the cut instead of dropping 3 000 characters silently
+// (measured: a 5 000-char --detail printed "added" and kept 2 000). The snapshot every
+// client receives (the broadcast and GET /api/user-todos) carries an OPEN item whole
+// and a RESOLVED one as a DETAIL_PREVIEW-char preview + `detailTruncated: true`
+// (previewOf), so history never grows the payload (250 resolved × 8 000 would be
+// 2 MB per broadcast); GET /api/user-todos/:id serves one record whole.
+const TEXT_MAX = 500;
+const DETAIL_MAX = 8000;
+const DETAIL_PREVIEW = 300;
+/** A RESOLVED item as the snapshot carries it: a detail past DETAIL_PREVIEW becomes its
+ *  first DETAIL_PREVIEW chars + `detailTruncated: true`; anything shorter (or no detail)
+ *  is the record itself. Never mutates the stored item. */
+function previewOf(item) {
+  if (!item || typeof item.detail !== 'string' || item.detail.length <= DETAIL_PREVIEW) return item;
+  return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true };
+}
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
 const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
 const RESOLVED_TAIL = 15;                    // the snapshot's resolved tail: always the newest 15…
@@ -209,7 +229,9 @@ class UserTodoManager {
       .sort((a, b) => (b.resolvedAt || 0) - (a.resolvedAt || 0))
       .filter((i, k) => k < RESOLVED_TAIL || (now - (i.resolvedAt || 0)) < RESOLVED_RECENT_MS)
       .slice(0, RESOLVED_SNAPSHOT_MAX);
-    return { open, resolved };
+    // a resolved item's detail rides as a PREVIEW (previewOf): the tail is history, and
+    // 250 × 8 000 chars per broadcast is not a price every client pays for it
+    return { open, resolved: resolved.map(previewOf) };
   }
 
   forSession(keys) {
@@ -220,7 +242,9 @@ class UserTodoManager {
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
   add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null } = {}) {
-    text = typeof text === 'string' ? text.trim().slice(0, 300) : '';
+    const rawText = typeof text === 'string' ? text.trim() : '';
+    text = rawText.slice(0, TEXT_MAX);
+    const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
     expiresAt = validExpiry(expiresAt);
     if (!text) throw new Error('text required');
@@ -248,7 +272,11 @@ class UserTodoManager {
     // 'notice' = for their information only — its own section in the popup,
     // never in the red badge. A PRODUCER declares it; nothing infers it.
     if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
-    detail = typeof detail === 'string' && detail.trim() ? detail.trim().slice(0, 2000) : null;
+    const rawDetail = typeof detail === 'string' ? detail.trim() : '';
+    detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
+    const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
+    // the cut is named on the RETURNED record only (the ledger never carries it)
+    const cut = (o) => (textCut || detailCut ? { ...o, ...(textCut ? { textCut } : {}), ...(detailCut ? { detailCut } : {}) } : o);
     // Idempotent BY TEXT across ALL statuses: re-filing an open question
     // refreshes it; re-filing a RESOLVED/DISMISSED one REOPENS the same item
     // (same id). Minting a fresh id per re-file would let an add→resolve loop
@@ -283,7 +311,7 @@ class UserTodoManager {
       // an item filed before the field existed takes the re-filer's declaration
       if (!existing.origin) { existing.origin = origin; changed = true; }
       if (changed) { this._save(); this._notify(); }
-      return { ...existing, existing: true };
+      return cut({ ...existing, existing: true });
     }
     if (openCount >= MAX_OPEN_PER_SESSION) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
     const item = {
@@ -304,7 +332,7 @@ class UserTodoManager {
     };
     this._state.items.push(item);
     this._save(); this._notify();
-    return item;
+    return cut(item);
   }
 
   /** auto-resolve a job's open inbox items (2.350.0, owner report: "提交过了
@@ -414,4 +442,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, validExpiry, normalizeAction };
+module.exports = { UserTodoManager, USER_TODO_URGENCIES: URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, previewOf, validExpiry, normalizeAction };

@@ -363,5 +363,42 @@ console.log('⑩ R4 verify r2: the store invariant holds at READ — a watcher w
   ok(bad.grainOf(orphan).watchers.length === 2, 'CONTROL: a copy without the filter honours the orphan watcher — the leg above would go red');
 }
 
+console.log('⑪ mirror-193: the grain stamp — what a dialog read, so its whole-list write proves the lists are unchanged');
+{
+  const ag = (id, name = id) => ({ kind: 'agent', id, name });
+  const row = (p, authority = 'draft', at = 100) => ({ principal: p, authority, createdAt: at, updatedAt: at });
+  const wrow = (p, at = 100, over = {}) => ({ principal: p, notify: 'wake', mode: 'all', createdAt: at, updatedAt: at, stats: { wakes: [], hits: [] }, ...over });
+  const g0 = { access: [row(ag('A')), row(ag('B'), 'send', 200)], watchers: [wrow(ag('A'), 300)] };
+  const s0 = F.grainStamp(g0);
+  ok(s0 === F.grainStamp({ access: [...g0.access].reverse(), watchers: g0.watchers }), 'the order a list is drawn in is not a change (sorted)');
+  ok(s0 === F.grainStamp({ access: g0.access.map((r) => ({ ...r, principal: { ...r.principal, name: 'renamed' } })), watchers: g0.watchers.map((w) => ({ ...w, stats: { wakes: [1, 2], hits: [3] } })) }), 'a RENAME (a stored name) and a WAKE (the pace ledger) are not edits — the stamp stays');
+  const EDITS = [
+    ['an access row added', { ...g0, access: [...g0.access, row(ag('C'))] }],
+    ['an access row removed', { ...g0, access: [g0.access[1]] }],
+    ['an authority changed IN THE SAME MILLISECOND (updatedAt equal)', { ...g0, access: [row(ag('A'), 'send'), g0.access[1]] }],
+    ['an access row re-stamped (updatedAt)', { ...g0, access: [row(ag('A'), 'draft', 101), g0.access[1]] }],
+    ['a watcher added', { ...g0, watchers: [...g0.watchers, wrow(ag('B'), 400)] }],
+    ['a watcher removed', { ...g0, watchers: [] }],
+    ['a watcher re-written (every watchers write re-stamps its rows)', { ...g0, watchers: [wrow(ag('A'), 301)] }],
+  ];
+  const same = EDITS.filter(([, g]) => F.grainStamp(g) === s0).map(([n]) => n);
+  ok(!same.length, `every edit a whole-list write could lose changes the stamp (${EDITS.length} kinds)`, JSON.stringify(same));
+  const view = { access: [{ ...row(ag('B'), 'draft', 200), authorityStored: 'send', authorityClamped: true }, row(ag('A'))], watchers: [{ ...wrow(ag('A'), 300), filter: null, estimateAtSet: null }] };
+  ok(F.grainStamp(view) === s0, 'a VIEW row the caps clamp to draft stamps by its STORED authority (authorityStored) — the view the dialog draws and the lists the engine judges stamp alike');
+  ok(F.grainStamp({ access: [{ principal: { kind: 'agent', id: 'x|y' }, authority: 'draft', updatedAt: 1 }], watchers: [] }) !== F.grainStamp({ access: [{ principal: { kind: 'agent', id: 'x' }, authority: 'y', updatedAt: 1 }], watchers: [] }), 'a principal id is free text: one JSON line per row, a `|` in an id never re-cuts a line');
+  const V = [
+    ['no base (an agent route, a script) = unconditional', g0, undefined, true, null],
+    ['base null = unconditional', g0, null, true, null],
+    ['base = the stamp of the lists as they stand', g0, s0, true, null],
+    ['the MIRROR: the copy had not heard of Xi (base = empty)', { access: [row(ag('agent-xi', 'Xi'))], watchers: [] }, F.grainStamp({ access: [], watchers: [] }), false, 'grain-changed'],
+    ['a stale base of any edit kind', EDITS[2][1], s0, false, 'grain-changed'],
+    ['a base that is not a stamp', g0, { access: [] }, false, 'bad-request'],
+  ];
+  const vFails = V.filter(([, cur, base, okWant, code]) => { const v = F.grainBaseVerdict(cur, base); return v.ok !== okWant || (!okWant && v.code !== code); }).map(([n]) => n);
+  ok(!vFails.length, `grainBaseVerdict: unconditional without a base, ok on the current stamp, refused BY NAME otherwise (${V.length} rows)`, JSON.stringify(vFails));
+  const mv = F.grainBaseVerdict({ access: [row(ag('agent-xi', 'Xi')), row(ag('B'))], watchers: [] }, F.grainStamp({ access: [row(ag('A')), row(ag('B'))], watchers: [] }));
+  ok(mv.added.join() === 'agent:agent-xi' && mv.removed.join() === 'agent:A' && /nothing was written/.test(mv.error), 'the refusal names who arrived (agent:agent-xi) and who left (agent:A) since the read, and says nothing was written', JSON.stringify(mv));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

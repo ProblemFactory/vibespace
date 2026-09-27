@@ -56,7 +56,7 @@ export function resolvedByText(by, t) {
   return by && by !== 'user' ? by : '';
 }
 
-const REPLY_SNIPPET = 80; // chars of "You replied: …" on a resolved row (the viewer shows the whole reply)
+const REPLY_SNIPPET = 80; // chars of "You replied: …" on a resolved row (the For-you window shows the whole reply)
 
 // A PRODUCER'S ACTION (design-reset-credits p2): an item that carries `action`
 // gets ONE button doing it — the client maps the TYPE to a verb it owns.
@@ -100,7 +100,8 @@ function partsOf(entry, ctx) {
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
   const body = `<div class="ut-text">${escHtml(words)}</div>${detailHtml}${opts}<div class="ut-meta">${meta}</div>`;
-  const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in viewer (copyable, rendered)'))}">⤢</button>`;
+  // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
+  const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   const actions = resolved
     ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
@@ -210,4 +211,28 @@ export function patchRow(el, entry, ctx) {
   }
   applyLive(el, entry.item, ctx);
   return el;
+}
+
+/** THE KEYED RECONCILER (design-user-inbox-reply D1.9; §9 shares it with the
+ *  For-you window's list): bring `container`'s keyed children (after `head`,
+ *  when given) to `entries`, in order. A child whose key is still listed is
+ *  PATCHED (never replaced — a focused textarea on it keeps focus and text), a
+ *  new one is created, a child no longer listed is removed, and a node MOVES
+ *  only when it is out of place (never the common case while a layout is
+ *  append-only — moving a focused textarea would blur it).
+ *  opts = {head, isRow(el), keyOf(el), idOf(entry), create(entry), patch(el, entry)} */
+export function reconcileKeyed(container, entries, { head = null, isRow, keyOf = (el) => el.dataset.id, idOf = (e) => e.item.id, create, patch }) {
+  const existing = new Map();
+  for (const c of container.children) if (isRow(c)) existing.set(keyOf(c), c);
+  let prev = head;
+  for (const e of entries) {
+    const id = idOf(e);
+    let row = existing.get(id);
+    if (row) { patch(row, e); existing.delete(id); }
+    else row = create(e);
+    const slot = prev ? prev.nextElementSibling : container.firstElementChild;
+    if (row !== slot) container.insertBefore(row, slot);
+    prev = row;
+  }
+  for (const r of existing.values()) r.remove();
 }

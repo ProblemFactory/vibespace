@@ -1,0 +1,135 @@
+#!/bin/bash
+# vs-sysroot-enter — enter the user's persistent APP SYSTEM (a same-release minbase userland on the
+# home PVC) in a private mount namespace and exec a command in it.
+#
+# Reference implementation of docs/design-app-persistence.zh.md §3.2 (Layer 1), the one that passed the
+# §5 probes P2/P3/P5/P6/P7/P8 on a test pod (2026-09-27). Installed root-owned at every boot by the server
+# (or by hand for a probe) together with a sudoers drop-in:
+#   Defaults!<this path> !use_pty, !pam_session, !pam_setcred, env_keep += "DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG TZ"
+# The drop-in grants nothing new (the pod user is already NOPASSWD: ALL); it makes sudo EXEC this helper on
+# the caller's pid (no monitor fork) and keeps the X environment. Every later hop is an exec on the same pid:
+#   shim (setsid) → sudo → this helper → unshare → this helper (stage 2) → chroot → env → sh → the app
+# so a keeper that recorded the shim's pid holds the app itself (handle, starttime, group kill, marker, PSS).
+#
+# Usage:  sudo -n vs-sysroot-enter [--cwd DIR] -- CMD [ARGS...]     # as the user (shims)
+#         sudo -n vs-sysroot-enter --root -- CMD [ARGS...]          # as root inside (apt/dpkg; the server only)
+#
+# Contract: the invoking user comes from SUDO_UID (never from the environment); the app system lives at
+# <that user's passwd HOME>/.vibespace/sysroot/rootfs and must be root-owned, canonical (no symlink in the
+# path), carry etc/vibespace-sysroot.json, and match this machine's dpkg architecture. The namespace dies with
+# its last process: nothing to unmount, a crash leaves no stale mount.
+set -euo pipefail
+umask 022
+
+die() { echo "vs-sysroot-enter: $*" >&2; exit 111; }
+
+[ "$(id -u)" = 0 ] || die "must run as root (through sudo)"
+case "${SUDO_UID:-}" in ''|*[!0-9]*) die "no SUDO_UID — run through sudo";; esac
+[ "$SUDO_UID" != 0 ] || die "SUDO_UID is 0 — the app system belongs to a user, never to root"
+
+SELF=$(realpath -e -- "$0") || die "cannot resolve own path"
+[ "$(stat -c %u "$SELF")" = 0 ] || die "helper not root-owned: $SELF"
+
+IFS=: read -r U_NAME _ U_UID U_GID _ U_HOME U_SHELL < <(getent passwd "$SUDO_UID") || die "uid $SUDO_UID has no passwd entry"
+[ "$U_UID" = "$SUDO_UID" ] || die "passwd lookup mismatch"
+G_LINE=$(getent group "$U_GID") || die "gid $U_GID has no group entry"
+R="$U_HOME/.vibespace/sysroot/rootfs"
+ID_FILE="$R/etc/vibespace-sysroot.json"
+
+check_root() {
+  [ -d "$R" ] || die "no app system at $R"
+  [ "$(realpath -e -- "$R")" = "$R" ] || die "app system path is not canonical (a symlink in $R)"
+  [ "$(stat -c %u "$R")" = 0 ] || die "app system root is not root-owned: $R"
+  (( ( 8#$(stat -c %a "$R") & 8#002 ) == 0 )) || die "app system root is world-writable: $R"
+  [ -f "$ID_FILE" ] && [ ! -L "$ID_FILE" ] && [ "$(stat -c %u "$ID_FILE")" = 0 ] || die "no root-owned identity file $ID_FILE"
+  local want have
+  want=$(sed -n 's/.*"arch"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$ID_FILE" | head -1)
+  have=$(dpkg --print-architecture)
+  [ -n "$want" ] && [ "$want" = "$have" ] || die "architecture mismatch: app system '$want', machine '$have' — Rebase"
+}
+
+MODE=user CWD=""
+if [ "${1:-}" = "--stage2" ]; then STAGE=2; shift; else STAGE=1; fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) MODE=root; shift;;
+    --cwd) CWD="${2:-}"; shift 2;;
+    --) shift; break;;
+    *) die "unknown option $1 (usage: [--root] [--cwd DIR] -- CMD ARGS...)";;
+  esac
+done
+[ $# -gt 0 ] || die "no command"
+
+check_root
+
+if [ "$STAGE" = 1 ]; then
+  # same pid: unshare execs this helper again inside a fresh, private mount namespace
+  if [ "$MODE" = root ]; then set -- --root -- "$@"; else set -- --cwd "$CWD" -- "$@"; fi
+  exec unshare --mount --propagation private -- "$SELF" --stage2 "$@"
+fi
+
+# stage 2: refuse to bind anything in the pod's own namespace (a direct --stage2 call would leak mounts)
+[ "$(readlink /proc/self/ns/mnt)" != "$(readlink /proc/1/ns/mnt)" ] || die "stage 2 outside a private mount namespace"
+
+no_symlink() { [ ! -L "$1" ] || die "bind target is a symlink: $1"; }
+bind_dir() {   # bind_dir SRC DST [ro]
+  local src=$1 dst=$R$2
+  [ -d "$src" ] || return 0
+  no_symlink "$dst"; [ -d "$dst" ] || mkdir -p "$dst"
+  mount --rbind "$src" "$dst"
+  if [ "${3:-}" = ro ]; then mount -o remount,bind,ro "$dst"; fi
+}
+bind_file_ro() {   # a regular-file target is created once; a symlink target (e.g. etc/localtime) is replaced
+  local src=$1 dst=$R$1
+  [ -e "$src" ] || return 0
+  if [ -L "$dst" ]; then rm -f "$dst"; fi
+  [ -e "$dst" ] || : > "$dst"
+  mount --bind "$src" "$dst"
+  mount -o remount,bind,ro "$dst"
+}
+
+# one writer at a time for the persistent edits (target creation, passwd/group upsert)
+exec 9>"$R/etc/.vibespace-sysroot.lock"
+flock 9
+
+bind_dir /proc /proc
+bind_dir /sys /sys ro
+bind_dir /dev /dev
+for f in /etc/resolv.conf /etc/hosts /etc/hostname /etc/localtime; do bind_file_ro "$f"; done
+bind_dir /usr/share/fonts /usr/share/fonts/vibespace-host ro
+
+if [ "$MODE" = user ]; then
+  bind_dir /home /home
+  bind_dir /tmp /tmp
+  [ -d "/run/user/$U_UID" ] && bind_dir "/run/user/$U_UID" "/run/user/$U_UID"
+  # upsert the user's passwd/group line (idempotent: written only when it differs)
+  P_LINE="$U_NAME:x:$U_UID:$U_GID::$U_HOME:$([ -x "$R$U_SHELL" ] && echo "$U_SHELL" || echo /bin/sh)"
+  upsert() {   # upsert FILE LINE NAME ID-FIELD-INDEX
+    local file=$1 line=$2 name=$3 idx=$4 tmp
+    grep -qxF -- "$line" "$file" && return 0
+    tmp=$(mktemp "$file.vs.XXXXXX")
+    awk -F: -v n="$name" -v id="$(echo "$line" | cut -d: -f"$idx")" -v i="$idx" '$1!=n && $i!=id' "$file" > "$tmp"
+    echo "$line" >> "$tmp"
+    chmod 0644 "$tmp"; chown root:root "$tmp"; mv -f "$tmp" "$file"
+  }
+  upsert "$R/etc/passwd" "$P_LINE" "$U_NAME" 3
+  upsert "$R/etc/group" "$G_LINE" "$(echo "$G_LINE" | cut -d: -f1)" 3
+fi
+flock -u 9; exec 9>&-
+
+SYS_PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+if [ "$MODE" = root ]; then
+  exec chroot "$R" /usr/bin/env -i PATH="$SYS_PATH" HOME=/root USER=root LOGNAME=root \
+    DEBIAN_FRONTEND=noninteractive LANG="${LANG:-C.UTF-8}" TERM="${TERM:-dumb}" "$@"
+fi
+
+# the environment is an ALLOWLIST: nothing else crosses (never VIBESPACE_SESSION_TOKEN, never the host PATH)
+ENVV=(PATH="$SYS_PATH" HOME="$U_HOME" USER="$U_NAME" LOGNAME="$U_NAME" SHELL="$U_SHELL")
+for k in DISPLAY XAUTHORITY VIBESPACE_DESKTOP_APP LANG LANGUAGE LC_ALL TZ TERM COLORTERM; do
+  [ -n "${!k:-}" ] && ENVV+=("$k=${!k}")
+done
+if [ -n "${DISPLAY:-}" ]; then ENVV+=(GDK_BACKEND=x11 QT_QPA_PLATFORM=xcb); fi
+[ -d "/run/user/$U_UID" ] && ENVV+=(XDG_RUNTIME_DIR="/run/user/$U_UID")
+
+exec chroot --userspec="$U_UID:$U_GID" "$R" /usr/bin/env -i "${ENVV[@]}" \
+  /bin/sh -c 'cd "$0" 2>/dev/null || cd "$HOME"; exec "$@"' "${CWD:-$U_HOME}" "$@"

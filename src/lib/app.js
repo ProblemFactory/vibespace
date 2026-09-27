@@ -52,6 +52,7 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
+import { openInboxWindow } from './inbox-window.js'; // design-user-inbox-reply §9: THE For-you window (the popup's / a row's / the mini inbox's ⤢, ⚙ Communication ▸ For you…)
 import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
 import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser P4 (§7.4/§7.5): the backend switcher, the chip, the blocked claims
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
@@ -2120,6 +2121,9 @@ class App {
   openJobs(opts) { return openJobsWindow(this, opts || {}); }
   openJobInteract(jobId, opts) { return openInteractWindow(this, jobId, opts || {}); }
   openChannel(adapterId, convId, opts) { return openChannelWindow(this, adapterId, convId, opts || {}); }
+  /** THE For-you window (design-user-inbox-reply §9) — a singleton kind; `{itemId, sessionKey, syncId}`:
+   *  select that item / scope to that session; an open window is revealed and re-pointed (a replay never re-points). */
+  openInbox(opts) { return openInboxWindow(this, opts || {}); }
   /** THE Outbox window (P3, design §9.2) — a singleton kind. */
   openChannelOutbox(opts) { return openChannelOutboxFn(this, opts || {}); }
   /** The Channels PANEL (the rail). Returns false where there is no rail —

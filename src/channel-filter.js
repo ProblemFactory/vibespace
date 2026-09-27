@@ -583,6 +583,51 @@ function grainOf(rec, legacy = undefined) {
   return { access, watchers: watchers.filter((w) => granted.has(principalKey(w.principal))) };
 }
 
+/**
+ * THE GRAIN'S STAMP (mirror-193, 2026-09-27) — what a dialog READ, spelled so
+ * its WHOLE-LIST write can prove the lists are still the ones it drew. The
+ * Grant access… / Notify… dialogs send a grain's whole access (or watchers)
+ * list; a list drawn from a copy the server has since moved on from (the
+ * panel's broadcast-fed digest a frame behind a route write; another window;
+ * an approval landing while the dialog was open) used to REPLACE the newer
+ * list — a principal granted meanwhile silently lost its access and its
+ * notification. Every access row: principal + STORED authority (a view row
+ * clamped by the caps carries `authorityStored`) + its `updatedAt`; every
+ * watcher row: principal + its `updatedAt` (every watchers write re-stamps
+ * its rows; a wake never does). Sorted: the order a list is drawn in is not
+ * a change. The same function reads the server's rows and the client's view.
+ */
+function grainStamp(g) {
+  const r0 = g && typeof g === 'object' ? g : {};
+  const at = (x) => Number(x && (x.updatedAt || x.createdAt)) || 0;
+  const pk = (x) => principalKey(x && x.principal) || '?';
+  // one JSON line per row: a principal id is free text (a `|` or a newline in it can never re-cut a line)
+  const a = (Array.isArray(r0.access) ? r0.access : []).map((x) => JSON.stringify(['a', pk(x), (x && (x.authorityStored || x.authority)) || '', at(x)])).sort();
+  const w = (Array.isArray(r0.watchers) ? r0.watchers : []).map((x) => JSON.stringify(['w', pk(x), at(x)])).sort();
+  return [...a, ...w].join('\n');
+}
+/**
+ * THE WRITE'S VERDICT on its base: `base` absent (an agent route, a script,
+ * a caller that predates the stamp) = unconditional, as before; `base` the
+ * stamp of the grain as it stands NOW = ok; anything else is refused BY NAME
+ * (`grain-changed`) — the writer re-reads and shows the user the list as it
+ * is, never overwrites it. The refusal names the principals that differ, so
+ * the words can say who arrived or left.
+ */
+function grainBaseVerdict(current, base) {
+  if (base === undefined || base === null) return { ok: true };
+  if (typeof base !== 'string') return refuse('bad-request', 'base must be the grain stamp the reader was given (a string)');
+  const now = grainStamp(current);
+  if (now === base) return { ok: true };
+  const keysOf = (stamp) => new Set(String(stamp).split('\n').map((l) => { try { const v = JSON.parse(l); return Array.isArray(v) ? v[1] : null; } catch { return null; } }).filter(Boolean));
+  const was = keysOf(base), is = keysOf(now);
+  return {
+    ok: false, code: 'grain-changed',
+    error: 'the access / notification lists changed since they were read — read them again and save again (nothing was written)',
+    added: [...is].filter((k) => !was.has(k)), removed: [...was].filter((k) => !is.has(k)),
+  };
+}
+
 /** The fields of a pre-split single assignment on an account / pattern
  *  record — what `liftGrainRecord` moves into the two lists. */
 const LEGACY_ASSIGNMENT_FIELDS = Object.freeze(['principal', 'mode', 'filterId', 'notify', 'digestMinutes', 'authority', 'dailyWakeCap', 'receiptWake', 'stats', 'estimateAtSet', 'createdBy']);
@@ -946,5 +991,5 @@ module.exports = {
   ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, expectedWakesPerDay, renderScopeDigestBlock,
   // R4 (2026-09-27): access and notification — two lists per grain, access first
   MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
-  splitAssignment, grainOf, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
+  splitAssignment, grainOf, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
 };

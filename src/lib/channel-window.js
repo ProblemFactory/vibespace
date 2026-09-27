@@ -432,7 +432,20 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   /** Past the local log's start: nothing older here AND the vendor said so. */
   let historyExhausted = false;
   let olderInFlight = false;
-  async function loadPage({ prepend = false } = {}) {
+  // ONE LIST, ONE WRITER (mirror-193, measured on a starved box): render() is re-entered by the open, by every
+  // broadcast naming this conversation (the watch beat's fetch and the open's mark-read each send one) and by a
+  // reconnect; each cleared the list and then awaited its page, so two renders in flight BOTH appended — every
+  // message twice or three times (the room's six messages ×3; the picture a suite waited on was the stale copy's
+  // lazy <img>, never loaded). Every render takes a generation, and a page is applied only by the render that is
+  // still the newest (`pageFor`); a page upward that a render overtook is dropped, and one is in flight at a time.
+  let renderGen = 0;
+  let upInFlight = false;
+  // the list is being rebuilt (cleared, its page not yet applied): the clear drops scrollTop to 0 and the scroll
+  // event it causes must not ask for the page ABOVE a boundary the clear just reset (that is the tail again —
+  // prepended beside the render's own copy)
+  let listReady = false;
+  const pageFor = (gen) => gen === renderGen;
+  async function loadPage({ prepend = false, gen = renderGen } = {}) {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (prepend && oldest !== null) {
       q.set('before', String(oldest));
@@ -455,6 +468,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       } else if (o && o.error) showToast(routeErrorText(o), { type: 'error' });
     }
     if (!recs.length) return 0;
+    if (!pageFor(gen)) return 0;   // a newer render owns the list now — this page is not applied
     // The page arrives oldest-first in the SAME order the store pages by, so
     // its first element IS the boundary for the next page up.
     const head = recs[0];
@@ -504,25 +518,31 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   }
 
   async function render({ read = false } = {}) {
+    const gen = ++renderGen;
     const c = await renderBar();
     if (!c) return;
+    if (read && c.unread) markRead();   // the OPEN marks read, whichever render ends up drawing the list
+    if (!pageFor(gen)) return;
+    listReady = false;
     list.textContent = '';
     oldest = null; oldestId = null;
     historyExhausted = false;
-    const n = await loadPage({});
+    const n = await loadPage({ gen });
+    if (!pageFor(gen)) return;
     if (!n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
     list.appendChild(outboxSec);
-    await renderOutbox();
-    list.scrollTop = list.scrollHeight;
-    if (read && c.unread) markRead();
+    // ready only once the render's own scroll is settled at the bottom: its clear's scroll event (and the 0 it left)
+    // is never read as the person asking for older history
+    try { await renderOutbox(); } finally { if (pageFor(gen)) { list.scrollTop = list.scrollHeight; listReady = true; } }
   }
 
   // Paging upward: one page per top-scroll, oldest-first (the same shape the
   // panel and the chat view use — a window never loads a 90-day log whole).
   list.addEventListener('scroll', () => {
-    if (list.scrollTop > 4) return;
+    if (list.scrollTop > 4 || upInFlight || !listReady) return;
     const before = list.scrollHeight;
-    loadPage({ prepend: true }).then((n) => { if (n) list.scrollTop = list.scrollHeight - before; }).catch(() => {});
+    upInFlight = true;
+    loadPage({ prepend: true }).then((n) => { if (n) list.scrollTop = list.scrollHeight - before; }).catch(() => {}).finally(() => { upInFlight = false; });
   });
 
   // Multi-client: the engine broadcasts ONE recomputed digest per pass, and a

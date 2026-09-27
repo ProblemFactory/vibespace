@@ -39,9 +39,14 @@ vibespace-ask show <id>                # one item of yours in full, any status, 
 The For you button in the taskbar (bottom right by default) with per-urgency
 count pills; a new item also pops a toast naming where the tray is ("Added to
 For you (bottom right)"); items grouped by session
-(clicking jumps into your conversation); a viewer with copyable markdown.
-Items you file with detail ship up to 2000 chars of context — write the
-detail so the user can decide WITHOUT opening the conversation.
+(clicking jumps into your conversation); a ⤢ on every item opens the For you
+WINDOW, where a long item is read at full width (markdown rendered — headings,
+lists, code blocks, tables), answered, marked done or dismissed.
+Items you file with detail ship up to 8000 chars of context (the question
+itself up to 500) — write the detail so the user can decide WITHOUT opening
+the conversation. A longer detail is cut and the CLI SAYS so (`NOTE: your
+--detail was CUT at 8000 characters`): the part after the cut never reached
+the user — put the whole content in your chat reply.
 
 ## Replies from the inbox
 

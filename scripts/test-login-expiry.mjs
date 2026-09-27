@@ -990,7 +990,8 @@ console.log('— §5 wiring');
   const css = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
   ck('the chip SVG is explicitly sized (an unsized inline SVG swallows the row — 2.369.13)', /\.acct-login-chip svg \{[^}]*width: 10px[^}]*height: 10px/.test(css));
   const panel = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-panel.js'), 'utf8');
-  ck("the inbox item's click lands on Manage Agents instead of a dead end", /key === 'accounts'/.test(panel) && /_showAgentsDialog/.test(panel));
+  const inboxModelSrc = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf8'); // §9 (2026-09-27): jump moved VERBATIM into THE client model the panel calls
+  ck("the inbox item's click lands on Manage Agents instead of a dead end", /if \(key === 'accounts'\) \{ close\(\); app\._showAgentsDialog\?\.\(\); return; \}/.test(inboxModelSrc) && /model\.jump\(key, item, \{ close: hidePopup \}\)/.test(panel));
   // An item that vanishes on its own must SAY it vanished on its own: the
   // resolved tail credits 'agent' for agent-resolved items, and the watch's
   // retraction is neither the user nor an agent.

@@ -138,6 +138,9 @@ export const UI_ICONS = {
   reach:     _s('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),
   connect:   _s('<path d="M6.5 9.5l3-3M9 4.5l1-1a2.5 2.5 0 013.5 3.5l-1 1M7 11.5l-1 1A2.5 2.5 0 012.5 9l1-1"/>'),
   plus:      _s('<path d="M8 3v10M3 8h10"/>'),
+  // the Word viewer's zoom out / in (a magnifier with − / +)
+  zoomOut:   _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4"/>'),
+  zoomIn:    _s('<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14M5 7h4M7 5v4"/>'),
   // an agent GROUP (design §22, g3): two heads — the group list's row glyph,
   // the members chip and the New group button
   users:     _s('<circle cx="6" cy="5.5" r="2.2"/><path d="M1.8 13c.4-2.4 2.1-3.8 4.2-3.8s3.8 1.4 4.2 3.8"/><path d="M10.2 3.5a2.2 2.2 0 010 4.2M11.6 9.4c1.4.5 2.3 1.8 2.6 3.6"/>'),

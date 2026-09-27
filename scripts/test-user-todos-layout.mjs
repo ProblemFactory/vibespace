@@ -136,13 +136,20 @@ console.log('⑦ THE REPLY BUTTON — PURE replyButtonState = the ONE replyVerdi
   ok(/export function renderRow\(/.test(rowSrc) && /export function patchRow\(/.test(rowSrc), 'the row file exports renderRow + patchRow');
   ok(!/class="ut-item[ "]/.test(panel) && !/itemHtml|resolvedInPlaceHtml/.test(panel), 'the panel holds no second `ut-item` row template (one renderer, one spelling)');
   ok(!/popup\.innerHTML\s*=/.test(panel), 'no `popup.innerHTML =` anywhere in the panel — the inbox reconciles keyed rows (a reply box survives a broadcast)');
-  ok(/replyButtonState\(/.test(panel) && /liveDotState\(/.test(panel), 'the panel draws the reply button and the dot through the PURE projections');
-  ok(/msg\.type === 'active-sessions'/.test(panel) && /patchLive\(/.test(panel), 'the panel subscribes to active-sessions and patches the live facts in place');
+  // §9 (2026-09-27): the store, the live facts and the verbs moved VERBATIM into THE client model
+  // src/lib/user-todos-actions.js (the For-you window is a second surface over them) — each pin
+  // below reads the code where it lives now AND the panel's use of it
+  const acts = fs.existsSync(path.join(ROOT, 'src/lib/user-todos-actions.js')) ? fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8') : '';
+  ok(/const replyState = \(i\) => replyButtonState\(i, factFor\(i\.sessionKey\)\);/.test(acts) && /const st = liveDotState\(factFor\(dot\.dataset\.key\)\);/.test(acts)
+    && /rowCtx: \{ t, nameFor, wordsOf, detailOf, replyState \}/.test(acts) && /const rowCtx = model\.rowCtx;/.test(panel) && /const patchDot = \(dot\) => model\.patchDot\(dot\);/.test(panel),
+    'the panel draws the reply button and the dot through the PURE projections (the model\'s replyState + patchDot, which the panel\'s rows and dots use)');
+  ok(/msg\.type === 'active-sessions' && Array\.isArray\(msg\.sessions\)\) \{ ingestLive\(msg\.sessions\); emit\('live'\); \}/.test(acts) && /model\.on\('live', \(\) => \{ patchLive\(\); scheduleBadges\(\); \}\);/.test(panel),
+    'the model subscribes to active-sessions (ingests the facts) and the panel patches the live facts in place on its `live` event');
   const sb = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar.js'), 'utf8');
   const facts = (/const LIVE_SESSION_FACTS = Object\.freeze\(\{([\s\S]*?)\n\}\);/.exec(sb) || [])[1] || '';
   ok(/(^|[^\w])turn: \{ digest: null \}/m.test(facts), 'LIVE_SESSION_FACTS carries `turn` with `digest: null` (carried-only: a fact that flips twice per turn must not re-render the list)');
-  ok(/'\/api\/user-todos\/' ?\+|\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply/.test(panel), 'the reply POSTs /api/user-todos/:id/reply');
-  ok(/Could not reply: \{why\}/.test(panel) && /Reply sent/.test(panel), 'both outcomes reach the user as a toast (no silent failure)');
+  ok(/\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply/.test(acts) && /const sent = await model\.postReply\(id, body\);/.test(panel), 'the reply POSTs /api/user-todos/:id/reply (the model\'s postReply, which the panel\'s sendReply calls)');
+  ok(/Could not reply: \{why\}/.test(acts) && /Reply sent/.test(acts) && !/fetchJson\(`\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}\/reply`/.test(panel), 'both outcomes reach the user as a toast (no silent failure) — ONE reply POST, in the model (the panel holds no second)');
 }
 
 console.log('⑧ THE MINI INBOX (design-user-inbox-reply §3, chunk 3) — one session\'s badge + its popover rows');
@@ -235,8 +242,10 @@ console.log('⑩ MARK ALL SEEN + THE BOARD CHIP (chunk 4) — wiring');
   const panel = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   ok(/'ut-seen-all'/.test(panel) && /'\/api\/user-todos\/resolve-many'/.test(panel) && /status: 'dismissed'/.test(panel), "the group head's 'Mark all seen' POSTs /api/user-todos/resolve-many with status dismissed");
   ok(/Could not update \{n\} items: \{why\}/.test(panel), 'a failed mark-all reaches the user as a toast naming the reason');
-  ok(/'ut-board'/.test(panel) && /_sessionStatuses/.test(panel) && /msg\.type === 'session-status-updated'/.test(panel), 'the board chip reads app.sidebar._sessionStatuses and is patched on session-status-updated');
-  ok(L_BOARD_OK(panel), "the chip's words are t()'d board states (needs input / blocked / review / working)");
+  const acts = fs.existsSync(path.join(ROOT, 'src/lib/user-todos-actions.js')) ? fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8') : '';
+  ok(/'ut-board'/.test(panel) && /_sessionStatuses/.test(acts) && /model\.boardOf\(key\)/.test(panel) && /msg\.type === 'session-status-updated' && msg\.statuses\) queueMicrotask\(\(\) => emit\('status'\)\)/.test(acts) && /model\.on\('status', \(\) => patchBoards\(\)\);/.test(panel),
+    'the board chip reads app.sidebar._sessionStatuses (the model\'s boardOf) and is patched on session-status-updated (the model\'s `status` event, a microtask after the broadcast)');
+  ok(L_BOARD_OK(acts), "the chip's words are t()'d board states (needs input / blocked / review / working)");
 }
 function L_BOARD_OK(src) { return ["t('needs input')", "t('blocked')", "t('review')", "t('working')"].every((k) => src.includes(k)); }
 
@@ -547,6 +556,126 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
   const KEYS = [...Object.values(O.ORIGIN_LABELS), 'All', 'Notices by source', 'Show all notices', 'Show only {source} notices', '{n} unread', 'Inbox', 'Notifications'];
   ok(KEYS.every((k) => zh.includes(`  ${JSON.stringify(k)}: `) && ja.includes(`  ${JSON.stringify(k)}: `)), 'every origin label and every new chrome string has a zh AND a ja entry', KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}: `) || !ja.includes(`  ${JSON.stringify(k)}: `)));
+}
+
+console.log('⑫ THE SIZE OF AN ITEM + THE PREVIEW SHAPE (2026-09-27, the For-you window\'s verify round) — the store\'s caps named on the return, the snapshot\'s preview, restoreDetails, the read route');
+{
+  const os = await import('node:os');
+  const { createRequire } = await import('node:module');
+  const { pathToFileURL } = await import('node:url');
+  const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+  const require = createRequire(import.meta.url);
+  const M = mutantCopies('ut-size', ROOT);
+  const cleanup = [];
+  process.on('exit', () => { for (const f of cleanup) { try { fs.rmSync(f, { recursive: true, force: true }); } catch { } } });
+  const tmpdir = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-size-')); cleanup.push(d); return d; };
+  // a patched copy OUTSIDE the tree (scripts/mutant-copy.mjs); every needle must exist
+  const mutant = (rel, edits) => { let src = fs.readFileSync(path.join(ROOT, rel), 'utf8'); for (const [from, to] of edits) { if (!src.includes(from)) throw new Error(`control needle missing in ${rel}: ${from.slice(0, 70)}`); src = src.split(from).join(to); } return M.load(rel, src); };
+  const UT = require(path.join(ROOT, 'src/user-todos.js'));
+  const mk = (Mod = UT) => new Mod.UserTodoManager({ dataDir: tmpdir(), expirySweepMs: 0 });
+  ok(UT.TEXT_MAX === 500 && UT.DETAIL_MAX === 8000 && UT.DETAIL_PREVIEW === 300, 'the constants: TEXT_MAX 500 · DETAIL_MAX 8000 · DETAIL_PREVIEW 300');
+  // ── the caps, and the cut NAMED on the returned record (never in the ledger) ──
+  const capLeg = (Mod) => {
+    const m = mk(Mod);
+    const long = m.add('claude:s', { origin: 'agent', text: 'long', detail: 'D'.repeat(9000) });
+    const fit = m.add('claude:s', { origin: 'agent', text: 'fit', detail: 'E'.repeat(7999) });
+    const q = m.add('claude:s', { origin: 'agent', text: 'Q'.repeat(600), detail: 'short' });
+    const both = m.add('claude:s', { origin: 'agent', text: 'B'.repeat(501), detail: 'F'.repeat(8001) });
+    const re = m.add('claude:s', { origin: 'agent', text: 'long', detail: 'G'.repeat(9000) }); // a re-file of `long` with another long detail
+    const out = {
+      long: { stored: m.get(long.id).detail.length, cut: long.detailCut, storedCut: m.get(long.id).detailCut, textCut: long.textCut },
+      fit: { stored: m.get(fit.id).detail.length, cut: fit.detailCut }, q: { stored: m.get(q.id).text.length, cut: q.textCut, detailCut: q.detailCut },
+      both: { textCut: both.textCut, detailCut: both.detailCut }, re: { existing: re.existing, cut: re.detailCut, stored: m.get(re.id).detail.length },
+    };
+    m.stop();
+    return out;
+  };
+  const c = capLeg();
+  ok(c.long.stored === 8000 && c.long.cut === 8000 && c.long.storedCut === undefined && c.long.textCut === undefined, 'a 9 000-char detail is kept to 8 000 and the RETURNED record says detailCut: 8000 — the ledger never carries the mark', c.long);
+  ok(c.fit.stored === 7999 && c.fit.cut === undefined, 'a 7 999-char detail is whole, nothing named', c.fit);
+  ok(c.q.stored === 500 && c.q.cut === 500 && c.q.detailCut === undefined, 'a 600-char question is kept to 500 and says textCut: 500', c.q);
+  ok(c.both.textCut === 500 && c.both.detailCut === 8000, 'both caps hit ⇒ both named', c.both);
+  ok(c.re.existing === true && c.re.cut === 8000 && c.re.stored === 8000, 'a re-file (existing: true) names the cut too', c.re);
+  const cOld = capLeg(mutant('src/user-todos.js', [['const DETAIL_MAX = 8000;', 'const DETAIL_MAX = 2000;']]));
+  ok(cOld.fit.stored === 2000 && cOld.fit.cut === 2000, 'CONTROL: a copy with the old 2 000 cap cuts the 7 999-char detail (the fit leg fails on it)', cOld.fit);
+  const cSilent = capLeg(mutant('src/user-todos.js', [['    const cut = (o) => (textCut || detailCut ?', '    const cut = (o) => (false ?']]));
+  ok(cSilent.long.stored === 8000 && cSilent.long.cut === undefined, 'CONTROL: a copy that never names the cut keeps 8 000 silently — the measured pre-fix behaviour (the naming leg fails on it)', cSilent.long);
+  // ── the snapshot: an OPEN item whole, a RESOLVED one previewed; the ledger whole ──
+  const shapeLeg = (Mod) => {
+    const m = mk(Mod);
+    const big = m.add('claude:s', { origin: 'agent', text: 'big', detail: 'H'.repeat(6000) + ' END' });
+    const small = m.add('claude:s', { origin: 'agent', text: 'small', detail: 'tiny' });
+    const none = m.add('claude:s', { origin: 'agent', text: 'none' });
+    const openBig = m.snapshot().open.find((i) => i.id === big.id);
+    m.setStatus(big.id, 'done'); m.setStatus(small.id, 'dismissed'); m.setStatus(none.id, 'done');
+    const s2 = m.snapshot();
+    const r = (id) => s2.resolved.find((i) => i.id === id);
+    const out = {
+      openWhole: openBig.detail.length === 6004 && openBig.detailTruncated === undefined,
+      resolvedBig: { len: r(big.id).detail.length, flag: r(big.id).detailTruncated, head: r(big.id).detail.slice(0, 5), ledger: m.get(big.id).detail.length, ledgerFlag: m.get(big.id).detailTruncated },
+      resolvedSmall: { detail: r(small.id).detail, flag: r(small.id).detailTruncated }, resolvedNone: { detail: r(none.id).detail, flag: r(none.id).detailTruncated },
+    };
+    m.stop();
+    return out;
+  };
+  const sh = shapeLeg();
+  ok(sh.openWhole, 'an OPEN item rides the snapshot WHOLE (6 004 chars, no flag)');
+  ok(sh.resolvedBig.len === 300 && sh.resolvedBig.flag === true && sh.resolvedBig.head === 'HHHHH' && sh.resolvedBig.ledger === 6004 && sh.resolvedBig.ledgerFlag === undefined, 'a RESOLVED item rides as its first 300 chars + detailTruncated: true — the ledger keeps the 6 004 whole, unflagged', sh.resolvedBig);
+  ok(sh.resolvedSmall.detail === 'tiny' && sh.resolvedSmall.flag === undefined && sh.resolvedNone.detail === null && sh.resolvedNone.flag === undefined, 'a short or absent detail is untouched (no flag)', { s: sh.resolvedSmall, n: sh.resolvedNone });
+  const shCtl = shapeLeg(mutant('src/user-todos.js', [['    return { open, resolved: resolved.map(previewOf) };', '    return { open, resolved };']]));
+  ok(shCtl.resolvedBig.len === 6004 && shCtl.resolvedBig.flag === undefined, 'CONTROL: a copy that broadcasts resolved items whole (the pre-fix shape) fails the preview leg', shCtl.resolvedBig);
+  const pv = UT.previewOf;
+  ok(pv({ id: 'a', detail: 'x'.repeat(301) }).detail.length === 300 && pv({ id: 'a', detail: 'x'.repeat(301) }).detailTruncated === true && pv({ id: 'a', detail: 'x'.repeat(300) }).detailTruncated === undefined && pv({ id: 'a', detail: null }).detail === null && pv(null) === null, 'previewOf (PURE): > 300 ⇒ 300 + the flag; ≤ 300 / null / garbage untouched');
+  const orig = { id: 'z', detail: 'y'.repeat(400) }; pv(orig);
+  ok(orig.detail.length === 400 && orig.detailTruncated === undefined, 'previewOf never mutates the record it is given');
+  // ── restoreDetails (PURE, user-todos-layout.js): the whole detail this client saw survives a snapshot that previews it ──
+  const { restoreDetails } = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const WHOLE = 'W'.repeat(1000) + ' END';
+  const seen = restoreDetails({ open: [{ id: 'a', status: 'open', detail: WHOLE }], resolved: [] }, new Map());
+  ok(seen.todos.open[0].detail === WHOLE && seen.fullById.get('a') === WHOLE, 'a whole detail the snapshot carried is remembered by id');
+  const later = restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', detail: WHOLE.slice(0, 300), detailTruncated: true }] }, seen.fullById);
+  ok(later.todos.resolved[0].detail === WHOLE && later.todos.resolved[0].detailTruncated === undefined && later.fullById.get('a') === WHOLE, 'the same item back as a preview ⇒ the whole text restored, the flag dropped (the reader\'s pane never shrinks under them)');
+  const never = restoreDetails({ open: [], resolved: [{ id: 'b', status: 'done', detail: 'p'.repeat(300), detailTruncated: true }] }, seen.fullById);
+  ok(never.todos.resolved[0].detailTruncated === true && never.todos.resolved[0].detail.length === 300, 'a previewed item this client never saw whole stays a preview (ensureDetail fetches it)');
+  const changed = restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', detail: 'different head'.padEnd(300, '.'), detailTruncated: true }] }, seen.fullById);
+  ok(changed.todos.resolved[0].detailTruncated === true, 'a preview that is NOT the head of the remembered text (the detail changed) is never overwritten');
+  ok(!restoreDetails({ open: [], resolved: [] }, seen.fullById).fullById.has('a'), 'an id the snapshot no longer lists leaves the memory (no unbounded growth)');
+  ok(restoreDetails({ open: [], resolved: [{ id: 'c', status: 'done', detail: 'F'.repeat(300), detailTruncated: true }] }, new Map([['c', 'F'.repeat(500)]])).todos.resolved[0].detail.length === 500, 'a whole detail ensureDetail fetched (already in the map) applies the same way');
+  const g = restoreDetails(null, null);
+  ok(JSON.stringify(g.todos) === JSON.stringify({ open: [], resolved: [] }) && g.fullById.size === 0, 'garbage in ⇒ empty lists');
+  {
+    const src = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8');
+    const needle = '    if (!i || !i.detailTruncated) return i;';
+    ok(src.includes(needle), 'control needle present in user-todos-layout.js');
+    const noRestore = await import(pathToFileURL(M.write('src/lib/user-todos-layout.js', src.split(needle).join('    if (i) return i;'), 'no-restore')).href);
+    const r = noRestore.restoreDetails({ open: [], resolved: [{ id: 'a', status: 'done', detail: WHOLE.slice(0, 300), detailTruncated: true }] }, seen.fullById);
+    ok(r.todos.resolved[0].detailTruncated === true, 'CONTROL: a copy that never restores leaves the reader\'s item a preview (the restore leg fails on it)');
+  }
+  for (const row of copiesCensus(M.files, M.dir, ROOT, { minCopies: 4, label: '⑫ ' })) ok(row.pass, row.name, row.detail);
+  // ── GET /api/user-todos/:id — ONE item whole, cookie-only ──
+  {
+    const { registerItemReadRoute } = require(path.join(ROOT, 'src/routes/user-todos-reply.js'));
+    const routes = {}; const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; } };
+    const m = mk();
+    registerItemReadRoute(app, { userTodos: m });
+    const h = routes['GET /api/user-todos/:id'];
+    const call = (id, headers = {}) => { let status = 200, json = null; h({ params: { id }, headers }, { status(c) { status = c; return this; }, json(j) { json = j; return this; } }); return { status, json }; };
+    const big = m.add('claude:s', { origin: 'agent', text: 'big', detail: 'R'.repeat(5000) });
+    m.setStatus(big.id, 'done');
+    ok(typeof h === 'function', 'the route registers GET /api/user-todos/:id');
+    const r1 = call(big.id);
+    ok(r1.status === 200 && r1.json.item.id === big.id && r1.json.item.detail.length === 5000 && r1.json.item.detailTruncated === undefined && r1.json.item.status === 'done', 'a resolved item is served WHOLE (5 000 chars, no flag) whatever the snapshot carries', { status: r1.status, len: r1.json && r1.json.item && r1.json.item.detail.length });
+    ok(call('ut-nope').status === 404 && call('ut-nope').json.code === 'not_found', 'an unknown id is 404 not_found');
+    const a1 = call(big.id, { authorization: 'Bearer vsst_abc' }), a2 = call(big.id, { authorization: 'Bearer jbt_abc' });
+    ok(a1.status === 403 && a1.json.code === 'agent_forbidden' && a2.status === 403, 'an agent / job token is refused by name (cookie-only — an agent reads its own items through vibespace-ask show)');
+    m.stop();
+  }
+  // ── wiring pins ──
+  const srv = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8'), acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
+  ok(/registerItemReadRoute\(app, \{ userTodos \}\)/.test(srv), 'server.js registers the read route');
+  ok(/const r = restoreDetails\(next \|\| \{ open: \[\], resolved: \[\] \}, fullById\); todos = r\.todos; fullById = r\.fullById;/.test(acts) && /fetchJson\(`\/api\/user-todos\/\$\{encodeURIComponent\(id\)\}`\)/.test(acts) && /ensureDetail,/.test(acts), 'the client model restores every whole detail it saw on each snapshot and fetches a previewed one on demand (ensureDetail, exported)');
+  ok(/if \(item\.detailCut\) console\.log\('NOTE: your --detail was CUT at ' \+ item\.detailCut/.test(cli) && /if \(item\.textCut\) console\.log\('NOTE: the question itself was CUT at ' \+ item\.textCut/.test(cli) && /up to 8000 chars/.test(cli), 'vibespace-ask names a cut detail / question by its cap and advertises 8000');
+  ok(/up to 8000 chars of context/.test(fs.readFileSync(path.join(ROOT, 'docs/agent/ask-manual.md'), 'utf8')), 'the agent manual says 8000');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -152,6 +152,9 @@ const alive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); ret
 const killChild = async (pid) => { if (!pid) return; try { process.kill(pid, 'SIGKILL'); } catch { } await childGone(pid); liveKids.delete(pid); };
 const waitFor = async (fn, ms = 4000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await sleep(25); } return !!fn(); };
 const within = (p, ms = 8000) => Promise.race([p, sleep(ms).then(() => ({ timeout: true }))]);
+// a dtach replay's wait for its wrapper and child to be GONE (mirror-193): the deadline for a process that never
+// dies — never a sample instant; the idle box settles in ~0.3 s, a starved one in a few
+const SETTLE_MS = 15000;
 const childGone = async (pid) => { for (let i = 0; i < 80; i++) { try { process.kill(pid, 0); } catch { return true; } await sleep(25); } return false; };
 
 // ── the REAL server teardown (setupSessionPty's onExit) ─────────────────────
@@ -389,7 +392,9 @@ for (const kind of KINDS) {
   ok(/record skipped: .*\.json is gone/.test(u.log), `${kind}: the log says the record was skipped because the meta is gone`, u.log.slice(-300));
   const k = await unlinkThenSignal(kind, wp, { unlink: false });
   ok(k.buf && k.bufText.includes(BUF_MARK[kind]) && k.json, `${kind}: …while the meta exists the same pending write IS flushed (a first-2 s death keeps its tail)`, { buf: k.buf, json: k.json });
-  const create = src.replace("fd = fs.openSync(file, 'r+');", "fd = fs.openSync(file, 'w');");
+  // the 'w' copy also LOGS whether the file existed when the handler opened it: the dtach control below is
+  // meaningful only on a trial where the handler ran AFTER the kill path's unlink (mirror-193)
+  const create = src.replace("fd = fs.openSync(file, 'r+');", "log(`ctl-open ${path.basename(file)} existed=${fs.existsSync(file)}`); fd = fs.openSync(file, 'w');");
   ok(create !== src, `control (${kind} create): the patch applies`);
   CREATE[kind] = M.write(REL[kind], create, 'create');
   const c = await unlinkThenSignal(kind, CREATE[kind]);
@@ -432,26 +437,61 @@ async function dtachReplay(kind, wrapperPath, { mode = 'kill' } = {}) {
   const master = dtachMasterPid(sock);
   if (master) liveKids.add(master);
   if (mode === 'kill') {
-    // THE KILL PATH (src/ws-handler.js kill case), one synchronous tick:
-    try { process.kill(master, 'SIGTERM'); } catch { }
+    // THE KILL PATH (src/ws-handler.js kill case) — one synchronous tick: SIGTERM the master, unlink the socket, the
+    // meta and the buffer. The record's hazard is the SIGHUP handler running AFTER that tick (the files are gone).
+    // Spelled in the server's order, a starved box never produces it (mirror-193, measured): the SIGTERM wakes the
+    // sleeping master on the SAME CPU, the scheduler preempts the sender for it, the master's exit SIGHUPs the
+    // wrapper and it too preempts — the handler writes into the still-present files and only THEN does this process
+    // run its unlinks (8 of 8 codex trials on one CPU beside two busy loops; the 'w' control then read
+    // "re-created nothing" — the runner's flaky red). So the tick is CONSTRUCTED in the order it means: the
+    // unlinks first, then the SIGTERM — the handler cannot run before the kill that triggers it. What can still
+    // land between them is a pre-existing steady-state writer (a due persist timer): `afterUnlink` below catches it
+    // and the trial is repeated (killTrial).
     for (const f of [sock, json, buf]) { try { fs.unlinkSync(f); } catch { } }
+    try { process.kill(master, 'SIGTERM'); } catch { }
   } else {
     try { process.kill(wrapperPid, 'SIGTERM'); } catch { }
   }
-  await sleep(800);
-  const out = { id, master, wrapperPid, childPid, json: fs.existsSync(json), buf: fs.existsSync(buf), meta: metaOf(id), wrapperAlive: alive(wrapperPid), childAlive: alive(childPid), received: readSigs(sigFile), log: logSince(kind, at) };
+  // THE TERMINAL SIGNALS, never a window (mirror-193; B-5f0b's rule): the files are final once the WRAPPER is
+  // gone (it is their only writer here) and the received signals once the CHILD is (it records, then dies 300 ms
+  // after its first signal). A fixed 800 ms read the 'w' control as "re-created nothing" on a starved runner —
+  // the SIGHUP handler had not run yet. SETTLE_MS bounds only a process that never dies; `settledMs` says how
+  // long the evidence took, `settled:false` that the deadline, not the process, ended the wait.
+  const t0 = Date.now();
+  const settled = await waitFor(() => !alive(wrapperPid) && !alive(childPid), SETTLE_MS);
+  const log = logSince(kind, at);
+  // WHICH ORDER THE TRIAL TOOK (mirror-193): the kill path unlinks in the same tick as the SIGTERM, but a starved box
+  // can run the wrapper's SIGHUP handler BETWEEN the two — then the record lands in the file the unlink removes
+  // next, and a "no orphan" verdict proves nothing. `afterUnlink` is the handler's own evidence that it ran after the
+  // unlink: the real record's "record skipped: <id>.json is gone", the 'w' copy's "ctl-open <id>.json existed=false".
+  const afterUnlink = mode === 'kill' ? (log.includes(`record skipped: ${id}.json is gone`) || log.includes(`ctl-open ${id}.json existed=false`)) : null;
+  const out = { id, master, wrapperPid, childPid, settled, settledMs: Date.now() - t0, afterUnlink, json: fs.existsSync(json), buf: fs.existsSync(buf), meta: metaOf(id), wrapperAlive: alive(wrapperPid), childAlive: alive(childPid), received: readSigs(sigFile), log };
   for (const pid of [childPid, wrapperPid, master]) await killChild(pid);
   for (const f of [sock, json, buf]) { try { fs.unlinkSync(f); } catch { } }
   return out;
+}
+// A KILL-PATH TRIAL whose handler ran BEFORE the unlink is INCONCLUSIVE (the record went into a file the unlink then
+// removed) — it is repeated, bounded, until one ran after the unlink; how many did not is said, and a run where
+// none did FAILS by name (the precondition, not the product, is then what the leg could not establish).
+const KILL_TRIALS = 8;
+async function killTrial(kind, wrapperPath) {
+  const skipped = [];
+  for (let i = 0; i < KILL_TRIALS; i++) {
+    const r = await dtachReplay(kind, wrapperPath);
+    if (r.afterUnlink) return { ...r, inconclusive: skipped.length };
+    skipped.push({ settledMs: r.settledMs, json: r.json, buf: r.buf, log: r.log.slice(-160) });
+  }
+  const last = await dtachReplay(kind, wrapperPath);   // reported whole (its fixture fields) when none was conclusive
+  return last.afterUnlink ? { ...last, inconclusive: skipped.length } : { ...last, afterUnlink: false, inconclusive: skipped.length + 1, skipped };
 }
 if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
   console.log('  · SKIP §2c: no dtach binary or no /proc on this machine (evidence: `command -v dtach` / /proc/self/cmdline) — §2b holds the no-orphan rule without dtach');
 } else {
   for (const kind of KINDS) {
-    const k = await dtachReplay(kind, REAL[kind]);
+    const k = await killTrial(kind, REAL[kind]);
     ok(k.master > 0 && k.wrapperPid > 0, `${kind} under dtach: fixture — the dtach master and the wrapper were found`, k);
     ok(/wrapper received SIGHUP/.test(k.log) && !k.wrapperAlive, `${kind} under dtach: the master's death SIGHUPs the wrapper AFTER the unlink and the handler runs`, k.log.slice(-300));
-    ok(!k.json && !k.buf, `${kind} under dtach: the kill path leaves no <id>.json / <id>.buf behind`, { json: k.json, buf: k.buf });
+    ok(k.afterUnlink && !k.json && !k.buf, `${kind} under dtach: the kill path leaves no <id>.json / <id>.buf behind — on a trial whose handler ran AFTER the unlink ("record skipped"; ${k.inconclusive} earlier trial(s) ran it before)`, { json: k.json, buf: k.buf, afterUnlink: k.afterUnlink, skipped: k.skipped });
     const kb = await dtachReplay(kind, NOHANDLER[kind]);
     ok(JSON.stringify(kb.received) === '["SIGHUP"]' && !kb.childAlive, `${kind} under dtach, kill path, BASELINE (handler removed): the child receives exactly the kernel's SIGHUP and dies of it`, kb);
     ok(JSON.stringify(k.received) === JSON.stringify(kb.received) && !k.childAlive, `${kind} under dtach, kill path: the child receives exactly what the default action hands it (${JSON.stringify(k.received)})`, { lane: k.received, baseline: kb.received });
@@ -462,8 +502,8 @@ if (!HAS_DTACH || !fs.existsSync('/proc/self/cmdline')) {
       `${kind} under dtach, wrapper SIGTERMed: the child receives the kernel's SIGHUP (session leader gone) — the same as the handler-less baseline`, { lane: p.received, baseline: pb.received });
     const pf = await dtachReplay(kind, FORWARD[kind], { mode: 'pkill' });
     ok(JSON.stringify(pf.received) !== JSON.stringify(pb.received), `control (${kind} forward, under dtach): a copy that forwards SIGTERM FAILS the dtach parity leg (${JSON.stringify(pf.received)})`, pf.received);
-    const c = await dtachReplay(kind, CREATE[kind]);
-    ok(c.json || c.buf, `control (${kind} create, under dtach): the 'w' copy re-creates the files the kill path removed (json=${c.json} buf=${c.buf})`);
+    const c = await killTrial(kind, CREATE[kind]);
+    ok(c.afterUnlink && c.settled && (c.json || c.buf), `control (${kind} create, under dtach): the 'w' copy re-creates the files the kill path removed (json=${c.json} buf=${c.buf}, read ${c.settledMs} ms after the kill once the wrapper and the child were gone, on a trial whose handler opened AFTER the unlink; ${c.inconclusive} earlier trial(s) opened before it)`, { settled: c.settled, afterUnlink: c.afterUnlink, wrapperAlive: c.wrapperAlive, childAlive: c.childAlive, log: c.log.slice(-300), skipped: c.skipped });
   }
 }
 
@@ -620,7 +660,7 @@ if (OUT && META && META.endsWith('.json') && String(process.argv[2]).endsWith('.
   const out = (s) => oAppend(OUT, s + '\\n');
   const fds = new Set();
   const note = (op) => { let v = 'gone'; try { const raw = oRead(META, 'utf8'); try { JSON.parse(raw); v = 'ok'; } catch { v = 'torn'; } } catch { } out('meta-' + op + ' ' + v); };
-  fs.openSync = function (p, flags, ...r) { const fd = oOpen.call(fs, p, flags, ...r); if (p === META && flags === 'r+') fds.add(fd); return fd; };
+  fs.openSync = function (p, flags, ...r) { const fd = oOpen.call(fs, p, flags, ...r); if (p === META && flags === 'r+') { fds.add(fd); try { out('open-size ' + fs.fstatSync(fd).size); } catch { } } return fd; };
   fs.writeSync = function (fd, ...r) { const x = oWrite.call(fs, fd, ...r); if (fds.has(fd)) note('write'); return x; };
   fs.ftruncateSync = function (fd, ...r) { const x = oTrunc.call(fs, fd, ...r); if (fds.has(fd)) note('ftruncate'); return x; };
   fs.closeSync = function (fd, ...r) { fds.delete(fd); return oClose.call(fs, fd, ...r); };
@@ -628,7 +668,23 @@ if (OUT && META && META.endsWith('.json') && String(process.argv[2]).endsWith('.
   for (const s of ['SIGTERM', 'SIGHUP', 'SIGINT']) process.prependListener(s, () => out('signal ' + s));
 }
 `);
+// A SPIED TRIAL IS JUDGED ONLY IF THE HANDLER OPENED THE INFLATED FILE (mirror-193, the same class as the kill-path
+// trials): the leg writes an inflated meta and THEN signals; on a starved box the wrapper's own steady-state meta
+// writer (the codex wrapper's 200 ms timer, re-armed by the child's line) can land between the two and replace the
+// inflated file with a normal one — the record then pads to nothing and the pad legs and their control read a
+// machine's timing, not the record. The spy logs the size the handler's r+ open saw; a trial that did not see the
+// inflation is repeated (bounded) and the count is said.
+const SPY_TRIALS = 6;
 async function spiedSignal(kind, wrapperPath) {
+  let r = null, inconclusive = 0;
+  for (let i = 0; i < SPY_TRIALS; i++) {
+    r = await spiedSignalOnce(kind, wrapperPath);
+    if (r.inflated && r.openSize > 4096) break;
+    inconclusive++;
+  }
+  return { ...r, inconclusive };
+}
+async function spiedSignalOnce(kind, wrapperPath) {
   const spyOut = path.join(ROOT, `spy-${++sigSeq}.txt`);
   const r = await runWrapper(kind, wrapperPath, { env: { NODE_OPTIONS: `${BASE_ENV.NODE_OPTIONS || ''} --require ${SPY}`.trim(), VS_SPY_OUT: spyOut } });
   const json = path.join(BUF, r.id + '.json');
@@ -642,9 +698,10 @@ async function spiedSignal(kind, wrapperPath) {
   let meta = null; try { meta = JSON.parse(raw); } catch { }
   const ops = (() => { try { return fs.readFileSync(spyOut, 'utf8').trim().split('\n'); } catch { return []; } })();
   const after = ops.slice(Math.max(0, ops.findIndex((l) => l.startsWith('signal '))));
+  const openLine = after.find((l) => l.startsWith('open-size '));
   await killChild(r.childPid);
   await teardownAsync(realEng, r.id);
-  return { ex, raw, meta, ops: after, inflated: !!m0 };
+  return { ex, raw, meta, ops: after.filter((l) => !l.startsWith('open-size ')), inflated: !!m0, openSize: openLine ? Number(openLine.split(' ')[1]) : 0 };
 }
 const handlerOf = (src) => src.slice(src.indexOf('function onWrapperSignal'), src.indexOf(HANDLER_LINE));
 const RECEIVED_LOG = /\n {4}log\(`wrapper received \$\{sig\} \(child pid \$\{child \? child\.pid : null\}, childDead=\$\{childDead\}\)`\);\n/;
@@ -654,7 +711,7 @@ for (const kind of KINDS) {
   ok(w.inflated && w.ops[0]?.startsWith('signal SIGHUP') && firstWrite > 0 && w.ex.code === 129, `${kind}: fixture — the spy saw the signal and the record's write (exit 129)`, { ops: w.ops, ex: w.ex });
   ok(firstWrite > 0 && (firstLog < 0 || firstWrite < firstLog), `${kind}: the record is the handler's FIRST write — before the log append (${w.ops.slice(0, 4).join(' | ')})`, w.ops);
   ok(w.ops.filter((l) => l.startsWith('meta-')).every((l) => l.endsWith(' ok')), `${kind}: after every syscall of the record the meta parses (no torn instant)`, w.ops);
-  ok(w.meta?.wrapperSignal === 'SIGHUP' && !('xfInflate' in w.meta) && w.raw.length > JSON.stringify(w.meta).length, `${kind}: the record is SHORTER than the inflated file and still parses (space-padded, never truncated)`, { len: w.raw.length, tail: JSON.stringify(w.raw.slice(-40)) });
+  ok(w.openSize > 4096 && w.meta?.wrapperSignal === 'SIGHUP' && !('xfInflate' in w.meta) && w.raw.length > JSON.stringify(w.meta).length, `${kind}: the record is SHORTER than the inflated file and still parses (space-padded, never truncated) — the handler opened the ${w.openSize}-byte inflated file (${w.inconclusive} earlier trial(s) did not)`, { len: w.raw.length, openSize: w.openSize, tail: JSON.stringify(w.raw.slice(-40)) });
   // CONTROLS: the r3 overwrite (ftruncate, then write) / a write with neither
   // pad nor truncate / the r3 order (the log line before the record).
   const src = SRC[kind];
@@ -665,7 +722,7 @@ for (const kind of KINDS) {
   const noPad = src.replace('      if (b.length < old) b = Buffer.concat([b, Buffer.alloc(old - b.length, 0x20)]);\n', '');
   ok(noPad !== src, `control (${kind} no pad): the patch applies`);
   const n = await spiedSignal(kind, M.write(REL[kind], noPad, 'nopad'));
-  ok(n.inflated && !n.meta, `control (${kind} no pad): a shorter record written over the longer file without padding leaves it unparseable`, n.raw.slice(-60));
+  ok(n.inflated && n.openSize > 4096 && !n.meta, `control (${kind} no pad): a shorter record written over the longer file without padding leaves it unparseable (the handler opened the ${n.openSize}-byte file; ${n.inconclusive} earlier trial(s) did not)`, n.raw.slice(-60));
   const h = handlerOf(src);
   const logLine = h.match(RECEIVED_LOG)?.[0];
   const recAt = kind === 'pty' ? '\n    let m = meta;\n' : '\n    meta.wrapperSignal = sig;\n';

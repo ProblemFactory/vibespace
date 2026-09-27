@@ -39,7 +39,7 @@ const noticeIdx = rawArgs.indexOf('--notice');
 const kind = noticeIdx >= 0 ? (rawArgs.splice(noticeIdx, 1), 'notice') : undefined;
 const USAGE = [
   'usage — mirror questions for the USER into their For you tray, bottom right of their screen (they may not be watching this window):',
-  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice]',
+  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice]',
   '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
   '  vibespace-ask list                    print this session\'s open items',
@@ -116,6 +116,11 @@ async function fileItem(text) {
   const { item } = await call({ add: { text, detail, urgency, kind, options } });
   console.log((item.existing ? 'already in the user\'s For you tray (refreshed): ' : 'added to the user\'s For you tray (bottom right of their screen): ') + item.text + '  (' + item.id + ')');
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
+  // THE CUT, NAMED (2026-09-27): the store keeps a question up to 500 chars and a detail up
+  // to 8000 and says on the returned record which cap it hit — a longer --detail used to
+  // lose its tail silently (the user read a question whose context stopped mid-sentence)
+  if (item.detailCut) console.log('NOTE: your --detail was CUT at ' + item.detailCut + ' characters — the user\'s tray holds only that much and the rest never reached them. Put the whole content in your CHAT reply (the tray is a notification mirror).');
+  if (item.textCut) console.log('NOTE: the question itself was CUT at ' + item.textCut + ' characters — keep the question to a sentence or two and put the context in --detail and your CHAT reply.');
   console.log('REMINDER: the For you tray is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the tray as the only copy. If you mention it, say "the For you tray at the bottom right" — never "your inbox" (no such word is on their screen).');
 }
 main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });

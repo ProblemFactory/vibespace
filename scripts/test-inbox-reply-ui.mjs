@@ -35,8 +35,9 @@
 //      session's rows; replying there ⇒ the stub's stdin, the row resolves in
 //      place, the badge counts down and is gone at 0
 //   ⑪ Escape closes the popover first, the panel on the next press
-//   ⑪b the same with a MODAL above the panel (the ⤢ viewer, createModalShell): one real
-//      Escape closes the viewer only, the next the panel
+//   ⑪b the same with a MODAL above the panel (a createModalShell dialog — the ⤢ viewer until
+//      design §9 retired it for the For-you window; the layout-history modal now): one real
+//      Escape closes the modal only, the next the panel
 //   ⑫ in a tab chain the badge rides the tab; un-tabbed it is back on the bar
 //   ⑬ a hostile session name stays text (popover head, title bar, aria-label)
 //   ⑭ NEGATIVE CONTROL: a patched miniInboxEntries without its key filter
@@ -462,19 +463,21 @@ try {
   await sleep(150);
   check('the second Escape closes the panel', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
 
-  console.log('⑪b a modal above the panel (the ⤢ viewer) takes ONE Escape; the panel the next');
+  console.log('⑪b a modal above the panel (a createModalShell dialog) takes ONE Escape; the panel the next');
   await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   check('(the panel reopens)', await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector('#user-todos-popup .ut-item .ut-view')`, 3000));
-  await evalJs(`document.querySelector('#user-todos-popup .ut-item .ut-view').click(); true`);
-  check('the row\'s ⤢ opens the viewer modal (createModalShell #ut-viewer, focused)', await waitFor(`document.activeElement === document.getElementById('ut-viewer')`, 3000), await evalJs(`document.activeElement?.id || document.activeElement?.className`));
+  // the ⤢ viewer is retired (design-user-inbox-reply §9: the row's ⤢ opens the For-you WINDOW, test-inbox-window-ui ①);
+  // the rule under test is the panel's Escape deferring to ANY visible .dialog-overlay — a read-only createModalShell modal
+  await evalJs(`app._showLayoutHistory(); true`);
+  check('a createModalShell modal opens above the panel (#layout-history-dialog, focused)', await waitFor(`document.activeElement === document.getElementById('layout-history-dialog')`, 3000), await evalJs(`document.activeElement?.id || document.activeElement?.className`));
   const realEsc = async () => {
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
     await sleep(200);
   };
   await realEsc();
-  const x11b = await evalJs(`({ viewer: !!document.getElementById('ut-viewer'), panel: !document.getElementById('user-todos-popup').classList.contains('hidden') })`);
-  check('ONE real Escape closes the viewer only — the panel stays open', !x11b.viewer && x11b.panel, x11b);
+  const x11b = await evalJs(`({ viewer: !!document.getElementById('layout-history-dialog'), panel: !document.getElementById('user-todos-popup').classList.contains('hidden') })`);
+  check('ONE real Escape closes the modal only — the panel stays open', !x11b.viewer && x11b.panel, x11b);
   if (x11b.panel) {
     await evalJs(`document.getElementById('user-todos-popup').focus?.(); true`);
     await realEsc();

@@ -11,15 +11,18 @@
 // notice (origin — src/inbox-origin.js) behind filter chips kept per device,
 // and the two tab labels carry counts patched in place (Inbox: the open asks +
 // the grey notice count; Notifications: toasts since this device last looked).
+// §9 (2026-09-27): the store, the live facts, the words of an item and every
+// verb on one live in src/lib/user-todos-actions.js (the For-you WINDOW is a
+// second surface over them); ⤢ on a row, on the popup's tab strip and on the
+// mini inbox's head opens THE window (src/lib/inbox-window.js, app.openInbox) —
+// the read-only viewer modal is retired.
 import { t } from './i18n.js';
-import { openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, liveDotState, replyButtonState, LIVE_DOT_WHY, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the running dot + the reply button's verdict (design-user-inbox-reply D1.5/D1.7); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
+import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: the group order + append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
+import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
-import { renderRow, patchRow, applyLive, replyBoxEl, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { marked } from 'marked';
-import DOMPurify from 'dompurify';
-import { anchorFixedPopup, copyText, createModalShell, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showToast } from './utils.js';
+import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
+import { anchorFixedPopup, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { openResetCreditDialog } from './reset-credit-dialog.js'; // THE one reset-credit confirm dialog (design-reset-credits p2): the ask-mode item's button
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -33,6 +36,7 @@ export function installUserTodos(app) {
   // the same segmented badge and opens the same popup (the stylesheet's
   // full-width sheet rule for .usage-popup beats the inline anchor).
   const mBtn = document.getElementById('mobile-nav-todos');
+  const model = inboxModel(app); // THE one store + the verbs (src/lib/user-todos-actions.js) — the For-you window asks for the same one
   let todos = { open: [], resolved: [] };
   let knownIds = null; // null until the first load — no toast storm at boot
   let layout = null;   // the popup's row order while OPEN (inc-mtw02kbq-kj96: a ✓ must not slide the next row under the pointer)
@@ -59,149 +63,29 @@ export function installUserTodos(app) {
   const markHistorySeen = () => { try { localStorage.setItem(HISTORY_SEEN_KEY, String(Date.now())); } catch { } };
   if (histSeen() == null) markHistorySeen();
 
-  // Match items to sidebar sessions with the sidebar's OWN canonical key
-  // derivation (same one the status chips use) — an ad-hoc reimplementation
-  // here would drift from it. webui:<serverId> covers items filed before the
-  // backend id existed.
-  const sessionFor = (key) => (app.sidebar?._allSessions || []).find((s) => {
-    if (s.webuiId && `webui:${s.webuiId}` === key) return true;
-    try { return app.sidebar._getSessionStateKey(s) === key; }
-    catch { return `${s.backend || 'claude'}:${s.sessionId}` === key; }
-  });
-  const displayName = (s) => {
-    try { return app.sidebar?.getCustomName?.(s) || s.name; } catch { return s.name; }
-  };
-  // THE WORDS OF AN ITEM (a3 i18n, 2026-09-21): a producer that filed its
-  // sentences as STRUCTURE (`i18n.text/detail/source` = `{key, params}`) is
-  // worded HERE with the device's t(); an item without it is its own words
-  // (an agent's ask). The English `text` stays the store's dedupe key.
-  const wordsOf = (i) => (i && i.i18n && i.i18n.text ? t(i.i18n.text.key, i.i18n.text.params || {}) : (i && i.text) || '');
-  const detailOf = (i) => (i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map((l) => t(l.key, l.params || {})).join('\n') : (i && i.detail) || '');
-  const nameFor = (key, items) => {
-    const s = sessionFor(key);
-    const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
-    return (s && displayName(s)) || (spoken && t(spoken.i18n.source.key)) || items.find((i) => i.sessionName)?.sessionName
-      || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
-  };
-  const jump = (key, item) => {
-    // a job-borne item opens its ANSWER surface directly regardless of which
-    // group it sits in (2.357.0: items are attributed to the OWNER session
-    // now, so the key is usually a real session — the actionable thing is
-    // still the job's form, which focusJobsPanel lands on in the sidebar)
-    if (item?.jobId) { popup.classList.add('hidden'); app.openJobInteract?.(item.jobId); return; }
-    if (key === 'jobs') { popup.classList.add('hidden'); app.openJobs?.(); return; }
-    // Account-level items (login-session expiry, 2026-09-07) belong to the
-    // INSTANCE, not a session — the actionable surface is Manage Agents, the
-    // same shape the 'jobs' bucket uses. Without this branch the click fell
-    // through to "Session not found in the list yet", i.e. a dead end on an
-    // item whose whole point is that the user must act.
-    if (key === 'accounts') { popup.classList.add('hidden'); app._showAgentsDialog?.(); return; }
-    const s = sessionFor(key);
-    if (!s) { showToast(t('Session not found in the list yet — try from the sidebar'), { type: 'error' }); return; }
-    popup.classList.add('hidden');
-    if (s.webuiId) {
-      // goToWindow only works when a window is OPEN for it — a live session
-      // whose window was closed needs a re-attach instead of a silent no-op.
-      const hasWindow = [...app.sessions.values()].some((term) => term.sessionId === s.webuiId);
-      if (hasWindow) app.goToWindow(s.webuiId);
-      else app.attachSession(s.webuiId, s.webuiName || displayName(s), s.cwd, { mode: s.webuiMode });
-      // A HELPER's ask (lane S1): land ON the card that waits, not just in its conversation.
-      // A window opened just now learns its asks from the attach — retried for a few seconds.
-      if (item?.action?.type === 'helper-ask' && item.action.requestId) {
-        const rid = item.action.requestId;
-        let n = 0;
-        const tryJump = () => {
-          const view = [...app.sessions.values()].find((v) => v && v.sessionId === s.webuiId && typeof v.jumpToPendingAsk === 'function');
-          if (view && (view._pendingAsks || []).some((a) => String(a.requestId) === String(rid))) { view.jumpToPendingAsk(rid).catch(() => {}); return; }
-          if (++n < 20) setTimeout(tryJump, 250);
-        };
-        setTimeout(tryJump, 50);
-      }
-    } else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, displayName(s), s.cwd);
-    else if (s.status === 'stopped') app.resumeSession(s.sessionId, s.cwd, displayName(s), { backend: s.backend, hostId: s.hostId || s.host || undefined });
-    else showToast(t('This session is running outside VibeSpace'), { type: 'error' });
-  };
-  const setStatus = async (id, status) => {
-    // fetchJson never throws (returns null / the parsed {error} body) — check
-    // the success flag or the failure is a silent no-op.
-    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-    if (!r || !r.success) showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' });
-  };
-
-  // Dedicated item viewer (user request: the popup rows are hard to read and
-  // can't be selected/copied) — markdown-rendered, selectable, with Copy.
-  const openViewer = (i) => {
-    const { body } = createModalShell({ id: 'ut-viewer', title: nameFor(i.sessionKey, [i]), bodyClass: 'ut-viewer-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
-    const raw = wordsOf(i) + (detailOf(i) ? '\n\n' + detailOf(i) : '');
-    // D1.4: the viewer shows the WHOLE reply (a row shows its first 80 chars)
-    const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? '\n\n---\n\n' + t('You replied: {text}', { text: i.reply.text }) : '';
-    const md = document.createElement('div');
-    md.className = 'ut-viewer-md';
-    md.innerHTML = DOMPurify.sanitize(marked.parse(raw + replied));
-    const meta = document.createElement('div');
-    meta.className = 'ut-meta';
-    meta.textContent = `${i.urgency || 'normal'} · ${agoText(i.createdAt)}${i.resolvedAt ? ` · ${i.status}` : ''}`;
-    const actionsRow = document.createElement('div');
-    actionsRow.className = 'dialog-actions';
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'mounts-btn';
-    copyBtn.textContent = t('Copy');
-    copyBtn.onclick = () => { copyText(raw + replied); showToast(t('Copied')); };
-    actionsRow.append(copyBtn);
-    body.append(md, meta, actionsRow);
-  };
+  // The words of an item, its session's name, the jump to where it is answered
+  // and the status POST are THE model's (moved verbatim, §9) — the popup hides
+  // itself before a jump; the window stays.
+  const { wordsOf, detailOf, nameFor } = model;
+  const hidePopup = () => popup.classList.add('hidden');
+  const jump = (key, item) => model.jump(key, item, { close: hidePopup });
+  const setStatus = (id, status) => model.setStatus(id, status);
 
   // the row words (ago / expires / who resolved it) live with THE row renderer
   const agoText = (ts) => agoTextOf(ts, t);
 
-  // ── LIVE FACTS (design-user-inbox-reply D1.5/D1.7) ────────────────────────
-  // The last `active-sessions` payload, keyed the way items are: the payload's
-  // own `sessionKey` (`<backend>:<backendSessionId>`) and `webui:<id>` (an item
-  // filed before the backend id existed). A chat entry wins over another entry
-  // under the same key. It feeds ONLY the dot and the reply controls — patched
-  // in place (patchLive), never a row re-render.
-  let liveByKey = new Map();
-  // webui id → the payload's own sessionKey (chunk 3: a window's view knows
-  // only the webui id; its items are keyed by the session key)
-  let keyByWebuiId = new Map();
-  const ingestLive = (sessions) => {
-    const m = new Map();
-    const kw = new Map();
-    for (const s of sessions || []) {
-      if (!s || !s.id) continue;
-      if (s.sessionKey) kw.set(s.id, s.sessionKey);
-      const fact = { live: true, mode: s.mode || 'terminal', remoteState: s.remoteState || null, turn: s.turn || null };
-      for (const k of [s.sessionKey, `webui:${s.id}`]) {
-        if (!k) continue;
-        const prev = m.get(k);
-        if (!prev || (prev.mode !== 'chat' && fact.mode === 'chat')) m.set(k, fact);
-      }
-    }
-    liveByKey = m;
-    keyByWebuiId = kw;
-  };
-  try { ingestLive(app.sidebar?._webuiSessions); } catch { }
-  const factFor = (key) => liveByKey.get(key) || null;
+  // ── LIVE FACTS (design-user-inbox-reply D1.5/D1.7) ── the model's: the last
+  // `active-sessions` payload keyed the way items are (factFor), the webui id →
+  // sessionKey map (keyForWebui), the reply verdict per item (replyState)
   const byId = (id) => todos.open.find((i) => i.id === id) || todos.resolved.find((i) => i.id === id) || null;
-  // THE row renderer's context (src/lib/user-todos-row.js) — the panel's words,
+  // THE row renderer's context (src/lib/user-todos-row.js) — the model's words,
   // names and the live verdict; chunk 3's mini inbox passes the same with mini:true
-  const rowCtx = { t, nameFor, wordsOf, detailOf, replyState: (i) => replyButtonState(i, factFor(i.sessionKey)) };
-  const drafts = new Map(); // item id → the text of a FOLDED reply box (Esc folds, the reply button unfolds it back)
+  const rowCtx = model.rowCtx;
+  const drafts = model.drafts; // item id → the text of a FOLDED reply box (Esc folds, the reply button unfolds it back) — one draft per item across the popup and the window
 
-  /** The badge's tiers and its WORDS — ONE spelling shared by the taskbar /
-   *  nav button and the Inbox tab's count (B-328d: "same words as the badge"). */
-  const tierCounts = (action) => {
-    const cu = action.filter((i) => i.urgency === 'urgent').length;
-    const ch = action.filter((i) => i.urgency === 'high').length;
-    return { cu, ch, cn: action.length - cu - ch };
-  };
-  const actionWords = (action) => {
-    const { cu, ch, cn } = tierCounts(action);
-    return action.length
-      ? [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
-          .filter(Boolean).join(' · ') + ' — ' + t('waiting on you')
-      : t('Nothing waiting on you');
-  };
+  // The badge's tiers and its WORDS (tierCounts / actionWords) — ONE spelling
+  // shared by the taskbar / nav button, the Inbox tab's count (B-328d: "same
+  // words as the badge") and the For-you window's Actions tab: imported.
   const renderBtn = () => {
     // NOTICES (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // only ACTION items colour the badge; notices are a grey count of their own.
@@ -294,6 +178,13 @@ export function installUserTodos(app) {
         for (const k of counts) { const n = mk('span', 'ut-count ut-tab-n'); n.dataset.n = k; n.style.display = 'none'; b.append(n); }
         d.append(b);
       }
+      // §9: the WHOLE inbox as a window (long messages read at full width) — the
+      // same ⤢ every row carries; a tab-strip sibling, never a `.ut-tab`
+      const ow = mk('button', 'ut-act ut-open-win', '⤢');
+      ow.type = 'button';
+      ow.title = t('Open as a window');
+      ow.setAttribute('aria-label', ow.title);
+      d.append(ow);
       popup.prepend(d);
     }
     patchTabs();
@@ -349,27 +240,10 @@ export function installUserTodos(app) {
   /** Bring `container`'s rows (after `head`, when given) to `entries`, keyed by
    *  data-id. A node moves only when it is out of place — never the common case
    *  while the layout is append-only (moving a focused textarea would blur it). */
-  const reconcileRows = (container, entries, head = null, ctx = rowCtx) => {
-    const existing = new Map();
-    for (const c of container.children) if (c.classList.contains('ut-item')) existing.set(c.dataset.id, c);
-    let prev = head;
-    for (const e of entries) {
-      let row = existing.get(e.item.id);
-      if (row) { patchRow(row, e, ctx); existing.delete(e.item.id); }
-      else row = renderRow(e, ctx);
-      const slot = prev ? prev.nextElementSibling : container.firstElementChild;
-      if (row !== slot) container.insertBefore(row, slot);
-      prev = row;
-    }
-    for (const r of existing.values()) r.remove();
-  };
-  const liveDotTitle = (state) => t(LIVE_DOT_WHY[state] || LIVE_DOT_WHY.off);
-  const patchDot = (dot) => {
-    const st = liveDotState(factFor(dot.dataset.key));
-    if (dot.dataset.state !== st) dot.dataset.state = st;
-    const title = liveDotTitle(st);
-    if (dot.title !== title) { dot.title = title; dot.setAttribute('aria-label', title); }
-  };
+  const reconcileRows = (container, entries, head = null, ctx = rowCtx) => reconcileKeyed(container, entries, {
+    head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
+  });
+  const patchDot = (dot) => model.patchDot(dot); // THE running dot (D1.7: liveDotState over the model's live fact)
   // A group = its BAR (the head — a button that jumps — and, beside it, the
   // "Mark all seen" button: a button never nests in a button), its rows, and
   // the fold's expander last.
@@ -403,20 +277,13 @@ export function installUserTodos(app) {
     return g;
   };
   // THE BOARD CHIP (design-user-inbox-reply §4 h, chunk 4): the session's own
-  // board state (vibespace-status) beside its name — the sidebar-tasks mixin
-  // already holds `_sessionStatuses` and its broadcast; the panel only reads it.
-  // An item keyed `<backend>:<id>` may have its status still under `webui:<id>`.
-  const boardWord = (state) => (state === 'needs-input' ? t('needs input') : state === 'blocked' ? t('blocked') : state === 'review' ? t('review') : state === 'working' ? t('working') : '');
-  const statusFor = (key) => {
-    const st = app.sidebar?._sessionStatuses || {};
-    if (st[key]) return st[key];
-    for (const [wid, k] of keyByWebuiId) if (k === key && st[`webui:${wid}`]) return st[`webui:${wid}`];
-    return null;
-  };
+  // board state (vibespace-status) beside its name — the model reads the
+  // sidebar-tasks mixin's `_sessionStatuses` (boardOf: the record + its word);
+  // the panel only paints it.
   const patchBoard = (head) => {
     const key = head.dataset.key;
-    const rec = key && key.includes(':') ? statusFor(key) : null;
-    const word = rec ? boardWord(rec.state) : '';
+    const b = key && key.includes(':') ? model.boardOf(key) : null;
+    const rec = b && b.rec, word = b ? b.word : '';
     let chip = head.querySelector(':scope > .ut-board');
     if (!word) { if (chip) chip.remove(); return; }
     if (!chip) { chip = mk('span', 'ut-board'); head.insertBefore(chip, head.querySelector(':scope > .ut-group-n')); }
@@ -512,15 +379,9 @@ export function installUserTodos(app) {
     if (popup.classList.contains('hidden')) { layout = null; return; }
     if (tab === 'history') { renderHistory(); return; }
     const root = ensureInbox();
-    const groups = new Map();
-    for (const i of todos.open) (groups.get(i.sessionKey) || groups.set(i.sessionKey, []).get(i.sessionKey)).push(i);
-    const gs = [...groups.entries()].sort((a, b) => {
-      // Background Work is its OWN section, always after session groups
-      // (owner report: it read as a weird phantom session mixed in)
-      if ((a[0] === 'jobs') !== (b[0] === 'jobs')) return a[0] === 'jobs' ? 1 : -1;
-      const w = (items) => Math.max(...items.map((i) => URG_RANK[i.urgency || 'normal'] || 1));
-      return (w(b[1]) - w(a[1])) || (Math.max(...b[1].map(i => i.createdAt)) - Math.max(...a[1].map(i => i.createdAt)));
-    });
+    // the groups in THE order (PURE sortGroups — Background Work last, worst
+    // urgency, newest; the For-you window orders by the same function)
+    const gs = sortGroups(todos.open);
     // STABLE ORDER WHILE OPEN (inc-mtw02kbq-kj96): while the popup is visible
     // the layout is append-only — a resolved row stays in its slot, dimmed
     // with ↺, until the popup closes (the next open rebuilds it sorted).
@@ -630,17 +491,11 @@ export function installUserTodos(app) {
     row.dataset.sending = '1';
     const item0 = byId(id);
     if (item0) applyLive(row, item0, rowCtx);
-    // fetchJson never throws — a null (network) or an {error, code} body is a
-    // FAILURE the user must see (no silent failures); the box keeps its text
-    const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: body }) });
+    // THE model's POST: both outcomes reach the user as a toast (no silent
+    // failures); on a failure the box keeps its text
+    const sent = await model.postReply(id, body);
     delete row.dataset.sending;
-    if (r && r.ok) {
-      showToast(t('Reply sent'));
-      drafts.delete(id);
-      if (!chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) box.remove(); }
-    } else {
-      showToast(t('Could not reply: {why}', { why: r && r.error ? t(r.error) : t('server unreachable') }), { type: 'error' });
-    }
+    if (sent && !chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) box.remove(); }
     const item1 = byId(id);
     if (item1 && row.isConnected) applyLive(row, item1, rowCtx);
   };
@@ -671,7 +526,7 @@ export function installUserTodos(app) {
     const wid = vid && !/^(view-|sub-)/.test(vid) ? vid : (spec.serverId || '');
     const keys = [];
     const add = (k) => { if (k && typeof k === 'string' && !keys.includes(k)) keys.push(k); };
-    if (wid) add(keyByWebuiId.get(wid));
+    if (wid) add(model.keyForWebui(wid));
     add(spec.sessionKey);
     if (!spec.sessionKey && spec.backend && spec.backendSessionId) add(`${spec.backend}:${spec.backendSessionId}`);
     if (wid) add(`webui:${wid}`);
@@ -714,12 +569,18 @@ export function installUserTodos(app) {
     const dot = mk('span', 'ut-live-dot');
     dot.setAttribute('role', 'img');
     const name = mk('span', 'ut-mini-name');
-    head.append(dot, mk('span', 'ut-mini-title', t('Inbox for this session')), name);
+    // §9: this session's inbox as a WINDOW (scoped to it) — the same ⤢ the rows carry
+    const ow = mk('button', 'ut-act ut-open-win', '⤢');
+    ow.type = 'button';
+    ow.title = t('Open this session\'s inbox as a window');
+    ow.setAttribute('aria-label', ow.title);
+    head.append(dot, mk('span', 'ut-mini-title', t('Inbox for this session')), name, ow);
     const rows = mk('div', 'ut-mini-rows');
     const empty = mk('div', 'empty-hint ut-mini-empty', t('all clear'));
     pop.append(head, rows, empty);
     pop.addEventListener('click', (e) => {
       if (e.target.closest('.ut-detail-exp')) return;
+      if (e.target.closest('.ut-mini-head > .ut-open-win')) { pop.remove(); app.openInbox({ sessionKey: primaryKey(mini?.keys || keys) }); return; }
       const item = e.target.closest('.ut-item');
       if (item) rowClick(e, item, { mini: true });
     });
@@ -773,9 +634,9 @@ export function installUserTodos(app) {
   // and explicitly ordered: this listener runs in the CAPTURE phase (before
   // the global bubble one) and DEFERS whenever a transient layer sits above
   // the sheet — an open [data-popover] or any visible .dialog-overlay (the
-  // static #dialog-overlay or a createModalShell modal such as the ⤢ viewer)
-  // — so one Escape closes exactly one layer; a terminal keeps its own Esc.
-  // (The viewer's own stopPropagation cannot order it: this capture listener
+  // static #dialog-overlay or a createModalShell modal such as the reset-credit
+  // dialog) — so one Escape closes exactly one layer; a terminal keeps its own
+  // Esc. (A modal's own stopPropagation cannot order it: this capture listener
   // on document runs before the overlay's handler.) (Not `defaultPrevented`:
   // a synthesized keydown is rarely cancelable, so that flag is no order.)
   // A REPLY BOX is the innermost layer: Esc inside one folds it (its text is
@@ -786,9 +647,10 @@ export function installUserTodos(app) {
     if (e.target?.closest?.('.xterm')) return;
     if (document.querySelector('[data-popover]')) return;
     // ANY visible .dialog-overlay — the static #dialog-overlay AND every
-    // createModalShell overlay (the ⤢ viewer #ut-viewer, the reset-credit
-    // dialog…): a capture listener on document runs BEFORE the modal's own
-    // keydown, so without this one Escape closed two layers (inbox r1).
+    // createModalShell overlay (the reset-credit dialog, a layout-history
+    // modal…; the retired ⤢ viewer was the r1 case): a capture listener on
+    // document runs BEFORE the modal's own keydown, so without this one
+    // Escape closed two layers (inbox r1).
     for (const o of document.querySelectorAll('.dialog-overlay')) if (!o.classList.contains('hidden')) return;
     const box = e.target?.closest?.('.ut-reply');
     if (box && popup.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); return; }
@@ -822,6 +684,8 @@ export function installUserTodos(app) {
     if (!r || !r.ok) showToast(t('Could not update {n} items: {why}', { n: ids.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' });
   };
   popup.addEventListener('click', (e) => {
+    // §9: the whole inbox as THE window (the popup steps aside for it)
+    if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup(); app.openInbox(); return; }
     const tb = e.target.closest('.ut-tab');
     if (tb) { if (tb.dataset.tab !== tab) { tab = tb.dataset.tab; renderPanel(); } return; } // the page below the tabs switches; the tabs are patched, never rebuilt
     // a notice FILTER chip (B-328d): per device; the active origin chip again = all
@@ -876,13 +740,16 @@ export function installUserTodos(app) {
       return;
     }
     if (e.target.closest('.ut-view')) {
+      // ⤢ = THE For-you window ON this item (§9: long text reads at full width,
+      // replied to / handled there) — the mini inbox's opens it scoped to its session
       const rec = byId(id);
-      if (rec) openViewer(rec);
+      if (!rec) return;
+      if (mini) { document.querySelectorAll('.ut-mini-popover').forEach((p) => p.remove()); app.openInbox({ itemId: rec.id, sessionKey: rec.sessionKey }); }
+      else { hidePopup(); app.openInbox({ itemId: rec.id }); }
       return;
     }
     if (e.target.closest('.ut-action-reset')) {
-      const rec = todos.open.find((i) => i.id === id);
-      if (rec && rec.action) openResetCreditDialog(app, { accountKey: rec.action.accountKey, sessionId: rec.action.sessionId || null, todoId: rec.id });
+      model.runAction(todos.open.find((i) => i.id === id)); // THE producer's verb (the model maps the type)
       return;
     }
     if (e.target.closest('.ut-done')) setStatus(id, 'done');
@@ -931,21 +798,16 @@ export function installUserTodos(app) {
     renderBtn(); renderPanel(); renderMini(); scheduleBadges();
   };
 
-  let liveSeen = false; // a broadcast beat the initial fetch — don't clobber it with the older snapshot
-  app.ws.onGlobal((msg) => { if (msg.type === 'user-todos-updated' && msg.todos) { liveSeen = true; apply(msg.todos); } });
-  // THE LIVE FACTS (D1.7): the session list's own broadcast — the running dot and
-  // the reply controls are patched in place, rows are never re-rendered for it
-  app.ws.onGlobal((msg) => { if (msg.type === 'active-sessions' && Array.isArray(msg.sessions)) { ingestLive(msg.sessions); patchLive(); scheduleBadges(); } });
-  // THE BOARD CHIP (chunk 4): the sidebar-tasks mixin stores the statuses from
-  // the same broadcast — patched after it (a microtask: handler order is not
-  // ours to rely on), chips only, never a row
-  app.ws.onGlobal((msg) => { if (msg.type === 'session-status-updated' && msg.statuses) queueMicrotask(patchBoards); });
-  // Resync on reconnect — items filed while offline would otherwise stay
-  // invisible until the next unrelated change re-broadcasts.
-  app.ws.onStateChange?.((connected) => {
-    if (connected) fetchJson('/api/user-todos').then((d) => { if (d?.todos) apply(d.todos); });
-  });
-  fetchJson('/api/user-todos').then((d) => { if (d?.todos && !liveSeen) apply(d.todos); });
+  // THE MODEL'S THREE BROADCASTS (§9 — the subscriptions, the reconnect resync and
+  // the first fetch live in src/lib/user-todos-actions.js; this surface paints):
+  // every snapshot ⇒ apply; the live facts (D1.7: the session list's own
+  // broadcast) ⇒ the running dot and the reply controls patched in place, rows
+  // never re-rendered for it; the board statuses (chunk 4, told a microtask after
+  // the sidebar-tasks mixin stored them) ⇒ chips only, never a row
+  model.on('todos', (next) => apply(next));
+  model.on('live', () => { patchLive(); scheduleBadges(); });
+  model.on('status', () => patchBoards());
+  if (model.loaded) apply(model.todos); // a model built before this surface (the window opened first) already holds a snapshot
   // A toast fired while the history page is open → live-refresh it
   // (and on the inbox page the Notifications tab's unread count ticks up in place)
   window.addEventListener('vs-toast', () => { if (popup.classList.contains('hidden')) return; if (tab === 'history') renderPanel(); else patchTabs(); });
