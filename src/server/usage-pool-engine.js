@@ -3634,7 +3634,7 @@ function resetCreditRung(session, { resetsAtSec = null, lane = null, key = null,
       if (!firstOfEvent || !(creditsLeft > 0)) return;
       const n = creditsLeft;
       const why = refusedBy ? ` Not used automatically: ${refusedBy}.` : v.use || mode === 'off' ? '' : ` Not used automatically: ${resetCredit.reasonText(v.reason)}.`;
-      try { feedPeerCard(session, { fromName: 'VibeSpace', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key } }); } catch { }
+      try { feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `Usage limit hit on ${nameOf(key)} — ${n} stored reset credit${n === 1 ? '' : 's'} available. ${desc.text}${why}`, resetCredit: { available: n, mode, accountKey: key } }); } catch { }
     };
     if (!v.use || mode === 'off') { wallCard(); return v.reason === 'cold-switch-first' ? 'switch-first' : 'skipped'; }
     if (mode === 'ask') {

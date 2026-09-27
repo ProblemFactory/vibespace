@@ -55,6 +55,19 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-collapse-kinds-note-default',
+      note: "lane S3 (naive-user study 2): the new 'note' kind (VibeSpace's notes to the assistant — the Stop nudge, the tools intro) ships ON in chat.collapseKinds, and a SAVED selection cannot tell 'user unchecked it' from 'the option predates the save' (the 'agent' precedent above). Add it once; unticking it afterwards sticks.",
+      run() {
+        const f = path.join(dataDir, 'settings.json');
+        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; }
+        const v = doc['chat.collapseKinds'];
+        if (!Array.isArray(v) || v.includes('note')) return;
+        v.push('note');
+        fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
+        fs.renameSync(f + '.tmp', f);
+      },
+    },
+    {
       id: '2026-09-reattribute-readings-by-slot',
       note: 'quota readings were keyed by the OTel-observed org = the identity the CLI cached at SPAWN, so after any pool hot switch a session\'s readings were filed under the account it started on. Re-attributes or archives (never silently keeps) the provably-foreign entries in usage-cache / usage-anchors / attribution.ndjson, and drops the learned rates so the estimator re-learns from the cleaned anchors.',
       run() {

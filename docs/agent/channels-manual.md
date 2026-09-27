@@ -66,7 +66,7 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
   "by a rule: …"); a digest for a whole account or rule lists several
   conversations in ONE block.
 - A row marked `requestable` is one you may ASK for: `vibespace-channels
-  request <conv> "why"` files ONE item in the user's For-you inbox with your
+  request <conv> "why"` files ONE item in the user's For you tray (bottom right) with your
   reason; approval grants YOU visibility on that ONE conversation and
   touches no group default.
 - Uniform errors: a conversation you cannot see and one that does not exist

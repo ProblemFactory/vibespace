@@ -92,7 +92,7 @@ HTTP equivalent (inside the job, no CLI spawn):
 `vibespace-job ask --form @panel.json [--timeout 30m]` posts a declarative
 panel (md / image / input / textarea / choice / checkbox / buttons /
 progress; a `buttons` block is the required submit affordance). It appears in
-the user's For-you inbox (opens the panel directly) and on the job card. Read
+the user's For you tray (bottom right; opens the panel directly) and on the job card. Read
 answers with `vibespace-job answers [--wait 100]`; with `--stdin-open` they
 also stream to your stdin as JSONL. The owner conversation is notified when
 the panel is posted AND when the user answers.

@@ -13,12 +13,13 @@
 //      into the conversation's next context injection. Machine-agnostic by
 //      construction: remote sessions' hooks already call back to this hub.
 // Envelope is CHANNEL-READY (owner direction 2026-08-20): every stashed entry
-// carries {source, fromName, text, ts} — 'agent' today; Gmail/Lark/Slack
+// carries {source, kind?, fromName, text, ts} (kind = notification/peer, the PATH — S3 verify F3) — 'agent' today; Gmail/Lark/Slack
 // connectors later feed the same ladder with their own source tags.
 const fs = require('fs');
 const path = require('path');
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
+const { vibespaceNoticeText } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 // How long a written frame waits for the wrapper's own verdict before it stops
@@ -65,7 +66,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function stashFor(cid, envelope) {
     const q = stash[cid] || (stash[cid] = []);
     // a RE-STASHED entry (the drain's budget handed it back) keeps its own ts so the next drain shows it in order
-    q.push({ source: envelope.source || 'agent', fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() });
+    // `kind` = the PATH (S3 verify F3): the drain heads a notification and draws its card by it — never by the sender's NAME, which a peer chooses
+    const kind = envelope.kind === 'notification' || envelope.kind === 'peer' ? envelope.kind : null;
+    q.push({ source: envelope.source || 'agent', ...(kind ? { kind } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() });
     if (q.length > STASH_CAP) q.splice(0, q.length - STASH_CAP);
     persistStash();
   }
@@ -218,6 +221,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // Unknown/absent origin = 'peer', the conservative lane (an older caller
     // never silently gains the steer behaviour).
     const kind = opts.kind === 'notification' ? 'notification' : 'peer';
+    // VIBESPACE SPEAKS AS ITSELF (lane S3, naive-user study 2): the CLI frames
+    // every server post as "Another Claude session sent a message", so a
+    // notification that did not say who it was read as a peer — the assistant
+    // answered the user's own browser handback with "I received a message from
+    // another Claude session". Every kind:'notification' producer's words open
+    // with the ONE head here, at the ONE site they all pass (the card strips it
+    // again: src/notification-senders.js noticeBody). A peer's words are theirs.
+    if (kind === 'notification') text = vibespaceNoticeText(text);
     // `noWake` (Channels P3, design §9.3): deliver ONLY where it costs
     // nothing — the rpc rung's predicted-free steer into a turn already
     // running — and otherwise refuse with `refused:'no-wake'` so the caller
@@ -301,7 +312,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       // machine turn and hold the next-turn group reports for the owner's own.
       const machineTurn = () => { try { const s = localSessionFor(cid); if (s) s._machineInputAt = Date.now(); } catch { } };
       const spent = () => { machineTurn(); if (!charged) return; money.settled = true; if (noteSpend) { try { noteSpend(charged); } catch (e) { log('[deliver] spend accounting failed:', e.message); } } };
-      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text }); } catch (e) { log('[deliver] card emit failed:', e.message); } };
+      const cardOk = () => { try { emitPeerCard?.(cid, { fromName: opts.fromName || null, text: opts.cardText || text, kind }); } catch (e) { log('[deliver] card emit failed:', e.message); } }; // `kind` rides the card (S3 verify F3): a peer's card is never a VibeSpace notice, whatever its name or first sentence
       // rung 0: VibeSpace channel socket (experimental, per-session opt-in)
       try {
         if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {

@@ -120,6 +120,7 @@ Overrides persist in the layout auto-save.
 |---------|------|---------|-------------|
 | `chat.compactMode` | boolean | `true` | Dense document-style layout instead of chat bubbles |
 | `chat.uploadDir` | string | *(empty)* | Where chat drag-drop/attached files land: empty = session working directory; absolute path (`~/Downloads`, `/data/uploads`) collects all uploads in one place; a bare name (`uploads`) = subfolder under the working directory. Remote sessions resolve it on the remote machine |
+| `chat.showAssistantNotes` | boolean | `true` | What VibeSpace says to the ASSISTANT — the end-of-turn reminder to update its status, the tools intro at session start, the per-turn reminder — shows as one grey line each ("VibeSpace reminded the assistant to update its status"), the text behind the expander, folded by default under the `note` kind of `chat.collapseKinds`. Off hides them entirely (the assistant still receives them). Applies to open chats instantly |
 | `chat.touchEnterSends` | boolean | `false` | On touch devices, make the keyboard's enter key send instead of inserting a newline (default: newline; send via the ▶ button) |
 | `chat.roleIndicator` | enum | `border` | How to distinguish user vs assistant messages: color border, background tint, icon, or text label |
 

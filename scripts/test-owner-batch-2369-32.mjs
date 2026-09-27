@@ -100,7 +100,7 @@ ok(/const fmtReset = \(ts, util(?:, est)?\) => \{/.test(um2) && (um2.match(/fmtR
 // ── 2.369.33: the 'search' fold kind + weekly reset projection ──
 {
   const ss = read('src/lib/settings-schema.js');
-  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss) && /value: 'image', label: t\('Image views/.test(ss), "settings: 'search' and 'image' are fold kinds, ON by default");
+  ok(/default: \['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image', 'note'\]/.test(ss) && /value: 'search', label: t\('Web searches \/ fetches/.test(ss) && /value: 'image', label: t\('Image views/.test(ss), "settings: 'search' and 'image' are fold kinds, ON by default");
   const cv = read('src/lib/chat-view.js');
   // 2.369.37: the classifier + summary composer moved to the PURE module
   // src/lib/chat-run-summary.js (owner caught "1 次 MCP" over a ToolSearch —

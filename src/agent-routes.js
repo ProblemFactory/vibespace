@@ -27,6 +27,7 @@ const crypto = require('crypto');
 const { BLOCK_MAX_BYTES: MSG_STASH_BLOCK_MAX_BYTES } = require('./channel-filter.js');
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
+const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
 const MSG_STASH_MAX_BYTES = 6144;
@@ -77,8 +78,19 @@ function renderMsgStash(entries) {
   const line = (e) => {
     const stamp = new Date(Number(e.ts) || Date.now()).toISOString().slice(5, 16) + 'Z';
     const who = e.fromName || e.source || 'unknown';
-    if (MSG_STASH_BLOCK_SOURCES.has(e.source)) return `- [${stamp}] from "${who}":\n${clipBytes(e.text || '', MSG_STASH_BLOCK_MAX_BYTES)}`;
-    return `- [${stamp}] from "${who}": ${String(e.text || '').slice(0, MSG_STASH_LINE_MAX)}`;
+    // lane S3: a stashed VibeSpace notification (the browser handback, a
+    // Background Work event, a channel wake) drains under the SAME head the live
+    // ladder puts on it — `from "VibeSpace browser"` read as a peer's message.
+    // WHICH entries: the ones whose PATH was a notification (S3 verify F3) — a
+    // peer SESSION named "VibeSpace browser" drains as `from "…":` like any
+    // peer, or the assistant would read another agent as VibeSpace. And the
+    // head is said ONCE (S3 verify F2): an entry whose text already opens with
+    // it (a re-stashed delivered frame) is not headed twice.
+    const notice = stashKindOf(e) === 'notification';
+    const said = notice ? `${VIBESPACE_NOTICE_HEAD} [${who}]` : `from "${who}":`;
+    const text = notice ? withoutNoticeHead(e.text || '') : String(e.text || '');
+    if (MSG_STASH_BLOCK_SOURCES.has(e.source)) return `- [${stamp}] ${said}\n${clipBytes(text, MSG_STASH_BLOCK_MAX_BYTES)}`;
+    return `- [${stamp}] ${said} ${text.slice(0, MSG_STASH_LINE_MAX)}`;
   };
   const shown = [], rows = [];
   let bytes = 0;
@@ -91,10 +103,32 @@ function renderMsgStash(entries) {
   const rest = entries.slice(0, entries.length - shown.length);
   const held = rest.length ? `\n(${rest.length} older message(s) held for your next turn)` : '';
   const hints = [];
-  if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source))) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
+  if (shown.some((e) => !MSG_STASH_BLOCK_SOURCES.has(e.source) && stashKindOf(e) !== 'notification')) hints.push('reply to an agent with vibespace-msg send "<name>" "..." if a response is expected');
   if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
+}
+/**
+ * THE STOP NUDGE'S WORDS (2.79.0; lane S3 rewording, naive-user study 2). The
+ * CLI answers a blocking Stop hook with a real turn, and the old closing "Then
+ * stop again." left that turn's MESSAGE to the model — which restated its
+ * whole answer ("Task complete — …") and narrated the bookkeeping to the user
+ * ("Status is set to done — no task group is linked…"): the testers read both
+ * as the conversation. The steps stay (tools first — a turn's substance goes
+ * at its END, after its last tool call, or the CLI may drop it: CLAUDE.md
+ * "claude CLI 中途文本丢失"); the closing now asks for the calls ONLY and at
+ * most one short line. The marker phrase stays first after the user's extra:
+ * the chat's note classifier (src/lib/chat-run-summary.js NOTE_MARKER) reads
+ * it on both the pre-S3 and the S3 wording. Steps list only ENABLED tools
+ * (2.211.0) — status is guaranteed on at the one caller.
+ * `extra` = the user's own agents.stopNudgeExtra (≤ 500 chars), on top.
+ */
+const STOP_NUDGE_CLOSE = 'Make these calls first, then stop: do not restate your answer; end with at most one short line (the user already has your answer above, and this bookkeeping is not news to them).';
+function stopNudgeReason(T = {}, extra = '') {
+  const steps = ['set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user)'];
+  if (T.ask) steps.push('if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the For you tray only notifies) — and vibespace-ask resolve anything they already answered');
+  if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
+  return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
 function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null }) {
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
@@ -386,7 +420,7 @@ app.get('/api/agent/task-context', (req, res) => {
         const drained = jm.drainNotifs(caller.conversationId);
         // drained job notifications enter the agent's context invisibly —
         // render the same card the live lane shows (2.363.0)
-        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text }); } catch { }
+        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
         // >2 entries: also spill the untruncated history to a file the agent
         // can Read — the injected block elides its middle under budget
         const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
@@ -407,7 +441,7 @@ app.get('/api/agent/task-context', (req, res) => {
         // stash drain enters the AGENT's context invisibly — emit the same
         // card the live lanes render so the user sees what arrived (2.363.0);
         // what did not fit the budget rides the next drain (own ts, in order)
-        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) }); // the entry's PATH (S3 verify F3), never its name
         for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
         if (pm.text) context = context ? context + '\n\n' + pm.text : pm.text;
       }
@@ -597,7 +631,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const drained = jm.drainNotifs(caller.conversationId);
         // drained job notifications enter the agent's context invisibly —
         // render the same card the live lane shows (2.363.0)
-        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text }); } catch { }
+        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
         const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
         const missed = jobModel.renderNotifStash(drained, { spillPath });
         if (missed) parts.push(missed);
@@ -615,7 +649,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // stash drain enters the AGENT's context invisibly — emit the same
         // card the live lanes render so the user sees what arrived (2.363.0);
         // what did not fit the budget rides the next drain (own ts, in order)
-        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text });
+        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) }); // the entry's PATH (S3 verify F3), never its name
         for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
         if (pm.text) parts.push(pm.text);
       }
@@ -669,7 +703,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // Per-feature toggles: the reminder lists only ENABLED tools (2.211.0).
       const segs = [];
       if (toolFlags.status) segs.push('vibespace-status <state> — keep your board state honest');
-      if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question onto their inbox (the FULL content still goes in your chat reply — the inbox is only the notification), and resolve <id|text> the moment they answer');
+      if (toolFlags.ask) segs.push('vibespace-ask "q" — MIRROR every chat question into their For you tray (bottom right of their screen — name it that way, never "your inbox"; the FULL content still goes in your chat reply — the tray is only the notification), and resolve <id|text> the moment they answer');
       if (toolFlags.task) segs.push(`vibespace-task ${multi ? '--group <id> ' : ''}progress "summary" — log finished work`);
       if (toolFlags.jobs) segs.push('vibespace-job run "cmd" --name x --context "brief" — background work that must OUTLIVE this conversation (auto-notifies you on completion; poll/show/subscribe/announce; full manual: vibespace-job docs)');
       segs.push('vibespace-docs [status|ask|task|jobs|msg|pages|browser] — the full manual for any of these tools');
@@ -799,14 +833,7 @@ app.get('/api/agent/stop-check', (req, res) => {
     try { spendGuard?.note?.({ reason: 'stop-nudge', session: s, identity: auth && auth.identity, hold: auth && auth.hold }); } catch { }
     // Per-hook custom text (2.88.0): user extra rides at the top of the nudge.
     const extra = customExtra('agents.stopNudgeExtra', 500);
-    // Steps list only ENABLED tools (2.211.0) — status is guaranteed on here.
-    const steps = ['set your CURRENT state — vibespace-status <working|needs-input|blocked|review|done> --reason "one line" (done if this piece of work is finished; needs-input/review if you are waiting on the user)'];
-    if (T.ask) steps.push('if you asked the user anything this turn or are waiting on them, MIRROR it — vibespace-ask "question" (the full content must already be in your chat reply; the inbox only notifies) — and vibespace-ask resolve anything they already answered');
-    if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
-    res.json({
-      block: true,
-      reason: (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. Then stop again.',
-    });
+    res.json({ block: true, reason: stopNudgeReason(T, extra) });
   } catch { res.json({ block: false }); }
 });
 // Integration master switch (agents.vibespaceIntegration, 2.190.0): OFF gates
@@ -1316,7 +1343,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${text}`;
   const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text, spendReason: 'peer-message' }) : { ok: false, reason: 'delivery not wired' };
   if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: r.peerName || target.t.name || null, machine: r.hostId || null });
-  deliver?.stashFor(target.cid, { source: 'agent', fromName, text });
+  deliver?.stashFor(target.cid, { source: 'agent', kind: 'peer', fromName, text }); // kind = the PATH (S3 verify F3): a session NAMED like VibeSpace still drains as a peer
   res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
 });
 
@@ -1710,12 +1737,12 @@ function sessionToolsIntro(T, facts = {}) {
   }
   if (T.ask) {
     L.push(
-      'Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it on their global inbox with `vibespace-ask`. They are often NOT watching this window; the inbox is how they find waiting questions across all sessions:',
+      'Whenever you ask the user ANYTHING — a question in chat, or ending a turn waiting on their decision/input/review — ALSO file it in their For you tray with `vibespace-ask`. They are often NOT watching this window; the tray is how they find waiting questions across all sessions. When you mention it to the user, call it "the For you tray at the bottom right" (where it sits on their screen) — never "your inbox", a word they cannot find on screen:',
       '  vibespace-ask "question or decision needed" [--detail "context + your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"]',
       '  vibespace-ask list  /  vibespace-ask resolve <id|text>  /  vibespace-ask show <id>',
-      'The user can reply from the inbox: that message opens with `[For you reply #<id>]` and quotes your item; an option chip replies with the label itself.',
+      'The user can reply from the For you tray: that message opens with `[For you reply #<id>]` and quotes your item; an option chip replies with the label itself.',
       'The MOMENT the user answers (in chat or anywhere), resolve the item YOURSELF with `vibespace-ask resolve` — never leave answered items for them to tick. Not for your own working steps — those belong in your normal todo list.',
-      'The inbox item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the inbox (the user reads and copies from chat; inbox rows are hard to read at length).');
+      'The For you item is a NOTIFICATION MIRROR, not the message itself: everything you file (the question, options, your recommendation) must ALSO appear IN FULL in your chat reply — never say something only in the tray (the user reads and copies from chat; tray rows are hard to read at length).');
   }
   if (T.jobs) {
     L.push(
@@ -1787,4 +1814,4 @@ function browserSetLine(set) {
 
 
 module.exports = {
-  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine };
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE };

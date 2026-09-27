@@ -37,7 +37,7 @@
  * history (session/load replays the agent's own history into it on resume).
  */
 
-const { peerDisplayName } = require('./message-manager');
+const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3)
 const fs = require('fs');
 const path = require('path');
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
@@ -226,7 +226,7 @@ class AcpMessageManager {
   }
 
   /** Server-side peer card (same shape as the claude/codex twins). */
-  injectPeerCard({ fromName, text }) {
+  injectPeerCard({ fromName, text, kind = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null;
@@ -235,7 +235,8 @@ class AcpMessageManager {
     this.turnIndex++;
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
-    msg.peerFrom = fromName ? String(fromName) : null;
+    msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
+    if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3)
     this._emit({ op: 'create', message: msg });
     return msg;
   }
@@ -468,12 +469,16 @@ class AcpMessageManager {
     if (!content.length) return;
     const text = content.map((b) => b.text || '').join('\n');
     if (rec.peer) {
-      const from = rec.peer.name ? String(rec.peer.name) : peerDisplayName(null, text);
+      // the PATH the words took (S3 verify F3): the wrapper's recorded kind, else the rung that names the delivered text
+      const inferred = peerOriginOf(null, text);
+      const from = rec.peer.name ? String(rec.peer.name) : inferred.name;
+      const via = rec.peer.kind === 'notification' || rec.peer.kind === 'peer' ? rec.peer.kind : inferred.via;
       const body = typeof rec.peer.body === 'string' && rec.peer.body.trim() ? [{ type: 'text', text: rec.peer.body }] : content;
       this.turnIndex++;
       const msg = this._create({ role: 'user', status: 'complete', content: body, turnIndex: this.turnIndex });
       msg.originKind = 'peer-message';
       msg.peerFrom = from;
+      if (via) msg.peerVia = via;
       this._lastPromptText = text;
       if (emit) this._emit({ op: 'create', message: msg });
       return;

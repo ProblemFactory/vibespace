@@ -221,7 +221,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           if (msg.type === 'event_msg' && msg.payload?.type === 'peer_message_result' && msg.payload.ok === false && msg.payload.text) {
             const cid = session.backendSessionId || session.claudeSessionId;
             console.log(`[deliver] rpc-queue wrapper delivery failed (${msg.payload.reason || 'unknown'}) — re-stashing for ${cid}`);
-            try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); }
+            try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.payload.kind || null, fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } // kind = the wrapper's echo of the frame's PATH (S3 verify F3; an older wrapper echoes none ⇒ unknown, never guessed from the name)
             catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
           }
           // A notification that could NOT be steered fell back to the queue

@@ -12,7 +12,7 @@
  */
 
 const { unknownFields: shapeUnknownFields, unknownFieldsSample } = require('./record-shape.js'); // §3 schema drift (2026-09-21)
-const { peerDisplayName } = require('./message-manager');
+const { peerOriginOf } = require('./message-manager'); // peerOriginOf = peerDisplayName's name + the PATH (S3 verify F3)
 // web-search cards: the ONE results renderer + the twin-dedup key (PURE, shared with the client's title chip)
 const { renderSearchOutput, searchActionKey, NO_SEARCH_DETAILS } = require('./search-card');
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab (the claude normalizer's twin)
@@ -101,6 +101,17 @@ function collabDetailOf(input) {
 // rollout has no such notion) — so a rebuild must recognise the frame alone.
 // Anchored so a user QUOTING a frame mid-text never turns into a peer card.
 const SERVER_PEER_FRAME_RE = /^\s*(?:Message from session "[^"]+" \(via vibespace-msg|\[VibeSpace Background Work\] )/;
+// …and since lane S3 every kind:'notification' delivery (a Background Work
+// event, a channel wake, the browser handback) OPENS with the ONE head that
+// names VibeSpace as the speaker (src/server/conversation-deliver.js) — so the
+// `[VibeSpace Background Work] ` frame is no longer at the start of the text,
+// and a rollout copy of a notification (the app-server's own record, which
+// wins over the wrapper's marked one on the idle path) has the head as its
+// only witness. Anchored the same way: a user QUOTING the head mid-text never
+// turns into a peer card (S3 verify r1: a headed notification rebuilt from the
+// rollout alone rendered as an anonymous "You" bubble).
+const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js');
+const startsWithNoticeHead = (text) => String(text || '').trimStart().startsWith(VIBESPACE_NOTICE_HEAD);
 
 // Peer-record detection for a codex user item (design-harness-plugins §1 P1).
 // Two carriers, in precedence:
@@ -112,17 +123,24 @@ const SERVER_PEER_FRAME_RE = /^\s*(?:Message from session "[^"]+" \(via vibespac
 //     copy and codex's rollout copy of the same user message still collide.
 //   ② the server frame shape (SERVER_PEER_FRAME_RE) — the ROLLOUT copy, an
 //     OLD wrapper's unmarked record, and whichever twin mergeCodexRecords
-//     kept on a rebuild: label parsed by the shared peerDisplayName (claude
+//     kept on a rebuild: label parsed by the shared peerOriginOf (claude
 //     rebuild parity; unknown frame ⇒ generic "another session" label).
 // Typed messages (webui_msg_id — the user's own words, auto-resume's
 // continuation line) are never peer records, whatever their text looks like.
+// …and the PATH the words took (S3 verify F3: the head and the name are words
+// a sender can type): the marker's own `kind` (the ladder's frame kind, which
+// the wrapper records since S3 verify), else the rung that names the DELIVERED
+// text (message-manager peerOriginOf — the vibespace-msg frame ⇒ 'peer', our
+// Background Work frame at the start ⇒ 'notification'), else null.
 function peerRecordOf(item, content) {
   const marker = item.webui_peer && typeof item.webui_peer === 'object' ? item.webui_peer : null;
   const text = content.map((b) => b.text || '').join('\n');
-  if (!marker && !SERVER_PEER_FRAME_RE.test(text)) return null;
+  if (!marker && !SERVER_PEER_FRAME_RE.test(text) && !startsWithNoticeHead(text)) return null;
   const body = marker && typeof marker.body === 'string' && marker.body.trim() ? marker.body : null;
-  const from = marker && marker.name ? String(marker.name) : peerDisplayName(null, text);
-  return { content: body ? [{ type: 'text', text: body }] : content, from };
+  const inferred = peerOriginOf(null, text);
+  const from = marker && marker.name ? String(marker.name) : inferred.name;
+  const via = marker && (marker.kind === 'notification' || marker.kind === 'peer') ? marker.kind : inferred.via;
+  return { content: body ? [{ type: 'text', text: body }] : content, from, via };
 }
 
 function toTs(value) {
@@ -484,7 +502,7 @@ class CodexMessageManager {
   // it: there the wrapper's own buffer record is the carrier (peerRecordOf)
   // and a second card here would double-render live. Containment-free: the
   // delivery site posts once per fire (same-body repeats are legitimate).
-  injectPeerCard({ fromName, text, resetCredit = null }) {
+  injectPeerCard({ fromName, text, resetCredit = null, kind = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     this._currentRk = null; // outside any record context — take the s-fallback id, never the last record's key
@@ -493,7 +511,8 @@ class CodexMessageManager {
     this.turnIndex++;
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
-    msg.peerFrom = fromName ? String(fromName) : null;
+    msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
+    if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3) — the delivery site's own kind
     // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
@@ -1325,6 +1344,7 @@ class CodexMessageManager {
         const msg = this._create({ role: 'user', status: 'complete', content: peer.content, turnIndex: this.turnIndex });
         msg.originKind = 'peer-message';
         msg.peerFrom = peer.from;
+        if (peer.via) msg.peerVia = peer.via; // S3 verify F3: never read off the words
         this._stampUserIdentity(msg, queueMsgId);
         if (emit) this._emit({ op: 'create', message: msg });
         return;

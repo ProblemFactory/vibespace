@@ -466,7 +466,7 @@ function handleQueueOp(msg) {
   const [dropped] = promptQueue.splice(idx, 1);
   // A queued PEER message was already reported delivered — removing it must
   // hand the text back to the delivery ladder (the Stop-drop rule).
-  if (dropped.opts?.peer && dropped.opts.peerText) record('peer_result', { ok: false, reason: 'removed from the queue before it was delivered', text: dropped.opts.peerText, fromName: dropped.opts.peerFrom || null });
+  if (dropped.opts?.peer && dropped.opts.peerText) record('peer_result', { ok: false, reason: 'removed from the queue before it was delivered', text: dropped.opts.peerText, fromName: dropped.opts.peerFrom || null, peerKind: dropped.opts.peerKind || null });
   if (dropped.opts?.nudge) nudgeTurnActive = false;
   record('queue_op_result', { op, id, ok: true, msg_id: dropped.opts?.msgId || '' });
   publishQueue();
@@ -662,7 +662,7 @@ async function handleInput(msg) {
       let droppedNudges = 0, droppedPeers = 0;
       for (const q of dropped) {
         if (q.opts?.peer) droppedPeers++;
-        if (q.opts?.peer && q.opts.peerText) record('peer_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: q.opts.peerText, fromName: q.opts.peerFrom || null });
+        if (q.opts?.peer && q.opts.peerText) record('peer_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: q.opts.peerText, fromName: q.opts.peerFrom || null, peerKind: q.opts.peerKind || null });
         // A dropped NUDGE takes its latch with it. `nudgeTurnActive` is cleared
         // by endPrompt for the nudge's OWN turn — a queue entry that never runs
         // never reaches endPrompt, so leaving the flag set silently disabled
@@ -728,14 +728,14 @@ async function handleInput(msg) {
       const peerKind = msg.kind === 'notification' ? 'notification' : 'peer';
       const body = `Message from ${fromName || 'another session'}:\n${text}`;
       try {
-        record('user', { msgId: '', content: [{ type: 'text', text }], peer: { name: fromName, body: cardText } });
+        record('user', { msgId: '', content: [{ type: 'text', text }], peer: { name: fromName, body: cardText, kind: peerKind } }); // kind = the PATH (S3 verify F3)
         const queued = !!activePrompt;
         // peerText/peerFrom ride the queue entry so a Stop that drops it can
         // hand the message back to the delivery ladder instead of losing it.
-        await runPrompt([{ type: 'text', text: body }], { peer: true, silentQueue: true, peerText: text, peerFrom: fromName });
+        await runPrompt([{ type: 'text', text: body }], { peer: true, silentQueue: true, peerText: text, peerFrom: fromName, peerKind });
         record('peer_result', { ok: true, mode: queued ? 'queued' : 'turn', ...(peerKind === 'notification' && queued ? { steer: 'unsupported' } : {}) });
       } catch (e) {
-        record('peer_result', { ok: false, reason: e.message, text, fromName });
+        record('peer_result', { ok: false, reason: e.message, text, fromName, peerKind }); // peerKind = the PATH (never `kind`: that is the record's own type), so the re-stash drains it as what it was (S3 verify F3)
       }
       return;
     }

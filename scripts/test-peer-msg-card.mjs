@@ -257,7 +257,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
   // that took the steer lane would render as an anonymous "You" bubble — and
   // each one names the submission (round 3), so the steered card and the
   // app-server's own commit twin cannot become two bubbles.
-  check('wrapper records the peer user message WITH the webui_peer marker (name + body) on ALL THREE delivery paths', /webui_peer: \{ name: fromName, body: cardText \}/.test(w) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
+  check('wrapper records the peer user message WITH the webui_peer marker (name + body + the frame\'s kind — S3 verify F3) on ALL THREE delivery paths', /webui_peer: \{ name: fromName, body: cardText, kind: peerKind \}/.test(w) && (w.match(/recordPeerMessage\((true|false), /g) || []).length === 3);
   // WHICH SIDE OF CODEX'S OWN COPY this record lands on is the rebuild's whole
   // question (2026-09-07 round 2): on the IDLE path `turn/start` has already
   // persisted codex's copy when we get here, so ours is the LATE twin and says
@@ -283,7 +283,7 @@ const userRec = (n, text, extra = {}) => ({ timestamp: T(n), type: 'response_ite
       users.length === 1 && users[0].originKind === 'peer-message' && users[0].webuiMsgId === 'peer-1', JSON.stringify(users.map((m) => [m.originKind, m.webuiMsgId])));
   }
   check('…through the ONE reader-facing marker for that fact', /\.\.\.\(afterCommit \? \{ webui_after_commit: true \} : \{\}\)/.test(w));
-  check('…and echoes fromName on failure so the re-stash keeps its label', /peer_message_result', \{ ok: false, reason: e\.message, text, fromName \}/.test(w));
+  check('…and echoes fromName (and the kind, S3 verify F3) on failure so the re-stash keeps its label and its path', /peer_message_result', \{ ok: false, reason: e\.message, text, fromName, kind: peerKind \}/.test(w));
   check('stdout/codex-events re-stash carries the echoed fromName (S5 consumer module)', /fromName: msg\.payload\.fromName \|\| null, text: String\(msg\.payload\.text\)/.test(read('src/server/stdout/codex-events.js')));
   check('mergeCodexRecords fingerprint strips webui_peer', /const \{[^}]*webui_peer[^}]*\.\.\.stablePayload \} = payload;/.test(read('src/codex-session-store.js')));
   check('codex recordKey strips webui_peer', /const \{[^}]*webui_peer[^}]*\.\.\.stable \} = payload;/.test(read('src/codex-message-manager.js')));

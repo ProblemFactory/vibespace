@@ -314,6 +314,17 @@
 .chat-peer-message .chat-peer-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--magenta, var(--accent)); font-weight: 600; margin-bottom: 4px; }
 .chat-peer-message .chat-text { font-size: 13px; }
 .chat-peer-name { text-decoration: underline dotted; cursor: pointer; }
+/* the head's sentence is ONE flex item (lane S3): as three items the 6 px gap
+   rendered `Message from “ VibeSpace browser ”` */
+.chat-peer-message .chat-peer-title { min-width: 0; }
+/* A VIBESPACE NOTICE (lane S3): the browser handback, a Background Work event, a
+   channel wake — VibeSpace speaking, titled "VibeSpace · <what happened>", in
+   the accent tint (a peer message keeps its magenta). Two-class selector for
+   the same cascade reason as the peer card. */
+.chat-msg.chat-vs-notice { display: block; border: 1px solid var(--border); border-left: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); border-radius: var(--radius-sm); padding: 8px 12px; margin: 4px 0; }
+.chat-vs-notice .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
+.chat-vs-notice .chat-vs-notice-title { min-width: 0; overflow-wrap: anywhere; }
+.chat-vs-notice .chat-text { font-size: 13px; }
 .chat-peer-name:hover { text-decoration: underline; }
 
 /* ── Codex multi-agent collab rows (B-7473) ──
@@ -1210,6 +1221,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* chat.showHookCards=false — hides every hook card instantly (class on body) */
 body.hide-hook-cards .chat-msg-hook { display: none; }
+body.hide-assistant-notes .chat-vs-note { display: none; } /* lane S3: VibeSpace's notes to the assistant — chat.showAssistantNotes off */
 body.hide-stop-hook-notice .chat-stop-hook-notice { display: none; } /* the CLI's 'Stop hook error occurred' notice — off by default (chat.showStopHookErrorNotice) */
 
 /* chat.hideEmptyThinking (default ON) — thinking cards with no text

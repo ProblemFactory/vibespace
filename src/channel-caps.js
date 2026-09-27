@@ -714,7 +714,7 @@ function deliveryLaneText(lane, { t = defaultT } = {}) {
     case 'message': return t('a message into the session');
     case 'channel': return t('the channel socket');
     case 'rpc-queue': return t('the queue of the running turn');
-    case 'user-inbox': return t('your inbox');
+    case 'user-inbox': return t('the For you tray'); // the lane CODE keeps its name; the words name the button the user sees (S3 verify F6)
     case 'remote-message': return t('a message on the owning machine');
     case 'stash': return t('the next-turn stash');
     case 'none': return t('nowhere');

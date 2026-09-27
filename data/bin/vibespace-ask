@@ -38,7 +38,7 @@ const options = optionsRaw === undefined ? undefined : optionsRaw.split('|').map
 const noticeIdx = rawArgs.indexOf('--notice');
 const kind = noticeIdx >= 0 ? (rawArgs.splice(noticeIdx, 1), 'notice') : undefined;
 const USAGE = [
-  'usage — mirror questions for the USER onto their global inbox (they may not be watching this window):',
+  'usage — mirror questions for the USER into their For you tray, bottom right of their screen (they may not be watching this window):',
   '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice]',
   '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
@@ -46,7 +46,7 @@ const USAGE = [
   '  vibespace-ask resolve <id|text>       the user answered (in chat counts)? resolve it YOURSELF immediately',
   '  vibespace-ask show <id>               print one item of this session in full (any status, with the user\'s inbox reply)',
   '  a reply from the inbox arrives as a user message opening with [For you reply #<id>] and a quote of your item',
-  '  (whenever you ask in chat, ALSO file it here — both channels, always; the FULL content goes in your CHAT reply, this inbox only notifies; your own working steps still belong in your todo list)',
+  '  (whenever you ask in chat, ALSO file it here — both channels, always; the FULL content goes in your CHAT reply, the For you tray only notifies; your own working steps still belong in your todo list)',
 ].join('\n');
 
 async function call(body) {
@@ -114,8 +114,8 @@ async function main() {
 async function fileItem(text) {
   if (!text) { console.error(USAGE); process.exit(1); }
   const { item } = await call({ add: { text, detail, urgency, kind, options } });
-  console.log((item.existing ? 'already filed (refreshed): ' : 'filed for the user: ') + item.text + '  (' + item.id + ')');
+  console.log((item.existing ? 'already in the user\'s For you tray (refreshed): ' : 'added to the user\'s For you tray (bottom right of their screen): ') + item.text + '  (' + item.id + ')');
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
-  console.log('REMINDER: the inbox is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the inbox as the only copy.');
+  console.log('REMINDER: the For you tray is only a NOTIFICATION MIRROR — now ALSO write the full question/content (options + your recommendation) in your CHAT REPLY to the user. Do not end the turn with the tray as the only copy. If you mention it, say "the For you tray at the bottom right" — never "your inbox" (no such word is on their screen).');
 }
 main().catch((e) => { console.error('vibespace-ask:', e.message); process.exit(1); });

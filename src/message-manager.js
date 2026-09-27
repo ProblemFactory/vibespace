@@ -15,6 +15,7 @@
 
 const { rewoundByRecord, applyRewound, rewoundOp } = require('./rewind-ops.js');
 const { workflowNameFromAck, shortWorkflowName } = require('./workflow-name.js');
+const { VIBESPACE_NOTICE_HEAD } = require('./notification-senders.js'); // PURE: the head our notifications open with (S3 verify F3: a peer record's PATH, peerOriginOf)
 const { offerOf } = require('./reset-credit.js'); // PURE: the reset-credit offer a peer card may carry (design-reset-credits §5)
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { staleFromDenyMessage } = require('./browser-stale.js'); // PURE (lane J r2): a deny naming browser_paused = the takeover's stale answer
@@ -149,21 +150,42 @@ function commandNames(commands) {
 // records) → a non-socket origin.from → null (renderer shows a generic label;
 // a unix socket path is never a user-facing identity).
 function peerDisplayName(origin, text) {
-  if (origin && origin.name) return String(origin.name);
-  const m = /<cross-session-message[^>]*\bfrom-name="([^"]+)"/.exec(String(text || ''));
-  if (m) return m[1];
+  return peerOriginOf(origin, text).name;
+}
+// Our Background Work frame counts as OURS only at the START of the delivered
+// text — after the CLI's own "Another Claude session sent a message:" wrap and
+// (since lane S3) our notice head. Anywhere else it is somebody QUOTING it (a
+// group wake carrying a member's words), which must never name the record.
+const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const BW_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?(?:' + escRe(VIBESPACE_NOTICE_HEAD) + '\\s*)?\\[VibeSpace Background Work\\] \\w+ "([^"]+)"');
+/**
+ * WHO sent a transcript peer record and WHICH PATH its words took (S3 verify
+ * F3 — the head and a name are words a sender can type; the rung that names a
+ * record is not). → {name, via}:
+ *   origin.name / a cross-session `from-name` / the vibespace-msg frame / a
+ *   non-socket origin.from — a name the SENDER chose ⇒ via 'peer' (never a
+ *   notice, whatever it is called or says);
+ *   our Background Work frame at the start ⇒ via 'notification';
+ *   nothing names it ⇒ {name:null, via:null} (the renderer then reads the head
+ *   as the witness of a name-less server post).
+ * peerDisplayName is its `.name` (every existing caller unchanged).
+ */
+function peerOriginOf(origin, text) {
+  if (origin && origin.name && String(origin.name).trim()) return { name: String(origin.name).trim(), via: 'peer' };
+  const s = String(text || '');
+  const m = /<cross-session-message[^>]*\bfrom-name="([^"]+)"/.exec(s);
+  if (m) return { name: m[1], via: 'peer' };
   // SERVER-posted deliveries (vibespace-msg / Background Work) reach the CLI
   // as an unregistered poster: origin has NO name and from:"unknown" — but the
   // framed text itself names the sender. Parse it so rebuilds match the card
   // the delivery site rendered live (2.363.0).
-  const s = String(text || '');
   const vm = /Message from session "([^"]+)" \(via vibespace-msg/.exec(s);
-  if (vm) return vm[1];
-  const bw = /\[VibeSpace Background Work\] \w+ "([^"]+)"/.exec(s);
-  if (bw) return 'Background Work · ' + bw[1];
+  if (vm) return { name: vm[1], via: 'peer' };
+  const bw = BW_AT_START_RE.exec(s);
+  if (bw) return { name: 'Background Work · ' + bw[1], via: 'notification' };
   const f = origin && origin.from;
-  if (f && f !== 'unknown' && !String(f).startsWith('uds:')) return String(f);
-  return null;
+  if (f && f !== 'unknown' && !String(f).startsWith('uds:')) return { name: String(f), via: 'peer' };
+  return { name: null, via: null };
 }
 
 // Result-error classes the UI ACTS on (2.365.0). 'prompt-too-long' = the
@@ -271,7 +293,7 @@ class MessageManager {
   // record never crosses stdout, and its body-less result.origin is skipped).
   // No containment dedup: the delivery site posts once per fire (same-body
   // repeats are legitimate — the 2.362.2 review lesson).
-  injectPeerCard({ fromName, text, msgId = null, resetCredit = null }) {
+  injectPeerCard({ fromName, text, msgId = null, resetCredit = null, kind = null }) {
     const body = String(text || '').trim();
     if (!body) return null;
     // A harness-delivered message carries the CLI's msg_id (the turn-start
@@ -285,7 +307,8 @@ class MessageManager {
     this.turnIndex++;
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
-    msg.peerFrom = fromName ? String(fromName) : null;
+    msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
+    if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3) — the delivery site's own kind, never read off the words
     // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
     // card / the auto-resume arm card — two numbers-and-a-mode, never markup
     const rc = offerOf(resetCredit);
@@ -1222,7 +1245,9 @@ class MessageManager {
         // same provenance law as the idle-wake user record — render the
         // peer card, never a "You" bubble of someone else's words
         msg.originKind = 'peer-message';
-        msg.peerFrom = peerDisplayName(a.origin, text);
+        const po = peerOriginOf(a.origin, text);
+        msg.peerFrom = po.name;
+        if (po.via) msg.peerVia = po.via; // S3 verify F3: the rung that named it, never the words
         this._notePeerMsgId(a.origin.msg_id);
       } else {
         msg.typed = true; // the user's own words — never a notification card
@@ -1515,7 +1540,9 @@ class MessageManager {
         // path — the turn appeared to start from nothing. Same provenance law
         // as task-notification: origin.kind wins, render a distinct card.
         msg.originKind = 'peer-message';
-        msg.peerFrom = peerDisplayName(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
+        const po = peerOriginOf(raw.origin, (raw.message && (typeof raw.message.content === 'string' ? raw.message.content : (raw.message.content || []).map((b) => b.text || '').join('\n'))) || '');
+        msg.peerFrom = po.name;
+        if (po.via) msg.peerVia = po.via; // S3 verify F3: the rung that named it, never the words
         this._notePeerMsgId(raw.origin.msg_id);
       }
       else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
@@ -1676,7 +1703,9 @@ class MessageManager {
       this._notePeerMsgId(po.msg_id);
       const pm = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: po.body }], turnIndex: this.turnIndex });
       pm.originKind = 'peer-message';
-      pm.peerFrom = peerDisplayName(po, po.body);
+      const pv = peerOriginOf(po, po.body);
+      pm.peerFrom = pv.name;
+      if (pv.via) pm.peerVia = pv.via; // S3 verify F3: the rung that named it, never the words
       if (emit) this._emit({ op: 'create', message: pm });
     }
     this.turnIndex++;
@@ -1910,4 +1939,4 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'bridge_status',          // the TUI's "/remote-control is active" banner (transcript 2.1.81, 11 rows; NOT in the SDK union — record-shape CORPUS_ONLY_SUBTYPES); VibeSpace never runs the remote-control bridge
 ]);
 
-module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };
+module.exports = { splitToolResultContent, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson };

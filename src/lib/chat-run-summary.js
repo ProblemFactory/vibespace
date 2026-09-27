@@ -11,7 +11,7 @@
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
 // from the label (2.369.34); countKinds() now zero-fills from this list and
 // the test asserts SUMMARY_ORDER covers it.
-export const RUN_KINDS = ['thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'skill', 'unknown'];
+export const RUN_KINDS = ['note', 'thinking', 'bash', 'read', 'search', 'image', 'write', 'memory', 'mcp', 'lookup', 'agent', 'report', 'skill', 'unknown'];
 
 // Counts the CALLER supplies that are not card kinds — they are never
 // produced by messageKind() and never zero-filled, so an unset one simply
@@ -27,6 +27,11 @@ export const SUMMARY_EXTRAS = ['subAgentIn'];
 // the kind ships UNCHECKED in chat.collapseKinds; the line only appears for a
 // user who ticked it.
 const SUMMARY_ORDER = [
+  // FIRST (lane S3, naive-user study 2): a VibeSpace note to the assistant opens
+  // the run it heads (the Stop nudge, then the vibespace-status call it asked
+  // for). A run holding exactly one note says that note's own sentence
+  // (runSummaryParts, `notes`); several say this count line.
+  ['note', '{n} VibeSpace notes to the assistant'],
   ['thinking', '{n} thinking'],
   ['bash', '{n} Bash'],
   ['read', '{n} file reads'],
@@ -106,7 +111,123 @@ export function messageKind(m, { toolCard, isMemoryPath = () => false }) {
   }
   if (m?.role === 'assistant' && Array.isArray(m.content) && m.content.length
       && m.content.every((b) => b.type === 'thinking')) return 'thinking';
+  if (assistantNoteOf(m)) return 'note'; // lane S3: text VibeSpace addressed to the ASSISTANT — its own fold kind, default on
   if (m?.noticeKind === 'unknown-record' || m?.noticeKind === 'unknown-fields') return 'unknown'; // 2.369.120: the fall-back card has its own toggle; the §3 drift card shares it
+  return null;
+}
+
+// ── TEXT ADDRESSED TO THE ASSISTANT (lane S3, naive-user study 2 — "聊天里到处是
+// 给助手看的内部文字"): the Stop hook's bookkeeping nudge, the codex twin of it
+// (a `<vibespace-reminder>` turn the wrapper starts), and every hook card whose
+// payload is one of VibeSpace's own injection blocks (the session-start tools
+// intro, a Task Group's context, the per-turn reminder, the user's agent
+// instructions). Every one was rendered as a card the user read as part of the
+// conversation — the bookkeeping nudge expanded to a paragraph of CLI syntax.
+// They are NOTES: one grey line saying what VibeSpace told the assistant, the
+// text behind the expander, their own fold kind ('note', default on), and a
+// switch that hides them entirely (chat.showAssistantNotes).
+//
+// Recognised from the TEXT, never from a flag a transport may drop: the nudge
+// carries its own marker phrase (both the pre-S3 wording and the S3 wording
+// open with it — src/agent-routes.js stopNudgeReason), and every injection
+// block opens with its `<vibespace-…>` tag. A message the USER typed
+// (`typed`, the CLI's promptSource) is never a note, whatever it says.
+export const NOTE_MARKER = 'VibeSpace bookkeeping before you stop';
+// Which injection block names which note, most specific first: a delivery
+// that carries a Task Group's context AND the reminder is "its task context".
+const NOTE_TAGS = Object.freeze([
+  ['vibespace-task-context', 'context'],
+  ['vibespace-task-update', 'context'],
+  ['vibespace-group-manager', 'context'],
+  ['vibespace-session-tools', 'tools'],
+  ['vibespace-reminder', 'reminder'],
+  ['vibespace-user-instructions', 'instructions'],
+]);
+/** The one sentence each note kind shows (an i18n KEY — the caller runs t()). */
+export const NOTE_SENTENCES = Object.freeze({
+  status: 'VibeSpace reminded the assistant to update its status',
+  tools: 'VibeSpace told the assistant about its tools',
+  context: 'VibeSpace gave the assistant its task context',
+  reminder: 'VibeSpace reminded the assistant of its tools',
+  instructions: 'VibeSpace passed your agent instructions to the assistant',
+  note: 'VibeSpace passed a note to the assistant',
+});
+export function noteSentence(what) { return NOTE_SENTENCES[what] || NOTE_SENTENCES.note; }
+const textOf = (m) => (Array.isArray(m?.content) ? m.content.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('') : '');
+function noteOfText(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  if (/^Stop hook feedback:/.test(s)) return s.includes(NOTE_MARKER) ? 'status' : null; // another hook's Stop feedback (a /goal check) keeps its own card
+  // a delivery made of VibeSpace blocks: it OPENS with one (a hook payload may
+  // put the user's own <system-reminder> notices after it, never before —
+  // agent-routes composes preamble → blocks → notices)
+  if (!/^<vibespace-[\w-]+[\s>]/.test(s)) return null;
+  if (s.includes(NOTE_MARKER)) return 'status'; // codex: the wrapper's turn-end nudge, a <vibespace-reminder> turn
+  for (const [tag, what] of NOTE_TAGS) if (s.includes('<' + tag)) return what;
+  return 'note';
+}
+/**
+ * Is this normalized message a VibeSpace note to the assistant? →
+ * `{ what, text }` (what ∈ NOTE_SENTENCES keys, text = the raw payload for the
+ * expander) or null. User records: not typed, not a peer / auto-resume card.
+ * System records: a hook card (`hookData`) whose output is a VibeSpace block.
+ */
+export function assistantNoteOf(m) {
+  if (!m || typeof m !== 'object') return null;
+  if (m.role === 'user') {
+    if (m.typed || m.originKind === 'peer-message' || m.originKind === 'auto-resume' || m.imageAttachment) return null;
+    const text = textOf(m);
+    const what = noteOfText(text);
+    return what ? { what, text: text.trim() } : null;
+  }
+  if (m.role === 'system') {
+    const h = m.content?.[0]?.hookData;
+    if (!h || typeof h.output !== 'string') return null;
+    const what = noteOfText(h.output);
+    return what ? { what, text: h.output.trim() } : null;
+  }
+  return null;
+}
+
+// ── HARNESS BOOKKEEPING IN A TOOL RESULT (lane S3): the CLI answers some agent
+// operations with text written for the MODEL — a background Agent's launch ack
+// ("Async agent launched successfully. (This tool result is internal metadata —
+// never quote or paste any part of it …)"), a TaskStop's raw JSON
+// ({"message":"Successfully stopped task: <id> (<what>)","task_id":…}). The
+// card's one visible line was that text. `toolResultSentence` turns it into a
+// plain sentence; the raw record stays behind the card's expander. → `{key,
+// params}` (an i18n key for t()) or `{text}` (already plain) or null (the
+// tool's own first line is fine as it is).
+const INTERNAL_RE = /\(This tool result is internal metadata[^)]*\)|\bnever quote or paste\b/i;
+const clip = (v, n = 100) => { const s = String(v == null ? '' : v).split('\n')[0].trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+function jsonObjectOf(s) {
+  if (!/^\{/.test(s)) return null;
+  try { const j = JSON.parse(s); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; }
+}
+export function toolResultSentence(block) {
+  const tn = block?.toolName;
+  const out = String(block?.output == null ? '' : block.output).trim();
+  const inp = block?.input && typeof block.input === 'object' ? block.input : {};
+  if ((tn === 'Agent' || tn === 'Task') && /^Async agent launched/i.test(out)) {
+    return { key: 'Helper started: {what}', params: { what: clip(inp.description, 120) || clip(inp.subagent_type) || 'a helper' } };
+  }
+  if (tn === 'TaskStop' || tn === 'KillShell') {
+    const j = jsonObjectOf(out);
+    const msg = String((j && j.message) || (j ? '' : out));
+    const m = /^Successfully (?:stopped task|killed shell):?\s*(\S+)\s*(?:\(([\s\S]*)\))?\s*$/.exec(msg.trim());
+    const what = clip((m && m[2]) || (j && (j.description || j.command)) || (m && m[1]) || (j && (j.task_id || j.shell_id)) || '');
+    if (m || (j && (j.task_id || j.shell_id))) return { key: 'Stopped: {what}', params: { what: what || 'a background task' } };
+  }
+  if (tn === 'TaskOutput') {
+    const st = /<status>\s*([\w-]+)\s*<\/status>/.exec(out)?.[1];
+    if (st) return { key: 'Background task: {status}', params: { status: st } };
+  }
+  // any OTHER result that declares itself internal: never show the declaration
+  if (INTERNAL_RE.test(out)) {
+    const clean = out.replace(/\(This tool result is internal metadata[^)]*\)/gi, '').split('\n')
+      .map((l) => l.trim()).filter((l) => l && !INTERNAL_RE.test(l) && !/\(internal\)\s*$/.test(l))[0] || '';
+    return clean ? { text: clip(clean, 120) } : { key: 'Done', params: {} };
+  }
   return null;
 }
 
@@ -136,11 +257,14 @@ export function countKinds(kinds) {
  * @param {Iterable<string>} mcpServers distinct servers among the run's mcp cards
  * @param {(key:string, params?:object)=>string} t i18n
  */
-export function runSummaryParts(byKind, mcpServers, t) {
+export function runSummaryParts(byKind, mcpServers, t, notes = []) {
   const parts = [];
   const servers = [...(mcpServers || [])];
   for (const [kind, key] of SUMMARY_ORDER) {
     if (!key || !byKind?.[kind]) continue;
+    // ONE note says what it was ("VibeSpace reminded the assistant to update
+    // its status"); the count line is for a run carrying several
+    if (kind === 'note' && byKind.note === 1 && notes.length === 1) { parts.push(t(noteSentence(notes[0]))); continue; }
     let s = t(key, { n: byKind[kind] });
     if (kind === 'mcp' && servers.length === 1) s += ` (${servers[0]})`;
     parts.push(s);
@@ -155,11 +279,12 @@ export function runSummaryParts(byKind, mcpServers, t) {
  * module, its POSITION belongs to this one composer, so the header, the
  * floating run bar and the run footer can never read different orders. This
  * module stays import-free by taking the string, not the module.
- * @param {{byKind:object, mcpServers?:Iterable<string>, files?:string[], nErr?:number, running?:boolean, collabPart?:string}} run
+ * @param {{byKind:object, mcpServers?:Iterable<string>, files?:string[], nErr?:number, running?:boolean, collabPart?:string, notes?:string[]}} run
+ *   notes = the `what` of every note member (assistantNoteOf), in render order
  *   files = display names in render order (writes already prefixed '✎ '), deduped by the caller
  */
-export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '' }, t) {
-  const kindParts = runSummaryParts(byKind, mcpServers, t);
+export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [] }, t) {
+  const kindParts = runSummaryParts(byKind, mcpServers, t, notes);
   if (collabPart) kindParts.push(collabPart);
   let label = kindParts.join(' · ');
   // touched files (user ask: don't lose the paths), capped at 4 + "+N"

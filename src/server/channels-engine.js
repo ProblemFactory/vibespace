@@ -3222,7 +3222,7 @@ function create(deps = {}) {
       }
       const ok = !!(r && r.ok);
       let stashed = false;
-      if (!ok && deliver && typeof deliver.stashFor === 'function') { try { deliver.stashFor(target.cid, { source: 'channel', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
+      if (!ok && deliver && typeof deliver.stashFor === 'function') { try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
       const wk = { at: t, n, cid: target.cid, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: ok ? null : String((r && r.reason) || 'refused').slice(0, 200), refused: (r && r.refused) || null, digest: true, grain: source, conversations: groups.length };
       await store.index.update((ix) => {
         const own = source === 'account' ? (ix.accountAssignments || {})[rec.id] : (ix.patternAssignments || {})[patternId];
@@ -3391,7 +3391,7 @@ function create(deps = {}) {
     if (!ok && deliver && typeof deliver.stashFor === 'function') {
       // The ladder's own durable stash: drained into the agent's next
       // context injection (renderMsgStash), so a refusal loses nothing.
-      try { deliver.stashFor(target.cid, { source: 'channel', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
+      try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
     await store.index.update((ix) => {
       const e2 = store.index.entry(rec.id, convId, { create: false });
@@ -4036,7 +4036,7 @@ function create(deps = {}) {
       try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
-        try { deliver.stashFor(cid, { source: 'channel-receipt', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] receipt stash failed: ${(err && err.message) || err}`); }
+        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] receipt stash failed: ${(err && err.message) || err}`); }
       }
     }
     const delivery = { at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String((r && r.reason) || 'refused').slice(0, 200) };

@@ -224,6 +224,44 @@ function handbackText({ cause = 'explicit', label = null, url = '', heldMs = 0, 
   return `${head} ${where}. Re-orient before continuing — the page may have changed (a login, a captcha, a navigation).`;
 }
 
+/**
+ * READ BACK the words `handbackText` wrote (lane S3): the chat card of a
+ * delivered handback is titled "VibeSpace · you handed control back after 17 s
+ * — the page is now …", and on a transcript rebuild the card has only the
+ * delivered TEXT to go on. This module wrote that text, so this module is the
+ * one that parses it (test-chat-hygiene round-trips every cause × target).
+ * → { cause, target, dur, url, title: {key, params} } | null. The title is an
+ * i18n KEY: the reader's device words it, the user is "you".
+ */
+const DUR = '(\\d+ (?:s|min|h))';
+const WHO = '(?:your (browser|window)|the "[^"]*" (browser|window))';
+function handbackFacts(text) {
+  const s = String(text == null ? '' : text);
+  const url = (/Current URL: (\S+?)\.(?:\s|$)/.exec(s) || [])[1] || null;
+  const tg = (m) => (m && (m[1] || m[2])) || 'browser';
+  let m;
+  if ((m = new RegExp(`The user handed ${WHO} back to you after ${DUR} of driving it\\.`).exec(s))) {
+    const target = tg(m), dur = m[3];
+    const title = target === 'window' ? { key: 'you handed control of the window back after {dur}', params: { dur } }
+      : url ? { key: 'you handed control back after {dur} — the page is now {url}', params: { dur, url } }
+        : { key: 'you handed control back after {dur}', params: { dur } };
+    return { cause: 'explicit', target, dur, url, title };
+  }
+  if ((m = new RegExp(`The user's takeover of ${WHO} lapsed \\(no input for ${DUR}\\)`).exec(s))) {
+    return { cause: 'idle', target: tg(m), dur: m[3], url, title: { key: 'your takeover lapsed after {dur} without input — the assistant has control again', params: { dur: m[3] } } };
+  }
+  if ((m = new RegExp(`The user closed the live view that held ${WHO}`).exec(s))) {
+    return { cause: 'viewer-left', target: tg(m), dur: null, url, title: { key: 'you closed the live view — the assistant has control again', params: {} } };
+  }
+  if ((m = new RegExp(`The user stopped ${WHO} while they were driving it`).exec(s))) {
+    return { cause: 'stop', target: tg(m), dur: null, url, title: { key: tg(m) === 'window' ? 'you stopped the window while driving it' : 'you stopped the browser while driving it', params: {} } };
+  }
+  if ((m = new RegExp(`Control of ${WHO} is back with you \\(([\\w-]+)\\)`).exec(s))) {
+    return { cause: m[3], target: tg(m), dur: null, url, title: { key: 'the assistant has control again', params: {} } };
+  }
+  return null;
+}
+
 /** The zero-spend notice (session-status `pushNotice`, kind `browser-handback`)
  *  that rides the user's own next message when nothing is delivered. */
 function handbackNotice({ cause = 'idle', label = null, url = '', heldMs = 0, idleMs = DEFAULT_TAKEOVER_IDLE_MS, at = 0, target = 'browser', handle = null } = {}) {
@@ -498,7 +536,7 @@ function inputSummary(states, hasBrowser) {
 module.exports = {
   INPUT_SIDES, HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
   inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
-  browserPausedRefusal, handbackText, handbackNotice, renderHandbackNotice, idleInboxItem,
+  browserPausedRefusal, handbackText, handbackFacts, handbackNotice, renderHandbackNotice, idleInboxItem,
   confirmationFromUpstream, confirmationResolvedFromUpstream, confirmationView, decisionArgv, decisionVerdict,
   agentCursorFromCommand, modeBadge, inputSummary,
   // lane J r2: the keyboard while you drive; stale approvals

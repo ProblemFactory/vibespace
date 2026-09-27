@@ -19,6 +19,7 @@ import { registerCommand, registerKeybinding, runCommand, hasCommand } from './c
 // "no list" is the bug this constant now prevents.
 import { LEGACY_QUEUE_VERBS, worktreeLatchWrite } from '../backend-caps.js';
 import { mcpParts, messageKind, foldToggleFor, countKinds, runSummaryLabel, foldPassMode } from './chat-run-summary.js';
+import { assistantNoteOf } from './chat-run-summary.js'; // lane S3: a run's note members say which note they were
 import { collabTrafficStats, collabHeadText, collabRunPart, subAgentStreamLabel } from '../collab-row.js';
 import { TEXT_WINDOW } from '../text-window.js';
 import { attachSlab } from './view-visibility.js'; // perf r1: which slab an attach asks for // PURE: the attach slab's numbers (the rescue's harm bound reads maxRecords)
@@ -6174,8 +6175,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
       const hideEmptyThink = this.app?.settings?.get('chat.hideEmptyThinking') !== false;
       const hooksHidden = document.body.classList.contains('hide-hook-cards');
       const stopNoticeHidden = document.body.classList.contains('hide-stop-hook-notice');
+      const notesHidden = document.body.classList.contains('hide-assistant-notes'); // lane S3: chat.showAssistantNotes off
       const kindsArr = this.app?.settings?.get('chat.collapseKinds');
-      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search', 'image']);
+      const kinds = new Set(Array.isArray(kindsArr) ? kindsArr : ['note', 'thinking', 'bash', 'read', 'memory', 'mcp', 'agent', 'search', 'image']);
       // per-member classification (also used by flush() for the summary) —
       // the PURE classifier in chat-run-summary.js (semantic collapseKind hint
       // first, claude tool-name map as the fallback; pinned by test-fold-ux)
@@ -6186,6 +6188,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         if (hideEmptyThink && el.classList.contains('chat-empty-thinking')) return 'skip';
         if (hooksHidden && el.classList.contains('chat-msg-hook')) return 'skip';
         if (stopNoticeHidden && el.classList.contains('chat-stop-hook-notice')) return 'skip';
+        if (notesHidden && el.classList.contains('chat-vs-note')) return 'skip';
         const m = el._rawMsg;
         if (!m) return null;
         // A card waiting for the user's Allow/Deny (or an AskUserQuestion
@@ -6223,7 +6226,10 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // one (user directive: "看到 bash 直接开始折叠, 无论多少条"; a lone tool
         // card still shrinks several lines → one). Pure-thinking runs need ≥2
         // so a lone thought stays inline.
-        const hasTool = members.some((el) => el.classList.contains('chat-msg-tool-result'));
+        // A VibeSpace NOTE folds like a tool card (lane S3): alone it is already
+        // one line, and beside the vibespace-status call it asked for the pair is
+        // bookkeeping the user never needs open — "default-collapsed".
+        const hasTool = members.some((el) => el.classList.contains('chat-msg-tool-result') || el.classList.contains('chat-vs-note'));
         // THE IMAGE MEMBER IS EXEMPT, NOT THE RUN (image-card review round 2, 2026-09-06).
         // An image the owner asked to SEE must not vanish into "1 image read"
         // (2.369.48): 'image' ships ON in chat.collapseKinds and the rule above
@@ -6297,8 +6303,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
           // without a second count anywhere.
           const collabStats = collabTrafficStats({ rows: collabRows });
           const liveCollabEl = this._elements.get(this._liveCollabId());
+          const notes = members.filter((el, i) => memberKinds[i] === 'note').map((el) => assistantNoteOf(el._rawMsg)?.what || 'note');
           const mkLabel = ({ now = Date.now(), live = false } = {}) => runSummaryLabel({
-            byKind, mcpServers, files, nErr, running,
+            byKind, mcpServers, files, nErr, running, notes,
             collabPart: collabRunPart(collabStats, { now, live, t }),
           }, t);
           const collabLive = !!liveCollabEl && members.includes(liveCollabEl);

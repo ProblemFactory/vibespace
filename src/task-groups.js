@@ -431,7 +431,7 @@ class TaskGroupManager {
       '(states: working | needs-input | blocked | review | done — `done` when this piece of work is finished)');
     if (T.ask) out.push(
       '',
-      'Whenever you ask the user anything or end a turn waiting on them — file it AND write the full question (options + recommendation) in your CHAT REPLY; the inbox only notifies, never the sole copy:',
+      'Whenever you ask the user anything or end a turn waiting on them — file it in their For you tray (bottom right of their screen: say that, never "your inbox") AND write the full question (options + recommendation) in your CHAT REPLY; the tray only notifies, never the sole copy:',
       `\`\`\``,
       `vibespace-ask "the question" --detail "options + your recommendation" --urgency high`,
       `\`\`\``,

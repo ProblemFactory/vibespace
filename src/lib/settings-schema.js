@@ -357,6 +357,17 @@ const SETTINGS_SCHEMA = {
     description: t('On: assistive tools see the messages near where you are reading — every rendered card farther than two viewports from the visible area is marked aria-hidden, so the browser\'s accessibility tree stays small however long the conversation grows (nothing visual or keyboard-reachable changes). Off: whole transcripts are marked aria-hidden — turn it off when an assistive tool (an IME, PowerToys, …) still makes Chrome or Edge freeze on large conversations (Chrome serialises the tree on the browser UI thread: 39 s for 27k nodes, measured).'),
     category: t('Chat'), liveApply: true,
   },
+  // lane S3 (naive-user study 2, "聊天里到处是给助手看的内部文字"): what VibeSpace
+  // tells the ASSISTANT — the Stop hook's bookkeeping nudge, the session-start
+  // tools intro, the per-turn reminder — renders as ONE grey line (and folds
+  // under the 'note' kind of chat.collapseKinds). Off = never shown at all; the
+  // assistant still receives every word.
+  'chat.showAssistantNotes': {
+    type: 'boolean', default: true,
+    label: t('Show VibeSpace notes to the assistant'),
+    description: t('VibeSpace talks to the assistant too: a reminder to update its status before it stops, the list of VibeSpace tools at the start of a session, a short per-turn reminder. Each shows as one grey line ("VibeSpace reminded the assistant to update its status") you can expand to read. Off hides them entirely — the assistant still receives them. Applies to open chats instantly.'),
+    category: t('Chat'), liveApply: true,
+  },
   'chat.showStopHookErrorNotice': {
     type: 'boolean', default: false,
     label: t("Show the CLI's 'Stop hook error' notice"),
@@ -391,8 +402,12 @@ const SETTINGS_SCHEMA = {
     // SEMANTIC kinds, one global set for every backend (Track B, owner-decided:
     // per-provider checkbox copies = config sprawl) — each backend's normalizer
     // maps its own tool names in (claude Bash / codex exec are both 'bash').
-    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image'],
+    type: 'multiSelect', default: ['thinking', 'bash', 'read', 'memory', 'mcp', 'skill', 'agent', 'search', 'image', 'note'],
     options: [
+      // lane S3 (naive-user study 2): what VibeSpace says to the ASSISTANT — the
+      // Stop nudge, the tools intro, the per-turn reminder. ON by default: a note
+      // is folded with the calls it asked for (chat.showAssistantNotes hides it)
+      { value: 'note', label: t('VibeSpace notes to the assistant (status reminders, the tools intro, per-turn reminders)') },
       { value: 'thinking', label: t('Thinking blocks') },
       { value: 'search', label: t('Web searches / fetches (WebSearch, WebFetch, web_search)') },
       { value: 'image', label: t('Image views (Read of an image file / view_image)') },
@@ -583,8 +598,8 @@ const SETTINGS_SCHEMA = {
   },
   'agents.toolAsk': {
     type: 'boolean', default: true,
-    label: t('Agent tool: vibespace-ask (your inbox)'),
-    description: t('Lets agents mirror questions/decisions onto your "For you" inbox. OFF: not taught, endpoint refuses with skip-and-continue guidance — agents ask only in chat.'),
+    label: t('Agent tool: vibespace-ask (the For you tray)'),
+    description: t('Lets agents mirror questions/decisions into the For you tray. OFF: not taught, endpoint refuses with skip-and-continue guidance — agents ask only in chat.'),
     category: t('Integration'), liveApply: true,
   },
   'agents.toolTask': {

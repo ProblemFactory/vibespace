@@ -63,6 +63,13 @@ try {
     m.runLocalMigrations();
     const st2 = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
     ok(!st2['chat.collapseKinds'].includes('agent'), 'a post-migration explicit un-tick is never re-added');
+    // lane S3: the 'note' kind (VibeSpace's notes to the assistant) rides the same one-shot rule
+    ok(st['chat.collapseKinds'].includes('note'), "lane S3: a saved collapse-kinds selection gains the default-on 'note' kind once");
+    st2['chat.collapseKinds'] = st2['chat.collapseKinds'].filter((k) => k !== 'note');
+    fs.writeFileSync(path.join(rootDir, 'data', 'settings.json'), JSON.stringify(st2));
+    m.runLocalMigrations();
+    const st3 = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'settings.json'), 'utf-8'));
+    ok(!st3['chat.collapseKinds'].includes('note'), "…and unticking 'note' afterwards sticks (the ledger, not content-sniffing)");
   }
   const doc = JSON.parse(fs.readFileSync(path.join(rootDir, 'data', 'task-groups.json'), 'utf-8'));
   ok(!('plan' in doc.tasks.t1) && !('plan' in doc.tasks.t2), 'plan keys stripped from the live store');

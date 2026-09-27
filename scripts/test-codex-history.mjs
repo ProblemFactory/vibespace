@@ -125,7 +125,7 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   ok("claude Agent/Task cards join the 'agent' kind via the fallback map", /tn === 'Agent' \|\| tn === 'Task'\) return 'agent'/.test(rs));
   ok('…and the chat view folds THROUGH that one classifier (no second name map left behind)', /messageKind\(el\._rawMsg, \{ toolCard:/.test(cv) && !/tn === 'Bash'\) return 'bash'/.test(cv));
   const ss = require('node:fs').readFileSync(REPO + '/src/lib/settings-schema.js', 'utf8');
-  ok("the settings checkboxes are SEMANTIC (one global set; 'agent' kind exists and defaults on)", /value: 'agent', label: t\('Sub-agent orchestration/.test(ss) && /'skill', 'agent', 'search', 'image'\]/.test(ss));
+  ok("the settings checkboxes are SEMANTIC (one global set; 'agent' kind exists and defaults on)", /value: 'agent', label: t\('Sub-agent orchestration/.test(ss) && /'skill', 'agent', 'search', 'image'(?:, 'note')?\]/.test(ss));
   ok('per-backend fallback model list lives on BACKEND_META (codex never lists claude models offline)', /fallbackModels: \['gpt-/.test(require('node:fs').readFileSync(REPO + '/src/lib/agent-meta.js', 'utf8')) && /getBackendMeta\(backend\)\?\.fallbackModels/.test(require('node:fs').readFileSync(REPO + '/src/lib/chat-status-bar.js', 'utf8')));
 }
 

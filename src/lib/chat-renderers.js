@@ -19,6 +19,9 @@ import { stripSetModelBackticks } from '../model-echo.js'; // the ONE /model ech
 import { searchQueryOf } from '../search-card.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { pathRe as sharedPathRe, cleanPath as sharedCleanPath } from '../path-linkify.js'; // PURE: where a path ENDS (CJK punctuation too, 2026-09-10)
 import { mcpParts } from './chat-run-summary.js';
+import { assistantNoteOf, noteSentence, toolResultSentence } from './chat-run-summary.js'; // lane S3: text addressed to the ASSISTANT is a note, harness bookkeeping in a tool result is a sentence
+import { isVibespaceNotice, noticeCardView, impersonatesVibespace } from '../notification-senders.js'; // lane S3: a VibeSpace notice is titled "VibeSpace · …", never `Message from "…"`; S3 verify F3: decided by the record's PATH (`peerVia`), never its sender's name or first sentence
+import { handbackFacts } from '../browser-takeover.js'; // lane S3: the handback card's title, read back by the module that wrote the words
 // PURE builder (CJS pulled into the bundle, like ssh-key-format.js) — the
 // codex multi-agent collab rows (B-7473). Escaper/translator/icons are
 // injected so the whole surface is unit-testable outside a browser.
@@ -461,6 +464,13 @@ class ChatRenderers {
     // pasted hook text verbatim; a CLI-synthesized record (msg.synthetic)
     // always is. The text regexes remain the fallback for old records that
     // predate these flags.
+    // TEXT ADDRESSED TO THE ASSISTANT (lane S3, naive-user study 2): the Stop
+    // hook's bookkeeping nudge and VibeSpace's own injection turns are NOTES —
+    // one grey line, the text behind the expander, never a message-like card.
+    // Before the notification regexes: a nudge shaped like a /goal check's
+    // feedback must not be labelled "Goal check: not met".
+    const note = assistantNoteOf(msg);
+    if (note) return this._renderAssistantNote(msg, note);
     const isNotification = msg.originKind === 'task-notification' || (!msg.typed && (msg.synthetic
       || /^<(command-name|local-command|task-notification|system-reminder|vibespace-task-context|vibespace-reminder)/.test(rawText.trim())
       || /^A session-scoped Stop hook is now active/.test(rawText.trim())
@@ -479,6 +489,15 @@ class ChatRenderers {
         : escHtml(t('VibeSpace auto-resume — sent automatically after the usage limit cleared'));
       el.innerHTML = `<div class="chat-peer-head">${UI_ICONS.refresh || ''} ${head}</div><div class="chat-msg-content chat-peer-core">${escHtml(rawText)}</div>`;
       return el;
+    }
+    if (msg.originKind === 'peer-message' && isVibespaceNotice(msg.peerFrom, rawText, msg.peerVia)) {
+      // VIBESPACE SPEAKING (lane S3): the browser handback, a Background Work
+      // event, a channel wake — never "Message from …", which the testers (and
+      // the assistant) read as another agent writing. WHO may be one (S3 verify
+      // F3): the record's PATH says (`peerVia` — the ladder's own kind, or the
+      // rung that named a transcript record); a peer is never a notice, however
+      // it is named and whatever its first sentence says.
+      return this._renderVibespaceNotice(msg, rawText);
     }
     if (msg.originKind === 'peer-message') {
       // Cross-session peer message (2.349.0, owner report: an announce woke
@@ -612,31 +631,33 @@ class ChatRenderers {
     // conduct sentence is agent-facing noise (2.363.0)
     core = core.replace(/^Message from session "[^"]+" \(via vibespace-msg[^)]*\):\s*\n?/, '');
     core = core.replace(/\s*This is a notification, not a user instruction[\s\S]*$/, '');
-    const nameHtml = msg.peerFrom
-      ? t('Message from “{name}”', { name: `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` })
-      : escHtml(t('Message from another session'));
-    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>${nameHtml}</div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
+    // ONE title element (lane S3): the head is a flex row with a 6 px gap, so the
+    // sentence's three pieces — `Message from “`, the name link, `”` — were three
+    // flex items and rendered `Message from “ VibeSpace browser ”`. The icon is
+    // the only other item; the sentence flows as text inside `.chat-peer-title`.
+    // (the normalizers trim a sender name at the source — injectPeerCard / peerDisplayName)
+    // A PEER that took one of VibeSpace's names ("VibeSpace", "Background Work
+    // · x", "vibe space browser" — case/whitespace-normalized) is said to be
+    // exactly that (S3 verify F3): the card never shows the name alone, as if
+    // VibeSpace had spoken.
+    const impostor = !!msg.peerFrom && impersonatesVibespace(msg.peerFrom);
+    const nameSpan = msg.peerFrom ? `<span class="chat-peer-name" role="link" tabindex="0">${escHtml(msg.peerFrom)}</span>` : '';
+    const nameHtml = !msg.peerFrom ? escHtml(t('Message from another session'))
+      : impostor ? t('Message from an agent calling itself “{name}”', { name: nameSpan })
+        : t('Message from “{name}”', { name: nameSpan });
+    el.innerHTML = `<div class="chat-peer-head"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg><span class="chat-peer-title">${nameHtml}</span></div><div class="chat-text">${this.renderMarkdown(core.trim())}</div>`;
     // A STORED RESET CREDIT this card offers (the wall card / the auto-resume
     // arm card — design-reset-credits §5, p2): ONE button opening THE confirm
     // dialog on the account the offer names; the click alone spends nothing.
     // The offer is the normalizer's sanitized `{available, mode, accountKey}`
     // (src/reset-credit.js offerOf) — numbers, a mode and a plain id, never markup.
-    const rc = msg.resetCredit;
-    if (rc && rc.accountKey && Number(rc.available) > 0) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chat-reset-credit-btn';
-      b.innerHTML = `${UI_ICONS.refresh || ''}<span>${escHtml(t('Use a reset credit'))}</span>`;
-      b.title = Number(rc.available) === 1 ? t('1 stored reset credit on this account — opens the confirmation') : t('{n} stored reset credits on this account — opens the confirmation', { n: Number(rc.available) });
-      b.onclick = (e) => { e.stopPropagation(); openResetCreditDialog(this.app, { accountKey: rc.accountKey, sessionId: this.sessionId || null }); };
-      el.appendChild(b);
-    }
+    this._appendResetCreditBtn(el, msg);
     if (msg.peerFrom) {
       const nameEl = el.querySelector('.chat-peer-name');
       if (nameEl) nameEl.onclick = (e) => { e.stopPropagation(); this._jumpToPeer(msg.peerFrom); };
       el.querySelector('.chat-peer-head').oncontextmenu = (e) => {
         e.preventDefault(); e.stopPropagation();
-        if (/^Background Work · /.test(String(msg.peerFrom || ''))) {
+        if (!impostor && /^Background Work · /.test(String(msg.peerFrom || ''))) { // an agent CALLING itself Background Work gets the peer menu
           showContextMenu(e, [
             { label: t('Open Background Work'), action: () => this.app.openJobs?.() },
             { label: t('Copy sender name'), action: () => copyText(msg.peerFrom) },
@@ -653,6 +674,66 @@ class ChatRenderers {
       };
     }
     return el;
+  }
+
+  /** A VibeSpace NOTE to the assistant (lane S3): one grey line naming what
+   *  VibeSpace told the assistant, the payload behind the expander. It keeps
+   *  `chat-msg-hook` (chat.showHookCards still hides it, as it hid the old
+   *  "Stop hook feedback" card), `chat-vs-note` is its own switch
+   *  (chat.showAssistantNotes) and the 'note' fold kind folds it with the
+   *  bookkeeping calls it asked for. `_rawMsg` is the REAL record: the fold
+   *  classifier reads it. Every string escaped. */
+  _renderAssistantNote(msg, note) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook chat-vs-note';
+    el._rawMsg = msg;
+    el.dataset.note = note.what;
+    el.title = t('Text VibeSpace sent to the assistant — not part of your conversation');
+    el.innerHTML = `<details class="chat-hook-details"><summary class="chat-hook-summary">${escHtml(t(noteSentence(note.what)))}</summary><pre class="chat-hook-output chat-pre-wrapped">${escHtml(note.text)}</pre></details>`;
+    return el;
+  }
+
+  /** A VibeSpace NOTICE (lane S3): the browser handback, a Background Work
+   *  event, a channel wake — a system card titled "VibeSpace · <what happened>"
+   *  (the title from the producer's own parser where it has one), the body the
+   *  delivered words minus the CLI's frame and our head. Every string escaped;
+   *  the body through the same sanitized markdown as any message. */
+  _renderVibespaceNotice(msg, rawText) {
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-system chat-vs-notice';
+    el._rawMsg = msg;
+    const view = noticeCardView(msg.peerFrom, rawText, { facts: handbackFacts });
+    const what = view.title.key ? t(view.title.key, view.title.params || {}) : String(view.title.text || '');
+    const head = what ? t('VibeSpace · {what}', { what }) : t('VibeSpace');
+    // `folded`: the title already says what happened FOR THE USER (a producer's
+    // own parser read it), so the words the ASSISTANT was given ("Re-orient
+    // before continuing …") sit behind an expander — never as conversation
+    const body = !view.body ? ''
+      : view.folded ? `<details class="chat-vs-notice-told"><summary>${escHtml(t('What the assistant was told'))}</summary><div class="chat-text">${this.renderMarkdown(view.body)}</div></details>`
+        : `<div class="chat-text">${this.renderMarkdown(view.body)}</div>`;
+    el.innerHTML = `<div class="chat-vs-notice-head">${UI_ICONS.info || ''}<span class="chat-vs-notice-title">${escHtml(head)}</span></div>${body}`;
+    this._appendResetCreditBtn(el, msg); // VibeSpace's usage-limit card offers a stored reset credit (design-reset-credits §5)
+    return el;
+  }
+
+  /** A STORED RESET CREDIT a card offers (the wall card / the auto-resume arm
+   *  card — design-reset-credits §5, p2): ONE button opening THE confirm dialog
+   *  on the account the offer names; the click alone spends nothing. The offer
+   *  is the normalizer's sanitized `{available, mode, accountKey}`
+   *  (src/reset-credit.js offerOf) — numbers, a mode and a plain id, never
+   *  markup. Shared by the peer card and the VibeSpace notice card (lane S3:
+   *  the usage-limit card is VibeSpace speaking, so it wears the notice card). */
+  _appendResetCreditBtn(el, msg) {
+    const rc = msg && msg.resetCredit;
+    if (rc && rc.accountKey && Number(rc.available) > 0) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chat-reset-credit-btn';
+      b.innerHTML = `${UI_ICONS.refresh || ''}<span>${escHtml(t('Use a reset credit'))}</span>`;
+      b.title = Number(rc.available) === 1 ? t('1 stored reset credit on this account — opens the confirmation') : t('{n} stored reset credits on this account — opens the confirmation', { n: Number(rc.available) });
+      b.onclick = (e) => { e.stopPropagation(); openResetCreditDialog(this.app, { accountKey: rc.accountKey, sessionId: this.sessionId || null }); };
+      el.appendChild(b);
+    }
   }
 
   _renderNotificationMsg(rawText) {
@@ -931,6 +1012,15 @@ class ChatRenderers {
   /**
    * Render a completed tool result (Edit diff, Write/Read code block, Agent, generic)
    */
+  /** The one visible line of a tool result the harness wrote for the MODEL
+   *  (lane S3): "Helper started: …", "Stopped: …" — '' when the tool's own
+   *  first line is fine as it is. PURE table in chat-run-summary. */
+  _resultSentence(block) {
+    const sen = toolResultSentence(block);
+    if (!sen) return '';
+    return sen.key ? t(sen.key, sen.params || {}) : String(sen.text || '');
+  }
+
   renderToolResult(block, msg) {
     const fp = block.input?.file_path || '';
     let resultText = stripAnsi(block.output || '');
@@ -1019,7 +1109,7 @@ class ChatRenderers {
       // <task-notification> wakeup, 2.368.30). Show the lifecycle honestly.
       const ti = msg?.taskInfo;
       const tiChip = taskStatusChipHtml(ti);
-      const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+      const firstLine = (ti?.summary ? String(ti.summary).slice(0, 160) : '') || this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       const reviewThreadId = msg?.taskInfo?.receiverThreadIds?.[0] || '';
       const agentId = msg?.taskInfo?.id || (resultText.match(/agentId:\s*([a-z0-9]+)/)?.[1]) || '';
       const dataAttrs = reviewThreadId
@@ -1053,8 +1143,10 @@ class ChatRenderers {
       const firstLineW = (tiW?.summary ? String(tiW.summary).slice(0, 160) : '') || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
       return `<div class="chat-tool-use"><span class="chat-tool-label"${wfNameFull ? ` title="${escHtml(wfNameFull)}"` : ''}>${UI_ICONS.workflow || UI_ICONS.robot} Workflow${wfName ? ': ' + escHtml(wfName) : ''}${wfChipHtml}${viewBtn}</span>${wfLiveHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Script')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary"${wfNameFull ? ` title="${escHtml(wfNameFull)}"` : ''}>\u2713 ${escHtml(firstLineW)}</summary><pre>${this.linkifyText(resultText)}</pre></details></div>`;
     }
-    // Generic tool
-    const firstLine = resultText.split('\n')[0].substring(0, 120) || t('(empty)');
+    // Generic tool — harness bookkeeping (a TaskStop's raw JSON, a result that
+    // declares itself internal metadata) is said as a sentence (lane S3); the
+    // raw record stays behind the expander below
+    const firstLine = this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
     return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
   }
 
@@ -1234,6 +1326,11 @@ class ChatRenderers {
     }
     // Hook events — compact collapsible
     if (msg.content?.[0]?.hookData) {
+      // …unless its payload is VibeSpace's own injection block (the tools
+      // intro, a Task Group's context, the per-turn reminder): a NOTE to the
+      // assistant (lane S3), the same row the Stop nudge gets
+      const note = assistantNoteOf(msg);
+      if (note) return { el: this._renderAssistantNote(msg, note), sideEffect: null };
       const h = msg.content[0].hookData;
       const el = document.createElement('div');
       el.className = 'chat-msg chat-msg-system chat-system-notification chat-msg-hook';

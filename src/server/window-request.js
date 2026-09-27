@@ -55,7 +55,7 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     // 3. the words (agent-facing English; the user's line quoted as a note)
     const mi = g.modeInfo || {};
     const text = R.requestText({ label: view.label, handle: view.handle, mode: mi.mode, resolved: mi.resolved, note });
-    const stash = () => { deliver.stashFor(cid, { source: 'window-request', fromName: FROM_NAME, text }); };
+    const stash = () => { deliver.stashFor(cid, { source: 'window-request', kind: 'peer', fromName: FROM_NAME, text }); };
     const out = { ok: true, granted: !!(g.granted && g.granted.changed), endedHold, text, sessionId: String(sessionId), name };
     if (!wake) { stash(); log.log?.(`[window] request: ${view.handle} → ${name} — rides its next turn`); return { ...out, delivered: 'next-turn' }; }
     const last = lastWake.get(cid) || 0;

@@ -185,6 +185,11 @@ class App {
     const applyStopNoticeVis = () => document.body.classList.toggle('hide-stop-hook-notice', this.settings.get('chat.showStopHookErrorNotice') !== true);
     applyStopNoticeVis();
     this.settings.on('chat.showStopHookErrorNotice', applyStopNoticeVis);
+    // VibeSpace's notes to the ASSISTANT (lane S3) — one body class, both
+    // directions instantly; the fold pass reads the same class ('skip')
+    const applyNoteVis = () => { document.body.classList.toggle('hide-assistant-notes', this.settings.get('chat.showAssistantNotes') === false); for (const v of this.sessions?.values?.() || []) v?._updateRuns?.(); };
+    applyNoteVis();
+    this.settings.on('chat.showAssistantNotes', applyNoteVis);
     // ACCESSIBILITY TREE SIZE (2.369.144, the owner's Windows freeze: Chrome's
     // browser UI thread spent 39.5 s in HandleAXEvents serialising a 27k-node
     // DOM into the accessibility tree because an assistive tool had the mode

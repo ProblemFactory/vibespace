@@ -2239,7 +2239,7 @@ async function _clearQueueForStop() {
       // ok:'queued'), so dropping it silently would lose a promised message —
       // ok:false hands the text back to the delivery ladder, which re-stashes it
       // for next-turn injection (the explicit `remove` path's rule, verbatim).
-      if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: known.text, fromName: known.from || null });
+      if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: known.text, fromName: known.from || null, kind: known.via || null });
     }
   } finally { queueSweepActive = false; }
   // The republish comes AFTER every result above — the truth, not an assumed
@@ -2352,7 +2352,7 @@ async function handleQueueOp(msg) {
       // A queued PEER/job message was already reported delivered (peer_message_result
       // ok:'queued') — removing it must give the text back to the ladder, which
       // re-stashes it for next-turn injection. Never a silent loss.
-      if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'removed from the queue before it was delivered', text: known.text, fromName: known.from || null });
+      if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'removed from the queue before it was delivered', text: known.text, fromName: known.from || null, kind: known.via || null });
       // It left the queue WITHOUT running, so the app-server will never commit
       // its own copy: whatever bubble we wrote for it claims a twin that can
       // no longer arrive (round 3).
@@ -2953,7 +2953,7 @@ async function handleInput(msg) {
     // round-1 major, still open for the one producer that minted no id).
     const recordPeerMessage = (afterCommit, queueCid) => record('response_item', {
       type: 'message', role: 'user', content: [{ type: 'input_text', text }],
-      webui_peer: { name: fromName, body: cardText },
+      webui_peer: { name: fromName, body: cardText, kind: peerKind }, // kind = the PATH the words took (S3 verify F3): a peer is never drawn as a VibeSpace notice, whatever it is called or says
       ...(queueCid ? { webui_queue_id: queueCid } : {}),
       ...(afterCommit ? { webui_after_commit: true } : {}),
     });
@@ -2986,7 +2986,7 @@ async function handleInput(msg) {
         // `text` rides the entry so a REMOVE can hand the message back to the
         // delivery ladder instead of losing something we already reported
         // delivered (the ACP wrapper's Stop-drop rule, same reason).
-        noteQueued(cid, { kind: 'peer', msgId: '', from: fromName, text });
+        noteQueued(cid, { kind: 'peer', msgId: '', from: fromName, text, via: peerKind }); // via = the frame's kind, echoed if a Stop/remove hands it back (S3 verify F3)
         noteRecordedUserCid(cid);   // recordPeerMessage() below IS this submission's bubble
         await request('thread/queue/add', {
           threadId: meta.threadId,
@@ -3003,8 +3003,9 @@ async function handleInput(msg) {
       }
     } catch (e) {
       // fromName rides the failure echo so the server's re-stash keeps the
-      // label the drain-site card will show
-      emitTaskEvent('peer_message_result', { ok: false, reason: e.message, text, fromName });
+      // label the drain-site card will show — and `kind`, the PATH, so the
+      // re-stashed entry drains as what it was (S3 verify F3)
+      emitTaskEvent('peer_message_result', { ok: false, reason: e.message, text, fromName, kind: peerKind });
       log('peer-message delivery failed: ' + e.message);
     }
     return;

@@ -134,7 +134,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     // A refusal loses nothing: the ladder's own stash carries the words to the
     // next injection, and the zero-spend notice rides the next message too.
     out.why = (r && r.reason) || 'delivery refused';
-    try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', fromName: FROM_NAME, text }); out.stashed = true; } } catch (e) { log.warn?.(`[browser] handback stash failed — ${e && e.message}`); }
+    try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); out.stashed = true; } } catch (e) { log.warn?.(`[browser] handback stash failed — ${e && e.message}`); }
     out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
     log.log?.(`[browser] handback (${cause}) for ${sess.id}: NOT delivered (${out.why})${out.stashed ? ' — stashed for the next injection' : ''}${out.noticed ? '; the notice rides the next message' : ''}`);
     return out;

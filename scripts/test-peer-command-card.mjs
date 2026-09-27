@@ -214,12 +214,12 @@ console.log('— NEGATIVE CONTROLS: the lookup renders nothing for the shapes th
 console.log('— wiring pins (the unstaged-wiring class)');
 {
   ok('the consumer calls the lookup on command_lifecycle started, local sessions only', /msg\.type === 'command_lifecycle' && msg\.state === 'started' && typeof msg\.command_uuid === 'string' && msg\.command_uuid && !session\.host\) peerCommandCard\(msg\.command_uuid\);/.test(consumerSrc));
-  ok('…through the rebuild-gated peer-card writer (feedPeerCard), never processLive', /feedPeerCard\(session, \{ fromName: peerDisplayName\(o, text\), text: o\.body, msgId: o\.msg_id \|\| null \}\);/.test(consumerSrc) && !/_normalizer\.injectPeerCard/.test(consumerSrc));
+  ok('…through the rebuild-gated peer-card writer (feedPeerCard), never processLive', /const po = peerOriginOf\(o, text\);[^\n]*\n\s*feedPeerCard\(session, \{ fromName: po\.name, text: o\.body, msgId: o\.msg_id \|\| null, kind: po\.via \}\);/.test(consumerSrc) && !/_normalizer\.injectPeerCard/.test(consumerSrc));
   ok('…bounded: a ≤512 KB tail read and a finite retry ladder', /512 \* 1024/.test(consumerSrc) && /const PEER_CMD_RETRY_MS = \[0, 150, 600, 2000\];/.test(consumerSrc));
   const sv = read('server.js');
   ok('server.js lists command_lifecycle as a HANDLED stream type (the breadcrumb must not cry unhandled for a handled type)', /'command_lifecycle',/.test(sv));
   const mm = read('src/message-manager.js');
-  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', /injectPeerCard\(\{ fromName, text, msgId = null(, resetCredit = null)? \}\)/.test(mm) && /if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm));
+  ok('injectPeerCard notes msgId and refuses a msg_id already on screen', /injectPeerCard\(\{ fromName, text, msgId = null(, resetCredit = null)?(, kind = null)? \}\)/.test(mm) && /if \(msgId && this\._peerMsgIds\.has\(msgId\)\) return null;\s*\n\s*this\._notePeerMsgId\(msgId\);/.test(mm));
   ok('the user-record and attachment peer sites skip a msg_id already rendered', (mm.match(/origin\.msg_id && this\._peerMsgIds\.has\([a-z]+\.origin\.msg_id\)\) return;/g) || []).length === 2);
   ok('ci.mjs runs this suite', /'test-peer-command-card'/.test(read('scripts/ci.mjs')));
 }

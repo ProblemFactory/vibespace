@@ -43,6 +43,23 @@
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
 
+/**
+ * WHERE THE TRAY IS (lane S3, naive-user study 2: the assistant said "I've
+ * filed this on your inbox" and the user did not know where that was). The
+ * toast a new item raises names the corner the For-you button sits in ON THIS
+ * DEVICE — the button's measured rect, never an assumed layout (customize mode
+ * moves it to any bar; on a phone it is in the top nav). → an i18n KEY
+ * ('bottom right' | 'bottom left' | 'top right' | 'top left') or null when the
+ * button is not on screen.
+ * @param {{left:number, top:number, width:number, height:number}|null} rect
+ */
+export const TRAY_CORNERS = Object.freeze(['bottom right', 'bottom left', 'top right', 'top left']);
+export function trayWhere(rect, vw, vh) {
+  if (!rect || !(rect.width > 0 || rect.height > 0) || !(vw > 0) || !(vh > 0)) return null;
+  const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+  return `${cy >= vh / 2 ? 'bottom' : 'top'} ${cx >= vw / 2 ? 'right' : 'left'}`;
+}
+
 /** @param {Array<[string, Array<{id:string}>]>} sortedGroups */
 export function openLayout(sortedGroups) {
   return { groups: sortedGroups.map(([key, items]) => ({ key, ids: items.map((i) => i.id) })) };

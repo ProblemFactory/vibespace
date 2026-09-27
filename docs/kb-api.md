@@ -134,6 +134,15 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass).
   mode:'queued', steer:'unsupported'}`. Which lane a harness uses is DERIVED
   from its capability row — `backend-caps notificationDelivery({peerDelivery,
   inputModes})` → `steer | queue | cli-inbox | stash` — never a backend id.
+  The kind is also the PATH the chat card is judged by (S3 verify F3, 2026-09-26):
+  the codex wrapper records it in its marker (`webui_peer: {name, body, kind}`),
+  the ACP wrapper in `peer: {name, body, kind}`, and both echo it on every
+  refusal (`peer_message_result {ok:false, text, fromName, kind}` / ACP
+  `peer_result {ok:false, …, peerKind}` — `kind` is an ACP record's own type) so
+  the re-stash keeps it; the ladder's own card is `emitPeerCard(cid, {fromName,
+  text, kind})` and every `stashFor` entry carries `kind` (data/msg-stash.json).
+  A `'peer'` card is NEVER drawn as a VibeSpace notice, whatever it is called or
+  says.
 
 #### Storage OAuth re-authorize (src/server/mounts-plugins-wiring.js)
 - `POST /api/mounts/gdrive-auth/start` `{mountId}` (re-authorize under the record's OWN client) or `{clientPreset | clientId + clientSecret, backend?}` (the add flow — and, since 2.369.165 D2, the Edit dialog's client switch) → `{url}`; `GET …/status` → `{active, url, token, error}`; `POST …/callback {url}` (the paste-back). Gmail's own trio `…/gmail-auth/{start,status,callback}` (`{clientPreset | clientId + clientSecret}`).

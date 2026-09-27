@@ -1537,7 +1537,7 @@ const NOTIF_TEXT = '[VibeSpace Background Work] task "nightly" (job-1): done.';
     ok(bad && bad.peerFrom === `Background Work · ${evil}` && bad.content[0].text.includes(evil) && !JSON.stringify(bad).includes('<span'),
       'the normalizer carries text and label as DATA — no markup is ever built here', JSON.stringify(bad && [bad.peerFrom, bad.content[0].text]).slice(0, 200));
     const cr = fs.readFileSync(path.join(REPO, 'src/lib/chat-renderers.js'), 'utf8');
-    ok(/const nameHtml = msg\.peerFrom[\s\S]{0,200}escHtml\(msg\.peerFrom\)/.test(cr), 'renderer pin: the peer/notification LABEL goes through escHtml before it enters innerHTML');
+    ok(/const nameSpan = msg\.peerFrom \? `<span class="chat-peer-name" role="link" tabindex="0">\$\{escHtml\(msg\.peerFrom\)\}<\/span>` : '';\s*\n\s*const nameHtml = !msg\.peerFrom[\s\S]{0,300}\{ name: nameSpan \}[\s\S]{0,120}\{ name: nameSpan \}/.test(cr), 'renderer pin: the peer/notification LABEL goes through escHtml before it enters innerHTML (both titles — S3 verify F3 added "an agent calling itself …" — take the one escaped span)');
     ok(/<div class="chat-text">\$\{this\.renderMarkdown\(core\.trim\(\)\)\}<\/div>/.test(cr) && /renderMarkdown\(text\) \{[\s\S]{0,400}DOMPurify\.sanitize\(marked\.parse/.test(cr), 'renderer pin: the BODY goes through renderMarkdown, i.e. DOMPurify (the XSS law)');
   }
   await N.stop();

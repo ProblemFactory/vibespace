@@ -28,7 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
-const { MessageManager, peerDisplayName } = require('../../message-manager');
+const { MessageManager, peerOriginOf } = require('../../message-manager');
 const { cwdToProjectDir, findSessionJsonlPath } = require('../../session-store');
 const { feedPeerCard } = require('../../normalizers'); // the rebuild-gated peer-card writer (same gate as feedLive)
 const { ClaudeCodeAdapter } = require('../../adapters/claude-code.js');
@@ -394,7 +394,8 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           if (!o || o.kind !== 'peer' || typeof o.body !== 'string' || !o.body.trim()) return;
           const c = rec.message?.content;
           const text = typeof c === 'string' ? c : (Array.isArray(c) ? c.map((b) => b?.text || '').join('\n') : '');
-          feedPeerCard(session, { fromName: peerDisplayName(o, text), text: o.body, msgId: o.msg_id || null });
+          const po = peerOriginOf(o, text); // the name AND the path its words took (S3 verify F3: a registered peer's origin.name is 'peer', never a notice)
+          feedPeerCard(session, { fromName: po.name, text: o.body, msgId: o.msg_id || null, kind: po.via });
         })().catch(() => schedule());
       };
       schedule();

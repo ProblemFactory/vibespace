@@ -13,6 +13,7 @@
 // the grey notice count; Notifications: toasts since this device last looked).
 import { t } from './i18n.js';
 import { openLayout, nextLayout, entriesFor, splitNotices, badgeCounts, liveDotState, replyButtonState, LIVE_DOT_WHY, inboxBadgeFor, miniInboxEntries, foldGroup, FOLD_MAX, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY } from './user-todos-layout.js'; // PURE: append-only row order while the popup is open (inc-mtw02kbq-kj96); notices split (2.369.118); the running dot + the reply button's verdict (design-user-inbox-reply D1.5/D1.7); the flood fold (chunk 4); notices by origin + the tab counts (B-328d)
+import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
@@ -884,6 +885,15 @@ export function installUserTodos(app) {
     }
   }
 
+  // the For-you button the user can SEE on this device (taskbar, else the phone nav)
+  const trayRect = () => {
+    for (const b of [btn, mBtn]) {
+      if (!b || !b.offsetParent) continue;
+      const r = b.getBoundingClientRect();
+      if (r.width > 0 || r.height > 0) return r;
+    }
+    return null;
+  };
   const apply = (next) => {
     const prevKnown = knownIds;
     todos = next || { open: [], resolved: [] };
@@ -895,7 +905,12 @@ export function installUserTodos(app) {
     if (prevKnown) {
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
-        const el = showToast(`${t('For you')} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`);
+        // lane S3: the toast says WHERE the tray is ("Added to For you (bottom
+        // right)") — measured off this device's own button, once per item
+        const where = trayWhere(trayRect(), window.innerWidth, window.innerHeight);
+        const head = where ? t('Added to For you ({where})', { where: t(where) }) : t('Added to For you');
+        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`);
+        if (el) el.dataset.todoId = i.id;
         if (el) { el.style.cursor = 'pointer'; el.onclick = () => jump(i.sessionKey, i); }
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
       }

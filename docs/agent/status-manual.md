@@ -30,3 +30,13 @@ vibespace-status done         --reason "what finished"
   into your next turn — respect it; don't silently flip it back.
 - Rapid flapping is noise: set working once per phase, not per tool call.
 - `vibespace-status` with no args prints usage + your current state.
+
+## The end-of-turn reminder
+
+When your state has gone stale, VibeSpace may stop you at the end of a turn
+with "VibeSpace bookkeeping before you stop …" — a note from VibeSpace, not
+from the user, which the user sees only as a folded grey line. Answer it with
+the calls it lists (status first) and then stop: **do not restate your
+answer** — the user already has it above — and end with at most one short
+line, or nothing. Never tell the user about the bookkeeping itself ("Status is
+set to done …" is not news to them).

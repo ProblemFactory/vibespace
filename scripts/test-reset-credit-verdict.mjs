@@ -175,7 +175,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
     && !/':default:soft'/.test(eng) && /':default'\); return; \}/.test(eng));
   for (const f of ['src/message-manager.js', 'src/codex-message-manager.js']) {
     const m = strip(f);
-    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, /injectPeerCard\(\{[^}]*resetCredit = null \}\)/.test(m) && /const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) msg\.resetCredit = rc;/.test(m));
+    ok(`${f}: injectPeerCard carries a sanitized resetCredit offer (offerOf)`, /injectPeerCard\(\{[^}]*resetCredit = null(?:, kind = null)? \}\)/.test(m) && /const rc = offerOf\(resetCredit\);\s*\n\s*if \(rc\) msg\.resetCredit = rc;/.test(m));
   }
   const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
   for (const be of ['claude', 'codex']) {
@@ -203,7 +203,7 @@ console.log('\n§7 WIRING PINS (code only, comments stripped)');
   ok('auto-resume: the ARM card asks resetCreditOffer and hands the offer to notify', /offer = resetCreditOffer \? resetCreditOffer\(id, s2\) : null;[\s\S]{0,200}notify\(id, s2, armNoticeFor\(reason, resets, Date\.now\(\), a\.cause\), offer \? \{ resetCredit: offer \} : undefined\)/.test(ar));
   const srv = strip('server.js');
   ok('server.js: notify passes extra.resetCredit to the peer card, and resetCreditOffer is the engine\'s',
-    /notify: \(id, s, text, extra\) => \{ try \{ feedPeerCard\(s, \{ fromName: 'VibeSpace', text, \.\.\.\(extra && extra\.resetCredit \? \{ resetCredit: extra\.resetCredit \} : \{\}\) \}\); \} catch \{ \} \}, resetCreditOffer: \(id, s\) => \{ try \{ return resetCreditOffer\(s\); \}/.test(srv)
+    /notify: \(id, s, text, extra\) => \{ try \{ feedPeerCard\(s, \{ fromName: 'VibeSpace', (?:kind: 'notification', )?text, \.\.\.\(extra && extra\.resetCredit \? \{ resetCredit: extra\.resetCredit \} : \{\}\) \}\); \} catch \{ \} \}, resetCreditOffer: \(id, s\) => \{ try \{ return resetCreditOffer\(s\); \}/.test(srv)
     && /usageCacheKeyFor, resetCreditOffer,/.test(srv));
   const cq = require(path.join(REPO, 'src/harnesses/codex-quota.js'));
   const clq = require(path.join(REPO, 'src/harnesses/claude-quota.js'));

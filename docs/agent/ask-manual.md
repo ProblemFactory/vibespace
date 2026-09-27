@@ -1,10 +1,16 @@
 # vibespace-ask — full manual
 
-Files an item into the USER's global For-you inbox: something only the human
-can do (a decision, missing input, a review). The inverse of your own todo
-list. The inbox is a NOTIFICATION MIRROR — the full question, options and
-your recommendation must ALSO be in your chat reply; never let the inbox be
-the only copy.
+Files an item into the USER's **For you tray** — the tray at the bottom right
+of their screen (top right on a phone): something only the human can do (a
+decision, missing input, a review). The inverse of your own todo list. The
+tray is a NOTIFICATION MIRROR — the full question, options and your
+recommendation must ALSO be in your chat reply; never let the tray be the
+only copy.
+
+**Name it the way the user sees it.** When you tell the user you filed
+something, say "I added it to the For you tray at the bottom right" — never
+"your inbox" or "your queue": no button on their screen carries those words,
+and a user told "check your inbox" does not know where to look.
 
 ## Verbs
 
@@ -30,7 +36,9 @@ vibespace-ask show <id>                # one item of yours in full, any status, 
 
 ## What the user sees
 
-Taskbar inbox button with per-urgency count pills; items grouped by session
+The For you button in the taskbar (bottom right by default) with per-urgency
+count pills; a new item also pops a toast naming where the tray is ("Added to
+For you (bottom right)"); items grouped by session
 (clicking jumps into your conversation); a viewer with copyable markdown.
 Items you file with detail ship up to 2000 chars of context — write the
 detail so the user can decide WITHOUT opening the conversation.
