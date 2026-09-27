@@ -270,7 +270,13 @@ question about another machine is the failure the rule exists to stop.
     rule grain) · `POST /api/channels/adapters/:id/estimate` `{scope, pattern?,
     filter?, notify?, digestMinutes?, dailyWakeCap?}` → `{estimate:{…,
     conversations, covered, sampled}, expectedWakesPerDay}` (a bounded read of
-    the matching conversations' last 7 days).
+    the matching conversations' last 7 days). A FILTERED account / pattern
+    assignment carries its filter INLINE (`assignment.filter`) — the engine
+    mints `f-account-<adapterId>` / `f-pattern-<id>` before validating (hotfix
+    2026-09-26). Refusals: `400 {error, code: bad-assignment|bad-filter|
+    bad-pattern|no-such-filter, why, rule?}` — `why` is the validator's closed
+    code (`F.ASSIGN_REFUSALS`, or a `validateFilter`/`validatePattern` code),
+    `rule` the refused rule's kind; the client words `why`, never `error`.
 - `GET /api/channels[?host=]` — the index DIGEST: adapters (with their
   resolved lane), conversations (title/kind/participants/lastAt/unread; `tracked` until 2026-09-26),
   each conversation's resolved `convCaps`, its `offers` (read / send-as-user /

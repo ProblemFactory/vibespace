@@ -14,10 +14,44 @@
 // build's i18n scan finds.
 import { t, tc } from './i18n.js';
 import * as chanCaps from '../channel-caps.js';
+import * as F from '../channel-filter.js';
 import { wakeCount } from './channel-groups-view.js';
 
+// THE VALIDATOR'S REFUSALS IN WORDS (hotfix 2026-09-26 — the owner's toast
+// "请求被拒绝: mode 'filtered' needs a filterId"): an assignment / filter /
+// pattern refusal answers its CLOSED code (`why`, + the refused rule's kind as
+// `rule`), and the toast words the code. A code only a stale client or a
+// hand-built call can produce — a value no control of the dialog can pick —
+// says exactly that; the English `error` is never the toast.
+const staleValueText = () => t('This window sent a value the server does not accept — reload the page and try again');
+/** A `validateAssignment` refusal (F.ASSIGN_REFUSALS) in words; null = no code. */
+export function assignmentRefusalText(why) {
+  switch (String(why || '')) {
+    case 'filter-missing': return t('The filter is not saved yet — add its rules, then save again');
+    case 'principal': return t('Pick an agent or a group to wake.');
+    case 'wake-cap': return t('Wakes per day must be a number of 0 or more');
+    case 'digest': return t('The digest window must be a number of minutes');
+    case 'not-an-object': case 'mode': case 'notify': case 'authority': case 'scope': return staleValueText();
+    default: return null;
+  }
+}
+/** The rule refusals a user can cause by TYPING (a value, a time, a member
+ *  list, the rule count) — `filterProblemText` words each; every other
+ *  validateFilter / validatePattern code is structural (a kind or a match no
+ *  control offers) ⇒ the stale-client sentence. */
+export const RULE_PROBLEM_CODES = Object.freeze(['value-required', 'members-required', 'time-format', 'tz-range', 'no-rules', 'kind-value', 'too-many-rules']);
+/** A `bad-filter` / `bad-pattern` refusal in words; null = no code.
+ *  `ruleLabel(kind, which)` is the editor's own label for a rule kind. */
+export function ruleRefusalText(r, which, ruleLabel = (k) => k) {
+  const why = String((r && r.why) || '');
+  if (!why) return null;
+  if (!RULE_PROBLEM_CODES.includes(why)) return staleValueText();
+  const w = F.filterProblemText({ ok: false, code: why, kind: (r && r.rule) || null, error: '' }, { t, ruleLabel: (k) => ruleLabel(k, which) || k });
+  return which === 'pattern' ? t('The rule is incomplete: {why}', { why: w }) : t('Filter is incomplete: {why}', { why: w });
+}
+
 /** The toast body for a failed channel/outbox/integration request. */
-export function routeErrorText(r, { fallback = null } = {}) {
+export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}) {
   if (!r) return t('Could not reach the server');
   const code = String(r.code || '');
   const raw = r.error ? String(r.error) : '';
@@ -49,7 +83,10 @@ export function routeErrorText(r, { fallback = null } = {}) {
     case 'bad-state': return t('This proposal can no longer be decided');
     case 'reconcile-not-available': return t('This channel cannot be checked by the machine');
     case 'authority-capped': return t('Direct send is not offered here');
-    case 'bad-filter': case 'bad-assignment': case 'bad-proposal': case 'bad-policy': case 'bad-grant': case 'bad-request':
+    // the account / pattern grains answer the validator's closed code (hotfix 2026-09-26); a route that does not keeps the sentence
+    case 'bad-assignment': { const w = assignmentRefusalText(r.why); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
+    case 'bad-filter': case 'bad-pattern': { const w = ruleRefusalText(r, code === 'bad-pattern' ? 'pattern' : 'filter', ruleLabel); if (w) return w; return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused'); }
+    case 'bad-proposal': case 'bad-policy': case 'bad-grant': case 'bad-request':
       return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
     case 'no-such-filter': return t('That filter no longer exists');
     case 'filter-in-use': return t('That filter is still used by an assignment');

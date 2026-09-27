@@ -127,6 +127,10 @@ console.log('⑤ assignment + authority caps (each only narrows)');
   ok(v.ok && v.assignment.mode === 'all' && v.assignment.notify === 'wake' && v.assignment.authority === 'draft' && v.assignment.dailyWakeCap === F.DEFAULT_DAILY_WAKE_CAP && v.assignment.digestMinutes === F.DEFAULT_DIGEST_MINUTES, 'defaults: all / wake / draft / cap ' + F.DEFAULT_DAILY_WAKE_CAP);
   ok(!F.validateAssignment({ principal: { kind: 'user', id: 'x' } }).ok, 'principal kind outside agent|group is refused');
   ok(!F.validateAssignment({ ...base, mode: 'filtered' }).ok, "mode 'filtered' needs a filterId");
+  // hotfix 2026-09-26 (the owner's toast): the refusal names its closed code for the client's words, and a
+  // caller carrying its filter INLINE threads the id it will mint first — then the same request is accepted
+  ok(F.validateAssignment({ ...base, mode: 'filtered' }).why === 'filter-missing' && F.ASSIGN_REFUSALS.includes('filter-missing'), "the filterId refusal carries why 'filter-missing' (a code in the closed ASSIGN_REFUSALS)");
+  ok(F.validateAssignment({ ...base, mode: 'filtered', filterId: 'f-account-lark-1', scope: { kind: 'account', id: 'lark-1' } }).ok, 'a filtered assignment with the minted id (f-account-<id>) is accepted');
   ok(F.validateAssignment({ ...base, notify: 'digest', digestMinutes: 1 }).assignment.digestMinutes === F.MIN_DIGEST_MINUTES, 'digestMinutes is floored');
   const byPolicy = F.validateAssignment({ ...base, authority: 'send' }, { offersSend: true, policyRequiresReview: true });
   ok(!byPolicy.ok && byPolicy.code === 'authority-capped' && /review/.test(byPolicy.error), 'CAP (a): a channel that requires review refuses authority:send by name');

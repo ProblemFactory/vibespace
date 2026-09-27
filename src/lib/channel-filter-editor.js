@@ -49,7 +49,7 @@ const RULE_LABELS = () => ({
 
 async function api(pathname, body, method = 'PUT') {
   const r = await fetchJson(pathname, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
+  if (!r || r.error) { showToast(routeErrorText(r, { ruleLabel: (k, which) => (which === 'pattern' ? PATTERN_LABELS() : RULE_LABELS())[k] }), { type: 'error' }); return null; }
   return r;
 }
 

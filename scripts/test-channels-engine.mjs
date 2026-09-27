@@ -22,6 +22,12 @@
 //      loop — 340 then 320 records land whole with zero duplicates, the anchor
 //      moves only after a complete walk, a quiet pass costs one page, and a
 //      walk the budget cuts short never advances the anchor (fence 9)
+//   ⑩ (hotfix 2026-09-26, the owner's toast "请求被拒绝: mode 'filtered' needs
+//      a filterId") the ACCOUNT and PATTERN grains save a FILTERED assignment
+//      whose filter rides INLINE — the engine mints `f-<kind>-<id>` BEFORE the
+//      validator runs; every refusal on these routes answers a closed code the
+//      client words (zh), never the validator's English sentence; a patched
+//      copy with the old validate-first order reproduces the toast
 //
 // Per-pid scratch dirs (scripts/scratch.mjs), no machine-global name.
 import fs from 'node:fs';
@@ -1096,6 +1102,122 @@ console.log('⑥ (P2) assign, filter, wake');
   eng3.stop();
 }
 
+// ── ⑩ THE INLINE FILTER AT THE ACCOUNT AND PATTERN GRAINS (hotfix 2026-09-26) ──
+// The owner handed a Lark account to the Task Group "工作", 开 = 匹配过滤器的消息
+// with two time-window rules, 投递 = 每个窗口一份摘要 (window 9999), cap 9999,
+// 起草 — and 保存 answered `请求被拒绝: mode 'filtered' needs a filterId`. The
+// scope editor sends its filter INSIDE the assignment; the engine validated the
+// assignment FIRST (the PURE validator refuses 'filtered' without a filterId)
+// and only then minted the id it stores the filter under. Driven here through
+// the REAL routes with the owner's exact body, at both grains.
+console.log('⑩ the inline filter at the account and pattern grains (the owner\'s toast)');
+{
+  const F = require(path.join(REPO, 'src/channel-filter.js'));
+  // the client's words, in the owner's language (i18n picks its dictionary at import)
+  globalThis.localStorage = { getItem: () => 'zh', setItem() {}, removeItem() {} };
+  const Wd = await import(path.join(REPO, 'src/lib/channel-words.js'));
+  const A = 'fake-poll';
+  const WORK = { kind: 'group', id: 'tg-work', name: '工作' };
+  const TWO_WINDOWS = { match: 'any', rules: [{ kind: 'time-window', from: '09:00', to: '12:00' }, { kind: 'time-window', from: '14:00', to: '18:00' }] };
+  // exactly what showScopeAssignDialog's Save sends: form.read().assignment + `filter` inline, estimateAtSet beside it
+  const ownerBody = (extra = {}) => ({ assignment: { principal: WORK, mode: 'filtered', notify: 'digest', digestMinutes: 9999, authority: 'draft', dailyWakeCap: 9999, receiptWake: false, filter: TWO_WINDOWS, ...extra }, estimateAtSet: { matchedPerDay: 3.4, totalPerDay: 12, windowDays: 7, sampled: false, truncated: false, conversations: 2 } });
+  const { eng } = mkEngine({ name: 'inline-filter' });
+  await eng.pass(A, { force: true });
+  routes.setup({ getEngine: () => eng });
+  const call = (method, url, body) => new Promise((resolve) => {
+    const req = { method, url, params: url.params, query: {}, body: body || {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; } };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === url.path && l.route.methods[method.toLowerCase()]);
+    if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((e) => resolve({ status: 500, body: { error: String(e && e.message) } }));
+  });
+  const ACCT = { path: '/api/channels/adapters/:id/assignment', params: { id: A } };
+  const PATS = { path: '/api/channels/adapters/:id/patterns', params: { id: A } };
+  const PAT = (pid) => ({ path: '/api/channels/adapters/:id/patterns/:pid', params: { id: A, pid } });
+  const ix = () => eng.store.index.snapshot();
+
+  // (a) THE OWNER'S SAVE, at the account grain
+  const r1 = await call('PUT', ACCT, ownerBody());
+  ok(r1.status === 200 && r1.body.ok === true, 'the owner\'s exact save (组 · 工作, filtered by two time windows, digest 9999, cap 9999, draft) is ACCEPTED at the account grain', JSON.stringify(r1.body));
+  const a1 = r1.body.assignment || {};
+  ok(a1.filterId === `f-account-${A}` && a1.filter && a1.filter.rules.length === 2 && a1.filter.rules.every((r) => r.kind === 'time-window'), `the filter is stored under the id the engine minted (f-account-${A}) and the answer carries its two rules`, JSON.stringify({ filterId: a1.filterId, filter: a1.filter }));
+  const st1 = (ix().accountAssignments || {})[A] || {};
+  const fs1 = (ix().filters || {})[`f-account-${A}`] || null;
+  ok(st1.filterId === `f-account-${A}` && st1.mode === 'filtered' && st1.principal && st1.principal.kind === 'group' && st1.principal.id === 'tg-work' && st1.principal.name === '工作' && st1.notify === 'digest' && st1.authority === 'draft', 'the STORED account assignment names the group, filtered, digest, draft, and carries that filterId', JSON.stringify(st1));
+  ok(fs1 && fs1.rules.length === 2 && fs1.rules[0].from === '09:00' && fs1.rules[1].to === '18:00' && fs1.estimateAtSet && fs1.estimateAtSet.matchedPerDay === 3.4, 'the filter RECORD is in the filters table with both windows and the estimate the user saw', JSON.stringify(fs1));
+  ok(st1.estimateAtSet && st1.estimateAtSet.matchedPerDay === 3.4 && st1.estimateAtSet.conversations === 2, 'the assignment keeps estimateAtSet (the measurement is compared against it later)', JSON.stringify(st1.estimateAtSet));
+  ok(st1.digestMinutes === F.MAX_DIGEST_MINUTES && st1.dailyWakeCap === F.MAX_DAILY_WAKE_CAP, `9999 is held to the validator's bounds (window ${F.MAX_DIGEST_MINUTES} min, cap ${F.MAX_DAILY_WAKE_CAP}) — what the account card then says`, JSON.stringify([st1.digestMinutes, st1.dailyWakeCap]));
+  ok((ix().accountGrants || []).filter((g) => g && g.origin === 'assignment' && g.scope && g.scope.id === A).length === 1, 'the account grain wrote its ONE assignment grant (the order of writes is unchanged)');
+  const dg = eng.digest();
+  const acctView = (dg.adapters || []).find((x) => x.id === A);
+  ok(acctView && acctView.assignment && acctView.assignment.filterId === `f-account-${A}` && acctView.assignment.filter && acctView.assignment.filter.rules.length === 2, 'the digest the panel draws carries the account grain with its filter (what the editor prefills on the next open)', JSON.stringify(acctView && acctView.assignment));
+  // (b) the EDIT: the dialog re-opens prefilled and re-sends the inline filter
+  const r2 = await call('PUT', ACCT, ownerBody({ filter: { match: 'every', rules: [{ kind: 'time-window', from: '10:00', to: '11:00' }] } }));
+  const fs2 = (ix().filters || {})[`f-account-${A}`] || {};
+  ok(r2.status === 200 && r2.body.assignment.filterId === `f-account-${A}` && fs2.match === 'every' && fs2.rules.length === 1 && fs2.createdAt === fs1.createdAt, 're-saving the account REPLACES its filter under the same id (createdAt kept)', JSON.stringify({ b: r2.body.assignment && r2.body.assignment.filterId, fs2 }));
+
+  // (c) THE PATTERN GRAIN — create, then edit
+  const p1 = await call('POST', PATS, ownerBody({ pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] } }));
+  const pid = p1.body.assignment && p1.body.assignment.scope && p1.body.assignment.scope.id;
+  ok(p1.status === 200 && p1.body.ok === true && /^pa-/.test(pid || ''), 'the same save at the PATTERN grain is accepted', JSON.stringify(p1.body));
+  ok(p1.body.assignment.filterId === `f-pattern-${pid}` && ((ix().filters || {})[`f-pattern-${pid}`] || { rules: [] }).rules.length === 2 && ((ix().patternAssignments || {})[pid] || {}).filterId === `f-pattern-${pid}`, `its filter is stored as f-pattern-<id> and the stored rule carries that filterId (${pid})`, JSON.stringify(p1.body.assignment));
+  const p2 = await call('PUT', PAT(pid), ownerBody({ pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] }, filter: { match: 'any', rules: [{ kind: 'keyword', value: 'gpu' }] } }));
+  ok(p2.status === 200 && p2.body.assignment.filterId === `f-pattern-${pid}` && (ix().filters || {})[`f-pattern-${pid}`].rules[0].kind === 'keyword', 'editing the rule re-sends its filter inline and replaces it under the same id');
+  const pa = await call('POST', PATS, { assignment: { principal: WORK, mode: 'all', pattern: { match: 'any', rules: [{ kind: 'title', value: 'ops' }] } } });
+  ok(pa.status === 200 && pa.body.assignment.filterId === null && pa.body.assignment.mode === 'all', 'POSITIVE CONTROL: an unfiltered rule still saves with no filter id');
+
+  // (d) EVERY REFUSAL ON THESE ROUTES IS WORDED BY ITS CODE — never the validator's sentence
+  const refusals = [
+    ['a filtered save with no filter at all', 'PUT', ACCT, { assignment: { principal: WORK, mode: 'filtered' } }, 'bad-assignment', 'filter-missing'],
+    ['an empty inline filter', 'PUT', ACCT, ownerBody({ filter: { match: 'any', rules: [] } }), 'bad-filter', 'no-rules'],
+    ['a time window typed as "9"', 'PUT', ACCT, ownerBody({ filter: { match: 'any', rules: [{ kind: 'time-window', from: '9', to: '18:00' }] } }), 'bad-filter', 'time-format'],
+    ['a keyword rule left empty', 'PUT', ACCT, ownerBody({ filter: { match: 'any', rules: [{ kind: 'keyword', value: '  ' }] } }), 'bad-filter', 'value-required'],
+    ['a negative daily cap', 'PUT', ACCT, ownerBody({ dailyWakeCap: -5 }), 'bad-assignment', 'wake-cap'],
+    ['no principal', 'PUT', ACCT, ownerBody({ principal: null }), 'bad-assignment', 'principal'],
+    ['a pattern rule left empty', 'POST', PATS, ownerBody({ pattern: { match: 'any', rules: [{ kind: 'title', value: '' }] } }), 'bad-pattern', 'value-required'],
+    ['a notify mode no control offers (a stale client)', 'PUT', ACCT, ownerBody({ notify: 'carrier-pigeon' }), 'bad-assignment', 'notify'],
+  ];
+  const leaks = [];
+  for (const [what, m, url, body, code, why] of refusals) {
+    const r = await call(m, url, body);
+    const words = Wd.routeErrorText(r.body);
+    const good = r.status === 400 && r.body.code === code && r.body.why === why && r.body.error && !words.includes(r.body.error) && !/[a-zA-Z]{4,} must be|needs a filterId|filterId/.test(words);
+    if (!good) leaks.push({ what, status: r.status, body: r.body, words });
+  }
+  ok(leaks.length === 0, `each of ${refusals.length} refusals on these routes answers 400 + its closed code and the toast words the CODE (zh), never the validator's English sentence`, JSON.stringify(leaks));
+  const ownerToast = Wd.routeErrorText({ code: 'bad-assignment', error: "mode 'filtered' needs a filterId", why: 'filter-missing' });
+  ok(ownerToast === '过滤器还没保存 — 请先添加规则，再保存', `the owner's refusal, should it ever happen again, reads "${ownerToast}"`);
+  // THE CENSUS: the validator's refusal codes are a CLOSED set and every one has words
+  const probes = [null, {}, { principal: WORK, mode: 'x' }, { principal: WORK, mode: 'filtered' }, { principal: WORK, notify: 'x' }, { principal: WORK, digestMinutes: 'abc' }, { principal: WORK, authority: 'x' }, { principal: WORK, dailyWakeCap: -1 }, { principal: WORK, scope: { kind: 'x', id: 'y' } }];
+  const seen = new Set(probes.map((x) => F.validateAssignment(x, {}).why));
+  ok([...seen].sort().join() === [...F.ASSIGN_REFUSALS].sort().join(), `every validateAssignment refusal carries a why from the closed ASSIGN_REFUSALS (${F.ASSIGN_REFUSALS.length}) and the probes reach all of them`, JSON.stringify([...seen]));
+  const unworded = F.ASSIGN_REFUSALS.filter((w) => { const s = Wd.assignmentRefusalText(w); return !s || /[a-z]+\.[a-z]+|must be [a-z]+\|/.test(s); });
+  ok(unworded.length === 0, 'every ASSIGN_REFUSALS code has words in channel-words (assignmentRefusalText)', unworded.join());
+  const FSRC = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
+  const ruleCodes = [...new Set([...FSRC.matchAll(/refuse\('([a-z-]+)'/g)].map((m) => m[1]))];
+  const rawBack = Wd.RULE_PROBLEM_CODES.filter((c) => !ruleCodes.includes(c) || F.filterProblemText({ ok: false, code: c, error: 'RAW-SENTENCE' }) === 'RAW-SENTENCE');
+  ok(ruleCodes.length >= 10 && rawBack.length === 0, `every rule code the dialog's typing can cause (${Wd.RULE_PROBLEM_CODES.length} of the ${ruleCodes.length} refuse codes) is one filterProblemText words; the rest answer the stale-client sentence`, rawBack.join());
+  ok(ruleCodes.every((c) => !Wd.ruleRefusalText({ why: c, rule: 'keyword', error: 'RAW-SENTENCE' }, 'filter').includes('RAW-SENTENCE')), 'no rule code in channel-filter.js makes the toast print the contract sentence');
+  // CONTROL (the words half): a route that DROPPED the code would print the sentence — what the owner saw
+  ok(Wd.routeErrorText({ code: 'bad-assignment', error: "mode 'filtered' needs a filterId" }).includes("mode 'filtered' needs a filterId"), 'CONTROL: without its code the refusal still falls back to the English sentence — the census above would see it');
+
+  // (e) NEGATIVE CONTROL — the pre-fix engine (validate FIRST, mint after) reproduces the toast
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const FIX = "    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id } }, scopeCaps);";
+  const PRE = esrc.replace(FIX, '    const v = F.validateAssignment({ ...b, scope: { kind, id } }, scopeCaps);');
+  ok(PRE !== esrc && esrc.split(FIX).length === 2, 'NEGATIVE CONTROL setup: the pre-fix validate-first order was reconstructed from the shipped bytes');
+  const engCopy = patchPath('src/server', 'channels-engine');
+  writeCopy(engCopy, PRE);
+  const PE = require(engCopy);
+  const pe = PE.create({ dataDir: path.join(ROOT, 'inline-filter-pre'), env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {} });
+  engines.push(pe);
+  await pe.pass(A, { force: true });
+  const b0 = ownerBody();
+  const pr1 = await pe.setScopeAssignment(A, { kind: 'account' }, { ...b0.assignment, estimateAtSet: b0.estimateAtSet });
+  const pr2 = await pe.setScopeAssignment(A, { kind: 'pattern' }, { ...b0.assignment, pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] }, estimateAtSet: b0.estimateAtSet });
+  ok(!pr1.ok && pr1.code === 'bad-assignment' && pr1.error === "mode 'filtered' needs a filterId" && !pr2.ok && pr2.error === "mode 'filtered' needs a filterId", 'NEGATIVE CONTROL: the pre-fix engine refuses the owner\'s save at BOTH grains with exactly the owner\'s sentence', JSON.stringify([pr1, pr2]));
+}
+
 for (const e of engines) { try { e.stop(); } catch {} }
 
 // ── tree: THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
@@ -1106,7 +1228,7 @@ for (const e of engines) { try { e.stop(); } catch {} }
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 9 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

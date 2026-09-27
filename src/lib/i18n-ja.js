@@ -5087,4 +5087,8 @@ export default {
   "Every \"vibespace-channels refresh\" counts against the account's vendor budget. Agents together may spend at most this share of each minute, so the conversations you watch keep their refresh cadence; past it an agent's refresh is refused with the wait. 100 = no separate limit.": "「vibespace-channels refresh」は毎回アカウントのベンダー予算に計上されます。エージェント全体で各 1 分のうちこの割合までしか使えないため、あなたが見ている会話の更新間隔は保たれます。超えるとエージェントの更新は待ち時間付きで拒否されます。100 = 個別の上限なし。",
   "{label}: kept at the maximum, {value}": "{label}：上限の {value} で保存しました",
   "{label}: raised to the minimum, {value}": "{label}：下限の {value} で保存しました",
+  "This window sent a value the server does not accept — reload the page and try again": "このウィンドウがサーバーの受け付けない値を送りました — ページを再読み込みしてからもう一度お試しください",
+  "The filter is not saved yet — add its rules, then save again": "フィルターがまだ保存されていません — ルールを追加してから、もう一度保存してください",
+  "Wakes per day must be a number of 0 or more": "1 日あたりの起動回数は 0 以上の数値にしてください",
+  "The digest window must be a number of minutes": "ダイジェストのウィンドウは分単位の数値にしてください",
 };

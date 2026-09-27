@@ -187,12 +187,15 @@ router.post('/api/channels/adapters/:id/disconnect', async (req, res) => {
 // ── 2026-09-26: THE ACCOUNT AND PATTERN GRAINS (design §7.3) ────────────
 // Declared BEFORE every `/api/channels/:adapterId/:convId/…` route, which
 // would otherwise swallow `/api/channels/adapters/<id>/assignment`.
-/** A scope verb's typed answer → status BY CODE. */
+/** A scope verb's typed answer → status BY CODE. `why` (the validator's
+ *  closed refusal code) and `rule` (the refused rule's kind) are what the
+ *  client words the refusal with (channel-words' routeErrorText) — the
+ *  English `error` stays the contract, never the toast. */
 function scopeAnswer(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404 : code === 'authority-capped' ? 409 : ['bad-assignment', 'bad-pattern', 'bad-filter', 'no-such-filter', 'bad-request'].includes(code) ? 400 : 500;
-  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}) });
+  return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && r.why ? { why: r.why } : {}), ...(r && r.rule ? { rule: r.rule } : {}) });
 }
 /** THE ACCOUNT GRAIN — `{assignment}` or `{assignment:null}`; the filter
  *  rides inside (`assignment.filter`). */

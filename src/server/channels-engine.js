@@ -4362,20 +4362,29 @@ function create(deps = {}) {
     const existingPattern = kind === 'pattern' && scope.id ? patternById(scope.id) : null;
     if (kind === 'pattern' && scope.id && (!existingPattern || existingPattern.adapterId !== adapterId)) return { ok: false, code: 'not-found', error: 'no such pattern assignment' };
     const id = kind === 'account' ? adapterId : (existingPattern ? existingPattern.id : `pa-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`);
-    const v = F.validateAssignment({ ...b, scope: { kind, id } }, scopeCaps);
-    if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error };
+    // THE INLINE FILTER'S ID IS MINTED BEFORE THE VALIDATOR RUNS (hotfix
+    // 2026-09-26, the owner's toast "请求被拒绝: mode 'filtered' needs a
+    // filterId"): these two grains carry their filter INSIDE the request and
+    // the engine stores it under `f-<kind>-<id>` — the validator ran first and
+    // refused every filtered save for the id this same request supplies. The
+    // id is threaded into the validator's input; every other check and the
+    // order of writes are unchanged. `why` = the refusal's closed code (the
+    // client's words, src/lib/channel-words.js); `error` stays the contract.
+    const inlineFilterId = b.filter && b.mode === 'filtered' ? `f-${kind}-${id}` : null;
+    const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id } }, scopeCaps);
+    if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error, ...(v.code ? {} : { why: v.why || null }) };
     let pattern = null;
     if (kind === 'pattern') {
       const pv = F.validatePattern(b.pattern);
-      if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code };
+      if (!pv.ok) return { ok: false, code: 'bad-pattern', error: pv.error, why: pv.code, rule: pv.kind || null };
       pattern = pv.pattern;
     }
     let filterId = null, filterRec = null;
     if (v.assignment.mode === 'filtered') {
-      if (b.filter) {
+      if (inlineFilterId) {
         const fv = F.validateFilter(b.filter);
-        if (!fv.ok) return { ok: false, code: 'bad-filter', error: fv.error };
-        filterId = `f-${kind}-${id}`;
+        if (!fv.ok) return { ok: false, code: 'bad-filter', error: fv.error, why: fv.code, rule: fv.kind || null };
+        filterId = inlineFilterId;
         filterRec = fv.filter;
       } else if (v.assignment.filterId && filterFor(v.assignment.filterId)) filterId = v.assignment.filterId;
       else return { ok: false, code: 'no-such-filter', error: 'a filtered assignment needs its filter (send `filter` with the assignment)' };

@@ -5088,4 +5088,8 @@ export default {
   "Every \"vibespace-channels refresh\" counts against the account's vendor budget. Agents together may spend at most this share of each minute, so the conversations you watch keep their refresh cadence; past it an agent's refresh is refused with the wait. 100 = no separate limit.": "每次「vibespace-channels refresh」都计入账号的平台额度。所有 agent 加起来每分钟最多用掉这个比例，保证你正在看的会话按原节奏刷新；超过后 agent 的刷新会被拒绝并告知要等多久。100 = 不单独限制。",
   "{label}: kept at the maximum, {value}": "{label}：已按最大值 {value} 保存",
   "{label}: raised to the minimum, {value}": "{label}：已按最小值 {value} 保存",
+  "This window sent a value the server does not accept — reload the page and try again": "这个窗口发送了服务器不接受的值 — 请刷新页面后再试",
+  "The filter is not saved yet — add its rules, then save again": "过滤器还没保存 — 请先添加规则，再保存",
+  "Wakes per day must be a number of 0 or more": "每天最多唤醒次数必须是 0 或更大的数字",
+  "The digest window must be a number of minutes": "摘要窗口必须是分钟数",
 };

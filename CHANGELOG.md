@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.369.187 — handing a whole account (or the conversations a rule matches) to an agent with a filter saves again (the owner's toast "请求被拒绝: mode 'filtered' needs a filterId")
+
+The owner, handing a Lark account to the group 工作 with 匹配过滤器的消息 (two time windows), one digest per window and 起草, pressed 保存 and got the toast `请求被拒绝: mode 'filtered' needs a filterId` — nothing was saved.
+
+- **A filtered hand-off saves.** "Hand the whole account to an agent" and "Conversations matching a rule" save *messages matching a filter* again: the server stores the filter you built in the dialog and the assignment points at it (every such save was refused since 2.369.185; *every message* was unaffected). Re-opening the dialog shows your rules and saving again replaces them.
+- **A refused save says what to fix, in your language.** A filter that is still incomplete, a missing agent, a negative wakes-per-day number and the like now read as a sentence about the dialog (e.g. 过滤器还没保存 — 请先添加规则，再保存), never as the server's internal English message.
+- Cause: the server checked the assignment for a filter id before creating the filter the same request carried. Gates: test-channels-engine ⑩ (fast: the owner's exact request at both grains through the real routes, eight refusals worded by their code, a patched copy with the old order as the control), test-channel-filter, test-channels-aggregate-ui ⑦ (heavy: the owner's dialog in the browser).
+
 ## 2.369.186 — a window you pick by name is shown, even when it is the first tab of a tab group (inc-muiq348r-jwb5)
 
 The owner, on an Android phone: "我在手机上怎么切换不到 vibespace 大开发这个 session？" — "VibeSpace 主开发" was the first (host) window of a tab group made on a desktop, with "Project B 大开发" on show; tapping its row in the phone's window switcher left Project B on screen while the title bar said 主开发.

@@ -58,6 +58,10 @@ const AUTHORITIES = Object.freeze(['draft', 'send']);
  *  PATTERN matches, or ONE conversation to an agent). Exactly one is in
  *  effect per conversation — `effectiveAssignment` below. */
 const ASSIGN_SCOPES = Object.freeze(['conversation', 'pattern', 'account']);
+/** The CLOSED `why` codes a `validateAssignment` refusal carries (hotfix
+ *  2026-09-26) — the client words each one (src/lib/channel-words.js), never
+ *  the English contract sentence. */
+const ASSIGN_REFUSALS = Object.freeze(['not-an-object', 'principal', 'mode', 'filter-missing', 'notify', 'digest', 'authority', 'wake-cap', 'scope']);
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
  *  filter chooses messages inside them). `participant` covers "the chats X
@@ -308,31 +312,38 @@ function estimate(filter, records, { days = 7, now = Date.now(), capHit = false,
  * boolean }`. `authority:'send'` is REFUSED when either cap says no — the
  * editor never drew it, so a request carrying it is a stale client or a
  * hand-built call, and both get the named reason back.
+ *
+ * Every other refusal carries `why` — a code from the CLOSED `ASSIGN_REFUSALS`
+ * (hotfix 2026-09-26): the client words the code (channel-words), the English
+ * `error` stays the contract. `filter-missing` is a filtered assignment with
+ * no filter id — a caller that carries its filter INLINE threads the id it
+ * will store it under BEFORE calling this (channels-engine's scope grains).
  */
 function validateAssignment(input, caps = {}) {
+  const no = (why, error) => ({ ok: false, error, why });
   const a = input && typeof input === 'object' ? input : null;
-  if (!a) return { ok: false, error: 'an assignment must be an object' };
+  if (!a) return no('not-an-object', 'an assignment must be an object');
   const p = a.principal && typeof a.principal === 'object' ? a.principal : null;
-  if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return { ok: false, error: `principal.kind must be ${PRINCIPAL_KINDS.join('|')}` };
+  if (!p || !PRINCIPAL_KINDS.includes(p.kind)) return no('principal', `principal.kind must be ${PRINCIPAL_KINDS.join('|')}`);
   const pid = str(p.id).trim();
-  if (!pid) return { ok: false, error: 'principal.id is required' };
+  if (!pid) return no('principal', 'principal.id is required');
   const mode = a.mode === undefined ? 'all' : a.mode;
-  if (!ASSIGN_MODES.includes(mode)) return { ok: false, error: `mode must be ${ASSIGN_MODES.join('|')}` };
+  if (!ASSIGN_MODES.includes(mode)) return no('mode', `mode must be ${ASSIGN_MODES.join('|')}`);
   const filterId = a.filterId === undefined || a.filterId === null ? null : str(a.filterId).trim() || null;
-  if (mode === 'filtered' && !filterId) return { ok: false, error: "mode 'filtered' needs a filterId" };
+  if (mode === 'filtered' && !filterId) return no('filter-missing', "mode 'filtered' needs a filterId");
   const notify = a.notify === undefined ? 'wake' : a.notify;
-  if (!NOTIFY_MODES.includes(notify)) return { ok: false, error: `notify must be ${NOTIFY_MODES.join('|')}` };
+  if (!NOTIFY_MODES.includes(notify)) return no('notify', `notify must be ${NOTIFY_MODES.join('|')}`);
   let digestMinutes = a.digestMinutes === undefined || a.digestMinutes === null || a.digestMinutes === '' ? DEFAULT_DIGEST_MINUTES : Number(a.digestMinutes);
-  if (!Number.isFinite(digestMinutes)) return { ok: false, error: 'digestMinutes must be a number' };
+  if (!Number.isFinite(digestMinutes)) return no('digest', 'digestMinutes must be a number');
   digestMinutes = Math.min(MAX_DIGEST_MINUTES, Math.max(MIN_DIGEST_MINUTES, Math.round(digestMinutes)));
   const authority = a.authority === undefined ? 'draft' : a.authority;
-  if (!AUTHORITIES.includes(authority)) return { ok: false, error: `authority must be ${AUTHORITIES.join('|')}` };
+  if (!AUTHORITIES.includes(authority)) return no('authority', `authority must be ${AUTHORITIES.join('|')}`);
   if (authority === 'send') {
     const cap = authorityCap(caps);
     if (cap) return { ok: false, error: `authority 'send' is not available here: ${cap}`, code: 'authority-capped', why: cap };
   }
   let dailyWakeCap = a.dailyWakeCap === undefined || a.dailyWakeCap === null || a.dailyWakeCap === '' ? DEFAULT_DAILY_WAKE_CAP : Number(a.dailyWakeCap);
-  if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return { ok: false, error: 'dailyWakeCap must be a number ≥ 0' };
+  if (!Number.isFinite(dailyWakeCap) || dailyWakeCap < 0) return no('wake-cap', 'dailyWakeCap must be a number ≥ 0');
   dailyWakeCap = Math.min(MAX_DAILY_WAKE_CAP, Math.round(dailyWakeCap));
   // P3 (design §9.3, decision 8): an outbox RECEIPT never wakes the agent by
   // default (it rides the next turn); an assignment may opt in — a billed
@@ -344,9 +355,9 @@ function validateAssignment(input, caps = {}) {
   let scope = null;
   if (a.scope !== undefined && a.scope !== null) {
     const sc = a.scope && typeof a.scope === 'object' ? a.scope : null;
-    if (!sc || !ASSIGN_SCOPES.includes(sc.kind)) return { ok: false, error: `scope.kind must be ${ASSIGN_SCOPES.join('|')}` };
+    if (!sc || !ASSIGN_SCOPES.includes(sc.kind)) return no('scope', `scope.kind must be ${ASSIGN_SCOPES.join('|')}`);
     const sid = str(sc.id).trim();
-    if (!sid) return { ok: false, error: 'scope.id is required' };
+    if (!sid) return no('scope', 'scope.id is required');
     scope = { kind: sc.kind, id: sid.slice(0, 512) };
   }
   return {
@@ -651,7 +662,7 @@ module.exports = {
   DEFAULT_DIGEST_MINUTES, MIN_DIGEST_MINUTES, MAX_DIGEST_MINUTES, DEFAULT_DAILY_WAKE_CAP, MAX_DAILY_WAKE_CAP,
   BLOCK_MAX_RECORDS, BLOCK_MAX_CHARS, BLOCK_MAX_BYTES,
   validateRule, validateFilter, filterProblemText, MAX_RULES, ruleWhy, matchRecord, estimate,
-  validateAssignment, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
+  validateAssignment, ASSIGN_REFUSALS, authorityCap, authorityCapCode, authorityCapText, effectiveAuthority, pickRoundRobin, paceVerdict, pruneLedger, countSince,
   renderWakeBlock, renderDigestBlock, whyText,
   // 2026-09-26: the three grains + conversation patterns + the scope digest
   ASSIGN_SCOPES, CONV_RULE_KINDS, CONV_KINDS, validatePattern, matchConversation, patternSummary, effectiveAssignment, expectedWakesPerDay, renderScopeDigestBlock,

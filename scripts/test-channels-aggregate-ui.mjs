@@ -17,6 +17,11 @@
 //     through the one editor, and every row then wears the INHERITED chip
 //     "（账号）"; the conversation window's chip says it too
 //   ⑥ zero Latin-only "Track"/"tracked" words on the panel and the window
+//   ⑦ (hotfix 2026-09-26, the owner's toast "请求被拒绝: mode 'filtered' needs a
+//     filterId") the owner's EXACT dialog: 组 · 工作, 匹配过滤器的消息 with two
+//     time-window rules, 每个窗口一份摘要 9999, cap 9999, 起草 ⇒ 保存 closes with
+//     NO error toast, the account line says it, the wire holds the minted
+//     filter id, and re-opening prefills the two rules and saves again
 //
 // Per-pid scratch (scripts/scratch.mjs); the server gets vncEnv() (§57), a
 // scratch HOME, VIBESPACE_CHANNELS_FAKE=1 and VIBESPACE_CHANNELS_FAKE_CONVS=3
@@ -264,6 +269,88 @@ const win2 = await p1.evaljs(`(async () => {
 ok(!win2.fail && win2.inherited && /（账号）/.test(win2.chip), 'the conversation window\'s chip says the assignment is inherited from the account', JSON.stringify(win2));
 const acl = await api('GET', '/api/channels');
 ok((acl.json.conversations || []).filter((c) => c.adapterId === 'fake-poll').every((c) => c.assignment && c.assignment.source === 'account'), 'the wire agrees: every row\'s effective assignment comes from the account grain');
+
+// ── ⑦ THE OWNER'S SAVE (hotfix 2026-09-26): a filtered hand-off with its filter inline ──
+// The owner's screenshot: "把整个账号交给一个 agent — Lark / 飞书", 唤醒 组 · 工作, 开 = 匹配过滤器的
+// 消息 (two 时间窗口 rules), 投递 = 每个窗口一份摘要 (窗口 9999), 每天最多唤醒次数 9999, 权限 起草
+// ⇒ 保存 answered 请求被拒绝: mode 'filtered' needs a filterId. Driven through the same dialog
+// on the fake account, from a fresh hand-off (the Ops desk grain of ⑤ released first).
+const un = await api('PUT', '/api/channels/adapters/fake-poll/assignment', { assignment: null });
+ok(un.status === 200 && un.json.ok === true, 'FIXTURE: the account grain of ⑤ is released (a fresh hand-off, as the owner\'s was)', JSON.stringify(un.json));
+const tgWork = await api('POST', '/api/tasks', { title: '工作' });
+ok(tgWork.status === 200 && tgWork.json.task && tgWork.json.task.id, 'FIXTURE: the Task Group 工作', JSON.stringify(tgWork.json));
+for (let i = 0; i < 40; i++) { if (await p1.evaljs(`(window.app.sidebar._tasks || []).some((t) => t.title === '工作')`)) break; await sleep(150); }
+const OWNER_DIALOG = (edit) => `(async () => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  for (let i = 0; i < 40; i++) { const s = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]'); if (s && ${edit ? '' : '!'}s.querySelector('.chan-grain-line[data-grain="account"]')) break; await sleep(150); }
+  const sec = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"]');
+  const more = sec && sec.querySelector('.chan-sec-more');
+  if (!more) return { fail: 'no ⋯ on the fake-poll section' };
+  more.click();
+  await sleep(200);
+  const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => /交给/.test(x.textContent));
+  if (!it) return { fail: 'no 交给 item', items: [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => x.textContent.trim()) };
+  const itemText = it.textContent.trim();
+  it.click();
+  for (let i = 0; i < 40 && !document.getElementById('chan-scope-assign-dialog'); i++) await sleep(100);
+  const dlg = document.getElementById('chan-scope-assign-dialog');
+  if (!dlg) return { fail: 'the editor did not open' };
+  const title = dlg.querySelector('.dialog-header h3') ? dlg.querySelector('.dialog-header h3').textContent : null;
+  const selWith = (v) => [...dlg.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === v));
+  const rows = () => [...dlg.querySelectorAll('.chan-af-rules:not(.chan-pat-rules) .chan-af-rule')];
+  let prefill = null;
+  if (${edit}) {
+    prefill = { mode: selWith('filtered').value, notify: selWith('digest').value, rules: rows().map((r) => [...r.querySelectorAll('input')].map((i) => i.value)), who: dlg.querySelector('select').selectedOptions[0] ? dlg.querySelector('select').selectedOptions[0].textContent : null };
+  } else {
+    const who = dlg.querySelector('select');
+    const opt = [...who.options].find((o) => o.textContent === '组 · 工作');
+    if (!opt) return { fail: 'the group is not offered as 组 · 工作', opts: [...who.options].map((o) => o.textContent) };
+    who.value = opt.value; who.dispatchEvent(new Event('change'));
+    const mode = selWith('filtered'); mode.value = 'filtered'; mode.dispatchEvent(new Event('change'));
+    const add = [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加规则');
+    if (!add) return { fail: 'no 添加规则 button' };
+    const windows = [['09:00', '12:00'], ['14:00', '18:00']];
+    for (let k = 0; k < windows.length; k++) {
+      add.click(); await sleep(50);
+      const row = rows()[k];
+      const ks = row.querySelector('select'); ks.value = 'time-window'; ks.dispatchEvent(new Event('change')); await sleep(50);
+      const ins = rows()[k].querySelectorAll('input');
+      ins[0].value = windows[k][0]; ins[0].dispatchEvent(new Event('input'));
+      ins[1].value = windows[k][1]; ins[1].dispatchEvent(new Event('input'));
+    }
+    const notify = selWith('digest'); notify.value = 'digest'; notify.dispatchEvent(new Event('change'));
+    const nums = [...dlg.querySelectorAll('input[type=number]')];
+    nums[0].value = '9999'; nums[0].dispatchEvent(new Event('input'));
+    nums[1].value = '9999'; nums[1].dispatchEvent(new Event('input'));
+    const auth = selWith('draft'); auth.value = 'draft'; auth.dispatchEvent(new Event('change'));
+  }
+  for (let i = 0; i < 40; i++) { const st = dlg.querySelector('.chan-af-stat'); if (st && !/估算中|估计中|Estimating/.test(st.textContent)) break; await sleep(150); }
+  const estimate = dlg.querySelector('.chan-af-stat') ? dlg.querySelector('.chan-af-stat').textContent : null;
+  const toastsBefore = document.querySelectorAll('#global-toasts .global-toast').length;
+  const save = [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存');
+  save.click();
+  for (let i = 0; i < 50 && document.getElementById('chan-scope-assign-dialog'); i++) await sleep(100);
+  await sleep(200);
+  const toasts = [...document.querySelectorAll('#global-toasts .global-toast')].slice(toastsBefore).map((x) => ({ error: x.classList.contains('global-toast-error'), text: x.textContent }));
+  const closed = !document.getElementById('chan-scope-assign-dialog');
+  if (!closed) document.getElementById('chan-scope-assign-dialog').remove();
+  return { itemText, title, prefill, estimate, closed, toasts };
+})()`;
+const own = await p1.evaljs(OWNER_DIALOG(false));
+ok(!own.fail && /把整个账号交给一个 agent/.test(own.title || ''), 'the account ⋯ 交给一个 agent… opens 把整个账号交给一个 agent — …', JSON.stringify(own));
+ok(own.closed && !(own.toasts || []).some((x) => x.error), 'the OWNER\'S save (组 · 工作, 匹配过滤器的消息 × two 时间窗口 rules, 每个窗口一份摘要 9999, cap 9999, 起草) CLOSES with no error toast', JSON.stringify(own.toasts));
+ok((own.toasts || []).some((x) => !x.error && /账号已交给 工作/.test(x.text)) && !(own.toasts || []).some((x) => /filterId|mode 'filtered'/.test(x.text)), 'the toast says 账号已交给 工作 — and nothing says `mode \'filtered\' needs a filterId`', JSON.stringify(own.toasts));
+const line = await p1.evaljs(`(async () => {
+  for (let i = 0; i < 60; i++) { const l = document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-grain-line[data-grain="account"]'); if (l && /工作/.test(l.textContent)) return l.textContent; await new Promise((r) => setTimeout(r, 200)); }
+  return null;
+})()`);
+ok(line === '已交给 工作 · 已过滤 · 每 1440 分钟一份摘要', `the account card's line reads "${line}" (9999 held to the 1440-minute bound)`, line);
+const wire = await api('GET', '/api/channels');
+const acctA = ((wire.json.adapters || []).find((x) => x.id === 'fake-poll') || {}).assignment || {};
+ok(acctA.mode === 'filtered' && acctA.filterId === 'f-account-fake-poll' && acctA.filter && acctA.filter.rules.length === 2 && acctA.filter.rules.map((r) => `${r.from}-${r.to}`).join() === '09:00-12:00,14:00-18:00' && acctA.principal.kind === 'group' && acctA.principal.name === '工作' && acctA.notify === 'digest' && acctA.digestMinutes === 1440 && acctA.dailyWakeCap === 1000 && acctA.authority === 'draft', 'the wire holds the grain: group 工作, filtered by f-account-fake-poll (09:00-12:00, 14:00-18:00), digest 1440, cap 1000, draft', JSON.stringify(acctA));
+const again = await p1.evaljs(OWNER_DIALOG(true));
+ok(!again.fail && /已交给 agent/.test(again.itemText || '') && again.prefill && again.prefill.who === '组 · 工作' && again.prefill.mode === 'filtered' && again.prefill.notify === 'digest' && JSON.stringify(again.prefill.rules) === JSON.stringify([['09:00', '12:00'], ['14:00', '18:00']]), 're-opening (已交给 agent —— 编辑…) prefills 组 · 工作 and 匹配过滤器的消息 with the two saved windows', JSON.stringify(again));
+ok(again.closed && !(again.toasts || []).some((x) => x.error), 'saving the edit (the filter re-sent inline) closes with no error toast', JSON.stringify(again.toasts));
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

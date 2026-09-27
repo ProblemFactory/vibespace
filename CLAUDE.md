@@ -650,6 +650,7 @@ stream-json 下 assistant 的 `thinking→text→thinking→tool_use` 三明治�
 
 **Full essays: docs/kb-bugfix-invariants.md (moved verbatim; ancient one-liners in docs/history-archive.md). Each entry is an incident whose FIX carries invariants — search here before re-diagnosing a familiar symptom.** Index:
 
+- A FILTERED ACCOUNT HAND-OFF WAS REFUSED FOR ITS OWN FILTER (hotfix 2026-09-26, `mode 'filtered' needs a filterId`): validated before its inline filter's id was minted. FIX = mint first; refusals = worded codes. 不变量=never reject a value the request supplies inline ⇒ kb-bugfix-invariants.md
 - A PILL WHOLE HERE WAS CUT ON THE RUNNER (.185 mirror red): an 82 px CSS cap + DejaVu Sans ⇒ "refresh pau…". FIX = the pill never shrinks, the title yields, the budget is in the words. 不变量=a pill is whole under the runner's font; rail-width censuses run under DejaVu Sans ⇒ kb-bugfix-invariants.md
 - SEVEN ROUNDS, ONE ORDERING BUG PER REWRITE (channels refresh drain, R2 r2–r8): an async-interleaved imperative scheduler. FIX (r9) = PURE src/channel-drain.js step function + a seeded invariant walk. 不变量=no scheduling decision lives across an await ⇒ kb-bugfix-invariants.md
 - THE PEN LEG READ `mouse`; A REBUILD UNDER A RESTING POINTER GREW A CHOOSER (.183 mirror red): Chrome re-targets resting pointers by a bare pointerenter. FIX = typed judge + PURE hoverStep (movement arms, once per group visit). 不变量=an enter is not an arrival ⇒ kb-bugfix-invariants.md
