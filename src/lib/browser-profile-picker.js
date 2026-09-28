@@ -37,32 +37,30 @@ export function adoptLabel(browserVariant) {
 export function canPinBrowser(app, s) {
   return !!(app && app._browserProfiles && Array.isArray(app._browserProfiles.profiles) && s && s.status === 'live' && s.webuiId && !s.host);
 }
-/** Owner ruling A: a profile's name as every pin surface spells it — "(only <name>)" when the user kept it to ONE
- *  conversation (the pin still works: the user's pick is the authorization), "(legacy shared)" for the migration's record.
- *  `nameOf(browserKey)` names a conversation from the client's own session rows. */
-export function profilePickLabel(p, nameOf = null) {
+/** Owner ruling A: a profile's name as every pin surface spells it — "(only some conversations)" when the user kept it
+ *  to a list of conversations / Task Groups (picking it here ADDS this conversation to that list — the pick writes the
+ *  list), "(legacy shared)" for the migration's record. The list itself is drawn in ONE place, the Agent browser panel. */
+export function profilePickLabel(p) {
   if (!p) return '';
   if (p.legacy) return p.label + ' ' + t('(legacy shared)');
-  if (p.scope === 'one') {
-    const key = p.owner && p.owner.kind === 'session' ? p.owner.id : null;
-    const n = key && typeof nameOf === 'function' ? nameOf(key) : '';
-    return p.label + ' ' + (n ? t('(only {name})', { name: n }) : t('(only one conversation)'));
-  }
+  if (p.scope === 'only') return p.label + ' ' + t('(only some conversations)');
   return String(p.label || '');
 }
 /** The picker's rows, DOM-free: current pin ✓, "No profile (temporary browser)", every profile, then
  *  the adopt item. `pinnedId` is the session's browser FACT's pin (`browserFact.pinned.id`, lane S2). Owner
  *  ruling A: EVERY named profile is offered — a mediated one too (a pin is a default attachment now, never a
  *  directory handed to the next launch). */
-export function pickerItems({ profiles = [], pinnedId = null, browserVariant = null, chips = {}, onSwitch = null, onPin, onAdopt, nameOf = null }) {
+export function pickerItems({ profiles = [], pinnedId = null, browserVariant = null, chips = {}, onSwitch = null, onPin, onAdopt, choicesOf = () => [] }) {
   const items = [];
   // the ticked row is where the pin already is: choosing it again changes nothing, so it asks the server nothing (lane J — it used to queue a "ephemeral → ephemeral" notice)
   items.push({ label: (pinnedId ? '  ' : '✓ ') + t('No profile (temporary browser)'), action: () => { if (pinnedId) onPin(null); } }); // lane S2: plain words, never "ephemeral"
   for (const p of profiles) {
-    items.push({ label: (p.id === pinnedId ? '✓ ' : '  ') + profilePickLabel(p, nameOf) + (chips && chips[p.id] ? ' · ' + chips[p.id] : ''), action: () => { if (p.id !== pinnedId) onPin(p.id); } });
+    items.push({ label: (p.id === pinnedId ? '✓ ' : '  ') + profilePickLabel(p) + (chips && chips[p.id] ? ' · ' + chips[p.id] : ''), action: () => { if (p.id !== pinnedId) onPin(p.id); } });
   }
-  // P4 (§7.4): the pinned profile's BACKEND CHIP as an item, opening the switcher (the second of the chip's two homes)
-  if (pinnedId && typeof onSwitch === 'function') { items.push({ separator: true }); items.push({ label: t('Backend: {chip} — switch…', { chip: (chips && chips[pinnedId]) || '?' }), action: () => onSwitch(pinnedId) }); }
+  // P4 (§7.4) → the rebuilt switch dialog: the pinned profile's browser as an item opening the dialog — ONLY when another
+  // browser is available for it (`choicesOf(profileId)`, the digest's switch choices); otherwise there is nothing to switch to
+  const choices = pinnedId && typeof choicesOf === 'function' ? (choicesOf(pinnedId) || []) : [];
+  if (pinnedId && typeof onSwitch === 'function' && choices.length) { items.push({ separator: true }); items.push({ label: t('Switch browser (now {name})…', { name: (chips && chips[pinnedId]) || t('unknown browser') }), action: () => onSwitch(pinnedId) }); } // says what it does (2026-09-28)
   items.push({ separator: true });
   items.push({ label: adoptLabel(browserVariant), action: () => onAdopt() });
   return items;
@@ -98,7 +96,7 @@ export function installBrowserProfilePicker(App) {
    *  ruling a pin is a default ATTACHMENT, so the Task Group default lists every profile as the New Session dialog does. */
   App.prototype.browserProfileOptions = function ({ includeShared = true } = {}) {
     const list = this._browserProfiles?.profiles || [];
-    return [{ value: '', label: t('No profile (temporary browser)') }, ...list.map((p) => ({ value: p.id, label: profilePickLabel(p, (k) => this.conversationNameOf(k)) }))];
+    return [{ value: '', label: t('No profile (temporary browser)') }, ...list.map((p) => ({ value: p.id, label: profilePickLabel(p) }))];
   };
   /** ONE pin write for every surface; the answer says when it applies. */
   App.prototype.pinBrowserProfile = async function (s, profileId) {
@@ -106,7 +104,8 @@ export function installBrowserProfilePicker(App) {
     const r = await fetchJson('/api/browser/pin', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: s.webuiId, profile: profileId || null }) });
     if (!r || r.error) { showToast(r?.error || t('server unreachable'), { type: 'error' }); return null; }
     // owner ruling A: the words say what the user will SEE — never a command line (`appliesFrom` is the agent's sentence)
-    showToast(r.pin ? t('Pinned to {name} — the agent’s next browser command opens it', { name: r.pin.label }) : t('Unpinned — the agent’s next browser command uses a temporary browser'), { duration: 7000 });
+    // "Who can use it" is a list: a pick of a profile kept to some conversations ADDS this one to them — said, never silent
+    showToast(r.pin ? t('Pinned to {name} — the agent’s next browser command opens it', { name: r.pin.label }) + (r.added ? t(' · this conversation was added to the ones that can use it') : '') : t('Unpinned — the agent’s next browser command uses a temporary browser'), { duration: 7000 });
     if (r.repoint && r.repoint.ok === false) showToast(r.repoint.why, { type: 'warn', duration: 9000 });
     return r;
   };
@@ -126,11 +125,11 @@ export function installBrowserProfilePicker(App) {
     const fact = s.browserFact && typeof s.browserFact === 'object' ? s.browserFact : null; // lane S2: the pin comes from THE fact
     const items = pickerItems({
       profiles: this._browserProfiles.profiles, pinnedId: fact && fact.pinned ? fact.pinned.id : null, browserVariant: s.browserVariant || null,
-      chips: this._browserProfiles.chips || {},
+      chips: Object.fromEntries((this._browserProfiles.profiles || []).map((p) => [p.id, this.browserChipFor ? this.browserChipFor(p.id) : null]).filter(([, c]) => c)), // the browser's NAME in words (never `chromium 151`)
+      choicesOf: (id) => (this.browserChoicesFor ? this.browserChoicesFor(id) : []),
       onSwitch: (id) => this.openBrowserSwitcher?.({ profileId: id, sessionId: s.webuiId }),
       onPin: (id) => this.pinBrowserProfile(s, id),
       onAdopt: () => this.adoptBrowserProfile(s),
-      nameOf: (k) => this.conversationNameOf(k),
     });
     showContextMenu(x, y, items);
   };
@@ -146,7 +145,10 @@ export function installBrowserProfilePicker(App) {
     if (!row || !sel) return;
     const backend = document.getElementById('input-backend')?.value || 'claude';
     const d = this._browserProfiles;
-    const show = !!(d && Array.isArray(d.profiles) && backend !== 'shell');
+    // identity verify r3 (2026-09-28, round 2's finding 6): a session on ANOTHER machine (a host picked) can never open a
+    // profile here — the row is not offered for it (the server records nothing but an inert pin for such a pick)
+    const onHost = !!document.getElementById('input-host')?.value;
+    const show = !!(d && Array.isArray(d.profiles) && backend !== 'shell' && !onHost);
     row.style.display = show ? '' : 'none'; // no global .hidden in this repo — display is the honest switch
     if (!show) { sel.value = ''; sel.dataset.origin = ''; return; }
     this._browserProfileRowTask = taskId || null; // lane S2: the digest broadcast re-fills an OPEN dialog with the same facts
@@ -183,9 +185,10 @@ export function installBrowserProfilePicker(App) {
     const p = fact.pinned ? (d.profiles || []).find((x) => x.id === fact.pinned.id) : null;
     const origin = fact.pinned ? pinOriginLabel(fact.pinned.origin || 'chosen') : '';
     const attached = p ? (d.leases || []).filter((l) => l.profileId === p.id).length : 0;
-    const chip = p && d.chips && d.chips[p.id] ? ` <span class="chat-status-dim browser-chip">${escHtml(d.chips[p.id])}</span>` : ''; // P4: the backend chip
-    // owner ruling A: who may use it — every conversation (the default), or only one (the user's panel switch)
-    const scope = p ? (p.scope === 'one' ? profilePickLabel(p, (k) => this.conversationNameOf(k)).slice(String(p.label || '').length).trim() : t('every conversation can use it')) : '';
+    const chipText = p && this.browserChipFor ? this.browserChipFor(p.id) : null;
+    const chip = chipText ? ` <span class="chat-status-dim browser-chip">${escHtml(chipText)}</span>` : ''; // P4: the browser's name in words (escaped: it syncs to every client)
+    // owner ruling A: who may use it — every conversation (the default), or only some (the list in the Agent browser panel)
+    const scope = p ? (p.scope === 'only' ? t('only some conversations') : t('every conversation can use it')) : '';
     return `<span class="session-props-browser-line${w.amber ? ' amber' : ''}" title="${escHtml(w.tooltip)}">${escHtml(w.line)}</span>${chip}${origin ? ` <span class="chat-status-dim">${escHtml('(' + t('pinned') + ': ' + origin + ')')}</span>` : ''}${p ? ` <span class="chat-status-dim">${escHtml('· ' + scope + ' · ' + t('{n} conversation(s) using it now', { n: attached }))}</span>` : ''}`;
   };
 }

@@ -266,6 +266,21 @@ function create({ dataDir, log = console } = {}) {
     return cur && KEY_RE.test(String(cur.key || '')) ? String(cur.key) : '';
   }
 
+  /** THE REVERSE READ ("Who can use it", 2026-09-27): the conversation a key is bound to, or '' — a STOPPED
+   *  conversation's chip in the Agent browser panel is named by the client from its own session rows through this
+   *  id. One file read per call; `conversationsByKey()` = the whole map, read ONCE (a panel with many rows). */
+  function conversationsByKey() {
+    const out = new Map();
+    for (const [sid, v] of Object.entries(readAll().byConversation)) if (v && KEY_RE.test(String(v.key || '')) && !out.has(String(v.key))) out.set(String(v.key), sid);
+    return out;
+  }
+  function conversationOf(key) {
+    const k = String(key || '');
+    if (!KEY_RE.test(k)) return '';
+    for (const [sid, v] of Object.entries(readAll().byConversation)) if (v && v.key === k) return sid;
+    return '';
+  }
+
   /** Every bound key (for a sweeper that wants to know which keys a stopped
    *  conversation could still come back for). */
   function keys() {
@@ -281,7 +296,7 @@ function create({ dataDir, log = console } = {}) {
   /** How many (session, conversation) implicit-fork announcements were journalled (r7). */
   function implicitForks() { return announced.size; }
 
-  return { record, lookup, keys, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS };
+  return { record, lookup, conversationOf, conversationsByKey, keys, refusals, implicitForks, noteUnbound, conversationIdOf, bindableIdOf, keyDecidedFor, file, dir, MAX_BINDINGS };
 }
 
 module.exports = { create, conversationIdOf, bindableIdOf, keyDecidedFor, FILE_NAME, DIR_REL, MAX_BINDINGS, REFUSAL_METRIC, SHARE_METRIC, IMPLICIT_FORK_METRIC };

@@ -35,6 +35,7 @@ import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { wiredCloak } from './fixtures/browser-switcher-views.mjs'; // THE cloak-wired override, one spelling shared with the switch dialog's fixtures
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
 const B = require('../src/browser-profiles.js');
@@ -93,6 +94,7 @@ if (a === 'open') {
   { let slow = 0; try { slow = Number(fs.readFileSync(path.join(st, 'slow-ms'), 'utf8')) || 0; } catch { } if (slow) { const t = Date.now() + slow; while (Date.now() < t) {} } }
   if (!(s && alive(s.pid))) {
     if (fs.existsSync(path.join(st, 'fail-license'))) { process.stderr.write('cloakbrowser: license validation failed — concurrent session limit reached for this key\\n'); process.exit(1); }
+    if (fs.existsSync(path.join(st, prefix.exe ? 'fail-cloak' : 'fail-plain'))) { process.stderr.write('fake: segmentation fault on start\\n'); process.exit(1); } // the rebuilt dialog: a launch that fails for no licence reason
     const c = spawn('sleep', ['600'], { detached: true, stdio: 'ignore' }); c.unref();
     s = { pid: c.pid, profile: process.env.AGENT_BROWSER_PROFILE || null, idle: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS || null, ...prefix, vendor, session: process.env.AGENT_BROWSER_SESSION || null };
     fs.writeFileSync(f, JSON.stringify(s));
@@ -233,7 +235,6 @@ console.log('— ① the version ladder, the seed, seats in three states, the ce
   ok(!g1.ok && g1.code === 'provider_needs_local_key' && calls.length === 0, 'host != null switching to cloak ⇒ provider_needs_local_key and resolveKey was NEVER called (nothing resolved, nothing handed to a transport)');
   const g1b = SW.switchVerdict({ profile: remote, target: 'cloud:browserbase', rowOf: B.providerRow, controlOf: B.providerControl, resolveKey });
   ok(!g1b.ok && g1b.code === 'provider_needs_local_key' && calls.length === 0, '…and cloud:* likewise');
-  const wiredCloak = { row: (id) => (id === 'cloak' ? { ...B.providerRow('cloak'), wired: true } : B.providerRow(id)), control: (id, o) => (id === 'cloak' && !(o && o.host) ? { ok: true, row: { ...B.providerRow('cloak'), wired: true } } : B.providerControl(id, o)) };
   const local = { id: 'bp-2', label: 'Vendor portal', provider: 'chromium', host: null, dir: '/tmp/x', fingerprintSeed: null, lastChromiumMajor: 146, owner: { kind: 'session', id: 'bk-00000001' } };
   const g2 = SW.switchVerdict({ profile: local, target: 'cloak', rowOf: B.providerRow, controlOf: B.providerControl, resolveKey });
   ok(!g2.ok && g2.code === 'backend_unavailable' && /binary_absent/.test(g2.error) && calls.length === 0, 'an unwired target ⇒ backend_unavailable naming what is missing, before any key resolve');
@@ -253,6 +254,7 @@ console.log('— ① the version ladder, the seed, seats in three states, the ce
   const rows = SW.switcherRows({ profile: local, providerIds: B.providerIds(), rowOf: wiredCloak.row, controlOf: wiredCloak.control, capabilityRefusalOf: B.capabilityRefusal, sources: (id) => (id === 'cloak' ? { source: 'cluster', clusterLabel: 'Team' } : { source: 'none' }), seats: {}, majors: {}, now: NOW });
   const rc = rows.find((r) => r.id === 'cloak'), rk = rows.find((r) => r.id === 'cloud:kernel'), rch = rows.find((r) => r.id === 'chromium');
   ok(rows.length === B.providerIds().length && rch.current && rc.enabled && /cluster default · Team \(seats shared/.test(rc.sourceLabel) && rc.seats.state === 'unknown' && rk.enabled === false && rk.sourceLabel === 'not configured' && rk.code === 'switch_export_only' && rk.action && rk.action.openIntegration === 'cloud:kernel', 'switcherRows: every backend with its verdict WRITTEN ON IT, the SOURCE chip from the masked view, seats per key row, the one-click action on a not-configured row');
+  ok(rch.state === 'current' && rc.state === 'ready' && rc.switchKind === 'in-place' && rk.state === 'not-a-switch' && rk.switchKind === 'export-only' && rows.find((r) => r.id === 'cdp').state === 'not-a-switch' && rc.facts && rc.facts.binary === null && rc.facts.key.source === 'cluster' && rc.facts.hold === null, 'the rebuilt dialog: the SAME call (its new inputs defaulted) now writes each row\'s closed STATE, its switch kind and its facts');
 }
 
 // ═══ ② ORCH: the key consumer over a REAL integration store ════════════════
@@ -287,9 +289,13 @@ const store = IS.create({ dataDir: path.join(ROOT, 'integ'), env: fakeEnv, broad
   const before = fetches.length;
   const t1 = await store.test('cloak');
   for (const k of Object.keys(orig)) cp[k] = orig[k];
-  ok(t1.ok === true && t1.kind === 'shape-only' && fetches.length === before && spawns.length === 0 && /free tier|cb_ key present/.test(JSON.stringify(t1.detail)), "cloak's Test: ok, zero fetches, zero child processes, zero bytes (the tier is not read here)");
+  ok(t1.ok === true && t1.kind === 'shape-only' && fetches.length === before && spawns.length === 0 && /cb_ key present/.test(JSON.stringify(t1.detail)) && !/free tier/.test(JSON.stringify(t1)), "cloak's Test: ok, zero fetches, zero child processes, zero bytes (the tier is not read here)");
   store.setIntegration('cloak', { licenseKey: '' });
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
+  // 2026-09-28 (the naive-user verifier): an EMPTY key is no key — the Test says so, exactly as a switch / a start answer
+  // backend_no_key for it (it used to pass as "empty = free tier", a promise the resolver never kept)
+  const t0 = await store.test('cloak');
+  ok(t0.ok === false && /no key resolved for cloak/.test(t0.error || '') && backend.keyFor('cloak').source === 'none', `an empty key ⇒ the Test fails by name, and the resolve says none (the same fact the switch gate refuses on): ${t0.error}`);
   fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'notacloakkey';
   const t2 = await store.test('cloak');
   ok(t2.ok === false && /validate: licenseKey/.test(t2.error) && /cb_/.test(t2.error), 'a malformed key ⇒ a named validate complaint');
@@ -335,7 +341,7 @@ console.log('— ③ the keeper: the three named refusals, the tier + major read
 let clock = 1_800_000_000_000;
 const settings = { 'browser.cloak.executablePath': '' };
 const KEY_A = 'bk-0000000a', KEY_B = 'bk-0000000b';
-const wired = { row: (id) => (id === 'cloak' ? { ...B.providerRow('cloak'), wired: true } : B.providerRow(id)), control: (id, o) => (id === 'cloak' && !(o && o.host) ? { ok: true, row: { ...B.providerRow('cloak'), wired: true } } : B.providerControl(id, o)) };
+const wired = wiredCloak; // scripts/fixtures/browser-switcher-views.mjs
 function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataDir = DATA, envPath = PATH_ENV } = {}) {
   const backend = BB.create({ integrations: store, log: { warn() {} } });
   return { keeper: K.create({ dataDir, homeDir: HOME, env: () => ({ PATH: envPath, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT }), serverSetting: (k) => settings[k], liveKeys: () => liveKeys, install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: backend, providers, hostKnown: () => false }), backend };
@@ -432,6 +438,85 @@ function mkKeeper({ liveKeys = new Set([KEY_A, KEY_B]), providers = wired, dataD
   k.reconcile({ graceMs: 0 });
   ok(k.blockedFor({}).length === 0, 'a dead conversation\'s blocked claims go with it at boot');
   await k.stop(p.id, { why: 'user' }).catch(() => {});
+  delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
+}
+
+// ═══ ③b the rebuilt switch dialog's server half ════════════════════════════════
+console.log('— ③b the rebuilt dialog: ROW_STATES / rowState / switchChoices / backendFact / installFacts, the view\'s live + states, the digest backends, the start-failure ROLLBACK');
+{
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  ok(SW.ROW_STATES.length === 17 && Object.isFrozen(SW.ROW_STATES) && new Set(SW.ROW_STATES).size === 17, 'ROW_STATES is a frozen closed set of 17');
+  const base = { id: 'bp-00000b01', label: 'Shop', provider: 'chromium', host: null, dir: '/tmp/x', lastChromiumMajor: 146, fingerprintSeed: null, owner: { kind: 'instance' } };
+  const ids = B.providerIds();
+  ok(same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: B.providerRow, controlOf: B.providerControl }), []), 'switchChoices on the SHIPPED table: [] (cloak is not wired on this build)');
+  ok(same(SW.switchChoices({ profile: base, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), ['cloak']), '…under the wired override: [cloak] (key, binary, version, seats not considered)');
+  ok(same(SW.switchChoices({ profile: { ...base, host: 'dev-1' }, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), []) && same(SW.switchChoices({ profile: { ...base, provider: 'cdp' }, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control }), []), '…a profile on a paired machine, or one on cdp: []');
+  ok(same(SW.backendFact({ provider: 'chromium', lastChromiumMajor: 151 }), { id: 'chromium', major: 151, plan: null }) && same(SW.backendFact({ provider: 'cloak' }, { seats: { cloak: { tier: 'free' } } }), { id: 'cloak', major: 146, plan: 'free' }) && SW.backendChip({ provider: 'cloak', major: 146, tier: 'free' }) === 'cloak 146 (free)', 'backendFact = the chip\'s facts unstringified (the agent\'s chip spelled from it)');
+  const iF = SW.installFacts({ verdict: { ok: true, spec: 's' }, npm: true, state: { running: false, exitCode: 1, error: null } });
+  ok(iF.ok && iF.npm === true && iF.state.failed === true && SW.installFacts({ verdict: {}, npm: false, state: { running: true, exitCode: null, error: 'x' } }).state.failed === false && SW.installFacts({ verdict: {}, state: { running: false, exitCode: 0, error: null } }).state.failed === false, 'installFacts: npm + state.failed (a finished run with an error / a non-zero exit, never while running)');
+  const bin = { present: false, configured: false };
+  const inst = { ok: true, npm: true, state: { running: false, failed: false } };
+  const rs = (o) => SW.rowState({ row: { canSwitchTo: 'in-place' }, currentRow: { canSwitchTo: 'in-place' }, ...o });
+  ok(rs({ verdict: { ok: false, code: 'backend_no_key' }, binary: bin, install: inst }) === 'not-installed' && rs({ verdict: { ok: false, code: 'backend_no_key' }, binary: { present: true }, install: inst }) === 'needs-key', 'rowState: rule 6 (the program) before rule 7 (the key)');
+  ok(rs({ verdict: { ok: true }, binary: bin, install: { ...inst, npm: false } }) === 'not-installed-here' && rs({ verdict: { ok: true }, binary: bin, install: { ok: false, npm: false, state: {} } }) === 'unavailable' && rs({ verdict: { ok: true }, binary: { present: false, configured: true }, install: inst }) === 'path-not-runnable' && rs({ verdict: { ok: true }, binary: bin, install: { ...inst, state: { failed: true } } }) === 'install-failed' && rs({ verdict: { ok: true }, binary: bin, install: { ...inst, state: { running: true } } }) === 'installing', 'rowState rule 6: configured path / failed / installable with npm / without npm / an unmet precondition = unavailable; a running install first');
+  ok(rs({ verdict: { ok: true, mode: 'proposal' }, hold: 'driven' }) === 'in-use-by-hand' && rs({ verdict: { ok: false, code: 'downgrade_unknown' } }) === 'ready-confirm' && rs({ verdict: { ok: false, code: 'backend_seat_ceiling', seats: { source: 'cluster' } } }) === 'all-in-use-shared' && rs({ verdict: { ok: false, code: 'backend_seat_ceiling', seats: { source: 'user' } } }) === 'all-in-use-own' && rs({ verdict: { ok: false, code: 'weird' } }) === 'unavailable' && SW.rowState({ current: true }) === 'current' && SW.rowState({ row: { canSwitchTo: 'no' }, currentRow: { canSwitchTo: 'in-place' }, verdict: {} }) === 'not-a-switch', 'rowState: driven, the confirm, the two ceilings, the fallback, current, not a switch');
+  const rUnk = SW.switcherRows({ profile: { ...base, lastChromiumMajor: null }, providerIds: ids, rowOf: wiredCloak.row, controlOf: wiredCloak.control, sources: () => ({ source: 'user' }) }).find((r) => r.id === 'cloak');
+  ok(rUnk.code === 'downgrade_unknown' && rUnk.enabled === false && rUnk.state === 'ready-confirm' && rUnk.fingerprintChange === 'gains', 'fingerprintChange is emitted UNCONDITIONALLY — a downgrade_unknown row (not ok) still says it gains a fingerprint');
+  // THE KEEPER: the view's live + states, the digest's backends, the install facts, the ROLLBACK on every start throw
+  fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY = 'cb_clusterkey000000';
+  const flag = (name, on) => { const f = path.join(AB_STATE, name); if (on) fs.writeFileSync(f, '1'); else fs.rmSync(f, { force: true }); };
+  const { keeper: kb } = mkKeeper({ dataDir: path.join(ROOT, 'data-3b') });
+  const pb = kb.createProfile({ label: 'Rollback portal' }, { owner: { kind: 'instance', id: null } });
+  let v0 = kb.switcherView(pb.id);
+  ok(v0.live === false && v0.rows.find((r) => r.id === 'cloak').state === 'ready-confirm' && typeof v0.install.npm === 'boolean' && v0.install.state.failed === false, 'switcherView: `live` (not running yet), the cloak row READY-CONFIRM (wired, cluster key, binary on PATH — but nothing has recorded which Chromium wrote the new directory), the install facts carry npm + state.failed', JSON.stringify({ live: v0.live, cloak: v0.rows.find((r) => r.id === 'cloak'), install: v0.install }).slice(0, 900));
+  const dg = kb.list();
+  ok(same(dg.backends[pb.id], { id: 'chromium', major: null, plan: null, choices: ['cloak'] }) && dg.chips[pb.id] === 'chromium', 'the digest carries backends[id] = {id, major, plan, choices} (choices [cloak] in the wired world)');
+  const { keeper: kShip } = mkKeeper({ providers: null, dataDir: path.join(ROOT, 'data-3b-ship') });
+  const pShip = kShip.createProfile({ label: 'Plain' }, { owner: { kind: 'instance', id: null } });
+  ok(same(kShip.list().backends[pShip.id].choices, []) && same(kShip.choicesFor(pShip.id), []) && kShip.switcherView(pShip.id).rows.find((r) => r.id === 'cloak').state === 'not-in-this-version', '…the SHIPPED table: choices [] (no entry point offers the dialog), the cloak row not-in-this-version');
+  await kb.attach({ profileId: pb.id, browserKey: KEY_A, sessionId: 'sess-a' });
+  v0 = kb.switcherView(pb.id);
+  ok(v0.live === true && v0.leases.length === 1 && v0.rows.find((r) => r.id === 'cloak').state === 'ready', 'attached: the view says live, and the launch recorded the major ⇒ the cloak row READY');
+  const n0 = launches().length;
+  flag('fail-cloak', true);
+  const e1 = await threw(() => kb.switchBackend({ profileId: pb.id, target: 'cloak', by: { kind: 'user' } }));
+  flag('fail-cloak', false);
+  ok(e1 && e1.code === 'launch_failed' && e1.restored === true && e1.from === 'chromium' && e1.to === 'cloak' && kb.profile(pb.id).provider === 'chromium' && kb.profile(pb.id).fingerprintSeed === null && launches().length === n0 + 1 && B.isLiveBrowser(kb.browserOf(pb.id)), 'ROLLBACK: a target whose start() throws launch_failed leaves provider === from, the minted seed cleared, the old browser started again ⇒ restored:true, from, to', JSON.stringify({ code: e1 && e1.code, restored: e1 && e1.restored, provider: kb.profile(pb.id).provider, launches: launches().length - n0 }));
+  flag('fail-cloak', true); flag('fail-plain', true);
+  const e2 = await threw(() => kb.switchBackend({ profileId: pb.id, target: 'cloak', by: { kind: 'user' } }));
+  flag('fail-cloak', false); flag('fail-plain', false);
+  ok(e2 && e2.code === 'launch_failed' && e2.restored === false && e2.from === 'chromium' && e2.to === 'cloak' && kb.profile(pb.id).provider === 'chromium', '…and when the old backend will not start again either: still back on from, restored:false');
+  // a gate that passed on a STALE view: the key resolves at the gate, is gone at start() ⇒ backend_no_key — the same three facts
+  let calls = 0;
+  const flaky = { keyFor: (id) => { calls++; return calls === 1 ? { integrationId: id, source: 'user', values: { licenseKey: 'cb_userkey0000000000' }, clusterKey: null, clusterLabel: null, why: null } : { integrationId: id, source: 'none', values: {}, why: 'the key was removed' }; }, sourceOf: (id) => ({ integrationId: id, source: 'user' }) };
+  const kf = K.create({ dataDir: path.join(ROOT, 'data-3b-flaky'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB_STATE, FAKE_AB_CDP_PORT: process.env.FAKE_AB_CDP_PORT }), serverSetting: (k2) => settings[k2], liveKeys: () => new Set([KEY_A, KEY_B]), install: false, now: () => clock, log: { log() {}, warn() {}, error() {} }, integrations: store, keys: flaky, providers: wired, hostKnown: () => false });
+  const pf = kf.createProfile({ label: 'Stale view' }, { owner: { kind: 'instance', id: null } });
+  await kf.attach({ profileId: pf.id, browserKey: KEY_B, sessionId: 'sess-b' });
+  const e3 = await threw(() => kf.switchBackend({ profileId: pf.id, target: 'cloak', by: { kind: 'user' } }));
+  ok(e3 && e3.code === 'backend_no_key' && e3.restored === true && e3.from === 'chromium' && e3.to === 'cloak' && kf.profile(pf.id).provider === 'chromium' && calls === 2, 'ROLLBACK on a start() refusal that is not a launch (backend_no_key on a stale view): the same three facts, the profile back on chromium', JSON.stringify({ code: e3 && e3.code, restored: e3 && e3.restored, calls }));
+  // the route's failure body spreads the three facts
+  const express = require('express');
+  const RT = require('../src/routes/browser.js');
+  const app = express(); app.use(express.json());
+  RT.setup({ keeper: kb, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
+  app.use(RT.router);
+  const srv3 = await new Promise((r) => { const s2 = app.listen(0, '127.0.0.1', () => r(s2)); });
+  servers.add(srv3);
+  const API3 = `http://127.0.0.1:${srv3.address().port}`;
+  flag('fail-cloak', true);
+  const res = await fetch(API3 + '/api/browser/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile: pb.id, provider: 'cloak' }) });
+  const body = await res.json();
+  flag('fail-cloak', false);
+  ok(res.status === 502 && body.code === 'launch_failed' && body.restored === true && body.from === 'chromium' && body.to === 'cloak', 'POST /api/browser/switch: the failure body spreads restored / from / to (fail())', JSON.stringify(body).slice(0, 300));
+  const bl = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pb.id }) });
+  const blj = await bl.json();
+  ok(bl.status === 200 && /THEIR act/.test(blj.next) && /Switch to CloakBrowser/.test(blj.next), 'the blocked claim\'s `next`: another browser IS available here ⇒ the live view offers the switch (THEIR act)', blj.next);
+  RT.setup({ keeper: kShip, activeSessions: new Map([['sess-a', { agentToken: 'vsst_' + 'c'.repeat(24), _browserKey: KEY_A, name: 'A' }]]), browserEnv: () => null, cloakPlan: () => B.cloakservePlan({ enabled: false }), forwards: () => [], propose: () => ({ id: 'ut-3b' }) });
+  const bl2 = await fetch(API3 + '/api/agent/browser/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'c'.repeat(24) }, body: JSON.stringify({ url: 'https://portal.example/x', profile: pShip.id }) });
+  const blj2 = await bl2.json();
+  ok(bl2.status === 200 && /THEIR act/.test(blj2.next) && /no other browser is available on this instance/.test(blj2.next), '…the shipped table: the agent is told no other browser is available, so the switch is not offered (still THEIR act to arrange one)', blj2.next);
+  await kb.stop(pb.id, { why: 'user' }).catch(() => {});
+  await kf.stop(pf.id, { why: 'user' }).catch(() => {});
   delete fakeEnv.VIBESPACE_INTEGRATION_CLOAK_LICENSEKEY;
 }
 

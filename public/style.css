@@ -3526,6 +3526,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .session-detail-row.sp-wrap .session-detail-value { white-space: normal; overflow: visible; text-overflow: clip; }
 /* lane S2: the Agent browser row prints THE browser fact's line — amber when the pin and the browser in use differ */
 .session-props-browser-line.amber { color: var(--yellow, #e5c07b); }
+/* the row wraps BETWEEN its parts, never inside the browser's name or its chip ("wor / k") */
+.session-props-browser .session-props-browser-line, .session-props-browser .browser-chip { white-space: nowrap; }
 .sess-browser-chip.amber .chip-text { color: var(--yellow, #e5c07b); }
 .session-props-group { display: flex; align-items: center; gap: 6px; font-size: 11px; padding: 2px 0; cursor: pointer; color: var(--text-secondary); }
 .session-props-group input { margin: 0; width: 12px; height: 12px; }
@@ -5077,13 +5079,15 @@ label.chan-cap-row { cursor: default; }
 .browser-live-strip-more:hover, .browser-live-strip-cap:hover { background: var(--hover-overlay); color: var(--text); }
 .browser-live-strip-cap.full { color: var(--red); border-color: color-mix(in srgb, var(--red) 60%, transparent); }
 .browser-live-strip-cap.machine-full { box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--yellow) 70%, transparent); }
-.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); font-size: 12px; color: var(--text); display: flex; flex-direction: column; gap: 6px; }
+.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-window); font-size: 12px; color: var(--text); display: flex; flex-direction: column; gap: 6px; }
 .browser-live-cap-head { font-weight: 600; }
 .browser-live-cap-machine { color: var(--yellow); font-size: 11px; }
 .browser-live-cap-empty, .browser-live-cap-shared { color: var(--text-dim); font-size: 11px; }
 .browser-live-cap-row { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
 .browser-live-cap-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.browser-live-cap-limit { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.browser-live-cap-limit { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.file-tool-btn.browser-live-cap-stop { width: auto; height: 22px; padding: 0 8px; font-size: 11px; white-space: nowrap; flex: 0 0 auto; } /* a WORDED button on the icon class: its width on its own classes (test-live-bar-layout §4b) */
+.file-tool-btn.browser-live-cap-default { width: auto; height: 22px; padding: 0 8px; font-size: 11px; white-space: nowrap; flex: 0 0 auto; }
 .browser-live-cap-value { min-width: 1.5em; text-align: center; font-variant-numeric: tabular-nums; }
 /* MULTIVIEW D5 (a): a live view that arrived as a quiet TAB (nothing on screen moved) pulses once */
 .tab-item.tab-arrived { animation: tab-split-pulse 1.2s ease-out 2; }
@@ -5105,7 +5109,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-mode.stopped { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); }
 .browser-live.stopped .browser-live-img { filter: grayscale(1); opacity: 0.45; }
 .file-tool-btn.browser-live-side-btn.active { color: var(--accent); border-color: var(--accent); }
-.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); } /* lane I: Take over is THE act of the bar — a bordered button, never bare text */
+.file-tool-btn.browser-live-mode-btn { color: var(--text); border-color: var(--border); width: auto; height: 22px; padding: 0 8px; font-size: 10px; } /* lane I: Take over is THE act of the bar — a bordered button, never bare text; its SIZE on its own classes (0,2,0) so the desktop strip's reach is not across files (test-live-bar-layout §4b) */
 .browser-live-bar > .browser-live-url { flex: 1 1 0; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-family: var(--font-mono, monospace); }
 /* the RULER (bar-fold.js): a hidden twin of a bar, offscreen, measuring each item's natural width once per text */
 .bar-ruler-host { position: absolute; left: -100000px; top: 0; width: 0; height: 0; overflow: visible; visibility: hidden; pointer-events: none; contain: layout style; }
@@ -5131,7 +5135,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-bar > .browser-live-more[data-badge="folded"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="takeover"] { color: var(--yellow, #e5c07b); background: color-mix(in srgb, var(--yellow, #e5c07b) 14%, transparent); border-color: color-mix(in srgb, var(--yellow, #e5c07b) 40%, transparent); }
 .browser-live-bar > .browser-live-more[data-badge="folded"][data-mode="other"] { color: var(--text-secondary); background: color-mix(in srgb, var(--text-secondary) 14%, transparent); border-color: color-mix(in srgb, var(--text-secondary) 40%, transparent); }
-.file-tool-btn.browser-live-handback { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); }
+.file-tool-btn.browser-live-handback { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); width: auto; height: 22px; padding: 0 8px; font-size: 10px; }
 .browser-live.driving .browser-live-img { cursor: crosshair; }
 .browser-live.driving .browser-live-canvas { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .browser-live:focus { outline: none; }
@@ -5162,35 +5166,54 @@ label.chan-cap-row { cursor: default; }
 .browser-live.picture-stale .browser-live-img { opacity: 0.45; filter: grayscale(0.6); }
 .browser-live-bar > .file-tool-btn.browser-live-fit { color: var(--text-secondary); border-color: var(--border); }
 .browser-live-bar > .file-tool-btn.browser-live-fit.actionable { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+/* builder r2 (lane live-input): the COPY chip is a button to press — drawn like an actionable fit chip, never a status label */
+.browser-live-bar > .file-tool-btn.browser-live-copy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .browser-live.zoomed .browser-live-img { will-change: transform; }
-@media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } } /* lane I: the recording chip folds into ⋯ like any item (its old display:none here lost to .file-tool-btn's display:flex anyway) */
+@media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } }
+/* a phone looking at a browser that is NOT running (stopped / closed / released / not started) with its past open: the
+   picture has nothing live to show, so the sessions list gets the full width and the status sits above it (the naive-user
+   verifier, 2026-09-28: a 198 px pane cut every row and squeezed the status into an 86 px column over six lines) */
+@media (max-width: 768px) {
+  .browser-live.side-past .browser-live-body { flex-direction: column; }
+  .browser-live.side-past .browser-live-canvas { flex: 0 0 auto; height: 120px; }
+  .browser-live.side-past .browser-live-side { width: 100%; max-width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
+} /* lane I: the recording chip folds into ⋯ like any item (its old display:none here lost to .file-tool-btn's display:flex anyway) */
 
 /* ── agent browser P4 (§7.4): the backend chip, the blocked-claim banner, the switcher dialog ── */
 .browser-live-bar > .browser-live-backend { font-family: var(--font-mono, monospace); }
 .browser-live-blocked { display: flex; flex-direction: column; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); flex-shrink: 0; }
 .browser-live-blocked-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
-.browser-live-blocked-row > .file-tool-btn { width: auto; height: 22px; padding: 0 8px; font-size: 10px; white-space: nowrap; flex: 0 0 auto; } /* lane I: the .file-tool-btn tie (a 24 px box) */
+.browser-live-blocked-row > .mounts-btn { white-space: nowrap; flex: 0 0 auto; } /* the house text button (2026-09-28): a banner button says what it does */
+.browser-live-blocked-detail { flex: 1 0 100%; font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
 .browser-live-blocked-text { flex: 1; min-width: 0; }
-.browser-switcher-head { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.browser-switcher-chip, .browser-chip { font-family: var(--font-mono, monospace); font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
-.browser-switcher-blocked { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); }
-.browser-switcher-blocked-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
-.browser-switcher-blocked-text { flex: 1; min-width: 0; }
-.browser-switcher-rows { display: flex; flex-direction: column; gap: 4px; max-height: 40vh; overflow-y: auto; }
-.browser-switcher-row.disabled { opacity: .75; }
-.browser-switcher-row.current { background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.browser-switcher-rowbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.browser-switcher-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.browser-switcher-rowlabel { font-weight: 600; }
-.browser-switcher-reason, .browser-switcher-error { color: var(--red, #e55); font-size: 12px; white-space: pre-wrap; }
-.browser-switcher-seats, .browser-switcher-note { font-size: 12px; white-space: pre-wrap; }
-.browser-switcher-integ { align-self: flex-start; }
-.browser-switcher-subhead { font-weight: 600; margin-top: 6px; }
-.browser-switcher-hint { display: flex; align-items: center; gap: 6px; font-size: 12px; font-family: var(--font-mono, monospace); }
-.browser-switcher-hint > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.browser-switcher-hint-add { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.browser-switcher-hint-add input, .browser-switcher-hint-add select { min-width: 0; flex: 1 1 120px; }
-@media (max-width: 768px) { .browser-switcher-rows { max-height: 50vh; } .browser-switcher-hint-add input, .browser-switcher-hint-add select { flex-basis: 100%; } }
+.browser-chip { font-family: var(--font-mono, monospace); font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+/* the rebuilt switch dialog (2026-09-27, src/lib/browser-switcher.js): every row a block, words wrap as sentences, every
+   worded button the house mounts-btn kept on ONE line (nowrap — a zh label never stacks one glyph per line); the phone
+   rule at the .dialog breakpoint (95vw) wins below 768 px */
+.dialog.browser-switcher { width: 420px; }
+.brsw-body { gap: 12px; }
+.brsw-loading { font-size: 12px; color: var(--text-dim); }
+.brsw-claims { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--yellow, #e5c07b) 12%, transparent); }
+.brsw-claim { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.brsw-claim-text { line-height: 1.45; overflow-wrap: anywhere; }
+.brsw-claim-detail { font-size: 11px; color: var(--text-dim); line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.brsw-claim-detail[hidden] { display: none; }
+.brsw-now { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.brsw-now-text { font-weight: 600; }
+.brsw-blurb { color: var(--text-dim); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.brsw-notice { font-size: 12px; line-height: 1.45; color: var(--text-secondary); overflow-wrap: anywhere; }
+.brsw-target { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; }
+.brsw-target-name { font-weight: 600; }
+.brsw-state { display: flex; flex-direction: column; gap: 4px; }
+.brsw-state:empty { display: none; }
+.brsw-line { line-height: 1.45; overflow-wrap: anywhere; }
+.brsw-line.brsw-warn { display: flex; align-items: flex-start; gap: 6px; color: var(--warn-text, var(--yellow, #e5c07b)); }
+.brsw-line.brsw-warn svg { width: 13px; height: 13px; flex: none; margin-top: 2px; }
+.brsw-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.brsw-actions:empty { display: none; }
+.browser-switcher .mounts-btn { white-space: nowrap; flex: 0 0 auto; max-width: 100%; }
+.brsw-empty { font-size: 12px; line-height: 1.45; }
+.brsw-error { font-size: 12px; line-height: 1.45; color: var(--red, #e55); overflow-wrap: anywhere; }
 
 /* ── agent browser P5 (§4.5 / D35): the action trace — the tool card's strip + expander, the entry dialog (before / after + the overlay), the live view's timeline pane ── */
 .chat-browser-trace { margin: 4px 0; display: flex; flex-direction: column; gap: 4px; }
@@ -5266,10 +5289,64 @@ label.chan-cap-row { cursor: default; }
 .file-tool-btn.browser-live-rec.on { color: var(--red, #e55); border-color: var(--red, #e55); }
 .browser-live-rec.on::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--red, #e55); margin-right: 4px; animation: chat-remote-pulse 1.2s ease-in-out infinite; }
 .browser-live-tracepane { height: 100%; }
+.browser-live-trace-divider { padding: 4px 8px; font-size: 10px; font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); border-bottom: 1px solid var(--border); }
+/* 2026-09-27: the live view's Sessions list (newest first, each with Replay) above the actions */
+.browser-live-sessions { flex: 0 0 auto; max-height: 40%; overflow: auto; border-bottom: 1px solid var(--border); }
+.browser-live-sessions-head { padding: 5px 8px; color: var(--text-secondary); font-size: 11px; font-weight: 600; }
+.browser-live-session { display: flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 11px; color: var(--text); }
+.browser-live-session.open .browser-live-session-text { color: var(--accent); }
+.browser-live-session-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.browser-live-session-replay { flex: 0 0 auto; }
+/* ── THE BROWSER REPLAY WINDOW (2026-09-27): sessions + actions left, the picture right; narrow ⇒ stacked, ≥ 44 px ── */
+.brp { display: flex; height: 100%; min-height: 0; outline: none; color: var(--text); background: var(--bg-window); }
+.brp-side { flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border); background: var(--bg-sidebar); }
+.brp-head { padding: 6px 10px; font-size: 11px; font-weight: 600; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.brp-sessions { flex: 0 1 auto; max-height: 40%; overflow: auto; border-bottom: 1px solid var(--border); }
+.brp-session { display: flex; flex-direction: column; gap: 1px; width: 100%; text-align: left; padding: 5px 10px; border: none; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: 12px; }
+.brp-session:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.brp-session.active { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.brp-session.open .brp-session-when { color: var(--accent); }
+.brp-session-when { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-session-sub { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-actions { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.brp-action { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 4px 10px; border: none; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; font-size: 11px; }
+.brp-action:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.brp-action.active { background: color-mix(in srgb, var(--accent) 16%, transparent); box-shadow: inset 2px 0 0 var(--accent); }
+.brp-action.failed .brp-action-label { color: var(--red); }
+.brp-action-thumb { flex: 0 0 64px; height: 36px; border-radius: 2px; overflow: hidden; background: var(--bg-input); display: flex; align-items: center; justify-content: center; }
+.brp-action-img { width: 64px; height: 36px; object-fit: cover; }
+.brp-action-noframe { font-size: 9px; color: var(--text-dim); text-align: center; }
+.brp-action-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.brp-action-time { color: var(--text-dim); font-family: var(--font-mono, monospace); font-size: 10px; }
+.brp-action-label { font-family: var(--font-mono, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brp-main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.brp-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.brp-bar .mounts-btn { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.brp-bar .mounts-btn svg { width: 12px; height: 12px; }
+.brp-bar .brp-which.active { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--bg-input)); }
+.brp-pos { margin-left: auto; font-size: 11px; color: var(--text-secondary); white-space: nowrap; }
+.brp-stage { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 10px; }
+.brp-pic { position: relative; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); overflow: hidden; }
+.brp-img { display: block; width: 100%; height: auto; }
+.brp-empty { padding: 28px 16px; text-align: center; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.brp-caption { padding: 6px 10px; border-top: 1px solid var(--border); font-size: 12px; min-width: 0; }
+.brp-cap-text { font-family: var(--font-mono, monospace); overflow-wrap: anywhere; }
+.brp-cap-meta { font-size: 11px; overflow-wrap: anywhere; }
+.brp-note { padding: 4px 10px 8px; font-size: 10px; }
+.brp.narrow { flex-direction: column; overflow: auto; }
+.brp.narrow .brp-side { flex: 0 0 auto; max-height: 45%; border-right: none; border-bottom: 1px solid var(--border); }
+.brp.narrow .brp-session, .brp.narrow .brp-action { min-height: 44px; }
+.brp.narrow .brp-bar .mounts-btn { min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12px; justify-content: center; }
+.brp.narrow .brp-main { flex: 1 0 auto; min-height: 320px; }
+@media (max-width: 768px) {
+  .browser-live-session-replay { min-height: 44px; padding: 6px 12px; font-size: 12px; }
+  .session-props-browser-replay { min-height: 44px; padding: 6px 12px; font-size: 12px; }
+}
 /* P5 (§6.4 / §8 step 3 / D8): the Browser profiles panel */
 .bprof { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); font-size: 12px; }
 .bprof-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
 .bprof-summary { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 768px) { .bprof-summary { white-space: normal; overflow: visible; } } /* the panel head on a phone: the line wraps, never "… 11 个已记录…" (the naive-user verifier, 2026-09-28) */
 .file-tool-btn.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; } /* lane I: (0,2,0) — at (0,1,0) viewers.css's later `.file-tool-btn` (24×24) won the tie and this fix never applied */ /* 2.369.145: a CJK label's min-content is ONE glyph — without nowrap the grid's auto track stacked 收编…/搁置 vertically */
 .bprof-hint { padding: 6px 10px; font-size: 11px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .bprof-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
@@ -5287,6 +5364,7 @@ label.chan-cap-row { cursor: default; }
 .bprof-mono { font-family: var(--font-mono, monospace); font-size: 11px; overflow-wrap: anywhere; }
 .bprof-chip { font-size: 10px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
 .bprof-cell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.bprof-trace-used { display: block; font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; } /* 2026-09-27: "{used} of {size}" on its own line */
 .bprof-state { display: flex; flex-direction: column; gap: 1px; color: var(--text); }
 .bprof-state.state-in-use, .bprof-state.state-live { color: var(--green, #7fc47f); }
 .bprof-state.state-stale { color: var(--yellow, #e5c07b); }
@@ -5299,8 +5377,48 @@ label.chan-cap-row { cursor: default; }
 .bprof-record { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; color: var(--text-secondary); cursor: pointer; }
 .bprof-record input { margin: 0; }
 .bprof-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; } /* owner ruling A: record · who can use it · stop · rename · delete */
-.bprof-scope { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; color: var(--text-secondary); font-size: 11px; }
-.bprof-scope-select { max-width: 220px; font-size: 11px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 4px; }
+/* "WHO CAN USE IT" (2026-09-27, a LIST — src/lib/browser-trace-view.js whoCell): the row's own full-width line — the
+   label, "All my conversations" or one chip per row of the list (a conversation: backend glyph · name, dim with a hollow
+   dot when not running; a Task Group: the people glyph · title, amber when deleted/archived), "+N more", the house text
+   button Change… and the amber "Nobody can use it now" line. Chips shrink with an ellipsis, never past the row. */
+.bprof-who { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; padding: 2px 0 1px; font-size: 11px; color: var(--text-secondary); }
+.bprof-who-label { white-space: nowrap; flex: 0 0 auto; }
+.bprof-who-value { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.bprof-who-all { color: var(--text); white-space: nowrap; }
+.bprof-who-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; min-width: 0; max-width: 100%; }
+.bprof-who-chip { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 220px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-size: 11px; line-height: 16px; }
+.bprof-who-chip .bprof-who-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bprof-who-chip .bprof-who-glyph { flex: 0 0 auto; width: 12px; height: 12px; font-size: 12px; }
+.bprof-who-chip.is-stopped { color: var(--text-dim); background: transparent; }
+.bprof-who-dot { flex: 0 0 7px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--text-dim); }
+.bprof-who-chip.is-amber { color: var(--warn-text); border-color: color-mix(in srgb, var(--warn-text) 45%, var(--border)); background: transparent; }
+.bprof-who-more { white-space: nowrap; color: var(--text-secondary); cursor: default; }
+.mounts-btn.bprof-who-change { white-space: nowrap; flex: 0 0 auto; }
+.bprof-who-nobody { flex: 1 0 100%; display: flex; align-items: center; gap: 4px; color: var(--warn-text); font-size: 11px; }
+/* the dialog (src/lib/browser-who-dialog.js): two answers, the principal picker under "Only these", the "will lose it" line */
+.dialog.bwho-dialog { width: min(520px, calc(92vw / var(--ui-scale, 1))); }
+.bwho-body { display: flex; flex-direction: column; gap: 8px; }
+.bwho-answers { display: flex; flex-direction: column; gap: 6px; }
+/* (0,2,1): out-ranks `.dialog-body label` (0,1,1), a COLUMN flex that stacked the radio above its words */
+.dialog-body label.bwho-answer { display: flex; flex-direction: row; align-items: flex-start; gap: 8px; margin: 0; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; color: var(--text); }
+.dialog-body label.bwho-answer:has(.bwho-radio:checked) { border-color: var(--accent); }
+.dialog-body label.bwho-answer .bwho-radio { margin: 2px 0 0; padding: 0; flex: 0 0 auto; width: auto; }
+.bwho-dialog .pp-list { max-height: 220px; }
+.bwho-answer-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bwho-answer-head { font-weight: 600; color: var(--text); }
+.bwho-answer-sub { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
+.bwho-pick { display: flex; flex-direction: column; gap: 6px; padding-left: 20px; min-width: 0; }
+.bwho-remote { font-size: 11px; }
+/* the naive-user verifier (2026-09-28): the note's sentence lives in its OWN span (never the alert glyph's line-height:0 box —
+   that drew a 0 px line whose text overlapped the next one and ran off the phone); the two notes sit between the scrolling
+   body and the footer, always on screen; every body part keeps its height and the body scrolls instead of squeezing */
+.bwho-body > * { flex-shrink: 0; }
+.bwho-notes { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 8px; }
+.bwho-lose, .bwho-refusal { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }
+.bwho-lose > .chan-ic, .bwho-refusal > .chan-ic { margin-top: 2px; }
+.bwho-lose > span:not(.chan-ic), .bwho-refusal > span:not(.chan-ic) { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.bwho-footer { display: flex; justify-content: flex-end; gap: 8px; }
+.bwho-footer .mounts-btn { min-height: 28px; padding: 4px 14px; font-size: 12px; }
 .file-tool-btn.bprof-forget { color: var(--yellow, #e5c07b); border-color: var(--yellow, #e5c07b); } /* lane I: (0,2,0) — the tie with viewers.css's `.file-tool-btn` */
 .file-tool-btn.bprof-forget:disabled { color: var(--text-dim); border-color: var(--border); }
 .file-tool-btn.bprof-delete { color: var(--red, #e55); border-color: var(--red, #e55); }

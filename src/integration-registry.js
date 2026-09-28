@@ -112,7 +112,7 @@ const V = {
   },
   cloakLicense: (v) => {
     const s = String(v);
-    if (!s) return okV;                       // empty = free tier (the browser design says so)
+    if (!s) return okV;                       // empty is a valid FIELD (nothing saved) — it resolves to no key, never to a free tier
     if (/\s/.test(s)) return bad('must not contain whitespace');
     if (!/^cb_[A-Za-z0-9_-]{8,}$/.test(s)) return bad('a CloakBrowser license key starts with cb_');
     return okV;
@@ -272,7 +272,10 @@ const ROWS = Object.freeze([
     label: 'CloakBrowser',
     fields: [
       { key: 'licenseKey', label: i18nKey('License key'), secret: true, required: false, placeholder: 'cb_…',
-        help: i18nKey('Empty means the free tier (one concurrent session).'), validate: V.cloakLicense },
+        // the naive-user verifier (2026-09-28): the old "Empty means the free tier" was a promise the resolver never
+        // kept — an empty field resolves to NO key and every switch / start answers backend_no_key — so the switch
+        // dialog's "needs a license key" and this card contradicted each other; the help says what the product does
+        help: i18nKey('It starts with cb_. CloakBrowser is used only with a key: yours, saved here, or one this VibeSpace provides.'), validate: V.cloakLicense },
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_CLOAK_' },
     setup: null,

@@ -7,7 +7,7 @@
 //      snapshot / launch — is never traced), the redaction (a fill's value and
 //      a type's text become «N chars»), the command text, the position kinds,
 //      the after-frame pick matrix (settled / latest / same / wait), the
-//      retention PLAN (age first, then size, every removal naming its rule),
+//      retention PLAN (by SIZE only since 2026-09-27: the oldest sessions' frames first, every list kept),
 //      the recording gate refusing BY NAME (off / not ours / not local / floor),
 //      the sweep SCOPE = exactly the provider rows with `ownsDir: true` with
 //      the cloud:* / local-window / cdp / remote records refused `not_ours` as
@@ -24,7 +24,7 @@
 //      as 0600 files + an index line + a broadcast + a live-view record; the
 //      fill's value is absent from EVERY byte on disk; tap-end finalizes what
 //      is pending; the lease seam arms and disarms; the setting gates; the
-//      sweep removes by age and by size and rewrites the index; recording
+//      sweep removes the oldest sessions' frames by size and keeps every index line; recording
 //      starts/stops through the lease's session and is refused below the floor.
 //   ③ HOUSEKEEPING on real directories: the panel's rows with their state and
 //      why (a cloud row is not-ours), the orphans (a marker dir listed, a
@@ -144,12 +144,13 @@ console.log('— ① the trace model, the retention plan, the recording gate, th
   ok(g && g.shape === 'dot' && g.left === 50 && g.top === 25, 'the overlay maps a CSS-px point into the drawn picture');
   const gr = T.overlayGeometry({ position: { kind: 'box', box: { x: 10, y: 10, width: 100, height: 20 } }, frame: { w: 1000, h: 500, scale: 2 }, drawn: { left: 0, top: 0, width: 1000, height: 500 } });
   ok(gr && gr.shape === 'rect' && gr.left === 20 && gr.width === 200 && T.overlayGeometry({ position: { kind: 'keys' }, frame: { w: 1, h: 1 }, drawn: { width: 1, height: 1 } }) === null, '…a box scales by the page scale factor; keys draw nothing');
-  // retention: age first, then size — every removal names its rule
-  const DAY = 86400000;
-  const plan = T.traceRetentionPlan({ groups: [{ key: 'bp-00000001', entries: [{ id: 'tr-000000000001', at: 0, bytes: 10 }, { id: 'tr-000000000002', at: 2 * DAY, bytes: 150 * 1048576 }, { id: 'tr-000000000003', at: 3 * DAY, bytes: 100 * 1048576 }, { id: 'tr-000000000004', at: 4 * DAY, bytes: 5 }] }, { key: T.EPHEMERAL_SCOPE, entries: [] }], now: 8 * DAY });
-  ok(plan.remove.length === 2 && plan.remove[0].id === 'tr-000000000001' && /older than 7 d \(8 d\)/.test(plan.remove[0].why) && plan.remove[1].id === 'tr-000000000002' && /over 200 MB for this profile \(oldest first\)/.test(plan.remove[1].why), 'age removes the 8-day-old entry; size removes the OLDEST of the rest until the profile fits 200 MB');
-  ok(plan.kept.length === 2 && plan.kept[0].n === 2 && /2 entries/.test(plan.kept[0].why) && plan.kept[1].why === 'empty' && plan.bytesRemoved === 10 + 150 * 1048576, 'every kept group says what it holds and why');
-  ok(T.traceRetentionPlan({ groups: [{ key: 'x', entries: [{ id: 'a', at: 0, bytes: 1 }] }], now: 1000 }).remove.length === 0, 'nothing within the limits is ever removed');
+  // retention BY SIZE ONLY (2026-09-27, the owner): the oldest sessions' FRAMES first, every list kept, no age rule —
+  // the session / plan / control legs live in test-browser-sessions; this is the digest the panel relies on
+  const MB = 1048576, DAY = 86400000;
+  const plan = T.traceSizePlan({ scopes: [{ key: 'bp-00000001', sessions: [{ id: 'bs-00000001', startAt: 0, open: false, entries: [{ id: 'tr-000000000001', at: 0, frameBytes: 10, listBytes: 600 }] }, { id: 'bs-00000002', startAt: 2, open: false, entries: [{ id: 'tr-000000000002', at: 2, frameBytes: 150 * MB, listBytes: 600 }, { id: 'tr-000000000003', at: 3, frameBytes: 100 * MB, listBytes: 600 }] }] }, { key: T.EPHEMERAL_SCOPE, sessions: [] }], bytesPerScope: 64 * MB });
+  ok(plan.removeFrames.length === 3 && plan.removeFrames.map((r) => r.id).join() === 'tr-000000000001,tr-000000000002,tr-000000000003' && plan.removeFrames.every((r) => /over 64 MB for this profile — the oldest session's frames go first; its action list is kept/.test(r.why)), 'over 64 MB: the oldest session\'s frames first, then the next session\'s — every removal names its rule');
+  ok(plan.kept.length === 2 && plan.kept[0].used === 1800 && plan.kept[0].listBytes === 1800 && plan.kept[1].used === 0 && plan.bytesRemoved === 10 + 250 * MB && !('remove' in plan), 'every scope says what it holds; only FRAMES are ever planned away (the lists stay: 1800 B)');
+  ok(T.traceSizePlan({ scopes: [{ key: 'x', sessions: [{ id: 'bs-00000003', startAt: 0, open: false, entries: [{ id: 'a', at: 0, frameBytes: 1, listBytes: 1 }] }] }] }).removeFrames.length === 0 && T.TRACE_BYTES_PER_PROFILE === 1073741824, 'nothing within the 1 GiB default is ever removed, however old');
   // recording (D7): refused BY NAME
   const chrom = { id: 'bp-00000001', label: 'Work', provider: 'chromium', dir: '/d', record: true, host: null };
   ok(T.recordingVerdict({ version: '0.38.0', profile: { ...chrom, record: false } }).code === 'recording_off', 'recording is a per-profile OPT-IN');
@@ -176,6 +177,15 @@ console.log('— ① the trace model, the retention plan, the recording gate, th
   ok(by.Old.state === 'stale' && /unused for 40 d/.test(by.Old.why) && /never deleted by itself/.test(by.Old.why), 'a stale row is listed, never deleted by itself');
   ok(by.Work.state === 'kept' && by.Work.bytes === 4096 && /last used 3 h ago/.test(by.Work.why), 'a kept row carries its size and its age');
   ok(by.Cloud.state === 'not-ours' && by.Cloud.canForget === false && by.Cloud.bytes === null, 'a cloud row is not ours — no size, no forget');
+  // 2026-09-28 (the naive-user verifier): the PANEL words each row from its structure in the device's language — the
+  // server's `why` ("attached by 1 session(s)", "last used 3 h ago") is the agent's / the CLI's and never reaches the row
+  {
+    const TV = await import(new URL('../src/lib/browser-trace-view.js', import.meta.url).href);
+    const w = Object.fromEntries(rows.map((r) => [r.label, TV.rowWhyText(r)]));
+    const unstable = TV.rowWhyText({ state: 'live', held: 0, browserClosed: 'browser_unstable', closedHow: 'failing', ageMs: 0 });
+    ok(w.Held === '1 conversation uses it' && w.Live === 'its browser is running' && w.Fresh === 'written 1 min ago; it may still be in use' && w.Old === 'unused for 40 days; listed, never deleted by itself' && w.Work === 'last used 3 h ago' && /only listed/.test(w.Cloud) && /could not be started/.test(unstable) && rows.every((r) => !/SERVER SENTENCE/.test(TV.rowWhyText({ ...r, why: 'SERVER SENTENCE' }))),
+      'the panel\'s row words come from the row\'s STRUCTURE (held, live, age, the unstable kind) — never the server\'s English why', w);
+  }
   ok(T.forgetVerdict({ profile: chrom, leases: [{ profileId: 'bp-00000001', browserKey: KEY_A }] }).code === 'leased' && T.forgetVerdict({ profile: chrom, browsers: { 'bp-00000001': { state: 'ready', pid: 2 } } }).code === 'running' && T.forgetVerdict({ profile: { ...chrom, provider: 'cdp' } }).code === 'not_ours' && T.forgetVerdict({ profile: chrom }).ok, 'forget is refused while leased / running / not ours');
   ok(T.forgottenDirName('/h/.agent-browser/x', 5) === '/h/.agent-browser/x.forgotten-5' && T.isForgottenName('/h/.agent-browser/x.forgotten-5') && !T.isForgottenName('/h/.agent-browser/x'), 'a forgotten directory is renamed beside itself');
   const cands = T.orphanCandidates({ base: '/h/.agent-browser', registeredDirs: ['/h/.agent-browser/known'], now: t0, names: [{ name: 'known', isDir: true, markers: ['Default'], mtime: 1 }, { name: 'orphan', isDir: true, markers: ['Local State'], mtime: t0 - DAY }, { name: 'plain', isDir: true, markers: [], mtime: 1 }, { name: 'x.forgotten-1', isDir: true, markers: ['Default'], mtime: 1 }, { name: 'file', isDir: false, markers: ['Default'], mtime: 1 }] });
@@ -326,18 +336,23 @@ const K1 = `sess-1|${P1}`;
   ok((await trace.watch({ sessionId: 'sess-1', profileId: P1 })).code === 'trace_off' && trace.enabled() === false, 'the setting gates the whole thing (browser.actionTrace)');
   settings['browser.actionTrace'] = true;
   ok((await trace.watch({ sessionId: 'sess-1', profileId: P1 })).ok && trace._taps.size === 1, '…and on again, a watch arms');
-  // the sweep: age, then size — with the index rewritten
+  // the sweep BY SIZE (the setting): the oldest sessions' frames go, EVERY action list stays
   const old = T.entryFor({ id: 'tr-0000000000aa', at: clock - 8 * 86400000, sessionId: 'sess-old', profileId: P1, command: { action: 'click', params: {} }, position: { kind: 'input' }, before: { file: 'tr-0000000000aa-before.jpg', bytes: 5 } });
   fs.writeFileSync(path.join(sdir, 'tr-0000000000aa-before.jpg'), 'old');
   const big = T.entryFor({ id: 'tr-0000000000bb', at: clock - 3600000, sessionId: 'sess-big', profileId: P1, command: { action: 'click', params: {} }, position: { kind: 'input' }, before: { file: 'tr-0000000000bb-before.jpg', bytes: 250 * 1048576 } });
   fs.appendFileSync(path.join(sdir, R.INDEX_FILE), JSON.stringify(old) + '\n' + JSON.stringify(big) + '\n');
   trace.unwatch({ sessionId: 'sess-1', profileId: P1 });
   const fresh = R.create({ dataDir: DATA, homeDir: HOME, keeper: stubKeeper, bridge, serverSetting: (k) => settings[k], broadcast: (m) => bcast.push(m), log: quiet, now, execFileImpl: fakeDu, sweepEveryMs: 0 });
+  const sw0 = fresh.sweep();
+  ok(sw0.removed === 0 && fs.existsSync(path.join(sdir, 'tr-0000000000aa-before.jpg')), 'under the 1 GiB default the sweep removes nothing — an 8-day-old frame stays (no age rule)');
+  settings['browser.traceBytesPerProfile'] = 64; // MB — the floor
   const sw = fresh.sweep();
-  ok(sw.removed === 2 && sw.plan.remove.some((r) => r.id === 'tr-0000000000aa' && /older than 7 d/.test(r.why)) && sw.plan.remove.some((r) => r.id === 'tr-0000000000bb' && /over 200 MB/.test(r.why)), 'the sweep removes the 8-day-old entry by AGE and the 250 MB one by SIZE, each naming its rule');
-  ok(!fs.existsSync(path.join(sdir, 'tr-0000000000aa-before.jpg')) && fresh.list({ profileId: P1 }).length === 5 && fs.readFileSync(path.join(sdir, R.INDEX_FILE), 'utf8').trim().split('\n').length === 5, 'its files are gone and the index is rewritten to the 5 kept entries');
+  ok(sw.removed === 2 && sw.plan.removeFrames.map((r) => r.id).join() === 'tr-0000000000aa,tr-0000000000bb' && sw.plan.removeFrames.every((r) => /over 64 MB/.test(r.why)) && sw.limit === 64 * 1048576, 'over the setting\'s 64 MB: the two OLDEST sessions\' frames go (the old one first, then the 250 MB one), each naming its rule');
+  ok(!fs.existsSync(path.join(sdir, 'tr-0000000000aa-before.jpg')) && fresh.list({ profileId: P1 }).length === 7 && fs.readFileSync(path.join(sdir, R.INDEX_FILE), 'utf8').trim().split('\n').length === 7, 'its frame files are gone and EVERY action list stays — 7 index lines before, 7 after');
+  ok(fresh.entry('tr-0000000000aa').framesRemoved && fresh.entry('tr-0000000000aa').framesRemoved.why === 'size' && fresh.entry('tr-0000000000aa').before === null, '…the entry says its frames went to the size limit');
   ok(bcast.some((m) => m.type === 'browser-housekeeping-updated' && m.sweep && m.sweep.removed === 2), 'the sweep result is broadcast');
-  ok(fresh.entry(e1.id) && fresh.entry(e1.id).id === e1.id && fresh.framePath(e1.id, 'before') === path.join(sdir, e1.before.file) && fresh.framePath('tr-0000000000aa', 'before') === null, 'a fresh recorder reads the index back; a removed entry has no frame');
+  ok(fresh.entry(e1.id) && fresh.entry(e1.id).id === e1.id && fresh.framePath(e1.id, 'before') === path.join(sdir, e1.before.file) && fresh.framePath('tr-0000000000aa', 'before') === null, 'a fresh recorder reads the index back; the newest session keeps its frames, a swept entry has none');
+  delete settings['browser.traceBytesPerProfile'];
   // recording (D7): through the lease's session, refused below the floor
   const r0 = await fresh.maybeStartRecording(P1, KEY_A, 'sess-1');
   ok(r0.code === 'recording_off' && fresh._recordings.size === 0, 'a profile with record off is not recorded');
@@ -365,11 +380,12 @@ const hk = R.create({ dataDir: DATA, homeDir: HOME, keeper: stubKeeper, bridge, 
 {
   const v = await hk.housekeeping();
   const by = Object.fromEntries(v.profiles.map((r) => [r.id, r]));
-  ok(by[P1].state === 'in-use' && by[P1].bytes === 4096 && by[P1].trace.n === 5 && by[P1].canForget === false, 'the Work row: in use, its size measured in a child, its trace digest');
+  ok(by[P1].state === 'in-use' && by[P1].bytes === 4096 && by[P1].trace.n === 7 && by[P1].canForget === false, 'the Work row: in use, its size measured in a child, its trace digest (the 7 action lists — the sweep took frames, never a list)');
   ok(by[P2].state === 'not-ours' && by[P2].bytes === null && /ownsDir/.test(by[P2].why), 'the Cloud row: not ours (never measured, never swept)');
   ok(by[P3].state === 'stale' && by[P3].canForget === true, 'the Idle row: stale, may be forgotten by a human');
   ok(v.orphans.length === 1 && v.orphans[0].name === 'orphan-one' && v.orphans[0].bytes === 4096 && v.orphansBase === AB, 'the orphans: the marker dir nobody names — not the registered ones, not the marker-less one');
-  ok(v.ephemeral.scope === T.EPHEMERAL_SCOPE && v.limits.retentionMs === T.TRACE_RETENTION_MS && v.limits.bytesPerProfile === T.TRACE_BYTES_PER_PROFILE && v.traceOn === true && Array.isArray(v.forgotten), 'the panel also gets the ephemeral digest, the limits, the setting and the ledger');
+  ok(v.ephemeral.scope === T.EPHEMERAL_SCOPE && !('retentionMs' in v.limits) && v.limits.bytesPerProfile === T.TRACE_BYTES_PER_PROFILE && v.limits.bytesFloor === T.TRACE_BYTES_FLOOR && v.limits.recordingRetentionMs === 7 * 86400000 && v.traceOn === true && Array.isArray(v.forgotten), 'the panel also gets the ephemeral digest, the limits (by size; the recordings\' own bound beside), the setting and the ledger');
+  ok(by[P1].trace.limit === T.TRACE_BYTES_PER_PROFILE && by[P1].trace.used > 0 && by[P1].trace.listBytes > 0 && v.ephemeral.trace.limit === T.TRACE_BYTES_PER_PROFILE, 'each profile row says what its records use against its limit (the panel\'s "{used} of {size}")');
   // takeover C3: the managed ephemeral browsers ride their OWN rows (the keeper's), never a profile row
   ok(Array.isArray(v.ephemeralBrowsers) && v.ephemeralBrowsers.length === 0, 'a keeper without ephemeral rows answers an empty `ephemeralBrowsers` list');
   stubKeeper.ephemerals = () => [{ profileId: 'bp-000000e1', label: '(ephemeral) fix the bug', browserKey: KEY_A, child: false, sessionId: 'sess-1', state: 'ready', live: true, pid: 42, startedAt: clock }];

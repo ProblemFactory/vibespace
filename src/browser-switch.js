@@ -478,7 +478,7 @@ const INSTALL_CODES = Object.freeze(['install_local_only', 'already_installed', 
  *   interrupted by an agent's proposal; another session's lease turns an
  *   agent's switch into a "For you" item for the owner).
  */
-function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf = null, resolveKey = null, seats = {}, majors = {}, dirMajor = null, confirmed = false, leases = [], inputs = {}, by = { kind: 'user' }, byKey = null, now = 0, hex = '00000001', runningOf = () => [] } = {}) {
+function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf = null, resolveKey = null, seats = {}, majors = {}, dirMajor = null, confirmed = false, leases = [], inputs = {}, by = { kind: 'user' }, byKey = null, admitted = null, now = 0, hex = '00000001', runningOf = () => [] } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   const to = String(target == null ? '' : target);
   const row = rowOf(to);
@@ -535,7 +535,12 @@ function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf 
   if (driving.length) { mode = 'proposal'; reason = `somebody is driving this browser (${driving.map((l) => l.browserKey).join(', ')}) — a profile being driven is never interrupted by a proposal`; }
   else if (by && by.kind === 'agent') {
     if (others.length) { mode = 'proposal'; reason = `${others.length} other session(s) hold a lease on this profile (${others.map((l) => l.browserKey).join(', ')}) — a switch stops everybody's browser, so it goes to the owner as a proposal`; }
-    else if (profile.owner && profile.owner.kind === 'session' && byKey && profile.owner.id !== byKey) { mode = 'proposal'; reason = 'this conversation does not own the profile'; }
+    // identity verify r3 (2026-09-28): WHO MAY USE IT is the ONE admission's answer (`admitted` = browser-profiles.mayAttach
+    // over the conversation's live Task Groups, asked by the keeper) — the pre-list rule below read `owner.kind === 'session'`,
+    // a shape the who-list migration retired, so an agent the list KEPT OUT switched a profile's backend directly (its
+    // browser stopped and relaunched under another backend, a fingerprint seed minted) while a pre-list record still made
+    // it a proposal. Not admitted, or not judged (null) ⇒ a proposal — never a direct switch of a profile one may not use
+    else if (admitted !== true) { mode = 'proposal'; reason = admitted === false ? 'this conversation may not use the profile ("Who can use it" keeps it to other conversations)' : 'whether this conversation may use the profile was not judged'; }
   }
   return {
     ok: true, mode, reason, from, to, provider: to, integrationId, source: key ? key.source : null, clusterKey: key ? key.clusterKey || null : null,
@@ -544,27 +549,152 @@ function switchVerdict({ profile, target, rowOf, controlOf, capabilityRefusalOf 
     reopen: leases.map((l) => ({ browserKey: l.browserKey, lastUrl: l.lastUrl || null })),
   };
 }
+/**
+ * THE ROW STATES the switch dialog draws (the rebuilt dialog, 2026-09-27): a
+ * CLOSED set, computed HERE and worded on the client (the server sends
+ * structure; the device's own `t()` says the words). `switching` is a VIEW
+ * fact (`view.switching`), never a row state: the keeper commits the new
+ * provider before its `start()`, so a per-row "restarting" would sit on the
+ * wrong row mid-switch. src/lib/browser-switcher-model.js mirrors this list
+ * and test-browser-switcher-model asserts the two are equal.
+ */
+const ROW_STATES = Object.freeze(['current', 'not-a-switch', 'other-machine', 'not-in-this-version', 'installing', 'path-not-runnable', 'install-failed', 'not-installed', 'not-installed-here', 'needs-key', 'older-browser', 'all-in-use-own', 'all-in-use-shared', 'in-use-by-hand', 'ready-confirm', 'ready', 'unavailable']);
+/**
+ * ONE row's state, FIRST MATCH WINS (the order is the decision; the client
+ * never re-derives it):
+ *   1 the current backend · 2 not an in-place pair (cdp / local-window /
+ *   cloud:* — another profile, never a switch of this one) · 3 a key-bearing
+ *   or local-only row on a paired machine's profile · 4 not wired on this
+ *   build · 5 an install running · 6 the binary absent (a configured path
+ *   that will not start / the last install failed / installable — or not by
+ *   VibeSpace here, npm missing / otherwise unavailable: a binary absent
+ *   while the install precondition is unmet is not an npm problem) · 7 no
+ *   key · 8 a downgrade · 9 the seat ceiling (whose key it is decides the
+ *   words) · 10 somebody drives it by hand · 11 a downgrade nobody can judge
+ *   (one confirmation) · 12 ready · 13 anything else.
+ * Rule 6 answers BEFORE rule 7: a missing program is the first step, a key
+ * the second (test-browser-switcher-model's not-installed-and-no-key fixture).
+ */
+function rowState({ verdict = {}, row = null, current = false, currentRow = null, binary = null, install = null, hold = null } = {}) {
+  const v = verdict || {};
+  if (current) return 'current';
+  if (!row || row.canSwitchTo !== 'in-place' || !currentRow || currentRow.canSwitchTo !== 'in-place') return 'not-a-switch';
+  if (v.code === 'provider_needs_local_key' || v.code === 'provider_local_only') return 'other-machine';
+  if (v.code === 'backend_unavailable') return 'not-in-this-version';
+  if (binary && install && install.state && install.state.running) return 'installing';
+  if (binary && binary.present === false) {
+    if (binary.configured) return 'path-not-runnable';
+    if (install && install.state && install.state.failed) return 'install-failed';
+    if (install && install.ok) return install.npm === false ? 'not-installed-here' : 'not-installed';
+    return 'unavailable';
+  }
+  if (v.code === 'backend_no_key') return 'needs-key';
+  if (v.code === 'downgrade_refused') return 'older-browser';
+  if (v.code === 'backend_seat_ceiling') return v.seats && v.seats.source === 'cluster' ? 'all-in-use-shared' : 'all-in-use-own';
+  if (hold === 'driven') return 'in-use-by-hand';
+  if (v.code === 'downgrade_unknown') return 'ready-confirm';
+  if (v.ok) return 'ready';
+  return 'unavailable';
+}
+/** Is any lease on this profile being DRIVEN by hand right now? `{hold, driver}` —
+ *  the same key the gate's proposal rule reads (`<browserKey>|<profileId>`). */
+function holdOf(leases = [], inputs = {}) {
+  for (const l of leases || []) {
+    const s = inputs && inputs[`${l.browserKey}|${l.profileId}`];
+    if (s && s.input === 'user') return { hold: 'driven', driver: String(l.browserKey) };
+  }
+  return { hold: null, driver: null };
+}
 /** The switcher's rows (§7.4 UX): every backend with its enabled/disabled
  *  verdict WRITTEN ON IT and, for a key-bearing row, the SOURCE chip from the
- *  MASKED view (`sources(id)` → {source, clusterKey, clusterLabel}) plus the
- *  one-click action. A disabled row names its reason; no row is hidden. */
-function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusalOf = null, sources = () => null, seats = {}, majors = {}, dirMajor = null, now = 0, runningOf = () => [] } = {}) {
+ *  MASKED view (`sources(id)` → {source, clusterKey, clusterLabel, whyCode,
+ *  whyParams}) plus the one-click action. A disabled row names its reason; no
+ *  row is hidden (the agent's `vibespace-browser backend` lists them all).
+ *  2026-09-27 (the rebuilt dialog): every row also carries `switchKind`, its
+ *  `state` (ROW_STATES, by `rowState`) and `facts` (structure the dialog words:
+ *  the binary, the key, the ladder's numbers, the seats, who drives it), and
+ *  `fingerprintChange` UNCONDITIONALLY (a `downgrade_unknown` row is not `ok`
+ *  and still gains or loses a fingerprint). The new inputs are defaulted:
+ *  `leases`/`inputs` (the same two the switch passes, so a driven profile's
+ *  state is real), `binaryOf(id)` (the keeper's executable probe re-shaped,
+ *  null = nothing the user installs) and `install` (`installFacts`). */
+function switcherRows({ profile, providerIds, rowOf, controlOf, capabilityRefusalOf = null, sources = () => null, seats = {}, majors = {}, dirMajor = null, now = 0, runningOf = () => [], leases = [], inputs = {}, binaryOf = () => null, install = null } = {}) {
+  const from = String(profile.provider || 'chromium');
+  const currentRow = rowOf(from) || null;
+  const held = holdOf(leases, inputs);
   return (providerIds || []).map((id) => {
     const row = rowOf(id) || {};
     const integrationId = integrationIdFor(id);
     const src = integrationId ? (sources(integrationId) || { source: 'none' }) : null;
-    const v = switchVerdict({ profile, target: id, rowOf, controlOf, capabilityRefusalOf, resolveKey: () => src, seats, majors, dirMajor, now, runningOf, by: { kind: 'user' } });
-    const current = String(profile.provider || 'chromium') === id;
+    const v = switchVerdict({ profile, target: id, rowOf, controlOf, capabilityRefusalOf, resolveKey: () => src, seats, majors, dirMajor, now, runningOf, leases, inputs, by: { kind: 'user' } });
+    const current = from === id;
     const sourceLabel = !integrationId ? null : (src && src.source === 'user' ? 'your own key' : src && src.source === 'cluster' ? `cluster default${src.clusterLabel ? ' · ' + src.clusterLabel : ''} (seats shared with other users)` : 'not configured');
     const seatRec = integrationId && seats && seats[integrationId] ? seats[integrationId] : null;
+    const binary = binaryOf(id) || null;
+    const sv = v.seats && v.seats.state ? v.seats : null;
+    const facts = {
+      host: profile.host || null,
+      binary: binary ? { needed: binary.needed || null, present: binary.present !== false, configured: !!binary.configured } : null,
+      key: integrationId ? { needed: true, source: src ? src.source || 'none' : 'none', whyCode: src && src.whyCode ? src.whyCode : null, whyParams: src && src.whyParams ? src.whyParams : null } : null,
+      wrote: v.ladder && Number.isInteger(v.ladder.wrote) ? v.ladder.wrote : null,
+      targetMajor: chromiumMajorFor(id, { tier: seatRec ? seatRec.tier : null, majors }),
+      majorAssumed: id === 'cloak' && !(seatRec && seatRec.tier && CLOAK_TIERS[seatRec.tier]),
+      seatsTotal: sv && Number.isInteger(sv.state.total) ? sv.state.total : null,
+      seatsUsed: sv ? sv.used : null,
+      holders: v.code === 'backend_seat_ceiling' && Array.isArray(v.holders) ? v.holders.map((h) => (h && h.label) || null).filter(Boolean) : [],
+      hold: held.hold, driver: held.driver,
+    };
     return {
       id, label: row.label || id, tier: row.tier || null, current,
       enabled: v.ok, code: v.ok ? null : v.code, reason: v.ok ? null : v.error, needsConfirm: !!v.needsConfirm,
       integrationId, source: src ? src.source : null, sourceLabel, action: v.ok ? null : (v.action || (integrationId && src && src.source === 'none' ? { openIntegration: integrationId, label: 'open Integrations' } : null)),
       seats: integrationId ? seatState({ tier: seatRec ? seatRec.tier : null, total: seatRec ? seatRec.total : null, at: seatRec ? seatRec.at : 0, now }) : null,
-      fingerprint: v.ok ? v.fingerprint : null, fingerprintChange: v.ok ? v.fingerprintChange : null, chip: backendChip({ provider: id, major: chromiumMajorFor(id, { tier: seatRec ? seatRec.tier : null, majors }), tier: seatRec ? seatRec.tier : null }),
+      fingerprint: v.ok ? v.fingerprint : null, fingerprintChange: fingerprintChange({ from, to: id }), chip: backendChip({ provider: id, major: chromiumMajorFor(id, { tier: seatRec ? seatRec.tier : null, majors }), tier: seatRec ? seatRec.tier : null }),
+      switchKind: row.canSwitchTo || null,
+      state: rowState({ verdict: v, row: rowOf(id) || null, current, currentRow, binary: facts.binary, install, hold: held.hold }),
+      facts,
     };
   });
+}
+/** THE CHOICES a profile's switch dialog would draw a card for (the digest's
+ *  `backends[id].choices`): every other backend where BOTH ends are an in-place
+ *  pair and the capability control says ok for this profile's machine. The key,
+ *  the binary, the version and the seats are NOT considered — a missing key or
+ *  program is a step the dialog offers, so it is worth opening. No fs read, no
+ *  key resolve: it rides every notify. [] on the shipped table (cloak unwired). */
+function switchChoices({ profile, providerIds, rowOf, controlOf } = {}) {
+  if (!profile) return [];
+  const cur = String(profile.provider || 'chromium');
+  const curRow = rowOf(cur);
+  if (!curRow || curRow.canSwitchTo !== 'in-place') return [];
+  return (providerIds || []).filter((id) => {
+    if (id === cur) return false;
+    const r = rowOf(id);
+    if (!r || r.canSwitchTo !== 'in-place') return false;
+    const c = controlOf(id, { host: profile.host || null });
+    return !!(c && c.ok === true);
+  });
+}
+/** The backend FACT behind the chip, unstringified: `{id, major, plan}` — the
+ *  profile's own recorded major first, else the backend's last launch; the plan
+ *  is a key row's seat tier when one was read. The client words it
+ *  (`chipWords`); `backendChip` spells the agent's `chromium 146` from it. */
+function backendFact(profile, { seats = {}, majors = {} } = {}) {
+  const provider = String((profile && profile.provider) || 'chromium');
+  const intId = integrationIdFor(provider);
+  const seat = intId && seats && seats[intId] ? seats[intId] : null;
+  const major = profile && Number.isInteger(profile.lastChromiumMajor) ? profile.lastChromiumMajor : chromiumMajorFor(provider, { tier: seat ? seat.tier : null, majors });
+  const plan = seat && (seat.tier === 'free' || seat.tier === 'pro') ? seat.tier : null;
+  return { id: provider, major: Number.isInteger(major) ? major : null, plan };
+}
+/** THE INSTALL FACTS every reader shares (the keeper's `installVerdict`, the
+ *  switcher view, the Manage Agents row): the PURE verdict + whether npm is on
+ *  this machine + the install state with `failed` = the last run ended with an
+ *  error or a non-zero exit and nothing runs now. */
+function installFacts({ verdict = {}, npm = false, state = {} } = {}) {
+  const s = state || {};
+  const failed = !s.running && (s.error != null || (s.exitCode != null && s.exitCode !== 0));
+  return { ...(verdict || {}), npm: !!npm, state: { ...s, failed } };
 }
 
 // ─── §7.4 failure form (1): INSTALLING cloakbrowser is a USER act that comes AFTER the measurement ───
@@ -629,4 +759,5 @@ module.exports = {
   testHostFor, hostOfUrl, testRequestFor,
   HINT_BY, TIERS, normalizeHost, siteHintVerdict, siteHintFor, blockedClaim, blockedText, navHint,
   backendChip, restartingRefusal, SWITCH_CODES, switchVerdict, switcherRows,
+  ROW_STATES, rowState, holdOf, switchChoices, backendFact, installFacts,
 };

@@ -53,11 +53,24 @@
  *     pointer, the agent cursor, the user's cursor and the click ripple share
  *     the one placement the CSS renders (a centred-maths reader over a
  *     top-aligned picture would be the lane J bug again, vertically).
- *   · TEXT (lane J r2): `textRecords` turns pasted / IME-composed text into
- *     the stream server's `input_keyboard` `char` records (measured on 0.38.1:
- *     the eventType is handed to CDP Input.dispatchKeyEvent verbatim, and a
- *     `char` with a multi-character text inserts all of it — keypress +
- *     beforeinput + input, no keydown), chunked and bounded.
+ *   · TEXT (lane J r2; lane live-input 2026-09-27 — "我似乎无法从外面复制文本进入那个
+ *     浏览器" / "中文输入法也不 work"): pasted / IME-composed text reaches the page
+ *     as the stream server's `input_keyboard` `char` records (the eventType is
+ *     handed to CDP Input.dispatchKeyEvent verbatim, 0.38.1). MEASURED on the
+ *     agent's own Chromium 151 (and Chrome 153): a `char` (or a keyDown) whose
+ *     text is 4 UTF-16 units or more is REFUSED — `-32602 Invalid 'text'
+ *     parameter` (Blink's WebKeyboardEvent text cap, 4 incl. the terminator) —
+ *     and the stream server swallows the refusal, so every paste ≥ 4 units and
+ *     every IME commit ≥ 4 units landed NOTHING while the bar said "sent".
+ *     `textChunks` cuts text into chunks of ≤ `CHAR_TEXT_MAX_UNITS` (3) units on
+ *     code points, with the control-character rules measured on the same build
+ *     (a `char` that STARTS with a tab inserts the tab and drops the rest; a
+ *     `char` that is only "\n" inserts nothing — so a tab ends its chunk and a
+ *     line break never travels alone). The chunks stay on the stream: the ONE
+ *     ordered channel the user's keys and clicks take (a text sent beside it — a
+ *     direct `Input.insertText` — was MEASURED to land between the first and the
+ *     second of 20 keys queued before it on a busy page). The viewer sends ONE
+ *     `input_text` record per act; the bridge chunks it (src/server/browser-stream.js).
  * Gate: scripts/test-browser-live.mjs (heavy — the bridge over a fake upstream
  * speaking the fixture's shapes, then headless chrome).
  */
@@ -76,7 +89,7 @@ const REPLAYED_TYPES = Object.freeze(['status', 'tabs', 'url']);
 /** The three modes of §4.3 — Watch (nobody holds the input side), Take over
  *  (a viewer holds it), Hand back (a transition, never a resting state). */
 const MODES = Object.freeze(['watch', 'takeover', 'handback']);
-const VIEWER_INPUT_TYPES = Object.freeze(['input_mouse', 'input_keyboard', 'input_touch']);
+const VIEWER_INPUT_TYPES = Object.freeze(['input_mouse', 'input_keyboard', 'input_touch', 'input_text']); // lane live-input: `input_text` {text} = one paste / one IME commit — the BRIDGE cuts it into ≤3-unit `char` records (never forwarded as-is)
 /** P3 (§4.3): the viewer verbs that change WHO drives, and the answer to a
  *  pending `--confirm-actions` card. None is forwarded upstream as-is. */
 const VIEWER_CONTROL_TYPES = Object.freeze(['takeover', 'handback', 'confirm', 'pass']); // + lane P verify: `pass` {to} = the holder hands its controls to another view of the same browser (a fold-back)
@@ -91,11 +104,14 @@ const KEY_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
  *  says `object-position: 50% 0` and every conversion reads THIS word. */
 const LIVE_ALIGN = 'top';
 const ALIGNS = Object.freeze(['center', 'top']);
-/** Text a viewer may hand the page in one act (a paste, a composition): one
- *  record per `TEXT_CHUNK` chars, refused as a whole past `TEXT_MAX` (a paste
- *  of a whole document into a page is not a keystroke — say so, never trim). */
-const TEXT_CHUNK = 200;
+/** Text a viewer may hand the page in one act (a paste, a composition): refused
+ *  as a whole past `TEXT_MAX` code points (a paste of a whole document into a
+ *  page is not a keystroke — say so, never trim). */
 const TEXT_MAX = 20000;
+/** lane live-input (MEASURED 2026-09-27, Chromium 151.0.7922.34 + Chrome 153.0.8010.47, scripts/test-browser-live-input.mjs
+ *  ① pins it on the real binary): CDP `Input.dispatchKeyEvent` accepts a `char` / `keyDown` text of at most 3 UTF-16
+ *  units — "ab", "你好", "😀", "abc" ok; "abcd", "你好世界", "😀😀", "hello world" → -32602 Invalid 'text' parameter. */
+const CHAR_TEXT_MAX_UNITS = 3;
 
 const sessionNameFor = (key) => 'vs-' + String(key || '');
 /** Lane H (2026-09-25): the reserved `profileRef` that names the session's OWN
@@ -259,7 +275,16 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
   if (t === 'ack') return { kind: 'ack', forward: false, seq: Number(msg.seq) || 0 };
   if (t === 'ping') return { kind: 'ping', forward: false };
   if (VIEWER_INPUT_TYPES.includes(t)) {
+    // lane live-input: a key record the browser would refuse (its text past the measured cap) is refused HERE, by name —
+    // a direct lease's receipt is only the stream write, so Chrome's -32602 would otherwise be a silent loss again
+    if (t === 'input_keyboard' && typeof msg.text === 'string' && msg.text.length > CHAR_TEXT_MAX_UNITS) return { kind: 'input', forward: false, refusal: { type: 'refused', code: 'text_too_long', error: `a key record carries at most ${CHAR_TEXT_MAX_UNITS} UTF-16 units of text (the browser refuses more) — text goes as one input_text record` } };
+    if (t === 'input_text') {
+      const tv = textChunks(typeof msg.text === 'string' ? msg.text : '');
+      if (!tv.ok) return { kind: 'input', text: true, forward: false, refusal: { type: 'refused', code: tv.code, error: tv.error } };
+    }
     const may = mode === 'takeover' && holder !== null && holder === viewerId;
+    if (t === 'input_text') return may ? { kind: 'input', text: true, forward: true }
+      : { kind: 'input', text: true, forward: false, refusal: { type: 'refused', code: 'watch-mode', error: mode === 'takeover' ? 'another viewer holds the controls — the lease\'s input side is theirs' : 'the view is in Watch mode: the agent is driving; take over to send input', holder: holder || null, mode } };
     return may ? { kind: 'input', forward: true }
       : { kind: 'input', forward: false, refusal: { type: 'refused', code: 'watch-mode', error: mode === 'takeover' ? 'another viewer holds the controls — the lease\'s input side is theirs' : 'the view is in Watch mode: the agent is driving; take over to send input', holder: holder || null, mode } };
   }
@@ -288,23 +313,30 @@ function viewerMessageVerdict(msg, { holder = null, viewerId = null, mode = 'wat
  * The book below is the view's arithmetic: `failing` = the LAST settled receipt failed (a later success clears it).
  */
 const INPUT_RECEIPT_MS = 1500;
-function receiptBook() { return { next: 1, pending: new Map(), delivered: 0, failed: 0, failing: null, via: null }; }
-/** A record is about to be sent: its `rid`. */
-function noteInputSent(book, now) { const rid = book.next++; book.pending.set(rid, Number(now) || 0); return rid; }
-/** The bridge's receipt for `rid` (a duplicate / unknown one changes nothing). */
-function noteInputReceipt(book, { rid, ok, via = null, code = null, error = null } = {}) {
+function receiptBook() { return { next: 1, pending: new Map(), deadlines: new Map(), delivered: 0, failed: 0, failing: null, via: null, last: null }; }
+/** A record is about to be sent: its `rid`. lane live-input: `ms` = this record's own wait (a text act of many chunks
+ *  on a mediated lease is answered after its LAST chunk — `textReceiptMs`). */
+function noteInputSent(book, now, { ms = null } = {}) { const rid = book.next++; book.pending.set(rid, Number(now) || 0); if (Number(ms) > 0) { if (!book.deadlines) book.deadlines = new Map(); book.deadlines.set(rid, Number(ms)); } return rid; }
+/** The bridge's receipt for `rid` (a duplicate / unknown one changes nothing). lane live-input: a text act's receipt
+ *  carries `landed` (code points that reached the page before a refusal) and `dropped` (a lone final line break). */
+function noteInputReceipt(book, { rid, ok, via = null, code = null, error = null, landed = null, dropped = null } = {}) {
   if (!book.pending.has(rid)) return false;
-  book.pending.delete(rid);
+  book.pending.delete(rid); if (book.deadlines) book.deadlines.delete(rid);
+  book.last = { rid, ok: !!ok, landed: Number.isFinite(Number(landed)) && landed !== null ? Number(landed) : null, dropped: Number(dropped) || 0 };
   if (ok) { book.delivered++; book.failing = null; book.via = via === 'browser' || via === 'stream' ? via : null; } // verify r3 (r2 F3): the bar's words follow what the last delivered receipt PROVED (via)
-  else { book.failed++; book.failing = { code: code || 'refused', error: error || null }; }
+  else { book.failed++; book.failing = { code: code || 'refused', error: error || null, landed: book.last.landed }; }
   return true;
 }
 /** Receipts that never came: settled as NOT DELIVERED (`no_answer`). Returns how many expired. */
 function sweepInputReceipts(book, now, { ms = INPUT_RECEIPT_MS } = {}) {
   let n = 0;
-  for (const [rid, at] of [...book.pending]) if ((Number(now) || 0) - at > ms) { book.pending.delete(rid); book.failed++; n++; book.failing = { code: 'no_answer', error: null }; }
+  for (const [rid, at] of [...book.pending]) { const own = book.deadlines && book.deadlines.get(rid); if ((Number(now) || 0) - at > (own || ms)) { book.pending.delete(rid); if (book.deadlines) book.deadlines.delete(rid); book.failed++; n++; book.failing = { code: 'no_answer', error: null }; } }
   return n;
 }
+/** lane live-input: how long a text act of `chunks` records may take to be answered — the stream server dispatches one
+ *  record after the other (MEASURED 0.38.1: 20 000 characters = 6 667 records in 3.6 s on a quiet page, a page that
+ *  works on every keystroke far slower), so the wait grows with the act: the base + 10 ms a record, at most 2 min. */
+function textReceiptMs(chunks) { return Math.min(120000, INPUT_RECEIPT_MS + 10 * Math.max(0, Number(chunks) || 0)); }
 /** Strip the view's `rid` off a record before it goes upstream (the stream server gets its own shape only). */
 function withoutRid(msg) { if (!isObj(msg) || msg.rid === undefined) return msg; const { rid, ...rest } = msg; return rest; }
 
@@ -357,12 +389,29 @@ function modifiersOf(ev) {
   return m;
 }
 const BUTTONS = Object.freeze({ 0: 'left', 1: 'middle', 2: 'right' });
+/** CDP's `buttons` bitmask of the button a drag holds (left 1, right 2, middle 4). */
+const BUTTON_BITS = Object.freeze({ 0: 1, 1: 4, 2: 2 });
 /** `input_mouse` for a pointer event already mapped to device px (`pt`).
- *  `kind` ∈ move|down|up; `clickCount` 1 on a press (CDP's rule). */
-function mouseRecord({ kind = 'move', pt = null, button = 0, modifiers = 0, clickCount = null } = {}) {
+ *  `kind` ∈ move|down|up; `clickCount` 1 on a press (CDP's rule) unless the view counted a double / triple click.
+ *  lane live-input: a move while a button is HELD (`held` = its DOM button index) carries that button (+ `buttons`) —
+ *  MEASURED through the live view on 0.38.1: a drag sent as `button:'none'` moves selected NOTHING, and a double click
+ *  sent as two single presses selected no word, so text could not be selected in the page to copy it. */
+function mouseRecord({ kind = 'move', pt = null, button = 0, modifiers = 0, clickCount = null, held = null } = {}) {
   if (!pt || !Number.isFinite(Number(pt.x)) || !Number.isFinite(Number(pt.y))) return null;
   const eventType = kind === 'down' ? 'mousePressed' : kind === 'up' ? 'mouseReleased' : 'mouseMoved';
-  return { type: 'input_mouse', eventType, x: Math.round(Number(pt.x)), y: Math.round(Number(pt.y)), button: kind === 'move' ? 'none' : (BUTTONS[Number(button)] || 'left'), clickCount: clickCount === null ? (kind === 'down' ? 1 : 0) : Number(clickCount) || 0, modifiers: Number(modifiers) || 0 };
+  const drag = kind === 'move' && held !== null && held !== undefined && BUTTONS[Number(held)];
+  const r = { type: 'input_mouse', eventType, x: Math.round(Number(pt.x)), y: Math.round(Number(pt.y)), button: kind === 'move' ? (drag ? BUTTONS[Number(held)] : 'none') : (BUTTONS[Number(button)] || 'left'), clickCount: clickCount === null ? (kind === 'down' ? 1 : 0) : Number(clickCount) || 0, modifiers: Number(modifiers) || 0 };
+  if (drag) r.buttons = BUTTON_BITS[Number(held)];
+  return r;
+}
+/** lane live-input: the view's own multi-click count (a pointerdown carries none): the same button pressed again within
+ *  MULTI_CLICK_MS and MULTI_CLICK_PX of the last press counts up (2 = a word, 3 = a paragraph); anything else is 1.
+ *  `prev`/`next` = {count, x, y, at, button} in the viewer's own px. */
+const MULTI_CLICK_MS = 500;
+const MULTI_CLICK_PX = 4;
+function clickCountNext(prev, { x = 0, y = 0, at = 0, button = 0 } = {}) {
+  const near = prev && prev.button === button && (Number(at) - Number(prev.at)) <= MULTI_CLICK_MS && (Number(at) - Number(prev.at)) >= 0 && Math.abs(Number(x) - Number(prev.x)) <= MULTI_CLICK_PX && Math.abs(Number(y) - Number(prev.y)) <= MULTI_CLICK_PX;
+  return { count: near ? Math.min(3, (Number(prev.count) || 1) + 1) : 1, x: Number(x) || 0, y: Number(y) || 0, at: Number(at) || 0, button };
 }
 /** `input_mouse` mouseWheel: deltas in CSS px (the browser's own units). */
 function wheelRecord({ pt = null, deltaX = 0, deltaY = 0, modifiers = 0 } = {}) {
@@ -386,19 +435,58 @@ function keyRecord({ kind = 'down', key = '', code = '', modifiers = 0, keyCode 
   if (text !== undefined) r.text = text;
   return r;
 }
-/** lane J r2: TEXT the user put into the page without keystrokes — a paste,
- *  an IME composition — as the stream server's `char` records (measured on
- *  0.38.1: `eventType` reaches CDP Input.dispatchKeyEvent verbatim and a
- *  multi-character `char` inserts all of it). Split on code points, never
- *  inside a surrogate pair. `{ok:true, records}` | `{ok:false, code:'empty'|'too_long', error}`. */
-function textRecords(text, { chunk = TEXT_CHUNK, max = TEXT_MAX } = {}) {
-  const t = typeof text === 'string' ? text.replace(/\r\n?/g, '\n') : '';
+/**
+ * lane live-input: TEXT the user put into the page without keystrokes — a paste, an IME commit, dictation — cut into
+ * the `char` texts the browser ACCEPTS (≤ CHAR_TEXT_MAX_UNITS UTF-16 units each, never splitting a surrogate pair).
+ * The control-character rules are MEASURED on Chromium 151 (input / textarea / contenteditable):
+ *   · a `char` that STARTS with "\t" inserts the tab and drops the rest ("\tz" → "\t") ⇒ a tab ENDS its chunk
+ *     ("z\t", "\n\t" and a lone "\t" all insert whole);
+ *   · a `char` that is only "\n" inserts NOTHING ("\nz", "z\n" and "\n\n" insert whole) ⇒ a line break never travels
+ *     alone: it STARTS its chunk (in a one-line field "\nz" gives " z" — what a paste gives — where "z\n" drops it), and
+ *     a lone one at the very end joins the previous chunk (or takes its last character); one that cannot (the text IS
+ *     one line break, or ends "\t\n" / "\n😀\n") is DROPPED and counted (`dropped`) — never a loss nobody can say;
+ *   · CRLF / CR → LF (a "\r" inside a `char` drops what follows it); NUL is stripped.
+ * `{ok:true, chunks:[string], length (code points), dropped}` | `{ok:false, code:'empty'|'too_long', error, length?, max?}`.
+ */
+function textChunks(text, { max = TEXT_MAX, units = CHAR_TEXT_MAX_UNITS } = {}) {
+  const t = typeof text === 'string' ? text.replace(/\r\n?/g, '\n').replace(/\u0000/g, '') : '';
   if (!t) return { ok: false, code: 'empty', error: 'nothing to type' };
   const cps = Array.from(t);
   if (cps.length > max) return { ok: false, code: 'too_long', error: `${cps.length} characters is more than one paste into a page may carry (${max})`, length: cps.length, max };
-  const records = [];
-  for (let i = 0; i < cps.length; i += Math.max(1, chunk)) records.push({ type: 'input_keyboard', eventType: 'char', text: cps.slice(i, i + Math.max(1, chunk)).join(''), modifiers: 0 });
-  return { ok: true, records, length: cps.length };
+  const cap = Math.max(2, Number(units) || CHAR_TEXT_MAX_UNITS); // a code point is ≤ 2 units — every chunk makes progress
+  const chunks = [];
+  let cur = '';
+  const flush = () => { if (cur) chunks.push(cur); cur = ''; };
+  for (const cp of cps) {
+    if (cur.length + cp.length > cap || (cp === '\n' && /[^\n]/.test(cur))) flush(); // a line break STARTS its chunk ("\nz" → " z" in a one-line field, like a paste; "z\n" there drops it) — line breaks in a row stay together
+    cur += cp;
+    if (cp === '\t') flush(); // a tab ENDS its chunk (one that starts with it drops the rest)
+  }
+  flush();
+  let dropped = 0;
+  const last = chunks.length - 1;
+  if (last >= 0 && chunks[last] === '\n') { // a lone line break at the end: joins the previous chunk, else takes its last code point
+    const prev = last > 0 ? chunks[last - 1] : null;
+    const cpsPrev = prev ? Array.from(prev) : [];
+    const rest = cpsPrev.slice(0, -1).join('');
+    if (prev && !prev.endsWith('\t') && prev.length + 1 <= cap) { chunks[last - 1] = prev + '\n'; chunks.pop(); }
+    else if (prev && !prev.endsWith('\t') && rest && rest !== '\n') { chunks[last - 1] = rest; chunks[last] = cpsPrev[cpsPrev.length - 1] + '\n'; }
+    else { chunks.pop(); dropped = 1; } // "…\t\n", "\n😀\n", or the text IS one line break
+  }
+  if (!chunks.length) return { ok: false, code: 'empty', error: 'a lone line break cannot be typed into the page — press Enter instead', dropped };
+  return { ok: true, chunks, length: cps.length, dropped };
+}
+/** The `char` records of one text act (the BRIDGE's half — the stream server's shape). */
+function textRecords(text, opts = {}) {
+  const c = textChunks(text, opts);
+  if (!c.ok) return c;
+  return { ok: true, records: c.chunks.map((x) => ({ type: 'input_keyboard', eventType: 'char', text: x, modifiers: 0 })), length: c.length, dropped: c.dropped };
+}
+/** The VIEWER's half: ONE `input_text` record per act (refused before it is sent when it could never be typed). */
+function inputTextRecord(text) {
+  const c = textChunks(text);
+  if (!c.ok) return c;
+  return { ok: true, record: { type: 'input_text', text: String(text).replace(/\r\n?/g, '\n') }, length: c.length, chunks: c.chunks.length, dropped: c.dropped };
 }
 /** `input_touch` for a touch event's first point. */
 function touchRecord({ kind = 'start', pt = null } = {}) {
@@ -449,9 +537,10 @@ function backpressureVerdict(bufferedAmounts, paused, limits = BACKPRESSURE) {
 }
 
 /** The first message every viewer receives. */
-function hello({ viewers = 1, target = null, mode = 'watch', holder = null, upstreamVersion = null } = {}) {
+function hello({ viewers = 1, target = null, mode = 'watch', holder = null, upstreamVersion = null, platform = null } = {}) {
   return {
     type: 'hello', viewers: Number(viewers) || 1, mode: MODES.includes(mode) ? mode : 'watch', holder: holder || null,
+    platform: typeof platform === 'string' && platform ? platform.slice(0, 20) : null, // lane live-input: the OS the browser runs on (the server's — a live view is local-only) — a Mac viewer's ⌘ chords are translated for a non-Mac browser
     target: target && target.ok ? { kind: target.kind, ref: target.ref || null, handle: target.handle || null, profileId: target.profileId || null, alias: target.alias || null, label: target.label || null, isDefault: !!target.isDefault, chosen: target.chosen, ns: target.ns || null } : null, // ns: a stopped view knows which ephemeral it waits for (naive study 2)
     protocol: { frames: 'latest-wins', ordered: UPSTREAM_TYPES.filter((t) => t !== 'frame'), input: 'holder-only', control: VIEWER_CONTROL_TYPES.slice(), view: VIEWER_VIEW_TYPES.slice(), upstreamVersion: upstreamVersion || null },
   };
@@ -604,10 +693,11 @@ function jpegSize(b64, { maxChars = 65536 } = {}) {
  *  url is the stream's ACTIVE tab (agent-browser's own `tabs` record), else the
  *  first ordinary page (tabs of one window share its viewport). `targets` =
  *  `/json/list` rows. Null when there is no page at all. */
-function pickViewportTarget(targets, { activeUrl = '' } = {}) {
+function pickViewportTarget(targets, { activeUrl = '', targetId = null } = {}) {
   const pages = (Array.isArray(targets) ? targets : []).filter((t) => t && t.type === 'page' && typeof t.webSocketDebuggerUrl === 'string');
   if (!pages.length) return null;
   const u = String(activeUrl || '');
+  if (targetId) { const byId = pages.find((t) => t.id === String(targetId)); if (byId) return byId; } // lane live-input: the stream's own active tab by its CDP id first (0.38.1 names it)
   return (u && pages.find((t) => t.url === u)) || pages.find((t) => !/^(chrome|devtools|chrome-extension):/.test(String(t.url || ''))) || pages[0];
 }
 /** The upstream records a viewer is never handed: the daemon's own `cdp_url`
@@ -881,12 +971,15 @@ module.exports = {
   toLocal, frameGeometry, pageViewportFor, sameAspect, jpegSize, pickViewportTarget, privateUpstream, SCROLLBAR_MAX_PX,
   // P3 (§4.3): the viewer's input as the stream server's CDP-shaped records
   modifiersOf, mouseRecord, wheelRecord, keyRecord, touchRecord,
+  clickCountNext, MULTI_CLICK_MS, MULTI_CLICK_PX, // lane live-input: a double / triple click and a drag reach the page (text can be selected to copy)
   // lane S2 (naive study 2 T4): every input has a receipt
-  INPUT_RECEIPT_MS, receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts, withoutRid,
+  INPUT_RECEIPT_MS, receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts, withoutRid, textReceiptMs,
   // verify r3: a takeover is anchored to the tab it began on (an agent's switch while the user drives is refused at the bridge)
   TAKEOVER_ANCHOR_GRACE_MS, TABS_RECORD_LATENCY_P99_MS, takeoverAnchor, takeoverAnchorStep, tabSwitchedReceipt, // verify r4: the grace is 3 × the measured p99
   // lane J r2: the picture's placement (top-aligned) and text a viewer hands the page (a paste, an IME composition)
-  LIVE_ALIGN, ALIGNS, textRecords, TEXT_CHUNK, TEXT_MAX,
+  LIVE_ALIGN, ALIGNS, textRecords, TEXT_MAX,
+  // lane live-input: the browser's measured 3-unit cap on a key event's text, the chunker, the viewer's one-record act
+  CHAR_TEXT_MAX_UNITS, textChunks, inputTextRecord,
   // MULTIVIEW (design-browser-multiview §2 / §4 / D3): the strip's list, the helper witness
   LIST_KINDS, ROW_STATES, CHILD_HANDLE_RE, rowStateOf, browserListFor, ownLiveCount, childN,
   NEW_CHILD_RE, taskOpeningsOf, newChildWitnessesOf, witnessClosesOf, namesHandle, newHelperState, bindHelpers, helperNames,

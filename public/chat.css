@@ -334,6 +334,11 @@
 .chat-vs-notice .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 4px; }
 .chat-vs-notice .chat-vs-notice-title { min-width: 0; overflow-wrap: anywhere; }
 .chat-vs-notice .chat-text { font-size: 13px; }
+.chat-browser-session .chat-vs-notice-head { margin-bottom: 0; }
+.chat-browser-session .chat-vs-notice-head svg { flex: 0 0 auto; }
+.chat-browser-session-note { font-size: 11px; margin-top: 4px; }
+.chat-browser-session-actions { display: flex; gap: 6px; margin-top: 6px; }
+@media (max-width: 768px) { .chat-browser-session-replay { min-height: 44px; padding: 6px 14px; font-size: 12px; } }
 .chat-peer-name:hover { text-decoration: underline; }
 
 /* ── Codex multi-agent collab rows (B-7473) ──

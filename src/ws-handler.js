@@ -4,7 +4,7 @@
  */
 
 const { MessageManager } = require('./message-manager');
-const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView } = require('./normalizers');
+const { createMessageManager, feedLive, feedPeerCard, rebuildHistory, seedHelperView, convertWithCards, browserCardsFor } = require('./normalizers');
 const { pendingAsksOf } = require('./helper-ask.js'); // PURE (lane S1): the pending asks of a normalizer that keeps no index (codex / ACP)
 const { createWsHeartbeat } = require('./server/ws-heartbeat');
 const { listCodexThreads } = require('./codex-session-store');
@@ -1268,7 +1268,7 @@ function registerWsHandler(wss, ctx) {
             // EMPTY, never wrong, which is exactly why it was silent.
             if (typeof sm.prepare === 'function') { try { await sm.prepare(); } catch (e) { console.warn(`[view] ${data.backend || 'claude'} reader prepare failed for ${backendSessionId}: ${e.message}`); } }
             const mm = createMessageManager(data.backend || 'claude', data.sessionId || 'view', { threadId: backendSessionId }); // the rendered conversation's id (codex ledger key)
-            await mm.convertHistoryAsync(sm.raw()); // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once)
+            await convertWithCards(mm, sm.raw(), browserCardsFor({ conversationId: backendSessionId })); // view-only replay of a dead session — same loop-friendly slicing (boot replay opens N of these at once); its browser-session cards by time (2026-09-27)
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
               messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true })); // the slab asked for, as the live attach (perf r1)
           } else {

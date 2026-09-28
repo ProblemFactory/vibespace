@@ -12,11 +12,15 @@
 //      through the shipped CLI; the turn ends ⇒ it runs
 //   ③ the user takes over from conversation 2's live view (the real bridge): conversation 2 browser_paused,
 //      conversation 1 browser_paused too (lane S2 r6: a takeover is of the BROWSER); the handback frees it
-//   ④ the row switch "Only First chat" ⇒ conversation 2 refused with the button sentence (never a command line); the
-//      user's new pick gives it back
+//   ④ "Who can use it" is a LIST (2026-09-27): "Only these: [Task Group G, First chat]" ⇒ conversation 2 (in G) opens work
+//      through its group (one Chrome, its own tab), conversation 3 refused not_owner with the list sentence and the CLI's
+//      way-out line (no command line, no temporary browser); the user adds conversation 3 ⇒ admitted; the user unbinds
+//      conversation 2 from G ⇒ its next command refused and its tab gone (a census of Chrome's own page targets);
+//      `profiles` prints the five `used by:` forms
 //   ⑤ Rename; Delete… with two pins ⇒ the warning's count, every pin cleared, the browser stopped, the directory set aside
-//   ⑥ the migration over a PRE-RULING registry fixture (a session-owned "bank"): refused before (the CONTROL), then
-//      another conversation opens it — one real Chrome
+//   ⑥ the migration `2026-09-browser-profiles-who-list` over a PRE-LIST registry (a "bank" kept to conversation 1 and
+//      conversation 2's USER pin made after that — yesterday's authorization): refused before the fold (the CONTROL), then
+//      conversation 2 opens it through the LIST — one real Chrome
 //   ⑦ B-f7ab the LATE KEY: a session created WITHOUT a key (the pre-feature spawn: key, pairs, config stripped after
 //      create) runs `vibespace-browser open <local url>` from a shell with no browser pairs ⇒ it succeeds (the first
 //      command minted the key, said once), the binding names that conversation, the live view + the fact name the browser
@@ -42,6 +46,7 @@ let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1200) : '')); } return !!c; };
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const J = (x) => JSON.stringify(x);
 const CMDLINE_RE = /`?vibespace-browser (new|use|pin|detach)\b/;
 // a VibeSpace session shell exports its own spawn pairs (AGENT_BROWSER_CONFIG replaces the binary's config search) — never inherited
 const BASE_ENV = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_')));
@@ -76,7 +81,11 @@ else await (async () => {
   const conv = {}; // browserKey → { turn, name }
   const KA = 'bk-0000d001', KB = 'bk-0000d002', KC = 'bk-0000d003';
   const live = new Set([KA, KB, KC]);
-  const k = K.create({ dataDir: DATA, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false, conversationFacts: (bk) => conv[bk] || { turn: null, name: null } });
+  // "Who can use it" (2026-09-27): the Task Groups each conversation belongs to NOW (the wiring's live store rule) + keys
+  // whose store read throws
+  const groupsOf = new Map(), unreadable = new Set();
+  const taskDeps = { taskIdsForKey: (bk) => { if (unreadable.has(bk)) throw new Error('fake: the task store is unreadable'); return { ids: groupsOf.get(bk) || [], unreadable: false }; }, taskInfo: (id) => (id === 'T-G' ? { title: 'Ops', archived: false } : null) };
+  const k = K.create({ ...taskDeps, dataDir: DATA, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false, conversationFacts: (bk) => conv[bk] || { turn: null, name: null } });
   const be = BE.create({ dataDir: DATA, homeDir: KH, serverNotice: null, telemetry: null, log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: KXD } });
   const mkSession = (bk, name, n) => { const e = be.envFor({ browserKey: bk, integrationOn: true, remote: false, cwd: CWD }); return { agentToken: 'vsst_' + String(n).repeat(24), _browserKey: bk, _browserVariant: e.variant, _browserEnv: e.pairs.slice(), name, webuiName: name, mode: 'chat', createdAt: Date.now() }; };
   const s1 = mkSession(KA, 'First chat', 1), s2 = mkSession(KB, 'Second chat', 2), s3 = mkSession(KC, 'Third chat', 3);
@@ -84,10 +93,11 @@ else await (async () => {
   const active = new Map([['sess-1', s1], ['sess-2', s2], ['sess-3', s3]]);
   const notices = [];
   const R = require('../src/routes/browser.js');
-  R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
+  R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { },
+    tasksForSession: (s) => { if (unreadable.has(s && s._browserKey)) throw new Error('fake: the task store is unreadable'); return groupsOf.get(s && s._browserKey) || []; } });
   const TR = require('../src/routes/browser-trace.js');
   const trace = require('../src/server/browser-trace.js').create({ dataDir: DATA, homeDir: KH, keeper: k, bridge: null, serverSetting: () => undefined, broadcast: () => { }, log: quiet });
-  TR.setup({ keeper: k, trace, activeSessions: active, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: (sid, s, nn) => notices.push({ sid, n: nn }) });
+  TR.setup({ keeper: k, trace, activeSessions: active, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: (sid, s, nn) => notices.push({ sid, n: nn }), keyForPickedSession: (id) => R.keyForPickedSession(id) });
   const bridge = require('../src/server/browser-stream.js').create({ keeper: k, activeSessions: active, requestAuthed: () => true, log: quiet });
   const app = express(); app.use(express.json());
   app.get('/page/:name', (req, res) => { res.type('html').send(`<!doctype html><title>${String(req.params.name).replace(/[^\w-]/g, '')}</title><p>${String(req.params.name).replace(/[^\w-]/g, '')}</p>`); });
@@ -173,7 +183,7 @@ else await (async () => {
     ok(!b1.ok && /\[browser_paused\]/.test(b1.err), '③b setup: the user drives work from conversation 2\'s live view — conversation 1 is browser_paused (taken WITH it: lane S2 r6)', b1.err);
     const mark3 = inbox3.length;
     await sleep(5);
-    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'one', conversation: KA });
+    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
     for (let i = 0; i < 30 && ws3.readyState === 1; i++) await sleep(100);
     const ended3 = inbox3.slice(mark3).find((m) => m.type === 'status' && m.state === 'ended');
     ok(r.status === 200 && r.json.detached.some((d) => d.browserKey === KB) && !!ended3 && ws3.readyState !== 1 && !inbox3.slice(mark3).some((m) => m.type === '(frame)'), `③b "Only First chat" while the user drives from conversation 2\'s view: the view ENDS with a typed status ("${ended3 && ended3.error}"), no stale picture`, { ended3, state: ws3.readyState });
@@ -183,24 +193,55 @@ else await (async () => {
     ok(!t3.ok && t3.code === 'no_lease' && /Session properties/.test(t3.error) && !CMDLINE_RE.test(t3.error), '③b a takeover of work by conversation 2 (no lease) is refused no_lease, naming the button — never a pause of conversation 1', t3);
     try { ws3.close(); } catch { /* closed */ }
     conv[KA].turn = 'idle';
-    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'all' });
+    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'all' } });
     r = await j('POST', '/api/browser/pin', { sessionId: 'sess-2', profile: 'work' }); // the ④ leg below starts from a pinned conversation 2 on work (its pin re-made after this narrowing)
     let re2 = await run(s2, ['get', 'title']);
     if (/\[profile_changed\]/.test(re2.err)) re2 = await run(s2, ['get', 'title']);
     ok(re2.ok && k.leasesOn(work.id).some((l) => l.browserKey === KB), '③b conversation 2 is back on work through its (re-made) pin for the legs below', re2.err);
 
-    // ── ④ the row switch "Only First chat" ⇒ conversation 2 refused with the button sentence ──
+    // ── ④ "Who can use it" is a LIST: [Task Group G, First chat] ──
+    /** Chrome's OWN page targets (its CDP /json/list, the keeper's browser) — the tab census. */
+    const pagesOf = async () => { const o = await k.leaseCliOpts(work.id, KA); const u = o && o.extraEnv && o.extraEnv.AGENT_BROWSER_CDP; const m = u && /^wss?:\/\/([^/]+)\//.exec(u); if (!m) return null; try { return (await (await fetch(`http://${m[1]}/json/list`)).json()).filter((t) => t.type === 'page').map((t) => t.title || t.url); } catch { return null; } };
+    groupsOf.set(KB, ['T-G']);
     await sleep(5);
-    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'one', conversation: KA });
-    ok(r.status === 200 && r.json.profile.scope === 'one' && r.json.detached.some((d) => d.browserKey === KB) && chromesOn(work.dir) === 1, '④ "Only First chat": conversation 2 loses it (its pin is older than this choice), conversation 1 keeps browsing — one Chrome', r.json);
-    let n1 = await run(s2, ['get', 'title']);
-    if (/\[profile_changed\]/.test(n1.err)) n1 = await run(s2, ['get', 'title']);
-    ok(!n1.ok && /\[not_owner\]/.test(n1.err) && /only its own conversation/.test(n1.err) && /All my conversations/.test(n1.err) && /Agent browser panel/.test(n1.err) && /pinned profile/.test(n1.err) && !CMDLINE_RE.test(n1.err) && !k.ephemeralFor(KB), '④ conversation 2\'s next command is refused not_owner with the BUTTON sentence (and that its pin did not open) — no command line, no temporary browser instead', n1.err);
-    r = await j('POST', '/api/browser/pin', { sessionId: 'sess-2', profile: 'work' });
-    let n2 = await run(s2, ['get', 'title']);
-    if (/\[profile_changed\]/.test(n2.err)) n2 = await run(s2, ['get', 'title']);
-    ok(r.status === 200 && n2.ok && chromesOn(work.dir) === 1, '④ the user picks work for conversation 2 again (after the switch) — the pick is the authorization: it browses, still one Chrome', n2);
-    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'all' });
+    let u0 = (await j('GET', `/api/browser/profiles/${work.id}/use`)).json;
+    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', session: 'sess-1' }] }, base: u0.base });
+    ok(r.status === 200 && r.json.profile.scope === 'only' && !r.json.detached.some((d) => d.browserKey === KB) && chromesOn(work.dir) === 1, '④ "Only these: Task Group G, First chat": conversation 2 (in G) KEEPS its tab, conversation 1 keeps browsing — one Chrome', r.json);
+    let n2 = await run(s2, ['open', PAGE('WORKB2')]);
+    const tB2 = await run(s2, ['get', 'title']);
+    ok(n2.ok && /WORKB2/.test(titleOf(tB2)) && chromesOn(work.dir) === 1 && !k.ephemeralFor(KB), `④ conversation 2 opens work THROUGH ITS TASK GROUP ("${titleOf(tB2)}" in its own tab, one Chrome)`, { n2, tB2 });
+    // conversation 3 — in no group on the list — is refused by the list sentence and the CLI's way-out line
+    r = await j('POST', '/api/browser/pin', { sessionId: 'sess-3', profile: 'work' }); // the USER's pick of work for 3 ADDS it — so first the agent asks ITSELF
+    ok(r.status === 200 && r.json.added && r.json.added.label === 'work', '④ (the user\'s pick of work for conversation 3 writes the list — the answer says `added`)', r.json);
+    r = await j('POST', '/api/browser/pin', { sessionId: 'sess-3', profile: null }); // unpinned again; take 3 back OUT of the list for the refusal leg
+    u0 = (await j('GET', `/api/browser/profiles/${work.id}/use`)).json;
+    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] }, base: u0.base });
+    const n3 = await run(s3, ['use', 'work']);
+    ok(!n3.ok && /\[not_owner\]/.test(n3.err) && /kept to some of the user's conversations and Task Groups/.test(n3.err) && /way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel \(Change…\), or to switch it to "All my conversations"/.test(n3.err) && !CMDLINE_RE.test(n3.err) && !k.ephemeralFor(KC), '④ conversation 3 `use work` ⇒ not_owner with the LIST sentence and the CLI\'s way-out line (no command line, no temporary browser)', n3.err);
+    // the five `used by:` forms, as each conversation's `profiles` prints them
+    await j('POST', '/api/browser/profiles', { label: 'shop' }); // everyone's
+    const pr1 = await run(s1, ['profiles']), pr2 = await run(s2, ['profiles']), pr3 = await run(s3, ['profiles']);
+    unreadable.add(KC); const pr3u = await run(s3, ['profiles']); unreadable.delete(KC);
+    const workLine = (x) => (x.out.split('\n').find((l) => / work {2}\(/.test(l)) || '');
+    const shopLine = (x) => (x.out.split('\n').find((l) => / shop {2}\(/.test(l)) || '');
+    ok(/used by: all your conversations/.test(shopLine(pr1)) && /used by: chosen conversations — yours included  /.test(workLine(pr1) + '  ') && /used by: chosen conversations — yours included \(through its Task Group\)/.test(workLine(pr2)) && /used by: chosen conversations — not yours \(the user can add this conversation under "Who can use it" in the Agent browser panel\)/.test(workLine(pr3)) && /used by: chosen conversations — unknown for yours right now \(the Task Group list could not be read\)/.test(workLine(pr3u)) && ![pr1, pr2, pr3, pr3u].some((x) => /bk-[0-9a-f]{8}/.test(x.out)), '④ `profiles` prints the five `used by:` forms (all / yours / through its Task Group / not yours / unknown) — and never a conversation key', { s: shopLine(pr1), a: workLine(pr1), b: workLine(pr2), c: workLine(pr3), u: workLine(pr3u) });
+    // the user adds conversation 3 (the UI's attach writes the list) ⇒ admitted
+    r = await j('POST', '/api/browser/attach', { sessionId: 'sess-3', profile: 'work' });
+    const n3b = await run(s3, ['open', PAGE('WORKC')]);
+    ok(r.status === 200 && r.json.added && n3b.ok && chromesOn(work.dir) === 1, '④ the user adds conversation 3 (the UI\'s attach ADDS it to the list) ⇒ it browses in work, still one Chrome', { r: r.json, n3b });
+    // unbind conversation 2 from G ⇒ its next command refused AND its tab gone
+    const before = await pagesOf();
+    groupsOf.set(KB, []);
+    const n2b = await run(s2, ['get', 'title']);
+    let after = null;
+    for (let i = 0; i < 40; i++) { after = await pagesOf(); if (after && !after.some((x) => /WORKB2/.test(x))) break; await sleep(250); }
+    ok(!n2b.ok && /\[not_owner\]/.test(n2b.err) && /Your tab in its browser was closed/.test(n2b.err) && !k.leasesOn(work.id).some((l) => l.browserKey === KB) && before && before.some((x) => /WORKB2/.test(x)) && after && !after.some((x) => /WORKB2/.test(x)) && after.some((x) => /WORKA/.test(x)) && chromesOn(work.dir) === 1, `④ conversation 2 unbound from G: its next command refused AND its tab gone (Chrome's pages: ${J(before)} → ${J(after)}), the others keep theirs, one Chrome`, { err: n2b.err, before, after });
+    u0 = (await j('GET', `/api/browser/profiles/${work.id}/use`)).json;
+    r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'all' }, base: u0.base });
+    await j('POST', '/api/browser/detach', { sessionId: 'sess-3', profile: 'work' });
+    let n2c = await run(s2, ['get', 'title']);
+    if (/\[profile_changed\]/.test(n2c.err)) n2c = await run(s2, ['get', 'title']);
+    ok(r.status === 200 && n2c.ok, '④ "All my conversations" again — conversation 2 browses through its pin (the legs below)', n2c);
 
     // ── ⑤ Rename; Delete… with two pins ──
     r = await j('PATCH', `/api/browser/profiles/${work.id}`, { label: 'Work (acme)' });
@@ -219,20 +260,20 @@ else await (async () => {
     const after2 = await run(s2, ['get', 'title']);
     ok(!/SingletonLock/.test(after2.out + after2.err), '⑤ conversation 2 goes back to a temporary browser of its own (no dangling pin, no lock)', after2);
 
-    // ── ⑥ the migration over a PRE-RULING registry fixture ──
+    // ── ⑥ the migration `2026-09-browser-profiles-who-list` over a PRE-LIST registry (a folded pin) ──
     const R2 = path.join(ROOT, 'inst2'), D2 = path.join(R2, 'data'); fs.mkdirSync(D2, { recursive: true });
     const bankDir = path.join(KH, '.agent-browser', 'vs-bp-0000d0b1'); fs.mkdirSync(bankDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-0000d0b1', label: 'bank', dir: bankDir, provider: 'chromium', owner: { kind: 'session', id: KA }, sharing: 'owner', createdAt: 1, lastUsedAt: 0, record: false, legacy: false }], leases: [], browsers: {}, pins: {} }), { mode: 0o600 });
+    fs.writeFileSync(path.join(D2, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [{ id: 'bp-0000d0b1', label: 'bank', dir: bankDir, provider: 'chromium', owner: { kind: 'session', id: KA }, sharing: 'owner', createdAt: 1, lastUsedAt: 0, record: false, legacy: false, scopeAt: 100 }], leases: [], browsers: {}, pins: { [KB]: { profileId: 'bp-0000d0b1', origin: 'chosen', at: 200, by: 'user' } } }), { mode: 0o600 });
     const k0 = K.create({ dataDir: D2, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false });
-    let e0 = null; try { await k0.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2' }); } catch (e) { e0 = e; }
+    let e0 = null; try { await k0.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2', by: 'pin' }); } catch (e) { e0 = e; }
     k0.shutdown();
-    ok(e0 && e0.code === 'not_owner' && chromesOn(bankDir) === 0, '⑥ CONTROL: before the migration conversation 2 is refused the pre-ruling "bank" (not_owner) and nothing starts', e0 && e0.message);
+    ok(e0 && e0.code === 'not_owner' && chromesOn(bankDir) === 0, '⑥ CONTROL: before the fold, conversation 2\'s pin on the pre-list "bank" (yesterday\'s authorization) opens nothing — a pin never authorizes now (not_owner), nothing starts', e0 && e0.message);
     const { runMigrations } = require('../src/migration-runner.js');
     const mm = require('../src/server/migrations.js').create({ rootDir: R2, homeDir: KH, serverNotice: () => { } });
-    const res = runMigrations({ ledgerPath: path.join(D2, 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === '2026-09-browser-profiles-all-conversations'), log: () => { }, warn: () => { } })[0];
+    const res = runMigrations({ ledgerPath: path.join(D2, 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === '2026-09-browser-profiles-who-list'), log: () => { }, warn: () => { } })[0];
     const k2 = K.create({ dataDir: D2, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false });
-    let a2 = null, e2 = null; try { a2 = await k2.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2' }); } catch (e) { e2 = e; }
-    ok(res && res.status === 'ran' && res.report.migrated.length === 1 && !e2 && a2 && k2.profile('bp-0000d0b1').createdBy === KA && chromesOn(bankDir) === 1, '⑥ the migration makes the pre-ruling "bank" usable by every conversation (createdBy = its old owner): conversation 2 opens it — ONE real Chrome on its directory', e2 ? e2.message : res && res.report);
+    let a2 = null, e2 = null; try { a2 = await k2.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2', by: 'pin' }); } catch (e) { e2 = e; }
+    ok(res && res.status === 'ran' && res.report.migrated.length === 1 && res.report.migrated[0].folded.join() === KB && !e2 && a2 && B.whoMayUse(k2.profile('bp-0000d0b1')).who.map((w) => w.id).join() === [KA, KB].join() && chromesOn(bankDir) === 1, '⑥ the migration folds conversation 2\'s pin into bank\'s LIST: it opens it — ONE real Chrome on its directory', e2 ? e2.message : res && res.report);
     await k2.stop('bp-0000d0b1').catch(() => { });
     k2.shutdown();
 

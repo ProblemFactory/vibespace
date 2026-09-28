@@ -515,8 +515,8 @@ const SETTINGS_SCHEMA = {
   // that binary is when it is not on PATH. Never downloaded by us.
   'browser.cloak.executablePath': {
     type: 'string', default: '',
-    label: t('CloakBrowser executable path'),
-    description: t('Where the cloakbrowser binary is, for switching a profile to the "cloak" backend in place. Empty (default): it is looked up on PATH. Nothing is downloaded by VibeSpace — installing it is your act, after the egress measurement is recorded.'),
+    label: t('CloakBrowser program file'),
+    description: t("Where CloakBrowser is installed, for when VibeSpace can't find it by itself. Leave it empty to look on this computer. VibeSpace never downloads it for you."),
     category: t('Agent browser'), liveApply: true,
   },
   'browser.cloak.egressAllowlist': {
@@ -528,11 +528,20 @@ const SETTINGS_SCHEMA = {
   'browser.actionTrace': {
     // D35 (owner 2026-09-13): default ON — the first action that ever needs a
     // review is otherwise the one unrecorded. A fill's value / a type's text
-    // are NEVER stored (only their length); frames are kept per profile for
-    // 7 days or 200 MB, whichever bites first (src/browser-trace.js).
+    // are NEVER stored (only their length); kept by SIZE per profile
+    // (browser.traceBytesPerProfile, 2026-09-27 — never by age; src/browser-trace.js).
     type: 'boolean', default: true,
     label: t('Record the agent\'s browser actions (before/after screenshots)'),
-    description: t('ON (default): every action an agent sends to its browser is kept as a before and an after screenshot with the click point or element box and the command — expandable on the tool card in the transcript and as a timeline in the live view. A fill\'s value and a type\'s text are never stored (only their length). Kept per profile for 7 days or 200 MB, whichever comes first; a screenshot of a logged-in page is a secret, and the sweep says what it removed. OFF: nothing is recorded.'),
+    description: t('ON (default): every action an agent sends to its browser is kept as a before and an after screenshot with the click point or element box and the command — expandable on the tool card in the transcript, as a timeline in the live view and as a replay of each browser session. A fill\'s value and a type\'s text are never stored (only their length). Each profile keeps its records up to the size below; over it, the oldest sessions\' screenshots are removed first and every action list stays. A screenshot of a logged-in page is a secret. OFF: nothing is recorded.'),
+    category: t('Agent browser'), liveApply: true,
+  },
+  'browser.traceBytesPerProfile': {
+    // 2026-09-27 (the owner: "记录不要按照 7 天上限，而是按照容量，每个浏览器 profile 最多保留 1GB 记录"): the ONE
+    // retention rule of the action trace — per profile (the temporary browsers together count as one), in MB;
+    // src/browser-trace.js traceBytesLimit reads it (the 64 MB floor is enforced there too). No age rule anywhere.
+    type: 'number', default: 1024, min: 64, max: 102400, step: 64,
+    label: t('Browser records kept per profile (MB)'),
+    description: t('How much each profile\'s browser records may take — the before/after screenshots and the list of actions. Over it, the screenshots of the oldest sessions are removed first; the list of what the agent did is always kept. Records are never removed for being old. Default 1024 MB (1 GB), at least 64 MB.'),
     category: t('Agent browser'), liveApply: true,
   },
   'browser.autoBindLiveView': {

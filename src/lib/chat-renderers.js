@@ -38,6 +38,8 @@ const permissionClassOf = (w) => (w && w.cls === 'allowed' ? 'chat-permission-al
 // THE one reset-credit confirm dialog (design-reset-credits p2): the wall card /
 // the auto-resume arm card that carries a stored-credit offer gets its button
 import { openResetCreditDialog } from './reset-credit-dialog.js';
+import { startCardText, endCardText, endCardReplays, framesGoneText } from './browser-session-words.js'; // 2026-09-27: a browser session's start / end card — the words shared with the live view and the replay window
+import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`): a button says what it does
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
 // Agent-memory files get their own card treatment (user ask: a memory write
@@ -735,6 +737,37 @@ class ChatRenderers {
     return el;
   }
 
+  /** THE BROWSER SESSION CARD (2026-09-27): `msg.content[0]` = the normalizer's sanitized block (src/browser-sessions.js
+   *  cardBlock — ids, instants, counts, a profile's name; never markup). Every string through textContent; the icon from
+   *  icons.js; the end card's Replay = the house text button opening the replay window on THAT session. */
+  _renderBrowserSessionCard(msg) {
+    const b = msg.content[0];
+    const el = document.createElement('div');
+    el.className = 'chat-msg chat-msg-system chat-vs-notice chat-browser-session';
+    el._rawMsg = msg;
+    el.dataset.browserSession = String(b.session || '');
+    el.dataset.phase = b.phase === 'end' ? 'end' : 'start';
+    const head = document.createElement('div');
+    head.className = 'chat-vs-notice-head';
+    head.innerHTML = b.phase === 'end' ? UI_ICONS.browserReplay : UI_ICONS.browserLive;
+    const title = document.createElement('span');
+    title.className = 'chat-vs-notice-title chat-browser-session-title';
+    title.textContent = t('VibeSpace · {what}', { what: b.phase === 'end' ? endCardText(b) : startCardText(b) });
+    head.appendChild(title);
+    el.appendChild(head);
+    if (b.phase === 'end') {
+      if (b.framesRemoved) { const g = document.createElement('div'); g.className = 'chat-browser-session-note chat-status-dim'; g.textContent = framesGoneText(b.limit); el.appendChild(g); }
+      if (!endCardReplays(b)) return el; // nothing to watch: the head says "0 actions" and why the session ended — no Replay
+      const row = document.createElement('div');
+      row.className = 'chat-browser-session-actions';
+      const replay = textBtn(t('Replay'), () => this.app?.openBrowserReplay?.({ browserKey: b.browserKey || null, conversation: (() => { try { const ids = this._getSessionCtx?.(); return ids && (ids.claudeId || ids.backendSessionId) || null; } catch { return null; } })(), session: b.session }), 'chat-browser-session-replay');
+      replay.title = t('Watch this browser session again, action by action');
+      row.appendChild(replay);
+      el.appendChild(row);
+    }
+    return el;
+  }
+
   /** A STORED RESET CREDIT a card offers (the wall card / the auto-resume arm
    *  card — design-reset-credits §5, p2): ONE button opening THE confirm dialog
    *  on the account the offer names; the click alone spends nothing. The offer
@@ -1249,6 +1282,11 @@ class ChatRenderers {
    */
   renderSystemMsg(msg) {
     const text = msg.content?.[0]?.text || '';
+    // A BROWSER SESSION'S START / END (2026-09-27, the owner: "在聊天界面…看到 session 的开始和结束"): a VibeSpace card
+    // drawn like the takeover / handback cards, never agent text; the end card opens the replay of that session
+    if (msg.noticeKind === 'browser-session' && msg.content?.[0]?.type === 'browser_session') {
+      return { el: this._renderBrowserSessionCard(msg), sideEffect: null };
+    }
     // UNKNOWN EVENT — the fall-back card (2.369.119/.120, owner): a harness
     // record VibeSpace does not recognize sits in the flow like any other
     // card, red-bordered so it is noticed, the WHOLE record behind its

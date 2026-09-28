@@ -5,6 +5,34 @@ import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps,
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t } from './i18n.js';
 import { registerOpenAction } from './window-types.js';
+import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
+
+/** 2026-09-27: how many browser sessions a conversation has, per ask (the window re-renders on every broadcast, so the
+ *  count is remembered here and re-asked at most every 15 s; the row appears once the answer says there are some). */
+const browserSessionCounts = new Map(); // query → { n, at, busy }
+function browserSessionsAsk(s) {
+  const q = new URLSearchParams();
+  if (s.status === 'live' && s.webuiId && !s.host) q.set('sessionId', s.webuiId);
+  const conv = s.backendSessionId || s.claudeSessionId || s.sessionId || '';
+  if (conv && !s.host) q.set('conversation', conv);
+  if (/^bk-[0-9a-f]{8}$/.test(String(s.browserKey || ''))) q.set('browserKey', s.browserKey);
+  return [...q.keys()].length ? q.toString() : '';
+}
+function browserSessionsCount(s, onChange) {
+  const k = browserSessionsAsk(s);
+  if (!k) return null;
+  const c = browserSessionCounts.get(k);
+  if (!c || (!c.busy && Date.now() - c.at > 15000)) {
+    const was = c ? c.n : null;
+    browserSessionCounts.set(k, { n: was, at: Date.now(), busy: true });
+    fetchJson('/api/browser/sessions?' + k).then((r) => {
+      const n = r && !r.error && Array.isArray(r.sessions) ? r.sessions.length : was;
+      browserSessionCounts.set(k, { n, at: Date.now(), busy: false, browserKey: r && r.browserKey || null });
+      if (n !== was) onChange();
+    });
+  }
+  return browserSessionCounts.get(k);
+}
 
 /**
  * Session Properties window — the FULL view of everything VibeSpace knows
@@ -257,10 +285,14 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     // lane S2 (naive study 2, T5): the section prints THE browser fact (`browserFact`, the same line the chip and the
     // live view print — "work", or "pinned work · running nothing — work could not start"); it re-renders on the
     // active-sessions broadcast the fact rides (a pin shows at once, never only after a reopen); ONE line (a name never
-    // wraps mid-word — the whole sentence is the tooltip); the window's own buttons (never the browser's white default)
+    // wraps mid-word — the whole sentence is the tooltip); the window's own buttons (never the browser's white default).
+    // 2026-09-28 (the naive-user verifier): the row WRAPS between its parts — at the default 400 px window the ellipsis
+    // cut exactly the new words (who can use it, how many use it now) with no way to read them; the NAME and the
+    // browser's chip stay whole on their line (style.css `.session-props-browser`)
     if (app._browserProfiles && s.browserFact && s.status === 'live' && s.webuiId && !s.host) {
       const brSec = section(t('Agent browser'));
-      row(brSec, t('Browser'), app.browserPinSummaryHtml(s));
+      brSec.classList.add('session-props-browser');
+      row(brSec, t('Browser'), app.browserPinSummaryHtml(s), { wrap: true });
       const brRow = document.createElement('div');
       brRow.className = 'session-detail-row';
       brRow.innerHTML = `<span class="session-detail-label">${escHtml(t('Pin'))}</span>`;
@@ -294,6 +326,21 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       };
       capRow.appendChild(capSel);
       brSec.appendChild(capRow);
+    }
+    // 2026-09-27: "Browser sessions (n)" — every run of this conversation's browser, each with its replay (the replay
+    // window's list); a stopped conversation's too (found by its id through the bindings store). Shown once there are some.
+    {
+      const bc = browserSessionsCount(s, () => { if (root.isConnected) render(); });
+      if (bc && bc.n > 0) {
+        const host = root.querySelector('.task-detail-section.session-props-browser') || section(t('Agent browser'));
+        const r = document.createElement('div');
+        r.className = 'session-detail-row session-props-browser-sessions';
+        r.innerHTML = `<span class="session-detail-label">${escHtml(t('Browser sessions ({n})', { n: bc.n }))}</span>`;
+        const b = textBtn(t('Replay'), () => app.openBrowserReplay?.({ browserKey: (/^bk-[0-9a-f]{8}$/.test(String(s.browserKey || '')) ? s.browserKey : bc.browserKey) || null, conversation: s.backendSessionId || s.claudeSessionId || s.sessionId || null }), 'session-props-browser-replay');
+        b.title = t('Every run of this conversation\'s browser, action by action');
+        r.appendChild(b);
+        host.appendChild(r);
+      }
     }
 
     // ── Config overrides (summary; edit via the card ⚙) ──

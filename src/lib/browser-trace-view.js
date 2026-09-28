@@ -34,13 +34,19 @@
 // law); every string from the wire goes through textContent; theme vars only,
 // SVG icons only. A frame is a SECRET of a logged-in page (§6.4): the dialog
 // says how long it is kept, and nothing here caches a byte.
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { fetchJson, createModalShell, showToast, showConfirmDialog, showInputDialog } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
+import { btn, el as chromeEl, icon as chromeIcon } from './channel-chrome.js';
+import { createBackendIcon } from './agent-meta.js';
+import { whoChips, foldChips, CHIPS_WIDE, CHIPS_NARROW } from './browser-who-model.js';
+import { openWhoDialog, nameHelpers } from './browser-who-dialog.js';
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
-import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_RETENTION_MS, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
+import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE } from '../browser-trace.js';
+import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
+import { dividerText, sessionRowText, retentionText, sizeText } from './browser-session-words.js'; // the words every session surface shares
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -79,8 +85,12 @@ export function statusText(e) {
   return t('no result');
 }
 /** The retention sentence every surface repeats (§6.4: the UI says so). */
-export function retentionSentence() {
-  return t('Frames of a logged-in page are secrets: kept {days} days or {mb} MB per profile, whichever comes first, then removed by the sweep.', { days: Math.round(TRACE_RETENTION_MS / 86400000), mb: Math.round(TRACE_BYTES_PER_PROFILE / 1048576) });
+/** 2026-09-27 (the owner: "按照容量，每个浏览器 profile 最多保留 1GB 记录"): by SIZE only — the limit the server
+ *  answered (`limit`, the setting), else the 1 GiB default; the oldest frames go first, every action list stays. */
+let knownLimit = TRACE_BYTES_PER_PROFILE; // the last limit the server answered (the housekeeping view / a sessions list)
+export function noteTraceLimit(n) { if (Number(n) > 0) knownLimit = Number(n); }
+export function retentionSentence(limitBytes = null) {
+  return retentionText(Number(limitBytes) > 0 ? Number(limitBytes) : knownLimit);
 }
 
 // ── the thumbnail strip ──
@@ -107,7 +117,7 @@ export function renderTraceStrip(container, entries, { onOpen = null, max = STRI
 
 // ── the entry dialog: before / after with the overlay ──
 /** Draw the position on a picture: after the image lands, the dot / rect in the drawn picture's px. */
-function drawOverlay(pane, img, entry, which) {
+export function drawOverlay(pane, img, entry, which) {
   const frame = entry && entry[which];
   const old = pane.querySelector('.browser-trace-overlay'); if (old) old.remove();
   if (!frame || !entry.position) return;
@@ -145,7 +155,7 @@ export function openTraceEntryDialog(app, entry, list = null) {
   function show(i) {
     index = Math.max(0, Math.min(entries.length - 1, i));
     const e = entries[index];
-    pos.textContent = t('{i} of {n}', { i: index + 1, n: entries.length }) + ' · ' + clockText(e.at);
+    pos.textContent = tc('replay', '{i} of {n}', { i: index + 1, n: entries.length }) + ' · ' + clockText(e.at); // "action k of n" — the replay window's words
     cmd.textContent = String(e.text || e.action || '');
     prev.disabled = index === 0; next.disabled = index >= entries.length - 1;
     for (const [pane, which] of [[before, 'before'], [after, 'after']]) {
@@ -200,7 +210,9 @@ export function createCardTraceLoader(view) {
     let nextTs = null;
     const msgEl = holder.closest('.chat-msg');
     let n = msgEl ? msgEl.nextElementSibling : null;
-    while (n) { const v = Number(n.dataset && n.dataset.ts); if (v > ts) { nextTs = v; break; } n = n.nextElementSibling; }
+    // a browser SESSION card (2026-09-27) is not the next message: it lands INSIDE the call that started the browser
+    // (the launch happens while the command runs) — ending the card's window there cut off the call's own actions
+    while (n) { const v = n.classList && n.classList.contains('chat-browser-session') ? 0 : Number(n.dataset && n.dataset.ts); if (v > ts) { nextTs = v; break; } n = n.nextElementSibling; }
     return { id: holder.dataset.traceKey, ts, ...traceWindowFor({ ts, nextTs, now: Date.now() }) };
   }
   function observe(root) {
@@ -326,16 +338,27 @@ export function createCardTraceLoader(view) {
  * The session's actions on ONE pane (the profile's scope, or the ephemeral
  * one): `load({profileId, ephemeral})` seeds from GET, `push(entry)` grows it
  * from the stream's `trace` record (deduped by id), `clear()` on a pane switch.
+ * 2026-09-27 (browser SESSIONS): the pane opens with a `Sessions` list (newest
+ * first — when · how long · how many actions, each with Replay) and the actions
+ * below it carry a DIVIDER where a session begins ("Session 3 · started 10:02");
+ * the list is re-read when a session starts or ends (`onSessions`), and a view
+ * of a STOPPED browser still has it (`sessionsCount`, the live window opens the
+ * pane then).
  */
 export function createTraceTimeline(app, { sessionId } = {}) {
   const root = el('div', 'browser-live-trace');
+  const sessBox = el('div', 'browser-live-sessions');
+  const sessHead = el('div', 'browser-live-sessions-head', t('Sessions'));
+  const sessList = el('div', 'browser-live-sessions-list');
+  sessBox.append(sessHead, sessList);
+  sessBox.style.display = 'none';
   const head = el('div', 'browser-live-trace-head');
   const count = el('span', 'browser-live-trace-count', '');
   head.appendChild(count);
   const listEl = el('div', 'browser-live-trace-list');
   const empty = el('div', 'browser-live-trace-empty chat-status-dim', t('No actions yet — every agent action lands here with its before / after frames.'));
-  root.append(head, listEl, empty);
-  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null };
+  root.append(sessBox, head, listEl, empty);
+  const st = { entries: [], ids: new Set(), scope: undefined, off: false, loading: false, error: null, sessions: [], ordinals: new Map(), browserKey: null, lastSid: undefined, sessTimer: null, rows: new Map(), sessRows: new Map() };
   function scopeQuery() { if (st.scope === undefined) return ''; return st.scope === null ? EPHEMERAL_SCOPE : String(st.scope); }
   function renderHead() {
     if (st.error) count.textContent = t('trace unavailable: {why}', { why: String(st.error) });
@@ -357,15 +380,80 @@ export function createTraceTimeline(app, { sessionId } = {}) {
     row.onclick = () => openTraceEntryDialog(app, e, st.entries);
     return row;
   }
+  /** The session an entry belongs to (its tag, else the implicit session of a pre-session record). */
+  const sidOf = (e) => sessionOfEntry(e, st.sessions);
+  function dividerFor(sid) {
+    const s = st.sessions.find((x) => x.id === sid) || null;
+    const d = el('div', 'browser-live-trace-divider', s ? dividerText(st.ordinals.get(sid) || 1, s.startAt) : t('Session {k} · started {time}', { k: st.ordinals.size + 1, time: '…' }));
+    d.dataset.session = sid || '';
+    return d;
+  }
+  /** Rebuild the list from the entries, the SAME row nodes kept (keyed by id), a divider where a session begins. */
+  function renderList() {
+    const nodes = [];
+    let prev;
+    for (const e of st.entries) {
+      const sid = sidOf(e);
+      if (sid !== prev && sid) nodes.push(dividerFor(sid));
+      prev = sid;
+      let r = st.rows.get(e.id); if (!r) { r = rowFor(e); st.rows.set(e.id, r); }
+      nodes.push(r);
+    }
+    st.lastSid = prev;
+    listEl.replaceChildren(...nodes);
+  }
+  function renderSessions() {
+    const list = st.sessions;
+    sessBox.style.display = list.length ? '' : 'none';
+    sessHead.textContent = `${t('Sessions')} (${list.length})`;
+    const out = list.map((x) => {
+      let r = st.sessRows.get(x.id);
+      if (!r) {
+        r = el('div', 'browser-live-session'); r.dataset.session = x.id;
+        const txt = el('span', 'browser-live-session-text');
+        const b = btn(t('Replay'), () => app.openBrowserReplay?.({ browserKey: st.browserKey || x.browserKey || null, session: x.id }), 'browser-live-session-replay');
+        b.title = t('Watch this browser session again, action by action');
+        r.append(txt, b);
+        st.sessRows.set(x.id, r);
+      }
+      const words = sessionRowText(x);
+      const txt = r.firstChild;
+      if (txt.textContent !== words) txt.textContent = words;
+      r.classList.toggle('open', !!x.open);
+      return r;
+    });
+    const kids = sessList.childNodes;
+    for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) sessList.insertBefore(out[i], kids[i] || null);
+    while (kids.length > out.length) sessList.removeChild(kids[kids.length - 1]);
+    for (const k of [...st.sessRows.keys()]) if (!list.some((x) => x.id === k)) st.sessRows.delete(k);
+  }
+  async function loadSessions() {
+    if (!sessionId) return;
+    const q = new URLSearchParams({ sessionId });
+    const sc = scopeQuery(); if (sc) q.set('profile', sc);
+    const r = await fetchJson(`/api/browser/sessions?${q}`);
+    if (!r || r.error) return; // the actions still show; the list is an addition, its absence says nothing false
+    noteTraceLimit(r.limit);
+    st.sessions = Array.isArray(r.sessions) ? r.sessions : [];
+    st.browserKey = r.browserKey || st.browserKey;
+    st.ordinals = sessionOrdinals(st.sessions);
+    renderSessions(); renderList();
+  }
   function push(entry) {
     if (!entry || !entry.id || st.ids.has(entry.id)) return false;
     st.ids.add(entry.id); st.entries.push(entry);
-    listEl.appendChild(rowFor(entry));
+    const sid = sidOf(entry);
+    if (sid && sid !== st.lastSid) { listEl.appendChild(dividerFor(sid)); st.lastSid = sid; }
+    if (sid && !st.sessions.some((x) => x.id === sid)) onSessions(); // a session the list has not heard of yet — re-read it
+    const r = rowFor(entry); st.rows.set(entry.id, r);
+    listEl.appendChild(r);
     renderHead();
     listEl.scrollTop = listEl.scrollHeight;
     return true;
   }
-  function clear() { st.entries = []; st.ids = new Set(); listEl.replaceChildren(); st.error = null; renderHead(); }
+  function clear() { st.entries = []; st.ids = new Set(); st.rows = new Map(); st.lastSid = undefined; listEl.replaceChildren(); st.error = null; st.sessions = []; st.ordinals = new Map(); st.sessRows = new Map(); sessList.replaceChildren(); sessBox.style.display = 'none'; renderHead(); }
+  /** A session started or ended on this conversation's browser: re-read the list (debounced). */
+  function onSessions() { if (st.sessTimer) clearTimeout(st.sessTimer); st.sessTimer = setTimeout(() => { st.sessTimer = null; loadSessions(); }, 500); }
   /** Seed (or re-seed after a reconnect — same scope keeps what it has, `push` dedups; a pane switch clears first). */
   async function load({ profileId = undefined } = {}) {
     if (st.scope !== profileId || st.error) { st.scope = profileId; clear(); }
@@ -373,15 +461,17 @@ export function createTraceTimeline(app, { sessionId } = {}) {
     st.loading = true;
     const q = new URLSearchParams({ sessionId, limit: '300' });
     const sc = scopeQuery(); if (sc) q.set('profile', sc);
-    const r = await fetchJson(`/api/browser/actions?${q}`);
+    const [r] = await Promise.all([fetchJson(`/api/browser/actions?${q}`), loadSessions()]);
     st.loading = false;
     if (!r || r.error) { st.error = (r && r.error) || t('server unreachable'); renderHead(); return; }
     st.off = r.traceOn === false;
+    if (r.browserKey) st.browserKey = r.browserKey;
     for (const e of r.entries || []) push(e);
+    renderList();
     renderHead();
   }
   renderHead();
-  return { el: root, load, push, clear, count: () => st.entries.length, state: () => ({ n: st.entries.length, off: st.off, error: st.error, scope: st.scope }) };
+  return { el: root, load, push, clear, onSessions, count: () => st.entries.length, sessionsCount: () => st.sessions.length, browserKey: () => st.browserKey, state: () => ({ n: st.entries.length, off: st.off, error: st.error, scope: st.scope, sessions: st.sessions.length, dividers: listEl.querySelectorAll('.browser-live-trace-divider').length }) };
 }
 
 // ── THE BROWSER PROFILES PANEL (§6.4 / §8 step 3 / D7 / D8) ──
@@ -416,31 +506,93 @@ export function agoText(ms) {
   if (s < 172800) return t('{n} h ago', { n: Math.round(s / 3600) });
   return t('{n} d ago', { n: Math.round(s / 86400) });
 }
-// ── OWNER RULING A (2026-09-26): WHO CAN USE a profile — the row's switch, Rename…, Delete… ──
 /**
- * The "Who can use it" options of ONE profile row, DOM-free: "All my conversations" first, then "Only <name>" for the
- * conversation it is kept to (when it is), the one that made it, the ones using it (a lease or a pin), then every
- * other live conversation, most recent first — each at most once. `value` = 'all' | 'one:<browserKey>'; `selected` marks
- * the current scope. A conversation no live row names is "Only the conversation that made it" / "Only one conversation".
+ * A profile row's state in the device's words, from the row's STRUCTURE (2026-09-28, the naive-user verifier: the server's
+ * English `why` — "attached by 2 session(s)", "last used 0 h ago" — sat inside the zh / ja panel; `why` stays the agent's
+ * and the CLI's sentence).
  */
-export function scopeOptions(row, conversations = []) {
-  const r = row || {};
-  const convs = Array.isArray(conversations) ? conversations : [];
-  const nameOf = (bk) => { const c = convs.find((x) => x && x.browserKey === bk); return c && c.name ? String(c.name) : ''; };
-  const out = [{ value: 'all', label: t('All my conversations'), selected: r.scope === 'all' || !r.scope }];
-  const seen = new Set();
-  const add = (bk, fallback) => {
-    if (!bk || seen.has(bk)) return;
-    seen.add(bk);
-    const n = nameOf(bk);
-    out.push({ value: 'one:' + bk, label: n ? t('Only {name}', { name: n }) : fallback, selected: r.scope === 'one' && r.scopeConversation === bk });
-  };
-  if (r.scope === 'task') out.push({ value: 'task', label: t('Only a Task Group'), selected: true }); // nothing creates one; shown as it is, never mislabelled "all"
-  if (r.scope === 'one' && r.scopeConversation) add(r.scopeConversation, r.scopeConversation === r.createdBy ? t('Only the conversation that made it') : t('Only one conversation (not running now)'));
-  if (r.createdBy) add(r.createdBy, t('Only the conversation that made it'));
-  for (const u of Array.isArray(r.usedBy) ? r.usedBy : []) if (u && u.browserKey) add(u.browserKey, t('Only one conversation (not running now)'));
-  for (const c of convs) if (c && c.browserKey) add(c.browserKey, t('Only one conversation (not running now)'));
-  return out;
+export function rowWhyText(r) {
+  const x = r || {};
+  const closed = x.browserClosed === 'browser_unstable' ? (x.closedHow === 'failing' ? t('its browser could not be started; VibeSpace stopped trying (Stop resets it)') : t('its browser keeps closing; VibeSpace stopped starting it (Stop resets it)'))
+    : x.browserClosed === 'profile_locked' ? t('its folder is held by another browser')
+      : x.browserClosed ? t('its browser is closed (the next command starts it again)') : '';
+  const age = Number.isFinite(Number(x.ageMs)) && x.ageMs !== null ? Number(x.ageMs) : null;
+  switch (x.state) {
+    case 'in-use': { const n = Number(x.held) || 0; const head = n === 1 ? t('1 conversation uses it') : t('{n} conversations use it', { n }); return closed ? `${head} · ${closed}` : head; }
+    case 'live': return closed || t('its browser is running');
+    case 'recent': return t('written {ago}; it may still be in use', { ago: agoText(age) });
+    case 'stale': return t('unused for {n} days; listed, never deleted by itself', { n: Math.round((age || 0) / 86400000) });
+    case 'kept': return age === null ? t('never used yet') : t('last used {ago}', { ago: agoText(age) });
+    case 'not-ours': return t("VibeSpace doesn't keep this profile's folder here, so it is only listed");
+    default: return String(x.why || '');
+  }
+}
+// ── OWNER RULING A (2026-09-26): WHO CAN USE a profile — the row's "Who can use it" cell, Rename…, Delete… ──
+/**
+ * THE "WHO CAN USE IT" CELL of one profile row (2026-09-27 — a LIST of conversations and Task Groups): the label, the
+ * VALUE ("All my conversations", or one chip per row of the list — a conversation by its backend glyph and name, dim
+ * with a hollow dot when not running; a Task Group by the people glyph and its title, amber when deleted — folded into
+ * "+N more" past 4, past 2 at ≤ 768 px), the amber "Nobody can use it now…" line when every row is dead, and the
+ * house text button "Change…" (the dialog, src/lib/browser-who-dialog.js). KEYED IN PLACE: the cell element and its
+ * chips are kept across loads and broadcasts — chips reconciled by `data-key`, a text replaced only when it changed —
+ * so a who-change never re-creates the row or a chip that did not change. Returns `{el, patch(row)}`.
+ */
+export function whoCell(app, { onChange = null } = {}) {
+  const root = chromeEl('div', 'bprof-who');
+  root.appendChild(chromeEl('span', 'bprof-who-label', t('Who can use it')));
+  const value = chromeEl('span', 'bprof-who-value');
+  const allText = chromeEl('span', 'bprof-who-all');
+  const chips = chromeEl('span', 'bprof-who-chips');
+  const more = chromeEl('span', 'bprof-who-more');
+  value.append(allText, chips, more);
+  let rowNow = null;
+  const change = btn(t('Change…'), () => { if (rowNow) openWhoDialog(app, rowNow.id, { label: String(rowNow.label || rowNow.id), onSaved: onChange }); }, 'bprof-who-change');
+  const note = chromeEl('div', 'bprof-who-nobody');
+  note.appendChild(chromeIcon('alert', 11));
+  const noteText = chromeEl('span', '');
+  note.appendChild(noteText);
+  root.append(value, change, note);
+  const nodes = new Map();   // chip key → node
+  const setText = (n, v) => { if (n.textContent !== v) n.textContent = v; };
+  function chipNode(c) {
+    let n = nodes.get(c.key);
+    const sig = JSON.stringify([c.kind, c.name, c.live, c.amber, c.tooltip, c.backend]);
+    if (n && n.dataset.sig === sig) return n;
+    if (!n) { n = chromeEl('span', 'bprof-who-chip'); n.dataset.key = c.key; nodes.set(c.key, n); }
+    n.dataset.sig = sig;
+    n.textContent = '';
+    n.className = 'bprof-who-chip' + (c.kind === 'task' ? ' is-group' : ' is-session') + (c.kind === 'session' && !c.live ? ' is-stopped' : '') + (c.amber ? ' is-amber' : '');
+    if (c.kind === 'task') n.appendChild(chromeIcon('users', 12, 'bprof-who-glyph'));
+    else if (c.live) { const bi = createBackendIcon(c.backend || 'claude', { className: 'bprof-who-glyph' }); bi.setAttribute('aria-hidden', 'true'); n.appendChild(bi); }
+    else n.appendChild(chromeEl('span', 'bprof-who-dot'));
+    n.appendChild(chromeEl('span', 'bprof-who-name', c.name));
+    n.title = c.tooltip ? c.name + ' — ' + c.tooltip : c.name;
+    return n;
+  }
+  function patch(r) {
+    rowNow = r;
+    const h = nameHelpers(app);
+    const m = whoChips(r && r.use, { t, nameOfConversation: h.nameOfConversation, taskOf: h.taskOf });
+    const narrow = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)').matches : false;
+    const f = foldChips(m.chips, narrow ? CHIPS_NARROW : CHIPS_WIDE, { t });
+    allText.style.display = m.mode === 'all' ? '' : 'none';
+    setText(allText, m.mode === 'all' ? t('All my conversations') : '');
+    const out = f.shown.map(chipNode);
+    const kids = chips.childNodes;
+    for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) chips.insertBefore(out[i], kids[i] || null);
+    while (kids.length > out.length) chips.removeChild(kids[kids.length - 1]);
+    for (const k of [...nodes.keys()]) if (!m.chips.some((c) => c.key === k)) nodes.delete(k);
+    chips.style.display = out.length ? '' : 'none';
+    more.style.display = f.more ? '' : 'none';
+    setText(more, f.more ? f.more.text : '');
+    more.title = f.more ? f.more.tooltip : '';
+    setText(noteText, m.nobody || '');
+    note.style.display = m.nobody ? '' : 'none';
+    const tip = m.mode === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Only the conversations and Task Groups listed here can use it. Picking it for another conversation (New Session, Session properties) adds that conversation.');
+    if (root.title !== tip) root.title = tip;
+    root.dataset.mode = m.mode;
+  }
+  return { el: root, patch, chipNodes: nodes };
 }
 /** The live conversations that USE a profile (a lease or a pin) — the Delete… warning's and the narrowing's count. */
 export function usersOf(row) { return (Array.isArray(row && row.usedBy) ? row.usedBy : []).filter((u) => u && (u.leased || u.pinned)); }
@@ -457,11 +609,18 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   app._hideWelcome?.();
   const winInfo = app.wm.createWindow({ title: t('Agent browser'), type: PANEL_TYPE, syncId, openSpec: { action: 'openBrowserProfiles' }, width: 860, height: 600 });
   const st = { view: null, error: null, busy: false, closed: false, timer: null, focus };
+  // KEYED (2026-09-27): each profile's "Who can use it" cell and its row are kept across loads — a load whose only change
+  // for a row is its list PATCHES the cell in place; a row whose other facts moved is rebuilt around the SAME cell
+  const whoCells = new Map();   // profileId → whoCell
+  const rowsById = new Map();   // profileId → { row, sig }
+  const whoCellFor = (id) => { let c = whoCells.get(id); if (!c) { c = whoCell(app, { onChange: () => load() }); whoCells.set(id, c); } return c; };
+  /** What a profile row draws OTHER than its list — equal ⇒ the row element is kept (its who cell patched). */
+  const rowSig = (r, v) => { const { use, ...rest } = r || {}; return JSON.stringify([rest, app.browserChipFor ? app.browserChipFor(r.id) : null, v?.limits?.recordingFloor || null, st.busy]); };
   const root = el('div', 'bprof');
   const bar = el('div', 'bprof-bar');
   const summary = el('span', 'bprof-summary', t('Loading…'));
   const spacer = el('span'); spacer.style.flex = '1';
-  const sweepBtn = el('button', 'file-tool-btn bprof-btn', t('Sweep now')); sweepBtn.title = t('Apply the retention plan now: traces and recordings older than the limit, or over the per-profile size, are removed — profiles are never touched');
+  const sweepBtn = el('button', 'file-tool-btn bprof-btn', t('Sweep now')); sweepBtn.title = t('Apply the size limit now: over it, the oldest sessions\' frames are removed and every action list stays; recordings keep their own limit — profiles are never touched');
   const refreshBtn = el('button', 'file-tool-btn bprof-btn', '⟳'); refreshBtn.title = t('Refresh');
   bar.append(summary, spacer, sweepBtn, refreshBtn);
   const hint = el('div', 'bprof-hint chat-status-dim');
@@ -476,8 +635,11 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   const usageLine = (host, u) => { const txt = u ? memoryText(u.memBytes, u.memMetric) : ''; if (!txt) return; const s = el('span', 'bprof-usage' + (u.over ? ' bprof-usage-over' : ''), txt); if (u.over) s.title = String(u.over); host.appendChild(s); };
 
   function renderHint(v) {
-    const days = Math.round((v?.limits?.retentionMs || TRACE_RETENTION_MS) / 86400000), mb = Math.round((v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) / 1048576);
-    hint.textContent = t('Traces and recordings are kept {days} days or {mb} MB per profile, whichever comes first; frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { days, mb }) + (v && v.traceOn === false ? ' ' + t('The action trace is OFF (Settings → Agent browser → Action trace).') : '');
+    // 2026-09-27: by SIZE only (the setting, 1 GB by default) — the recordings keep their own days / MB bound
+    const size = sizeText(v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE);
+    const days = Math.round((v?.limits?.recordingRetentionMs || 7 * 86400000) / 86400000), mb = Math.round((v?.limits?.recordingBytesPerProfile || 200 * 1048576) / 1048576);
+    noteTraceLimit(v?.limits?.bytesPerProfile);
+    hint.textContent = t('Each profile keeps its records up to {size}; over it, the oldest sessions\' frames are removed first and every action list stays. Recordings are kept {days} days or {mb} MB. Frames of a logged-in page are secrets. Nothing here deletes a profile by itself: setting one aside moves its directory beside itself, and only your click on a set-aside row deletes it.', { size, days, mb }) + (v && v.traceOn === false ? ' ' + t('The action trace is OFF (Settings → Agent browser → Action trace).') : '');
   }
   function renderSummary(v) {
     const rows = v?.profiles || [];
@@ -485,6 +647,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const traces = rows.reduce((s, r) => s + (r.trace ? r.trace.n : 0), 0) + (v?.ephemeral?.trace?.n || 0);
     const recs = rows.reduce((s, r) => s + (r.recordings ? r.recordings.length : 0), 0);
     summary.textContent = t('{n} profile(s) · {size} on disk · {traces} traced action(s) · {recs} recording(s)', { n: rows.length, size: bytesText(bytes), traces, recs }) + (v?.orphans?.length ? ' · ' + t('{n} unregistered director(ies)', { n: v.orphans.length }) : '');
+    summary.title = summary.textContent; // a narrow window ellipsizes the line; the whole of it is here (a phone wraps it — style.css)
   }
   function profileRow(r, v) {
     const row = el('div', 'bprof-row bprof-profile'); row.dataset.profileId = r.id;
@@ -498,12 +661,17 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const chip = app.browserChipFor ? app.browserChipFor(r.id) : null;
     ident.appendChild(el('span', 'browser-chip', chip || String(r.provider || '')));
     row.appendChild(ident);
-    const state = cell(row, 'bprof-state state-' + String(r.state || '').replace(/[^a-z-]/g, ''), stateText(r.state), String(r.why || ''));
-    state.appendChild(el('span', 'bprof-why', String(r.why || '')));
+    const why = rowWhyText(r);
+    const state = cell(row, 'bprof-state state-' + String(r.state || '').replace(/[^a-z-]/g, ''), stateText(r.state), why);
+    state.appendChild(el('span', 'bprof-why', why));
     usageLine(state, r.usage);
     cell(row, 'bprof-size', r.bytes === null || r.bytes === undefined ? t('not measured') : bytesText(r.bytes), r.dir ? String(r.dir) : '');
     const tr = r.trace || { n: 0, bytes: 0 };
-    cell(row, 'bprof-trace', tr.n ? t('{n} action(s)', { n: tr.n }) + ' · ' + bytesText(tr.bytes) : t('no actions'), tr.last ? t('last {ago}', { ago: agoText(Date.now() - tr.last) }) : '');
+    // 2026-09-27: what this profile's records take against its limit (the sweep's measure: frames + action lists)
+    const usedOf = t('{used} of {size}', { used: bytesText(Number(tr.used) || 0), size: sizeText(Number(tr.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) });
+    const trCell = cell(row, 'bprof-trace', tr.n ? t('{n} action(s)', { n: tr.n }) : t('no actions'), tr.last ? t('last {ago}', { ago: agoText(Date.now() - tr.last) }) : '');
+    trCell.appendChild(el('span', 'bprof-trace-used', usedOf)); // its own line: the size is never the part an ellipsis eats
+    trCell.dataset.used = String(Number(tr.used) || 0);
     const recs = Array.isArray(r.recordings) ? r.recordings : [];
     const recCell = cell(row, 'bprof-recs', recs.length ? t('{n} recording(s)', { n: recs.length }) + ' · ' + bytesText(r.recordingBytes || 0) : t('no recordings'));
     if (r.recording) { const live = el('span', 'bprof-rec-live', t('recording')); live.title = String(r.recording.file || ''); recCell.appendChild(live); }
@@ -513,7 +681,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!r.record;
     const ours = r.state !== 'not-ours' && !r.host;
     cb.disabled = !ours || st.busy;
-    recWrap.title = ours ? t('Record this profile\'s screen (30 fps WebM, needs agent-browser ≥ {floor}) whenever its browser is live — a video of a logged-in profile is a secret with a storage bill', { floor: String(v?.limits?.recordingFloor || '0.37.0') }) : String(r.why || '');
+    recWrap.title = ours ? t('Record this profile\'s screen (30 fps WebM, needs agent-browser ≥ {floor}) whenever its browser is live — a video of a logged-in profile is a secret with a storage bill', { floor: String(v?.limits?.recordingFloor || '0.37.0') }) : rowWhyText(r);
     cb.onchange = async () => { st.busy = true; cb.disabled = true; const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', { record: cb.checked }), t('Could not change recording')); st.busy = false; if (!ok) cb.checked = !cb.checked; load(); };
     recWrap.append(cb, document.createTextNode(' ' + t('record')));
     // owner ruling A: the row's controls live in ONE wrapping cell (record · who can use it · stop · rename · delete)
@@ -528,40 +696,6 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       stop.title = t('Stop this profile\'s browser now — its logins stay in the profile; the next command starts it again (this also resets a browser that keeps closing)');
       stop.onclick = async () => { stop.disabled = true; const res = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}/stop`, jsonInit('POST'), t('Could not stop the browser')); if (res) showToast(t('Stopped {label}', { label: String(r.label || r.id) }), { duration: 4000 }); load(); };
       actions.appendChild(stop);
-    }
-    // OWNER RULING A (3): "Who can use it" — All my conversations (the default) / Only <a conversation>; narrowing takes it
-    // from every other conversation that uses it (the user's latest choice wins over an earlier pin), said first
-    if (!r.legacy) {
-      const wrap = el('label', 'bprof-scope');
-      wrap.appendChild(document.createTextNode(t('Who can use it') + ' '));
-      const sel = document.createElement('select'); sel.className = 'bprof-scope-select';
-      const opts = scopeOptions(r, v?.conversations || []);
-      for (const o of opts) { const op = document.createElement('option'); op.value = o.value; op.textContent = o.label; if (o.selected) op.selected = true; sel.appendChild(op); }
-      sel.disabled = st.busy || r.state === 'not-ours';
-      wrap.title = r.scope === 'all' ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.') : t('Other conversations can\'t use it unless you pick it for them (New Session or Session properties).');
-      const cur = (opts.find((o) => o.selected) || opts[0]).value;
-      sel.onchange = async () => {
-        const val = sel.value;
-        if (val === cur) return;
-        const body = val === 'all' ? { scope: 'all' } : { scope: 'one', conversation: val.slice(4) };
-        if (val !== 'all') {
-          const keep = val.slice(4);
-          const others = usersOf(r).filter((u) => u.browserKey !== keep);
-          if (others.length) {
-            const name = (opts.find((o) => o.value === val) || {}).label || '';
-            const yes = await showConfirmDialog({ title: t('Keep {label} to one conversation?', { label: String(r.label || r.id) }), message: t('{n} other conversation(s) are using it; they lose it now (their pages in it close). To give it back to one, pick it for that conversation again in Session properties.', { n: others.length }) + ' (' + name + ')', confirmText: t('Keep it to one') });
-            if (!yes) { sel.value = cur; return; }
-          }
-        }
-        st.busy = true; sel.disabled = true;
-        const ok = await act(`/api/browser/profiles/${encodeURIComponent(r.id)}`, jsonInit('PATCH', body), t('Could not change who can use it'));
-        st.busy = false;
-        if (!ok) sel.value = cur;
-        else if (ok.detached && ok.detached.length) showToast(t('{n} other conversation(s) no longer use {label}', { n: ok.detached.length, label: String(r.label || r.id) }), { duration: 6000 });
-        load();
-      };
-      wrap.appendChild(sel);
-      actions.appendChild(wrap);
     }
     // Rename… — validated like a new profile's name (unique, a human name, never a path)
     const rename = el('button', 'file-tool-btn bprof-btn bprof-rename', t('Rename…'));
@@ -579,7 +713,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const forget = el('button', 'file-tool-btn bprof-btn bprof-forget', t('Delete…'));
     const notOurs = r.state === 'not-ours';
     forget.disabled = notOurs || st.busy;
-    forget.title = notOurs ? String(r.why || '') : t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below');
+    forget.title = notOurs ? rowWhyText(r) : t('Stop it, take it away from every conversation that uses it, and move its directory beside itself — nothing is deleted for good until you click Delete permanently below');
     forget.onclick = async () => {
       const users = usersOf(r);
       const names = users.map((u) => u.name).filter(Boolean);
@@ -591,6 +725,12 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
       load();
     };
     actions.appendChild(forget);
+    // 2026-09-27: every browser session on this profile, each with its replay (the replay window, this profile's list)
+    if (r.trace && r.trace.n) { const rp = btn(t('Replay…'), () => app.openBrowserReplay?.({ profileId: r.id }), 'bprof-replay'); rp.title = t('Every browser session on this profile, action by action'); actions.appendChild(rp); }
+    // "WHO CAN USE IT" (2026-09-27, a LIST): the row's own full-width line — the label, the chips (or "All my
+    // conversations"), Change… and the amber "Nobody can use it now" line; the cell is KEPT per profile across loads
+    // (patched in place, never re-created for a who-change); the legacy record has no list (its chip says so)
+    if (!r.legacy) { const wc = whoCellFor(r.id); wc.patch(r); row.appendChild(wc.el); }
     return row;
   }
   /** takeover C3 (design-browser-takeover §5.3): one managed EPHEMERAL browser —
@@ -661,12 +801,21 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     const prof = section(t('Profiles'), t('state · size on disk · traced actions · recordings · the per-profile screencast opt-in'));
     const rows = v.profiles || [];
     if (!rows.length) prof.appendChild(el('div', 'bprof-empty chat-status-dim', t('No profiles yet — an agent gets one with `vibespace-browser new <label>`, or pin one from a session card.')));
-    for (const r of rows) prof.appendChild(profileRow(r, v));
+    const seen = new Set();
+    for (const r of rows) {
+      seen.add(r.id);
+      const sig = rowSig(r, v), had = rowsById.get(r.id);
+      let row;
+      if (had && had.sig === sig) { row = had.row; if (!r.legacy) whoCellFor(r.id).patch(r); }
+      else { row = profileRow(r, v); rowsById.set(r.id, { row, sig }); }
+      prof.appendChild(row);
+    }
+    for (const id of [...rowsById.keys()]) if (!seen.has(id)) { rowsById.delete(id); whoCells.delete(id); }
     const eph = el('div', 'bprof-row bprof-ephemeral');
     const ei = el('div', 'bprof-ident'); ei.appendChild(el('span', 'bprof-label', t('Browsers without a profile'))); ei.appendChild(el('span', 'bprof-chip', t('ephemeral'))); eph.appendChild(ei);
     cell(eph, 'bprof-state', ''); cell(eph, 'bprof-size', '');
     const et = v.ephemeral?.trace || { n: 0, bytes: 0 };
-    cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) + ' · ' + bytesText(et.bytes) : t('no actions'));
+    cell(eph, 'bprof-trace', et.n ? t('{n} action(s)', { n: et.n }) : t('no actions')).appendChild(el('span', 'bprof-trace-used', t('{used} of {size}', { used: bytesText(Number(et.used) || 0), size: sizeText(Number(et.limit) || v?.limits?.bytesPerProfile || TRACE_BYTES_PER_PROFILE) })));
     prof.appendChild(eph);
     // takeover C3: every conversation's managed ephemeral browser — watched like a profile, gone with its conversation
     const ephs = section(t('Ephemeral browsers'), t('one per conversation that browses without a profile — started by its first command, stopped after its idle timeout, removed with the conversation'));
@@ -682,7 +831,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     for (const f of v.forgotten || []) fg.appendChild(forgottenRow(f));
     const sw = section(t('Sweep'), '');
     const s = v.sweep;
-    sw.appendChild(el('div', 'bprof-sweep chat-status-dim', s ? t('Last sweep {ago}: removed {n} trace entr(ies) ({bytes}) and {r} recording(s) ({rbytes}).', { ago: agoText(Date.now() - Number(s.at || 0)), n: s.removed || 0, bytes: bytesText(s.bytesRemoved || 0), r: s.recordingsRemoved || 0, rbytes: bytesText(s.recordingBytesRemoved || 0) }) : t('No sweep has run yet (it runs at boot and every hour).')));
+    sw.appendChild(el('div', 'bprof-sweep chat-status-dim', s ? t('Last sweep {ago}: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes}); every action list is kept.', { ago: agoText(Date.now() - Number(s.at || 0)), n: s.removed || 0, bytes: bytesText(s.bytesRemoved || 0), r: s.recordingsRemoved || 0, rbytes: bytesText(s.recordingBytesRemoved || 0) }) : t('No sweep has run yet (it runs at boot and every hour).')));
     if (st.focus) focusRow(st.focus);
   }
   function focusRow(profileId) {
@@ -698,12 +847,13 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     st.error = null; st.view = r; render();
   }
   const scheduleLoad = () => { if (st.timer) clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; load(); }, PANEL_REFRESH_DEBOUNCE_MS); };
-  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended') scheduleLoad(); };
+  // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
+  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated') scheduleLoad(); };
   app.ws?.onGlobal?.(onGlobal);
-  sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed {n} trace entr(ies) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
+  sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
   winInfo.onClose = () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
-  winInfo._browserProfiles = { focusRow, load, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length }) };
+  winInfo._browserProfiles = { focusRow, load, whoCell: (id) => whoCells.get(id) || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length }) };
   load();
   return winInfo;
 }

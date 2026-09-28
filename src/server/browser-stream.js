@@ -50,8 +50,11 @@
  *     ruling pane (PURE src/browser-fit.js `fitTarget` — the holder's while
  *     somebody drives, else the largest visible one) becomes the page's viewport
  *     through `keeper.setViewportFor` (the daemon's own `set viewport`, debounced,
- *     single flight); every viewer is told (`{type:'fit'}`, replayed to a late
- *     one). The mirror of OUR set is dropped before the taps and the fan-out
+ *     single flight — builder r2: a MODE change fits at once, and no set starts
+ *     while the driver holds a button: FIT.buttonStep / fitHoldVerdict; a shared
+ *     browser somebody drives answers `held_while_driving`, a state the handback
+ *     re-fits, never a failure); every viewer is told (`{type:'fit'}`, replayed to
+ *     a late one). The mirror of OUR set is dropped before the taps and the fan-out
  *     (`ownViewportRecord`); an AGENT's `set viewport` / `set device` is a flag
  *     on the target (`fitStates`, it outlives the relay) — never overridden, the
  *     view letterboxes and says so, and only a viewer's `fit {force}` (the user's
@@ -77,6 +80,17 @@
  *     `refresh` — is answered with a picture asked of the page itself
  *     (`keeper.freshFrameFor`, CDP Page.captureScreenshot server-side).
  * Gate: scripts/test-browser-fit.mjs (fast) + scripts/test-browser-live-fit.mjs (heavy).
+ *
+ * lane live-input (2026-09-27, the owner: a paste and an IME commit of four characters never reached the page while the
+ * bar said "sent"): ONE ORDERED INPUT PIPELINE per relay (`relay.inq`): a viewer's `input_text` is cut into the ≤ 3-unit
+ * `char` records Chromium accepts (S.textRecords — a longer key text is refused -32602, measured) and its chunks keep
+ * their place among the keys and clicks around them; ONE receipt per act (`landed`, `dropped`); a MEDIATED lease keeps
+ * at most INPUT_WINDOW records waiting on their credits. COPY OUT: a takeover arms a copy watch on the tab on show
+ * (keeper.watchCopiesFor) — the page's own copies reach the HOLDER as `clipboard` records, ONLY on the holder's own
+ * gesture the bridge forwarded (`relay.copyArm`, PURE T.copyDeliverVerdict: single-use, COPY_GESTURE_MS — verify
+ * 2026-09-27: a page's synthetic copy wrote the user's clipboard with nothing pressed). A `fit {claim}` makes the
+ * page follow that viewer's window; every `fitted` record names the ruling window's `place`. `hello.platform`.
+ * Gate: scripts/test-live-input.mjs (fast) + scripts/test-browser-live-input.mjs (heavy).
  */
 const { WebSocketServer, WebSocket } = require('ws');
 const S = require('../browser-stream.js');
@@ -84,18 +98,30 @@ const T = require('../browser-takeover.js');
 const FIT = require('../browser-fit.js'); // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
 /** lane S4: a page size the keeper could not set is not asked for again for this long (a new pane size is). */
 const FIT_RETRY_MS = 30000;
+/** builder r2 (the reality verifier's B): the page is never resized under the driver's HELD button — a resize landing
+ *  mid-drag re-laid the page out under the pointer (the drag's moves jumped from y=232 to y=361, the selection empty).
+ *  A fit that comes due while a button is down waits for its release; a button held longer than this (a release that
+ *  never arrived) stops holding it. */
+const FIT_HOLD_MAX_MS = 15000;
 
 const MAX_PAYLOAD = 32 * 1024 * 1024;
 const LIVE_CHECK_MS = 2000;
 const RESUME_POLL_MS = 50;
 /** The holder's inputs restart the keeper's idle clock at most this often. */
 const INPUT_NOTE_MS = 1000;
+/** lane live-input: on a MEDIATED lease at most this many forwarded inputs wait on their credit at once (the rest queue
+ *  here, in order). The mediator keeps ≤ 256 credits for 1.2 s each (browser-mediation INPUT_CREDIT_MS): a 3-unit-chunked
+ *  paste of thousands of records sent at once evicted its own first credits (refused browser_paused); 16 in flight keep
+ *  the daemon's serial dispatch fed and each credit well inside its life. A direct lease has no credit: no window. */
+const INPUT_WINDOW = 16;
+/** lane live-input: the same copy reported twice inside this span (two worlds of one re-armed page) is one copy. */
+const COPY_DEDUP_MS = 150;
 /** P5: the fps a tapped relay asks for with no viewer (src/browser-trace.js owns the number). */
 const TAP_FPS = require('../browser-trace.js').TRACE_TAP_FPS;
 const TF = require('./turn-facts.js'); // verify r1: the restore waits for a KNOWN running turn (the keeper's own rule for releases)
 
 function create({ keeper = null, activeSessions, requestAuthed, log = console, now = Date.now, limits = S.BACKPRESSURE,
-  WebSocketImpl = WebSocket, connectTimeoutMs = 20000, getTelemetry = () => null } = {}) {
+  WebSocketImpl = WebSocket, connectTimeoutMs = 20000, getTelemetry = () => null, platform = process.platform, inputWindow = INPUT_WINDOW } = {}) {
   if (!activeSessions) throw new Error('browser-stream: activeSessions is required');
   if (typeof requestAuthed !== 'function') throw new Error('browser-stream: requestAuthed is required');
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
@@ -183,7 +209,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null };
     relay.viewers.set(viewer.id, viewer);
     noteViewers(relay);
-    send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
+    send(ws, { ...S.hello({ viewers: relay.viewers.size, target, mode: relay.mode, holder: relay.holder, platform }), you: viewer.id, mine: relay.holder === viewer.id, since: relay.modeSince || 0 });
     for (const t of S.REPLAYED_TYPES) if (relay.last[t]) send(ws, relay.last[t]);
     if (relay.lastFrame) { send(ws, relay.lastFrame); viewer.lastFrameAt = now(); viewer.sent++; viewer.sentSeq = relay.frameSeq; }
     if (relay.viewport) send(ws, relay.viewport); // lane J: the page's viewport reading, replayed like the last frame
@@ -231,7 +257,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // lane S4: frame sequence (the trailing gate), the panes (fit), the navigation clock (the fresh frame)
       frameSeq: 0, firstFrameAt: 0, fits: new Map(), fitTimer: null, fitBusy: false, fitAgain: null, fitForce: false, fitCheck: null, lastFit: null, fitWarned: false,
       navAt: 0, lastUpFrameAt: 0, freshTimer: null, freshBusy: false, lastRefreshAt: 0, lastUrl: '', ordSeq: 0, // ordSeq: the position of every ordered upstream record (verify r1: two viewport sets in flight are judged by the daemon's ORDER)
-      stats: { frames: 0, dropped: 0, ordered: 0, trailed: 0, fresh: 0, own: 0 }, lastLiveCheck: now(), since: now(),
+      stats: { frames: 0, dropped: 0, ordered: 0, trailed: 0, fresh: 0, own: 0, textActs: 0, textChunks: 0, copies: 0, copiesDropped: 0 }, lastLiveCheck: now(), since: now(),
+      // lane live-input: the holder's input pipeline (ONE order: every record and every chunk of a text act, a window of
+      // credits on a mediated lease), the claimed pane, and the copy watch armed while somebody drives
+      btnDown: new Set(), btnDownAt: 0, fitHeld: null, fitHoldTimer: null, fitHeldSaid: false, // builder r2: the driver's buttons held down (a fit waits for their release)
+      inq: [], inflight: 0, fitClaim: null, copyWatch: null, lastCopy: null, copyArm: null, // copyArm: the holder's last copy GESTURE the bridge forwarded (verify: a copy leaves the server only on it — single-use)
     };
     // P3: the keeper may already say somebody drives (an HTTP takeover, a
     // sibling relay that ended) — mirror it rather than assume Watch.
@@ -332,10 +362,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     else if (!user) relay.anchor = null;
     relay.mode = user ? 'takeover' : 'watch';
     relay.holder = user && state.takenBy ? state.takenBy.viewerId : null;
+    if (user && relay.viewers.has(relay.holder)) armCopyWatch(relay); else disarmCopyWatch(relay); // lane live-input: copy out while a viewer of THIS relay drives (a sibling conversation's mirror has nobody to hand a copy to)
     relay.modeSince = user ? (state.takenAt || now()) : (state && state.handedBackAt) || now();
     const more = { ...(extra && extra.interrupted ? { interrupted: extra.interrupted } : {}), ...(extra && Array.isArray(extra.rerun) ? { rerun: extra.rerun.slice(0, 20) } : {}) };
     for (const v of relay.viewers.values()) send(v.ws, { type: 'mode', mode: relay.mode, holder: relay.holder, mine: relay.holder === v.id, since: relay.modeSince, cause: cause || null, url: (state && state.url) || null, ...more });
-    if (relay.fits.size) scheduleFit(relay, 'mode'); // lane S4: the holder's pane rules while somebody drives
+    if (!user) { releaseButtons(relay); relay.fitHeldSaid = false; } // builder r2: nobody drives ⇒ no button is held for the page (and the next takeover says its held size once again)
+    // lane S4: the holder's pane rules while somebody drives. builder r2: AT ONCE (no 250 ms debounce) — a mode change is one
+    // discrete act, and the resize then lands while the hand is still on the Take over button, not under its first press
+    if (relay.fits.size) scheduleFit(relay, 'mode', { delay: 0 });
   }
   function lastUrlOf(relay) {
     try { const u = relay.last.url ? JSON.parse(relay.last.url) : null; if (u && typeof u.url === 'string') return u.url; } catch { /* */ }
@@ -399,6 +433,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
       relay.activeTarget = act && act.targetId ? String(act.targetId) : null; // verify r2: every `tabs` record re-says which tab the user is looking at
+      if (relay.mode === 'takeover' && relay.viewers.has(relay.holder) && relay.activeTarget && (!relay.copyWatch || relay.copyWatch.targetId !== relay.activeTarget)) armCopyWatch(relay); // lane live-input: the copy watch follows the tab on show
       if (relay.anchor) { // verify r3: …and the takeover's anchor judges it (an agent's switch while the user drives ⇒ `switched`, inputs refused tab_switched)
         const next = S.takeoverAnchorStep(relay.anchor, { activeTarget: relay.activeTarget, now: now() });
         if (next && next.switched && !relay.anchor.switched) log.log?.(`[browser-live] ${relay.key}: the browser moved to tab ${next.switched.to.slice(0, 8)} while the user drives tab ${String(next.switched.from).slice(0, 8)} — the user's input is refused (tab_switched) until they hand back and take over again`);
@@ -541,6 +576,21 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (ds) { const f = fitStates.get(relay.key); if (f && f.agent && f.agent.kind === 'device') { Object.assign(f.agent, { width: ds.width, height: ds.height, scale: ds.scale }); persistFit(f); broadcastFit(relay, { state: 'agent', width: ds.width, height: ds.height, device: f.agent.device, viewerId: null, rule: null }); } }
     return false;
   }
+  /** builder r2: the driver's buttons, off the records the bridge FORWARDS (a watcher's never reach here) — a press holds
+   *  any resize until its release (PURE FIT.buttonStep); the last release lets a held fit run at once. */
+  function noteButtons(relay, msg) {
+    const was = relay.btnDown.size;
+    const next = FIT.buttonStep(relay.btnDown, msg);
+    if (!next) return;
+    relay.btnDown = next;
+    if (!was && next.size) relay.btnDownAt = now();
+    if (was && !next.size) releaseButtons(relay);
+  }
+  function releaseButtons(relay) {
+    relay.btnDown = new Set(); relay.btnDownAt = 0;
+    if (relay.fitHoldTimer) { clearTimeout(relay.fitHoldTimer); relay.fitHoldTimer = null; }
+    if (relay.fitHeld) { const w = relay.fitHeld; relay.fitHeld = null; scheduleFit(relay, w, { delay: 0 }); }
+  }
   function scheduleFit(relay, why, { force = false, delay = FIT.FIT_DEBOUNCE_MS } = {}) {
     if (!canFit()) return;
     if (force) relay.fitForce = true;
@@ -556,7 +606,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!fs.baseline && open && relay.picture && (relay.viewport || now() - relay.firstFrameAt >= 1500)) fs.baseline = pageSizeOf(relay);
     const force = relay.fitForce;
     if (force && fs.agent) { log.log?.(`[browser-live] ${relay.key}: a viewer asked to fit the page to its window — the agent's ${fs.agent.width}×${fs.agent.height} is set aside`); fs.agent = null; persistFit(fs); }
-    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent, applied: fs.applied, baseline: fs.baseline, force, floorW: fs.floorW, ready: open && !!fs.baseline });
+    const v = FIT.fitVerdict({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, agent: fs.agent, applied: fs.applied, baseline: fs.baseline, force, floorW: fs.floorW, ready: open && !!fs.baseline, claim: relay.fitClaim });
+    const placeOf = (id) => { const f = relay.fits.get(id); return f && f.place ? { ...f.place } : null; }; // lane live-input: WHERE the ruling window is (the chip's words)
     relay.fitForce = false;
     if (v.act === 'wait') { if (open && relay.picture && !fs.baseline) scheduleFit(relay, why, { delay: 500 }); return; }
     if (v.act === 'letterbox') {
@@ -567,11 +618,17 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (v.act === 'restore') { armRestore(relay.key); return; }
     if (fs.restoreTimer) { clearTimeout(fs.restoreTimer); fs.restoreTimer = null; }
     if (v.act === 'keep') {
-      if (v.why === 'fitted') { const last = relay.lastFit ? JSON.parse(relay.lastFit) : null; if (!last || last.state !== 'fitted' || last.viewerId !== v.viewerId || last.rule !== v.rule) broadcastFit(relay, { state: 'fitted', width: fs.applied.width, height: fs.applied.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null }); }
+      if (v.why === 'fitted') { const last = relay.lastFit ? JSON.parse(relay.lastFit) : null; if (!last || last.state !== 'fitted' || last.viewerId !== v.viewerId || last.rule !== v.rule) broadcastFit(relay, { state: 'fitted', width: fs.applied.width, height: fs.applied.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, place: placeOf(v.viewerId) }); }
       return;
     }
     // act 'set' — a size that just failed is not asked again for FIT_RETRY_MS (each ask is a CLI spawn: the fork tax)
     if (fs.failed && fs.failed.width === v.width && fs.failed.height === v.height && now() - fs.failed.at < FIT_RETRY_MS) return;
+    // builder r2: never under the driver's held button — the resize waits for the release (bounded by FIT_HOLD_MAX_MS)
+    if (FIT.fitHoldVerdict({ down: relay.btnDown.size, downAt: relay.btnDownAt, now: now(), maxMs: FIT_HOLD_MAX_MS }) === 'hold') {
+      relay.fitHeld = why;
+      if (!relay.fitHoldTimer) { relay.fitHoldTimer = setTimeout(() => { relay.fitHoldTimer = null; if (relay.fitHeld) { const w = relay.fitHeld; relay.fitHeld = null; scheduleFit(relay, w, { delay: 0 }); } }, Math.max(0, FIT_HOLD_MAX_MS - (now() - relay.btnDownAt)) + 10); if (relay.fitHoldTimer.unref) relay.fitHoldTimer.unref(); }
+      return;
+    }
     relay.fitBusy = true;
     beginOwn(fs, { width: v.width, height: v.height });
     let r;
@@ -592,12 +649,19 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       relay.fitCheck = { width: v.width, height: v.height, at: now(), frames: 0 };
       relay.fitWarned = false;
       persistFit(fs);
-      if (relays.get(relay.key) === relay) broadcastFit(relay, { state: 'fitted', width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, why });
+      if (relays.get(relay.key) === relay) broadcastFit(relay, { state: 'fitted', width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, drawScale: v.drawScale, floor: fs.floorW > FIT.FIT_MIN_W ? fs.floorW : null, why, place: placeOf(v.viewerId) });
     } else {
-      fs.pending = null;
-      fs.failed = { width: v.width, height: v.height, at: now() };
-      if (!relay.fitWarned) { relay.fitWarned = true; log.warn?.(`[browser-live] ${relay.key}: the page could not be sized to the pane (${r && (r.code || '')} ${r && r.error}) — the view scales the picture`); }
+      // builder r2 (the reality verifier's A): a failed set's command mirror may land AFTER the CLI returned (a busy stream) —
+      // it is still OURS (`prevOwn`), never the agent's choice (the chip said "Agent's size 1398×835" = our own refused set)
+      setAsideOwn(fs);
+      // …and a SHARED browser held while somebody drives (the keeper's typed `held_while_driving`) is not a failure to
+      // remember: the handback re-fits at once (FIT_RETRY_MS kept the page "could not resize" after the handback)
+      const held = !!(r && r.code === 'held_while_driving');
+      if (!held) fs.failed = { width: v.width, height: v.height, at: now() };
+      if (held) { if (!relay.fitHeldSaid) { relay.fitHeldSaid = true; log.log?.(`[browser-live] ${relay.key}: a shared browser keeps its size while the user drives it — the page is re-fitted at the handback`); } }
+      else if (!relay.fitWarned) { relay.fitWarned = true; log.warn?.(`[browser-live] ${relay.key}: the page could not be sized to the pane (${r && (r.code || '')} ${r && r.error}) — the view scales the picture`); }
       const cur = pageSizeOf(relay) || {};
+      // the raw error stays in the journal (above); the record carries it for the diagnostics, the view words it by its code
       if (relays.get(relay.key) === relay) broadcastFit(relay, { state: 'unavailable', width: cur.width || 0, height: cur.height || 0, viewerId: null, rule: null, error: String((r && r.error) || 'the size could not be set').slice(0, 200), code: (r && r.code) || null });
     }
     if (relay.fitAgain) { const w = relay.fitAgain; relay.fitAgain = null; scheduleFit(relay, w, { delay: 0 }); }
@@ -638,7 +702,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     beginOwn(fs, { ...args, putBack: true });
     let r; try { r = await keeper.setViewportFor(fs.target, args); } catch (e) { r = { ok: false, error: String(e && e.message) }; }
     if (fs.pending) fs.pending.inFlight = false;
-    if (!(r && r.ok)) { fs.pending = null; log.warn?.(`[browser-live] ${key}: the agent's own size could not be put back (${r && (r.code || '')} ${r && r.error})`); }
+    if (!(r && r.ok)) { setAsideOwn(fs); log.warn?.(`[browser-live] ${key}: the agent's own size could not be put back (${r && (r.code || '')} ${r && r.error})`); } // builder r2: its late mirror is still ours
   }
   /** Nobody visible: after RESTORE_AFTER_MS (a reload, a tab switch, a desktop flip come back first) the page goes
    *  back to the size it had before our first fit — never over the agent's own choice, never a browser started. */
@@ -648,7 +712,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     fs.restoreTimer = setTimeout(async () => {
       fs.restoreTimer = null;
       const relay = relays.get(key);
-      if (relay && FIT.fitTarget({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode })) return; // somebody is back
+      if (relay && FIT.fitTarget({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, claim: relay.fitClaim })) return; // somebody is back
       if (!fs.applied || fs.agent || !fs.baseline) return;
       // verify r1: never under the agent's feet — a KNOWN running turn keeps the size until the turn ends (re-asked every grace; a
       // terminal-mode session publishes no turn and restores on the clock as before)
@@ -720,8 +784,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (v.kind === 'fit') {
       const rep = FIT.fitReport(msg);
       if (!rep) { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'a fit report carries a positive width and height' }); return; }
-      relay.fits.set(viewer.id, { viewerId: viewer.id, width: rep.width, height: rep.height, dpr: rep.dpr, visible: rep.visible, at: now() });
-      scheduleFit(relay, rep.force ? 'force' : 'report', { force: rep.force });
+      relay.fits.set(viewer.id, { viewerId: viewer.id, width: rep.width, height: rep.height, dpr: rep.dpr, visible: rep.visible, place: rep.place || null, at: now() });
+      // lane live-input: "Fit here" = this view CLAIMS the page's size (the latest claim wins; hiding or leaving ends it)
+      if (rep.claim && rep.visible) relay.fitClaim = viewer.id;
+      else if (!rep.visible && relay.fitClaim === viewer.id) relay.fitClaim = null;
+      scheduleFit(relay, rep.force ? 'force' : rep.claim ? 'claim' : 'report', { force: rep.force });
       return;
     }
     if (v.kind === 'refresh') {
@@ -736,20 +803,14 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       // reply (a mediated lease: the credit minted here BEFORE the forward is what lets the user's own input past the
       // mediator's paused fence), or from the stream server's write (a direct lease), or the refusal. Never silence.
       const rid = Number.isInteger(msg.rid) ? msg.rid : null;
-      const receipt = (r) => { if (rid !== null) send(viewer.ws, { type: 'input-receipt', rid, ok: !!r.ok, via: r.via || null, code: r.code || null, error: r.error || null }); };
+      const receipt = (r) => { if (rid !== null) send(viewer.ws, { type: 'input-receipt', rid, ok: !!r.ok, via: r.via || null, code: r.code || null, error: r.error || null, ...(Number.isFinite(r.landed) ? { landed: r.landed } : {}), ...(r.dropped ? { dropped: r.dropped } : {}) }); }; // lane live-input: a text act says how much landed (and a line break it could not type)
       if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; } // verify r3: the takeover is on another tab than the one on show — nothing forwarded, said by name
       if (v.forward && relay.upstream && relay.upstream.readyState === 1) {
-        let credit = null;
-        const record = S.withoutRid(msg); // what goes upstream — and what the credit is bound to (lane S2 verify)
-        try { credit = keeper && typeof keeper.creditUserInput === 'function' ? keeper.creditUserInput(relay.target, record, { targetId: relay.activeTarget || null }) : null; } catch (e) { credit = null; log.warn?.(`[browser-live] ${relay.key}: input credit failed — ${e && e.message}`); } // verify r2: the credit names the tab the user is looking at
-        const up = relay.upstream;
-        try {
-          up.send(JSON.stringify(record), (err) => {
-            if (err) { receipt({ ok: false, code: 'upstream_gone', error: String(err && err.message || err) }); return; }
-            if (credit && typeof credit.then === 'function') credit.then((r) => receipt({ ...r, via: 'browser' }), (e) => receipt({ ok: false, code: 'no_reply', error: String(e && e.message) }));
-            else receipt({ ok: true, via: 'stream' });
-          });
-        } catch (e) { receipt({ ok: false, code: 'upstream_gone', error: String(e && e.message) }); }
+        // lane live-input: every input of the holder goes through ONE ordered pipeline — a text act is cut into the
+        // `char` records the browser accepts (S.textRecords, ≤ 3 UTF-16 units each) and its chunks keep their place
+        // among the keys and clicks around them; ONE receipt answers the whole act
+        if (v.text) enqueueText(relay, msg.text, receipt);
+        else { noteButtons(relay, msg); relay.inq.push({ kind: 'rec', record: S.withoutRid(msg), receipt }); pumpInput(relay); } // what goes upstream — and what the credit is bound to (lane S2 verify)
         const t = now();
         if (t - relay.lastInputNoteAt >= INPUT_NOTE_MS) { relay.lastInputNoteAt = t; try { keeper?.noteUserInput?.(relay.browserKey, relay.target.profileId || null, t); } catch { /* optional */ } }
       } else {
@@ -794,6 +855,97 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     }
     send(viewer.ws, v.refusal);
   }
+  // ── lane live-input: THE HOLDER'S INPUT PIPELINE ──
+  /** One text act (a paste, an IME commit): its chunks queue as ONE item; its receipt says how much landed. */
+  function enqueueText(relay, text, receipt) {
+    const r = S.textRecords(text);
+    if (!r.ok) { receipt({ ok: false, code: r.code, error: r.error }); return; }
+    relay.stats.textActs++;
+    relay.inq.push({ kind: 'text', records: r.records, idx: 0, receipt, settled: 0, failed: false, landed: 0, dropped: r.dropped || 0, via: null });
+    pumpInput(relay);
+  }
+  /** Forward what the window allows, in order: a direct lease forwards everything at once (the daemon keeps the order);
+   *  a mediated one keeps ≤ `inputWindow` records waiting on their credit (the mediator's queue and credit life). */
+  function pumpInput(relay) {
+    while (relay.inq.length) {
+      const it = relay.inq[0];
+      if (!relay.upstream || relay.upstream.readyState !== 1) { failQueued(relay, 'upstream_gone', 'the browser stream closed'); return; }
+      if (relay.inflight >= inputWindow) return; // a settling credit pumps again
+      if (it.kind === 'rec') { relay.inq.shift(); forwardInput(relay, it.record, it.receipt); continue; }
+      if (it.failed) { relay.inq.shift(); continue; }
+      const rec = it.records[it.idx++];
+      if (it.idx >= it.records.length) relay.inq.shift();
+      relay.stats.textChunks++;
+      forwardInput(relay, rec, (res) => settleTextChunk(it, rec, res));
+    }
+  }
+  function settleTextChunk(it, rec, res) {
+    if (it.failed) return;
+    if (res && res.ok) {
+      it.settled++; it.landed += Array.from(rec.text || '').length; it.via = res.via || it.via;
+      if (it.settled === it.records.length) it.receipt({ ok: true, via: it.via, landed: it.landed, dropped: it.dropped });
+      return;
+    }
+    it.failed = true; // the rest of this act is not typed after a hole (a half paste is said, never finished around a gap)
+    it.receipt({ ...(res || {}), ok: false, code: (res && res.code) || 'refused', landed: it.landed });
+  }
+  function failQueued(relay, code, error) {
+    for (const it of relay.inq.splice(0)) { if (it.kind === 'rec') it.receipt({ ok: false, code, error }); else if (!it.failed) { it.failed = true; it.receipt({ ok: false, code, error, landed: it.landed }); } }
+  }
+  /** One record upstream: its credit first (a mediated lease — the user's own input passes the paused fence on it), then
+   *  the write; `done(receipt)` = the browser's own reply (mediated) or the stream write (direct). */
+  function forwardInput(relay, record, done) {
+    relay.copyArm = T.armCopyGesture(relay.copyArm, record, now()); // verify: the holder's copy / cut chord (or a press) is the ONE door a page's copy may leave by
+    let credit = null;
+    try { credit = keeper && typeof keeper.creditUserInput === 'function' ? keeper.creditUserInput(relay.target, record, { targetId: relay.activeTarget || null }) : null; } catch (e) { credit = null; log.warn?.(`[browser-live] ${relay.key}: input credit failed — ${e && e.message}`); } // verify r2: the credit names the tab the user is looking at
+    const mediated = !!(credit && typeof credit.then === 'function');
+    if (mediated) relay.inflight++;
+    const settle = (r) => { if (mediated) { relay.inflight = Math.max(0, relay.inflight - 1); } try { done(r); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: input receipt failed — ${e && e.message}`); } if (mediated && relays.get(relay.key) === relay) pumpInput(relay); };
+    const up = relay.upstream;
+    try {
+      up.send(JSON.stringify(record), (err) => {
+        if (err) { settle({ ok: false, code: 'upstream_gone', error: String(err && err.message || err) }); return; }
+        if (mediated) credit.then((r) => settle({ ...r, via: 'browser' }), (e) => settle({ ok: false, code: 'no_reply', error: String(e && e.message) }));
+        else settle({ ok: true, via: 'stream' });
+      });
+    } catch (e) { settle({ ok: false, code: 'upstream_gone', error: String(e && e.message) }); }
+  }
+  // ── lane live-input: COPY OUT — the page's own copies, while somebody drives, to the holder ──
+  function armCopyWatch(relay) {
+    if (!keeper || typeof keeper.watchCopiesFor !== 'function' || relay.mode !== 'takeover') return;
+    const want = relay.activeTarget || null;
+    if (relay.copyWatch && relay.copyWatch.targetId === want) return;
+    disarmCopyWatch(relay);
+    const w = { targetId: want, close: null, armed: false, error: null };
+    relay.copyWatch = w;
+    // an ARMED watch that ends (its tab closed, the browser restarted) is armed again once, on the tab then on show; a watch
+    // that could not arm is said once below and left (never a retry storm) — a tab change arms again
+    const onEnd = () => { if (relay.copyWatch !== w || !w.armed) return; relay.copyWatch = null; if (relay.mode === 'takeover' && relays.get(relay.key) === relay) setTimeout(() => { if (relay.mode === 'takeover' && !relay.copyWatch && relays.get(relay.key) === relay) armCopyWatch(relay); }, 500); };
+    Promise.resolve().then(() => keeper.watchCopiesFor(relay.target, { targetId: want, activeUrl: relay.activeUrl || lastUrlOf(relay), onCopy: (c) => deliverCopy(relay, w, c), onEnd }))
+      .catch((e) => ({ ok: false, error: String(e && e.message) }))
+      .then((r) => {
+        if (relay.copyWatch !== w || relay.mode !== 'takeover' || relays.get(relay.key) !== relay) { if (r && r.ok && r.close) r.close(); return; }
+        if (r && r.ok) { w.close = r.close; w.armed = true; w.targetId = r.targetId || want; }
+        else { w.error = (r && r.error) || 'unavailable'; log.warn?.(`[browser-live] ${relay.key}: copying out of the page is not available (${w.error}) — a copy in the page stays in the page`); }
+      });
+  }
+  function disarmCopyWatch(relay) { const w = relay.copyWatch; relay.copyWatch = null; relay.copyArm = null; if (w && w.close) { try { w.close(); } catch { /* closing */ } } }
+  /** The page copied: the TEXT goes to the viewer who drives — nobody else, never a log line — and ONLY on the holder's own
+   *  gesture the bridge forwarded (verify, 2026-09-27: a page's synthetic copy on a timer, or one the agent planted, wrote
+   *  the driving user's clipboard with nothing pressed): PURE T.copyDeliverVerdict — a chord / a press arms ONE delivery
+   *  for COPY_GESTURE_MS; no arm ⇒ dropped here, counted, nothing leaves the server. The record names its `gesture`. */
+  function deliverCopy(relay, w, c) {
+    if (relay.copyWatch !== w || relay.mode !== 'takeover' || relay.holder === null) return;
+    const t = now();
+    if (relay.lastCopy && relay.lastCopy.text === c.text && relay.lastCopy.kind === c.kind && t - relay.lastCopy.at < COPY_DEDUP_MS) return;
+    relay.lastCopy = { text: c.text, kind: c.kind, at: t };
+    const g = T.copyDeliverVerdict(relay.copyArm, t);
+    relay.copyArm = g.arm;
+    if (!g.deliver) { relay.stats.copiesDropped++; return; }
+    relay.stats.copies++;
+    const v = relay.viewers.get(relay.holder);
+    if (v) send(v.ws, { type: 'clipboard', kind: c.kind, gesture: g.gesture, text: c.text, length: c.length, truncated: c.length > c.text.length, at: t });
+  }
   function pushMaxFps(relay, force = false) {
     // P5: with no viewer the recorder's taps hold the relay at TAP_FPS
     const m = relay.viewers.size ? S.maxFpsAcross([...relay.viewers.values()]) : (relay.taps.size ? TAP_FPS : S.maxFpsAcross([]));
@@ -805,6 +957,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function dropViewer(relay, viewer) {
     if (!relay.viewers.delete(viewer.id)) return;
     if (viewer.trailTimer) { clearTimeout(viewer.trailTimer); viewer.trailTimer = null; }
+    if (relay.fitClaim === viewer.id) relay.fitClaim = null; // lane live-input: a claim leaves with its view
     if (relay.fits.delete(viewer.id)) scheduleFit(relay, 'viewer-left'); // lane S4: the next pane rules (or nobody: the restore clock)
     noteViewers(relay);
     // P3: the holder's window closed ⇒ the controls go back to the agent
@@ -859,8 +1012,9 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function endRelay(relay, code = 1000, why = null) {
     if (relays.get(relay.key) === relay) relays.delete(relay.key);
     stopResumePoll(relay);
+    disarmCopyWatch(relay); failQueued(relay, 'upstream_gone', why || 'the live view ended'); // lane live-input
     // lane S4: the relay's clocks end with it; the page's size we set is put back after the grace (unless somebody returns)
-    for (const tm of ['fitTimer', 'freshTimer']) if (relay[tm]) { clearTimeout(relay[tm]); relay[tm] = null; }
+    for (const tm of ['fitTimer', 'freshTimer', 'fitHoldTimer']) if (relay[tm]) { clearTimeout(relay[tm]); relay[tm] = null; }
     for (const v of relay.viewers.values()) if (v.trailTimer) { clearTimeout(v.trailTimer); v.trailTimer = null; }
     relay.fits.clear();
     armRestore(relay.key); // the keeper refuses a browser that is not running (a view never starts one); shutdown() clears the clocks
@@ -889,6 +1043,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       picture: r.picture, viewport: r.viewport ? { clientWidth: r.viewport.clientWidth, clientHeight: r.viewport.clientHeight, why: r.viewport.why } : null, // lane J
       fit: (() => { const f = fitStates.get(r.key); return { fits: [...r.fits.values()].map((x) => ({ ...x })), applied: f && f.applied ? { ...f.applied } : null, baseline: f && f.baseline ? { ...f.baseline } : null, agent: f && f.agent ? { ...f.agent } : null, floorW: f ? f.floorW : FIT.FIT_MIN_W, last: r.lastFit ? JSON.parse(r.lastFit) : null, pending: f && f.pending ? { ...f.pending } : null }; })(), frameSeq: r.frameSeq, ordSeq: r.ordSeq, // lane S4 (+ verify r1: the in-flight set and the record order)
       viewers: [...r.viewers.values()].map((v) => ({ id: v.id, maxFps: v.maxFps, sent: v.sent, dropped: v.dropped, bufferedAmount: v.ws.bufferedAmount })),
+      input: { queued: r.inq.length, inflight: r.inflight, claim: r.fitClaim, copyWatch: r.copyWatch ? { armed: !!r.copyWatch.armed, targetId: r.copyWatch.targetId || null, error: r.copyWatch.error || null } : null }, // lane live-input
       ...r.stats,
     }));
   }
@@ -898,4 +1053,4 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     tap, broadcastTo, TAP_FPS }; // P5: the recorder's seam
 }
 
-module.exports = { create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS };
+module.exports = { create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS, INPUT_WINDOW, COPY_DEDUP_MS };

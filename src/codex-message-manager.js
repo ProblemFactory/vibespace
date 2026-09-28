@@ -578,9 +578,11 @@ class CodexMessageManager {
   }
 
   /** Time-sliced twin of convertHistory (see MessageManager.convertHistoryAsync). */
-  async convertHistoryAsync(records, { budgetMs = 25, onSlice } = {}) {
+  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
+  async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
     let sliceStart = Date.now(), done = 0;
     for (const record of records || []) {
+      if (beforeRecord) { try { beforeRecord(record); } catch { } }
       // per-record isolation (review-caught: one bad rollout record rejected
       // the whole rebuild for every attached window)
       try { this._processRecord(record, false); }

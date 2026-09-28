@@ -89,7 +89,7 @@ console.log('§1 the PURE table');
   ok(gmail.delegate && gmail.delegate.to === 'drive-presets' && gmail.delegate.prefer === 'channels' && gmail.delegate.multi === true && !gmail.clusterEnv, 'gmail DELEGATES to drive-presets with prefer:channels + multi and declares NO env of its own (decision 5)');
   ok(gmail.test.kind === 'shape-only' && /shape/i.test(gmail.test.caveat), 'gmail: shape-only and says so');
   const cloak = R.rowById('cloak');
-  ok(cloak.test.kind === 'shape-only' && cloak.fields[0].key === 'licenseKey' && cloak.fields[0].secret && !cloak.fields[0].required, 'cloak: shape-only, one secret licenseKey, NOT required (empty = free tier)');
+  ok(cloak.test.kind === 'shape-only' && cloak.fields[0].key === 'licenseKey' && cloak.fields[0].secret && !cloak.fields[0].required, 'cloak: shape-only, one secret licenseKey, NOT required (empty = nothing saved, which resolves to no key)');
   for (const row of R.ROWS) if (!row.consumers.length) ok(!!row.wiredIn, `${row.id}: no live consumer ⇒ names the phase it is wired in (decision 25, ${row.wiredIn})`);
   // negative controls on checkRow
   const noCaveat = { ...lark, test: { ...lark.test, caveat: '' } };
@@ -129,7 +129,7 @@ console.log('§2 masking + validation');
   ok(!badId.ok && /cli_/.test(badId.errors.appId), `a bad App ID is a NAMED complaint (${badId.errors.appId})`);
   const unknown = R.validateValues('lark', { bogus: 'x' });
   ok(!unknown.ok && /not a field/.test(unknown.errors.bogus), 'an unknown field is a named error, never silently dropped');
-  ok(R.validateValues('cloak', { licenseKey: '' }).ok && R.validateValues('cloak', { licenseKey: 'cb_abcdefghij' }).ok && !R.validateValues('cloak', { licenseKey: 'nope' }).ok, 'cloak: empty ok (free tier), cb_… ok, other shapes named');
+  ok(R.validateValues('cloak', { licenseKey: '' }).ok && R.validateValues('cloak', { licenseKey: 'cb_abcdefghij' }).ok && !R.validateValues('cloak', { licenseKey: 'nope' }).ok, 'cloak: empty ok (nothing saved), cb_… ok, other shapes named');
   ok(R.missingFields('lark', { appId: 'cli_x' }).join() === 'appSecret' && R.missingFields('cloak', {}).length === 0, 'missingFields names the required gap and nothing for optional fields');
 }
 

@@ -307,6 +307,34 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       },
     },
     {
+      id: '2026-09-browser-profiles-who-list',
+      note: "\"Who can use it\" becomes a LIST (2026-09-27, the owner: give a browser profile to several conversations and/or Task Groups). Every named record in data/browser-profiles.json kept to ONE conversation (owner kind 'session') or one Task Group (owner kind 'task') becomes `{kind:'only', who:[that row]}` (a helper's key → its conversation's), and — for those records only — every conversation whose pin the USER made on it no earlier than its last \"Who can use it\" change (the pin that let it in yesterday, owner ruling A (4), a rule that is gone: a pin never authorizes now, the list does) is added to the list, so nothing anyone could open yesterday is refused today. \"All my conversations\" records, the legacy shared record, a conversation's temporary browser and an already-listed record are left alone. Through the live keeper when there is one, else the file (atomic, its mode kept); a missing file is not a failure; an unreadable one fails by name and is retried at the next boot.",
+      run() {
+        const B = require('../browser-profiles.js');
+        const file = path.join(dataDir, 'browser-profiles.json');
+        let disk = null, missing = false;
+        try { disk = JSON.parse(fs.readFileSync(file, 'utf-8')); }
+        catch (e) { if (e && e.code === 'ENOENT') missing = true; else throw new Error(`${path.basename(file)} could not be read (${e && e.code ? e.code : 'unparsable JSON'}: ${e && e.message}) — not migrated; retried at the next boot`); }
+        if (missing) { const rep = { file: path.basename(file), via: 'none', migrated: [], kept: 0 }; console.log('[migrate] browser-profiles-who-list:', JSON.stringify(rep)); return rep; }
+        if (!disk || typeof disk !== 'object') throw new Error(`${path.basename(file)} is not a registry document (${JSON.stringify(disk)}) — not migrated; retried at the next boot`);
+        const k = typeof browserKeeper === 'function' ? browserKeeper() : browserKeeper;
+        let r, via;
+        if (k && typeof k.reshapeStore === 'function') { r = k.reshapeStore((doc) => B.migrateWhoList(doc)); via = 'keeper'; }
+        else {
+          r = B.migrateWhoList(disk); via = 'file';
+          if (r.migrated.length) {
+            let mode = 0o600; try { mode = fs.statSync(file).mode & 0o777; } catch { }
+            const tmp = `${file}.${process.pid}.tmp`;
+            fs.writeFileSync(tmp, JSON.stringify(disk, null, 2), { mode });
+            fs.renameSync(tmp, file);
+          }
+        }
+        const rep = { file: path.basename(file), via, migrated: r.migrated, kept: r.kept };
+        console.log('[migrate] browser-profiles-who-list:', JSON.stringify(rep));
+        return rep;
+      },
+    },
+    {
       id: '2026-09-channel-credential-key',
       note: "the Communication panel manages ACCOUNTS like the storage mounts do (owner 2026-09-22): every channel adapter record carries `credentialKey` — `cluster:<presetKey>` or `own` — naming the OAuth client / tenant app its token was minted under, so a change of the integration's default pick never refreshes an existing token with another client (Google answers invalid_client; §14.2 'never a silent swap'). A record from before the model is stamped ONCE through the engine's own serialized writer with the client its OWN TOKEN names when this instance still offers it (a Gmail token records the preset key it was exchanged under — the honest reading of what minted it, whatever the row's pick says now), else with the integration's CURRENT pick (what refreshed it until now); the report names the evidence per record. A record whose token names nothing offered and whose integration resolves to nothing is left unstamped and keeps following the row's pick, as before.",
       run() {

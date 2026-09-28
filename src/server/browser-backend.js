@@ -76,21 +76,25 @@ function create({ integrations = null, fetchImpl = null, now = Date.now, log = c
     if (!st || !RESOLVE[id]) return { integrationId: id, source: 'none', clusterKey: null, clusterLabel: null, why: st ? `${id} is not a key row` : 'the integration store is not available on this instance', testedAt: null, lastOk: null };
     let v;
     try { v = st.publicView(id); } catch (e) { return { integrationId: id, source: 'none', clusterKey: null, clusterLabel: null, why: String(e && e.message), testedAt: null, lastOk: null }; }
-    return { integrationId: id, source: v.source, clusterKey: v.clusterKey || null, clusterLabel: v.clusterLabel || null, why: v.why || null, testedAt: v.testedAt || null, lastOk: v.lastOk == null ? null : v.lastOk, missing: v.missing || [] };
+    return { integrationId: id, source: v.source, clusterKey: v.clusterKey || null, clusterLabel: v.clusterLabel || null, why: v.why || null, whyCode: v.whyCode || null, whyParams: v.whyParams || null, testedAt: v.testedAt || null, lastOk: v.lastOk == null ? null : v.lastOk, missing: v.missing || [] }; // whyCode/whyParams: the same fact as STRUCTURE — the switch dialog words it with the device's t() (credentialWhyText)
   }
 
   // ── the runners ──
   /** `cloak` — shape-only. Zero network, starts no process, downloads no
-   *  byte: it validates the `cb_…` shape through the row's own validator (an
-   *  empty key is the free tier, which the row says is legal). The seat tier
-   *  is NOT read here (that needs the 200 MB binary and §7.2.1's egress
-   *  proof, neither of which a card opened to paste a key may trigger). */
+   *  byte: it validates the `cb_…` shape through the row's own validator. No
+   *  key resolved is a FAILED test (2026-09-28, the naive-user verifier: it
+   *  used to pass as "empty = free tier" while every switch and start answer
+   *  backend_no_key for exactly that state — the card and the dialog said two
+   *  things). The seat tier is NOT read here (that needs the 200 MB binary and
+   *  §7.2.1's egress proof, neither of which a card opened to paste a key may
+   *  trigger). */
   async function cloakTest({ resolved, row }) {
     const f = (row && row.fields || []).find((x) => x.key === 'licenseKey');
     const v = resolved && resolved.values ? String(resolved.values.licenseKey || '') : '';
+    if (!v) return { ok: false, error: `no key resolved for cloak${resolved && resolved.why ? ' (' + resolved.why + ')' : ''} — CloakBrowser is used only with a key (the user's own, or a cluster default); a switch or a start answers backend_no_key` };
     const r = f && typeof f.validate === 'function' ? f.validate(v) : { ok: true };
     if (!r || r.ok !== true) return { ok: false, error: `validate: licenseKey ${(r && r.why) || 'invalid'}` };
-    return { ok: true, detail: { network: 'none', shape: v ? 'cb_ key present' : 'empty = free tier (one concurrent session)', tier: 'read back from the first real launch, not from this check', source: resolved ? resolved.source : 'none' } };
+    return { ok: true, detail: { network: 'none', shape: 'cb_ key present', tier: 'read back from the first real launch, not from this check', source: resolved ? resolved.source : 'none' } };
   }
   /** `cloud:*` — credential-exchange: ONE bounded read-only request to the
    *  ONE derived host; the key rides a header. */

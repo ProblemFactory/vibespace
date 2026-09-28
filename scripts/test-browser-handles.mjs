@@ -239,7 +239,7 @@ let workId, persId;
   // adoptScratch
   const scratchDir = path.join(DATA, 'browser-profiles', 'vs-' + KEY_B); fs.mkdirSync(scratchDir, { recursive: true }); fs.writeFileSync(path.join(scratchDir, 'Cookies'), 'jar');
   const ad = k.adoptScratch({ label: 'Adopted', scratchDir, owner: { kind: 'session', id: KEY_B } });
-  ok(ad.dir === path.join(HOME, '.agent-browser', 'vs-' + ad.id) && fs.existsSync(path.join(ad.dir, 'Cookies')) && !fs.existsSync(scratchDir) && ad.owner.id === KEY_B, 'adoptScratch MOVES the scratch dir under ~/.agent-browser/ (the login kept) and registers it');
+  ok(ad.dir === path.join(HOME, '.agent-browser', 'vs-' + ad.id) && fs.existsSync(path.join(ad.dir, 'Cookies')) && !fs.existsSync(scratchDir) && ad.owner.kind === 'only' && ad.owner.who[0].id === KEY_B, 'adoptScratch MOVES the scratch dir under ~/.agent-browser/ (the login kept) and registers it (a pre-list single owner stored as a one-row list, 2026-09-27)');
   ok((await threw(() => k.adoptScratch({ label: 'Adopted', scratchDir: path.join(DATA, 'nope') }))).code === 'label_taken' && (await threw(() => k.adoptScratch({ label: 'Gone', scratchDir: path.join(DATA, 'nope') }))).code === 'adopt_failed', 'adopt refuses a taken label and a missing directory by name');
   // the Task-Group rung's dep
   ok(k.taskGroupDefaultFor({ initialGroupId: 'T-1' }) === 'bp-0000feed' && k.taskGroupDefaultFor({ initialGroupId: 'T-2' }) === '', 'taskGroupDefaultFor asks the wiring\'s dep (an id or nothing)');

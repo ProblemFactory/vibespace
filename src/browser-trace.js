@@ -35,10 +35,15 @@
  * logged-in page is a secret, which is why the trace has a RETENTION and the UI
  * says so, §6.4).
  *
- * RETENTION (D35): per profile 7 days OR 200 MB, whichever bites first; the
- * plan names, for every entry it removes, the rule that removed it, and for
- * everything it keeps, why — a sweep that cannot say why it acted is one
- * nobody can audit.
+ * RETENTION BY SIZE ONLY (the owner, 2026-09-27: "记录不要按照 7 天上限，而是按照容量，
+ * 每个浏览器 profile 最多保留 1GB 记录"): per trace scope (a named profile; the
+ * ephemeral scope counts as one) the records may take `TRACE_BYTES_PER_PROFILE`
+ * = 1 GiB (the setting `browser.traceBytesPerProfile`, MB, floor 64); over it,
+ * `traceSizePlan` removes the OLDEST SESSIONS' FRAMES first and keeps EVERY
+ * action list (the replay can still say what happened). There is no age rule
+ * here — a record is never removed for being old. The plan names, for every
+ * frame it removes, the rule, and for every scope, what it holds. (The video
+ * recordings keep their own bound: src/browser-recording-retention.js.)
  *
  * HOUSEKEEPING (§6.4 / §7.1 / §8 step 3 / D8): the sweep's scope is EXACTLY the
  * provider rows with `ownsDir: true` on this machine — `queueVerdict` refuses a
@@ -53,8 +58,10 @@
 const B = require('./browser-profiles.js');
 
 // ── constants ──────────────────────────────────────────────────────────────
-const TRACE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-const TRACE_BYTES_PER_PROFILE = 200 * 1024 * 1024;
+/** 1 GiB of records per trace scope (the setting `browser.traceBytesPerProfile` in MB; `TRACE_BYTES_FLOOR` the least). */
+const TRACE_BYTES_PER_PROFILE = 1024 * 1024 * 1024;
+const TRACE_BYTES_FLOOR = 64 * 1024 * 1024;
+const TRACE_BYTES_SETTING = 'browser.traceBytesPerProfile';
 /** Frames per second the recorder asks the stream for when NO viewer watches
  *  (a "before" frame is then at most 250 ms stale). */
 const TRACE_TAP_FPS = 4;
@@ -223,11 +230,13 @@ function afterFramePick({ resultAt, frames = [], beforeSeq = null, now, settleMs
   return { pick: 'wait' };
 }
 /** The record. `before` / `after` are `{file, bytes, ...frameMeta, at}` or null. */
-function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, command, result = null, position, before = null, after = null, afterSame = false, url = null } = {}) {
+function entryFor({ id, at, sessionId = null, browserKey = null, profileId = null, browserSession = null, command, result = null, position, before = null, after = null, afterSame = false, url = null } = {}) {
   const action = String(command && command.action || '');
   const params = redactParams(action, command && command.params);
   return {
     id: String(id), at: Number(at) || 0, sessionId: sessionId || null, browserKey: browserKey || null, profileId: profileId || null,
+    // the browser SESSION this action belongs to (`bs-…`, src/browser-sessions.js) — null only for a pre-session record
+    browserSession: /^bs-[0-9a-f]{8}$/.test(String(browserSession || '')) ? browserSession : null,
     scope: profileId || EPHEMERAL_SCOPE,
     action, kind: classifyAction(action) || 'input', text: commandText(action, params), params,
     ok: resultOk(result), error: resultError(result), durationMs: result && Number.isFinite(result.duration_ms) ? result.duration_ms : null,
@@ -283,34 +292,54 @@ function overlayGeometry({ position, frame, drawn } = {}) {
   return null;
 }
 
-// ── retention ──────────────────────────────────────────────────────────────
+// ── retention: BY SIZE ONLY ──
+/** The per-scope limit in bytes from the setting's MB (default 1 GiB, never below the 64 MB floor). */
+function traceBytesLimit(settingMb) {
+  const n = Number(settingMb);
+  if (settingMb === undefined || settingMb === null || settingMb === '' || !Number.isFinite(n) || n <= 0) return TRACE_BYTES_PER_PROFILE;
+  return Math.max(TRACE_BYTES_FLOOR, Math.round(n) * 1048576);
+}
+/** An entry's FRAME bytes — each distinct file once (an `afterSame` after IS the before file). */
+function entryFrameBytes(e) {
+  if (!e) return 0;
+  const seen = new Set(); let n = 0;
+  for (const f of [e.before, e.after]) { if (!f || !f.file || seen.has(f.file)) continue; seen.add(f.file); n += Number(f.bytes) || 0; }
+  return n;
+}
+/** An entry's LIST bytes — its index line (what the sweep never removes). */
+function entryListBytes(e) { try { return JSON.stringify(e).length + 1; } catch { return 600; } }
 /**
- * The retention PLAN over grouped entries (`groups` = [{key, entries:[{id, at, bytes}]}]):
- * age first (older than `retentionMs`), then size (oldest first until the
- * group fits `bytesPerGroup`). Every removal names its rule; every kept group
- * says what it holds. Never touches anything not in `groups`.
+ * THE SWEEP'S PLAN (`scopes` = [{key, sessions:[{id, startAt, open, entries:[{id, at, frameBytes, listBytes}]}]}]):
+ * a scope over `bytesPerScope` loses the FRAMES of its OLDEST sessions first — every frame of a closed session, oldest
+ * session first; only when every closed session is bare, the open sessions' oldest frames one action at a time (the
+ * newest stay) — and NEVER an action list. Every removal names its rule; every scope says what it holds and by how
+ * much it is still over when its lists alone exceed the limit. No age rule: an old record under the limit stays.
  */
-function traceRetentionPlan({ groups = [], now, retentionMs = TRACE_RETENTION_MS, bytesPerGroup = TRACE_BYTES_PER_PROFILE } = {}) {
-  const t = Number(now) || 0;
-  const remove = [], kept = [];
-  for (const g of groups) {
-    const key = String(g.key || '');
-    const entries = [...(g.entries || [])].filter((e) => e && e.id).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
-    let bytes = 0;
-    const alive = [];
-    for (const e of entries) {
-      const age = t - (Number(e.at) || 0);
-      if (age > retentionMs) { remove.push({ key, id: e.id, bytes: Number(e.bytes) || 0, why: `older than ${Math.round(retentionMs / 86400000)} d (${Math.round(age / 86400000)} d)` }); continue; }
-      alive.push(e); bytes += Number(e.bytes) || 0;
+function traceSizePlan({ scopes = [], bytesPerScope = TRACE_BYTES_PER_PROFILE } = {}) {
+  const limit = Number(bytesPerScope) > 0 ? Number(bytesPerScope) : TRACE_BYTES_PER_PROFILE;
+  const mb = Math.round(limit / 1048576);
+  const removeFrames = [], kept = [];
+  for (const sc of scopes || []) {
+    const key = String(sc.key || '');
+    const sessions = [...(sc.sessions || [])].filter(Boolean).map((s) => ({ ...s, entries: [...(s.entries || [])].filter((e) => e && e.id).sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0)) }));
+    let frames = 0, lists = 0;
+    for (const s of sessions) for (const e of s.entries) { frames += Number(e.frameBytes) || 0; lists += Number(e.listBytes) || 0; }
+    const order = [...sessions.filter((s) => !s.open), ...sessions.filter((s) => s.open)].map((s, i) => ({ s, i }))
+      .sort((a, b) => (a.s.open === b.s.open ? 0 : a.s.open ? 1 : -1) || (Number(a.s.startAt) || 0) - (Number(b.s.startAt) || 0) || a.i - b.i).map((x) => x.s);
+    for (const s of order) {
+      if (frames + lists <= limit) break;
+      for (const e of s.entries) {
+        const b = Number(e.frameBytes) || 0;
+        if (!b) continue;
+        if (s.open && frames + lists <= limit) break;
+        removeFrames.push({ key, id: e.id, session: s.id || null, bytes: b, why: `over ${mb} MB for this profile — the oldest session's frames go first; its action list is kept` });
+        frames -= b;
+      }
     }
-    while (alive.length && bytes > bytesPerGroup) {
-      const e = alive.shift();
-      bytes -= Number(e.bytes) || 0;
-      remove.push({ key, id: e.id, bytes: Number(e.bytes) || 0, why: `over ${Math.round(bytesPerGroup / 1048576)} MB for this profile (oldest first)` });
-    }
-    kept.push({ key, n: alive.length, bytes, why: alive.length ? `${alive.length} entr${alive.length === 1 ? 'y' : 'ies'}, ${Math.round(bytes / 1024)} KB, all within ${Math.round(retentionMs / 86400000)} d and ${Math.round(bytesPerGroup / 1048576)} MB` : 'empty' });
+    const used = frames + lists;
+    kept.push({ key, used, frameBytes: frames, listBytes: lists, limit, overBy: Math.max(0, used - limit), why: used > limit ? `the action lists alone take ${Math.round(lists / 1048576)} MB of ${mb} MB — every frame is gone, the lists stay` : `${Math.round(used / 1048576)} MB of ${mb} MB` });
   }
-  return { remove, kept, bytesRemoved: remove.reduce((s, r) => s + r.bytes, 0) };
+  return { removeFrames, kept, bytesRemoved: removeFrames.reduce((n, r) => n + r.bytes, 0) };
 }
 
 // ── recording (D7: opt-in per profile) ─────────────────────────────────────
@@ -326,6 +355,45 @@ function recordingVerdict({ version, profile, rowOf = B.providerRow } = {}) {
   if (!v) return { ok: false, code: 'recording_floor', error: `agent-browser version ${JSON.stringify(String(version))} is unreadable — recording needs ≥ ${RECORDING_FLOOR}` };
   if (B.cmpVersion(String(version), RECORDING_FLOOR) < 0) return { ok: false, code: 'recording_floor', error: `agent-browser ${version} cannot record (record start at 30 fps arrives in ${RECORDING_FLOOR}) — update it, then turn recording on again` };
   return { ok: true, code: null, error: null };
+}
+/**
+ * lane live-input: A FAILED `record start`'s words as the profile row may keep them — the CLI's own stderr minus the
+ * command line it echoes ("Command failed: agent-browser record start /abs/…/x.webm") and minus absolute paths (the
+ * owner read "recording refused" + a raw command as the whole explanation). Never the user's data: a recording's file
+ * name is the conversation id and a clock.
+ */
+function cleanRecordError(raw) {
+  let s = String(raw || '').replace(/\r/g, '');
+  s = s.replace(/^Command failed:[^\n]*\n?/i, '');
+  s = s.replace(/(?:^|\s)\/[^\s'"]+/g, (m) => (m.startsWith(' ') ? ' ' : '') + '…');
+  s = s.replace(/\s+/g, ' ').trim();
+  return s.slice(0, 240);
+}
+/**
+ * lane live-input: THE RECORDING CHIP'S WORDS on the live view's bar — three states a person can act on (the owner had
+ * to turn video on by hand and read "recording refused" + a raw error). `recording` / `refused` = the digest's rows for
+ * this profile, `hasProfile` = the view shows a named profile (a temporary browser has none to record under), `since` =
+ * a time string. `t` = the caller's translator. → {state: 'on'|'off'|'none'|'refused', text, title}.
+ */
+function recordingChipWords({ recording = null, refused = null, hasProfile = true, since = '' } = {}, { t = (s, p) => (p ? s.replace(/\{(\w+)\}/g, (_, k) => (p[k] !== undefined ? String(p[k]) : '{' + k + '}')) : s) } = {}) {
+  if (!hasProfile) return { state: 'none', text: t('Video off'), title: t('A temporary browser cannot be recorded to video — only a saved browser profile can. Every action the agent takes is still listed under Actions.') };
+  if (recording) return { state: 'on', text: t('Recording video'), title: t('A video of this browser is being saved (since {time}). Click to see the videos or turn recording off.', { time: since || '?' }) };
+  if (refused) {
+    const why = String(refused.code || '');
+    const detail = refused.error ? cleanRecordError(refused.error) : '';
+    const byCode = {
+      recording_floor: t('This version of agent-browser cannot record video. Update it, then turn video on again.'),
+      recording_not_ours: t('VibeSpace does not start this browser, so it cannot record it.'),
+      recording_not_local: t('This browser runs on another machine — video works only for browsers on this one.'),
+      browser_no_cdp: t('VibeSpace could not reach this browser to record it. Turn video off and on again once the browser is running.'),
+      dir_unwritable: t('The folder for videos cannot be written.'),
+      record_failed: t('The video recorder did not start. Turn video off and on again in Agent browser.'),
+    };
+    const head = byCode[why] || t('Video could not start.');
+    // builder r2: joined by the translated template (zh / ja put no space after 。)
+    return { state: 'refused', text: t('Video did not start'), title: detail && (why === 'record_failed' || !byCode[why]) ? t('{first} {then}', { first: head, then: t('Details: {why}', { why: detail }) }) : head };
+  }
+  return { state: 'off', text: t('Video off'), title: t('This browser is not being recorded to video. Click to open Agent browser, where video can be turned on for this profile — every action the agent takes is listed under Actions either way.') };
 }
 function recordingFileFor({ profileId, sessionId, at } = {}) {
   const sid = String(sessionId || 'session').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
@@ -371,7 +439,10 @@ function housekeepingVerdict({ profiles = [], leases = [], browsers = {}, dirFac
     const closedWhy = browserClosed === 'browser_unstable' ? (br.closed.unstable === 'failing' ? ' — its browser could not be started: VibeSpace stopped trying (Stop resets it)' : ' — its browser keeps closing: VibeSpace stopped starting it again (Stop resets it)') : browserClosed === 'profile_locked' ? ' — its folder is held by another browser' : browserClosed ? ' — its browser is closed (the next command starts it again)' : '';
     const lastWrite = Math.max(Number(p.lastUsedAt) || 0, Number(facts.mtime) || 0);
     const ageMs = lastWrite ? Math.max(0, t - lastWrite) : null;
-    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed };
+    // `closedHow` (2026-09-28): the unstable record's kind as STRUCTURE, so the panel words the row in the device's language
+    // (`why` stays the English sentence the agent / the CLI read)
+    const closedHow = browserClosed === 'browser_unstable' ? (br.closed.unstable === 'failing' ? 'failing' : 'closing') : null;
+    const base = { id: p.id, label: p.label, dir: p.dir || null, provider: p.provider, host: p.host || null, legacy: !!p.legacy, record: !!p.record, sharing: p.sharing === 'instance' ? 'instance' : 'owner', mediated: B.isMediatedProfile(p), bytes: Number.isFinite(facts.bytes) ? facts.bytes : null, lastUsedAt: Number(p.lastUsedAt) || 0, ageMs, held, live, browserClosed, closedHow };
     if (!q.ok) return { ...base, state: 'not-ours', why: q.error, canForget: false };
     if (held) return { ...base, state: 'in-use', why: `attached by ${held} session(s)${closedWhy}`, canForget: false };
     if (live) return { ...base, state: 'live', why: browserClosed ? `its daemon is running${closedWhy}` : 'its browser is running', canForget: false };
@@ -497,11 +568,12 @@ function scopeDigest(entries) {
 }
 
 module.exports = {
-  TRACE_RETENTION_MS, TRACE_BYTES_PER_PROFILE, TRACE_TAP_FPS, AFTER_SETTLE_MS, AFTER_MAX_MS, BOX_PROBE_TIMEOUT_MS, PENDING_CAP, FRAME_RING,
+  TRACE_BYTES_PER_PROFILE, TRACE_BYTES_FLOOR, TRACE_BYTES_SETTING, TRACE_TAP_FPS, AFTER_SETTLE_MS, AFTER_MAX_MS, BOX_PROBE_TIMEOUT_MS, PENDING_CAP, FRAME_RING,
   RECORDING_FLOOR, RECORDING_DIR, TRACE_DIR, FORGOTTEN_FILE, STALE_PROFILE_DAYS, INFLIGHT_GRACE_MS, PROFILE_MARKERS, FORGOTTEN_SUFFIX, EPHEMERAL_SCOPE,
   TRACED_ACTIONS, classifyAction, isTracedCommand, selectorOf, redactParams, commandText, positionOf, resultOk, resultError, frameMeta, boxFromProbe, afterFramePick,
   entryFor, isEntryId, mintEntryId, timelineLabel, traceWindowFor, commandDrivesBrowser, entriesInWindow, overlayGeometry,
-  traceRetentionPlan, recordingVerdict, recordingFileFor, isRecordingFile,
+  traceBytesLimit, entryFrameBytes, entryListBytes, traceSizePlan, recordingVerdict, recordingFileFor, isRecordingFile,
+  cleanRecordError, recordingChipWords, // lane live-input: a failed record start's words kept without its command line / paths; the bar's recording chip
   sweepScope, queueVerdict, housekeepingVerdict, forgetVerdict, forgottenDirName, isForgottenName, orphanCandidates, orphanPathVerdict, scopeDigest,
   HOUSEKEEPING_STATES, frameUrl, bytesText, toolCommandText, traceSummary, unionWindow, assignEntriesToWindows, positionText, armGapFor,
 };

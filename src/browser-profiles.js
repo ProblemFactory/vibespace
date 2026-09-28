@@ -152,39 +152,24 @@ function lateKeyRefusal(why, { holderName = '' } = {}) {
 }
 
 /**
- * WHEN THE LATE KEY'S DEFAULT PIN IS DATED (B-f7ab verify r1, 2026-09-27 — reproduced on the real keeper + routes).
- * A pin the USER chose is an authorization (`mayAttach`'s `pinned`, owner ruling A (4)) and THE USER'S LATEST CHOICE
- * WINS: `userPinAuthorizes` admits a pin only when it is no older than the profile's last "Who can use it" change
- * (`scopeAt`). The late key applies the spawn's pin ladder (Task Group default > instance default), and the keeper
- * stamps a pin with its own clock — so a session that STARTED before the user kept a profile to another conversation
- * got a pin dated AFTER that narrowing on its agent's first browser command, and was admitted to the profile (its
- * logins included) with no user act in between; the same session keyed at spawn is refused `not_owner`. The late key
- * stands in for the key the spawn would have given, so its default pin carries the instant the session STARTED:
- * the OLDEST of what the record and the live session state (a restored session whose record states none carries its
- * restore instant — never a start). Nothing finite ⇒ 0: an unknown start outranks no narrowing. The keeper only ever
- * dates a pin EARLIER than its own clock (`setPin`'s `at`), so no caller can mint a fresher authorization.
- */
-function latePinAt({ recordedAt = null, liveAt = null } = {}) {
-  const ts = [recordedAt, liveAt].map((v) => (typeof v === 'number' ? v : Number.NaN)).filter((v) => Number.isFinite(v) && v > 0);
-  return ts.length ? Math.min(...ts) : 0;
-}
-/**
  * WHICH DEFAULT PIN THE LATE KEY APPLIES (B-f7ab verify r2, 2026-09-27 — reproduced on the real keeper + routes: an
- * instance / Task Group default the user set to a narrowed profile AFTER a keyless session started reached that session
- * on its agent's first browser command, dated at the session's START ⇒ admitted; its spawn-keyed twin had landed on the
- * default in force at ITS start and never saw the new one). A default reaches a conversation ONLY AT ITS START — the
- * cap's law (lane P finding 5) and the spawn's own: the ladder is read once, when the session is created. The late key
- * stands in for that read, and it has no history to read from. So:
+ * instance / Task Group default the user set AFTER a keyless session started reached that session on its agent's first
+ * browser command; its spawn-keyed twin had landed on the default in force at ITS start and never saw the new one). A
+ * default reaches a conversation ONLY AT ITS START — the cap's law (lane P finding 5) and the spawn's own: the ladder is
+ * read once, when the session is created. The late key stands in for that read, and it has no history to read from. So:
  *   · a WITNESS — the spawn's own record of the pick its ladder made at the start (`browserPinAtStart`, written by
  *     ws-create for a keyless spawn since r2: {profileId, origin, at, by}; a fork's = its parent's pin verbatim, the
- *     copy the spawn would have made) — is applied AS THAT PICK: the profile, the origin, the date (never later than the
- *     start: `startedAt` clamps it), the `by`. Full parity with the spawn for every session spawned since.
+ *     copy the spawn would have made) — is applied AS THAT PICK: the profile, the origin, the witness's own date, the
+ *     `by`. Full parity with the spawn for every session spawned since.
  *   · no witness (a session from before r2, or one whose ladder did not run): the default the user has NOW is applied
- *     as a LANDING only — dated 0, so it never authorizes a profile the user narrowed (`userPinAuthorizes`: a pin dated
- *     0 authorizes nothing — r3: not even a narrowed profile that carries no `scopeAt`; a never-narrowed profile admits
- *     everybody without a pin anyway). The agent's bare command still names the profile — refused `not_owner` by the
- *     button, never a silent temporary browser. A witness on a record that states no start is dated 0 too (r3).
+ *     as a LANDING (undated — the keeper stamps its clock).
  *   · the conversation's OWN pin (a kept key's row) is the record's, untouched — the resume rung, as at spawn.
+ * THE PIN NO LONGER AUTHORIZES (2.369.196, the "Who can use it" list — spec-who-may-use §3.3): a pin, witnessed or
+ * landed, is a PREFERENCE — which profile the conversation's bare command opens. Whether that profile admits the
+ * conversation is `whoMayUse` at every command (`mayAttach`), so a pin's date is informational and verify r1's
+ * `latePinAt` (a pin dated at the session's start so it could not outrank a later narrowing) is gone with the rule it
+ * served. A witness WIDENS NOTHING: restoring it never edits any profile's `owner.who` (keeper `restorePin`; only the
+ * user's own `chosen` pick adds a conversation to the list).
  * → {profileId, origin, at, by, source: 'witness'|'landing'|'conversation'|'none', refused?}
  */
 const PIN_WITNESS_BYS = Object.freeze(['user', 'agent']);
@@ -199,17 +184,13 @@ function isEmptyPinWitness(w) {
 }
 /** The Task Group cap a witness carries (null = none was in force / not witnessed). */
 function witnessCap(w) { return w && typeof w === 'object' && Number.isInteger(w.cap) ? w.cap : null; }
-function lateDefaultPin({ witness = null, ladder = null, startedAt = 0 } = {}) {
-  const started = (typeof startedAt === 'number' && Number.isFinite(startedAt) && startedAt > 0) ? startedAt : 0;
+function lateDefaultPin({ witness = null, ladder = null } = {}) {
   const pick = ladder && typeof ladder === 'object' ? ladder : { profileId: '', origin: 'harness' };
   if (pick.origin === 'conversation' && pick.profileId) return { profileId: String(pick.profileId), origin: 'conversation', at: null, by: null, source: 'conversation' };
-  // verify r3 (LOW): a witness is dated by the START it belongs to (the record's / the live session's, `latePinAt`) — a
-  // record that states NO start (ws-create writes `createdAt` in the same write as the witness; a witness without one is
-  // a damaged or hand-written record) is dated 0 like r1's unknown start, never by the witness's own claim
-  if (isPinWitness(witness)) return { profileId: witness.profileId, origin: witness.origin, at: started ? Math.min(started, witness.at) : 0, by: witness.by, source: 'witness' };
+  if (isPinWitness(witness)) return { profileId: witness.profileId, origin: witness.origin, at: witness.at, by: witness.by, source: 'witness' };
   if (isEmptyPinWitness(witness)) return { profileId: '', origin: 'harness', at: null, by: null, source: 'witness' };
   if (witness !== null && witness !== undefined) return { profileId: '', origin: 'harness', at: null, by: null, source: 'none', refused: 'the start-time pin record is not a pin witness' };
-  if (pick.profileId && (pick.origin === 'task-group' || pick.origin === 'instance')) return { profileId: String(pick.profileId), origin: pick.origin, at: 0, by: 'user', source: 'landing' };
+  if (pick.profileId && (pick.origin === 'task-group' || pick.origin === 'instance')) return { profileId: String(pick.profileId), origin: pick.origin, at: null, by: 'user', source: 'landing' };
   return { profileId: '', origin: 'harness', at: null, by: null, source: 'none' };
 }
 
@@ -1101,7 +1082,6 @@ function cloakservePlan({ enabled = false, proof = CLOAK_EGRESS_PROOF, allowlist
     ],
   };
 }
-const OWNER_KINDS = Object.freeze(['task', 'session', 'instance']);
 const LABEL_MAX = 80;
 function cleanLabel(v) {
   // eslint-disable-next-line no-control-regex
@@ -1210,9 +1190,10 @@ function newProfileRecord({ id, label, dir, provider = 'chromium', proxy = null,
     };
   }
   // OWNER RULING A (2026-09-26, "A吧"): a named profile is usable by ALL of the owner's conversations unless the user's
-  // panel switch says otherwise — no owner given ⇒ instance; `createdBy` = the conversation that made it (display and the
-  // switch's "Only …" option), never an admission fact
-  const o = owner && OWNER_KINDS.includes(owner.kind) ? { kind: owner.kind, id: owner.id == null ? null : String(owner.id) } : { kind: 'instance', id: null };
+  // "Who can use it" says otherwise — no owner given ⇒ instance; `createdBy` = the conversation that made it (display and
+  // the dialog's row), never an admission fact. The list (2026-09-27): a create writes a WRITE shape — instance, or
+  // `only` with its rows normalized (a pre-list single `session` / `task` owner handed in becomes a one-row list)
+  const o = ownerForWrite(owner);
   const by = createdBy == null ? null : parentKeyOf(String(createdBy));
   return {
     id: String(id), label: cleanLabel(label), dir: dir == null ? null : String(dir), provider: String(provider),
@@ -1253,6 +1234,10 @@ function normalizeRegistry(doc) {
     // toldView) — the memory layer ①'s one-time refusal fires on.
     children: obj(d.children),
     told: obj(d.told),
+    // "Who can use it" (2026-09-27): the tabs the keeper CLOSED when the user took a profile from a conversation
+    // (`<profileId>|<browserKey>` → when) — measured on 0.38.1, a session whose bound tab was closed answers `tab_gone`
+    // until it binds a new one; the keeper binds one at that conversation's next attach, then drops the mark
+    tabClosed: Object.fromEntries(Object.entries(obj(d.tabClosed)).filter(([k, v]) => /^bp-[0-9a-f]{8}\|bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(k) && Number.isFinite(Number(v))).map(([k, v]) => [k, Number(v)])),
     // MULTIVIEW D4: each conversation's EXPLICIT per-conversation browser cap
     // (browserKey → {cap, at}) — conversation-level like `pins`, so a resume
     // keeps it; the session meta carries a copy (`browserCap`)
@@ -1390,92 +1375,398 @@ function ephemeralDirOf(pairs) {
   return null;
 }
 // ── OWNER RULING A (2026-09-26, after two naive-user studies failed the same task — "A吧"): a named profile is USABLE
-// BY ALL of the owner's conversations by default. WHO MAY USE a profile is ONE field, `owner` (instance = "All my
-// conversations", session = "Only <that conversation>", task = "Only Task Group …"); `sharing` is NOT it — `instance`
-// there is the P6 TAB ISOLATION (each conversation sees only its own tabs through the mediating proxy), an opt-in knob.
-// The study's path A died on a record whose two fields contradicted each other (owner session + sharing instance) —
-// the admission read one, the recreate wrote the other. One field, one reader.
-/** The closed set of scopes the panel's "Who can use it" speaks (a task-owned record reads 'task'; nothing creates one). */
-const SCOPES = Object.freeze(['all', 'one', 'task']);
-/** WHO MAY USE this record, derived from `owner` alone (never stored twice): 'all' | 'one' | 'task'; an ephemeral
- *  record is its conversation's ('one'); null for no record. The legacy shared record is always 'all'. */
-function scopeOf(p) {
-  if (!p) return null;
-  if (isEphemeralProfile(p)) return 'one';
-  if (p.legacy) return 'all';
-  const o = p.owner || { kind: 'instance' };
-  if (o.kind === 'instance') return 'all';
-  if (o.kind === 'task') return 'task';
-  return 'one';
+// BY ALL of the owner's conversations by default. WHO MAY USE a profile is ONE field, `owner`; `sharing` is NOT it —
+// `instance` there is the P6 TAB ISOLATION (each conversation sees only its own tabs through the mediating proxy), an
+// opt-in knob. The study's path A died on a record whose two fields contradicted each other (owner session + sharing
+// instance) — the admission read one, the recreate wrote the other. One field, one reader.
+//
+// "WHO CAN USE IT" IS A LIST (2026-09-27, the owner: "给多个会话和/或任务组"): `owner` is `{kind:'instance'}` (every
+// conversation of the owner's — THE DEFAULT) or `{kind:'only', who:[{kind:'session', id:<browser key>} | {kind:'task',
+// id:<Task Group id>}]}`. A conversation is its BROWSER KEY (minted once per conversation, kept across restarts and
+// resumes; a fork mints its own — another conversation); a Task Group means every conversation that belongs to it NOW
+// (the task store's live rule, asked at every command). `whoMayUse` is the ONE reader; `mayAttach` the ONE admission.
+// A PIN NEVER AUTHORIZES: the user's pick (New Session, Session properties, the card menu, the UI's attach) WRITES the
+// list (`keeper.setPin` / `attach(by:'user')` append the conversation), and a default applied by the spawn ladder (the
+// conversation's own, a fork's copy, a Task Group's, the instance's) never does.
+/** What a WRITE may produce (the pre-list single shapes `session` / `task` are still READ — see whoMayUse). */
+const OWNER_KINDS = Object.freeze(['only', 'instance']);
+/** The closed set of row kinds of an "only these" list. */
+const WHO_KINDS = Object.freeze(['session', 'task']);
+/** At most this many rows in one list (a PATCH over it is refused `too_many`). */
+const WHO_MAX = 64;
+const TASK_ID_RE = /^[A-Za-z0-9._:-]{1,120}$/;
+/** One row, normalized — or null (a row of an unknown kind or a malformed id is DROPPED, never trusted). A child
+ *  (helper) key is stored as its conversation's. */
+function whoRow(r) {
+  if (!r || typeof r !== 'object') return null;
+  if (r.kind === 'session') { const k = parentKeyOf(String(r.id == null ? '' : r.id)); return isBrowserKey(k) ? { kind: 'session', id: k } : null; }
+  if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); return TASK_ID_RE.test(id) ? { kind: 'task', id } : null; }
+  return null;
+}
+/** A stored list, normalized: closed kinds, well-formed ids, duplicates collapsed (a helper's key = its parent's). */
+function normalizeWho(rows) {
+  const out = [], seen = new Set();
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const w = whoRow(r);
+    if (!w) continue;
+    const k = w.kind + ':' + w.id;
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(w);
+  }
+  return out;
 }
 /**
- * The refusal an agent gets for a profile the user kept to ANOTHER conversation — it names the BUTTON the user presses,
- * never a command line (the study's Ask-user card offered `vibespace-browser new work --sharing instance`, which made a
- * second contradictory record and still did not work). An agent relays it; it never proposes a recreate.
+ * WHO MAY USE this record — THE ONE READER (every shape that can be on disk):
+ *   no record ⇒ null · ephemeral ⇒ its conversation alone (`ephemeral:true`) · legacy ⇒ all
+ *   {kind:'instance'} / owner missing or null ⇒ all
+ *   {kind:'session', id} / {kind:'task', id} (the pre-list single shapes — the migration rewrites them; a failed run
+ *     retries at the next boot, so the reader judges the file as it is) ⇒ only [that row]
+ *   {kind:'only', who:[…]} ⇒ only [the rows, normalized — unknown rows dropped]
+ *   anything else ⇒ {mode:'unknown'} (admission refuses by name — fail closed, never "everyone")
  */
-function notOwnerRefusal({ label = '', kind = 'session', taskId = null } = {}) {
+function whoMayUse(p) {
+  if (!p) return null;
+  if (isEphemeralProfile(p)) return { mode: 'only', who: [{ kind: 'session', id: parentKeyOf(p.owner.id) }], ephemeral: true };
+  if (p.legacy) return { mode: 'all' };
+  const o = p.owner;
+  if (o === undefined || o === null) return { mode: 'all' };
+  if (typeof o !== 'object' || Array.isArray(o)) return { mode: 'unknown' };
+  if (o.kind === 'instance') return { mode: 'all' };
+  if (o.kind === 'session' || o.kind === 'task') { const w = whoRow(o); return w ? { mode: 'only', who: [w] } : { mode: 'unknown' }; }
+  if (o.kind === 'only' && Array.isArray(o.who)) return { mode: 'only', who: normalizeWho(o.who) };
+  return { mode: 'unknown' };
+}
+/** The closed set of words the digest's `scope` speaks (derived from `owner`, never stored twice). */
+const SCOPES = Object.freeze(['all', 'only']);
+/** 'all' | 'only' (an ephemeral record, an unknown shape: only), null for no record. */
+function scopeOf(p) {
+  const U = whoMayUse(p);
+  if (!U) return null;
+  return U.mode === 'all' ? 'all' : 'only';
+}
+/** The digest's `use`: keys and ids only (it is the broadcast) — `{mode:'all'}` | `{mode:'only', who:[{kind,key|id}]}`. */
+function useDigestOf(p) {
+  const U = whoMayUse(p);
+  if (!U) return null;
+  if (U.mode === 'all') return { mode: 'all' };
+  if (U.mode === 'unknown') return { mode: 'unknown', who: [] };
+  return { mode: 'only', who: U.who.map((w) => (w.kind === 'session' ? { kind: 'session', key: w.id } : { kind: 'task', id: w.id })) };
+}
+/**
+ * The refusal an agent gets for a profile the user kept to some conversations — ONE form (a list is a list): it names
+ * the BUTTON the user presses, never a command line (the study's Ask-user card offered `vibespace-browser new work
+ * --sharing instance`, which made a second contradictory record and still did not work). An agent relays it; it never
+ * proposes a recreate.
+ */
+function notOwnerRefusal({ label = '' } = {}) {
   const who = `"${label || 'this profile'}"`;
-  const set = kind === 'task' ? `set to "only Task Group ${taskId || '?'}"` : 'set to "only its own conversation"';
   return {
     ok: false, code: 'not_owner',
-    error: `profile ${who} is ${set} — ask the user to switch it to "All my conversations" in the Agent browser panel (its row's "Who can use it"), or to pick ${who} for this conversation in Session properties → Agent browser; or pick another profile. Never create a second profile with the same login.`,
-    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → All my conversations`,
+    error: `profile ${who} is kept to some of the user's conversations and Task Groups, and yours is not one of them — ask the user to add this conversation (or its Task Group) under "Who can use it" in the Agent browser panel (Change…), or to switch it to "All my conversations"; or pick another profile. Never create a second profile with the same login.`,
+    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → Change… → add this conversation, or All my conversations`,
+  };
+}
+/** The Task Group list could not be read, and a Task Group row might have admitted the asker: refused BY NAME (never
+ *  `not_owner` — a store that threw is not "no groups"; a lease already held is KEPT). */
+function groupsUnreadableRefusal({ label = '' } = {}) {
+  return {
+    ok: false, code: 'groups_unreadable',
+    error: `whether "${label || 'this profile'}" is yours through a Task Group could not be judged — the Task Group list could not be read; run the same command again once`,
+    remedy: 'run the same command again once; if it repeats, tell the user',
   };
 }
 /**
- * Ownership is COOPERATIVE and it is by CONVERSATION (the browserKey), never by webui session id, which churns on every
- * resume. Admitted: every conversation when the scope is 'all' (instance-owned, legacy); the conversation it is kept to
- * (its children included); the conversations of its Task Group; AND — owner ruling A (4) — a conversation whose PIN the
- * USER chose names it (`pinned`: the New Session dialog, Session properties, a Task-Group / instance default the user
- * configured — the user's choice IS the authorization), and any attach the USER makes (`by:'user'`, the UI's attach).
- * An AGENT's own pin is not the user's choice and never admits (the keeper passes `pinned` only for a user pin).
+ * THE ADMISSION (§3 of the spec — the table): `K` = the asker's conversation (a helper's key = its parent's),
+ * `taskIds` = the Task Groups it belongs to NOW (asked at every command), `groupsUnreadable` = that read threw.
+ *   no record ⇒ not-found · ephemeral ⇒ its own conversation (`via:'own'`), anyone else not_attachable
+ *   all / legacy ⇒ ok `via:'all'` · only: K listed ⇒ `via:'conversation'`; one of its Task Groups listed ⇒ `via:'task'`
+ *   only, no hit, a Task Group row + an unreadable store ⇒ groups_unreadable · only, no hit ⇒ not_owner
+ *   an owner shape this release cannot judge ⇒ not_owner (fail closed)
+ * A PIN IS NEVER AN INPUT HERE — the user's pick wrote the list (keeper.setPin); ruling A (4)'s dated pin is gone.
  */
-function mayAttach(profile, { browserKey, taskIds = [], pinned = false, by = 'agent' } = {}) {
+function mayAttach(profile, { browserKey, taskIds = [], groupsUnreadable = false } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
-  if (scopeOf(profile) === 'all') return { ok: true };
-  const o = profile.owner || { kind: 'instance' };
-  const parent = isChildKey(browserKey) ? parentKeyOf(browserKey) : browserKey;
-  if (o.kind === 'session' && o.id === parent) return { ok: true };
-  if (o.kind === 'task' && (taskIds || []).includes(o.id)) return { ok: true };
-  if (pinned) return { ok: true, via: 'pin' };
-  if (by === 'user') return { ok: true, via: 'user' };
-  if (o.kind === 'task') return notOwnerRefusal({ label: profile.label, kind: 'task', taskId: o.id });
-  if (o.kind === 'session') return notOwnerRefusal({ label: profile.label, kind: 'session' });
-  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${o.kind}) — ask the user to set it to "All my conversations" in the Agent browser panel` };
+  const K = parentKeyOf(String(browserKey || ''));
+  const U = whoMayUse(profile);
+  if (U.ephemeral) {
+    if (K && U.who[0].id === K) return { ok: true, via: 'own' };
+    return { ok: false, code: 'not_attachable', error: `"${profile.label}" is another conversation's own temporary browser — it is never shared` };
+  }
+  if (U.mode === 'all') return { ok: true, via: 'all' };
+  if (U.mode === 'only') {
+    if (K && U.who.some((w) => w.kind === 'session' && w.id === K)) return { ok: true, via: 'conversation' };
+    const mine = new Set((Array.isArray(taskIds) ? taskIds : []).map((x) => String(x)));
+    const hit = U.who.find((w) => w.kind === 'task' && mine.has(w.id));
+    if (hit) return { ok: true, via: 'task', taskId: hit.id };
+    if (groupsUnreadable && U.who.some((w) => w.kind === 'task')) return groupsUnreadableRefusal({ label: profile.label });
+    return notOwnerRefusal({ label: profile.label });
+  }
+  const kind = profile.owner && typeof profile.owner === 'object' ? String(profile.owner.kind) : typeof profile.owner;
+  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${kind}) — ask the user to set it to "All my conversations" in the Agent browser panel` };
 }
 /**
- * Does a conversation's PIN authorize it on this profile (mayAttach's `pinned`)? Only a pin the USER made (never an
- * agent's own), naming this profile, and — THE USER'S LATEST CHOICE WINS — made no earlier than the profile's last "Who
- * can use it" change (`scopeAt`): narrowing a profile to one conversation takes it from every other one, a pinned one
- * included; picking it for a conversation again afterwards gives it back.
+ * What the AGENT is told about a profile (`GET /api/agent/browser/profiles`, the CLI's `used by:` line): only whether
+ * ITS conversation may use it and through what — never the list, never another conversation's key (the owner's
+ * default 3, 2026-09-27: the names are the user's). → `{mode:'all'|'only', you, via:'all'|'conversation'|'task'|null,
+ * unreadable?}`.
  */
-function userPinAuthorizes({ pin = null, profile = null } = {}) {
-  if (!pin || !profile || pin.profileId !== profile.id || pin.by === 'agent') return false;
-  const at = Number(pin.at) || 0;
-  // B-f7ab verify r3 (LOW): a pin DATED 0 is a LANDING (the late key's default on a record with no witness — never an
-  // authorization) — and `0 ≥ scopeAt` read TRUE on a narrowed profile that carries no scope date (a record only a
-  // hand-edited or restored-after-the-migration registry holds: every narrowing the product writes stamps `scopeAt`),
-  // so the landing admitted it. An authorization is DATED; a profile open to all admits without asking here (mayAttach).
-  if (!(at > 0)) return false;
-  return at >= (Number(profile.scopeAt) || 0);
+function agentUseOf(p, facts = {}) {
+  const U = whoMayUse(p);
+  if (!U || U.mode === 'all') return { mode: 'all', you: true, via: 'all' };
+  const v = mayAttach(p, facts);
+  if (v.ok) return { mode: 'only', you: true, via: v.via === 'task' ? 'task' : 'conversation' };
+  if (v.code === 'groups_unreadable') return { mode: 'only', you: false, via: null, unreadable: true };
+  return { mode: 'only', you: false, via: null };
+}
+/** A digest row as an agent may see it: the record's public view MINUS `owner` / `createdBy` / `scopeAt` / the list,
+ *  PLUS `use` for the asking conversation. `extra` = the digest's own derived fields (mediated, scope). */
+function agentProfileView(p, facts = {}, extra = {}) {
+  if (!p) return null;
+  // eslint-disable-next-line no-unused-vars
+  const { owner, createdBy, scopeAt, ...rest } = publicProfileView(p);
+  // eslint-disable-next-line no-unused-vars
+  const { use: _u, owner: _o, createdBy: _c, scopeAt: _s, ...ex } = extra || {};
+  return { ...rest, ...ex, scope: scopeOf(p), use: agentUseOf(p, facts) };
 }
 /**
- * The panel switch (PATCH `{scope, conversation?}` — a USER act): the owner a scope change writes. 'all' ⇒ instance;
- * 'one' ⇒ the named conversation (a parent browser key; required). The legacy shared record and an ephemeral one have
- * no switch. → `{ok, owner}` | a typed refusal.
+ * A CONVERSATION ON ANOTHER MACHINE NEVER USES A PROFILE (identity verify r2, 2026-09-28): a profile's browser runs on
+ * THIS machine and a lease reaches it over the hub's loopback CDP url, which an ssh host or a paired device cannot see
+ * — so a remote session's `use` used to take a lease, launch the hub's Chrome and hand a `ws://127.0.0.1:…` of the hub
+ * to the other machine, and the user's pin / attach for it wrote its key into "Who can use it" (the same key the PATCH
+ * refuses and the picker never offers). ONE refusal, spelled here; the keeper asks it at the ONE admission (`attach`)
+ * and at the ONE add (`addConversation`); a remote session keeps its own browser on its machine (rung H).
  */
-function scopePatchVerdict({ profile, scope, conversation = null } = {}) {
+function remoteSessionRefusal({ label = '' } = {}) {
+  return {
+    ok: false, code: 'remote_session',
+    error: `this conversation runs on another machine — "${label || 'this profile'}"'s browser runs on the VibeSpace machine and a conversation elsewhere cannot reach it; it keeps its own browser on its machine`,
+    remedy: 'run the browser commands from a conversation on the VibeSpace machine, or ask the user to open the site there',
+  };
+}
+/** Is this lease / holder / claim / grant row the asking conversation's own (its parent key, a helper's included)? */
+function ownRow(row, myKey) { const K = parentKeyOf(String(myKey || '')); return !!K && !!row && parentKeyOf(String(row.browserKey || '')) === K; }
+/** A lease row as an AGENT may see it (B-325a, the owner's default 3): its own rows whole; another conversation's row
+ *  reduced to what the count needs — the profile, whether it is mediated / a managed ephemeral — never its key, its webui
+ *  session id, its handle, its tab or its label (a managed ephemeral's label names the conversation). */
+function agentLeaseRow(l, myKey) {
+  if (!l) return null;
+  if (ownRow(l, myKey)) return { ...l };
+  // r3: another conversation's EPHEMERAL browser is its own record — its id names nothing an agent may act on (no handle,
+  // no `use`), and it keyed the digest's `browsers` map to that conversation's pid + namespace; the count needs no id
+  if (l.ephemeral) return { ephemeral: true, other: true };
+  return { profileId: l.profileId, mediated: !!l.mediated, other: true };
+}
+/**
+ * A browser RECORD as an agent may see it (identity verify r3, 2026-09-28 — the digest's `browsers` map rode WHOLE:
+ * every record's pid, daemon namespace (`vs-<key>` = a conversation's bs-session id), socket dir, directory, launch env
+ * and `startedBy: "attach <key>"`, another conversation's managed ephemeral records included): the STATE facts only —
+ * the CLI reads `state`, the strip `live` / `startedAt` / `endedAt` / `stoppedBy` / `lastError` / `closed.code`. `own`
+ * keeps the pid (a conversation's own browser, its helpers' — `status` prints it).
+ */
+function agentBrowserView(rec, { own = false } = {}) {
+  if (!rec || typeof rec !== 'object') return null;
+  const closed = rec.closed && typeof rec.closed === 'object' ? { code: rec.closed.code || null, at: Number(rec.closed.at) || 0, ...(rec.closed.unstable ? { unstable: true } : {}) } : null;
+  return { profileId: rec.profileId, state: rec.state, startedAt: rec.startedAt || 0, endedAt: rec.endedAt || null, lastError: rec.lastError || null, stoppedBy: rec.stoppedBy || null,
+    closed, adopted: !!rec.adoptedAt, external: !!rec.external, hostId: rec.hostId || null, browserLost: !!rec.browserLost, live: rec.live && typeof rec.live === 'object' ? { ...rec.live } : null,
+    ...(own && Number.isInteger(rec.pid) ? { pid: rec.pid } : {}) };
+}
+/**
+ * THE DIGEST AS AN AGENT MAY SEE IT (identity verify r2, 2026-09-28 — the `backend` GET of a profile the asker may NOT
+ * use answered every other conversation's lease row, key + webui id; the `profiles` digest did for every profile):
+ * every profile through `agentProfileView`; `leases` / the mediator's `grants` through `agentLeaseRow`; `ephemerals`
+ * = the asker's own browsers (its helpers' included) + a COUNT of the others; a blocked claim of another conversation
+ * without its key / session id; `pins` = the asker's own. `drivers` stays (owner ruling A (2): the ONE deliberate
+ * exception — a `browser_busy` refusal names the conversation that drives, by key). `profileOf(id)` = the keeper's
+ * record (the digest row is a view). Pure over the digest object; never mutates it.
+ */
+function agentDigestView(d, facts = {}, profileOf = () => null) {
+  const me = facts.browserKey;
+  const out = { ...(d || {}) };
+  out.profiles = (d && Array.isArray(d.profiles) ? d.profiles : []).map((row) => agentProfileView(profileOf(row.id) || row, facts, { mediated: row.mediated }));
+  out.leases = (d && Array.isArray(d.leases) ? d.leases : []).map((l) => agentLeaseRow(l, me)).filter(Boolean);
+  const eph = d && Array.isArray(d.ephemerals) ? d.ephemerals : [];
+  out.ephemerals = eph.filter((e) => ownRow(e, me)).map((e) => ({ ...e }));
+  out.ephemeralsOthers = eph.length - out.ephemerals.length;
+  // r3: the `browsers` map — a NAMED profile's record reduced to its state; an ephemeral record only when it is the
+  // asker's own (its helpers' too), judged by the record the keeper holds (`profileOf`) or by the digest's own ephemeral rows
+  if (d && d.browsers && typeof d.browsers === 'object') {
+    const ownEph = new Set(eph.filter((e) => ownRow(e, me)).map((e) => e.profileId));
+    const otherEph = new Set(eph.filter((e) => !ownRow(e, me)).map((e) => e.profileId));
+    out.browsers = {};
+    for (const [id, rec] of Object.entries(d.browsers)) {
+      const p = profileOf(id);
+      const isEph = p ? isEphemeralProfile(p) : otherEph.has(id) || ownEph.has(id);
+      const own = ownEph.has(id) || !!(p && isEphemeralProfile(p) && me && parentKeyOf(String(p.owner.id)) === parentKeyOf(String(me)));
+      if (isEph && !own) continue;
+      out.browsers[id] = agentBrowserView(rec, { own });
+    }
+  }
+  out.blocked = (d && Array.isArray(d.blocked) ? d.blocked : []).map((b) => (ownRow(b, me) ? { ...b } : (({ browserKey, sessionId, ...rest }) => ({ ...rest, other: true }))(b)));
+  const med = d && d.mediation && typeof d.mediation === 'object' ? d.mediation : null;
+  if (med) out.mediation = { ...med, grants: (Array.isArray(med.grants) ? med.grants : []).map((g) => agentLeaseRow(g, me)).filter(Boolean) };
+  out.pins = me && d && d.pins && d.pins[me] ? { [me]: d.pins[me] } : {};
+  return out;
+}
+/**
+ * THE SERVER BELT (identity verify r3, 2026-09-28 — round 1 stripped one agent route, round 2 found four more raw
+ * answers; a class that returns round after round gets a BELT, not a fifth example). `agentAnswerView` is what the
+ * `/api/agent/browser/*` router runs over EVERY body before `res.json` — a route written raw tomorrow still cannot name
+ * another conversation: every browser key in any string (`bk-xxxxxxxx`, a helper's `bk-xxxxxxxx.N`, a `vs-bk-…`
+ * namespace, an `attach bk-…` line) whose conversation is not the asker's is masked `bk-********`; every other live
+ * session's webui id / conversation id (`foreign.ids`) is masked `[another conversation]`; every other conversation's
+ * browser pid (`foreign.pids`) becomes null. A string the asker itself SENT (`echoes`: a handle it named, a profile ref)
+ * is left as it wrote it — an echo is not a disclosure. THE ONE EXCEPTION is `$.drivers` (owner ruling A (2): who
+ * drives each shared browser right now, by key, so a `browser_busy` can be relayed) — `BELT_EXCEPTIONS` names it and
+ * the census pins that it is the only one. Pure: never mutates the body; a non-object body is returned as is.
+ */
+const BELT_EXCEPTIONS = Object.freeze(['drivers']);
+const KEY_IN_TEXT_RE = /\bbk-[0-9a-f]{8}(?:\.\d{1,4})?\b/g;
+const MASKED_KEY = 'bk-********';
+const MASKED_ID = '[another conversation]';
+/** Every string leaf of the given values (a request's body / query / params) — what the asker itself said. */
+function echoesOf(...sources) {
+  const out = new Set();
+  const walk = (v, depth) => {
+    if (depth > 6 || v === null || v === undefined) return;
+    if (typeof v === 'string') { if (v) out.add(v); return; }
+    if (Array.isArray(v)) { for (const x of v) walk(x, depth + 1); return; }
+    if (typeof v === 'object') for (const x of Object.values(v)) walk(x, depth + 1);
+  };
+  for (const s of sources) walk(s, 0);
+  return out;
+}
+function agentAnswerView(body, { me = null, foreign = null, echoes = null } = {}) {
+  const K = parentKeyOf(String(me || ''));
+  const ids = foreign && foreign.ids instanceof Set ? foreign.ids : new Set(Array.isArray(foreign && foreign.ids) ? foreign.ids : []);
+  const pids = foreign && foreign.pids instanceof Set ? foreign.pids : new Set(Array.isArray(foreign && foreign.pids) ? foreign.pids : []);
+  const said = echoes instanceof Set ? echoes : new Set(Array.isArray(echoes) ? echoes : []);
+  const maskText = (s) => {
+    if (ids.has(s) && !said.has(s)) return MASKED_ID; // the whole leaf is another session's id
+    let t = s.replace(KEY_IN_TEXT_RE, (m) => (K && parentKeyOf(m) === K ? m : said.has(m) ? m : MASKED_KEY));
+    for (const id of ids) if (id && id.length >= 8 && t.includes(id) && !said.has(id)) t = t.split(id).join(MASKED_ID); // inside a sentence / a path: ids long enough to be nobody else's
+    return t;
+  };
+  const walk = (v, depth) => {
+    if (depth > 24) return v;
+    if (typeof v === 'string') return v && v.length < 65536 ? maskText(v) : v;
+    if (typeof v === 'number') return pids.has(v) ? null : v;
+    if (v === null || typeof v !== 'object') return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    const out = {};
+    for (const [k, x] of Object.entries(v)) out[k] = depth === 0 && BELT_EXCEPTIONS.includes(k) ? x : walk(x, depth + 1);
+    return out;
+  };
+  return walk(body, 0);
+}
+/**
+ * THE WHOLE-LIST RULE (mirror-193): the stamp of what a reader READ — one sorted JSON line per row (`["s", key]` /
+ * `["t", id]`) plus the mode line `["m", "all"|"only"|"unknown"]`, joined by `\n` (channel-filter's grainStamp shape).
+ * A helper's key reads as its parent's (the same stamp), the order a list is drawn in is not a change.
+ */
+function useStamp(p) {
+  const U = whoMayUse(p) || { mode: 'unknown' };
+  const lines = [JSON.stringify(['m', U.mode === 'all' ? 'all' : U.mode === 'only' ? 'only' : 'unknown'])];
+  if (U.mode === 'only') for (const w of U.who) lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id]));
+  return lines.sort().join('\n');
+}
+/** The write's verdict on its base: absent = unconditional (a script); the stamp of the list as it stands NOW = ok;
+ *  anything else is refused `list-changed`, naming the rows that differ (`session:<key>` / `task:<id>` / `mode:<m>`). */
+function useBaseVerdict(profile, base) {
+  if (base === undefined || base === null) return { ok: true };
+  if (typeof base !== 'string') return { ok: false, code: 'bad-request', error: 'base must be the stamp the reader was given (a string)' };
+  const now = useStamp(profile);
+  if (now === base) return { ok: true };
+  const NAMES = { s: 'session', t: 'task', m: 'mode' };
+  const keysOf = (stamp) => new Set(String(stamp).split('\n').map((l) => { try { const v = JSON.parse(l); return Array.isArray(v) && NAMES[v[0]] ? NAMES[v[0]] + ':' + v[1] : null; } catch { return null; } }).filter(Boolean));
+  const was = keysOf(base), is = keysOf(now);
+  return {
+    ok: false, code: 'list-changed',
+    error: 'who can use this profile changed since it was read — read it again and save again (nothing was written)',
+    added: [...is].filter((k) => !was.has(k)), removed: [...was].filter((k) => !is.has(k)),
+  };
+}
+/**
+ * The SHAPE of a `use` body (the panel's Save, PATCH /api/browser/profiles/:id) — PURE, before anything is resolved:
+ *   {mode:'all'} | {mode:'only', who:[{kind:'task', id} | {kind:'session', key:'bk-…'} | {kind:'session', session:'<webui id>'}]}
+ * → `{ok, mode, rows}` (rows as given, kind-checked) | a typed refusal (bad-request / empty_list / too_many).
+ */
+function useShapeVerdict(use) {
+  const bad = (error) => ({ ok: false, code: 'bad-request', error });
+  if (!use || typeof use !== 'object' || Array.isArray(use)) return bad('`use` must be {mode:"all"} or {mode:"only", who:[…]}');
+  if (use.mode === 'all') return { ok: true, mode: 'all', rows: [] };
+  if (use.mode !== 'only') return bad(`use.mode "${String(use.mode)}" is not a value — one of all, only`);
+  if (!Array.isArray(use.who)) return bad('use.who must be a list of conversations and Task Groups');
+  if (!use.who.length) return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All my conversations' };
+  if (use.who.length > WHO_MAX * 4) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups` };
+  const rows = [];
+  for (const r of use.who) {
+    if (!r || typeof r !== 'object') return bad('every row of use.who is {kind:"task", id} or {kind:"session", key|session}');
+    if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); if (!TASK_ID_RE.test(id)) return bad(`task id ${JSON.stringify(r.id)} is not an id`); rows.push({ kind: 'task', id }); continue; }
+    if (r.kind === 'session') {
+      if (typeof r.session === 'string' && r.session && r.key === undefined) { rows.push({ kind: 'session', session: r.session }); continue; }
+      const k = parentKeyOf(String(r.key == null ? '' : r.key));
+      if (!isBrowserKey(k)) return bad(`session key ${JSON.stringify(r.key)} is not a conversation's browser key`);
+      rows.push({ kind: 'session', key: k });
+      continue;
+    }
+    return bad(`row kind ${JSON.stringify(r.kind)} is not a value — one of ${WHO_KINDS.join(', ')}`);
+  }
+  return { ok: true, mode: 'only', rows };
+}
+/**
+ * THE WRITE'S VERDICT on the rows (after the route resolved every picked live session to its key — a `session` row
+ * still unresolved here is refused): a task id the store does not list is refused `unknown_task` unless it is already
+ * in the list (a KEPT dead row); a key must be in the current list, carried by a live session, the profile's
+ * `createdBy`, or a lease / pin holder of THIS profile (`knownKey`) — else `unknown_conversation`; then dedup (a
+ * helper's key → its conversation's) and the cap. The legacy and ephemeral records have no list.
+ * → `{ok, owner, now}` | a typed refusal.
+ */
+function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () => false } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   if (isEphemeralProfile(profile)) return { ok: false, code: 'not_editable', error: `"${profile.label}" is a conversation's own temporary browser — it has no "Who can use it"` };
-  if (profile.legacy) return { ok: false, code: 'bad-request', error: 'the legacy shared profile is always usable by every conversation — adopt it as a new profile to keep it to one' };
-  const s = String(scope == null ? '' : scope);
-  if (s === 'all') return { ok: true, owner: { kind: 'instance', id: null } };
-  if (s === 'one') {
-    const bk = conversation == null ? '' : parentKeyOf(String(conversation));
-    if (!isBrowserKey(bk)) return { ok: false, code: 'bad-request', error: '"Only one conversation" needs that conversation (its browser key)' };
-    return { ok: true, owner: { kind: 'session', id: bk } };
+  if (profile.legacy) return { ok: false, code: 'bad-request', error: 'the legacy shared profile is always usable by every conversation — adopt it as a new profile to keep it to some' };
+  const sv = useShapeVerdict(use);
+  if (!sv.ok) return sv;
+  if (sv.mode === 'all') return { ok: true, owner: { kind: 'instance', id: null }, now: { mode: 'all' } };
+  const cur = whoMayUse(profile);
+  const had = new Set(cur && cur.mode === 'only' ? cur.who.map((w) => w.kind + ':' + w.id) : []);
+  const who = [], seen = new Set();
+  for (const r of sv.rows) {
+    let w;
+    if (r.kind === 'task') {
+      if (!had.has('task:' + r.id) && !knownTask(r.id)) return { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id };
+      w = { kind: 'task', id: r.id };
+    } else {
+      if (r.session !== undefined) return { ok: false, code: 'bad-request', error: 'a picked session must be resolved to its conversation before the list is written' };
+      if (!had.has('session:' + r.key) && !knownKey(r.key)) return { ok: false, code: 'unknown_conversation', error: `${r.key} is not a conversation this profile knows (not in its list, not running, not the one that made it, not using it)`, key: r.key };
+      w = { kind: 'session', id: r.key };
+    }
+    const k = w.kind + ':' + w.id;
+    if (seen.has(k)) continue;
+    seen.add(k); who.push(w);
   }
-  return { ok: false, code: 'bad-request', error: `scope "${s}" is not a value — one of all, one` };
+  if (!who.length) return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All my conversations' };
+  if (who.length > WHO_MAX) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups (${who.length} were sent)` };
+  return { ok: true, owner: { kind: 'only', who }, now: { mode: 'only', who } };
+}
+/** THE PICK WRITES THE LIST: the owner a user's pick of this profile for conversation `browserKey` leaves — the list
+ *  plus that conversation (a helper's key → its parent), or null when nothing needs writing (every conversation may,
+ *  it is already listed, or the record has no list). */
+function ownerWithConversation(profile, browserKey) {
+  const U = whoMayUse(profile);
+  if (!U || U.mode === 'all' || U.ephemeral || profile.legacy) return null;
+  const K = parentKeyOf(String(browserKey || ''));
+  if (!isBrowserKey(K)) return null;
+  const who = U.mode === 'only' ? U.who.slice() : [];
+  if (who.some((w) => w.kind === 'session' && w.id === K)) return null;
+  who.push({ kind: 'session', id: K });
+  return { kind: 'only', who };
+}
+/** The owner a CREATE stores: `instance` unless a non-empty list (or a pre-list single row) is handed in. */
+function ownerForWrite(owner) {
+  if (!owner || typeof owner !== 'object' || owner.kind === 'instance') return { kind: 'instance', id: null };
+  const U = whoMayUse({ owner });
+  return U && U.mode === 'only' && U.who.length ? { kind: 'only', who: U.who } : { kind: 'instance', id: null };
 }
 /**
  * The migration `2026-09-browser-profiles-all-conversations` (PURE over the registry document): every NAMED record that
@@ -1504,6 +1795,48 @@ function migrateScopeAll(doc) {
   return out;
 }
 
+/**
+ * The migration `2026-09-browser-profiles-who-list` (PURE over the registry document, idempotent; the doc is reshaped IN
+ * PLACE): "Who can use it" becomes a LIST.
+ *   1. every NAMED record (not legacy, not ephemeral) whose owner is the pre-list single shape — `{kind:'session', id}`
+ *      ⇒ `{kind:'only', who:[{kind:'session', id: parentKeyOf(id)}]}`, `{kind:'task', id}` ⇒ `{kind:'only', who:[{kind:
+ *      'task', id}]}`;
+ *   2. FOR THOSE RECORDS ONLY: every pin that AUTHORIZED yesterday under ruling A (4) — naming this profile, `by` not
+ *      'agent', DATED and made no earlier than the record's `scopeAt` (the retired userPinAuthorizes rule as 2.369.195
+ *      left it: B-f7ab verify r3 — a pin dated 0 is the late key's LANDING and authorized nothing, even on a narrowed
+ *      record with no `scopeAt`; the .196 integration) — whose conversation is not in the list yet is appended: nothing
+ *      anyone could open yesterday is refused today, and nothing yesterday refused is opened;
+ *   3. instance / legacy / ephemeral / already-`only` records are kept (a second pass converts nothing and folds nothing:
+ *      step 2's precondition is step 1's shape).
+ * → `{migrated:[{id, label, from, folded:[browserKey…]}], kept:n}`.
+ */
+function migrateWhoList(doc) {
+  const out = { migrated: [], kept: 0 };
+  const list = doc && Array.isArray(doc.profiles) ? doc.profiles : [];
+  const pins = doc && doc.pins && typeof doc.pins === 'object' && !Array.isArray(doc.pins) ? doc.pins : {};
+  for (const p of list) {
+    if (!p || typeof p !== 'object' || !isProfileId(p.id)) continue;
+    const o = p.owner && typeof p.owner === 'object' ? p.owner : null;
+    if (p.ephemeral || p.legacy || !o || (o.kind !== 'session' && o.kind !== 'task')) { out.kept++; continue; }
+    const first = whoRow(o);
+    if (!first) { out.kept++; continue; } // a malformed single owner stays as it is: the reader refuses it by name (fail closed)
+    const who = [first];
+    const folded = [];
+    for (const [bk, pin] of Object.entries(pins)) {
+      if (!pin || typeof pin !== 'object' || pin.profileId !== p.id || pin.by === 'agent') continue;
+      const at = Number(pin.at) || 0;
+      if (!(at > 0) || at < (Number(p.scopeAt) || 0)) continue; // 2.369.195's rule: a pin dated 0 (a landing) authorized nothing
+      const w = whoRow({ kind: 'session', id: bk });
+      if (!w || who.some((x) => x.kind === 'session' && x.id === w.id)) continue;
+      who.push(w); folded.push(w.id);
+    }
+    const from = { kind: o.kind, id: o.id == null ? null : String(o.id) };
+    p.owner = { kind: 'only', who };
+    out.migrated.push({ id: p.id, label: p.label, from, folded });
+  }
+  return out;
+}
+
 // ── §3.4 the lease ─────────────────────────────────────────────────────────
 /** A sub-agent's handle is its parent's key plus a suffix (§3.7): the parent's
  *  teardown reaps them by PREFIX. Ordinary rows, not a second record type. */
@@ -1519,8 +1852,8 @@ function findLease(leases, profileId, browserKey) {
  * rewrites `sessionId` IN PLACE; it never creates a second lease. `input` has
  * exactly one holder (`agent` at attach; the live view flips it, P2).
  */
-function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], pinned = false, by = 'agent' } = {}) {
-  const may = mayAttach(profile, { browserKey, taskIds, pinned, by });
+function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], groupsUnreadable = false } = {}) {
+  const may = mayAttach(profile, { browserKey, taskIds, groupsUnreadable });
   if (!may.ok) return may;
   if (!isBrowserKey(browserKey) && !isChildKey(browserKey)) return { ok: false, code: 'bad-request', error: 'a lease needs a browser key' };
   const existing = findLease(leases, profile.id, browserKey);
@@ -2424,7 +2757,7 @@ function floorNotice(v) {
 
 module.exports = {
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
-  browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, latePinAt, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default
+  browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default (a PREFERENCE — the list admits)
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,
   SOCKET_PATH_MAX, SOCKET_DIR_BASE, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
   USER_CONFIG_REL, PROJECT_CONFIG_NAME, layerProjectConfig,
@@ -2458,6 +2791,12 @@ module.exports = {
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,
   toldView, blindnessVerdict, nextChildN, childEnvFor, childPairsOver, adoptDirVerdict, normAbsPath,
   // OWNER RULING A (2026-09-26): who may use a profile (one field), one browser per profile, one driver at a time, the cap
-  SCOPES, scopeOf, notOwnerRefusal, scopePatchVerdict, migrateScopeAll, userPinAuthorizes, joinOrLaunch, DRIVE_HOLD_MS, driveVerdict, browserBusyRefusal,
+  SCOPES, scopeOf, notOwnerRefusal, migrateScopeAll, joinOrLaunch, DRIVE_HOLD_MS, driveVerdict, browserBusyRefusal,
+  // "Who can use it" is a LIST (2026-09-27): the ONE reader, the admission's words, the agent's view, the whole-list rule,
+  // the write's verdicts, the pick that writes the list, the migration
+  WHO_KINDS, WHO_MAX, whoRow, normalizeWho, whoMayUse, useDigestOf, groupsUnreadableRefusal, agentUseOf, agentProfileView,
+  remoteSessionRefusal, ownRow, agentLeaseRow, agentDigestView, // identity verify r2 (2026-09-28): a remote session never uses a profile; the agent's digest
+  agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes
+  useStamp, useBaseVerdict, useShapeVerdict, usePatchVerdict, ownerWithConversation, ownerForWrite, migrateWhoList,
   ownsLiveBrowser, conversationOwnCount, ephemeralHolderRefusal,
 };

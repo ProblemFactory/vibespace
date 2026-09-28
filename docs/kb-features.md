@@ -1611,10 +1611,32 @@ kept as `«N chars»` (the §3.7 audit rule); the target element's box comes fro
 ONE bounded `get box <selector>`; the after-frame is the first ≥ 400 ms after
 the result (else the latest by 1.5 s, marked "nothing repainted"). Entries are
 0600 files under `data/browser-trace/<profile|ephemeral>/` and are NEVER
-redacted (§12.9) — which is why they have a RETENTION (7 d or 200 MB per
-profile, whichever bites first, the sweep naming every removal's rule) and why
-every surface repeats §6.4's sentence. Setting `browser.actionTrace` (Browser,
-default ON) gates the whole thing.
+redacted (§12.9) — which is why they have a RETENTION and why every surface
+repeats §6.4's sentence. The retention is BY SIZE since 2026-09-27 (the owner:
+"记录不要按照 7 天上限，而是按照容量，每个浏览器 profile 最多保留 1GB 记录"):
+`browser.traceBytesPerProfile` (MB, default 1024, floor 64) per profile — the
+temporary browsers together count as one; over it the oldest sessions' FRAMES
+go first and every action LIST stays (the entry says its frames went to the
+size limit); nothing is removed for being old; the video recordings keep their
+own 7 d / 200 MB. Setting `browser.actionTrace` (Browser, default ON) gates the
+whole thing.
+
+**Browser SESSIONS and their REPLAY (2026-09-27, the owner: "最关键是能在聊天界面和浏览器查看界面两个地方都能看到 session 的开始和结束，以及每个浏览器 session 的回放").**
+A session is one run of a conversation's browser — the lease granted / the
+browser launched or joined, to the lease let go (detach, the conversation
+gone, a person's Stop, a backend switch; an idle stop is NOT an end). The chat
+shows a VibeSpace card at each start ("Browser session started · work · 14:02")
+and end ("Browser session ended · 12 min · 38 actions" + Replay) — live, and
+after a reload / a server restart / a read-only history in the place they
+happened (derived from the trace's markers). The live view's Actions pane
+opens with a Sessions list (each with Replay) and puts "Session k · started …"
+dividers between its actions; a stopped browser's view opens straight onto that
+list. The replay window (`browser-replay`, one per conversation or per profile)
+lists the sessions and the chosen one's actions, draws the after-frame with
+the click point / element box, Before / After, ← → Home End, Space plays one a
+second; on a phone the list sits above the picture. Also from Session
+properties ("Browser sessions (n)") and the Agent browser panel's Replay….
+Gates: test-browser-sessions (fast), test-browser-replay-ui (heavy).
 
 **Where you see it (the client half):** ① THE TOOL CARD — a shell tool call
 whose command drives the agent browser (`agent-browser …` /
@@ -2598,7 +2620,9 @@ Config export/import of these keys (design §14.10) is NOT in P0b.
   REUSES the existing Drive/Gmail OAuth-client presets `VIBESPACE_GDRIVE_CLIENTS`
   through `MountManager.drivePresets()` with `prefer:'channels'`, `multi:true`,
   and declares NO env of its own — decision 5), `cloak` (a per-seat license key;
-  empty = free tier). The Lark callback URL is defined in exactly ONE place and
+  optional as a FIELD, but an empty one is NO key — every switch / start answers
+  `backend_no_key` and the card's Test fails by name; 2026-09-28, the "empty =
+  free tier" promise removed because the resolver never kept it). The Lark callback URL is defined in exactly ONE place and
   the suite fails a second spelling anywhere in code.
 - **The card** (one per row, the Plugins card language, single column at every
   width): a SOURCE CHIP (`Your own` / `Cluster default · <label>` / `Not

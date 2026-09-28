@@ -247,9 +247,11 @@ class AcpMessageManager {
     return this.messages;
   }
   /** Time-sliced twin (same shape as MessageManager.convertHistoryAsync). */
-  async convertHistoryAsync(records, { budgetMs = 25, onSlice } = {}) {
+  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
+  async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
     let sliceStart = Date.now(), done = 0;
     for (const r of records || []) {
+      if (beforeRecord) { try { beforeRecord(r); } catch { } }
       try { this._processRecord(r, false); }
       catch (e) { console.error('[acp-normalizer] record skipped during history rebuild:', e.message); }
       done++;

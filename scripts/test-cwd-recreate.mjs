@@ -23,7 +23,31 @@ fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); // the cw
 const projDir = path.join(fakeHome, '.claude', 'projects', MISSING_CWD.replace(/[/._]/g, '-'));
 fs.mkdirSync(projDir, { recursive: true });
 fs.writeFileSync(path.join(projDir, `${SID}.jsonl`), JSON.stringify({ type: 'user', uuid: 'u1', timestamp: new Date().toISOString(), sessionId: SID, cwd: MISSING_CWD, message: { role: 'user', content: [{ type: 'text', text: 'hello from before the deletion' }] } }) + '\n');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+// THE CLI IS A STUB (the 2.369.196 integration: the gate runs with `claude` hidden from PATH — zero vendor calls — and
+// this suite had silently needed the machine's real binary: every create spawned it). The stub keeps the one CLI fact
+// the server reads here: a `--resume` of an id with no transcript under <HOME>/.claude/projects/<cwd, [/._]→-> says
+// "No conversation found with session ID: <id>" (a stream-json error result on stdout — the buffer the breaker scans —
+// and the plain line on stderr) and exits 1; any other start announces itself and lives until stdin closes.
+const STUB = path.join(fakeHome, '.stub-bin', 'claude'); // inside the fixture HOME: removed with it at exit
+fs.mkdirSync(path.dirname(STUB), { recursive: true });
+fs.writeFileSync(STUB, `#!${process.execPath}
+const fs = require('fs'), path = require('path'), os = require('os');
+const a = process.argv.slice(2);
+if (a.includes('--version')) { console.log('2.1.281 (Claude Code) stub'); process.exit(0); }
+if (a.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
+const at = (f) => { const i = a.indexOf(f); return i >= 0 ? a[i + 1] : null; };
+const rid = at('--resume');
+if (rid && !fs.existsSync(path.join(os.homedir(), '.claude', 'projects', process.cwd().replace(/[/._]/g, '-'), rid + '.jsonl'))) {
+  const msg = 'No conversation found with session ID: ' + rid;
+  process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, errors: [msg] }) + '\\n');
+  process.stderr.write(msg + '\\n');
+  process.exit(1);
+}
+const SID = at('--session-id') || rid || ('0e1a0000-0000-4000-8000-' + String(process.pid).padStart(12, '0'));
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.281' }) + '\\n');
+process.stdin.on('data', () => {}); process.stdin.on('end', () => process.exit(0));
+`, { mode: 0o755 });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', CLAUDE_CMD: STUB }, stdio: 'ignore' });
 process.on('exit', () => { try { srv.kill('SIGKILL'); } catch {}; try { execSync(`git worktree remove --force ${wt}`, { stdio: 'ignore' }); } catch {}; try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch {}; try { fs.rmSync(scratch('cwdre-workdir'), { recursive: true, force: true }); } catch {} });
 for (let i = 0; i < 40; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); break; } catch { await sleep(250); } }
 const WebSocket = require('ws');

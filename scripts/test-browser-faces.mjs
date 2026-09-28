@@ -47,7 +47,7 @@ console.log('① the faces are named for who drives them — labels at their sou
   ok(/const brSec = section\(t\('Agent browser'\)\);/.test(sp) && /brBtn\.textContent = t\('Agent browser profile…'\);/.test(sp), "Session Properties: the section is 'Agent browser'");
   const ss = read('src/lib/settings-schema.js');
   const cats = [...ss.matchAll(/category: t\('([^']+)'\), liveApply: true/g)].map((m) => m[1]);
-  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 15, `Settings: the 15 agent-browser rows sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs + lane S4's browser.fitPageToView)`);
+  ok(!/category: t\('Browser'\)/.test(ss) && ss.split("category: t('Agent browser')").length - 1 === 16, `Settings: the 16 agent-browser rows sit in category 'Agent browser' (none left in 'Browser'; ${cats.filter((c) => c === 'Agent browser').length} counted — 12 + MULTIVIEW's browser.defaultPerConversationCap / browser.idleReleaseAfterTurnMs + lane S4's browser.fitPageToView + 2026-09-27's browser.traceBytesPerProfile)`);
   ok(/^  t\('Agent browser'\),$/m.test(ss) && !/^  t\('Browser'\),$/m.test(ss) && /categories: \[t\('Integration'\), t\('Channels'\), t\('Background Work'\), t\('Agent browser'\)\]/.test(ss), 'Settings: SETTINGS_CATEGORIES and the Services group name the renamed category');
   ok(/'toolbar\.showBrowserButton': \{\s*type: 'boolean', default: true, label: t\('Show Web view button'\)/.test(ss) && /'browser\.isolateSessions'/.test(ss), "Settings: the toolbar row reads 'Show Web view button' (keys toolbar.showBrowserButton / browser.* unchanged)");
   ok(/\{ id: 'btn-browser',\s+label: 'Web view button',\s+hideKey: 'toolbar\.showBrowserButton'/.test(read('src/lib/customize-mode.js')), "customize mode names the element 'Web view button'");
@@ -59,7 +59,8 @@ console.log('① the faces are named for who drives them — labels at their sou
   const tv = read('src/lib/browser-trace-view.js');
   ok(tv.split("t('action trace is off (Settings → Agent browser)')").length - 1 === 2 && /Settings → Agent browser → Action trace/.test(tv) && /\(Agent browser\)'\)/.test(tv), "the trace pointers name Settings → Agent browser / the Agent browser window");
   const lw = read('src/lib/browser-live-window.js');
-  ok(/title: t\('Agent browser \(live\)'\), type: 'browser-live'/.test(lw) && /turn it on in Agent browser…'\)/.test(lw) && /t\('Agent browser is not available'\)/.test(lw), "the live view: window title 'Agent browser (live)', its pointers name the Agent browser window");
+  const btr = read('src/browser-trace.js'); // lane live-input: the recording chip's words moved to PURE recordingChipWords
+  ok(/title: t\('Agent browser \(live\)'\), type: 'browser-live'/.test(lw) && /in Agent browser\.'\)/.test(btr) && /Click to open Agent browser/.test(btr) && /t\('Agent browser is not available'\)/.test(lw), "the live view: window title 'Agent browser (live)', its pointers name the Agent browser window");
   const rail = read('src/lib/sidebar-rail.js');
   ok(/browser: 'Agent browser',/.test(rail) && /item\('browser', tr\('Agent browser'\), /.test(rail), "rail: the browser item and its header title say 'Agent browser' (rail id `browser` unchanged)");
   // ids NOT touched (layout replay reads ids)

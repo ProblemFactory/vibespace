@@ -21,6 +21,20 @@
  * lane S4: `captureFrame` — a FRESH picture of the active tab when the stream
  * sent none after a navigation (scripts/test-browser-fit.mjs, fast — a fake CDP
  * endpoint; scripts/test-browser-live-fit.mjs, heavy — the real rung).
+ * lane live-input: `watchCopies` — COPY OUT while the user drives. The user's
+ * Ctrl/⌘+C reaches the page as a key (the page copies into the REMOTE clipboard,
+ * a web terminal still gets its interrupt); the text it copied is read AT THAT
+ * EVENT: a copy/cut listener in an ISOLATED WORLD (`Page.addScriptToEvaluateOnNewDocument`
+ * with a per-arm world name + `Page.createIsolatedWorld` for the frames already
+ * there) reports the selection through a `Runtime.addBinding` only that world
+ * sees — the page's own scripts see neither. Reading at the event keeps the
+ * order the stream gives (a selection read beside the stream would race the
+ * keys queued before it — measured for text) and covers the page's own "Copy"
+ * button (execCommand fires the same event). A password field fires no copy
+ * event (Chrome's rule), so nothing of it is ever read. MEASURED on Chromium 151
+ * (paragraph, input after Ctrl+A, textarea cut, same-origin iframe, a navigation
+ * — the world is re-made on every new document). One persistent page socket per
+ * watch; `close()` ends it (the binding and the script die with the session).
  */
 const http = require('http');
 const { WebSocket } = require('ws');
@@ -131,4 +145,63 @@ async function readViewport(cdpUrl, { activeUrl = '', timeoutMs = READ_MS, WebSo
   return { ok: true, clientWidth: cw, clientHeight: ch, targetId: t.id || null };
 }
 
-module.exports = { readViewport, captureFrame, READ_MS };
+/** lane live-input: the text a copy/cut may carry back (a page-wide select-all of a long article is still one copy). */
+const COPY_TEXT_MAX = 200000;
+/** The isolated world's script: one capture listener per kind; the selection of the focused field (never a password),
+ *  else the document selection (through same-origin frames); guarded so a world whose binding is gone throws nothing. */
+function copyWatchSource(binding) {
+  const b = JSON.stringify(String(binding));
+  return `(() => { const B = ${b}; if (window[B + '_armed']) return; window[B + '_armed'] = true;
+const pick = (doc) => { let el = doc.activeElement; for (let i = 0; el && el.tagName === 'IFRAME' && i < 8; i++) { try { const d = el.contentDocument; if (!d) return null; doc = d; el = d.activeElement; } catch { return null; } }
+  let docSel = ''; try { docSel = String(doc.getSelection ? doc.getSelection() : ''); } catch { docSel = ''; }
+  if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) { if (String(el.type || '').toLowerCase() === 'password') return null; const s = el.selectionStart, e = el.selectionEnd; const inField = typeof s === 'number' && typeof e === 'number' ? String(el.value).slice(s, e) : ''; return inField || docSel; }
+  return docSel; };
+for (const kind of ['copy', 'cut']) document.addEventListener(kind, () => { try { const f = window[B]; if (typeof f !== 'function') return; const text = pick(document); if (text === null) return; f(JSON.stringify({ kind, text: text.slice(0, ${COPY_TEXT_MAX}), length: text.length })); } catch { } }, true); })()`;
+}
+/**
+ * Watch the page target for copies. `onCopy({kind, text, length})` per copy/cut the page performs; `onEnd(why)` once when
+ * the socket ends. → Promise<{ok:true, close, targetId}> | {ok:false, error}; never throws.
+ */
+async function watchCopies(cdpUrl, { targetId = null, activeUrl = '', onCopy = () => {}, onEnd = () => {}, timeoutMs = READ_MS, WebSocketImpl = WebSocket, nonce = null } = {}) {
+  const h = hostPortOf(cdpUrl);
+  if (!h) return { ok: false, error: 'no CDP endpoint' };
+  const list = await getJson(h, '/json/list', timeoutMs);
+  if (!list.ok) return { ok: false, error: list.error };
+  const t = S.pickViewportTarget(list.json, { activeUrl, targetId });
+  if (!t) return { ok: false, error: 'the browser has no page target' };
+  const tag = String(nonce || Math.random().toString(36).slice(2, 10)).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'x';
+  const binding = '__vsCopy_' + tag, world = 'vs-copy-' + tag;
+  return new Promise((resolve) => {
+    let ws = null, id = 0, done = false, ended = false;
+    const pend = new Map();
+    const fin = (r) => { if (done) return; done = true; clearTimeout(timer); resolve(r); };
+    const end = (why) => { if (ended) return; ended = true; for (const f of pend.values()) f({ error: { message: why } }); pend.clear(); try { onEnd(why); } catch { /* the caller's */ } };
+    const close = () => { try { ws && ws.close(); } catch { /* */ } end('closed'); };
+    const timer = setTimeout(() => { try { ws && ws.terminate(); } catch { /* */ } fin({ ok: false, error: 'the copy watch timed out' }); }, timeoutMs);
+    const call = (method, params = {}) => new Promise((res) => { const i = ++id; pend.set(i, res); try { ws.send(JSON.stringify({ id: i, method, params })); } catch (e) { pend.delete(i); res({ error: { message: e.message } }); } });
+    try { ws = new WebSocketImpl(t.webSocketDebuggerUrl, { maxPayload: 16 * 1024 * 1024, handshakeTimeout: timeoutMs }); } catch (e) { fin({ ok: false, error: e.message }); return; }
+    ws.on('message', (d) => {
+      let m = null; try { m = JSON.parse(String(d)); } catch { return; }
+      if (m && m.id && pend.has(m.id)) { const f = pend.get(m.id); pend.delete(m.id); f(m); return; }
+      if (m && m.method === 'Runtime.bindingCalled' && m.params && m.params.name === binding) {
+        let o = null; try { o = JSON.parse(String(m.params.payload || '')); } catch { o = null; }
+        if (o && (o.kind === 'copy' || o.kind === 'cut') && typeof o.text === 'string') { try { onCopy({ kind: o.kind, text: o.text.slice(0, COPY_TEXT_MAX), length: Number(o.length) || o.text.length }); } catch { /* the caller's */ } }
+      }
+    });
+    ws.on('error', (e) => { if (!done) fin({ ok: false, error: e && e.message }); end('error'); });
+    ws.on('close', () => { if (!done) fin({ ok: false, error: 'closed before the watch was armed' }); end('closed'); });
+    ws.on('open', async () => {
+      const src = copyWatchSource(binding);
+      const steps = [['Runtime.enable'], ['Page.enable'], ['Runtime.addBinding', { name: binding, executionContextName: world }], ['Page.addScriptToEvaluateOnNewDocument', { source: src, worldName: world, runImmediately: true }]];
+      for (const [m, p] of steps) { const r = await call(m, p); if (r.error) { try { ws.close(); } catch { /* */ } fin({ ok: false, error: `${m}: ${r.error.message}` }); return; } }
+      // the frames already there: an isolated world each, the script evaluated in it (runImmediately covers new documents)
+      const tree = await call('Page.getFrameTree');
+      const frames = []; const walk = (n) => { if (!n || !n.frame) return; frames.push(n.frame.id); for (const c of n.childFrames || []) walk(c); };
+      walk(tree.result && tree.result.frameTree);
+      for (const fid of frames) { const w = await call('Page.createIsolatedWorld', { frameId: fid, worldName: world }); if (w.result && w.result.executionContextId) await call('Runtime.evaluate', { expression: src, contextId: w.result.executionContextId }); }
+      fin({ ok: true, close, targetId: t.id || null });
+    });
+  });
+}
+
+module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, COPY_TEXT_MAX, READ_MS };

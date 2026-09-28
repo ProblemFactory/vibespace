@@ -138,6 +138,9 @@ async function call(method, p, body, { soft = false } = {}) {
   try { j = await res.json(); } catch { }
   if (!res.ok || j.error) {
     if (soft) return { ...j, _status: res.status, _failed: true };
+    // "Who can use it" (2026-09-27): a refusal whose way out is the USER's button prints that way out on every verb
+    // (`use` as much as a page verb's /resolve) — the list sentence, then the button, never a command line
+    if (j.code === 'not_owner' || j.code === 'groups_unreadable') { printRefusal(j); process.exit(1); }
     console.error((j.error || `HTTP ${res.status}`) + (j.code ? ` [${j.code}]` : ''));
     // B-f7ab verify r1: a refusal's WAY OUT is printed for every verb, not only the page verbs' (`status` on a session
     // that could not get its browser key said what happened and never what to do — the 2026-09-17 chat parked on less)
@@ -184,8 +187,14 @@ function printRefusal(r) {
     // takeover C3 (D2): the instance's browsers + desktop apps are at the shared ceiling — nothing is queued
     for (const h of r.holders || []) console.error(`  holder: ${h.label}${h.sessions && h.sessions.length ? ' (' + h.sessions.join(', ') + ')' : ''}${h.kind && h.kind !== 'profile' ? ' [' + h.kind + ']' : ''}`);
   } else if (r.code === 'not_owner') {
-    // owner ruling A: the user kept that profile to another conversation — the way out is THEIR button, never a recreate
-    console.error('  way out: ask the user to set it to "All my conversations" in the Agent browser panel (Who can use it), or to pick it for this conversation in Session properties → Agent browser');
+    // "Who can use it" is a list: the user kept that profile to some conversations / Task Groups — the way out is THEIR
+    // button (add this conversation, or All my conversations), never a recreate
+    console.error('  way out: ask the user to add this conversation under "Who can use it" in the Agent browser panel (Change…), or to switch it to "All my conversations"');
+  } else if (r.code === 'groups_unreadable') {
+    console.error('  the Task Group list could not be read — run the same command again once');
+  } else if (r.code === 'remote_session') {
+    // identity verify r2 (2026-09-28): a profile's browser runs on the VibeSpace machine — a conversation elsewhere keeps its own
+    console.error('  this conversation runs on another machine — keep using its own browser (a bare `vibespace-browser <verb>` lands on it)');
   } else if (r.code === 'browser_busy') {
     // owner ruling A (2): one conversation drives a shared browser at a time — wait (once), never loop
     console.error(`  driven by: ${r.by === 'user' ? 'the user' + (r.holder ? ' (in "' + r.holder + '"\'s live view)' : '') : (r.holder ? '"' + r.holder + '"' : 'another conversation')}${r.retryAfterMs ? ` · free in at most ${Math.ceil(r.retryAfterMs / 1000)} s` : ''}`);
@@ -604,8 +613,12 @@ async function runPage(c) {
       const leases = r.leases.filter((l) => l.profileId === p.id);
       const b = r.browsers[p.id];
       const a = mine.get(p.id);
-      // owner ruling A: who may use it — never an owner id (a browser key is not a word for the user)
-      const usedBy = p.scope === 'one' ? (r.me && p.owner && p.owner.id === r.me.browserKey ? 'only this conversation' : 'only another conversation (the user can switch it to all in the Agent browser panel)') : p.scope === 'task' ? 'only a Task Group' : 'all your conversations';
+      // "Who can use it" (a list): only whether THIS conversation may, and through what — never the list, never a key
+      const u = p.use || {};
+      const usedBy = u.mode !== 'only' ? 'all your conversations'
+        : u.unreadable ? 'chosen conversations — unknown for yours right now (the Task Group list could not be read)'
+          : u.you ? `chosen conversations — yours included${u.via === 'task' ? ' (through its Task Group)' : ''}`
+            : 'chosen conversations — not yours (the user can add this conversation under "Who can use it" in the Agent browser panel)';
       console.log(`${a ? (a.isDefault ? '*' : '+') : ' '} ${p.label}  (${p.id})${a ? '  handle: ' + a.alias : ''}  ${p.provider}${p.host ? ' on ' + p.host : ''}${p.cdpPort ? ' cdp:' + p.cdpPort : ''}${p.legacy ? '  [legacy shared]' : (p.mediated ? '  [separate tabs, mediated]' : '')}  used by: ${usedBy}  browser: ${b ? b.state : 'not running'}  attached: ${leases.length}${p.proxy ? '  proxy: ' + p.proxy : ''}`);
     }
     console.log(`(${r.cap.used}/${r.cap.cap} browsers running; * = my default, + = attached${r.floor && !r.floor.sharedProfiles ? '; shared profiles need the browser CLI ' + r.floor.floor + ' or newer — ' + (r.floor.installed || 'none') + ' is installed, so your tab is not pinned on a shared profile' : ''})`);

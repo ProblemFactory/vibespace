@@ -35,9 +35,23 @@
  *     NAME below the 0.37.0 floor — D7's opt-in; frames of a logged-in profile
  *     are a secret with a storage bill).
  *
- * RETENTION: an hourly sweep (and one at boot) applies the PURE plan — 7 days
- * or 200 MB per profile for traces AND recordings — and logs what it removed
- * and why. HOUSEKEEPING (§8 step 3, D8): sizes are measured with `du -sb` in a
+ * BROWSER SESSIONS (the owner, 2026-09-27): the same lease seam opens and
+ * closes a SESSION per (conversation's browser key, trace scope) — a `start`
+ * marker when the lease is granted / the browser is joined or launched, an
+ * `end` marker when the lease is released (detach, lease dropped, a stop by a
+ * person, a backend switch; an IDLE stop is not an end — src/browser-sessions.js
+ * `stopEndsSession`) — appended to `data/browser-trace/<scope>/sessions.ndjson`;
+ * every entry of the run carries the session id (`browserSession`), an action
+ * with no open session opens one. A restart re-opens a session whose lease came
+ * back, else writes its end with reason `restart`. `onSession(marker)` (the
+ * wiring) puts the chat card into the live conversation; every marker is
+ * broadcast `browser-sessions-updated`.
+ * RETENTION BY SIZE ONLY: an hourly sweep (and one at boot) applies the PURE
+ * `traceSizePlan` — over the per-scope limit (setting
+ * `browser.traceBytesPerProfile`, default 1 GiB) the oldest sessions' FRAMES go
+ * first, every action list stays (its entry is stamped `framesRemoved`) — and the
+ * recordings their own 7 d / 200 MB bound (src/browser-recording-retention.js);
+ * it logs what it removed and why. HOUSEKEEPING (§8 step 3, D8): sizes are measured with `du -sb` in a
  * child (never a sync walk on the loop — 98 GB live under ~/.agent-browser on
  * the design's machine), cached; orphans are directories carrying a Chromium
  * marker that no record names; `forget` RENAMES the directory beside itself
@@ -51,6 +65,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const T = require('../browser-trace.js');
+const BS = require('../browser-sessions.js'); // 2026-09-27: browser SESSIONS (markers, pairing, the chat cards) — PURE
+const RR = require('../browser-recording-retention.js'); // the video recordings keep their own 7 d / 200 MB bound
 const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): what was IN FLIGHT at a takeover is read off this recorder's ring
 const B = require('../browser-profiles.js');
 const S = require('../browser-stream.js');
@@ -72,7 +88,9 @@ function writeJsonAtomic(file, obj) {
 const SCOPE_RE = /^(bp-[0-9a-f]{8}|ephemeral)$/;
 
 function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null, serverSetting = () => undefined, broadcast = null, log = console, now = Date.now,
-  execFileImpl = execFile, sweepEveryMs = SWEEP_EVERY_MS, runtime = null } = {}) {
+  execFileImpl = execFile, sweepEveryMs = SWEEP_EVERY_MS, runtime = null,
+  // 2026-09-27: every session marker, as it is written — the wiring puts the chat card into the live conversation
+  onSession = null } = {}) {
   if (!dataDir) throw new Error('browser-trace: dataDir is required');
   const traceRoot = path.join(dataDir, T.TRACE_DIR);
   const recRoot = path.join(dataDir, T.RECORDING_DIR);
@@ -81,12 +99,15 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   const rt = () => runtime || (keeper && keeper._runtime) || null;
   const setting = (k, d) => { try { const v = serverSetting(k); return v === undefined || v === null || v === '' ? d : v; } catch { return d; } };
   const enabled = () => setting('browser.actionTrace', true) !== false && setting('browser.actionTrace', true) !== 'false';
+  /** The per-scope record limit in bytes (setting MB → bytes, default 1 GiB, floor 64 MB). */
+  const bytesLimit = () => T.traceBytesLimit(setting(T.TRACE_BYTES_SETTING, undefined));
 
   // ── state ──
   const taps = new Map();        // key → tap state
   const indexes = new Map();     // scope → entries[] (loaded lazily)
   const byId = new Map();        // entry id → { scope, entry }
   const recordings = new Map();  // `${profileId}|${browserKey}` → { profileId, browserKey, sessionId, file, since }
+  const recStarting = new Map(); // lane live-input: the same key → the ONE start in flight (single flight)
   const recordingRefusals = new Map(); // profileId → { code, error, at }
   const sizeCache = new Map();   // dir → { bytes, at }
   let forgotten = null;
@@ -98,6 +119,11 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   // VERIFY r2 L5: tap key → the failure (its armFailedAt) already SAID to the clients — a verb inside the backoff records
   // nothing, and that is said ONCE per failure (typed), never an unexplained empty Browser actions row
   const armFailSaid = new Map();
+  // 2026-09-27 BROWSER SESSIONS: scope → markers (loaded lazily from sessions.ndjson, appended in memory), and the OPEN
+  // session per (browser key, scope) — loaded from disk once (a start with no end) before the first event decides anything
+  const markersBy = new Map();
+  const openSessions = new Map();
+  let openLoaded = false;
 
   const bc = (m) => { try { broadcast?.(m); } catch (e) { log.warn?.(`[browser-trace] broadcast failed: ${e && e.message}`); } };
   /** VERIFY r2 L5: `browser-trace-status` — `arm_failed` {until = the end of the backoff, the why} when an EPHEMERAL
@@ -143,7 +169,89 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     try { const f = path.join(scopeDir(scope), INDEX_FILE); const tmp = f + '.tmp-' + crypto.randomBytes(4).toString('hex'); fs.writeFileSync(tmp, entries.map((e) => JSON.stringify(e)).join('\n') + (entries.length ? '\n' : ''), { mode: FILE_MODE }); fs.renameSync(tmp, f); }
     catch (e) { log.warn?.(`[browser-trace] index rewrite failed (${scope}): ${e && e.message}`); }
   }
-  const entryBytes = (e) => (e.before ? Number(e.before.bytes) || 0 : 0) + (e.after ? Number(e.after.bytes) || 0 : 0) + 600;
+
+  // ── browser sessions: the markers, the open set, start / end ──
+  function loadMarkers(scope) {
+    if (markersBy.has(scope)) return markersBy.get(scope);
+    const out = [];
+    try {
+      const text = fs.readFileSync(path.join(scopeDir(scope), BS.MARKERS_FILE), 'utf8');
+      for (const line of text.split('\n')) { if (!line.trim()) continue; try { const m = JSON.parse(line); if (BS.isMarker(m)) out.push(m); } catch { /* a torn line is skipped */ } }
+    } catch { /* no markers yet */ }
+    markersBy.set(scope, out);
+    return out;
+  }
+  function appendMarker(scope, m) {
+    loadMarkers(scope).push(m);
+    try { fs.mkdirSync(scopeDir(scope), { recursive: true, mode: 0o700 }); fs.appendFileSync(path.join(scopeDir(scope), BS.MARKERS_FILE), JSON.stringify(m) + '\n', { mode: FILE_MODE }); }
+    catch (e) { log.warn?.(`[browser-trace] session marker not written (${scope}): ${e && e.message}`); }
+  }
+  /** Every start with no end, per (key, scope) — read once, before the first lease event or action decides anything. */
+  function ensureOpenLoaded() {
+    if (openLoaded) return;
+    openLoaded = true;
+    for (const sc of scopes()) {
+      const pending = new Map();
+      for (const m of loadMarkers(sc)) { if (m.phase === 'start') pending.set(m.id, m); else pending.delete(m.id); }
+      if (!pending.size) continue;
+      const counts = new Map(); let last = new Map();
+      for (const e of loadIndex(sc)) if (pending.has(e.browserSession)) { counts.set(e.browserSession, (counts.get(e.browserSession) || 0) + 1); last.set(e.browserSession, Math.max(last.get(e.browserSession) || 0, Number(e.at) || 0)); }
+      for (const m of pending.values()) {
+        const k = BS.sessionKey(m.browserKey, sc);
+        const prev = openSessions.get(k);
+        // two starts for one key on disk (a crash between them): the newer is the one still open; the older is ended
+        if (prev && prev.at > m.at) { endOpen(sc, m, 'restart', counts.get(m.id) || 0, Math.max(m.at, last.get(m.id) || 0)); continue; }
+        if (prev) endOpen(sc, prev, 'restart', prev.count, Math.max(prev.at, prev.lastAt || 0));
+        openSessions.set(k, { ...m, scope: sc, count: counts.get(m.id) || 0, lastAt: last.get(m.id) || 0, fromDisk: true });
+      }
+    }
+  }
+  function sayMarker(m) {
+    bc({ type: 'browser-sessions-updated', browserKey: m.browserKey, profileId: m.profileId || null, marker: m });
+    try { onSession?.(m); } catch (e) { log.warn?.(`[browser-trace] session hook failed: ${e && e.message}`); }
+  }
+  /** Open the session of (browser key, scope) unless one is open; answers it. */
+  function startSession({ browserKey, profileId = null, webuiSessionId = null, why = null, at = null } = {}) {
+    if (!/^bk-[0-9a-f]{8}(\.\d{1,4})?$/.test(String(browserKey || ''))) return null;
+    // the trace switch OFF means nothing is recorded — no new session either (an open one still ends: its end is written)
+    if (!enabled()) return null;
+    ensureOpenLoaded();
+    const scope = profileId || T.EPHEMERAL_SCOPE;
+    const k = BS.sessionKey(browserKey, scope);
+    const had = openSessions.get(k);
+    if (had) { if (webuiSessionId && !had.webuiSessionId) had.webuiSessionId = webuiSessionId; return had; }
+    let label = null; try { label = profileId && keeper && typeof keeper.profile === 'function' ? (keeper.profile(profileId) || {}).label || null : null; } catch { label = null; }
+    const m = BS.markerFor({ phase: 'start', id: BS.mintSessionId(crypto.randomBytes(4).toString('hex')), browserKey, profileId, webuiSessionId, label, at: at || now(), reason: why });
+    appendMarker(scope, m);
+    const o = { ...m, scope, count: 0, lastAt: 0 };
+    openSessions.set(k, o);
+    log.log?.(`[browser-trace] browser session ${m.id} started: ${browserKey} on ${profileId || 'its own browser'}${why ? ` (${why})` : ''}`);
+    sayMarker(m);
+    return o;
+  }
+  function endOpen(scope, o, reason, count, at) {
+    const m = BS.markerFor({ phase: 'end', id: o.id, browserKey: o.browserKey, profileId: o.profileId || null, webuiSessionId: o.webuiSessionId || null, label: o.label || null, at, count, durationMs: Math.max(0, at - o.at), reason });
+    appendMarker(scope, m);
+    log.log?.(`[browser-trace] browser session ${o.id} ended (${reason}): ${o.browserKey} on ${o.profileId || 'its own browser'}, ${count} action(s)`);
+    sayMarker(m);
+    return m;
+  }
+  /** Close the open session of (browser key, scope) — `reason` ∈ BS.END_REASONS. */
+  function endSession({ browserKey, profileId = null, reason = 'stopped', at = null } = {}) {
+    ensureOpenLoaded();
+    const scope = profileId || T.EPHEMERAL_SCOPE;
+    const k = BS.sessionKey(browserKey, scope);
+    const o = openSessions.get(k);
+    if (!o) return null;
+    openSessions.delete(k);
+    return endOpen(scope, o, reason, o.count, at || now());
+  }
+  /** The open session an entry of this tap belongs to — an action with none opens one (it is its own session). */
+  function sessionForTap(tp) {
+    const bk = tp.browserKey || tp.wantKey || null;
+    if (!bk) return null;
+    return startSession({ browserKey: bk, profileId: tp.profileId || null, webuiSessionId: tp.sessionId || null, why: 'action' });
+  }
 
   // ── the tap listener ──
   function tapState(key, { sessionId, profileId, browserKey, target }) {
@@ -231,12 +339,14 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     const before = writeFrame(p.before, 'before');
     const after = p.afterSame && p.after === p.before ? (before ? { ...before, file: before.file } : null) : writeFrame(p.after, 'after');
     const position = T.positionOf({ kind: p.kind, params: p.command.params, box: p.box, boxWhy: p.boxWhy });
-    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null });
+    const bs = sessionForTap(tp); // 2026-09-27: the browser session this action belongs to (an action with none opens one)
+    const entry = T.entryFor({ id, at: p.at, sessionId: tp.sessionId, browserKey: tp.browserKey, profileId: tp.profileId, browserSession: bs ? bs.id : null, command: p.command, result: p.result, position, before, after, afterSame: p.afterSame, url: tp.lastUrl || p.url || null });
+    if (bs) { bs.count++; bs.lastAt = Math.max(bs.lastAt || 0, entry.at); }
     try { fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify(entry), { mode: FILE_MODE }); } catch (e) { log.warn?.(`[browser-trace] entry write failed: ${e && e.message}`); }
     appendIndex(scope, entry);
     tp.entries++;
     if (!tp.childKey) { try { bridge?.broadcastTo?.(tp.sessionId, tp.profileId, { type: 'trace', entry }); } catch { /* optional */ } } // a sub-agent's browser has no live view of its own
-    bc({ type: 'browser-trace-appended', sessionId: tp.sessionId, profileId: tp.profileId, browserKey: tp.browserKey, entry: { id: entry.id, at: entry.at, action: entry.action, kind: entry.kind, text: entry.text, ok: entry.ok, scope } });
+    bc({ type: 'browser-trace-appended', sessionId: tp.sessionId, profileId: tp.profileId, browserKey: tp.browserKey, entry: { id: entry.id, at: entry.at, action: entry.action, kind: entry.kind, text: entry.text, ok: entry.ok, scope, browserSession: entry.browserSession } });
   }
 
   // ── arming ──
@@ -331,8 +441,30 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   }
   /** Every event answers a promise when it ARMS a tap — the keeper holds the
    *  verb that caused it until the tap is connected (bounded, lane H). */
+  /** 2026-09-27: the SESSION half of a lease event — a grant / a launch / a join opens (per holder), a release closes
+   *  (after the taps finalized what was in flight, so the last actions carry the session they happened in); an IDLE
+   *  stop closes nothing. Sessions are recorded whether or not the trace is on (they are small, and say what ran). */
+  function sessionsOnEvent(ev) {
+    const reason = BS.endReasonFor(ev);
+    if (ev.ephemeral) {
+      if (!ev.browserKey) return;
+      if (ev.kind === 'browser-ready' || ev.kind === 'verb') startSession({ browserKey: ev.browserKey, profileId: null, webuiSessionId: ev.sessionId || null, why: ev.kind === 'verb' ? 'verb' : 'launch' });
+      else if (reason) endSession({ browserKey: ev.browserKey, profileId: null, reason });
+      return;
+    }
+    if (!ev.profileId) return;
+    if (ev.kind === 'attach') startSession({ browserKey: ev.browserKey, profileId: ev.profileId, webuiSessionId: ev.sessionId || null, why: 'attach' });
+    else if (ev.kind === 'browser-ready') { for (const l of keeper ? keeper.leasesOn(ev.profileId) : []) startSession({ browserKey: l.browserKey, profileId: ev.profileId, webuiSessionId: l.sessionId || null, why: 'launch' }); }
+    else if ((ev.kind === 'detach' || ev.kind === 'lease-dropped') && reason) endSession({ browserKey: ev.browserKey, profileId: ev.profileId, reason });
+    else if (ev.kind === 'browser-stopped' && reason) { ensureOpenLoaded(); for (const o of [...openSessions.values()]) if (o.profileId === ev.profileId) endSession({ browserKey: o.browserKey, profileId: ev.profileId, reason }); }
+  }
   function onLeaseEvent(ev) {
     if (!ev) return null;
+    const out = leaseTaps(ev);
+    try { sessionsOnEvent(ev); } catch (e) { log.warn?.(`[browser-trace] session bookkeeping failed on ${ev.kind}: ${e && e.message}`); }
+    return out;
+  }
+  function leaseTaps(ev) {
     if (ev.ephemeral) {
       if (ev.kind === 'browser-ready') return armEphemeral(ev);
       if (ev.kind === 'verb') return armOnVerb(ev);
@@ -357,21 +489,38 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     if (!rec || rec.state !== 'ready') return { ok: false, code: 'not-live', error: 'no live browser' };
     const key = `${profileId}|${browserKey}`;
     if (recordings.has(key)) return { ok: true, already: true, ...recordings.get(key) };
+    // lane live-input (the owner's journal: "recording … → …132332.webm" then, 106 ms later, "record start failed … 132438.webm"):
+    // ONE start per recording at a time — the `attach` every agent command emits and the panel's record-on fan-out raced
+    // through the awaits below. A second ask while one is starting answers with THAT start (never a second `record start`).
+    if (recStarting.has(key)) return recStarting.get(key).then((x) => (x && x.ok ? { ...x, already: true } : x));
+    const run = startRecording(profileId, browserKey, sessionId, key).finally(() => { if (recStarting.get(key) === run) recStarting.delete(key); });
+    recStarting.set(key, run);
+    return run;
+  }
+  async function startRecording(profileId, browserKey, sessionId, key) {
+    const refuse = (code, error) => {
+      // a refusal is recorded only when it is REAL: this recording is not running (a start another ask won cannot fail it)
+      if (!recordings.has(key)) { recordingRefusals.set(profileId, { code, error, at: now() }); try { keeper.list && bc({ type: 'browser-profiles-updated', ...keeper.list() }); } catch { /* */ } }
+      return { ok: false, code, error };
+    };
     const r = rt();
     if (!r) return { ok: false, code: 'unavailable', error: 'no runtime' };
     const rel = T.recordingFileFor({ profileId, sessionId: sessionId || browserKey, at: now() });
     const file = path.join(recRoot, rel);
-    try { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); } catch (e) { return { ok: false, code: 'dir_unwritable', error: e.message }; }
+    try { fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); } catch (e) { return refuse('dir_unwritable', e.message); }
     // naive study 2: under the lease's session over the keeper browser's CDP url — never the profile directory
     const o = typeof keeper.leaseCliOpts === 'function' ? await keeper.leaseCliOpts(profileId, browserKey) : null;
-    if (!o) { const why = 'the browser answered no CDP url — a screencast cannot join it without starting a second browser'; recordingRefusals.set(profileId, { code: 'browser_no_cdp', error: why, at: now() }); return { ok: false, code: 'browser_no_cdp', error: why }; }
+    if (!o) return refuse('browser_no_cdp', 'the browser answered no CDP url — a screencast cannot join it without starting a second browser');
     const res = await r.exec(B.sessionNameFor(profileId), ['record', 'start', file], { ...o, timeout: 20000 });
-    if (!res.ok) { const why = (res.error || res.stderr || res.stdout || '').trim().slice(0, 300); recordingRefusals.set(profileId, { code: 'record_failed', error: why, at: now() }); log.warn?.(`[browser-trace] record start failed for ${profileId}: ${why}`); return { ok: false, code: 'record_failed', error: why }; }
+    if (!res.ok) { const why = T.cleanRecordError(res.error || res.stderr || res.stdout || ''); log.warn?.(`[browser-trace] record start failed for ${profileId}: ${why}`); return refuse('record_failed', why); }
     const st = { profileId, browserKey, sessionId: sessionId || null, file: rel, since: now() };
     recordings.set(key, st);
     recordingRefusals.delete(profileId);
     log.log?.(`[browser-trace] recording ${profileId} (${browserKey}) → ${rel}`);
     try { keeper.list && bc({ type: 'browser-profiles-updated', ...keeper.list() }); } catch { /* */ }
+    // turned off while it was starting ⇒ stopped at once (the switch's last word wins)
+    const pNow = keeper.profile(profileId);
+    if (pNow && !pNow.record) stopRecording(profileId, browserKey, 'record off (while starting)').catch(() => { });
     return { ok: true, ...st };
   }
   async function stopRecording(profileId, browserKey, why = 'stop') {
@@ -421,6 +570,43 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return hits.length > n ? hits.slice(hits.length - n) : hits;
   }
   function entry(id) { if (!T.isEntryId(id)) return null; if (!byId.has(id)) for (const sc of scopes()) { loadIndex(sc); if (byId.has(id)) break; } const h = byId.get(id); return h ? h.entry : null; }
+  /** 2026-09-27: every scope's sessions (PURE pairing over markers + entries), filtered — newest first. `browserKey`
+   *  = a conversation's own key (its helpers' child keys included), `profileId` = one scope (null = the ephemeral one),
+   *  `sessionId` = a live webui id (matched with the key, a resume churns the id). */
+  function sessions({ browserKey = null, profileId = undefined, sessionId = null } = {}) {
+    ensureOpenLoaded();
+    const names = profileId ? [String(profileId)] : (profileId === null ? [T.EPHEMERAL_SCOPE] : scopes());
+    let out = [];
+    for (const sc of names) {
+      if (!SCOPE_RE.test(sc)) continue;
+      out = out.concat(BS.pairSessions({ markers: loadMarkers(sc), entries: loadIndex(sc), now: now() }).map((x) => ({ ...x, scope: sc })));
+    }
+    if (browserKey || sessionId) {
+      const byKey = browserKey ? new Set(BS.sessionsOfKey(out, browserKey).map((x) => x.id)) : new Set();
+      out = out.filter((x) => byKey.has(x.id) || (sessionId && x.webuiSessionId === sessionId));
+    }
+    return out.sort((a, b) => b.startAt - a.startAt || (b.order || 0) - (a.order || 0));
+  }
+  /** One session's entries, oldest first (its tag, or — an implicit one — the span of its browser). */
+  function sessionEntries(id, { scope = null } = {}) {
+    if (!BS.isSessionId(id)) return [];
+    const names = scope ? [scope] : scopes();
+    for (const sc of names) {
+      if (!SCOPE_RE.test(sc)) continue;
+      const all = loadIndex(sc);
+      const tagged = all.filter((e) => e.browserSession === id);
+      if (tagged.length) return tagged.slice().sort((a, b) => a.at - b.at);
+      const ss = BS.pairSessions({ markers: loadMarkers(sc), entries: all, now: now() });
+      const s = ss.find((x) => x.id === id);
+      if (s) return all.filter((e) => BS.sessionOfEntry(e, ss) === id).sort((a, b) => a.at - b.at);
+    }
+    return [];
+  }
+  /** The chat cards of ONE conversation (its browser key): start + end per session, stable ids, oldest first. */
+  function chatCardsFor(browserKey) {
+    if (!B.isBrowserKey(browserKey)) return [];
+    try { return BS.chatCardsFor(sessions({ browserKey }), browserKey, { limit: bytesLimit() }); } catch (e) { log.warn?.(`[browser-trace] chat cards for ${browserKey} not derived: ${e && e.message}`); return []; }
+  }
   function framePath(id, which) {
     const e = entry(id);
     if (!e) return null;
@@ -429,35 +615,55 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     return path.join(scopeDir(e.scope || e.profileId || T.EPHEMERAL_SCOPE), f.file);
   }
 
-  // ── retention ──
+  // ── retention: BY SIZE ONLY (the owner, 2026-09-27) ──
+  /** The plan's input for one scope: its sessions, each with its entries' frame and list bytes. */
+  function scopeForPlan(sc) {
+    const entries = loadIndex(sc);
+    const ss = BS.pairSessions({ markers: loadMarkers(sc), entries, now: now() });
+    const byS = new Map(ss.map((x) => [x.id, { id: x.id, startAt: x.startAt, open: x.open, entries: [] }]));
+    const loose = { id: null, startAt: 0, open: false, entries: [] };
+    for (const e of entries) { const sid = BS.sessionOfEntry(e, ss); (byS.get(sid) || loose).entries.push({ id: e.id, at: e.at, frameBytes: T.entryFrameBytes(e), listBytes: T.entryListBytes(e) }); }
+    return { key: sc, sessions: [...byS.values(), ...(loose.entries.length ? [loose] : [])] };
+  }
   function sweep() {
     const t = now();
-    const groups = scopes().map((sc) => ({ key: sc, entries: loadIndex(sc).map((e) => ({ id: e.id, at: e.at, bytes: entryBytes(e) })) }));
-    const plan = T.traceRetentionPlan({ groups, now: t });
-    let removedFiles = 0;
-    for (const sc of new Set(plan.remove.map((r) => r.key))) {
-      const gone = new Set(plan.remove.filter((r) => r.key === sc).map((r) => r.id));
-      const kept = [];
-      for (const e of loadIndex(sc)) {
-        if (!gone.has(e.id)) { kept.push(e); continue; }
-        byId.delete(e.id);
-        for (const f of [`${e.id}.json`, e.before && e.before.file, e.after && e.after.file]) { if (!f) continue; try { fs.unlinkSync(path.join(scopeDir(sc), f)); removedFiles++; } catch { /* gone already */ } }
+    const limit = bytesLimit();
+    const plan = T.traceSizePlan({ scopes: scopes().map(scopeForPlan), bytesPerScope: limit });
+    for (const sc of new Set(plan.removeFrames.map((r) => r.key))) {
+      const gone = new Map(plan.removeFrames.filter((r) => r.key === sc).map((r) => [r.id, r]));
+      const list = loadIndex(sc);
+      for (const e of list) {
+        const r = gone.get(e.id);
+        if (!r) continue;
+        const files = new Set([e.before && e.before.file, e.after && e.after.file].filter(Boolean));
+        for (const f of files) { try { fs.unlinkSync(path.join(scopeDir(sc), f)); } catch { /* gone already */ } }
+        // the ACTION LIST stays: the entry keeps everything but its pictures, and says why they went
+        e.before = null; e.after = null;
+        e.framesRemoved = { at: t, why: 'size', limit };
+        try { fs.writeFileSync(path.join(scopeDir(sc), `${e.id}.json`), JSON.stringify(e), { mode: FILE_MODE }); } catch { /* the index line is the record */ }
       }
-      rewriteIndex(sc, kept);
+      rewriteIndex(sc, list);
     }
-    // recordings: the same rule per profile (age, then size) over the files themselves
+    // recordings: their own bound, per profile (src/browser-recording-retention.js), over the files themselves
     const recRemoved = [];
     let recDirs = [];
     try { recDirs = fs.readdirSync(recRoot).filter((n) => B.isProfileId(n)); } catch { recDirs = []; }
     for (const pid of recDirs) {
       const files = recordingsOf(pid).filter((f) => !f.live).map((f) => ({ id: f.file, at: f.mtime, bytes: f.bytes }));
-      const rp = T.traceRetentionPlan({ groups: [{ key: pid, entries: files }], now: t });
+      const rp = RR.recordingRetentionPlan({ groups: [{ key: pid, entries: files }], now: t });
       for (const r of rp.remove) { try { fs.unlinkSync(path.join(recRoot, pid, r.id)); recRemoved.push({ profileId: pid, file: r.id, why: r.why, bytes: r.bytes }); } catch { /* */ } }
     }
-    lastSweep = { at: t, removed: plan.remove.length, bytesRemoved: plan.bytesRemoved, recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((s, r) => s + r.bytes, 0), kept: plan.kept };
-    if (plan.remove.length || recRemoved.length) log.log?.(`[browser-trace] sweep: ${plan.remove.length} trace entr${plan.remove.length === 1 ? 'y' : 'ies'} (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.remove, ...recRemoved].slice(0, 5).map((r) => r.why).join('; ')}${plan.remove.length + recRemoved.length > 5 ? '; …' : ''}`);
+    const framesRemoved = plan.removeFrames.length;
+    lastSweep = { at: t, removed: framesRemoved, framesRemoved, bytesRemoved: plan.bytesRemoved, limit, recordingsRemoved: recRemoved.length, recordingBytesRemoved: recRemoved.reduce((n, r) => n + r.bytes, 0), kept: plan.kept };
+    if (framesRemoved || recRemoved.length) log.log?.(`[browser-trace] sweep: the frames of ${framesRemoved} action(s) (${Math.round(plan.bytesRemoved / 1024)} KB) + ${recRemoved.length} recording(s) removed — ${[...plan.removeFrames, ...recRemoved].slice(0, 3).map((r) => r.why).join('; ')}${framesRemoved + recRemoved.length > 3 ? '; …' : ''} (every action list kept)`);
     bc({ type: 'browser-housekeeping-updated', sweep: lastSweep });
     return { ...lastSweep, plan, recordings: recRemoved };
+  }
+  /** What one scope holds now against its limit (the panel's `{used} of {size}`). */
+  function usageOf(sc) {
+    let frames = 0, lists = 0;
+    for (const e of loadIndex(sc)) { frames += T.entryFrameBytes(e); lists += T.entryListBytes(e); }
+    return { used: frames + lists, frameBytes: frames, listBytes: lists, limit: bytesLimit() };
   }
 
   // ── sizes (a child process, cached) ──
@@ -574,19 +780,19 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
     for (const p of scope) if (p.dir) dirFacts[p.id] = { bytes: sizes[p.dir] ?? null, mtime: dirMtime(p.dir) };
     const rows = T.housekeepingVerdict({ profiles: reg.profiles, leases: reg.leases, browsers: reg.browsers, dirFacts, now: now() });
     for (const r of rows) {
-      r.trace = T.scopeDigest(loadIndex(r.id));
+      r.trace = { ...T.scopeDigest(loadIndex(r.id)), ...usageOf(r.id) };
       r.recordings = recordingsOf(r.id);
       r.recordingBytes = r.recordings.reduce((s, f) => s + f.bytes, 0);
       r.recording = [...recordings.values()].find((x) => x.profileId === r.id) || null;
       r.recordingRefused = recordingRefusals.get(r.id) || null;
       r.usage = keeper && typeof keeper.usageOf === 'function' ? keeper.usageOf(r.id) : null; // 2026-09-25: the live resource row (report only — memBytes + memMetric, `over`)
     }
-    const eph = { scope: T.EPHEMERAL_SCOPE, trace: T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)) };
+    const eph = { scope: T.EPHEMERAL_SCOPE, trace: { ...T.scopeDigest(loadIndex(T.EPHEMERAL_SCOPE)), ...usageOf(T.EPHEMERAL_SCOPE) } };
     const o = await orphans();
     // takeover C3: every managed ephemeral browser — the record, whose conversation, its state (the panel's Stop is the profile stop route)
     const ephemeralBrowsers = keeper && typeof keeper.ephemerals === 'function' ? keeper.ephemerals() : [];
     return { profiles: rows, ephemeral: eph, ephemeralBrowsers, orphans: o.orphans, orphansBase: o.base, orphansWhy: o.why || null, forgotten: loadForgotten().slice().reverse(), sweep: lastSweep,
-      limits: { retentionMs: T.TRACE_RETENTION_MS, bytesPerProfile: T.TRACE_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR },
+      limits: { bytesPerProfile: bytesLimit(), bytesDefault: T.TRACE_BYTES_PER_PROFILE, bytesFloor: T.TRACE_BYTES_FLOOR, recordingRetentionMs: RR.RECORDING_RETENTION_MS, recordingBytesPerProfile: RR.RECORDING_BYTES_PER_PROFILE, staleDays: T.STALE_PROFILE_DAYS, graceMs: T.INFLIGHT_GRACE_MS, recordingFloor: T.RECORDING_FLOOR },
       traceOn: enabled(), taps: [...taps.values()].map((tp) => ({ sessionId: tp.sessionId, profileId: tp.profileId, entries: tp.entries, pending: tp.pending.size })), version: keeper && keeper._facts ? keeper._facts.lastVersion() ?? null : null };
   }
 
@@ -607,9 +813,25 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
         const r = await watch({ sessionId: l.sessionId, profileId: l.profileId }); if (r.ok) armed++; maybeStartRecording(l.profileId, l.browserKey, l.sessionId).catch(() => { });
       }
     }
+    // 2026-09-27: a session left open by the last run is RE-OPENED when its lease came back (the keeper re-adopted it),
+    // else it ENDS with reason `restart` at its last known moment (its last action, else its start)
+    let reopened = 0, endedAtBoot = 0;
+    try {
+      ensureOpenLoaded();
+      const reg = keeper ? keeper._reg() : { leases: [] };
+      for (const [k, o] of [...openSessions.entries()]) {
+        if (!o.fromDisk) continue;
+        const held = (reg.leases || []).some((l) => l.browserKey === o.browserKey && (o.profileId ? l.profileId === o.profileId : (typeof keeper.isEphemeral === 'function' && keeper.isEphemeral(l.profileId))));
+        if (held) { o.fromDisk = false; reopened++; continue; }
+        openSessions.delete(k);
+        endOpen(o.scope, o, 'restart', o.count, Math.max(o.at, o.lastAt || 0));
+        endedAtBoot++;
+      }
+    } catch (e) { log.warn?.(`[browser-trace] boot session check failed: ${e && e.message}`); }
+    if (reopened || endedAtBoot) log.log?.(`[browser-trace] boot: ${reopened} browser session(s) re-opened (their lease came back), ${endedAtBoot} ended (restart)`);
     let sw = null; try { sw = sweep(); } catch (e) { log.warn?.(`[browser-trace] boot sweep failed: ${e && e.message}`); }
     if (!timer && sweepEveryMs > 0) { timer = setInterval(() => { try { sweep(); } catch (e) { log.warn?.(`[browser-trace] sweep failed: ${e && e.message}`); } }, sweepEveryMs); if (timer.unref) timer.unref(); }
-    return { armed, sweep: sw ? { removed: sw.removed, recordingsRemoved: sw.recordingsRemoved } : null };
+    return { armed, reopened, endedAtBoot, sweep: sw ? { removed: sw.removed, recordingsRemoved: sw.recordingsRemoved } : null };
   }
   /**
    * WHAT WAS IN FLIGHT AT A TAKEOVER (the owner's ruling, 2026-09-27): the keeper asks at the instant; the tap of that
@@ -631,9 +853,9 @@ function create({ dataDir, homeDir = os.homedir(), keeper = null, bridge = null,
   function shutdown() { if (timer) clearInterval(timer); timer = null; for (const tp of [...taps.values()]) unwatch({ sessionId: tp.sessionId, profileId: tp.profileId }); try { unsubLease?.(); } catch { /* */ } unsubLease = null; }
 
   return {
-    enabled, watch, unwatch, list, entry, framePath, sweep, housekeeping, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
+    enabled, watch, unwatch, list, entry, framePath, sweep, housekeeping, sessions, sessionEntries, chatCardsFor, startSession, endSession, usageOf, bytesLimit, orphans, forgetProfile, forgetOrphan, deleteForgotten, adoptOrphan,
     maybeStartRecording, stopRecording, recordingsOf, recordingPath, digest, boot, install, shutdown, inFlightFor,
-    traceRoot, recRoot, forgottenFile, abBase, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep,
+    traceRoot, recRoot, forgottenFile, abBase, _taps: taps, _recordings: recordings, _onRecord: onRecord, _lastSweep: () => lastSweep, _openSessions: openSessions,
   };
 }
 

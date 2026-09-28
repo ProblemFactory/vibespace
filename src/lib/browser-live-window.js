@@ -44,7 +44,9 @@
 //     focusin listeners bound to the window's AbortController route every key
 //     to the page (PURE `keyRoute`: only `RESERVED_CHORDS` stay the app's —
 //     Ctrl+\ and Ctrl+Alt+←/→; Esc goes to the page, handing back is the
-//     button), a paste arrives as its TEXT (`textRecords`), an IME composes in
+//     button), a paste arrives as its TEXT (lane live-input: ONE `input_text`
+//     record — the bridge cuts it into the ≤ 3-unit `char` records Chromium
+//     accepts, in order with the keys), an IME composes in
 //     the view's own hidden sink and is forwarded at `compositionend`, and an
 //     editable element elsewhere that takes focus is reclaimed at once
 //     (`focusVerdict`). The claim lives in src/lib/keyboard-owner.js: ChatInput.focus
@@ -53,6 +55,11 @@
 //     open + on screen + open), re-asked on every event — a dropped socket,
 //     a desktop switch, a handback release it without bookkeeping. The bar
 //     says "Typing goes to the browser" and the picture wears a focus ring.
+//     lane live-input (2026-09-27): a Mac viewer's ⌘ chords are translated for a
+//     non-Mac browser (PURE `macChord`), a keyup reaches the page only after its
+//     keydown did, the sink takes the focus back after a click elsewhere in the
+//     view, a drag and a double click reach the page, and the page's own copy
+//     comes back to the viewer's clipboard (`onPageCopied`, picture-shell's rule).
 //   · INPUT FEEDBACK (lane J r2: a lost input looked like a frozen picture):
 //     every click while driving draws a RIPPLE at the mapped page point (placed
 //     back through deviceToViewport — the ripple lands where the page got the
@@ -105,23 +112,28 @@
 //     refused with a hint.
 // XSS: page titles and URLs are page-controlled and sync to every client —
 // textContent / escHtml only. Theme vars only, SVG icons only.
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
+import { claimWords, backendName, dismissOutcomeWords } from './browser-switcher-model.js'; // the rebuilt switch dialog: the claim's words, a backend's name, the Dismiss answer (PURE)
+import { btn as textBtn } from './channel-chrome.js'; // the house text button (mounts-btn): the blocked banner's controls say what they do
 import { escHtml, fetchJson, showToast, showContextMenu, createPopover, COUNTER_ZOOM } from './utils.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
 import { stripOrder, stripFold, capChip, shortLabel, stoppableRows, rowStateWords } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE)
 import { UI_ICONS } from './icons.js';
-import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor } from '../browser-stream.js';
+import { STREAM_PATH, MAX_FPS_DEFAULT, EPHEMERAL_REF, pointerToDevice, deviceToViewport, drawnRect, liveTitle, mouseRecord, wheelRecord, keyRecord, touchRecord, modifiersOf, liveViewPlan, viewTargetRunning, browserListFor, clickCountNext } from '../browser-stream.js';
 import { frameGeometry, toLocal } from '../browser-stream.js'; // lane J: the picture vs the page — two sizes, one rect basis
-import { LIVE_ALIGN, textRecords } from '../browser-stream.js'; // lane J r2: the picture's placement (top) + text a viewer hands the page
+import { LIVE_ALIGN, inputTextRecord, textReceiptMs } from '../browser-stream.js'; // lane J r2: the picture's placement (top); lane live-input: ONE `input_text` record per paste / IME commit (the bridge cuts it into the chunks the browser accepts)
 import { agentCursorFromCommand, modeBadge as modeBadgeText } from '../browser-takeover.js';
 import { keyboardOwnership, keyRoute, focusVerdict } from '../browser-takeover.js'; // lane J r2: the keyboard while you drive (PURE tables)
+import { macChord, isMacPlatform, copyChordOf, copyWriteVerdict } from '../browser-takeover.js'; // lane live-input: a Mac viewer's ⌘ chords on a non-Mac browser, the copy-out chords (PURE tables); verify: a copy is written by itself ONLY when it answers the user's own chord
+import { copyViaSelection, pageIsSecure, GESTURE_WINDOW_MS } from './picture-shell.js'; // lane live-input: copy OUT = the desktop view's way (the API, the gesture copy on plain http, else the chip)
+import { recordingChipWords } from '../browser-trace.js'; // lane live-input: the recording chip's three states in words a person can act on
 import { claimKeyboard, releaseKeyboard, keyboardOwner, keyboardOwned } from './keyboard-owner.js'; // lane J r2: THE one keyboard owner of this client
 import { createTraceTimeline } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the Actions pane
 import { shortModeBadge } from './live-bar-layout.js'; // lane I: the bar's never-fold badge words (the full sentence is its tooltip)
 import { createBarFold } from './bar-fold.js'; // lane I: the bar folds into ⋯ by priority — never wraps, never overlaps
-import { fitChipState, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
+import { fitChipState, fitChipWords, pictureState, zoomAt, pinchStep, panStep, zoomClamp, isZoomed, transformCss, FIT_REPORT_MS, ZOOM_DOUBLE_TAP, ZOOM_NONE } from '../browser-fit.js'; // lane S4: the page is the pane's size, the picture clocks, the phone's pinch (PURE)
 import { browserFactWords, liveFollowPlan } from '../browser-fact.js'; // lane S2: THE browser fact — the view's names, and a view FOLLOWS its session's browser
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 
@@ -131,20 +143,37 @@ const HIDDEN_FPS = 2;
 const HINT_EVERY_MS = 8000;
 /** Pointer moves are forwarded at most this often while the user drives. */
 const MOVE_EVERY_MS = 33;
+/** lane live-input: after a copy chord, the page's copy is expected this long; none ⇒ the echo says nothing was copied. */
+const COPY_ANSWER_MS = 1500;
+/** lane live-input: WHERE this view is, for the fit chip's words — `page` = this loaded page, `device` = this browser on
+ *  this device (localStorage; unreadable storage ⇒ no device tag and the chip says "another window", never a guess). */
+const PAGE_TAG = 'p' + Math.random().toString(36).slice(2, 12);
+function placeTags() {
+  let device = null;
+  try { device = localStorage.getItem('vibespace.deviceTag'); if (!device || !/^[A-Za-z0-9_-]{4,40}$/.test(device)) { device = 'd' + Math.random().toString(36).slice(2, 12); localStorage.setItem('vibespace.deviceTag', device); } } catch { device = null; }
+  return { page: PAGE_TAG, device };
+}
+/** lane live-input: is the VIEWER a Mac (its ⌘ chords are translated for a browser that is not)? */
+const viewerIsMac = () => { try { return isMacPlatform((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent); } catch { return false; } };
 /** The URL line's minimum width in the bar (the ONE flexible item) — public/style.css `.browser-live-bar > .browser-live-url` min-width says the same (test-live-bar-layout pins the pair). */
 export const URL_MIN_PX = 120;
 /** THE BAR'S FOLD PRIORITIES (lane I; src/lib/live-bar-layout.js): 0 never folds — the ONE mode toggle (Take over ↔
  *  Hand back) and Reconnect (shown only when the stream failed: then it is the one act that matters); 1 the mode badge
  *  (the LAST to go — lane I verify r1: a never-fold badge left a split pane's bar wider than the pane, the toggle cut
  *  and the ⋯ clipped out; folded, its sentence is the ⋯'s first row and the ⋯ wears its colour, and the toggle's own
- *  words still say who drives); 2 the URL + its web-view hand-off; 3 bind, viewers, recording; 4 the backend chip;
+ *  words still say who drives); 2 the URL + its web-view hand-off; 3 bind, viewers, recording; 4 the browser's name (the
+ *  button when another browser is available, else the plain label — the rebuilt switch dialog, 2026-09-27);
  *  5 Tabs / Console / Actions (first to go — their counts ride the ⋯ rows). Equal priorities fold right-to-left. */
 /*  2.369.180 (lanes I + J integrated): lane J r2's two driving-only items fold like the rest — the "Typing goes to
    *  the browser" chip with bind/viewers/recording (3; folded, its words are an info row of the ⋯), the "input sent · n"
    *  echo first (5; a transient count — the page itself shows what the input did). */
 /*  lane S4: the FIT chip (shown only when the page is NOT this pane's size — the agent chose it, another pane rules …)
    *  folds with bind/viewers/recording (3); folded, its words and its act are a ⋯ row. */
-export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, badge: 1, url: 2, open: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, fit: 3, backend: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
+/*  lane live-input: the FIT chip explains the picture on screen and offers the one act that changes it ("Fit here"),
+   *  and the COPY chip ("Copied in the page — click to copy") is shown only while a copy waits for the user's click —
+   *  both fold with the URL (2), AFTER bind/viewers/recording (the owner's narrow window folded the chip away first);
+   *  folded, each is a ⋯ row with its act. */
+export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, badge: 1, url: 2, open: 2, fit: 2, copy: 2, bind: 3, viewers: 3, rec: 3, kbd: 3, backend: 4, backendLabel: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
 const RIPPLE_MS = 650;
@@ -245,7 +274,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     // MULTIVIEW (design-browser-multiview §2 / D3 / D4): the session's status answer, the strip's rows in THIS
     // window's first-seen order, which tabs are folded, and whether the session itself ended
     status: null, rows: [], order: [], folded: [], sessionEnded: false,
-    running: false, lastCommand: null, reconnects: 0, reconnectTimer: null, lastHintAt: 0, sidePane: null, stopped: false,
+    running: false, lastCommand: null, reconnects: 0, reconnectTimer: null, lastHintAt: 0, sidePane: null, stopped: false, claimOpen: new Set(),
     // P3 (§4.3): the input side — our viewer id, whether WE hold it, the agent cursor, the pending confirmations
     you: null, mine: false, modeSince: 0, modeCause: null, cursor: null, confirmations: new Map(), confirmTimer: null, lastMoveAt: 0, buttonsDown: 0,
     // lane J r2: input feedback + the keyboard — acts sent this takeover, the last ripples, the user's mapped pointer, the echo timer
@@ -255,6 +284,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     zoom: { ...ZOOM_NONE }, touches: new Map(), pinch: null, pan: null, lastTap: null, lastPinchHintAt: 0,
     // lane S2 (naive study 2): THE session's browser fact this view last saw (it FOLLOWS it), the input receipts
     fact: null, followed: 0, receipts: receiptBook(), receiptTimer: null,
+    // lane live-input: the browser's OS (hello), the keys whose keydown went to the page (a keyup is forwarded only for
+    // those — an IME commit's Enter / Space keyup never reaches the page alone), the last copy gesture, the copied text
+    remotePlatform: null, pressed: new Map(), copyAt: 0, copyTimer: null, copied: null, copying: false, place: placeTags(), click: null, heldButton: 0, // copyAt: the user's own copy chord — the ONE moment a delivered copy may be written by itself (verify: a click is no copy gesture)
   };
   const row = () => sessionRow(app, sessionId);
   /** lane S2: THE browser fact of this view's session (active-sessions' `browserFact`, carried onto the merged row). */
@@ -283,15 +315,18 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   openBtn.title = t('Open this URL in a web view');
   const viewersEl = document.createElement('span'); viewersEl.className = 'browser-live-viewers';
   // P5 (D7): the RECORDING indicator reads the profile digest (`recording[profileId]` rides `browser-profiles-updated`); click = the Browser profiles panel where the per-profile opt-in lives
-  const recEl = document.createElement('button'); recEl.className = 'file-tool-btn browser-live-rec'; recEl.textContent = t('not recording');
+  const recEl = document.createElement('button'); recEl.className = 'file-tool-btn browser-live-rec'; recEl.textContent = t('Video off');
   const tabsBtn = document.createElement('button'); tabsBtn.className = 'file-tool-btn browser-live-side-btn'; tabsBtn.dataset.pane = 'tabs';
   const consBtn = document.createElement('button'); consBtn.className = 'file-tool-btn browser-live-side-btn'; consBtn.dataset.pane = 'console';
   // P5 (§4.5 / D35): the ACTIONS pane — the timeline of the pane you are looking at
   const traceBtn = document.createElement('button'); traceBtn.className = 'file-tool-btn browser-live-side-btn'; traceBtn.dataset.pane = 'trace';
   const timeline = createTraceTimeline(app, { sessionId });
   const reBtn = document.createElement('button'); reBtn.className = 'file-tool-btn browser-live-reconnect'; reBtn.textContent = t('Reconnect'); reBtn.style.display = 'none';
-  // P4 (§7.4): the BACKEND CHIP — `chromium 146` / `cloak 146 (free)` from the profile digest; click = the switcher. Hidden for the ephemeral browser (a backend is a property of a PROFILE).
-  const backendBtn = document.createElement('button'); backendBtn.className = 'file-tool-btn browser-live-backend'; backendBtn.style.display = 'none'; backendBtn.title = t('This profile’s backend — click to switch');
+  // P4 (§7.4) → the rebuilt switch dialog (2026-09-27): the profile's BROWSER NAME (`Chromium` / `CloakBrowser`, the digest's
+  // fact in words — never a version or a plan). A BUTTON opening the switch dialog only when another browser is available
+  // for this profile (`app.browserChoicesFor`), else the same words as a plain label; neither for the temporary browser.
+  const backendBtn = document.createElement('button'); backendBtn.className = 'file-tool-btn browser-live-backend'; backendBtn.style.display = 'none'; backendBtn.title = t('Your agent’s browser; click to switch it');
+  const backendLabelEl = document.createElement('span'); backendLabelEl.className = 'browser-live-backend-label browser-chip'; backendLabelEl.style.display = 'none';
   // P7 (§4.6): BIND — snap this pane beside its session's window in ONE tab group, or unbind. ICON-ONLY (lane I): its
   // words carry the session's NAME (unbounded) — they are its accessible name + tooltip and the ⋯ row's label
   const bindBtn = document.createElement('button'); bindBtn.className = 'file-tool-btn browser-live-bind bar-icon-btn'; bindBtn.innerHTML = BIND_SVG;
@@ -306,13 +341,19 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const echoEl = document.createElement('span'); echoEl.className = 'browser-live-echo'; echoEl.style.display = 'none'; echoEl.setAttribute('aria-live', 'polite');
   // lane S4: the FIT chip — the page's size when it is NOT this pane's (words by kind; click = "Fit to this window" when the agent chose it)
   const fitChip = document.createElement('button'); fitChip.className = 'file-tool-btn browser-live-fit'; fitChip.style.display = 'none';
-  bar.append(modeBadge, takeBtn, handBtn, kbdChip, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, backendBtn, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
+  // lane live-input: COPY OUT — shown only when text copied IN the page could not reach your clipboard by itself (plain
+  // http past the key's moment, a refused API): one click copies it (the click is the gesture the browser wants)
+  const copyChip = document.createElement('button'); copyChip.className = 'file-tool-btn browser-live-copy'; copyChip.style.display = 'none';
+  copyChip.textContent = t('Copied in the page — click to copy');
+  copyChip.title = t('Text was copied in the agent’s browser. It goes on your clipboard only by your own copy key, or by this click — click to copy it.');
+  bar.append(modeBadge, takeBtn, handBtn, kbdChip, echoEl, bindBtn, urlEl, openBtn, viewersEl, recEl, fitChip, copyChip, backendBtn, backendLabelEl, tabsBtn, consBtn, traceBtn, reBtn, moreBtn);
   // …and the same act on the TITLE BAR of the standalone window (the design's affordance; hidden with the title bar once grouped)
   const titleBind = document.createElement('button'); titleBind.className = 'win-btn win-bind'; titleBind.innerHTML = BIND_SVG;
   { const controls = winInfo.titleBar?.querySelector('.window-controls'); if (controls) controls.insertBefore(titleBind, controls.firstChild); }
   // P3: the --confirm-actions cards (one row per pending confirmation)
   const confirms = document.createElement('div'); confirms.className = 'browser-live-confirms'; confirms.style.display = 'none';
-  // P4 (§7.4): the agent's `blocked` CLAIMS about this profile — it says WHO claimed it; the one-click "Open with CloakBrowser" is the USER's act (it opens the switcher on the cloak row)
+  // P4 (§7.4): the agent's `blocked` CLAIMS about this profile — it says WHO claimed it (your agent); "Switch to <name>…" is
+  // offered ONLY when another browser is available for the profile (the switch is the USER's act, in the dialog), Dismiss always
   const blockedBar = document.createElement('div'); blockedBar.className = 'browser-live-blocked'; blockedBar.style.display = 'none';
   const body = document.createElement('div'); body.className = 'browser-live-body';
   const canvas = document.createElement('div'); canvas.className = 'browser-live-canvas';
@@ -360,6 +401,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     modeBadge.title = t(fullBadge);
     modeBadge.classList.toggle('stopped', !!st.stopped);
     root.classList.toggle('stopped', !!st.stopped); // naive study 2 (finding 3): the LAST frame stays, greyed — never a blank "new" browser
+    syncPast(); // running again ⇒ the picture takes its place back
     modeBadge.classList.toggle('takeover', taken && st.mine);
     modeBadge.classList.toggle('other', taken && !st.mine);
     moreBtn.dataset.mode = !taken ? 'watch' : st.mine ? 'takeover' : 'other'; // the ⋯ wears the badge's colour while the badge is folded into it (its words change ⇒ the fold re-runs ⇒ renderMore)
@@ -370,8 +412,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     root.classList.toggle('driving', taken && st.mine);
     // lane J r2: entering a takeover of OUR OWN claims the keyboard (a re-claim moves this view to the end — the last
     // takeover on this client wins); leaving it releases, and the sink lets go of focus so nothing is typed into it
-    if (taken && st.mine) { if (!st.claimed) { st.claimed = true; st.sent = 0; claimKeyboard({ id: winInfo.id, owns: ownsKeyboard }); } focusSink(); }
-    else if (st.claimed) { st.claimed = false; releaseKeyboard(winInfo.id); if (document.activeElement === kbd) kbd.blur(); kbd.value = ''; st.youPt = null; }
+    if (taken && st.mine) { if (!st.claimed) { st.claimed = true; st.sent = 0; st.pressed.clear(); claimKeyboard({ id: winInfo.id, owns: ownsKeyboard }); } focusSink(); }
+    else if (st.claimed) { st.claimed = false; st.pressed.clear(); releaseKeyboard(winInfo.id); if (document.activeElement === kbd) kbd.blur(); kbd.value = ''; st.youPt = null; hideCopied(); }
     renderKbd();
     renderCursor();
   };
@@ -404,29 +446,32 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     echoEl.style.display = '';
     echoEl.classList.toggle('error', !ok);
     echoEl.classList.add('fresh');
-    echoEl.textContent = ok ? t('input sent · {n}', { n: st.sent }) : (verbatim ? why : t('not sent — {why}', { why: why || t('no connection') }));
+    echoEl.textContent = ok ? (verbatim && why ? why : t('input sent · {n}', { n: st.sent })) : (verbatim ? why : t('not sent — {why}', { why: why || t('no connection') }));
     if (st.echoTimer) clearTimeout(st.echoTimer);
     st.echoTimer = setTimeout(() => { st.echoTimer = null; echoEl.classList.remove('fresh'); }, ECHO_MS);
   }
   /** Every input record goes through here: `act` = one user act (a press, a key, a paste) counted in the echo.
    *  lane S2: a record that carries a user act asks for a RECEIPT (`rid`) — the bridge answers `input-receipt` from
    *  the browser's own reply (a mediated lease) or the stream's write (a direct one); none in 1.5 s = NOT DELIVERED. */
-  function sendInput(rec, act = false, { receipt = act } = {}) {
+  function sendInput(rec, act = false, { receipt = act, receiptMs = null } = {}) {
     if (!rec) return false;
     const open = !!(st.ws && st.ws.readyState === 1);
-    if (open) { if (receipt) { rec = { ...rec, rid: noteInputSent(st.receipts, Date.now()) }; armReceiptSweep(); } send(rec); }
+    if (open) { if (receipt) { rec = { ...rec, rid: noteInputSent(st.receipts, Date.now(), { ms: receiptMs }) }; armReceiptSweep(); } send(rec); }
     if (act) { if (open) st.sent++; if (!open) echo(false, t('the live view is disconnected')); else if (!st.receipts.failing) echo(true); }
     return open;
   }
   /** lane S2: the words of a failed receipt (the bridge's code, never a raw error first). */
   function receiptWhy(f) {
     const byCode = { no_answer: t('no answer from the browser'), no_reply: t('the browser has not answered it'), not_dispatched: t('the browser was never asked to act on it'), browser_refused: t('the browser refused it'), upstream_gone: t('the browser stream closed'), 'no-upstream': t('the browser stream is not connected'), 'watch-mode': t('you are not driving this browser'), no_grant: t('this conversation no longer holds that browser'),
-      other_tab: t('it reached another tab than the one you are looking at and was refused there'), tab_switched: t('the browser moved to another tab while you were driving — hand back and take over again to drive it') }; // verify r3
-    return (byCode[f && f.code] || t('it was refused')) + (f && f.error && !byCode[f.code] ? ' — ' + String(f.error).slice(0, 160) : '');
+      other_tab: t('it reached another tab than the one you are looking at and was refused there'), tab_switched: t('the browser moved to another tab while you were driving — hand back and take over again to drive it'), // verify r3
+      text_too_long: t('the browser takes at most 3 characters in one key'), too_long: t('it is more text than one paste may carry'), empty: t('there was nothing to type') }; // lane live-input
+    const partial = f && Number(f.landed) > 0 ? ' ' + t('({n} characters reached the page first)', { n: f.landed }) : '';
+    return (byCode[f && f.code] || t('it was refused')) + (f && f.error && !byCode[f.code] ? ' — ' + String(f.error).slice(0, 160) : '') + partial;
   }
   function onReceiptsChanged() {
     const f = st.receipts.failing;
     if (f) echo(false, t('not delivered — {why}', { why: receiptWhy(f) }), { verbatim: true });
+    else if (st.receipts.last && st.receipts.last.ok && st.receipts.last.dropped) echo(true, t('sent — a line break at the very end could not be typed'), { verbatim: true }); // lane live-input: said, never a silent loss
     renderKbd();
   }
   function armReceiptSweep() {
@@ -616,7 +661,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   };
   const stateTitle = (r) => (STATE_WORDS[rowStateWords(r, st.rows)] || STATE_WORDS.released)();
   /** 2.369.183: a browser this view has no frame of is not running (a strip switch, a pop-out) — HOLLOW, the tab's own words. */
-  const hollowFor = (m) => { st.error = m; st.hollow = true; const r = st.rows.find((x) => x.ref === curRef()); setStatus(stateTitle(r || { kind: st.target && st.target.kind, state: 'released' }), { reconnect: false }); };
+  const hollowFor = (m) => { st.error = m; st.hollow = true; const r = st.rows.find((x) => x.ref === curRef()); setStatus(stateTitle(r || { kind: st.target && st.target.kind, state: 'released' }), { reconnect: false }); syncPast(); };
   /** The rows in THIS window's first-seen order (a new browser lands at the tail — nothing shown moves). */
   const computeRows = () => {
     const cur = curRef();
@@ -745,6 +790,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   if (typeof ResizeObserver === 'function') { const ro = new ResizeObserver(() => refold()); ro.observe(strip); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => ro.disconnect()); }
   const renderSide = () => {
     side.style.display = st.sidePane ? '' : 'none';
+    syncPast();
     tabsPane.style.display = st.sidePane === 'tabs' ? '' : 'none';
     consPane.style.display = st.sidePane === 'console' ? '' : 'none';
     tracePane.style.display = st.sidePane === 'trace' ? '' : 'none';
@@ -757,7 +803,21 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const syncTrace = () => {
     const tg = st.target;
     const pid = tg && tg.kind !== 'ephemeral' && tg.profileId ? tg.profileId : null;
-    timeline.load({ profileId: pid }).then(renderTraceBtn).catch(() => renderTraceBtn());
+    timeline.load({ profileId: pid }).then(() => { renderTraceBtn(); maybeShowSessions(); }).catch(() => renderTraceBtn());
+  };
+  /** 2026-09-27: a STOPPED browser's view still has its past — when the browser is not running (stopped, closed, not
+   *  started, released) and the pane has sessions, the Actions pane opens on its Sessions list (each with Replay);
+   *  never over a pane the user chose or closed. */
+  // nothing live to show: stopped / closed / released / not started, or an error before the first frame (the stream
+  // could not be reached) — the past is what this view can offer then
+  function idleNow() { return !!(st.stopped || st.hollow || (st.error && (st.error.browserState === 'not-started' || st.error.code === 'browser_stopped' || (!st.connected && !st.frames)))); }
+  /** A phone looking at the PAST of a browser that is not running: the Sessions list takes the full width and the status
+   *  sits above it (style.css `.side-past`, ≤ 768 px; the naive-user verifier, 2026-09-28). */
+  function syncPast() { root.classList.toggle('side-past', st.sidePane === 'trace' && idleNow()); }
+  const maybeShowSessions = () => {
+    if (st.closed || st.sideUser || st.sidePane) return;
+    if (!idleNow() || !timeline.sessionsCount()) return;
+    st.sidePane = 'trace'; renderSide();
   };
   /** P5 (D7): the recording indicator from the digest — never fetched here. */
   const renderRec = () => {
@@ -766,29 +826,61 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     const rec = pid && d.recording ? d.recording[pid] : null;
     const refused = pid && d.recordingRefused ? d.recordingRefused[pid] : null;
     recEl.classList.toggle('on', !!rec);
-    if (rec) { recEl.textContent = t('recording'); recEl.title = t('Recording to {file} since {time}', { file: String(rec.file || ''), time: new Date(Number(rec.since) || 0).toLocaleTimeString() }); }
-    else if (refused) { recEl.textContent = t('recording refused'); recEl.title = String(refused.error || refused.code || ''); }
-    else { recEl.textContent = t('not recording'); recEl.title = pid ? t('Recording is a per-profile opt-in — turn it on in Agent browser…') : t('An ephemeral browser has no profile to record under'); }
+    // lane live-input: three states in words a person can act on (the owner read "recording refused" + a raw command)
+    const w = recordingChipWords({ recording: rec, refused, hasProfile: !!pid, since: rec ? new Date(Number(rec.since) || 0).toLocaleTimeString() : '' }, { t });
+    recEl.textContent = w.text; recEl.title = w.title; recEl.dataset.state = w.state; recEl.classList.toggle('refused', w.state === 'refused');
   };
   recEl.onclick = () => { const pid = st.target && st.target.profileId ? st.target.profileId : null; if (app.openBrowserProfiles) app.openBrowserProfiles({ focus: pid }); else showToast(t('Agent browser is not available'), { type: 'warn' }); };
-  /** P4 (§7.4): the chip + the blocked-claim banner, both read from the profile digest (never fetched here). */
+  /** P4 (§7.4): the browser's name + the blocked-claim banner, both read from the profile digest (never fetched here). */
   const renderBackend = () => {
     const pid = st.target && st.target.profileId ? st.target.profileId : null;
-    const chip = pid && app.browserChipFor ? app.browserChipFor(pid) : null;
-    backendBtn.style.display = pid ? '' : 'none';
-    backendBtn.textContent = chip || t('backend unknown');
+    const words = pid ? ((app.browserChipFor ? app.browserChipFor(pid) : null) || t('unknown browser')) : '';
+    const choices = pid && app.browserChoicesFor ? app.browserChoicesFor(pid) : [];
+    const asButton = !!pid && choices.length > 0;
+    backendBtn.style.display = asButton ? '' : 'none';
+    backendLabelEl.style.display = pid && !asButton ? '' : 'none';
+    if (backendBtn.textContent !== words) backendBtn.textContent = words;
+    if (backendLabelEl.textContent !== words) backendLabelEl.textContent = words;
     const claims = app.browserBlockedFor ? app.browserBlockedFor({ profileId: pid, sessionId }) : [];
-    blockedBar.replaceChildren();
     blockedBar.style.display = claims.length ? '' : 'none';
+    // rebuilt only when what it says changed — a digest broadcast never re-creates a button under the pointer; an opened
+    // Details fold stays open across a rebuild (st.claimOpen, by the claim's id)
+    const sig = JSON.stringify([pid, choices[0] || null, claims.map((b) => [b.id, b.host, b.why, b.evidence || ''])]);
+    if (blockedBar.dataset.sig === sig) return;
+    blockedBar.dataset.sig = sig;
+    blockedBar.replaceChildren();
+    for (const id of [...st.claimOpen]) if (!claims.some((b) => b.id === id)) st.claimOpen.delete(id);
     for (const b of claims) {
-      const row = document.createElement('div'); row.className = 'browser-live-blocked-row';
+      const w = claimWords(b, t);
+      const row = document.createElement('div'); row.className = 'browser-live-blocked-row'; row.dataset.claim = String(b.id || '');
       const text = document.createElement('span'); text.className = 'browser-live-blocked-text';
-      text.textContent = t('The agent says this page is blocked: {host}', { host: String(b.host || '') }) + (b.why ? ' (' + String(b.why) + ')' : '') + ' — ' + t('it suggests tier {tier}', { tier: b.tier });
-      const open = document.createElement('button'); open.className = 'file-tool-btn'; open.textContent = t('Open with CloakBrowser');
-      open.disabled = !pid; open.onclick = () => app.openBrowserSwitcher?.({ profileId: pid, sessionId, preselect: 'cloak' });
-      const dismiss = document.createElement('button'); dismiss.className = 'file-tool-btn'; dismiss.textContent = t('Dismiss');
-      dismiss.onclick = async () => { const r = await fetchJson(`/api/browser/blocked/${encodeURIComponent(b.id)}`, { method: 'DELETE' }); if (!r || r.error) showToast((r && r.error) || t('server unreachable'), { type: 'error' }); };
-      row.append(text, open, dismiss);
+      // no other browser to switch to: the banner says what the person CAN do (the naive-user verifier, 2026-09-28 — the
+      // claim + Dismiss alone was a dead end; the dialog's empty line gives the same advice)
+      text.textContent = pid && choices.length ? w.text : `${w.text} ${t('Take over to get past the check yourself.')}`;
+      row.appendChild(text);
+      if (pid && choices.length) {
+        const to = choices[0];
+        row.appendChild(textBtn(t('Switch to {name}…', { name: backendName(to, t) }), () => app.openBrowserSwitcher?.({ profileId: pid, sessionId, preselect: to })));
+      }
+      let det = null;
+      if (w.detail) {
+        // the agent's evidence, behind a fold (the dialog's Details — here too, so it can be read on every build)
+        det = document.createElement('div'); det.className = 'browser-live-blocked-detail'; det.textContent = w.detail; det.hidden = !st.claimOpen.has(b.id);
+        const d = textBtn(det.hidden ? t('Details') : t('Hide details'), () => {
+          det.hidden = !det.hidden;
+          if (det.hidden) st.claimOpen.delete(b.id); else st.claimOpen.add(b.id);
+          d.textContent = det.hidden ? t('Details') : t('Hide details');
+        }, 'browser-live-blocked-details');
+        row.appendChild(d);
+      }
+      row.appendChild(textBtn(tc('browser', 'Dismiss'), async () => {
+        const r = await fetchJson(`/api/browser/blocked/${encodeURIComponent(b.id)}`, { method: 'DELETE' });
+        if (r && r.error) console.warn('[browser-live] dismiss answered', r.code, r.error);
+        const dw = dismissOutcomeWords(r, t);
+        if (dw) showToast(dw.text, { type: dw.tone === 'error' ? 'error' : 'warn' });
+        if (dw && dw.refresh) { blockedBar.dataset.sig = ''; app.refreshBrowserProfiles?.(); }
+      }));
+      if (det) row.appendChild(det);
       blockedBar.appendChild(row);
     }
   };
@@ -797,7 +889,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
 
   // ── lane I: THE FOLD — every item keeps its words on one line; what the bar has no room for goes into ⋯ by
   // LIVE_BAR_PRIORITY (PURE barLayout; the ruler + observers + rAF live in bar-fold.js, bound to this window's signal) ──
-  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, kbd: kbdChip, echo: echoEl, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
+  const barItems = { badge: modeBadge, take: takeBtn, handback: handBtn, kbd: kbdChip, echo: echoEl, copy: copyChip, bind: bindBtn, url: urlEl, open: openBtn, viewers: viewersEl, rec: recEl, fit: fitChip, backend: backendBtn, backendLabel: backendLabelEl, tabs: tabsBtn, console: consBtn, trace: traceBtn, reconnect: reBtn };
   const fold = createBarFold(bar, {
     more: moreBtn,
     items: () => Object.entries(barItems).map(([key, el]) => ({ key, el, priority: LIVE_BAR_PRIORITY[key], flexMin: key === 'url' ? URL_MIN_PX : undefined })),
@@ -826,8 +918,11 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       else if (key === 'open') { if (!out.includes('url')) rows.push({ label: t('Open this URL in a web view'), disabled: !st.url, action: () => openBtn.onclick() }); }
       else if (key === 'viewers') rows.push({ label: viewersEl.textContent, title: viewersEl.title, disabled: true });
       else if (key === 'rec') rows.push({ label: recEl.textContent, title: recEl.title, action: () => recEl.onclick() });
-      else if (key === 'fit') { const c = fitChipNow(); rows.push(c.act ? { label: t('Fit the page to the window'), title: fitChip.title, action: () => fitChip.onclick() } : { label: fitChip.textContent, title: fitChip.title, disabled: true }); } // lane S4
-      else if (key === 'backend') rows.push({ label: backendBtn.textContent, title: backendBtn.title, action: () => backendBtn.onclick() });
+      else if (key === 'fit') { const c = fitChipNow(); rows.push(c.act ? { label: fitChip.textContent, title: fitChip.title, action: () => fitChip.onclick() } : { label: fitChip.textContent, title: fitChip.title, disabled: true }); } // lane S4; builder r2: folded, the row keeps the chip's own words (WHY the page looks small AND what a click does — "Fit the page to this window" alone lost the why at 360 px)
+      else if (key === 'copy') rows.push({ label: copyChip.textContent, title: copyChip.title, action: () => copyChip.onclick() }); // lane live-input
+      // the browser's name, folded, says WHAT it is (the naive-user verifier, 2026-09-28: a bare "Chromium" row read as nothing)
+      else if (key === 'backend') rows.push({ label: t('Switch browser (now {name})…', { name: backendBtn.textContent }), title: backendBtn.title, action: () => backendBtn.onclick() });
+      else if (key === 'backendLabel') rows.push({ label: t("Your agent's browser: {name}", { name: backendLabelEl.textContent }), disabled: true }); // an info row (no other browser to switch to)
       else if (key === 'tabs') rows.push({ label: check('tabs', tabsBtn), action: () => tabsBtn.onclick() });
       else if (key === 'console') rows.push({ label: check('console', consBtn), action: () => consBtn.onclick() });
       else if (key === 'trace') rows.push({ label: check('trace', traceBtn), title: traceBtn.title, action: () => traceBtn.onclick() });
@@ -891,6 +986,8 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const onGlobal = (msg) => {
     if (st.closed || !msg) return;
     if (msg.type === 'active-sessions' && Array.isArray(msg.sessions)) { const r = msg.sessions.find((x) => x && x.id === sessionId); if (r && r.browserFact) onFact(r.browserFact); return; }
+    // 2026-09-27: a session of this conversation's browser started or ended — the Actions pane's Sessions list re-reads
+    if (msg.type === 'browser-sessions-updated') { const r = row(); const bk = timeline.browserKey() || (r && r.browserKey) || null; if (bk && msg.browserKey && (msg.browserKey === bk || String(msg.browserKey).startsWith(bk + '.'))) timeline.onSessions(); return; }
     if (msg.type === 'browser-profiles-updated') {
       refreshSet(); renderBackend(); renderRec(); renderOwner();
       // naive study 2 (finding 3): a STOPPED view resumes when the digest says its browser runs again (a view never starts one)
@@ -935,6 +1032,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       case 'hello':
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.viewers = m.viewers || 1; st.target = m.target || null;
         st.you = m.you || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0;
+        st.remotePlatform = typeof m.platform === 'string' ? m.platform : null; // lane live-input: the browser's OS (⌘ chords are translated for a non-Mac one)
         renderMode(); renderViewers(); renderTitle(); renderStrip(); renderBackend(); renderRec(); syncTrace(); renderOwner(); renderBind();
         st.fitSent = null; reportFit(); renderFit(); // lane S4: this viewer's pane, at once (the bridge sizes the page to the ruling pane)
         break;
@@ -942,7 +1040,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       case 'mode': {
         const was = st.mode, wasMine = st.mine;
         st.mode = m.mode || 'watch'; st.holder = m.holder || null; st.mine = !!m.mine; st.modeSince = Number(m.since) || 0; st.modeCause = m.cause || null;
-        renderMode();
+        renderMode(); renderFit(); // builder r2: the fit chip's words name who drives (a shared browser held while YOU drive)
         // the owner's ruling (2026-09-27): the takeover INTERRUPTS the agent and the handback asks it to re-run — both said here
         const rerunList = Array.isArray(m.rerun) ? m.rerun.map(String).filter(Boolean).slice(0, 8).join(', ') : '';
         st.lastRerun = rerunList;
@@ -975,18 +1073,19 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
             st.error = m; st.stopped = true; st.stoppedHow = null; st.hollow = false; renderMode();
             setStatus(t('Stopped — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true });
           } else hollowFor(m); // MULTIVIEW: a released / stopped browser (lane P verify: an attachment too) is HOLLOW — the tab's own words
+          maybeShowSessions(); // 2026-09-27: its past sessions, each with Replay
         } else if (m.state === 'error' && m.code === 'browser_released') {
-          hollowFor(m);
+          hollowFor(m); maybeShowSessions();
         } else if (m.state === 'error' && m.code === 'no-browser' && m.browserState === 'not-started') {
           // …or not started yet (the conversation has not opened it) — hollow too, and the view picks it up by itself
-          st.error = m; setStatus(t('Not started yet — the next command starts it'), { reconnect: false });
+          st.error = m; setStatus(t('Not started yet — the next command starts it'), { reconnect: false }); maybeShowSessions();
         } else if (m.state === 'error' && (m.code === 'browser_closed' || m.code === 'browser_unstable')) {
           // lane H verify r5 (MINOR 2): its browser was CLOSED (the daemon lives) — a view never starts it: the last frame
           // stays greyed, the badge names why; `browser_unstable` = it kept closing and VibeSpace stopped restarting it
           // lane H verify r6 MINOR 1: `unstable: 'failing'` = every ask to start it again failed — it never came back to close
-          st.error = m; st.stopped = m.code; st.stoppedHow = m.unstable || null; renderMode();
+          st.error = m; st.stopped = m.code; st.stoppedHow = m.unstable || null; renderMode(); maybeShowSessions();
           setStatus(m.code === 'browser_unstable' ? (m.unstable === 'failing' ? t('This browser could not be started — VibeSpace stopped trying. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh') : t('This browser keeps closing — VibeSpace stopped starting it again. Stop it in ⚙ → Tools → Agent browser…, then the next command starts it fresh')) : t('Closed — the agent\'s next browser command starts it again, and this view reconnects then'), { reconnect: true, error: m.code === 'browser_unstable' });
-        } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); }
+        } else if (m.state === 'error') { st.error = m; if (m.code === 'not-found') st.sessionEnded = true; setStatus(t('Live view unavailable: {why}', { why: String(m.error || m.code || '') }), { error: true, reconnect: true }); maybeShowSessions(); }
         else if (m.state === 'connecting') setStatus(t('Starting the browser stream…'));
         else if (m.state === 'upstream-open') { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); if (st.stopped) { st.stopped = false; renderMode(); } setStatus(st.frames ? '' : t('Connected — waiting for the first frame…'), { hide: !!st.frames }); renderKbd(); }
         else if (m.state === 'upstream-closed') { st.connected = false; setStatus(t('Stream ended'), { error: true, reconnect: true }); }
@@ -996,6 +1095,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         }
         break;
       case 'input-receipt': if (noteInputReceipt(st.receipts, m)) onReceiptsChanged(); break; // lane S2: the bridge's answer for one input
+      case 'clipboard': onPageCopied(m); break; // lane live-input: the page copied text while you drive — to YOUR clipboard
       case 'frame': {
         const data = typeof m.data === 'string' ? m.data : '';
         if (!data) break;
@@ -1005,6 +1105,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         if (st.error && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); }
         if (st.picture !== 'ok' || st.pictureStale) { st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); if (!st.error && !st.stopped) setStatus('', { hide: true }); }
         if (!st.connected) { st.connected = true; st.reconnects = 0; st.openAt = Date.now(); } // a LATE viewer of a relay already open (a tap kept it) hears no upstream-open — its first frame is the proof
+        if (root.classList.contains('side-past')) syncPast(); // a picture again: the Sessions list gives the width back
         const md = m.metadata || {};
         if (Number(md.deviceWidth) > 0 && Number(md.deviceHeight) > 0) st.meta = { width: Number(md.deviceWidth), height: Number(md.deviceHeight) }; // lane J: every frame's claim, both sides
         img.src = 'data:image/jpeg;base64,' + data; // .src, never markup (the image-overlay law)
@@ -1018,7 +1119,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
         break;
       case 'url': { const u = String(m.url || ''); if (u && st.url && u !== st.url && st.frames > 0) { st.navAt = Date.now(); st.refreshSent = false; } st.url = u; renderUrl(); if (st.error && st.connected && !st.stopped && !st.hollow) { st.error = null; setStatus('', { hide: true }); } break; } // lane S4: a navigation starts the picture clock; lane S2: a navigation clears a stale error too
       // lane S4: the page's size and whose pane it follows (the bridge's ruling; replayed to a late viewer)
-      case 'fit': st.fit = { state: m.state, width: Number(m.width) || 0, height: Number(m.height) || 0, viewerId: m.viewerId ?? null, rule: m.rule || null, drawScale: Number(m.drawScale) || 1, floor: m.floor || null, device: m.device || null, error: m.error || null, why: m.why || null }; renderFit(); break;
+      case 'fit': st.fit = { state: m.state, width: Number(m.width) || 0, height: Number(m.height) || 0, viewerId: m.viewerId ?? null, rule: m.rule || null, drawScale: Number(m.drawScale) || 1, floor: m.floor || null, device: m.device || null, error: m.error || null, code: m.code || null, why: m.why || null, place: m.place && typeof m.place === 'object' ? { page: m.place.page || null, device: m.place.device || null } : null }; renderFit(); break; // lane live-input: `place` = where the ruling window is (the chip says which)
       // lane J: the page's own layout viewport (the bridge reads it over CDP on the first frame, a picture/tab change and a takeover)
       case 'viewport': if (m.ok && Number(m.clientWidth) > 0 && Number(m.clientHeight) > 0) { st.page = { clientWidth: Number(m.clientWidth), clientHeight: Number(m.clientHeight) }; renderCursor(); } break;
       case 'console':
@@ -1061,7 +1162,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   const onScreen = () => { try { if (document.hidden || !root.isConnected) return false; if (typeof root.checkVisibility === 'function') return root.checkVisibility({ visibilityProperty: true }); return root.getClientRects().length > 0; } catch { return false; } };
   /** The pane = the canvas's box in viewport px — at NET zoom 1 that IS its CSS px (never device px: a DPR-3 phone asks for a 390-wide page). */
   function paneNow() { const r = canvas.getBoundingClientRect(); return { width: Math.round(r.width), height: Math.round(r.height) }; }
-  function reportFit({ force = false } = {}) {
+  function reportFit({ force = false, claim = false } = {}) {
     if (st.closed || !(st.ws && st.ws.readyState === 1)) return;
     const p = paneNow();
     // `browser.fitPageToView` OFF: this view never votes (a view that had voted says it is gone — the page goes back after the grace)
@@ -1069,37 +1170,37 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     const vis = allowed && onScreen() && p.width >= 1 && p.height >= 1;
     const last = st.fitSent;
     const width = vis ? p.width : (last ? last.width : Math.max(1, p.width)), height = vis ? p.height : (last ? last.height : Math.max(1, p.height));
-    if (!force && last && last.width === width && last.height === height && last.visible === vis) return;
+    if (!force && !claim && last && last.width === width && last.height === height && last.visible === vis) return;
     st.fitSent = { width, height, visible: vis };
-    send({ type: 'fit', width: Math.max(1, width), height: Math.max(1, height), dpr: Number(window.devicePixelRatio) || 1, visible: vis, force });
+    send({ type: 'fit', width: Math.max(1, width), height: Math.max(1, height), dpr: Number(window.devicePixelRatio) || 1, visible: vis, force, claim: claim && vis, place: st.place }); // lane live-input: `claim` = "Fit here"; `place` = where this view is (the other views' chip words)
   }
   const scheduleReport = () => { if (st.fitTimer) clearTimeout(st.fitTimer); st.fitTimer = setTimeout(() => { st.fitTimer = null; reportFit(); }, FIT_REPORT_MS); };
-  if (typeof ResizeObserver === 'function') { const cro = new ResizeObserver(() => { scheduleReport(); if (isZoomed(st.zoom)) setZoom(st.zoom); }); cro.observe(canvas); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => cro.disconnect()); }
+  // lane live-input: the ResizeObserver re-renders the fit chip too — its "smaller / larger here" follows this window's own size
+  if (typeof ResizeObserver === 'function') { const cro = new ResizeObserver(() => { scheduleReport(); renderFit(); if (isZoomed(st.zoom)) setZoom(st.zoom); }); cro.observe(canvas); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => cro.disconnect()); }
   document.addEventListener('visibilitychange', scheduleReport, { signal: winInfo._listenerCtl?.signal });
   // verify r1: a DESKTOP SWITCH (and the stage) hide a window with `visibility:hidden` WRITTEN ON ITS ELEMENT'S STYLE — no
   // resize, no visibilitychange — so the view kept voting from another desktop (its pane still ruled the page, the restore
   // never came). Every hider that writes the element's style/class is watched; the report re-reads onScreen() itself.
   if (typeof MutationObserver === 'function' && winInfo.element) { const mo = new MutationObserver(scheduleReport); mo.observe(winInfo.element, { attributes: true, attributeFilter: ['style', 'class'] }); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => mo.disconnect()); }
   { const onFitSetting = () => scheduleReport(); app.settings?.on?.('browser.fitPageToView', onFitSetting); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => app.settings?.off?.('browser.fitPageToView', onFitSetting)); }
-  const fitChipNow = () => fitChipState({ fit: st.fit, you: st.you });
-  // the chip's words by kind (English keys — t() needs the literals)
-  const FIT_WORDS = {
-    agent: (c) => ({ text: t('Agent’s size {w}×{h}', { w: c.width, h: c.height }), title: (c.device ? t('The agent set this page to a {device} ({w}×{h}) itself', { device: c.device, w: c.width, h: c.height }) : t('The agent set this page to {w}×{h} itself', { w: c.width, h: c.height })) + ' — ' + t('the picture is scaled to your window. Click to fit the page to the window again.') }),
-    other: (c) => ({ text: t('Sized for another window'), title: t('The page is {w}×{h} — sized for {who}; this window shows it scaled.', { w: c.width, h: c.height, who: c.rule === 'holder' ? t('the window of whoever is driving') : t('the largest window watching it') }) }),
-    floor: (c) => ({ text: t('Page {w} px wide', { w: c.width }), title: t('This browser’s window cannot be narrower than {w} px, so the page is that wide and scaled to fit this window', { w: c.width }) }),
-    unavailable: (c) => ({ text: t('Page {w}×{h}', { w: c.width, h: c.height }), title: t('The page could not be sized to this window: {why}', { why: String(c.error || '') }) }),
-  };
+  const fitChipNow = () => fitChipState({ fit: st.fit, you: st.you, place: st.place, pane: paneNow(), mine: st.mode === 'takeover' && !!st.mine }); // lane live-input: WHERE the page's size comes from, and whether it is shown smaller or larger here (builder r2: `mine` = the words of a shared browser held while THIS view drives)
+  // lane live-input: the chip's words live in PURE src/browser-fit.js `fitChipWords` (the owner could not read "Sized for another window")
   function renderFit() {
     const c = fitChipNow();
     fitChip.style.display = c.show ? '' : 'none';
     fitChip.dataset.kind = c.kind || '';
     if (!c.show) return;
-    const w = FIT_WORDS[c.kind](c);
+    const w = fitChipWords(c, { t });
     fitChip.textContent = w.text; fitChip.title = w.title; fitChip.setAttribute('aria-label', w.title);
     fitChip.classList.toggle('actionable', !!c.act);
   }
   fitChip.onclick = () => {
     const c = fitChipNow();
+    if (c.act === 'claim') { // lane live-input: the page follows THIS window from now on (the explicit act — the other window then shows it scaled)
+      reportFit({ claim: true });
+      showToast(c.rule === 'holder' ? t('The page will fit this window once the other window hands back') : t('The page now fits this window'), { duration: 3500 });
+      return;
+    }
     if (c.act !== 'force') { showToast(fitChip.title, { duration: 5000 }); return; }
     reportFit({ force: true }); // the user's explicit act: the page follows the window again (the agent's size is set aside; the rule picks the pane)
     showToast(t('Fitting the page to the window — the agent’s own size is set aside'), { duration: 3500 });
@@ -1181,9 +1282,9 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   // lane S2 (naive study 2, T4: "Reconnect does nothing"): Reconnect RE-RESOLVES the target — a view whose browser is
   // gone (a stale refusal) moves to the browser in use now; otherwise it reconnects as before
   reBtn.onclick = () => { st.reconnects = 0; const f = st.fact || factNow(); const plan = liveFollowPlan({ view: viewFacts(), prev: f, next: f, force: true }); if (plan.act === 'retarget') { st.followed++; switchTo(plan.ref); } else connect(); };
-  tabsBtn.onclick = () => { st.sidePane = st.sidePane === 'tabs' ? null : 'tabs'; renderSide(); };
-  consBtn.onclick = () => { st.sidePane = st.sidePane === 'console' ? null : 'console'; renderSide(); };
-  traceBtn.onclick = () => { st.sidePane = st.sidePane === 'trace' ? null : 'trace'; renderSide(); };
+  tabsBtn.onclick = () => { st.sideUser = true; st.sidePane = st.sidePane === 'tabs' ? null : 'tabs'; renderSide(); };
+  consBtn.onclick = () => { st.sideUser = true; st.sidePane = st.sidePane === 'console' ? null : 'console'; renderSide(); };
+  traceBtn.onclick = () => { st.sideUser = true; st.sidePane = st.sidePane === 'trace' ? null : 'trace'; renderSide(); };
   // P3 (§4.3): the three modes behind ONE toggle (lane I). Take over asks
   // the bridge (the keeper decides, a `mode` record answers every viewer);
   // Hand back is a transition any viewer may trigger.
@@ -1205,10 +1306,12 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
       if (p) canvas.dataset.lastPointer = `${p.x},${p.y}`;
       return;
     }
-    e.preventDefault(); focusSink();
+    e.preventDefault(); focusSink(); // verify (2026-09-27): a press is NO copy gesture — a page's copy after a click reaches the chip only (the bridge names the gesture)
     try { img.setPointerCapture(e.pointerId); } catch { /* optional */ }
     st.buttonsDown++;
-    const rec = e.pointerType === 'touch' ? touchRecord({ kind: 'start', pt: p }) : mouseRecord({ kind: 'down', pt: p, button: e.button, modifiers: modifiersOf(e) });
+    // lane live-input: a double / triple click is counted here (a pointerdown carries no count) and a drag holds its button
+    st.click = clickCountNext(st.click, { x: e.clientX, y: e.clientY, at: Date.now(), button: e.button }); st.heldButton = e.button;
+    const rec = e.pointerType === 'touch' ? touchRecord({ kind: 'start', pt: p }) : mouseRecord({ kind: 'down', pt: p, button: e.button, modifiers: modifiersOf(e), clickCount: st.click.count });
     if (rec && sendInput(rec, true)) { ripple(p); st.youPt = p; renderYou(); }
   }, sig);
   img.addEventListener('pointermove', (e) => {
@@ -1218,7 +1321,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (now - st.lastMoveAt < MOVE_EVERY_MS) return;
     st.lastMoveAt = now;
     const p = pointerAt(e); if (!p) return;
-    const rec = e.pointerType === 'touch' ? (st.buttonsDown ? touchRecord({ kind: 'move', pt: p }) : null) : mouseRecord({ kind: 'move', pt: p, modifiers: modifiersOf(e) });
+    const rec = e.pointerType === 'touch' ? (st.buttonsDown ? touchRecord({ kind: 'move', pt: p }) : null) : mouseRecord({ kind: 'move', pt: p, modifiers: modifiersOf(e), held: st.buttonsDown ? st.heldButton : null }); // lane live-input: a drag selects
     if (rec) sendInput(rec);
     st.youPt = p; renderYou();
   }, sig);
@@ -1228,7 +1331,7 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (!driving()) return;
     const p = pointerAt(e);
     st.buttonsDown = Math.max(0, st.buttonsDown - 1);
-    const rec = e.pointerType === 'touch' ? touchRecord({ kind: 'end', pt: p || { x: 0, y: 0 } }) : (p ? mouseRecord({ kind: 'up', pt: p, button: e.button, modifiers: modifiersOf(e) }) : null);
+    const rec = e.pointerType === 'touch' ? touchRecord({ kind: 'end', pt: p || { x: 0, y: 0 } }) : (p ? mouseRecord({ kind: 'up', pt: p, button: e.button, modifiers: modifiersOf(e), clickCount: st.click ? st.click.count : 1 }) : null);
     if (rec) sendInput(rec);
   };
   img.addEventListener('pointerup', up, sig);
@@ -1253,22 +1356,41 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     if (route.to === 'app') return;                                       // Ctrl+\ / Ctrl+Alt+←/→ — and command mode, once armed
     if (route.to === 'compose' || route.to === 'paste') { focusSink(); return; } // the IME composes in the sink / the browser raises `paste` there
     e.preventDefault(); e.stopPropagation(); if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-    if (e.type !== 'keypress') {
-      const rec = keyRecord({ kind: e.type === 'keyup' ? 'up' : 'down', key: e.key, code: e.code, modifiers: modifiersOf(e), keyCode: e.keyCode });
-      sendInput(rec, e.type === 'keydown' && !['Shift', 'Control', 'Alt', 'Meta'].includes(e.key));
+    if (e.type === 'keydown') {
+      // lane live-input: a Mac viewer on a non-Mac browser — ⌘A/C/X/Z/⇧Z … reach the page as the Ctrl chords (PURE table)
+      const k = macChord(e, { viewerMac: viewerIsMac(), remoteMac: isMacPlatform(st.remotePlatform) });
+      const cc = copyChordOf(e);
+      if (cc) armCopyAnswer(cc); // the page's own copy answers it (onPageCopied); the chord still goes to the page
+      const rec = keyRecord({ kind: 'down', key: k.key, code: k.code, modifiers: modifiersOf(k), keyCode: k.keyCode });
+      if (rec && k.dropText) delete rec.text;
+      st.pressed.set(e.code || e.key, { key: k.key, code: k.code, keyCode: k.keyCode });
+      sendInput(rec, !['Shift', 'Control', 'Alt', 'Meta'].includes(e.key));
+    } else if (e.type === 'keyup') {
+      // lane live-input: a keyup reaches the page only after its keydown did (an IME's commit key — Enter / Space — would
+      // otherwise arrive alone; a key held down before the takeover is released where it was pressed)
+      const was = st.pressed.get(e.code || e.key);
+      if (was) {
+        st.pressed.delete(e.code || e.key);
+        const k = macChord(e, { viewerMac: viewerIsMac(), remoteMac: isMacPlatform(st.remotePlatform) });
+        sendInput(keyRecord({ kind: 'up', key: was.key, code: was.code, modifiers: modifiersOf(k), keyCode: was.keyCode }));
+      }
     }
     focusSink();
   };
   document.addEventListener('keydown', onDocKey, capture);
   document.addEventListener('keyup', onDocKey, capture);
   document.addEventListener('keypress', onDocKey, capture);
-  /** Text the user put in without keystrokes (a paste, a composition, dictation) → the page, as text. */
+  /** Text the user put in without keystrokes (a paste, a composition, dictation) → the page, as text: ONE `input_text`
+   *  record per act (lane live-input — the bridge cuts it into the ≤ 3-unit chunks the browser accepts, in order with the
+   *  keys around it); its receipt waits as long as the act's chunk count needs. The text itself is never shown or logged. */
   function typeText(text) {
-    const r = textRecords(text);
-    if (!r.ok) { if (r.code === 'too_long') showToast(t('Not pasted into the page: {n} characters is more than one paste may carry ({max})', { n: r.length, max: r.max }), { type: 'warn' }); return; }
-    let okAll = true;
-    r.records.forEach((rec, i) => { okAll = sendInput(rec, false, { receipt: i === r.records.length - 1 }) && okAll; }); // lane S2: the paste's LAST record carries its receipt
-    st.sent += okAll ? 1 : 0; if (!okAll) echo(false, t('the live view is disconnected')); else if (!st.receipts.failing) echo(true);
+    const r = inputTextRecord(text);
+    if (!r.ok) {
+      if (r.code === 'too_long') showToast(t('Not pasted into the page: {n} characters is more than one paste may carry ({max})', { n: r.length, max: r.max }), { type: 'warn' });
+      else if (r.dropped) echo(false, t('not sent — a lone line break cannot be typed into the page (press Enter instead)'), { verbatim: true });
+      return;
+    }
+    sendInput(r.record, true, { receipt: true, receiptMs: textReceiptMs(r.chunks) });
   }
   document.addEventListener('paste', (e) => {
     if (!iOwn()) return;
@@ -1298,13 +1420,64 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
   }, capture);
   kbd.addEventListener('input', () => { if (!st.composing) kbd.value = ''; }, sig);   // the sink never keeps text
   document.addEventListener('focusin', (e) => {
-    if (!iOwn()) return;
+    if (!iOwn() || st.copying) return; // lane live-input: the copy's own scratch textarea is not a place you typed into
     if (focusVerdict({ owns: true, editable: isEditable(e.target), insideView: e.target === kbd }) !== 'reclaim') return;
     st.reclaims++;
     queueMicrotask(focusSink);
     const now = Date.now();
     if (now - st.lastReclaimHintAt > RECLAIM_HINT_EVERY_MS) { st.lastReclaimHintAt = now; showToast(t('Typing goes to the agent’s browser while you drive it — press Hand back to type here'), { duration: 4000 }); }
   }, capture);
+  // lane live-input (the tracer's leftover of H4): while the view drives, a click on the bar, a side pane or empty space
+  // takes focus off the sink — the next key then reached no text field, so an IME never started (its first letter went
+  // to the page as a Latin key). The sink takes the focus back unless it went to a text field (that one is reclaimed
+  // by the focusin rule above, with its hint) or the window itself lost it.
+  kbd.addEventListener('blur', () => {
+    if (st.copying || !iOwn()) return;
+    setTimeout(() => {
+      if (st.closed || st.copying || !iOwn()) return;
+      const a = document.activeElement;
+      if (a === kbd || (a && a !== document.body && isEditable(a))) return;
+      focusSink();
+    }, 0);
+  }, sig);
+  // ── lane live-input: COPY OUT — what the page copied reaches YOUR clipboard ──
+  /** A copy / cut chord went to the page: its copy answers within COPY_ANSWER_MS (else the echo says nothing came). */
+  function armCopyAnswer(kind) {
+    st.copyAt = Date.now();
+    if (st.copyTimer) clearTimeout(st.copyTimer);
+    st.copyTimer = setTimeout(() => { st.copyTimer = null; if (st.mode === 'takeover' && st.mine) echo(true, t('nothing was copied — the page gave no text (nothing selected, a password field, or a frame from another site)'), { verbatim: true }); }, COPY_ANSWER_MS);
+    st.copyKind = kind;
+  }
+  /** The bridge's `clipboard` record: the text the page copied (its own copy event, read in an isolated world), which the
+   *  bridge delivers only on a gesture of OURS it forwarded (`m.gesture`: 'chord' | 'click'). PURE copyWriteVerdict
+   *  (verify, 2026-09-27 — a page's synthetic copy was written to the clipboard on a secure page with nothing pressed,
+   *  and after any click on plain http): ONLY a copy answering the user's own copy chord, inside its window, is written by
+   *  itself — the Clipboard API on a secure page, else the gesture copy on plain http (the chord left the page active);
+   *  a click's copy (the page's own Copy button) and anything else is the chip — one explicit click, never a silent write. */
+  function onPageCopied(m) {
+    if (!(st.mode === 'takeover' && st.mine)) return;
+    if (st.copyTimer) { clearTimeout(st.copyTimer); st.copyTimer = null; }
+    const text = typeof m.text === 'string' ? m.text : '';
+    if (!text) { if (Date.now() - st.copyAt < COPY_ANSWER_MS * 2) echo(true, t('nothing was copied — no text is selected in the page'), { verbatim: true }); return; }
+    const secure = pageIsSecure();
+    const cb = typeof navigator !== 'undefined' ? navigator.clipboard : null;
+    const chordAge = st.copyAt ? Date.now() - st.copyAt : null;
+    const how = copyWriteVerdict({ gesture: m.gesture, chordAge, secure, canWrite: !!(cb && typeof cb.writeText === 'function'), windowMs: GESTURE_WINDOW_MS });
+    if (how !== 'chip') st.copyAt = 0; // the chord is spent on this copy (single-use here too)
+    const said = () => echo(true, m.truncated ? t('copied the first {n} characters to your clipboard', { n: text.length }) : t('copied to your clipboard'), { verbatim: true });
+    if (how === 'api') { let p = null; try { p = cb.writeText(text); } catch { showCopied(text); return; } Promise.resolve(p).then(() => { hideCopied(); said(); }, () => showCopied(text)); return; }
+    if (how === 'gesture' && copyNow(text)) { hideCopied(); said(); return; }
+    showCopied(text);
+  }
+  /** copyViaSelection moves the focus to a scratch textarea and back — the focus rules above must not read that as leaving. */
+  function copyNow(text) { st.copying = true; try { return copyViaSelection(text); } finally { st.copying = false; focusSink(); } }
+  function showCopied(text) { st.copied = String(text); copyChip.style.display = ''; echo(true, t('copied in the page — use the button on the bar to put it on your clipboard'), { verbatim: true }); } // builder r2: never a quote of the chip (it quoted half of it)
+  function hideCopied() { st.copied = null; copyChip.style.display = 'none'; }
+  copyChip.onclick = () => {
+    if (st.copied == null) return;
+    if (copyNow(st.copied)) { showToast(t('Copied to your clipboard')); hideCopied(); }
+    else showToast(t('Could not copy — select the text in the page and press Ctrl+C again'), { type: 'error' });
+  };
   const onVis = () => send({ type: 'config', maxFps: document.hidden ? HIDDEN_FPS : MAX_FPS_DEFAULT });
   document.addEventListener('visibilitychange', onVis, { signal: winInfo._listenerCtl?.signal });
 
@@ -1343,12 +1516,13 @@ function createLiveView(app, winInfo, { sessionId, profileId }) {
     geometry, frameClaim: () => (st.meta ? { ...st.meta } : null), pageReading: () => (st.page ? { ...st.page } : null), // lane J: {picW, picH, cssW, cssH, source}; the metadata's CLAIM and the page's own reading (the suite's control replays both)
     send, // P3: the suite drives the control verbs through the real socket
     state: () => ({ sessionId, profileRef: st.profileRef, connected: st.connected, stopped: !!st.stopped, frames: st.frames, frameW: st.frameW, frameH: st.frameH, viewers: st.viewers, mode: st.mode, target: st.target, url: st.url, tabs: st.tabs.slice(), console: st.console.length, attachments: st.attachments.slice(), running: st.running, lastCommand: st.lastCommand, error: st.error, lastStatus: st.lastStatus, sidePane: st.sidePane,
-      backend: backendBtn.style.display === 'none' ? null : backendBtn.textContent, blockedShown: blockedBar.style.display !== 'none', // P4
+      backend: backendBtn.style.display !== 'none' ? backendBtn.textContent : backendLabelEl.style.display !== 'none' ? backendLabelEl.textContent : null, backendIsButton: backendBtn.style.display !== 'none', blockedShown: blockedBar.style.display !== 'none', // P4 + the rebuilt dialog: the name, and whether it opens the dialog
       trace: timeline.state(), traceBtn: traceBtn.textContent, recording: recEl.textContent, recordingOn: recEl.classList.contains('on'), // P5
       bound: isBound(), bindText: bindLabel(), owners: dotsFor(st.target && st.target.profileId ? st.target.profileId : null).map((d) => ({ sessionId: d.sessionId, name: d.name, color: d.color })), // P7
       you: st.you, mine: st.mine, holder: st.holder, modeSince: st.modeSince, modeCause: st.modeCause, cursor: st.cursor ? { ...st.cursor } : null, cursorShown: cursorEl.style.display !== 'none', confirmations: [...st.confirmations.values()].map((c) => ({ ...c })), badge: modeBadge.textContent, badgeFull: modeBadge.title,
       // lane J r2
       ownsKeyboard: !!(st.claimed && iOwn()), kbdChip: kbdChip.style.display !== 'none', sent: st.sent,
+      remotePlatform: st.remotePlatform, pressed: [...st.pressed.keys()], copyChip: copyChip.style.display === 'none' ? null : copyChip.textContent, copiedLength: st.copied == null ? null : st.copied.length, recChip: { state: recEl.dataset.state || null, text: recEl.textContent, title: recEl.title }, fitTitle: fitChip.style.display === 'none' ? null : fitChip.title, // lane live-input
       // lane S2: the fact this view follows, how often it moved, the receipts (pending / delivered / failed / failing) and the chip's words
       fact: st.fact ? { digest: st.fact.digest, using: { ...(st.fact.using || {}) } } : null, followed: st.followed, receipts: { pending: st.receipts.pending.size, delivered: st.receipts.delivered, failed: st.receipts.failed, failing: st.receipts.failing ? { ...st.receipts.failing } : null }, kbdText: kbdText.textContent, echo: echoEl.style.display === 'none' ? null : echoEl.textContent, ripples: st.ripples.map((r) => ({ ...r })), youPt: st.youPt ? { ...st.youPt } : null, youShown: youEl.style.display !== 'none', reclaims: st.reclaims, align: LIVE_ALIGN,
       // MULTIVIEW (design-browser-multiview §2 / D3 / D4) — the STRIP's folds are `stripFolded` (`folded` is lane I's bar)

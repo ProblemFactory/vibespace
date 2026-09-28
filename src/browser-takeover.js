@@ -452,6 +452,122 @@ function keyRoute(k, { appMode = null } = {}) {
   if (isPasteChord(k)) return { to: 'paste' };
   return { to: 'page' };
 }
+// ── lane live-input (2026-09-27, the owner on a Mac driving a Linux Chromium): ⌘ CHORDS, COPY OUT, LOG-SAFE URLS ──
+/** Does a platform string (navigator.userAgentData.platform / navigator.platform / a UA / node's process.platform)
+ *  name a Mac? iPad/iPhone count (their keyboards send ⌘ too). */
+function isMacPlatform(s) { return /mac|darwin|iphone|ipad|ipod/i.test(String(s || '')); }
+/**
+ * THE MAC CHORD TABLE (item B). On a Mac the editing chords are ⌘-chords; a Linux (or Windows) Chromium gives ⌘ (Meta)
+ * no editing meaning and — MEASURED on Chromium 151, the owner's build — TYPES the letter of a Meta chord: ⌘A / ⌘C /
+ * ⌘X / ⌘Z typed "a" / "c" / "x" / "z" into the page. So when the VIEWER is a Mac and the BROWSER is not, a chord is
+ * translated before it becomes a key record. Rows are matched in order; `from` names the Mac keys, `to` what reaches the
+ * page. Only a key already routed to the PAGE is translated (Ctrl+Backslash / Ctrl+Alt+←/→ keep their app route: keyRoute runs
+ * first; ⌘V is the paste route, never a key record).
+ */
+const MAC_CHORD_ROWS = Object.freeze([
+  Object.freeze({ id: 'meta-key', from: '⌘ alone', to: 'Ctrl', why: 'the modifier itself: the page sees Ctrl held while ⌘ is (its keyup matches its keydown)' }),
+  Object.freeze({ id: 'line-start', from: '⌘←', to: 'Home', why: 'the Mac start-of-line (Shift kept: ⌘⇧← selects to the start)' }),
+  Object.freeze({ id: 'line-end', from: '⌘→', to: 'End', why: 'the Mac end-of-line' }),
+  Object.freeze({ id: 'doc-start', from: '⌘↑', to: 'Ctrl+Home', why: 'the Mac top of the document' }),
+  Object.freeze({ id: 'doc-end', from: '⌘↓', to: 'Ctrl+End', why: 'the Mac bottom of the document' }),
+  Object.freeze({ id: 'word-jump', from: '⌥← / ⌥→ / ⌥↑ / ⌥↓', to: 'Ctrl+← / → / ↑ / ↓', why: 'the Mac word jump; Alt+← on Linux is the browser’s Back' }),
+  Object.freeze({ id: 'word-delete', from: '⌥⌫ / ⌥⌦ / ⌘⌫', to: 'Ctrl+Backspace / Ctrl+Delete / Ctrl+Backspace', why: 'delete a word (⌘⌫ deletes to the line start on a Mac — the nearest single chord)' }),
+  Object.freeze({ id: 'command', from: '⌘ + any other key (A C X Z ⇧Z F R …)', to: 'Ctrl + the same key, no text', why: 'the editing and browser chords (select all, copy, cut, undo, redo, find, reload …) — the text is dropped so a chord never types a letter' }),
+  Object.freeze({ id: 'option-char', from: '⌥ + a key that produced a character (⌥2 = ™, ⌥e then e = é)', to: 'that character, no Alt', why: 'the Mac\'s Option characters are text, not an Alt accelerator' }),
+]);
+const META_CODES = Object.freeze({ MetaLeft: 'ControlLeft', MetaRight: 'ControlRight', OSLeft: 'ControlLeft', OSRight: 'ControlRight' });
+/**
+ * `k` = the DOM KeyboardEvent's fields {key, code, keyCode, ctrlKey, altKey, metaKey, shiftKey}; → the same fields
+ * translated (+ `dropText` when the record must carry no text, `rule` = the MAC_CHORD_ROWS id, null = unchanged).
+ * Identity unless `viewerMac && !remoteMac`.
+ */
+function macChord(k, { viewerMac = false, remoteMac = false } = {}) {
+  const f = { key: String((k && k.key) || ''), code: String((k && k.code) || ''), keyCode: Number(k && k.keyCode) || 0, ctrlKey: !!(k && k.ctrlKey), altKey: !!(k && k.altKey), metaKey: !!(k && k.metaKey), shiftKey: !!(k && k.shiftKey), dropText: false, rule: null };
+  if (!viewerMac || remoteMac) return f;
+  const out = (o, rule) => ({ ...f, ...o, rule });
+  if (f.key === 'Meta' || f.key === 'OS' || META_CODES[f.code]) return out({ key: 'Control', code: META_CODES[f.code] || 'ControlLeft', keyCode: 17, metaKey: false, ctrlKey: f.metaKey || f.ctrlKey }, 'meta-key'); // held on its keydown, released on its keyup
+  if (f.metaKey && !f.ctrlKey) {
+    const nav = { ArrowLeft: ['Home', 'Home', 36, false, 'line-start'], ArrowRight: ['End', 'End', 35, false, 'line-end'], ArrowUp: ['Home', 'Home', 36, true, 'doc-start'], ArrowDown: ['End', 'End', 35, true, 'doc-end'] }[f.key];
+    if (nav) return out({ key: nav[0], code: nav[1], keyCode: nav[2], metaKey: false, ctrlKey: nav[3], altKey: false, dropText: true }, nav[4]);
+    if (f.key === 'Backspace') return out({ metaKey: false, ctrlKey: true, altKey: false, dropText: true }, 'word-delete');
+    return out({ metaKey: false, ctrlKey: true, dropText: true }, 'command');
+  }
+  if (f.altKey && !f.metaKey && !f.ctrlKey) {
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(f.key)) return out({ altKey: false, ctrlKey: true, dropText: true }, 'word-jump');
+    if (f.key === 'Backspace' || f.key === 'Delete') return out({ altKey: false, ctrlKey: true, dropText: true }, 'word-delete');
+    if (Array.from(f.key).length === 1) return out({ altKey: false }, 'option-char');
+  }
+  return f;
+}
+/** The copy-out chords (item C): Ctrl/⌘+C and Ctrl+Insert copy, Ctrl/⌘+X and Shift+Delete cut — still forwarded to the
+ *  page (its own copy runs, a web terminal's Ctrl+C still interrupts); the view stamps its gesture for the answer. */
+function copyChordOf(k) {
+  const f = kflags(k);
+  const mod = (f.ctrl || f.meta) && !f.alt;
+  if (mod && (f.key === 'c' || f.key === 'C')) return 'copy';
+  if (mod && (f.key === 'x' || f.key === 'X')) return 'cut';
+  if (f.key === 'Insert' && f.ctrl && !f.shift && !f.alt && !f.meta) return 'copy';
+  if (f.key === 'Delete' && f.shift && !f.ctrl && !f.alt && !f.meta) return 'cut';
+  return null;
+}
+/**
+ * THE COPY-OUT DOOR IS THE USER'S OWN GESTURE (lane live-input verify, 2026-09-27 — CONFIRMED on the real stack, the S2
+ * law applied to the copy path): the bridge delivered EVERY copy/cut event the page fired to the driving viewer, and the
+ * viewer wrote it to the clipboard on the Clipboard API (a secure page: NO act of the user's at all) or inside the 5 s a
+ * plain CLICK on the picture had left the page active (plain http). A page's own script — or one the AGENT planted with
+ * `eval` before the takeover — selecting a hidden element and dispatching a synthetic `copy` on a timer put ITS text on
+ * the driving user's clipboard (measured: "HIJACK-19" after a takeover with nothing pressed; "HIJACK-11" after one
+ * click). The clipboard is the user's device; the takeover fences the agent OUT of the user's act. So, like an input
+ * credit: a copy leaves the server only on the driving user's own gesture the bridge itself forwarded — single-use,
+ * short-lived (COPY_GESTURE_MS), fail closed:
+ *   'chord'  a copy / cut chord keyDown (Ctrl/⌘+C, +X, Ctrl+Insert, Shift+Delete — as the bridge forwards it, the ⌘ row
+ *            already translated) — the ONE gesture whose copy the viewer may write to the clipboard by itself;
+ *   'click'  a mousePressed (the page's own "Copy" button) — its copy reaches the viewer as the CHIP only (one explicit
+ *            click puts it on the clipboard; a page firing on the user's click gets a chip, never a silent write);
+ *   none     dropped at the bridge, counted (`copiesDropped`) — nothing leaves the server.
+ * `modifiers` on a record are the stream's bitmask (browser-stream KEY_MODIFIERS: alt 1, ctrl 2, meta 4, shift 8).
+ */
+const REC_MODIFIERS = Object.freeze({ alt: 1, ctrl: 2, meta: 4, shift: 8 });
+const COPY_GESTURES = Object.freeze(['chord', 'click']);
+const COPY_GESTURE_MS = 2000;
+/** What a forwarded input record ARMS: 'chord' | 'click' | null. */
+function copyGestureOfRecord(rec) {
+  if (!isObj(rec)) return null;
+  if (rec.type === 'input_mouse') return rec.eventType === 'mousePressed' ? 'click' : null;
+  if (rec.type === 'input_keyboard' && rec.eventType === 'keyDown') {
+    const m = Number(rec.modifiers) || 0;
+    return copyChordOf({ key: rec.key, ctrlKey: !!(m & REC_MODIFIERS.ctrl), altKey: !!(m & REC_MODIFIERS.alt), metaKey: !!(m & REC_MODIFIERS.meta), shiftKey: !!(m & REC_MODIFIERS.shift) }) ? 'chord' : null;
+  }
+  return null;
+}
+/** The arm after a forwarded record: a gesture REPLACES it (the latest act is the one a copy answers); any other record leaves it. */
+function armCopyGesture(arm, rec, now) { const g = copyGestureOfRecord(rec); return g ? { gesture: g, at: Number(now) || 0 } : (arm || null); }
+/** A copy the page reported: delivered ONLY on a live arm, which it CONSUMES; none / stale ⇒ dropped, by name. */
+function copyDeliverVerdict(arm, now, { ttlMs = COPY_GESTURE_MS } = {}) {
+  if (!arm || !COPY_GESTURES.includes(arm.gesture)) return { deliver: false, gesture: null, arm: null, why: 'no-gesture' };
+  if ((Number(now) || 0) - (Number(arm.at) || 0) > ttlMs || (Number(now) || 0) < (Number(arm.at) || 0)) return { deliver: false, gesture: null, arm: null, why: 'stale' };
+  return { deliver: true, gesture: arm.gesture, arm: null, why: null };
+}
+/** The VIEWER's half: only a copy answering the user's own CHORD, inside the chord's window, is written by itself — the
+ *  Clipboard API on a secure page, else the gesture copy on plain http; a click's copy, an unknown gesture, a chord too old
+ *  ⇒ the chip (one explicit click). */
+function copyWriteVerdict({ gesture = null, chordAge = null, secure = false, canWrite = false, windowMs = 5000 } = {}) {
+  if (gesture !== 'chord' || typeof chordAge !== 'number' || !Number.isFinite(chordAge) || chordAge < 0 || chordAge > windowMs) return 'chip';
+  return secure && canWrite ? 'api' : 'gesture';
+}
+/** A page URL as the JOURNAL may print it (item F): origin + path — the query string (order ids, tokens, search terms)
+ *  and the fragment never reach a log line; a query is marked `?…`. The agent's own handback sentence keeps the URL. */
+function urlForLog(url) {
+  const s = String(url || '');
+  if (!s) return '';
+  try {
+    const u = new URL(s);
+    if (u.protocol === 'data:' || u.protocol === 'blob:' || u.protocol === 'javascript:') return u.protocol + '…';
+    const base = /^https?:$/.test(u.protocol) ? u.origin : u.protocol + (u.host ? '//' + u.host : ''); // about:blank's origin is "null"
+    return base + u.pathname + (u.search ? '?…' : '');
+  } catch { return s.split(/[?#]/)[0].slice(0, 200) + (/[?]/.test(s) ? '?…' : ''); }
+}
+
 /**
  * Focus while a view owns the keyboard: an EDITABLE element (a textarea, an
  * input, a contenteditable — the chat composer, a terminal's hidden textarea,
@@ -578,5 +694,8 @@ module.exports = {
   agentCursorFromCommand, modeBadge, inputSummary,
   // lane J r2: the keyboard while you drive; stale approvals
   RESERVED_CHORDS, reservedChordOf, isPasteChord, keyboardOwnership, keyRoute, focusVerdict, ownerOf,
+  // lane live-input: a Mac viewer's ⌘ chords on a non-Mac browser, the copy-out chords, the journal's URL
+  MAC_CHORD_ROWS, isMacPlatform, macChord, copyChordOf, urlForLog,
+  COPY_GESTURES, COPY_GESTURE_MS, copyGestureOfRecord, armCopyGesture, copyDeliverVerdict, copyWriteVerdict, // lane live-input verify: the copy-out door is the user's own gesture (single-use, fail closed)
   STALE_MOMENTS, STALE_MARK, SHELL_TOOLS, shellSegments, browserArgvOf, browserApprovalVerdict, staleDenyText, staleFromDenyMessage,
 };

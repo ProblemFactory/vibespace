@@ -378,7 +378,7 @@ AGENT_BROWSER_IDLE_TIMEOUT_MS=<bound, §3.2.3>
 > 同步执行 ⇒ 天然单飞；成功时 `/resolve` 回答带 `minted`，CLI 打印一次 `[browser_key_minted]`。
 > 活的本地无 key 会话在 active-sessions 里发布"no browser yet"的事实（`keylessFact`），而不是什么都不说。
 > **verify r2（2026-09-27）：默认值只在会话启动时到达对话。** r1 把 pin 落款在启动时刻，但晚到的 key 仍在铸造时**读取**阶梯——用户在会话启动**之后**把一个已收窄给别的对话的 profile 设为实例/Task Group 默认值，这个会话的第一条浏览器命令就被放进去了（落款 = 启动时刻 ≥ scopeAt），而同一时刻 spawn 拿到 key 的孪生会话停在它启动时生效的默认值上。现在**无 key 的 spawn 把阶梯的选择记成见证**（`browserPinAtStart`：profile / origin / 落款 / by / 当时生效的 group cap；fork = 父对话的 pin 行逐字），晚到的 key 只还原这个见证（纯函数 `lateDefaultPin`，keeper `restorePin`，`stampGroupCap({value})` 从不现读 group）；没有见证的旧记录把当前默认值当作**落点**、落款 0——对被收窄的 profile 永不构成授权，agent 的裸命令被拒 `not_owner` 并点名按钮。spawn ↔ late 的 8 行对照表两列一致。门：test-browser-share-model ③f (r2)（四个复现场景 + 对照表 + 两个 patched-copy 对照：r1 引擎会放行；现读 cap 的副本会盖上后来的 cap）。
-> **verify r1（2026-09-27）：晚到的 key 套用的默认 pin（Task Group / 实例默认 profile）以会话**启动**的时刻落款（`B.latePinAt`：记录与活会话两者中最早的一个；`keeper.setPin` 的 `at` 只能把 pin 落得更早，绝不更晚）。** pin 是授权（`userPinAuthorizes`：不早于 profile 的 `scopeAt`），而引擎原先按铸造瞬间落款——一个在用户把默认 profile 收窄给别的对话**之前**就启动的会话，在 agent 第一条浏览器命令时被放进了那个 profile（含登录态），而同一会话若在 spawn 时拿到 key 会被拒 `not_owner`。现在两者一致：拒绝并点名按钮；在收窄**之后**才启动的会话照旧被默认值接纳（spawn 本来也会）。门：test-browser-share-model ③f（含按铸造瞬间落款的 patched-copy 对照）。
+> **verify r1（2026-09-27）：晚到的 key 套用的默认 pin（Task Group / 实例默认 profile）以会话**启动**的时刻落款（`B.latePinAt`：记录与活会话两者中最早的一个；`keeper.setPin` 的 `at` 只能把 pin 落得更早，绝不更晚）。** pin 是授权（`userPinAuthorizes`：不早于 profile 的 `scopeAt`），而引擎原先按铸造瞬间落款——一个在用户把默认 profile 收窄给别的对话**之前**就启动的会话，在 agent 第一条浏览器命令时被放进了那个 profile（含登录态），而同一会话若在 spawn 时拿到 key 会被拒 `not_owner`。现在两者一致：拒绝并点名按钮；在收窄**之后**才启动的会话照旧被默认值接纳（spawn 本来也会）。门：test-browser-share-model ③f（含按铸造瞬间落款的 patched-copy 对照）。 **（2.369.196 名单合并后作废：pin 不再授权、`latePinAt` 已删除，准入只看 `whoMayUse`；见 §3.2.6 附录。r2 的见证 `browserPinAtStart` 保留为偏好，恢复时绝不改动任何 profile 的名单。）**
 
 #### 3.2.1 `browserKey` 是那个对话，而 webui id 不是它
 
@@ -655,6 +655,16 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
 门禁：`test-browser-share-model`（fast，70）+ `test-browser-share`（heavy，真 0.38.1 + 真 Chrome，21）+ `test-migrations`
 的迁移腿 + 翻转过的 `test-browser-pin` / `-handles` / `-mediation` / `test-profile-blindness` 断言。
 
+**补记（2026-09-27）—— "谁能使用"成为一个名单（owner："给多个会话和/或任务组"；取代上面第 1、4、7、8 条的对应部分）。**
+
+- **字段仍是一个 `owner`：** `{kind:'instance'}` = 我的所有对话（默认，不变）；`{kind:'only', who:[{kind:'session', id:<父 browserKey>} | {kind:'task', id:<任务组 id>}]}` = 仅以下对话和任务组。会话按 **browser key** 记（每个对话只铸一次，跨重启、跨恢复不变；fork 铸自己的 —— 另一个对话；子 agent 的 key 按父 key 判）。任务组按 store id 记，**成员在每条命令时按任务组 store 自己的实时规则判定**（绑定到它的、在它文件夹里启动的、创建进它的）。PURE `whoMayUse(p)` 是**唯一的读者**，读盘上每一种形状（旧的单个 `session` / `task` 读成一行名单；未知形状 ⇒ 拒绝，绝不放给所有人）。
+- **钉子不再授权。** 只有名单授权。用户的选择**写名单**：新建会话的显式选择、会话属性、卡片菜单、UI 的 attach 在名单不放行这个对话时把它**加进名单**（回答里带 `added`，toast 说出来）；恢复时对话自己的 pin、fork 复制的 pin、任务组默认、实例默认**从不加**（`userPinAuthorizes` / `scopeAt` 作为授权输入被删除；`scopeAt` 只留给日志和提示）。lane-browser-key 的 `browserPinAtStart` 见证在 .196 合并时保留为 spawn 记下的**偏好**，不再有授权作用（`latePinAt` 删除）。
+- **收窄**（面板的 Change… → 保存）：新名单不再放行的每个租约立即被用户解除 —— 它在共享浏览器里的标签页关闭（租约会话自己的 `tab close` + `close`；实测 0.38.1：会话随后仍绑在那个已关的标签上，所以它下次被放行时 keeper 先为它 `--pin-tab tab new`），每个活着的对话下一条消息听到；任务组名单读不出 ⇒ 保留租约、报告 `undecided`。**离开任务组**在下一条命令生效（owner 默认 2，不订阅 store）：那条命令被拒 `not_owner` 并在同一次调用里关掉它的标签页。
+- **agent 只被告知自己的那一行**（owner 默认 3）：`GET /api/agent/browser/profiles` 每行只有 `use:{mode, you, via}`，没有 owner / createdBy / 名单；CLI 的 `used by:` 五种说法。`not_owner` 只有一种句子，点名"Who can use it"（Change…）或"All my conversations"；新码 `groups_unreadable`（任务组名单读不出：再跑一次）。
+- **面板**：`谁能使用` 是一行 chips + `更改…`（house 文字按钮），超过 4 个折成"还有 N 个"（手机上 2 个），全部失效时琥珀色"现在没有会话能使用它：…"；chips 按 `data-key` 原地协调（广播不重建行、不重建没变的 chip）。**对话框**是 principal picker（任务组在前、会话按任务组分组、键盘 + 鼠标），从**新鲜的** `GET /api/browser/profiles/:id/use` 画，保存是一次带 `base` 的整表 `PATCH`（名单在对话框打开期间变了 ⇒ 409，什么都不写，重新打开在当前名单上）；空名单当场拒绝。
+- **迁移** `2026-09-browser-profiles-who-list`（在 all-conversations 之后）：单个 `session` / `task` owner ⇒ 一行名单，**并且只对这些记录**把昨天按第 4 条放行的每个用户 pin（非 agent、不早于 `scopeAt`）并进名单 —— 昨天能打开的，今天不会被拒绝。
+- 门禁：`test-browser-share-model`（36 格准入表、每种存储形状、写的拒绝、真 keeper + 路由、五个 patched-copy 对照）、`test-migrations`、`test-browser-who-ui`（heavy，40 个会话、zh 键鼠、一次 PATCH 带 base、第二个标签页 chip 节点不变、409、360 px）、`test-browser-share`（heavy，真 0.38.1：经任务组打开、解绑关掉标签页）。
+
 ### 3.3 profile 注册表
 
 `data/browser-profiles.json`，经 `writeJsonAtomic`（tmp+rename）写入，并且像其它每个 store 一样
@@ -675,9 +685,9 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
     "proxy": null,                          // proxy URL; the SECRET half never leaves the server
     "host": null,                           // null = this machine; else a hostId (ssh host / device)
     "allowedDomains": null,                 // see §6.3 — refused on a persistent profile
-    "owner": { "kind": "task|session|instance", "id": "…" }, // WHO MAY USE IT (§3.2.6): instance = all my conversations (the default)
+    "owner": { "kind": "instance" } | { "kind": "only", "who": [{ "kind": "session", "id": "bk-…" }, { "kind": "task", "id": "T-…" }] }, // WHO MAY USE IT (§3.2.6 + 2026-09-27 addendum): instance = all my conversations (the default); only = these conversations (by browser key) and Task Groups; the pre-list single session|task shapes are still READ (whoMayUse)
     "createdBy": "bk-…",                    // §3.2.6: the conversation that made it (display only, never an admission fact)
-    "scopeAt": 0,                           // §3.2.6: the last "Who can use it" change — an older USER pin no longer authorizes
+    "scopeAt": 0,                           // §3.2.6: the last "Who can use it" change — logs and the row's tooltip only (2026-09-27: a pin never authorizes)
     "sharing": "owner",                     // owner | instance = TAB ISOLATION only (§6.2, §3.2.6), never who may use it
     "record": false,                        // per-profile screencast opt-in
     "lastChromiumMajor": null,              // §7.4's version ladder — the highest major that has written `dir`

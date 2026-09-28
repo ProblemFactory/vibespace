@@ -19,6 +19,12 @@
 //      AFTER style.css) wins every (0,1,0) tie, so a text button whose own `.x { width: auto }` rule sat in style.css
 //      was a 24 px box with its words stacked vertically; DERIVED over every class that co-occurs with file-tool-btn
 //      in src/lib: no single-class style.css rule sets a property the icon rule sets (it would silently lose);
+//   §4b THE WORDED-ICON-BOX CENSUS (the rebuilt switch dialog, 2026-09-27): every WORDED button that wears a ≤ 40 px
+//      icon-box class (derived from the sheets) is reached by a width:auto rule of its own classes, or of a parent the
+//      SAME file builds and appends it to; controls: the classifier, the three reaches, a planted site, the parent law;
+//   §4c THE DEAD-TOKEN CENSUS (the naive-user verifier, 2026-09-28: the cap popover had no background — `--bg-secondary`
+//      is defined by no theme): no floating surface takes its background from a dead token, the browser dialogs' own
+//      surfaces use none, and the product-wide count is a ratchet; controls: the pre-fix popover rule, a planted use;
 //   §5 wiring pins: both views fold through createBarFold with their priority tables; the URL / status minimums equal
 //      their CSS min-width; the ONE mode toggle (no Watch button); the globe, never the missing `web`; the bar CSS is
 //      nowrap + no-shrink at (0,2,0); the window menu's live-view row; every new t() key has zh + ja;
@@ -183,6 +189,258 @@ const tieCensus = (texts, css) => {
   ok(c.bad.length === 0, `no (0,1,0) style.css rule on a file-tool-btn companion class sets a property the icon rule wins (${c.bad.length})`, c.bad.join('\n    '));
   const planted = tieCensus(libTexts, cssText + '\n.browser-live-open { width: auto; padding: 0 8px; font-size: 10px; }\n');
   ok(planted.bad.length === 1 && /browser-live-open/.test(planted.bad[0]), 'NEGATIVE CONTROL: the pre-fix rule (`.browser-live-open { width: auto }`, the audit\'s D1) planted into a patched listing is caught', planted.bad);
+}
+
+// ── §4b the worded-icon-box census ──
+// The rebuilt switch dialog (2026-09-27; the owner's zh screenshot: "打开集成" / "安装 CloakBrowser…" / "取消" /
+// "切换" / "记住" stacked one glyph per line). §4 judges one cascade tie; this judges every WORDED button that
+// wears an ICON-BOX class, wherever it is built: (1) the icon-box set = every single-class rule of the app's sheets
+// (comments stripped, cascade order from index.html) setting `width: Npx`, N ≤ 40; (2) the sites = el|mk('button',
+// '<cls>', …), a line-anchored `X = document.createElement('button')` + `X.className = '<cls…>'` (test-ax-paint's
+// shape) and template `<button class="…">` over src/lib/*.js + index.html, whose classes hold an icon-box class;
+// (3) WORDS = t( / tr( / tc( / escHtml(, a literal with two letters in a row (JS escapes decoded), or an unresolved
+// variable written as TEXT; ICON = what is left after the icon refs (UI_ICONS / FILE_ICONS / *_SVG / an ALL_CAPS
+// constant), tags and entities is ≤ 2 non-letter code points (test-ax-paint's rhsIconOnly rule; a variable written
+// as innerHTML is markup); (4) a worded site passes only by (i) an inline `width: auto`, (ii) a rule made of its own
+// classes alone setting `width: auto` that beats the icon rule (specificity above (0,1,0), or equal and later), or
+// (iii) a parent-keyed rule `P > X` / `P X` whose parent the SAME file builds with class P and appends the element to
+// (a template: encloses it); (5) the flagged list is EMPTY; (6) report-only: a worded site with no nowrap reaching it.
+console.log('§4b the worded-icon-box census (a WORDED button on a 24 px icon class)');
+const W = (() => {
+  const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const specOf = (sel) => {
+    const s2 = sel.replace(/::[a-z-]+/gi, ' ').replace(/:[a-z-]+(\([^)]*\))?/gi, ' .p');
+    return [(s2.match(/#[\w-]+/g) || []).length, (s2.match(/\.[\w-]+|\[[^\]]*\]/g) || []).length, (s2.replace(/[.#][\w-]+|\[[^\]]*\]/g, ' ').match(/(^|[\s>+~])[a-z][\w-]*/gi) || []).length];
+  };
+  const cmp = (a, b) => (a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2]);
+  const WIDTH_PX = /(?:^|[;{\s])width\s*:\s*(\d+(?:\.\d+)?)px/, WIDTH_AUTO = /(?:^|[;{\s])width\s*:\s*auto\b/, NOWRAP = /(?:^|[;{\s])white-space\s*:\s*nowrap\b/;
+  const rulesOf = (sheets) => { const out = []; let i = 0; for (const { name, text } of sheets) for (const m of strip(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)) for (const sel of m[1].split(',').map((x) => x.trim()).filter(Boolean)) if (!sel.startsWith('@')) out.push({ file: name, idx: i++, sel, body: m[2], spec: specOf(sel) }); return out; };
+  const iconSetOf = (rules) => { const set = new Map(); for (const r of rules) { const m = /^\.([\w-]+)$/.exec(r.sel), w = WIDTH_PX.exec(r.body); if (m && w && Number(w[1]) <= 40) set.set(m[1], r); } return set; };
+  const decode = (x) => String(x || '').replace(/\\u\{([0-9a-f]+)\}/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/\\u([0-9a-f]{4})/gi, (_, h) => String.fromCharCode(parseInt(h, 16))).replace(/\\x([0-9a-f]{2})/gi, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  const ICON_REF = /(?:UI_ICONS|FILE_ICONS)(?:\.\w+|\[[^\]]+\])|\b[A-Z][A-Z0-9_]+\b(?:\[[^\]]+\]|\.\w+)?|\b\w*_SVG\b/g;
+  const lits = (e) => [...e.matchAll(/'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)].map((m) => decode(m[1] ?? m[2] ?? m[3] ?? ''));
+  const noLit = (e) => e.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g, "''");
+  const iconOnly = (text) => { const rest = decode(text).replace(/\$\{[^}]*\}/g, '').replace(/<[^>]+>/g, '').replace(/&#\d+;|&[a-z]+;/gi, '').replace(/\s/g, ''); return !/\p{L}{2,}/u.test(rest) && [...rest].filter((c) => !/\p{L}/u.test(c)).length <= 2; };
+  /** textContent / el() content: WORDS unless it is only literals that are icon-only (an expression = unresolved = WORDS). */
+  const valuePart = (e) => { const x = String(e || ''); const q = noLit(x).indexOf('?'); return q >= 0 ? x.slice(q + 1) : x; }; // a ternary's condition is not content (`m.dir === 'pull' ? MI.cross : MI.eject`)
+  const textKind = (e) => {
+    const x = valuePart(e).trim();
+    if (!x) return 'none';
+    if (/\b(?:t|tr|tc|escHtml)\(/.test(x)) return 'words';
+    const ls = lits(x), other = noLit(x).replace(/''|[\s?:+()|&,;]/g, '').replace(/^(?:[\w$.!]+)$/, (m) => (ls.length ? '' : m));
+    if (other && /[A-Za-z_$]/.test(other)) return 'words';
+    return ls.every(iconOnly) ? 'icon' : 'words';
+  };
+  /** innerHTML / a template's inner: WORDS only with a translation / escHtml or a literal whose letters live outside tags. */
+  const markupKind = (e) => {
+    const x = valuePart(e);
+    if (/\b(?:t|tr|tc|escHtml)\(/.test(x)) return 'words';
+    return lits(x).every(iconOnly) ? 'icon' : 'words';
+  };
+  const templateInnerKind = (inner) => {
+    if (/\$\{[^}]*\b(?:t|tr|tc|escHtml)\(/.test(inner)) return 'words';
+    const outside = inner.replace(/\$\{[^}]*\}/g, '');
+    if (!iconOnly(outside)) return 'words';
+    for (const m of inner.matchAll(/\$\{([^}]*)\}/g)) {
+      const branches = m[1].replace(/^[^?]*\?/, '').split(/:|\|\|/).map((b) => b.trim());
+      if (!branches.every((b) => !b || /^(?:(?:UI_ICONS|FILE_ICONS)(?:\.\w+|\[[^\]]+\])|[A-Z][A-Z0-9_]+(?:\.\w+|\[[^\]]+\])?|\w*_SVG|\w*[Ii]con\w*\([^)]*\)|''|""|`[^`]*`)$/.test(b) || (/^['"`]/.test(b) && iconOnly(b.slice(1, -1))))) return 'words';
+    }
+    return 'icon';
+  };
+  const rhsAll = (src, v, prop) => { const out = []; const re = new RegExp(`(?<![\\w$.])${v.replace(/[.$]/g, '\\$&')}\\.${prop}\\s*=\\s*`, 'g'); let m; while ((m = re.exec(src))) { let i = m.index + m[0].length, d = 0, q = null; const st = i; for (; i < src.length && i - st < 1200; i++) { const c = src[i]; if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; } if (c === "'" || c === '"' || c === '`') q = c; else if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { if (!d) break; d--; } else if ((c === ';' || c === '\n') && !d) break; } out.push(src.slice(st, i)); } return out; };
+  /** A helper's PARAMETER written as the button's text (`_btn(text, title) { … b.textContent = text; }`) is resolved by the
+   *  helper's own call sites in the file — the argument at that position, each classified; no call found = unresolved. */
+  const paramKind = (whole, at, param, kindOf) => {
+    const head = whole.slice(Math.max(0, at - 400), at);
+    const defs = [...head.matchAll(/(?:(?:const|let)\s+([\w$]+)\s*=\s*\(([^)]*)\)\s*=>|\b([\w$]+)\s*\(([^)]*)\)\s*\{)/g)];
+    const d = defs.reverse().find((x) => (x[2] ?? x[4] ?? '').split(',').map((y) => y.trim().replace(/\s*=.*$/, '')).includes(param));
+    if (!d) return 'words';
+    const name = d[1] || d[3], idx = (d[2] ?? d[4]).split(',').map((y) => y.trim().replace(/\s*=.*$/, '')).indexOf(param);
+    const kinds = [];
+    for (const c of whole.matchAll(new RegExp(`(?<![\\w$])(?:this\\.)?${name.replace(/[$]/g, '\\$&')}\\(`, 'g'))) {
+      let i = c.index + c[0].length, dpt = 0, q = null, cur = '', args = [];
+      for (; i < whole.length && i - c.index < 600; i++) { const ch = whole[i]; if (q) { cur += ch; if (ch === '\\') { cur += whole[++i]; } else if (ch === q) q = null; continue; } if (ch === "'" || ch === '"' || ch === '`') { q = ch; cur += ch; continue; } if ('([{'.includes(ch)) dpt++; if (')]}'.includes(ch)) { if (!dpt) break; dpt--; } if (ch === ',' && !dpt) { args.push(cur); cur = ''; continue; } cur += ch; }
+      args.push(cur);
+      if (whole.slice(c.index - 12, c.index).match(/function\s*$/) || /^\s*\{/.test(whole.slice(i + 1, i + 4))) continue; // the definition itself
+      if (args[idx] !== undefined) kinds.push(kindOf(args[idx]));
+    }
+    return !kinds.length ? 'words' : kinds.includes('words') ? 'words' : 'icon';
+  };
+  const varKind = (src, v, whole = src, at = 0) => {
+    const kinds = [];
+    for (const [prop, kindOf] of [['(?:textContent|innerText)', textKind], ['innerHTML', markupKind]]) for (const r of rhsAll(src, v, prop)) kinds.push(/^\s*[a-z_$][\w$]*\s*$/i.test(r) && !/^[A-Z][A-Z0-9_]+$/.test(r.trim()) && kindOf === textKind ? paramKind(whole, at, r.trim(), textKind) : kindOf(r));
+    return !kinds.length ? 'none' : kinds.includes('words') ? 'words' : 'icon';
+  };
+  const inlineAuto = (src, v) => new RegExp(`(?<![\\w$.])${v.replace(/[.$]/g, '\\$&')}\\.style\\.(?:width\\s*=\\s*['"]auto['"]|cssText\\s*[+]?=\\s*['"\`][^'"\`]*width:\\s*auto)`).test(src);
+  const lineOf = (src, i) => src.slice(0, i).split('\n').length;
+  function sitesOf(file, src, iconSet) {
+    const out = [], has = (cl) => cl.some((c) => iconSet.has(c));
+    for (const m of src.matchAll(/(?:(?:const|let|var)\s+([\w$]+)\s*=\s*)?\b(?:el|mk)\(\s*'button'\s*,\s*(['"])([^'"\n]*)\2\s*(?:,\s*([^\n]*))?/g)) {
+      const classes = m[3].split(/\s+/).filter(Boolean);
+      if (!has(classes)) continue;
+      let arg = m[4] || '';
+      { let d = 0, i = 0; for (; i < arg.length; i++) { if ('([{'.includes(arg[i])) d++; else if (')]}'.includes(arg[i])) { if (!d) break; d--; } } arg = arg.slice(0, i); }
+      const v = m[1] || null;
+      const kind = arg.trim() ? textKind(arg) : (v ? varKind(src, v) : 'none');
+      out.push({ file, line: lineOf(src, m.index), var: v, classes, kind, inlineAuto: v ? inlineAuto(src, v) : false });
+    }
+    for (const m of src.matchAll(/(?:(?:const|let|var)\s+)?((?:this\.)?[\w$]+)\s*=\s*document\.createElement\('button'\)/g)) {
+      const v = m[1];
+      const lineNo = lineOf(src, m.index);
+      // THE NAME'S OWN SPAN (verifier 2026-09-28): from its birth to the next line that gives the same name another
+      // element (`const|let|var v` / `v = document.createElement|el|mk(`) — a name reused later in the file is another
+      // button, but a button whose words are written far below its birth (the live bar's `tabsBtn.textContent` 230 lines
+      // down, `backendBtn` 500) is THIS button; the old 40-line window (test-ax-paint's) read five worded bar buttons as
+      // `none` and never judged them (the negative control below strips the bar rule and names them)
+      const ve = v.replace(/[.$]/g, '\\$&');
+      const rest = src.slice(m.index + m[0].length);
+      const reborn = rest.search(new RegExp(`\\b(?:const|let|var)\\s+${ve}\\b|(?<![\\w$.])${ve}\\s*=\\s*(?:document\\.createElement|el|mk)\\(`));
+      const after = m[0] + (reborn >= 0 ? rest.slice(0, reborn) : rest);
+      const cm = new RegExp(`(?<![\\w$.])${ve}\\.className\\s*=\\s*(['"\`])([^'"\`\\n]*)\\1`).exec(after.split('\n').slice(0, 40).join('\n')); // the class within 40 lines of the birth (test-ax-paint's shape)
+      if (!cm) continue;
+      const classes = cm[2].replace(/\$\{[^}]*\}/g, ' ').split(/\s+/).filter(Boolean);
+      if (!has(classes)) continue;
+      out.push({ file, line: lineNo, var: v, classes, kind: varKind(after, v, src, m.index), inlineAuto: inlineAuto(after, v) });
+    }
+    for (const m of src.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)) {
+      const cls = /\bclass="([^"]*)"/.exec(m[1]);
+      if (!cls) continue;
+      const classes = cls[1].replace(/\$\{[^}]*\}/g, ' ').split(/\s+/).filter(Boolean);
+      if (!has(classes)) continue;
+      out.push({ file, line: lineOf(src, m.index), var: null, classes, kind: templateInnerKind(m[2]), inlineAuto: /style="[^"]*width:\s*auto/.test(m[1]), template: src.slice(Math.max(0, m.index - 600), m.index) });
+    }
+    return out;
+  }
+  /** The textual proof a parent-keyed rule reaches: an append naming `v` into a variable whose NEAREST earlier class
+   *  assignment (className = / classList.add / el|mk(…, '…')) names P — a name reused elsewhere is another element. */
+  function parentProof(src, v, P) {
+    if (!v) return false;
+    const ve = v.replace(/[.$]/g, '\\$&');
+    for (const a of src.matchAll(new RegExp(`((?:this\\.)?[\\w$]+)\\.(?:append|appendChild|prepend|insertBefore)\\([^;]*?(?<![\\w$.])${ve}\\b`, 'g'))) {
+      const pe = a[1].replace(/[.$]/g, '\\$&');
+      const before = src.slice(0, a.index);
+      const assigns = [...before.matchAll(new RegExp(`(?<![\\w$.])${pe}(?:\\.className\\s*=\\s*(['"\`])([^'"\`\\n]*)\\1|\\.classList\\.add\\(([^)]*)\\)|\\s*=\\s*\\b(?:el|mk)\\(\\s*'[\\w-]+'\\s*,\\s*(['"])([^'"\\n]*)\\4|\\s*=\\s*document\\.createElement\\()`, 'g'))];
+      const last = assigns.filter((m) => !/document\.createElement\($/.test(m[0])).pop();
+      const cls = last ? (last[2] ?? last[3] ?? last[5] ?? '') : '';
+      if (new RegExp(`(?:^|[\\s'"])${P}(?:$|[\\s'"])`).test(cls)) return true;
+    }
+    return false;
+  }
+  function reached(site, src, rules, iconSet) {
+    if (site.inlineAuto) return { by: 'inline' };
+    const icons = site.classes.filter((c) => iconSet.has(c)).map((c) => iconSet.get(c));
+    const own = new Set(site.classes);
+    for (const r of rules) {
+      if (!WIDTH_AUTO.test(r.body) || /:/.test(r.sel)) continue;
+      const parts = r.sel.split(/\s*[>+~]\s*|\s+/).filter(Boolean), last = parts[parts.length - 1];
+      const lastCls = (last.match(/\.[\w-]+/g) || []).map((x) => x.slice(1));
+      if (!lastCls.length || last.replace(/\.[\w-]+/g, '') || !lastCls.every((c) => own.has(c))) continue;
+      if (!icons.every((ic) => { const c = cmp(r.spec, ic.spec); return c > 0 || (c === 0 && r.idx > ic.idx); })) continue;
+      if (parts.length === 1) return { by: 'own', rule: r };
+      const parentCls = (parts[parts.length - 2].match(/\.[\w-]+/g) || []).map((x) => x.slice(1));
+      if (!parentCls.length) continue;
+      if (site.template ? parentCls.every((P) => new RegExp(`class="[^"]*\\b${P}\\b`).test(site.template)) : parentCls.every((P) => parentProof(src, site.var, P))) return { by: 'parent', rule: r };
+    }
+    return null;
+  }
+  function census({ sheets, srcFiles }) {
+    const rules = rulesOf(sheets), iconSet = iconSetOf(rules), sites = [];
+    for (const [f, src] of Object.entries(srcFiles)) sites.push(...sitesOf(f, src, iconSet));
+    const worded = sites.filter((x) => x.kind === 'words'), flagged = [], noNowrap = [];
+    for (const x of worded) {
+      const r = reached(x, srcFiles[x.file], rules, iconSet);
+      if (!r) flagged.push(`${x.file}:${x.line} ${x.var || '<template>'} [${x.classes.join(' ')}]`);
+      else if (!rules.some((y) => NOWRAP.test(y.body) && (y === r.rule || ((y.sel.split(/\s*[>+~]\s*|\s+/).pop().match(/\.[\w-]+/g) || []).every((c) => x.classes.includes(c.slice(1))) && !/:/.test(y.sel))))) noNowrap.push(`${x.file}:${x.line} ${x.var || '<template>'}`);
+    }
+    return { iconSet, sites, worded, flagged, noNowrap };
+  }
+  return { census, textKind, markupKind, templateInnerKind };
+})();
+{
+  const idxHtml = read('public/index.html');
+  const order = [...idxHtml.matchAll(/<link rel="stylesheet" href="\/([\w-]+\.css)">/g)].map((m) => m[1]).filter((f) => ['style.css', 'viewers.css', 'chat.css', 'theme-editor.css'].includes(f));
+  const sheets = order.map((name) => ({ name, text: read('public/' + name) }));
+  const srcFiles = { ...Object.fromEntries(Object.entries(libTexts).map(([f, t]) => ['src/lib/' + f, t])), 'public/index.html': idxHtml };
+  const c = W.census({ sheets, srcFiles });
+  ok(same(order, ['style.css', 'viewers.css', 'chat.css', 'theme-editor.css']) && c.iconSet.has('file-tool-btn') && c.iconSet.size >= 10, `the icon-box set, in index.html's cascade order (${order.join(' → ')}), holds file-tool-btn among ${c.iconSet.size} single-class ≤ 40 px rules`);
+  ok(c.worded.length >= 30, `the census scope is non-vacuous: ${c.sites.length} icon-class button sites, ${c.worded.length} of them WORDED (46 before the rebuilt dialog removed its eight — the floor sits under both)`);
+  ok(c.flagged.length === 0, `every WORDED button on an icon-box class is reached by a width:auto rule of its own classes, or of a parent the same file builds and appends it to (${c.flagged.length} flagged)`, c.flagged.join('\n    '));
+  console.log(`  (report only) worded icon-class sites with no white-space: nowrap in reach: ${c.noNowrap.length}${c.noNowrap.length ? ' — ' + c.noNowrap.slice(0, 8).join(', ') : ''}`);
+  // CONTROLS — the classifier, the three reaches, a planted site, the parent law
+  ok(W.textKind("t('Remember')") === 'words' && W.textKind("'Stop'") === 'words' && W.textKind("'\\u2715'") === 'icon' && W.textKind("'A'") === 'icon' && W.textKind('label') === 'words' && W.markupKind('UI_ICONS.more') === 'icon' && W.markupKind('svg') === 'icon' && W.markupKind("'<svg viewBox=\"0 0 1 1\"></svg>'") === 'icon' && W.markupKind('escHtml(name)') === 'words' && W.templateInnerKind('${gDef ? STAR_F : STAR_O}') === 'icon' && W.templateInnerKind("${escHtml(t('Copy'))}") === 'words' && W.templateInnerKind('Save') === 'words',
+    'CONTROL: the classifier — words (t(), a literal word, an unresolved TEXT variable, escHtml) vs icons (an escaped glyph, one letter, a markup variable, an SVG literal, an ALL_CAPS constant)');
+  const fx = (src, css) => W.census({ sheets: [{ name: 'style.css', text: css || '' }, { name: 'viewers.css', text: '.file-tool-btn { width: 24px; height: 24px; }' }], srcFiles: { 'fx.js': src } });
+  const planted = W.census({ sheets, srcFiles: { ...srcFiles, 'src/lib/zz-planted.js': "const x = el('button', 'file-tool-btn', t('Remember'));\n" } });
+  ok(planted.flagged.length === 1 && /zz-planted\.js:1/.test(planted.flagged[0]), 'NEGATIVE CONTROL: a planted `el(\'button\', \'file-tool-btn\', t(\'Remember\'))` in a patched listing is the ONE flagged site', planted.flagged);
+  const inline = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn';\nb.textContent = t('Save');\nb.style.width = 'auto';\n");
+  const ownR = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn x-save';\nb.textContent = t('Save');\n", '.file-tool-btn.x-save { width: auto; }');
+  const ownTie = fx("const b = document.createElement('button');\nb.className = 'file-tool-btn x-save';\nb.textContent = t('Save');\n", '.x-save { width: auto; }');
+  const par = "const row = document.createElement('div'); row.className = 'x-row';\nconst b = document.createElement('button');\nb.className = 'file-tool-btn';\nb.textContent = t('Save');\n";
+  ok(inline.flagged.length === 0 && ownR.flagged.length === 0 && ownTie.flagged.length === 1 && fx(par + 'row.append(b);\n', '.x-row > .file-tool-btn { width: auto; }').flagged.length === 0 && fx(par, '.x-row > .file-tool-btn { width: auto; }').flagged.length === 1,
+    'CONTROL: the reaches — inline width:auto passes; an own-class (0,2,0) rule passes; a (0,1,0) rule EARLIER in the cascade loses the tie (flagged); a parent rule passes only WITH the same-file append proof');
+  const dlg = "const acts = document.createElement('div'); acts.className = 'dialog-actions';\nconst go = document.createElement('button');\ngo.className = 'file-tool-btn';\ngo.textContent = t('Switch');\nacts.append(go);\n";
+  ok(fx(dlg, '.desktop-bar > .file-tool-btn { width: auto; }').flagged.length === 1, 'NEGATIVE CONTROL: a worded file-tool-btn appended into `.dialog-actions` (the old switch dialog\'s Cancel / Switch) is flagged although `.desktop-bar > .file-tool-btn` exists');
+  // verifier 2026-09-28: a button's words may be written FAR below its birth — the live bar's Tabs / Console / Actions
+  // (`tabsBtn.textContent = …` 230 lines down), the fit chip, the browser-name button (500 lines down). A census that read
+  // only the 40 lines after `createElement` saw them as `none` and never judged them. The control: a sheet whose bar rule
+  // (`.browser-live-bar > .file-tool-btn`) lost its `width: auto` must name all five — a copy of style.css, in memory.
+  {
+    const barRule = /\.browser-live-bar > \.file-tool-btn \{ width: auto;/;
+    ok(barRule.test(sheets[0].text), 'the live bar\'s worded buttons are reached by `.browser-live-bar > .file-tool-btn { width: auto; … }` (the rule the control strips)');
+    const stripped = sheets.map((sh) => (sh.name === 'style.css' ? { ...sh, text: sh.text.replace(barRule, '.browser-live-bar > .file-tool-btn { ') } : sh));
+    const c2 = W.census({ sheets: stripped, srcFiles });
+    const far = ['tabsBtn', 'consBtn', 'traceBtn', 'backendBtn', 'fitChip'];
+    const named = far.filter((v) => c2.flagged.some((f) => f.startsWith('src/lib/browser-live-window.js:') && f.includes(' ' + v + ' ')));
+    ok(named.length === far.length && c2.flagged.length > c.flagged.length, `NEGATIVE CONTROL: with the bar rule's width:auto stripped, the five bar buttons whose words are written far below their birth are flagged BY NAME (${named.join(', ')}; ${c2.flagged.length} flagged in all)`, c2.flagged.join('\n    '));
+    const wl = (v) => { const src = srcFiles['src/lib/browser-live-window.js']; const birth = src.search(new RegExp(`const ${v} = document\\.createElement\\('button'\\)`)); const text = src.search(new RegExp(`(?<![\\w$.])${v}\\.textContent = `)); return src.slice(birth, text).split('\n').length; };
+    ok(wl('tabsBtn') > 40 && wl('backendBtn') > 40, `…and two of them write their words more than 40 lines after the birth (tabsBtn ${wl('tabsBtn')}, backendBtn ${wl('backendBtn')}) — the span the old window never reached`);
+  }
+}
+
+// ── §4c the dead-token census ──
+// The naive-user verifier (2026-09-28): the live view's browser-cap popover was drawn with NO background — its rule named
+// `var(--bg-secondary)`, a token no theme defines (chat.css already says so), so the popover's rows sat over the bar and
+// the banner showing through. A var() with no fallback naming a token nothing defines paints NOTHING. Judged over the
+// app's sheets (comments stripped): (1) a FLOATING surface (a pop / popover / menu / dropdown / tooltip rule) never takes its
+// background from a dead token; (2) the browser dialogs' own surfaces (.brp / .brsw / .bwho / the cap popover / the blocked
+// banner / the who cell) use no dead token at all; (3) THE RATCHET — the product-wide count of dead-token uses never grows
+// (51 measured after this fix: the older live-view / panel rules, left for their own lanes, each with a named rule).
+console.log('§4c the dead-token census (a var(--x) nothing defines paints nothing)');
+const DEAD_TOKEN_CEILING = 51;
+const deadTokens = (sheets, jsTexts) => {
+  const strip = (css) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const defined = new Set([...sheets.map((x) => strip(x.text)).join('\n').matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+  for (const src of jsTexts) for (const m of src.matchAll(/setProperty\(\s*['"`](--[\w-]+)/g)) defined.add(m[1]);
+  const uses = [];
+  for (const { name, text } of sheets) {
+    for (const m of strip(text).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const sel = m[1].trim().replace(/\s+/g, ' ');
+      for (const u of m[2].matchAll(/var\(\s*(--[\w-]+)\s*(,)?/g)) {
+        if (u[2] || defined.has(u[1])) continue;
+        const bg = new RegExp('background(-color)?\\s*:\\s*var\\(\\s*' + u[1] + '\\s*\\)').test(m[2]);
+        uses.push({ file: name, sel, token: u[1], bg });
+      }
+    }
+  }
+  const floating = uses.filter((u) => u.bg && /(-pop\b|popover|menu|dropdown|tooltip)/.test(u.sel));
+  const lane = uses.filter((u) => /(^|[\s,>+~])\.(brp|brsw|bwho|bprof-who|browser-live-cap-pop|browser-live-blocked)\b/.test(u.sel));
+  return { defined, uses, floating, lane };
+};
+{
+  const SHEETS = ['public/style.css', 'public/chat.css', 'public/viewers.css', 'public/theme-editor.css'].filter((f) => fs.existsSync(path.join(repo, f))).map((f) => ({ name: f, text: read(f) }));
+  const walkJs = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
+  const JS = [...walkJs(path.join(repo, 'src')), path.join(repo, 'public/index.html')].map((f) => fs.readFileSync(f, 'utf8'));
+  const d = deadTokens(SHEETS, JS);
+  ok(d.defined.has('--bg-dialog') && d.defined.has('--bg-window') && !d.defined.has('--bg-secondary') && d.uses.length >= 10, `census scope is non-vacuous (${d.defined.size} tokens defined; --bg-secondary is not one of them; ${d.uses.length} dead uses product-wide)`);
+  ok(d.floating.length === 0, 'no floating surface (pop / popover / menu / dropdown / tooltip) takes its background from a dead token', d.floating.map((u) => `${u.file}: ${u.sel} → ${u.token}`).join('\n    '));
+  ok(d.lane.length === 0, 'the browser dialogs\' own surfaces (.brp / .brsw / .bwho / the cap popover / the blocked banner / the who cell) use no dead token', d.lane.map((u) => `${u.sel} → ${u.token}`).join('\n    '));
+  ok(d.uses.length <= DEAD_TOKEN_CEILING, `THE RATCHET: ${d.uses.length} dead-token uses product-wide ≤ ${DEAD_TOKEN_CEILING} (a new one fails; fixing an old one lowers the count)`, d.uses.slice(0, 8).map((u) => `${u.file}: ${u.sel} → ${u.token}`).join('\n    '));
+  // NEGATIVE CONTROLS over patched listings: the pre-fix popover rule, and a planted new dead use
+  const sheetsWith = (edit) => SHEETS.map((x) => (x.name === 'public/style.css' ? { ...x, text: edit(x.text) } : x));
+  const pre = deadTokens(sheetsWith((t0) => t0.replace('.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-dialog);', '.browser-live-cap-pop { min-width: 240px; max-width: 360px; padding: 8px 10px; background: var(--bg-secondary);')), JS);
+  ok(pre.floating.some((u) => /browser-live-cap-pop/.test(u.sel)) && pre.lane.some((u) => /browser-live-cap-pop/.test(u.sel)) && pre.uses.length === d.uses.length + 1, 'NEGATIVE CONTROL: the pre-fix cap popover (`background: var(--bg-secondary)`) is flagged as a floating surface AND as a browser-dialog surface');
+  const planted = deadTokens(sheetsWith((t0) => t0 + '\n.vs-planted-card { color: var(--text-primary); }\n'), JS);
+  ok(planted.uses.length === d.uses.length + 1 && (d.uses.length < DEAD_TOKEN_CEILING || planted.uses.length > DEAD_TOKEN_CEILING), 'NEGATIVE CONTROL: a planted new dead use grows the count past the ratchet');
 }
 
 // ── §5 wiring pins ──

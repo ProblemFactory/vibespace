@@ -816,12 +816,14 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
   ok(!/root\.addEventListener\('keydown'/.test(LW) && !/FORWARDED_KEYS/.test(LW), '…and the pre-fix path (keys forwarded only while the view\'s own element had focus) is gone');
 
   // ── text a viewer hands the page ──
+  // lane live-input: the browser REFUSES a key event's text of 4+ UTF-16 units (measured, Chromium 151) — the records are
+  // ≤ 3 units each (the full table + the real-binary legs: scripts/test-live-input.mjs, scripts/test-browser-live-input.mjs)
   const tr = S.textRecords('tomsmith');
-  ok(tr.ok && tr.records.length === 1 && tr.records[0].type === 'input_keyboard' && tr.records[0].eventType === 'char' && tr.records[0].text === 'tomsmith', 'textRecords: a paste / composition becomes the stream server\'s `char` record (measured 0.38.1: a multi-character char inserts all of it)');
-  const emoji = '😀'.repeat(S.TEXT_CHUNK + 1);
+  ok(tr.ok && tr.records.length === 3 && tr.records.every((r) => r.type === 'input_keyboard' && r.eventType === 'char' && r.text.length <= S.CHAR_TEXT_MAX_UNITS) && tr.records.map((r) => r.text).join('') === 'tomsmith', 'textRecords: a paste / composition becomes the stream server\'s `char` records of at most 3 UTF-16 units (Chrome refuses a longer key text)');
+  const emoji = '😀'.repeat(7);
   const er = S.textRecords(emoji);
-  ok(er.ok && er.records.length === 2 && er.records.every((r) => !/[\uD800-\uDBFF]$/.test(r.text)) && er.records.map((r) => r.text).join('') === emoji, 'textRecords chunks on CODE POINTS (never splitting a surrogate pair)');
-  ok(S.textRecords('a\r\nb').records[0].text === 'a\nb' && S.textRecords('').code === 'empty' && S.textRecords('x'.repeat(S.TEXT_MAX + 1)).code === 'too_long', '…normalizes CRLF, refuses empty, and refuses (never trims) a paste past TEXT_MAX');
+  ok(er.ok && er.records.length === 7 && er.records.every((r) => !/[\uD800-\uDBFF]$/.test(r.text)) && er.records.map((r) => r.text).join('') === emoji, 'textRecords chunks on CODE POINTS (never splitting a surrogate pair)');
+  ok(S.textRecords('a\r\nb').records.map((r) => r.text).join('') === 'a\nb' && S.textRecords('').code === 'empty' && S.textRecords('x'.repeat(S.TEXT_MAX + 1)).code === 'too_long', '…normalizes CRLF, refuses empty, and refuses (never trims) a paste past TEXT_MAX');
   ok(S.keyRecord({ key: 'F5', keyCode: 116 }).windowsVirtualKeyCode === 116 && S.keyRecord({ key: 'a' }).windowsVirtualKeyCode === 65 && S.keyRecord({ key: 'x', keyCode: 229 }).windowsVirtualKeyCode === 88, 'keyRecord takes the DOM\'s keyCode (F-keys were 0 before), never the IME\'s 229');
   // ── the picture is TOP-aligned; every conversion reads the same word ──
   const el = { left: 10, top: 20, width: 700, height: 900 };

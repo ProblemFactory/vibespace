@@ -560,9 +560,11 @@ class MessageManager {
    * runs and replay them after — a live record interleaved mid-rebuild
    * would land before the rest of the history.
    */
-  async convertHistoryAsync(claudeMessages, { budgetMs = 25, onSlice } = {}) {
+  // `beforeRecord` (2026-09-27): the browser-session cards interleave by time (normalizers.convertWithCards)
+  async convertHistoryAsync(claudeMessages, { budgetMs = 25, onSlice, beforeRecord } = {}) {
     let sliceStart = Date.now(), done = 0;
     for (const msg of claudeMessages) {
+      if (beforeRecord) { try { beforeRecord(msg); } catch { } }
       try { this._processMessage(msg, false); }
       catch (e) { console.error('[normalizer] record skipped during history rebuild:', e.message); }
       done++;

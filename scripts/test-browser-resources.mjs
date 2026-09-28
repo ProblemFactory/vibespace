@@ -89,6 +89,15 @@ const ROOT = scratch('browser-res');
 // alone is 33 bytes and pushes the socket path past 103): a second scratch root
 // with two-letter names, removed with everything else on exit.
 const HB = scratch('bh');
+// THE USER HOME legs ⓐ / ⓑ run under (the 2.369.196 integration, a heavy RED on a gate run with a scratch HOME):
+// they used to inherit the INVOKING user's ~/.agent-browser/config.json — this box's owner has `args: --no-sandbox,
+// headed: true, profile: …/default-profile` there, and without it Chrome dies at launch ("No usable sandbox!": this
+// kernel refuses the unprivileged sandbox) — so the legs passed on the owner's HOME and nowhere else. The fixture
+// mirrors that config's SHAPE (the no-sandbox arg a user here needs, `headed: true` the generated config must
+// override, a named default profile neither session may land on) under this suite's own root.
+const USER_HOME = path.join(HB, 'u');
+fs.mkdirSync(path.join(USER_HOME, '.agent-browser'), { recursive: true });
+fs.writeFileSync(path.join(USER_HOME, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox', headed: true, profile: path.join(USER_HOME, '.agent-browser', 'default-profile') }));
 const REPO_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(path.join(ROOT, 'data', 'session-meta'), { recursive: true });
@@ -170,7 +179,7 @@ function sockDirs() {
   // runtime dir this suite actually runs under — a literal /run/user/<uid> missed every daemon of a run given a
   // scratch XDG_RUNTIME_DIR (takeover r3: the positive control below read 0 there)
   const xdg = process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid?.() ?? 1000}`;
-  const roots = [path.join(os.homedir(), '.agent-browser'), path.join(xdg, 'agent-browser')];
+  const roots = [path.join(os.homedir(), '.agent-browser'), path.join(USER_HOME, '.agent-browser'), path.join(xdg, 'agent-browser')];
   return roots.flatMap((r) => [r, path.join(r, 'namespaces')]);
 }
 function strayNamespaceDirs() {
@@ -196,7 +205,7 @@ const WATCHDOG = setTimeout(() => { console.error('  ✗ WATCHDOG: this suite ow
 WATCHDOG.unref?.();
 
 // ── the environment under test comes from the REAL resolver ────────────────
-// HEADLESS THROUGH THE PRODUCT'S OWN KNOB, not through a flag. This machine's
+// HEADLESS THROUGH THE PRODUCT'S OWN KNOB, not through a flag. The fixture user's (this machine's owner's shape)
 // user config is `headed: true`, and a `--headed false` on `open` alone makes
 // the LAUNCH headless while every later command still resolves headed — the
 // daemon then answers about a browser that is not the one we opened (measured:
@@ -205,6 +214,7 @@ WATCHDOG.unref?.();
 // also why `browser.headed` is a setting rather than a spawn flag.
 const resolver = BE.create({
   dataDir: DATA,
+  homeDir: USER_HOME, // the fixture user (above) — never the invoking user's own agent-browser config
   serverSetting: (k) => (k === 'browser.headed' ? false : undefined),
   // The socket base is this run's own (r4): a long HOME on the box running
   // this would otherwise make the product create the production per-uid dir.
@@ -213,7 +223,7 @@ const resolver = BE.create({
 });
 function envFor(key, extra = {}) {
   const r = resolver.envFor({ browserKey: key, integrationOn: true });
-  const e = { ...process.env, ...extra };
+  const e = { ...process.env, HOME: USER_HOME, ...extra }; // the fixture user's HOME (its config.json), never the invoking user's
   // Strip anything ambient so the only names in play are the ones under test.
   for (const k of ['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE', 'AGENT_BROWSER_IDLE_TIMEOUT_MS']) delete e[k];
   for (const p of r.pairs) { const i = p.indexOf('='); e[p.slice(0, i)] = p.slice(i + 1); }
@@ -288,7 +298,7 @@ console.log('\nⓐ two sessions, one machine (I1 + I2)');
   // can never reach the machine's real default daemon.
   const ctlNs = `vs-ctl-${TAG}`;
   const ctlEnv = () => {
-    const e = { ...process.env };
+    const e = { ...process.env, HOME: USER_HOME };
     delete e.AGENT_BROWSER_SESSION;            // ← THE MISSING NAME, the whole point
     e.AGENT_BROWSER_NAMESPACE = ctlNs;         // ← shared, as today: one daemon
     e.AGENT_BROWSER_CONFIG = A.env.AGENT_BROWSER_CONFIG; // user-data-dir held constant

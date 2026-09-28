@@ -1131,7 +1131,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // `conversation` rung answer on the next resume (and a fork's copy
               // stick to the fork, not to its parent).
               if (pin.profileId && pin.origin !== 'conversation') {
-                try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin }); } catch { }
+                // identity verify r2 (2026-09-28): a REMOTE spawn's explicit pick never writes the conversation into "Who can use
+                // it" — a session on another machine never reaches this machine's browser (the pin itself stays a preference)
+                try { require('./server/browser-keeper.js').keeper()?.setPin(bk.key, pin.profileId, { origin: pin.origin, remote: !!data.hostId }); } catch { }
               } else if (pin.profileId && data.fork && forkParentKey && forkParentKey !== bk.key) {
                 // VERIFY S5 (2026-09-26) MAJOR: a FORK's key is NEW and the 'conversation' rung above is the PARENT's pin —
                 // copied into the keeper under the fork's key (the parent's `by`/`at` verbatim: no laundering), else the

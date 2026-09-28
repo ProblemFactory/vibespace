@@ -78,13 +78,21 @@ export function btn(label, onClick, cls = '') {
   return b;
 }
 
-/** A note line; a warning carries the alert glyph before its sentence (§4.7). */
+/** A note line; a warning carries the alert glyph before its sentence (§4.7). Re-word it with noteText(). */
 export function noteLine(cls, text, { warn = false } = {}) {
   const line = document.createElement('div');
   line.className = cls + (warn ? ' chan-warn' : '');
   if (warn) line.appendChild(icon('alert', 11));
   const s = document.createElement('span');
+  s.className = 'chan-note-text';
   s.textContent = text;
   line.appendChild(s);
+  return line;
+}
+/** Change what a noteLine() says: its OWN text span, never the glyph's (a warning's first span is the icon's
+ *  line-height:0 box — a sentence written there is a 0 px line; the naive-user verifier, 2026-09-28). */
+export function noteText(line, text) {
+  const s = line && line.querySelector(':scope > .chan-note-text');
+  if (s && s.textContent !== String(text)) s.textContent = String(text);
   return line;
 }

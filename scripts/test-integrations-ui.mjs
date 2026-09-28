@@ -343,8 +343,25 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 {
   ok((await p1.evaljs(`${CARD('cloak')}.querySelector('.integ-test').textContent`)) === 'Check format (no network)', 'cloak (shape-only): the button says "Check format (no network)"');
   ok((await p1.evaljs(`${CARD(BL)}.querySelector('.integ-test').textContent`)) === 'Test connection', 'Browserless (credential-exchange): the button says "Test connection" (never clicked — it would reach a vendor)');
-  const t1 = await p1.evaljs(`(async () => { ${CARD('cloak')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloak')}.querySelector('.integ-test-result'); if (r && r.querySelector('.integ-verdict')) return { verdict: r.querySelector('.integ-verdict').textContent, caveat: !!r.querySelector('.integ-caveat'), text: r.textContent }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
-  ok(t1 && t1.verdict === 'Passed' && t1.caveat, `a passing Test (cloak, empty = the free tier) draws Passed WITH the caveat, never a bare tick (${JSON.stringify(t1 && t1.text).slice(0, 120)})`);
+  // Test the cloak row, waiting for THE verdict asked (a card keeps its last result drawn until the next one lands)
+  const cloakTestUntil = (want) => p1.evaljs(`(async () => { ${CARD('cloak')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloak')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && v.textContent === ${JSON.stringify(want)}) return { verdict: v.textContent, caveat: !!r.querySelector('.integ-caveat'), err: (r.querySelector('.integ-test-error') || {}).textContent || '', text: r.textContent }; await new Promise((r) => setTimeout(r, 100)); } const r = ${CARD('cloak')}.querySelector('.integ-test-result'); return { verdict: null, text: r ? r.textContent : null }; })()`);
+  // lane browser-dialog (the naive-user verifier, 2026-09-28): an EMPTY cloak key is NOT "the free tier" — the resolver
+  // resolves no key and every switch / start answers backend_no_key — so the shape check FAILS with the words, never passes
+  const t0 = await cloakTestUntil('Failed');
+  ok(t0 && t0.verdict === 'Failed' && /no key resolved for cloak/.test(t0.err) && t0.caveat, `a cloak Test with NO key resolved draws Failed with the words on the card, beside the caveat — never "empty = the free tier" (${JSON.stringify(t0 && (t0.err || t0.text)).slice(0, 160)})`);
+  // a well-formed cb_ key saved the user's way (Set → password input → Save), then the shape check passes
+  const saved = await p1.evaljs(`(async () => {
+    const row = ${CARD('cloak')}.querySelector('.integ-field[data-field="licenseKey"]');
+    row.querySelector('.integ-replace').click();
+    const inp = row.querySelector('input[type="password"]');
+    if (!inp) return { why: 'no password input after Set' };
+    inp.value = 'cb_' + 'ShapeOnly0001';
+    row.querySelector('.mounts-btn-primary').click();
+    for (let i = 0; i < 60; i++) { const c2 = ${CARD('cloak')}; const m = c2 && c2.querySelector('.integ-field[data-field="licenseKey"] .integ-mask'); if (m && /••••/.test(m.textContent) && !c2.querySelector('input[type="password"]')) return { mask: m.textContent }; await new Promise((r) => setTimeout(r, 100)); }
+    return { why: 'never re-rendered' };
+  })()`);
+  const t1 = saved && saved.mask ? await cloakTestUntil('Passed') : null;
+  ok(t1 && t1.verdict === 'Passed' && t1.caveat, `a passing Test (cloak, a well-formed cb_ key saved) draws Passed WITH the caveat, never a bare tick (${JSON.stringify({ saved, t1: t1 && t1.text }).slice(0, 160)})`);
   const t2 = await p1.evaljs(`(async () => { ${CARD('cloud:browseruse')}.querySelector('.integ-test').click(); for (let i = 0; i < 60; i++) { const r = ${CARD('cloud:browseruse')}.querySelector('.integ-test-result'); const v = r && r.querySelector('.integ-verdict'); if (v && v.textContent === 'Failed') return { err: (r.querySelector('.integ-test-error') || {}).textContent || '', caveat: !!r.querySelector('.integ-caveat') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   ok(t2 && /no key resolved/.test(t2.err) && t2.caveat, `a failing Test (a keyless cloud row — refused before any request) draws the words on the card, beside the caveat (${JSON.stringify(t2)})`);
 }

@@ -15,9 +15,11 @@
  * ONE PATH, TWO MOMENTS. `mintKey` is THE mint and `applyKey` THE session fields a key brings — ws-create's spawn and
  * `ensureBrowserKey` (a live session's first use) both call them, over the same PURE ladder (`B.browserKeyFor`), the
  * same browser-env composition (`envFor`: the generated config / scratch dir + pin symlink / socket dir), the same pin
- * ladder (`keeper.pinForCreate`: the conversation's pin > the Task Group default > the instance default — a DEFAULT
- * pin dated when the session STARTED, `B.latePinAt`: a pin is an authorization and must not be fresher than the session
- * it stands in for, verify r1) and the same cap stamp. The binding is written by the SAME choke point: the late key is persisted into the session's own meta
+ * ladder (`keeper.pinForCreate`: the conversation's pin > the Task Group default > the instance default — the pick the
+ * spawn WITNESSED at the start, `browserPinAtStart`, verify r2) and the same cap stamp. The pin is a PREFERENCE (which
+ * profile a bare command opens): since 2.369.196 "Who can use it" is a list and `whoMayUse` is the one admission, so a
+ * pin authorizes nothing, verify r1's dated pin (`latePinAt`) is gone, and a restored witness never edits any
+ * profile's list. The binding is written by the SAME choke point: the late key is persisted into the session's own meta
  * record with `browserKeyFor` = the session's own conversation id, so `bindableIdOf` binds exactly that conversation
  * and the store's two belts (a conversation keeps its key; a key is one conversation's) stand behind it.
  *
@@ -143,16 +145,16 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     // verify r2: A DEFAULT REACHES A CONVERSATION ONLY AT ITS START. The ladder above is read NOW; the spawn read it at
     // the start — and a default the user set to a narrowed profile in between walked in through this key (reproduced).
     // The spawn's own record of its pick (`browserPinAtStart`, a keyless spawn's WITNESS since r2) is what the late key
-    // restores; without one, the default the user has now is a LANDING dated 0 (never an authorization on a narrowed
-    // profile — `userPinAuthorizes`); the group cap is the witness's, never the group's live value (PURE lateDefaultPin)
+    // restores; without one, the default the user has now is a LANDING. Either is a PREFERENCE — whether the profile
+    // admits this conversation is the list's answer at every command (`whoMayUse`); the group cap is the witness's, never
+    // the group's live value (PURE lateDefaultPin)
     const witness = f.meta && f.meta.browserPinAtStart !== undefined ? f.meta.browserPinAtStart : null;
-    const startedAt = B.latePinAt({ recordedAt: f.meta && f.meta.createdAt, liveAt: session.createdAt });
     let late = { profileId: '', origin: 'harness', at: null, by: null, source: 'none' };
     try {
       if (k && typeof k.pinForCreate === 'function') {
         const taskGroupDefault = typeof k.taskGroupDefaultFor === 'function' ? k.taskGroupDefaultFor(groupFacts) : '';
         const ladder = k.pinForCreate({ explicit: '', priorKey: v.reuse, forkParentKey: '', taskGroupDefault, resume: !!v.reuse, fork: false });
-        late = B.lateDefaultPin({ witness, ladder: ladder.refused ? { profileId: '', origin: 'harness' } : ladder, startedAt });
+        late = B.lateDefaultPin({ witness, ladder: ladder.refused ? { profileId: '', origin: 'harness' } : ladder });
         if (late.refused) { try { log.warn?.(`[browser] ${f.id}: ${late.refused} — starting ephemeral`); } catch { } }
         const p = late.profileId && typeof k.profile === 'function' ? k.profile(late.profileId) : null;
         if (late.profileId && !p) { try { log.warn?.(`[browser] ${f.id}: pinned profile ${late.profileId} no longer exists — starting ephemeral`); } catch { } late = { ...late, profileId: '', origin: 'harness', source: 'none' }; }
@@ -167,14 +169,14 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     if (!env || !env.variant) return refused(session, f.id, B.lateKeyRefusal(isolationOn(e) ? 'unavailable' : 'isolation_off'));
     applyKey(session, { key: bk.key, env, pin });
     if (k) {
-      // verify r1: the DEFAULT pin is dated when this session STARTED, never now — a pin is an authorization and the
-      // user's latest choice wins (B.latePinAt; the keeper only ever dates a pin earlier than its own clock).
       // verify r2: a WITNESSED pick is restored as the spawn wrote it (`restorePin`: profile, origin, date, by — a fork's
-      // parent row verbatim, no re-admission); a LANDING (no witness) is the current default dated 0 (`setPin`'s clamp
-      // keeps it there): the agent's bare command names it and a narrowed profile refuses `not_owner`, by the button
+      // parent row verbatim, no re-admission); a LANDING (no witness) is the current default, its origin kept (a default,
+      // never a `chosen` pick — so `setPin` adds nothing to the list). Neither widens "Who can use it": the agent's bare
+      // command names the profile and the LIST answers (a profile kept from this conversation refuses `not_owner`, by the
+      // button). 2.369.196: no date is handed in — a pin authorizes nothing
       try {
         if (late.source === 'witness' && late.profileId) k.restorePin(bk.key, { profileId: late.profileId, origin: late.origin, at: late.at, by: late.by });
-        else if (late.source === 'landing' && late.profileId) k.setPin(bk.key, late.profileId, { origin: late.origin, by: 'user', at: 0 });
+        else if (late.source === 'landing' && late.profileId) k.setPin(bk.key, late.profileId, { origin: late.origin, by: 'user' });
       } catch { /* the pin row stays the session's copy */ }
       // the group cap: the witness's value (null = none was in force at the start), never the group's live value
       try { if (typeof k.stampGroupCap === 'function') k.stampGroupCap(bk.key, groupFacts, { value: B.witnessCap(witness) }); session._browserCap = typeof k.capOf === 'function' ? k.capOf(bk.key) : null; } catch { session._browserCap = null; }
@@ -193,7 +195,7 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     try { bound = e.bindings && typeof e.bindings.lookup === 'function' ? e.bindings.lookup(v.conversationId) : ''; } catch { bound = ''; }
     const origin = bk.origin === 'conversation' ? 'conversation' : 'new';
     try {
-      log.log?.(`[browser] ${f.id}: had no browser key (it started before per-session browsers, or while they were off) — ${origin === 'conversation' ? `gave it its conversation's key ${bk.key} back` : `minted ${bk.key}`} for conversation ${v.conversationId.slice(0, 8)} on its first browser use (rung ${env.variant}${late.profileId ? `; pin ${late.profileId} ${late.origin}, ${late.source === 'witness' ? 'the pick its spawn witnessed at the start' : late.source === 'conversation' ? 'its conversation\'s own' : 'the default the user has now — a landing, never an authorization'}` : late.source === 'witness' ? '; no default was in force at its start' : ''})`
+      log.log?.(`[browser] ${f.id}: had no browser key (it started before per-session browsers, or while they were off) — ${origin === 'conversation' ? `gave it its conversation's key ${bk.key} back` : `minted ${bk.key}`} for conversation ${v.conversationId.slice(0, 8)} on its first browser use (rung ${env.variant}${late.profileId ? `; pin ${late.profileId} ${late.origin}, ${late.source === 'witness' ? 'the pick its spawn witnessed at the start' : late.source === 'conversation' ? 'its conversation\'s own' : 'the default the user has now — a landing'}` : late.source === 'witness' ? '; no default was in force at its start' : ''})`
         + (persisted ? (bound === bk.key ? '' : ` — the binding was NOT recorded (the store holds ${bound || 'nothing'} for it; the next resume decides from there)`) : ' — no session record to persist it to: this process keeps it, a later resume mints its own'));
     } catch { /* never throws */ }
     try { global.__vsMetric?.('browser-key-late', 1); } catch { }

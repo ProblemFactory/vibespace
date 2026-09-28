@@ -179,7 +179,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const factOf = async (sid) => ev(`const r = row(${S(sid)}); return r && r.browserFact ? r.browserFact : null;`);
     const lineOf = async (sid) => { const f = await factOf(sid); return f ? BF.browserFactWords(f).line : null; };
     const chipOf = (sid) => ev(`const w = chat(${S(sid)}); const c = w && w.element.querySelector('.chat-status-browser'); return c ? { text: c.textContent.trim(), amber: c.classList.contains('amber'), title: c.title } : null;`);
-    const propsLine = (sid) => ev(`const w = props(${S(sid)}); const v = w && w.content.querySelector('.session-props-browser-line'); return v ? { text: v.textContent, amber: v.classList.contains('amber'), ws: getComputedStyle(v.closest('.session-detail-value')).whiteSpace, lines: Math.round(v.closest('.session-detail-value').getBoundingClientRect().height / parseFloat(getComputedStyle(v.closest('.session-detail-value')).lineHeight || '14')) } : null;`);
+    const propsLine = (sid) => ev(`const w = props(${S(sid)}); const v = w && w.content.querySelector('.session-props-browser-line'); const val = v && v.closest('.session-detail-value'); return v ? { text: v.textContent, amber: v.classList.contains('amber'), ws: getComputedStyle(v).whiteSpace, clipped: val.scrollWidth > val.clientWidth + 1, whole: val.textContent.replace(/\\s+/g, ' ').trim(), lines: Math.round(val.getBoundingClientRect().height / parseFloat(getComputedStyle(val).lineHeight || '14')) } : null;`);
 
     // ── 1 · coherence ──
     console.log('— 1 · coherence: the chip, its menu, Session Properties, the card chip and the live view print ONE answer');
@@ -226,7 +226,10 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
     const bgInput = await ev(`const d = document.createElement('div'); d.style.background = 'var(--bg-input)'; document.body.appendChild(d); const c = getComputedStyle(d).backgroundColor; d.remove(); return c;`);
     ok(/task-detail-btn/.test(pbt.cls) && pbt.bg === bgInput && pbt.radius !== '0px', 'Session Properties\' two buttons are the window\'s own (task-detail-btn: the theme\'s input fill + radius), never the browser\'s white default', S({ pbt, bgInput }));
     const pl = await propsLine(SID.P);
-    ok(pl && pl.ws === 'nowrap', 'the profile value is ONE line (white-space: nowrap — never "wor / k")', S(pl));
+    ok(pl && pl.ws === 'nowrap', 'the profile NAME never wraps (white-space: nowrap on its span — never "wor / k")', S(pl));
+    // 2026-09-28 (the naive-user verifier): the value wraps BETWEEN its parts — the ellipsis used to cut the words that say
+    // who can use the profile and how many use it now, with no way to read them
+    ok(pl && !pl.clipped && /every conversation can use it/.test(pl.whole) && /conversation\(s\) using it now/.test(pl.whole), 'the whole Browser value is on screen — nothing cut (who can use it · how many use it now)', S(pl));
     await ev(`const w = props(${S(SID.P)}); w.element.focus(); return true;`);
     await key('Escape', 'Escape', 27);
     ok(await until(() => ev(`return !props(${S(SID.P)});`), 3000), 'Esc closes Session Properties');

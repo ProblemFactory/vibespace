@@ -1,6 +1,7 @@
 const { HARNESSES } = require('./harnesses');
 const { MessageManager } = require('./message-manager');
 const { helperParentOf: helperParentFromTaskRecords } = require('./helper-ask.js'); // PURE (lane S1)
+const { cardBlock: browserCardBlock } = require('./browser-sessions.js'); // PURE (2026-09-27): the browser-session card's block
 
 // REGISTRY, not a ternary (P4, design-backend-parity.md §4): the old
 // `backend === 'codex' ? Codex : Claude` shape silently handed every FUTURE
@@ -158,6 +159,59 @@ function feedPeerCard(session, card) {
   return true;
 }
 const HELD_PEER_CARDS_CAP = 32;
+
+// ── BROWSER SESSION CARDS (2026-09-27, the owner: "在聊天界面…看到 session 的开始和结束") ──
+// A VibeSpace card per session start and end, DERIVED FROM THE TRACE MARKERS (src/server/browser-trace.js — the one
+// record): live, the recorder's `onSession` hook feeds the card into the running conversation's normalizer
+// (`feedBrowserCard`, gated like every live writer); a REBUILD (first attach after a restart) and a view-only history
+// ask the markers again (`setBrowserCardSource`, the wiring's reader) and place each card BY TIME between the records
+// (`convertWithCards` → the normalizer's `beforeRecord` hook). Never agent text, never a turn: a system message
+// (`noticeKind: 'browser-session'`) whose id is the session's own (`{view id}:bs:{session id}:start|end`) — the live op and
+// every rebuild name the SAME card, so a card fed while the rebuild ran is never drawn twice.
+let browserCardSource = null;
+function setBrowserCardSource(fn) { browserCardSource = typeof fn === 'function' ? fn : null; }
+/** The cards of a conversation (`{session}` live, `{conversationId}` for a view-only history) — never throws. */
+function browserCardsFor(q) {
+  if (!browserCardSource) return [];
+  try { const r = browserCardSource(q || {}); return Array.isArray(r) ? r : []; } catch (e) { console.warn('[normalizer] browser session cards not read:', e && e.message); return []; }
+}
+/** THE ONE writer of a browser-session card into a normalizer (any harness: every normalizer keeps `messages`,
+ *  `messageIndex`, `turnIndex`, `_emit`). Idempotent by id. `emit` = a live op; a history conversion emits nothing. */
+function placeBrowserCard(mm, card, { emit = false } = {}) {
+  if (!mm || !Array.isArray(mm.messages) || !mm.messageIndex) return null;
+  const block = browserCardBlock(card);
+  if (!block) return null;
+  const id = `${mm.sessionId || 'view'}:bs:${block.session}:${block.phase}`;
+  if (mm.messageIndex.has(id)) return null;
+  const msg = { id, role: 'system', status: 'complete', content: [block], ts: block.at || Date.now(), srcLine: null, uuid: null, turnIndex: mm.turnIndex || 0,
+    toolCallId: null, toolName: null, toolStatus: null, permission: null, usage: null, taskInfo: null, meta: null, noticeKind: 'browser-session' };
+  mm.messages.push(msg);
+  mm.messageIndex.set(id, msg);
+  if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
+  return msg;
+}
+/** A record's own instant (the transcripts' ISO `timestamp`; a stdout-ring record has none — it never moves a card). */
+function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN; return Number.isFinite(t) ? t : 0; }
+/** convertHistoryAsync with the browser cards placed BY TIME: a card goes before the first record stamped after it;
+ *  the rest (after every stamped record) at the end. */
+async function convertWithCards(mm, records, cards, opts = {}) {
+  const due = (cards || []).filter((c) => browserCardBlock(c)).slice().sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0));
+  if (!due.length) return mm.convertHistoryAsync(records, opts);
+  let i = 0;
+  const beforeRecord = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && (Number(due[i].at) || 0) <= at) placeBrowserCard(mm, due[i++]); };
+  await mm.convertHistoryAsync(records, { ...opts, beforeRecord });
+  while (i < due.length) placeBrowserCard(mm, due[i++]);
+  return mm.messages;
+}
+/** The live card (the recorder's `onSession`): through the same gate as every live writer — held in the rebuild's
+ *  queue while one runs; before the first attach nothing is written (that attach's rebuild derives it from the marker). */
+function feedBrowserCard(session, card) {
+  const mm = session && session._normalizer;
+  if (!mm || !browserCardBlock(card)) return false;
+  if (session._rebuildQueue) { session._rebuildQueue.push({ kind: 'bcard', card }); return true; }
+  if (!session._historyLoaded) return false;
+  return !!placeBrowserCard(mm, card, { emit: true });
+}
 /** verify r6 (S2, MEDIUM — the replay vs the transcript's own record): a card the delivery ladder emitted after a
  *  SUCCESSFUL post carries `recorded` = the exact text the CLI's transcript now holds (a JSONL user record with
  *  origin.kind 'peer' — the CLI wraps it: "Another Claude session sent a message:\n…"); message-manager.injectPeerCard's
@@ -243,6 +297,7 @@ function drainQueue(session, mm, ctx = null) {
     const e = session._rebuildQueue.shift();
     try {
       if (e.kind === 'peer') { if (mm.injectPeerCard) replayCard(mm, e.card, ctx); }
+      else if (e.kind === 'bcard') placeBrowserCard(mm, e.card, { emit: true }); // a card the rebuild's markers already held is the same id — never twice
       else if (e.kind === 'perm-stale') applyPermissionStale(mm, e.requestId, e.staleBy);
       else if (e.kind === 'helper-result') applyHelperResults(session, mm, e.msg);
       else { mm.processLive(e.msg); if (session._normalizer === mm) routeToHelperView(session, e.msg); }
@@ -295,7 +350,8 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   session._rebuildProgress = { done: 0, total: records?.length || 0 };
   const run = async () => {
     try {
-      await mm.convertHistoryAsync(records, { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
+      // 2026-09-27: the browser-session cards, read from the trace markers NOW and placed by time between the records
+      await convertWithCards(mm, records, browserCardsFor({ session }), { ...(budgetMs ? { budgetMs } : {}), onSlice: (done) => { session._rebuildProgress = { done, total: records?.length || 0 }; try { onProgress?.(session._rebuildProgress); } catch { } } });
       // the persisted task records (2.369.140) — silent, after the history, before the live queue
       for (const { record, at } of taskReplayRecords(replay || session._taskRecords)) { try { mm.replay(record, { at }); } catch (err) { console.error('[normalizer] task record replay skipped:', err.message); } }
       // verify r3: the helpers' tool_results (session-store helperResults — the record list skips every sidechain
@@ -330,4 +386,5 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
   return turn;
 }
 
-module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP };
+module.exports = { createMessageManager, NORMALIZERS, feedLive, feedPeerCard, rebuildHistory, taskReplayRecords, pendingPermissions, pendingHelperApprovals, notePermissionStale, routeToHelperView, seedHelperView, setAsksObserver, noteHelperResults, HELD_PEER_CARDS_CAP,
+  setBrowserCardSource, browserCardsFor, placeBrowserCard, convertWithCards, feedBrowserCard };

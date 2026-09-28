@@ -17,14 +17,22 @@ class SettingsUI {
     this._search = '';
   }
 
-  open({ syncId } = {}) {
+  open({ syncId, search } = {}) {
     // Non-blocking: Settings is a normal same-level WINDOW (not a modal overlay)
     // so you can tweak a setting and watch the effect on the workspace live.
     // Singleton — focus an already-open settings window instead of stacking.
+    // `search` (the switch dialog's "Set location in Settings…", 2026-09-27): the search box is filled with it and the
+    // filter applied before the first render — the rows that match are the ones on screen (there is no category focus).
+    const want = typeof search === 'string' && search ? search : null;
     const existing = [...this.app.wm.windows.values()].find(w => w.type === 'settings');
     if (existing) {
       this.app.wm.revealWindow(existing.id, { replay: !!syncId }); // its own tab, restored, raised (a replay only raises)
       const inp = existing.content.querySelector('.settings-search');
+      if (want && inp) {
+        inp.value = want; this._search = want.toLowerCase();
+        const content = existing.content.querySelector('.settings-content'), nav = existing.content.querySelector('.settings-nav');
+        if (content && nav) this._renderContent(content, nav);
+      }
       inp?.focus();
       return;
     }
@@ -57,7 +65,8 @@ class SettingsUI {
     const searchInput = document.createElement('input');
     searchInput.className = 'settings-search';
     searchInput.placeholder = t('Search settings...');
-    this._search = ''; // clear filter on open
+    this._search = want ? want.toLowerCase() : ''; // clear filter on open (or the caller's search)
+    if (want) searchInput.value = want;
     searchInput.oninput = () => { this._search = searchInput.value.toLowerCase(); this._renderContent(content, nav); };
     searchWrap.appendChild(searchInput);
 

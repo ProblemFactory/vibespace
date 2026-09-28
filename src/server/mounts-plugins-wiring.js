@@ -669,6 +669,9 @@ function createSessionMessages(session, sessionId) {
       access: browserAccess, hostKnown: (h) => browserAccess.hostKnown(h),
       integrations: () => integrations, keys: browserBackend, mediator: cdpMediator,
       liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)),
+      // identity verify r2 (2026-09-28): the keys carried by live sessions on ANOTHER machine (an ssh host / a paired device —
+      // rung H): the keeper refuses their `use` / attach (`remote_session`) and never writes them into "Who can use it"
+      remoteKeys: () => new Set([...activeSessions.values()].filter((s) => s && s._browserKey && (s.hostId || s.host || s._browserVariant === 'H')).map((s) => s._browserKey)),
       // §3.2.5 row 3: the Task Group this create lands in (spawned-into first,
       // else the earliest bound group naming a default). Belonging is the
       // store's own LIVE rule (`groupsForSession`), asked with the facts a
@@ -706,6 +709,30 @@ function createSessionMessages(session, sessionId) {
         const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId }) || [];
         const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && Number.isInteger(g.browserCap))) || groups.find((g) => Number.isInteger(g.browserCap));
         return first ? first.browserCap : null;
+      },
+      // "Who can use it" is a LIST (2026-09-27): the Task Groups the conversation carrying a browser key belongs to NOW —
+      // the store's own live rule over the live session; a store read that THROWS is `unreadable`, never "no groups" (the
+      // re-judge keeps that lease, the PATCH says undecided). A key NO live session carries is `live: false` — a STOPPED
+      // conversation's membership cannot be read through the live rule, and it is not "no groups" either (verify
+      // 2026-09-28: read as "no groups", a WIDENING detached a stopped member of the listed Task Group — its tab in the
+      // shared browser closed for a change that kept it); the keeper judges it at its next command instead
+      taskIdsForKey: (bk) => {
+        const tasks = getTasks ? getTasks() : null;
+        if (!tasks) return { ids: [], unreadable: false };
+        let hit = null, hitId = null;
+        for (const [id, x] of activeSessions) if (x && x._browserKey === bk) { hit = x; hitId = id; break; }
+        if (!hit) return { ids: [], unreadable: false, live: false };
+        try {
+          const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
+          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId }) || []).map((g) => g.id), unreadable: false };
+        } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
+      },
+      // one Task Group's facts (null = the store no longer lists it) — the write's unknown_task and the panel's words
+      taskInfo: (id) => {
+        const tasks = getTasks ? getTasks() : null;
+        if (!tasks) return null;
+        try { const t = tasks.get(String(id)); return t ? { title: String(t.title || ''), archived: !!t.archived } : null; }
+        catch (e) { if (/not found/i.test(String(e && e.message))) return null; throw e; }
       },
     });
     const taskIdsFor = (s, id) => {
@@ -870,16 +897,32 @@ function createSessionMessages(session, sessionId) {
   let browserTrace = null;
   try {
     if (browserKeeper) {
-      browserTrace = require('./browser-trace').create({ dataDir: path.join(rootDir, 'data'), keeper: browserKeeper, bridge: browserStream, serverSetting, broadcast: (m) => bcastAll(m) });
+      // 2026-09-27 BROWSER SESSIONS: a marker the recorder writes becomes a VibeSpace card in the live conversation that
+      // owns that browser (its own key — a helper's browser has no card in the parent's chat); a rebuild / a view-only
+      // history reads the markers again through the normalizers' card source (bindings: a stopped conversation's key)
+      const N = require('../normalizers');
+      const cardOfMarker = (m) => (m.phase === 'start'
+        ? { id: `bs:${m.id}:start`, phase: 'start', at: m.at, session: m.id, browserKey: m.browserKey, profileId: m.profileId || null, label: m.label || null }
+        : { id: `bs:${m.id}:end`, phase: 'end', at: m.at, session: m.id, browserKey: m.browserKey, profileId: m.profileId || null, label: m.label || null, durationMs: m.durationMs, count: m.count, reason: m.reason, framesRemoved: false });
+      const onSession = (m) => { for (const [, s] of activeSessions) { if (s && s._browserKey === m.browserKey) { try { N.feedBrowserCard(s, cardOfMarker(m)); } catch (e) { console.warn('[browser-trace] session card not shown — ' + (e && e.message)); } } } };
+      browserTrace = require('./browser-trace').create({ dataDir: path.join(rootDir, 'data'), keeper: browserKeeper, bridge: browserStream, serverSetting, broadcast: (m) => bcastAll(m), onSession });
       browserTrace.install();
       const { router: traceRouter, setup: setupTraceRoutes } = require('../routes/browser-trace');
       // the bindings READER: a stopped conversation's trace is found through the key its CLI id was bound to (P0 r5/r7's store, read off the file per ask — a human's click)
       let bindings = null; try { bindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser-trace] bindings reader unavailable — ' + (e && e.message)); }
+      N.setBrowserCardSource(({ session = null, conversationId = null } = {}) => {
+        let key = session && /^bk-[0-9a-f]{8}$/.test(String(session._browserKey || '')) ? session._browserKey : null;
+        const cid = conversationId || (session && (session.claudeSessionId || session.backendSessionId)) || null;
+        if (!key && cid && bindings && typeof bindings.lookup === 'function') { try { key = bindings.lookup(cid) || null; } catch { key = null; } }
+        return key ? browserTrace.chatCardsFor(key) : [];
+      });
       // owner ruling A (6): the row's Delete… = release every lease + stop, clear every pin (lane S2's `unpinProfile` —
       // ONE implementation, in routes/browser.js beside the pin route), then set aside. Lane S2 (naive study 2, T7): "Set
       // aside" of a PINNED profile is refused `pinned` unless the user unpins (`pinGuard`)
       setupTraceRoutes({ keeper: browserKeeper, trace: browserTrace, activeSessions, bindings,
         releaseProfile: (id) => require('../routes/browser').releaseProfile(id), unpinProfile: (id) => require('../routes/browser').unpinProfile(id),
+        // "Who can use it": a picked live session → its conversation's browser key (routes/browser.js's ONE resolver)
+        keyForPickedSession: (webuiId) => require('../routes/browser').keyForPickedSession(webuiId),
         pinGuard: (id, unpin) => require('../routes/browser').pinGuardFor(id, unpin),
         // a narrowing's detached conversation hears it on its next message (§3.8 layer ②, the same queue as the pin's)
         notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); } });

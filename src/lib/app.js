@@ -57,6 +57,7 @@ import { openInboxWindow } from './inbox-window.js'; // design-user-inbox-reply 
 import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
 import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser P4 (§7.4/§7.5): the backend switcher, the chip, the blocked claims
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
+import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
 import { permissionModeOptions } from './permission-mode-labels.js'; // lane L: permission modes in plain words, the raw value as a hint
 import { BACKEND_META, createBackendIconHtml, getSessionKey, pickAgentIdentity, settingsPrefixFor, effortLabel, noteModelCatalog, worktreeCapsFor } from './agent-meta.js';
 
@@ -1918,7 +1919,7 @@ class App {
       // stored freshest updater.
       this._acctListenersWired = true;
       document.getElementById('input-backend')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); });
-      document.getElementById('input-host')?.addEventListener('change', () => this._updateAcctRow?.());
+      document.getElementById('input-host')?.addEventListener('change', () => { this._updateAcctRow?.(); this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || ''); }); // identity r3: a host pick hides the profile row
     }
     // Host dropdown (remote sessions run over ssh + remote dtach; terminal only until P3)
     const hostSel = document.getElementById('input-host');
@@ -2563,6 +2564,7 @@ installBrowserProfilePicker(App);
 installBrowserLive(App); // agent browser P7 (§4.6): onBrowserDigestChanged → the live view born beside its session
 installBrowserSwitcher(App);
 installBrowserTrace(App);
+installBrowserReplay(App);
 
 // ── WINDOW-TYPE REGISTRATIONS (Plugin Ph1): the kinds App itself opens ──
 registerWindowType({

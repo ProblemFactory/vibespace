@@ -123,6 +123,9 @@ export const UI_ICONS = {
   // globe (`web` / `globe`) is the web view's alone. The rail's 24-grid variant
   // is RAIL_ICONS.browser in sidebar-rail.js.
   browserLive: _s('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><circle cx="8" cy="9" r="1.6"/>'),
+  // A browser session's REPLAY (2026-09-27): the agent browser's window with a play mark in place of the dot — the
+  // replay window's kind icon, the chat card's Replay row, the Sessions list's rows
+  browserReplay: _s('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><path d="M6.8 7.4v3.4l2.9-1.7z"/>'),
   info:      _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 7v4.5M8 4.8v.2"/>'),
   // Communication panel (docs/design-communication-panel-ui.md §4.7, a4
   // 2026-09-18): the channel KINDS (chat / mail / the built-in robot), the
@@ -133,6 +136,7 @@ export const UI_ICONS = {
   mail:      FILE_ICONS.mail,
   more:      _s('<circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/>'),
   chevronRight: _s('<path d="M6 3.5L10.5 8 6 12.5"/>'),
+  chevronLeft: _s('<path d="M10 3.5L5.5 8 10 12.5"/>'), // the replay window's previous action
   outbox:    _s('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>'),
   filter:    _s('<path d="M2.5 3h11l-4.5 5.5V13l-2-1V8.5z"/>'),
   reach:     _s('<path d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8s-2.5 4.5-6.5 4.5S1.5 8 1.5 8z"/><circle cx="8" cy="8" r="2"/>'),

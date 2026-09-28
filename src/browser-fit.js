@@ -64,8 +64,10 @@
  *
  * THE RULE WHEN SEVERAL VIEWERS WATCH (`fitTarget`, decided and pinned): the
  * HOLDER's pane while somebody drives (the person whose clicks land must see the
- * page at their size), else the LARGEST visible pane by area, ties → the earliest
- * viewer. A hidden viewer (another desktop, a background tab, a minimized
+ * page at their size), else the pane a viewer CLAIMED by an explicit act (lane
+ * live-input: the chip's "Fit here" — the latest claim wins; it ends when that
+ * view leaves or hides), else the LARGEST visible pane by area, ties → the
+ * earliest viewer. A hidden viewer (another desktop, a background tab, a minimized
  * window) never votes. Every other viewer's picture is the same frame,
  * letterboxed by its own aspect — never stretched. Nobody visible for
  * `RESTORE_AFTER_MS` ⇒ the page goes back to its `baseline`.
@@ -108,7 +110,10 @@ const ZOOM_MIN = 1;
 const ZOOM_MAX = 4;
 /** A double tap on an unzoomed picture zooms to this. */
 const ZOOM_DOUBLE_TAP = 2;
-const FIT_RULES = Object.freeze(['holder', 'largest']);
+const FIT_RULES = Object.freeze(['holder', 'claimed', 'largest']);
+/** lane live-input: a view's PLACE tags (random, opaque — `page` per loaded page, `device` per browser profile of this
+ *  device, localStorage) ride its pane report so a viewer can be told WHERE the page's size comes from. */
+const PLACE_TAG_RE = /^[A-Za-z0-9_-]{4,40}$/;
 /** What the bridge tells every viewer about the page's size (`{type:'fit', state, …}`). */
 const FIT_STATES = Object.freeze(['fitted', 'agent', 'restored', 'unavailable']);
 
@@ -121,7 +126,9 @@ function fitReport(msg) {
   const w = posNum(msg.width), h = posNum(msg.height);
   if (!w || !h || w > 20000 || h > 20000) return null;
   const dpr = posNum(msg.dpr);
-  return { width: Math.round(w), height: Math.round(h), dpr: dpr && dpr <= 8 ? dpr : 1, visible: msg.visible !== false, force: msg.force === true };
+  const tag = (v) => (typeof v === 'string' && PLACE_TAG_RE.test(v) ? v : null);
+  const pl = msg.place && typeof msg.place === 'object' ? { page: tag(msg.place.page), device: tag(msg.place.device) } : null;
+  return { width: Math.round(w), height: Math.round(h), dpr: dpr && dpr <= 8 ? dpr : 1, visible: msg.visible !== false, force: msg.force === true, claim: msg.claim === true, place: pl && (pl.page || pl.device) ? pl : null };
 }
 
 /**
@@ -148,12 +155,16 @@ function paneViewport({ width, height, dpr = 1, floorW = FIT_MIN_W } = {}) {
  * holder has a visible report), else the largest visible pane by area, ties →
  * the lowest viewer id (the earliest). Null when nobody visible reported.
  */
-function fitTarget({ fits = [], holder = null, mode = 'watch' } = {}) {
+function fitTarget({ fits = [], holder = null, mode = 'watch', claim = null } = {}) {
   const vis = (fits || []).filter((f) => f && f.visible !== false && posNum(f.width) && posNum(f.height));
   if (!vis.length) return null;
   if (mode === 'takeover' && holder !== null && holder !== undefined) {
     const h = vis.find((f) => f.viewerId === holder);
     if (h) return { viewerId: h.viewerId, width: h.width, height: h.height, dpr: h.dpr || 1, rule: 'holder' };
+  }
+  if (claim !== null && claim !== undefined) { // lane live-input: the pane a viewer asked for by its own click ("Fit here")
+    const c = vis.find((f) => f.viewerId === claim);
+    if (c) return { viewerId: c.viewerId, width: c.width, height: c.height, dpr: c.dpr || 1, rule: 'claimed' };
   }
   let best = null;
   for (const f of vis) {
@@ -174,9 +185,9 @@ function fitTarget({ fits = [], holder = null, mode = 'watch' } = {}) {
  * = the page's size before the first fit; `floorW` = HEADED_MIN_W once a headed
  * browser was seen scaling (`fitHonored`).
  */
-function fitVerdict({ fits = [], holder = null, mode = 'watch', agent = null, applied = null, baseline = null, force = false, floorW = FIT_MIN_W, ready = true } = {}) {
+function fitVerdict({ fits = [], holder = null, mode = 'watch', agent = null, applied = null, baseline = null, force = false, floorW = FIT_MIN_W, ready = true, claim = null } = {}) {
   if (agent && !force) return { act: 'letterbox', why: 'agent', agent };
-  const t = fitTarget({ fits, holder, mode });
+  const t = fitTarget({ fits, holder, mode, claim });
   if (!t) {
     if (applied && baseline && posNum(baseline.width) && posNum(baseline.height)) return { act: 'restore', width: Math.round(baseline.width), height: Math.round(baseline.height), why: 'no-visible-viewer' };
     return { act: 'keep', why: 'no-visible-viewer' };
@@ -307,22 +318,117 @@ function fitHonored({ fit = null, picture = null } = {}) {
  * The bar's fit chip for THIS viewer (`you`) — shown only when the page is NOT
  * sized for this pane (a fitted page needs no words). `fit` = the bridge's last
  * `{type:'fit'}` record. → { show, kind: 'agent'|'other'|'floor'|'unavailable'|null, width, height, act }
- *   agent       the agent chose the size — the act is "Fit to this window"
- *   other       another viewer's pane rules (the driver's, else the largest)
+ *   agent       the agent chose the size — the act is `force` (the page follows this window again)
+ *   other       another view's window rules (the driver's, a claimed one, else the largest) — the act is `claim`
+ *               (lane live-input: the page follows THIS window from the click on; while somebody else drives the
+ *               driver's window keeps it and the claim applies at the handback); `where` = the ruling view's place
+ *               against this one's (`place` = this view's tags): 'this-page' (another window of this very page),
+ *               'this-device' (another tab or window of this browser), 'other-device', or null (unknowable);
+ *               `how` = 'smaller' | 'larger' | null — the picture here against the page (from this view's `pane`)
  *   floor       a headed browser cannot be this narrow — the page is its narrowest, scaled to fit
- *   unavailable the size could not be set here (said with the reason in the title)
+ *   unavailable the size could not be set here — the words say why by the record's `code` alone (builder r2: the raw
+ *               error — CDP method names, the agent's own refusal text — is the journal's, never a tooltip's);
+ *               `held_while_driving` = a SHARED (mediated) browser keeps its size while somebody drives it (the
+ *               mediator's paused fence refuses every viewport call, the product's own too) — `mine` = THIS view drives
  */
-function fitChipState({ fit = null, you = null } = {}) {
+function fitChipState({ fit = null, you = null, place = null, pane = null, mine = false } = {}) {
   const none = { show: false, kind: null, width: 0, height: 0, act: null };
   if (!fit || typeof fit !== 'object') return none;
   const w = Math.round(posNum(fit.width)), h = Math.round(posNum(fit.height));
   if (fit.state === 'agent') return { show: true, kind: 'agent', width: w, height: h, act: 'force', device: fit.device || null };
-  if (fit.state === 'unavailable') return { show: true, kind: 'unavailable', width: w, height: h, act: null, error: fit.error || null };
+  if (fit.state === 'unavailable') return { show: true, kind: 'unavailable', width: w, height: h, act: null, error: fit.error || null, code: fit.code || null, mine: !!mine };
   if (fit.state === 'fitted') {
-    if (fit.viewerId !== null && fit.viewerId !== undefined && you !== null && you !== undefined && fit.viewerId !== you) return { show: true, kind: 'other', width: w, height: h, act: null, rule: fit.rule || 'largest' };
+    if (fit.viewerId !== null && fit.viewerId !== undefined && you !== null && you !== undefined && fit.viewerId !== you) {
+      const theirs = fit.place && typeof fit.place === 'object' ? fit.place : null;
+      const mine = place && typeof place === 'object' ? place : null;
+      const where = !theirs || !mine ? null
+        : (theirs.page && mine.page && theirs.page === mine.page) ? 'this-page'
+          : (theirs.device && mine.device && theirs.device === mine.device) ? 'this-device'
+            : (theirs.device && mine.device) ? 'other-device' : null;
+      const pw = posNum(pane && pane.width), ph = posNum(pane && pane.height);
+      const k = pw && ph && w && h ? Math.min(pw / w, ph / h) : 0;
+      const how = !k || Math.abs(k - 1) < 0.02 ? null : k < 1 ? 'smaller' : 'larger';
+      return { show: true, kind: 'other', width: w, height: h, act: 'claim', rule: fit.rule || 'largest', where, how };
+    }
     if (fit.floor && posNum(fit.drawScale) && fit.drawScale < 0.999) return { show: true, kind: 'floor', width: w, height: h, act: null };
   }
   return none;
+}
+/**
+ * builder r2 (the reality verifier's B): the DRIVER'S HELD BUTTONS off the input records the bridge forwards — a resize
+ * landing mid-drag re-laid the page out under the pointer (moves jumped from y=232 to y=361; the selection came back
+ * empty). `down` = the set held so far ('mouse:left' … / 'touch'); → the next set, or null when the record says nothing
+ * about buttons. A MOVE with no button held (`button:'none'`, no `buttons`) while the set holds a mouse button = its
+ * release happened where the view could not map it (outside the picture) — the mouse part is cleared.
+ */
+function buttonStep(down, rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  const cur = new Set(down instanceof Set ? down : []);
+  if (rec.type === 'input_mouse') {
+    const b = 'mouse:' + String(rec.button || 'left');
+    if (rec.eventType === 'mousePressed') { cur.add(b); return cur; }
+    if (rec.eventType === 'mouseReleased') { cur.delete(b); return cur; }
+    if (rec.eventType === 'mouseMoved' && !(Number(rec.buttons) > 0) && [...cur].some((x) => x.startsWith('mouse:'))) { for (const x of [...cur]) if (x.startsWith('mouse:')) cur.delete(x); return cur; }
+    return null;
+  }
+  if (rec.type === 'input_touch') {
+    if (rec.eventType === 'touchStart') { cur.add('touch'); return cur; }
+    if (rec.eventType === 'touchEnd' || rec.eventType === 'touchCancel') { cur.delete('touch'); return cur; }
+    return null;
+  }
+  return null;
+}
+/** builder r2: does a resize that came due now WAIT for the driver's release? 'hold' while a button is down and has been
+ *  for less than `maxMs` (a release that never arrived stops holding it), else 'go'. */
+function fitHoldVerdict({ down = 0, downAt = 0, now = 0, maxMs = 15000 } = {}) {
+  if (!(Number(down) > 0)) return 'go';
+  return Number(now) - Number(downAt) < Number(maxMs) ? 'hold' : 'go';
+}
+/**
+ * lane live-input (the owner: "按另一个窗口的大小 — 非常 confusing 看不懂啥意思"): THE CHIP'S WORDS, one read each —
+ * (1) why the picture here is smaller / larger, (2) which other place the page's size follows when that is knowable,
+ * (3) what a click does. `t` is the caller's translator (the literals below are the dictionary keys). → {text, title}.
+ * No "viewport", "pane", "lease" or "rule" — the words a person uses: page, window, tab, device, drive.
+ */
+function fitChipWords(c, { t = (s, p) => (p ? s.replace(/\{(\w+)\}/g, (_, k) => (p[k] !== undefined ? String(p[k]) : '{' + k + '}')) : s) } = {}) {
+  if (!c || !c.show) return { text: '', title: '' };
+  const size = { w: c.width, h: c.height };
+  // builder r2: sentences are joined by a TRANSLATED template ("{first} {then}" — zh / ja join with no space after 。),
+  // and every sentence carries its own full stop (the agent kind printed "…1280×720. 这个窗口…" / "…にしました. この…")
+  const join = (...parts) => parts.filter(Boolean).reduce((a, b) => t('{first} {then}', { first: a, then: b }));
+  if (c.kind === 'agent') {
+    const who = c.device ? t('The agent set this page to the {device} size ({w}×{h}).', { device: c.device, ...size }) : t('The agent set this page to {w}×{h}.', size);
+    return { text: t('Agent’s size {w}×{h} · Fit here', size), title: join(who, t('This window shows it scaled. Click to make the page fit this window again.')) };
+  }
+  if (c.kind === 'other') {
+    const text = c.where === 'this-page' ? t('Sized for your other window · Fit here')
+      : c.where === 'this-device' ? t('Sized for your other tab · Fit here')
+        : c.where === 'other-device' ? t('Sized for another device · Fit here')
+          : t('Sized for another window · Fit here');
+    const place = c.where === 'this-page' ? t('your other window showing this browser')
+      : c.where === 'this-device' ? t('another tab or window of yours on this device')
+        : c.where === 'other-device' ? t('a window on another device')
+          : t('another window showing this browser');
+    const lead = c.rule === 'holder'
+      ? t('The page is {w}×{h} to fit the window of whoever is driving it ({place}).', { ...size, place })
+      : t('The page is {w}×{h} to fit {place}.', { ...size, place });
+    const shown = c.how === 'smaller' ? t('Here it is shown smaller.') : c.how === 'larger' ? t('Here it is shown larger.') : t('Here it is shown scaled.');
+    // builder r2: the driver is usually the viewer's OWN other tab — "that window", never "they" (对方 read as another person)
+    const act = c.rule === 'holder' ? t('Click to make the page fit this window once that window hands back.') : t('Click to make the page fit this window instead.');
+    return { text, title: join(lead, shown, act) };
+  }
+  if (c.kind === 'floor') return { text: t('Page {w} px wide (its narrowest)', { w: c.width }), title: t('This browser’s window cannot be narrower than {w} px, so the page is that wide and shown smaller here.', { w: c.width }) };
+  if (c.kind === 'unavailable') {
+    if (c.code === 'held_while_driving') {
+      return { text: t('Page {w}×{h} · resized after the handback', size), title: c.mine
+        ? t('A shared browser cannot change its size while you drive it, so the page is shown scaled here. It is resized again once you hand back.')
+        : t('A shared browser cannot change its size while someone drives it, so the page is shown scaled here. It is resized again after the handback.') };
+    }
+    // builder r2 (the reality verifier's item 5): never the raw error — it was English, addressed to the agent, full of
+    // CDP method names and cut at 200 characters; the journal keeps it (the bridge's one warning per relay)
+    return { text: t('Page {w}×{h} · could not resize', size), title: t('The page could not be resized to this window, so it is shown scaled.') };
+  }
+  return { text: '', title: '' };
 }
 
 /**
@@ -383,6 +489,7 @@ module.exports = {
   FIT_SCALE, FIT_MIN_W, FIT_MIN_H, FIT_MAX_W, FIT_MAX_H, HEADED_MIN_W, FIT_SLACK_PX, FIT_REPORT_MS, FIT_DEBOUNCE_MS, RESTORE_AFTER_MS, OWN_WINDOW_MS,
   FRESH_FRAME_MS, REFRESH_EVERY_MS, WAIT_PICTURE_MS, NO_PICTURE_MS, ZOOM_MIN, ZOOM_MAX, ZOOM_DOUBLE_TAP, ZOOM_NONE, FIT_RULES, FIT_STATES,
   fitReport, paneViewport, fitTarget, fitVerdict, viewportArgv, agentViewportOf, deviceSizeOf, ownViewportRecord, fitHonored, fitChipState, pictureState,
+  fitChipWords, PLACE_TAG_RE, buttonStep, fitHoldVerdict, // lane live-input (+ builder r2: the driver's held buttons hold a resize): the chip's words (where the page's size comes from + what a click does); a view's place tags
   agentSetArgs, ownSetOutcome, restoreDeferred, fitNoteOf, fitStateFromNote, // verify r1: the order-judged outcome of our own set, the deferred restore, the persisted note
   zoomClamp, isZoomed, zoomAt, pinchStep, panStep, zoomedRect, transformCss,
 };

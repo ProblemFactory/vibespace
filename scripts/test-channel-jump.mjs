@@ -231,7 +231,10 @@ try {
   // ── ① one call, three conversations, one draft ──
   console.log('① one call reads three conversations and drafts a reply on one');
   await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'check the channels' }); true`);
-  const got3 = await waitFor(`${ROWS(1)}.length === 3`, 30000);
+  // The stub's turn is three reads THEN a reply: three rows exist after the third read, the draft mark lands with
+  // the fourth call. The wait is for the TERMINAL state of the turn (three rows AND the drafted one marked), never
+  // the intermediate count — the .195 mirror read the rows between the two (2026-09-28, twice on the runner).
+  const got3 = await waitFor(`${ROWS(1)}.length === 3 && ${ROWS(1)}.some((r) => r.classList.contains('drafted'))`, 30000);
   const r1 = await rowsOf(1);
   check('the card holds ONE row per conversation (three)', got3 && r1.length === 3, { r1, turns: fs.existsSync(path.join(stubDir, 'turns.log')) ? fs.readFileSync(path.join(stubDir, 'turns.log'), 'utf8').slice(0, 1500) : null });
   check('the DRAFTED conversation is first ("drafted a reply · read … messages"), marked drafted; the other two follow', r1[0]?.key === 'fake-poll/fake-poll-ops' && r1[0].drafted && /^drafted a reply · read \d+ messages$/.test(r1[0].words) && r1.slice(1).every((r) => !r.drafted && /^read \d+ messages?$/.test(r.words)), r1);

@@ -109,6 +109,8 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // P6 (§6.2 / §6.5): a mediated profile with no proxy in this process / a browser that answered no CDP url
   // owner ruling A: a pin is an attachment default now — P6's `pin_refused` is gone; one driver at a time on a shared browser
   mediation_unavailable: 503, mediation_no_cdp: 502, pinned: 409, browser_busy: 409,
+  // identity verify r2 (2026-09-28): a conversation on another machine never uses / pins / is listed on a profile
+  remote_session: 409,
   // §3.7 / §3.8 — the handle refusals are typed so the CLI prints the code and the agent can read why
   profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
   // P3 (§4.3): the user drives ⇒ the agent's command is refused typed; the control verbs' own refusals
@@ -129,7 +131,9 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // MULTIVIEW (design-browser-multiview §2 / D4): a Stop of a browser that has not started (a view's refusal is lane H's browser_stopped); a shared profile is not one of yours to stop
   browser_released: 409, shared: 409,
   // B-f7ab: a live session that could not get its browser key on first use (the reason in `why`), or is not running any more
-  no_browser_key: 409, 'session-gone': 410 };
+  // "Who can use it" is a LIST (2026-09-27): the whole-list rule, the write's refusals, the resolver of a picked session,
+  // and a Task Group list that could not be read (never `not_owner`)
+  'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410, groups_unreadable: 409 };
 function fail(res, e) {
   const code = e?.code || null;
   // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
@@ -141,6 +145,9 @@ function fail(res, e) {
     ...(e?.action ? { action: e.action } : {}), ...(Array.isArray(e?.waysOut) && e.waysOut.length ? { waysOut: e.waysOut } : {}), ...(e?.needsConfirm ? { needsConfirm: true } : {}), ...(e?.provider ? { provider: e.provider } : {}), ...(e?.integrationId ? { integrationId: e.integrationId } : {}),
     // lane H verify r2: a thrown `browser_paused` (an agent's detach while the user drives) carries when, like a resolve's; `profile_locked` names the holder pid
     ...(Number.isInteger(e?.takenAt) && e.takenAt > 0 ? { takenAt: e.takenAt, lastUserInputAt: e.lastUserInputAt || 0 } : {}), ...(Number.isInteger(e?.holderPid) ? { holderPid: e.holderPid } : {}),
+    // the rebuilt switch dialog: a switch whose target did not START carries its rollback facts (whatever the code) —
+    // the dialog words the answer by them first: `restored` (the profile is back as it was), `from`, `to`
+    ...(typeof e?.restored === 'boolean' ? { restored: e.restored, from: e.from || null, to: e.to || null } : {}),
     ...rulingExtras(e) });
 }
 /** Owner ruling A: the extras a refusal on the sharing paths carries — `browser_busy`'s holder (a NAME: the ruling's "told
@@ -210,13 +217,42 @@ function keeperOr503(res) {
   if (!k) res.status(503).json({ error: 'browser profiles are not available on this server', code: 'unavailable' });
   return k;
 }
-/** A live session's conversation identity + Task Groups. */
+/** A live session's conversation identity + Task Groups (asked NOW — membership is judged at every command). A store
+ *  read that THREW is `groupsUnreadable` beside `taskIds: []` — never "no groups" (with Task Group rows in a profile's
+ *  list that would be a silent revoke). */
 function sessionFacts(id) {
   const s = ctx?.activeSessions?.get?.(id) || null;
   if (!s) return null;
-  let taskIds = [];
-  try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch { taskIds = []; }
-  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds };
+  let taskIds = [], groupsUnreadable = false;
+  try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
+  // identity verify r2 (2026-09-28): a session on ANOTHER machine (an ssh host / a paired device — rung H) is named so
+  const remote = !!(s.hostId || s.host || s._browserVariant === require('../browser-profiles.js').VARIANTS.H);
+  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, groupsUnreadable, remote };
+}
+/**
+ * THE ONE RESOLVER OF A PICKED LIVE SESSION (§6.3): the "Who can use it" dialog picks live sessions by their webui id;
+ * the list stores the conversation's BROWSER KEY. → `{ok, key, name}` | `{ok:false, code, error}`:
+ *   gone ⇒ session-gone · on another machine ⇒ no_browser_key (the Agent browser runs on this machine only)
+ *   carries a key ⇒ it · else `ctx.ensureBrowserKey` when the wiring provides it (mints + binds, idempotent) · else
+ *   no_browser_key: "{name}" has no browser of its own yet — restart it (Terminate → Resume), then add it
+ * A PIN IS NEVER CONSULTED HERE; a remote session is never offered.
+ */
+async function keyForPickedSession(webuiId) {
+  const B = require('../browser-profiles.js');
+  const f = sessionFacts(String(webuiId || ''));
+  if (!f) return { ok: false, code: 'session-gone', error: 'that conversation is not running any more — pick it again from the list' };
+  const name = String(f.session.webuiName || f.session.name || f.sessionId);
+  if (f.session.hostId || f.session.host) return { ok: false, code: 'no_browser_key', why: 'remote', name, error: `"${name}" runs on another machine — the Agent browser runs on this machine only` };
+  if (B.isBrowserKey(f.browserKey)) return { ok: true, key: f.browserKey, name };
+  if (typeof ctx?.ensureBrowserKey === 'function') {
+    try {
+      const r = await ctx.ensureBrowserKey(f.session, { sessionId: f.sessionId }); // the engine's signature (src/server/browser-key.js) — liveness asked by this id
+      const key = r && typeof r === 'object' ? r.key : r;
+      if (B.isBrowserKey(key)) return { ok: true, key, name };
+      return { ok: false, code: (r && r.code) || 'no_browser_key', why: r && r.why, name, error: (r && r.error) || `"${name}" has no browser of its own yet — restart it (Terminate → Resume), then add it` };
+    } catch (e) { return { ok: false, code: 'no_browser_key', name, error: `"${name}" has no browser of its own yet — ${e && e.message}` }; }
+  }
+  return { ok: false, code: 'no_browser_key', name, error: `"${name}" has no browser of its own yet — restart it (Terminate → Resume), then add it` };
 }
 /** B-f7ab: a live session with no browser key YET (it started before per-session browsers, or while they were off)
  *  gets one here, on its first browser use — THE engine function (src/server/browser-key.js `ensureBrowserKey`: the
@@ -240,10 +276,14 @@ function needKey(res, f) {
   }
   return f;
 }
-/** The wrapper's answer WITHOUT the CDP url (§5.1) — only the wrapper form asks for it, and it asks explicitly. */
-function attachAnswer(r, { cdp = false } = {}) {
+/** The wrapper's answer WITHOUT the CDP url (§5.1) — only the wrapper form asks for it, and it asks explicitly.
+ *  `agent` = the asking conversation's facts: the record rides as the AGENT's view (identity verify r2, 2026-09-28 — the
+ *  `use` / `resolve` answers carried the raw record: the list, every other conversation's key, `createdBy`). */
+function attachAnswer(r, { cdp = false, agent = null } = {}) {
   const { cdpUrl, ...rest } = r;
-  return cdp ? { ...rest, cdpUrl: cdpUrl || null } : rest;
+  const out = cdp ? { ...rest, cdpUrl: cdpUrl || null } : rest;
+  if (agent && out.profile) out.profile = require('../browser-profiles.js').agentProfileView(out.profile, agent, { mediated: !!out.profile.mediated });
+  return out;
 }
 
 // ── UI ──
@@ -311,8 +351,8 @@ router.post('/api/browser/attach', async (req, res) => {
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   try {
     const was = spellSet(k.setFor(f.browserKey));
-    // owner ruling A (4): the USER's attach is the authorization — a profile kept to another conversation is attached too
-    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, alias: req.body?.alias, by: 'user' });
+    // the USER's attach WRITES the list (§3.3): a profile kept to other conversations gets this one added, then attached
+    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, alias: req.body?.alias, by: 'user' });
     const set = k.setFor(f.browserKey);
     if (r.created) noteChange(f, { kind: 'browser-profile', was, now: spellSet(set), handles: set.handles.map((h) => h.handle) });
     res.json({ ...attachAnswer(r), attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
@@ -568,6 +608,9 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   const B = require('../browser-profiles.js');
   let p = null;
   if (ref !== null && ref !== undefined && ref !== '' && ref !== false) {
+    // identity verify r2 (2026-09-28): a conversation on another machine never pins a profile (the pin could never open —
+    // attachPin answers `none` on rung H — and the user's pick used to write its key into "Who can use it"); an UNPIN stays
+    if (f.remote) { const rr = B.remoteSessionRefusal({ label: String(ref) }); throw Object.assign(new Error(rr.error), { code: rr.code, remedy: rr.remedy }); }
     p = k.profileByRef(ref);
     if (!p) { const a = k.setFor(f.browserKey).attachments.find((x) => x.alias === String(ref).trim()); if (a) p = k.profile(a.profileId); }
     if (!p) throw Object.assign(new Error(`no profile ${ref}`), { code: 'not-found' });
@@ -575,7 +618,10 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   }
   const before = k.setFor(f.browserKey);
   const prevPin = k.pinFor(f.browserKey);
-  const pin = k.setPin(f.browserKey, p ? p.id : null, { origin: 'chosen', by: by === 'user' ? 'user' : 'agent' });
+  const pin0 = k.setPin(f.browserKey, p ? p.id : null, { origin: 'chosen', by: by === 'user' ? 'user' : 'agent', taskIds: Array.isArray(f.taskIds) ? f.taskIds : null, groupsUnreadable: !!f.groupsUnreadable });
+  // THE PICK WRITES THE LIST (§3.3): the answer says when this conversation was added to the ones that may use it
+  const { added = null, ...pinRest } = pin0 || {};
+  const pin = pin0 ? pinRest : null;
   if (f.session) { f.session._browserProfileId = p ? p.id : null; f.session._browserPinOrigin = p ? 'chosen' : 'harness'; }
   try { ctx.persistPin?.(f.session, p ? p.id : null, p ? 'chosen' : 'harness'); } catch (e) { console.warn('[browser] pin not persisted to session meta — ' + (e && e.message)); }
   // the pin moved off a profile whose lease the PIN made ⇒ that lease goes (never one the agent attached itself)
@@ -592,7 +638,7 @@ function pinAnswer(k, f, ref, { by = 'agent' } = {}) {
   if (by === 'user') { if (moved) noteChange(f, { kind: 'browser-pin', was: prevPin ? prevPin.label : '', now: p ? p.label : '', handles: after.handles.map((h) => h.handle) }); }
   else k.tell(f.browserKey);
   try { ctx.onPinChanged?.(f.sessionId, f.session, pin); } catch { /* optional */ }
-  return { pin, repoint, detached, appliesFrom: B.pinApplyNotice({ liveBrowser, label: p ? p.label : '' }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved };
+  return { pin, repoint, detached, appliesFrom: B.pinApplyNotice({ liveBrowser, label: p ? p.label : '' }), attachments: after.attachments, handles: after.handles, defaultId: after.defaultId, changedSet: before.fingerprint !== after.fingerprint, moved, ...(added ? { added } : {}) };
 }
 /** OWNER RULING A: a pinned conversation's first bare command with NO attachment opens its pin THROUGH THE KEEPER (the
  *  profile's one browser, joined when another conversation runs it) — then it resolves again as that attachment (every
@@ -606,7 +652,7 @@ async function attachPin(k, f, v, verb = null) {
   const p = k.profile(v.profileId);
   const label = p ? p.label : v.profileId;
   try {
-    await k.attach({ profileId: v.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, by: 'pin' });
+    await k.attach({ profileId: v.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, by: 'pin' });
   } catch (e) {
     try { k.notePinFailure?.(f.browserKey, { profileId: v.profileId, code: e && e.code, error: e && e.message }); } catch { /* optional */ }
     console.warn(`[browser] ${f.browserKey}: its pinned profile ${v.profileId} "${label}" did not open — ${e && (e.code || '')} ${e && e.message}`);
@@ -714,28 +760,87 @@ function healDanglingPins() {
 }
 
 // ── AGENT (the CLI) ──
+/** The asking session's facts by its vsst_ token — null when the token names no live session (the belt and
+ *  `agentFacts` share this ONE resolution; the facts are stashed on the request for the belt). */
+function askerOf(req) {
+  if (req._agentFacts !== undefined) return req._agentFacts;
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
+  let f = null;
+  if (token && token.startsWith('vsst_')) for (const [id, s] of (ctx?.activeSessions || new Map())) if (s && s.agentToken === token) { f = sessionFacts(id); break; }
+  req._agentFacts = f;
+  return f;
+}
+/**
+ * THE SERVER BELT on `/api/agent/browser/*` (identity verify r3, 2026-09-28): ONE wrapper, registered BEFORE every agent
+ * route, so the body of every `res.json` on this prefix — a success, a refusal, a route written raw tomorrow — passes the
+ * PURE `agentAnswerView` last: another conversation's browser key in any string is masked, its webui / conversation id
+ * masked, its browser pid nulled; what the asker itself sent is left as it wrote it; `$.drivers` is the one exception
+ * (browser-profiles.BELT_EXCEPTIONS). The per-route views (`agentDigestView` / `agentProfileView`) still decide the
+ * SHAPE an agent is told (no `owner` list, no `createdBy`, other rows reduced) — the belt is the last line for the
+ * identifier class, not a substitute. scripts/test-browser-identity-census.mjs proves the belt precedes every route
+ * and walks every answer of a fixture at runtime.
+ */
+const AGENT_PREFIX = '/api/agent/browser';
+function foreignOf(f) {
+  const B = require('../browser-profiles.js');
+  const me = f ? B.parentKeyOf(String(f.browserKey || '')) : '';
+  const ids = new Set(), pids = new Set();
+  for (const [id, s] of (ctx?.activeSessions || new Map())) {
+    if (!s || (f && id === f.sessionId)) continue;
+    for (const v of [id, s.claudeSessionId, s.backendSessionId]) if (typeof v === 'string' && v) ids.add(v);
+  }
+  const k = ctx?.keeper || null;
+  if (k && typeof k.ephemerals === 'function') { try { for (const e of k.ephemerals()) if (Number.isInteger(e.pid) && (!me || B.parentKeyOf(String(e.browserKey || '')) !== me)) pids.add(e.pid); } catch { /* the belt masks what it can read */ } }
+  return { ids, pids };
+}
+function agentBelt(req, res, next) {
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    let out = body;
+    try {
+      const B = require('../browser-profiles.js');
+      const f = askerOf(req);
+      out = B.agentAnswerView(body, { me: f ? f.browserKey : null, foreign: foreignOf(f), echoes: B.echoesOf(req.body, req.query, req.params) });
+    } catch (e) { console.warn(`[browser] the agent belt could not judge an answer — ${e && e.message}`); out = { error: 'the answer could not be judged for another conversation\'s identifiers', code: 'belt_failed' }; }
+    return json(out);
+  };
+  next();
+}
+router.use(AGENT_PREFIX, agentBelt);
 function agentFacts(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   if (!token || !token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token', code: 'unauthorized' }); return null; }
-  for (const [id, s] of (ctx?.activeSessions || new Map())) if (s && s.agentToken === token) return needKey(res, sessionFacts(id));
+  const f = askerOf(req);
+  if (f) return needKey(res, f);
   res.status(401).json({ error: 'unknown session token', code: 'unauthorized' });
   return null;
 }
+/** The digest as an AGENT may see it (§4.1; the owner's default 3): every profile stays LISTED (an agent may ask the user
+ *  for one it cannot use) but each row says only whether THIS conversation may use it and through what (`use.you` /
+ *  `use.via`) — never the list, never `owner` / `createdBy` (another conversation's key), and the pins narrowed to its own. */
+function agentDigest(k, f) {
+  const B = require('../browser-profiles.js');
+  // identity verify r2 (2026-09-28): the WHOLE digest through the ONE agent view — every profile row through
+  // agentProfileView, other conversations' lease / grant / ephemeral / claim rows without their keys and session ids
+  return B.agentDigestView(k.list(), agentFactsOf(f), (id) => k.profile(id));
+}
+/** The asking conversation's admission facts (the ONE shape every agent view takes). */
+const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
 router.get('/api/agent/browser/profiles', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
-  try { res.json({ ...k.list(), me: k.statusFor(f.browserKey) }); } catch (e) { fail(res, e); }
+  try { res.json({ ...agentDigest(k, f), me: k.statusFor(f.browserKey) }); } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/use', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   try {
-    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, alias: req.body?.alias });
+    const r = await k.attach({ profile: req.body?.profile, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, alias: req.body?.alias });
     const set = k.setFor(f.browserKey);
     k.tell(f.browserKey);
     stampActive(f, r.profile.id); // `use` execs a subshell on this profile: the agent's next direct commands land here
     const mine = set.attachments.find((a) => a.profileId === r.profile.id) || null;
-    res.json({ ...attachAnswer(r, { cdp: req.body?.wrapper === true }), alias: mine ? mine.alias : null, attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
+    res.json({ ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), alias: mine ? mine.alias : null, attachments: set.attachments, handles: set.handles, defaultId: set.defaultId });
   } catch (e) { fail(res, e); }
 });
 /** §3.7: WHICH browser does this CLI command act on. ONE call for the
@@ -863,10 +968,10 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       }
       return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
-    const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds });
+    const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
-    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt });
+    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true, agent: agentFactsOf(f) }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/new-child', (req, res) => {
@@ -924,7 +1029,14 @@ router.get('/api/agent/browser/providers', (req, res) => {
 router.post('/api/agent/browser/new', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
+  const B = require('../browser-profiles.js');
+  // identity verify r3 (2026-09-28): the record an agent's `new` / `--adopt` answers rides as the AGENT's view (never
+  // `owner` / `createdBy` raw — the adopt of a directory another conversation registered is refused by name before this)
+  const view = (p) => B.agentProfileView(p, agentFactsOf(f), { mediated: typeof k.isMediated === 'function' ? !!k.isMediated(p) : !!(p && p.sharing === 'instance') });
   try {
+    // a conversation on ANOTHER machine never makes a profile here: it could never use it (r2's fence at every admission),
+    // so a `new` from an ssh host / a paired device is refused by the same name — it keeps its own browser on its machine
+    if (f.remote) { const rr = B.remoteSessionRefusal({ label: String(req.body?.label || '') }); return res.status(STATUS[rr.code] || 409).json({ error: rr.error, code: rr.code, remedy: rr.remedy }); }
     // `--adopt <dir>`: REGISTER a directory that already exists, in place (the
     // remedy the path refusal names — a path becomes a HANDLE here, never on a
     // command); refused with the reason when it is not a directory
@@ -940,11 +1052,11 @@ router.post('/api/agent/browser/new', (req, res) => {
       // owner ruling A: usable by ALL of the owner's conversations (`createdBy` = this one); the user's panel switch narrows it
       const a = k.adoptDirectory({ label: req.body?.label, dir: adoptDir, owner: { kind: 'instance', id: null }, createdBy: f.browserKey });
       if (!a.profile) return res.status(409).json({ error: a.why || 'cannot adopt that directory', code: 'adopt_failed' });
-      return res.json({ profile: a.profile, adopted: true, created: a.created });
+      return res.json({ profile: view(a.profile), adopted: true, created: a.created });
     }
     // owner ruling A ("A吧"): an agent's `new` makes a profile EVERY conversation of the owner can use — the study's path A
     // (`new work` in one chat, `use work` in the next ⇒ not_owner) is gone; only the user's row switch keeps one to one chat
-    res.json({ profile: k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey }) });
+    res.json({ profile: view(k.createProfile(req.body || {}, { owner: { kind: 'instance', id: null }, createdBy: f.browserKey })) });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/detach', (req, res) => {
@@ -987,7 +1099,14 @@ router.get('/api/agent/browser/backend', (req, res) => {
     const p = agentProfileFor(k, f, req.query.profile);
     const v = k.switcherView(p.id);
     const set = k.setFor(f.browserKey);
-    res.json({ ...v, attachments: set.attachments.map((a) => ({ ...a, chip: k.chipFor(k.profile(a.profileId) || { provider: 'chromium' }) })), me: f.browserKey });
+    // the record as an AGENT may see it (§4.1, the owner's default 3): never `owner` (the list — other conversations'
+    // keys) / `createdBy` / `scopeAt`; `use` says only whether THIS conversation may use it (verify 2026-09-28: the raw
+    // record rode this answer for ANY profile named by ref, admitted or not)
+    const B = require('../browser-profiles.js');
+    // …and the view's lease / claim rows likewise (identity verify r2, 2026-09-28: they rode whole — another
+    // conversation's key + webui session id — for ANY profile named by ref, admitted or not)
+    const agent = B.agentDigestView({ leases: v.leases, blocked: v.blocked }, agentFactsOf(f));
+    res.json({ ...v, leases: agent.leases, blocked: agent.blocked, profile: B.agentProfileView(p, agentFactsOf(f), { mediated: !!(v.profile && v.profile.mediated) }), attachments: set.attachments.map((a) => ({ ...a, chip: k.chipFor(k.profile(a.profileId) || { provider: 'chromium' }) })), me: f.browserKey });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/backend', async (req, res) => {
@@ -995,7 +1114,7 @@ router.post('/api/agent/browser/backend', async (req, res) => {
   const f = agentFacts(req, res); if (!f) return;
   try {
     const p = agentProfileFor(k, f, req.body?.profile);
-    const r = await k.switchBackend({ profileId: p.id, target: req.body?.provider, by: { kind: 'agent' }, browserKey: f.browserKey, sessionId: f.sessionId, confirmDowngrade: req.body?.confirmDowngrade === true });
+    const r = await k.switchBackend({ profileId: p.id, target: req.body?.provider, by: { kind: 'agent' }, browserKey: f.browserKey, sessionId: f.sessionId, confirmDowngrade: req.body?.confirmDowngrade === true, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
     if (r.mode === 'proposal') return res.json({ ...r, filed: fileProposal(f, r, { by: 'agent' }) });
     k.tell(f.browserKey);
     res.json(r);
@@ -1005,12 +1124,23 @@ router.post('/api/agent/browser/blocked', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   try {
-    let profileId = null;
-    try { const p = profileRefFor(k, req.body?.profile, f); if (p) profileId = p.id; else { const t = inputTargetFor(k, f, ''); if (t.ok) profileId = t.profileId; } } catch { profileId = null; }
+    let profileId = null, named = null;
+    try { named = profileRefFor(k, req.body?.profile, f); if (named) profileId = named.id; else { const t = inputTargetFor(k, f, ''); if (t.ok) profileId = t.profileId; } } catch { profileId = null; }
+    // identity verify r3 (2026-09-28): a claim names a block the agent HIT in this profile's browser — a profile the list keeps
+    // from this conversation is not one it could have hit a block in; refused by the admission's own name (the user's live
+    // view of a kept profile never shows a stranger's claim with a one-click switch beside it)
+    if (named && !named.ambiguous) { const B = require('../browser-profiles.js'); const may = B.mayAttach(named, agentFactsOf(f)); if (!may.ok) return res.status(STATUS[may.code] || 409).json({ error: may.error, code: may.code, ...(may.remedy ? { remedy: may.remedy } : {}) }); }
     const r = k.blocked({ url: req.body?.url, why: req.body?.why, evidence: req.body?.evidence, tier: req.body?.tier, browserKey: f.browserKey, sessionId: f.sessionId, profileId });
     let remembered = null;
     if (req.body?.remember === true) { try { remembered = k.addSiteHint({ host: r.claim.host, tier: r.claim.tier, backend: null, why: r.claim.why || 'blocked (agent claim)', by: 'agent' }); } catch (e) { remembered = { error: String(e && e.message), code: e && e.code }; } }
-    res.json({ ...r, remembered, next: 'the user sees your claim in the live view with a one-click "Open with CloakBrowser" — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself' });
+    // the rebuilt dialog: the live view offers the switch ONLY when another browser is available for this profile
+    // (SW.switchChoices, the digest's `backends[id].choices`) — the agent is told which world it is in
+    let choices = [];
+    try { choices = profileId && typeof k.choicesFor === 'function' ? k.choicesFor(profileId) : []; } catch { choices = []; }
+    const next = choices.includes('cloak')
+      ? 'the user sees your claim in the live view with a one-click "Switch to CloakBrowser…" — the switch is THEIR act; `vibespace-browser backend <name>` proposes it yourself'
+      : 'the user sees your claim in the live view; no other browser is available on this instance, so the switch is not offered there — it is THEIR act to arrange one; `vibespace-browser backend` lists the rows';
+    res.json({ ...r, remembered, next });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/site-hint', (req, res) => {
@@ -1019,4 +1149,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs }; // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { router, setup, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

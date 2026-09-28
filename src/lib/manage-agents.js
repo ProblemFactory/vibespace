@@ -35,6 +35,7 @@ import { overageChip, spendControlChip, creditsChipHtml, creditsState } from './
 import { ETA_MIN_MS, accountResetEta, bucketEta, bucketMayNameDeadline, bucketResetMs, fullEta } from './usage-eta.js'; // the ONE compact reset countdown (PURE, 2026-09-14) + the per-account full form (2026-09-15)
 import { THRESH } from '../account-pool-auto.js'; // the pool's own hard bars = what "spent" means for the per-account countdown (PURE)
 import { overageState, spendControlState } from '../spend-authorizer.js'; // the ONE overage / spend-control verdict (PURE)
+import { installVerdictWords, installOutcomeWords, installConfirmWords } from './browser-switcher-model.js'; // the CloakBrowser row's words = the switch dialog's (PURE)
 
 // Roster order = TYPE, never add-order (2.268.5): pool → subscription → API
 // key, name-sorted within a type. ONE comparator for both rosters (2.369.18 —
@@ -1526,39 +1527,37 @@ export function installManageAgents(App, ctx = {}) {
         await renderRoster(b.key);
         if (stale()) return;
       }
-      // ── CloakBrowser (the agent browser's `cloak` backend, design §7.4
-      // failure form (1)) — local machine only. Installing it is a USER act
-      // that comes AFTER the §7.2.1 egress measurement: the row states the
-      // server's verdict (a disabled Install WITH its reason) and never
-      // downloads anything by itself. A refused verdict is a 200 carrying
-      // {ok:false, code, error}; a transport failure hides the row (the
-      // browser keeper may simply not be wired on this server).
+      // ── CloakBrowser (a browser the agent can use, design §7.4 failure form (1)) — local machine only. Installing
+      // it is a USER act that comes AFTER the §7.2.1 egress measurement. The row is worded by the PURE
+      // installVerdictWords (src/lib/browser-switcher-model.js, the same words the switch dialog says): the state
+      // word, and ONE button only when it works — `Install…` behind the same download confirm; no disabled
+      // control with a tooltip, no measurement notes. A refused verdict is a 200 carrying {ok:false, code}; a
+      // transport failure hides the row (the browser keeper may simply not be wired on this server).
       if (!selectedHost) {
         let iv = null;
         try { iv = await fetchJson('/api/browser/install'); } catch { iv = null; }
         if (stale() || !body.isConnected) return;
-        if (iv && typeof iv.ok === 'boolean' && (iv.ok || iv.code)) {
-          const row = document.createElement('div'); row.className = 'ob-backend';
+        // a build without CloakBrowser lists no row for it (the naive-user verifier, 2026-09-28: "this version of VibeSpace
+        // doesn't have CloakBrowser" in red named a feature nobody here can act on); red only for a real failure
+        const w = iv && typeof iv.ok === 'boolean' && (iv.ok || iv.code) ? installVerdictWords(iv, { t, name: 'CloakBrowser' }) : null;
+        if (w && w.state !== 'not-in-this-version') {
+          const row = document.createElement('div'); row.className = 'ob-backend ob-cloak';
           const left = document.createElement('div'); left.className = 'ob-backend-id';
-          const installed = iv.code === 'already_installed';
-          const running = !!(iv.state && iv.state.running);
-          left.innerHTML = `<b>CloakBrowser</b> <span class="ob-ver">${escHtml(t('browser backend'))}</span> ${
-            installed ? `<span class="ob-ok">✓ ${escHtml(t('installed at {path}', { path: String(iv.path || '') }))}</span>`
-            : running ? `<span class="ob-ver">${escHtml(t('install in progress…'))}</span>`
-            : `<span class="ob-bad">${escHtml(t('not installed'))}</span>`
-          }`;
+          const cls = w.state === 'installed' ? 'ob-ok' : (w.state === 'install-failed' || w.state === 'unavailable') ? 'ob-bad' : 'ob-ver';
+          left.innerHTML = `<b>CloakBrowser</b> <span class="${cls}">${w.state === 'installed' ? '✓ ' : ''}${escHtml(w.text)}</span>`;
+          if (w.title) left.title = w.title; // the path rides the title, never the text
           const actions = document.createElement('div'); actions.className = 'agent-actions';
-          if (!installed && !running) {
-            const instBtn = document.createElement('button'); instBtn.className = 'agent-btn' + (iv.ok ? ' primary' : ''); instBtn.textContent = t('Install');
-            instBtn.disabled = !iv.ok;
-            instBtn.title = iv.ok ? `npm install ${String(iv.spec || '')}` : String(iv.error || '');
+          if (w.offer) {
+            const instBtn = document.createElement('button'); instBtn.className = 'agent-btn primary';
+            instBtn.textContent = w.offer === 'install-again' ? t('Install again…') : t('Install…');
             instBtn.onclick = async () => {
+              if (!(await showConfirmDialog(installConfirmWords('CloakBrowser', t)))) return;
               const r = await fetchJson('/api/browser/install', { method: 'POST' });
-              if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error', duration: 9000 }); return; }
-              showToast(t('Installing {spec} — the row updates when it finishes', { spec: String(r.spec || '') }));
+              if (r && r.error) console.warn('[manage-agents] cloak install answered', r.code, r.error);
+              const o = installOutcomeWords(r, { t, name: 'CloakBrowser' });
+              showToast(o.text, { type: o.tone === 'error' ? 'error' : o.tone === 'warn' ? 'warn' : 'info', duration: 9000 });
             };
             actions.appendChild(instBtn);
-            if (!iv.ok) { const why = document.createElement('div'); why.className = 'ob-ver'; why.textContent = String(iv.error || ''); left.appendChild(why); }
           }
           row.append(left, actions);
           body.appendChild(row);

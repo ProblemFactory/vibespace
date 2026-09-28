@@ -207,13 +207,40 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   used by every other conversation of the user's too — the login you make in
   it is theirs as well. It runs ONE browser: a second conversation that uses
   it JOINS that browser in its own tab; it is never started twice.
-* **The user can keep a profile to one conversation** (the Agent browser
-  panel's "Who can use it"). Using one kept to ANOTHER conversation answers
-  `not_owner` with the button to press: relay that sentence to the user — ask
-  them to set it to "All my conversations" in the Agent browser panel, or to
-  pick it for this conversation in Session properties → Agent browser. Never
-  propose a command line to them, and never create a second profile for the
-  same login (a copy does not share the login and still is not theirs).
+* **The user can keep a profile to SOME conversations and Task Groups** (the
+  Agent browser panel's "Who can use it" → Change…). A Task Group means every
+  conversation in it, now or later. `profiles` tells you only whether YOURS
+  may use each one — `used by: all your conversations`, `chosen conversations
+  — yours included` (or `… (through its Task Group)`), `… not yours`, or
+  `… unknown for yours right now` — never who else. Using one that is not
+  yours answers `not_owner` with the button to press: relay that sentence to
+  the user — ask them to add this conversation (or its Task Group) under "Who
+  can use it" in the Agent browser panel, or to switch it to "All my
+  conversations". `groups_unreadable` means the Task Group list could not be
+  read: run the same command again once. Never propose a command line to
+  them, and never create a second profile for the same login (a copy does not
+  share the login and still is not theirs).
+* **A conversation on another machine never uses a profile.** If this
+  conversation runs on an ssh host or a paired device, every `use` / `pin` /
+  `new` of a profile answers `remote_session`: the profile's browser runs on
+  the VibeSpace machine and cannot be reached from yours — keep using the
+  browser of your own machine (a bare `vibespace-browser <verb>` lands on it).
+* **You are told about your own conversation only.** Every answer names your
+  own browsers, tabs and helpers; another conversation's browser key reads
+  `bk-********`, its session `[another conversation]` — they are the user's
+  to name, not yours. The one thing said by key is who DRIVES a shared
+  browser right now (`drivers`), so a `browser_busy` can be relayed.
+* **Switching a profile's backend, or claiming a block in it, needs the
+  profile to be yours to use.** A `backend <name>` on a profile "Who can use
+  it" keeps from this conversation is filed as a proposal to the user, never
+  run — the same as when other conversations are attached or somebody drives
+  it; a `blocked` claim naming such a profile is refused `not_owner` (you
+  could not have hit a block in a browser you cannot open).
+* **Leaving the list takes the profile away at your next command.** If the
+  user narrows the list, or this conversation leaves the Task Group the
+  profile is kept to, your next command on it is refused `not_owner` and your
+  tab in that browser is closed ("Your tab in its browser was closed.") — the
+  other conversations keep theirs.
 * **One conversation drives a shared browser at a time.** While another
   conversation's agent is working in it (its turn is running and it sent a
   command in the last ~90 s), your command answers `browser_busy`, naming
@@ -275,9 +302,11 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
 * **A pin is this conversation's DEFAULT browser.** When you have no
   attachment, your next bare command OPENS the pinned profile (joining its
   browser if another conversation already runs it) — nothing is relaunched,
-  and the browser you had keeps its pages. A pin the USER chose (New Session,
-  Session properties) works even on a profile kept to another conversation —
-  their choice is the permission. If the pinned profile cannot open, your
+  and the browser you had keeps its pages. A pin is only a preference, never
+  a permission: when the USER picks a profile for this conversation (New
+  Session, Session properties), this conversation is added to the profile's
+  "Who can use it" list; a pin you made yourself, a fork's copy of its
+  parent's, or a default adds nothing. If the pinned profile cannot open, your
   command is refused with the reason and `pinned profile: …` — nothing else
   is opened instead: tell the user. `--none` goes back to your own temporary
   browser.
@@ -290,8 +319,12 @@ vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2
   somebody else started — nothing is started, nothing of yours is stopped.
 * **Being blocked.** When a page blocks you (a captcha, a 403/429, an anti-bot
   wall), do NOT switch anything yourself: `blocked --url <u> --why <code>`
-  records your CLAIM with your name; the user sees it in the live view with a
-  one-click "Open with CloakBrowser", and `--remember` files a per-site hint. A
+  records your CLAIM with your name and the user sees it in the live view. The
+  live view offers "Switch to CloakBrowser…" beside it ONLY when another
+  browser is available for that profile on this instance (the answer's `next`
+  says which); otherwise the user sees the claim and a Dismiss, and getting
+  past the check is theirs (a takeover in the live view). `--remember` files a
+  per-site hint; `backend` lists the hints — no user surface shows them. A
   backend switch (`backend <name>`) is a PROPOSAL: it happens directly only
   when you are the only session attached and nobody drives; otherwise it
   becomes a "For you" item for the user. While a switch restarts the browser,
@@ -363,8 +396,8 @@ default with `*`.
   (another conversation drives a shared browser): run the command again once,
   after the wait it names — or tell the user.
 * **A refusal that names a button is the user's to press.** Relay it in your
-  own words ("switch 'work' to All my conversations in the Agent browser
-  panel"); never offer the user a `vibespace-browser` command line, and never
+  own words ("add this conversation to 'work' under Who can use it in the
+  Agent browser panel"); never offer the user a `vibespace-browser` command line, and never
   create a second profile to get around a refusal.
 * **A login or a captcha is the user's.** Tell them which page needs them and
   stop; continue after the handback.

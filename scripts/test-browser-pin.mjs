@@ -186,10 +186,12 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(B.mayAttach(profiles[1], { browserKey: KEY_B }).ok && B.mayAttach({ ...rec, legacy: true, owner: { kind: 'session', id: KEY_A } }, { browserKey: KEY_B }).ok, 'an instance-owned or legacy profile admits any conversation');
   ok(B.mayAttach(rec, { browserKey: KEY_A }).ok && B.mayAttach(rec, { browserKey: KEY_A + '.3' }).ok && B.mayAttach(rec, { browserKey: KEY_B }).code === 'not_owner', 'a session-owned profile admits its conversation (children included) and refuses another');
   ok(B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: ['tg-1'] }).ok && B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: [] }).code === 'not_owner', 'a task-owned profile admits the sessions bound to that Task Group');
-  // OWNER RULING A (2026-09-26): the USER's pick is the authorization; the refusal names the BUTTON, never a command line
-  ok(B.mayAttach(rec, { browserKey: KEY_B, pinned: true }).ok && B.mayAttach(rec, { browserKey: KEY_B, by: 'user' }).ok && B.mayAttach(profiles[2], { browserKey: KEY_B, pinned: true }).ok, 'owner ruling A (4): a profile kept to ANOTHER conversation admits a conversation whose USER pin names it, and any attach the USER makes');
-  { const r = B.mayAttach(rec, { browserKey: KEY_B, by: 'agent' }); ok(r.code === 'not_owner' && /only its own conversation/.test(r.error) && /All my conversations/.test(r.error) && /Agent browser panel/.test(r.error) && /Session properties/.test(r.error) && !/vibespace-browser/.test(r.error + (r.remedy || '')) && /Never create a second profile/.test(r.error), 'owner ruling A (5): not_owner names the buttons ("All my conversations" in the Agent browser panel, or Session properties) and no command line', r.error); }
-  ok(B.scopeOf(profiles[1]) === 'all' && B.scopeOf(rec) === 'one' && B.scopeOf(profiles[2]) === 'task' && B.scopeOf({ ...rec, legacy: true }) === 'all' && B.scopeOf(B.newProfileRecord({ id: 'bp-0000000f', label: 'x', dir: '/tmp/x' })) === 'all', 'owner ruling A: scopeOf reads ONE field (owner): instance/legacy = all, session = one, task = task — and a new record with no owner is ALL');
+  // "WHO CAN USE IT" IS A LIST (2026-09-27): a PIN NEVER AUTHORIZES — the admission takes no `pinned` / `by` (the user's
+  // pick WRITES the list, keeper.setPin); the refusal names the BUTTON, never a command line
+  ok(B.mayAttach(rec, { browserKey: KEY_B, pinned: true }).code === 'not_owner' && B.mayAttach(rec, { browserKey: KEY_B, by: 'user' }).code === 'not_owner' && B.mayAttach(profiles[2], { browserKey: KEY_B, pinned: true }).code === 'not_owner', 'the list (2026-09-27): a pin or a `by:\'user\'` is no admission input any more — a profile kept to ANOTHER conversation refuses a pinned conversation (the user\'s pick writes the list instead)');
+  { const r = B.mayAttach(rec, { browserKey: KEY_B }); ok(r.code === 'not_owner' && /kept to some of the user's conversations and Task Groups/.test(r.error) && /"Who can use it" in the Agent browser panel \(Change…\)/.test(r.error) && /All my conversations/.test(r.error) && !/vibespace-browser/.test(r.error + (r.remedy || '')) && /Never create a second profile/.test(r.error), 'owner ruling A (5): not_owner names the buttons ("Who can use it" → Change… in the Agent browser panel, or "All my conversations") and no command line', r.error); }
+  ok(B.scopeOf(profiles[1]) === 'all' && B.scopeOf(rec) === 'only' && B.scopeOf(profiles[2]) === 'only' && B.scopeOf({ ...rec, legacy: true }) === 'all' && B.scopeOf(B.newProfileRecord({ id: 'bp-0000000f', label: 'x', dir: '/tmp/x' })) === 'all' && B.SCOPES.join() === 'all,only', 'owner ruling A: scopeOf reads ONE field (owner): instance/legacy = all, a list (or a pre-list single session / task owner) = only — and a new record with no owner is ALL');
+  ok(rec.owner.kind === 'only' && rec.owner.who.length === 1 && rec.owner.who[0].kind === 'session' && rec.owner.who[0].id === KEY_A, 'a create handed a pre-list single `session` owner stores the WRITE shape: a one-row list');
   // the lease: ONE per (profile, conversation)
   let leases = [];
   const a1 = B.decideAttach({ profile: profiles[1], leases, browserKey: KEY_A, sessionId: 'sess-1', now: 10 });
@@ -272,7 +274,7 @@ let kA, workId, teamId, thirdId;
   ok(kA._facts.lastVersion() === '0.38.0', 'the keeper probed the fake binary\'s version (0.38.0 ≥ the 0.37.1 floor ⇒ shared profiles ON)');
   const work = kA.createProfile({ label: 'Work' }, { owner: { kind: 'session', id: KEY_A } });
   workId = work.id;
-  ok(B.isProfileId(work.id) && work.owner.kind === 'session' && work.owner.id === KEY_A && work.dir === path.join(HOME, '.agent-browser', 'vs-' + work.id), `createProfile mints ${work.id} owned by the conversation, dir under ~/.agent-browser/`);
+  ok(B.isProfileId(work.id) && work.owner.kind === 'only' && work.owner.who.length === 1 && work.owner.who[0].id === KEY_A && work.scope === 'only' && work.use.mode === 'only' && work.use.who[0].key === KEY_A && work.dir === path.join(HOME, '.agent-browser', 'vs-' + work.id), `createProfile mints ${work.id} kept to the conversation (a one-row list; the digest's use names its key), dir under ~/.agent-browser/`);
   ok((fs.statSync(work.dir).mode & 0o777) === 0o700, 'the profile directory is 0700');
   ok((fs.statSync(kA.storeFile).mode & 0o777) === 0o600 && JSON.parse(fs.readFileSync(kA.storeFile, 'utf8')).profiles.length === 1, 'data/browser-profiles.json is written 0600 and carries the record');
   ok(bcast.length >= 1 && bcast[bcast.length - 1].type === 'browser-profiles-updated' && bcast[bcast.length - 1].profiles.length === 1, 'every commit broadcasts browser-profiles-updated with the digest (multi-client law)');
@@ -295,16 +297,18 @@ let kA, workId, teamId, thirdId;
   ok(!at2.created && at2.resumed && reg(kA).leases.filter((l) => l.profileId === workId).length === 1 && launches().length === 1, 'a resume re-carries the ONE lease (one holder) and launches nothing new');
   const e2 = await threw(() => kA.attach({ profile: 'Work', browserKey: KEY_B, sessionId: 'sess-9' }));
   ok(e2 && e2.code === 'not_owner' && /All my conversations/.test(e2.message) && !/vibespace-browser/.test(e2.message), 'another conversation\'s AGENT cannot attach to a profile the user kept to one conversation — refused with the button sentence');
-  // owner ruling A (4): the USER pins Work for KEY_B (Session properties) — that pick IS the authorization: KEY_B joins the
-  // SAME browser (no second launch on the directory), then the leg puts everything back for the legs below
+  // THE PICK WRITES THE LIST (2026-09-27): the USER pins Work for KEY_B (Session properties) — KEY_B is ADDED to Work's list
+  // (said on the answer) and joins the SAME browser (no second launch on the directory); then the leg puts everything back
   {
     const e2a = await threw(() => kA.setPin(KEY_B, workId, { by: 'agent' }));
-    ok(e2a && e2a.code === 'not_owner', 'owner ruling A: an AGENT\'s own pin on a profile kept to another conversation is refused not_owner (only the user\'s pick authorizes)');
-    kA.setPin(KEY_B, workId, { by: 'user' });
+    ok(e2a && e2a.code === 'not_owner', 'an AGENT\'s own pin on a profile kept to another conversation is refused not_owner (only the user\'s pick writes the list)');
+    const pinB = kA.setPin(KEY_B, workId, { by: 'user' });
+    ok(pinB && pinB.added && pinB.added.profileId === workId && B.whoMayUse(kA.profile(workId)).who.map((w) => w.id).join() === [KEY_A, KEY_B].join(), 'the user\'s pick ADDS KEY_B to Work\'s list (the answer says `added`) — the list, not the pin, lets it in');
     const L0 = launches().length;
     const j2 = await kA.attach({ profile: 'Work', browserKey: KEY_B, sessionId: 'sess-9', by: 'pin' });
-    ok(j2.created && j2.others === 1 && launches().length === L0 && j2.env.some((kv) => kv === `AGENT_BROWSER_CDP=${reg(kA).browsers[workId].cdpUrl}`) && reg(kA).leases.find((l) => l.profileId === workId && l.browserKey === KEY_B).via === 'pin', 'owner ruling A (1)+(4): a conversation the USER pinned Work for is admitted and JOINS the running browser — same CDP endpoint, no second launch; the lease says the pin made it');
+    ok(j2.created && j2.others === 1 && launches().length === L0 && j2.env.some((kv) => kv === `AGENT_BROWSER_CDP=${reg(kA).browsers[workId].cdpUrl}`) && reg(kA).leases.find((l) => l.profileId === workId && l.browserKey === KEY_B).via === 'pin', 'owner ruling A (1): the conversation now on the list is admitted and JOINS the running browser — same CDP endpoint, no second launch; the lease says the pin made it');
     kA.detach({ profileId: workId, browserKey: KEY_B, by: 'user' }); kA.setPin(KEY_B, null);
+    kA.updateProfile(workId, { use: { mode: 'only', who: [{ kind: 'session', key: KEY_A }] } }); // back to "only KEY_A" for the legs below
   }
   // two conversations on Team share ONE browser
   const t1 = await kA.attach({ profile: 'Team', browserKey: KEY_A, sessionId: 'sess-1' });
@@ -601,7 +605,7 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   r = await j('POST', '/api/agent/browser/use', { profile: 'Squad', wrapper: true }, bearer(TOKEN_A));
   ok(r.status === 200 && /^ws:\/\//.test(r.json.cdpUrl), '…only the WRAPPER form asks for it explicitly');
   r = await j('POST', '/api/agent/browser/new', { label: 'Mine' }, bearer(TOKEN_A));
-  ok(r.status === 200 && r.json.profile.owner.kind === 'instance' && r.json.profile.createdBy === KEY_A && r.json.profile.scope === 'all', 'owner ruling A: POST /new creates a profile EVERY conversation of the user\'s can use (created by THIS one)');
+  ok(r.status === 200 && !('owner' in r.json.profile) && !('createdBy' in r.json.profile) && r.json.profile.scope === 'all' && r.json.profile.use && r.json.profile.use.mode === 'all' && kR.profile(r.json.profile.id).owner.kind === 'instance' && kR.profile(r.json.profile.id).createdBy === KEY_A, 'owner ruling A: POST /new creates a profile EVERY conversation of the user\'s can use (created by THIS one); the answer is the agent\'s view (identity r3: no owner / createdBy on the wire)');
   r = await j('GET', '/api/agent/browser/profiles', undefined, bearer(TOKEN_A));
   ok(r.status === 200 && r.json.me.leases.length === 1 && r.json.profiles.some((p) => p.label === 'Mine') && r.json.profiles.some((p) => p.label === 'Squad'), 'GET /api/agent/browser/profiles = the digest + my status');
 

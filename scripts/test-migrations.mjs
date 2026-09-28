@@ -1265,6 +1265,120 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const pre = fixture();
     ok(BP.mayAttach(pre.profiles[0], { browserKey: KB }).code === 'not_owner' && BP.mayAttach(pre.profiles[1], { browserKey: 'bk-0000a0ff' }).code === 'not_owner', 'CONTROL: before the migration both path-A records refuse another conversation (not_owner) — the legs above can go red');
   }
+  // ── 2026-09-browser-profiles-who-list ("Who can use it" becomes a LIST, 2026-09-27) ──
+  // A record kept to ONE conversation / Task Group becomes a one-row list, and every conversation whose USER pin let it
+  // in yesterday (owner ruling A (4): by the user, made no earlier than the record's last change) is folded into the
+  // list — a pin never authorizes after this release, so nothing anyone could open yesterday may be refused today.
+  {
+    console.log('2026-09-browser-profiles-who-list');
+    const ID = '2026-09-browser-profiles-who-list';
+    const BP = require('../src/browser-profiles.js');
+    const mkInst = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data'), { recursive: true }); return r; };
+    const runOnly = (mm, r) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } });
+    const K1 = 'bk-0000e001', K2 = 'bk-0000e002', K3 = 'bk-0000e003', K4 = 'bk-0000e004', K5 = 'bk-0000e005', K6 = 'bk-0000e006', K7 = 'bk-0000e007';
+    const fixture = () => ({ version: 1, profiles: [
+      { id: 'bp-0000e001', label: 'Team', dir: '/x/t', provider: 'chromium', owner: { kind: 'instance', id: null }, sharing: 'owner' },
+      { id: 'bp-0000e002', label: 'work', dir: '/x/w', provider: 'chromium', owner: { kind: 'session', id: K1 + '.2' }, sharing: 'owner', scopeAt: 100 },
+      { id: 'bp-0000e003', label: 'Group', dir: '/x/g', provider: 'chromium', owner: { kind: 'task', id: 'T-OPS' }, sharing: 'owner', scopeAt: 50 },
+      { id: 'bp-0000e004', label: '(ephemeral) chat', dir: null, provider: 'chromium', owner: { kind: 'conversation', id: K1 }, sharing: 'owner', ephemeral: true },
+      { id: 'bp-0000e005', label: 'Shared (legacy)', dir: '/x/l', provider: 'chromium', owner: { kind: 'instance', id: null }, sharing: 'instance', legacy: true },
+    ], leases: [], browsers: {}, pins: {
+      [K2]: { profileId: 'bp-0000e002', origin: 'chosen', at: 150, by: 'user' },        // the user's pick after the narrowing ⇒ FOLDED
+      [K3]: { profileId: 'bp-0000e002', origin: 'chosen', at: 170, by: 'agent' },       // an agent's own pin ⇒ never
+      [K4]: { profileId: 'bp-0000e002', origin: 'chosen', at: 90, by: 'user' },         // older than the narrowing ⇒ not
+      [K5]: { profileId: 'bp-0000e001', origin: 'chosen', at: 200, by: 'user' },        // another profile ⇒ not
+      [K6]: { profileId: 'bp-0000e002', origin: 'conversation', at: 90, by: 'user' },   // a fork's copy of an old pin ⇒ not
+      [K7]: { profileId: 'bp-0000e003', origin: 'chosen', at: 60 },                     // a pre-ruling pin (no `by` = the user's) on the task record ⇒ FOLDED
+    } });
+    // the 2.369.194 admission, verbatim (owner / task / a USER pin no older than scopeAt) — what the fold must preserve
+    const oldAdmits = (p, bk, pins, taskIds = []) => {
+      const o = p.owner || {};
+      if (o.kind === 'instance' || p.legacy) return true;
+      if (o.kind === 'session' && BP.parentKeyOf(o.id) === bk) return true;
+      if (o.kind === 'task' && taskIds.includes(o.id)) return true;
+      const pin = pins[bk];
+      return !!(pin && pin.profileId === p.id && pin.by !== 'agent' && (Number(pin.at) || 0) >= (Number(p.scopeAt) || 0));
+    };
+    const pre = fixture();
+    ok(oldAdmits(pre.profiles[1], K2, pre.pins) && !BP.mayAttach(pre.profiles[1], { browserKey: K2 }).ok && oldAdmits(pre.profiles[2], K7, pre.pins) && !BP.mayAttach(pre.profiles[2], { browserKey: K7 }).ok, 'CONTROL: yesterday\'s admission let the pinned chats in (K2 on work, K7 on Group) and today\'s — a pin never authorizes — refuses them on the pre-migration file: the fold below is what keeps them in');
+    const doc = fixture();
+    const rp = BP.migrateWhoList(doc);
+    const byId = Object.fromEntries(doc.profiles.map((p) => [p.id, p]));
+    ok(rp.migrated.map((m) => m.id).join() === 'bp-0000e002,bp-0000e003' && rp.kept === 3, 'PURE: the session-owned and the task-owned records are converted; the instance, ephemeral and legacy ones are kept', rp);
+    ok(JSON.stringify(byId['bp-0000e002'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: K2 }] }) && rp.migrated[0].folded.join() === K2, 'work ⇒ [its conversation (a helper\'s key → its parent), + K2 folded]; the agent\'s pin, the older pin, another profile\'s pin and the fork\'s old copy are NOT folded', byId['bp-0000e002'].owner);
+    ok(JSON.stringify(byId['bp-0000e003'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'task', id: 'T-OPS' }, { kind: 'session', id: K7 }] }), 'Group ⇒ [Task Group T-OPS, + K7 folded] (a pre-ruling pin with no `by` is the user\'s)', byId['bp-0000e003'].owner);
+    ok(byId['bp-0000e001'].owner.kind === 'instance' && byId['bp-0000e004'].owner.kind === 'conversation' && byId['bp-0000e005'].legacy === true && JSON.stringify(doc.pins) === JSON.stringify(fixture().pins), 'the instance / ephemeral / legacy records and every pin are untouched');
+    ok(BP.mayAttach(byId['bp-0000e002'], { browserKey: K2 }).ok && BP.mayAttach(byId['bp-0000e003'], { browserKey: K7 }).ok && !BP.mayAttach(byId['bp-0000e002'], { browserKey: K3 }).ok && !BP.mayAttach(byId['bp-0000e002'], { browserKey: K4 }).ok, 'after the fold, everyone yesterday admitted is admitted by the LIST (and nobody else)');
+    doc.pins[K3] = { profileId: 'bp-0000e002', origin: 'chosen', at: 999, by: 'user' }; // a fresh user pin present at the second pass
+    const again = JSON.stringify(doc.profiles);
+    const rp2 = BP.migrateWhoList(doc);
+    ok(!rp2.migrated.length && JSON.stringify(doc.profiles) === again, 'idempotent: a second pass converts nothing and folds nothing (even with a fresh user pin present — step 2 needs step 1\'s shape)');
+    // (a) the FILE path
+    const r1 = mkInst('whol-file');
+    const f1 = path.join(r1, 'data', 'browser-profiles.json');
+    fs.writeFileSync(f1, JSON.stringify(fixture()), { mode: 0o600 });
+    const mm1 = create({ rootDir: r1, homeDir: scratchHomeDir, serverNotice: () => { } });
+    ok(mm1.MIGRATIONS.some((x) => x.id === ID) && mm1.MIGRATIONS.findIndex((x) => x.id === ID) > mm1.MIGRATIONS.findIndex((x) => x.id === '2026-09-browser-profiles-all-conversations'), 'registered as a ledger-keyed one-shot, AFTER 2026-09-browser-profiles-all-conversations');
+    const res1 = runOnly(mm1, r1).find((x) => x.id === ID);
+    const d1 = JSON.parse(fs.readFileSync(f1, 'utf-8'));
+    ok(res1 && res1.status === 'ran' && res1.report.via === 'file' && res1.report.migrated.length === 2 && d1.profiles.find((p) => p.id === 'bp-0000e002').owner.kind === 'only' && (fs.statSync(f1).mode & 0o777) === 0o600 && !fs.readdirSync(path.join(r1, 'data')).some((f) => /\.tmp$/.test(f)), 'the file is reshaped atomically (0600 kept, no temp left); the report names both records', res1.report);
+    ok(runOnly(mm1, r1).find((x) => x.id === ID).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) through the LIVE keeper
+    const r3 = mkInst('whol-keeper');
+    fs.writeFileSync(path.join(r3, 'data', 'browser-profiles.json'), JSON.stringify(fixture()), { mode: 0o600 });
+    const Kp = require('../src/server/browser-keeper.js').create({ dataDir: path.join(r3, 'data'), homeDir: scratchHomeDir, install: false, log: { log() { }, warn() { }, error() { } } });
+    Kp.list();
+    const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
+    ok(res3.status === 'ran' && res3.report.via === 'keeper' && Kp.list().profiles.find((p) => p.id === 'bp-0000e002').use.who.map((w) => w.key).join() === [K1, K2].join(), 'with a live keeper the IN-MEMORY record is reshaped (the digest\'s `use` lists both conversations) and its own save puts it on disk', res3.report);
+    Kp.shutdown();
+    // (c) no store ⇒ ran, nothing created; (d) an unparsable store FAILS by name, the ledger unstamped, retried when whole
+    const r2 = mkInst('whol-none');
+    const res2 = runOnly(create({ rootDir: r2, homeDir: scratchHomeDir, serverNotice: () => { } }), r2).find((x) => x.id === ID);
+    ok(res2 && res2.status === 'ran' && !fs.existsSync(path.join(r2, 'data', 'browser-profiles.json')), 'no store ⇒ ran, nothing created', res2);
+    const r5 = mkInst('whol-corrupt');
+    const f5 = path.join(r5, 'data', 'browser-profiles.json');
+    const torn = '{"version":1,"profiles":[{"id":"bp-0000e002","owner":{"kind":"session"';
+    fs.writeFileSync(f5, torn, { mode: 0o600 });
+    const mm5 = create({ rootDir: r5, homeDir: scratchHomeDir, serverNotice: () => { } });
+    const res5 = runOnly(mm5, r5).find((x) => x.id === ID);
+    let led5 = null; try { led5 = JSON.parse(fs.readFileSync(path.join(r5, 'data', 'migrations.json'), 'utf-8')); } catch { led5 = null; }
+    ok(res5 && res5.status !== 'ran' && /browser-profiles\.json could not be read/.test(String(res5.error || '')) && fs.readFileSync(f5, 'utf-8') === torn && !(led5 && led5.applied && led5.applied[ID]), 'an unparsable registry FAILS by name — the file untouched, the ledger NOT stamped', res5);
+    fs.writeFileSync(f5, JSON.stringify(fixture()), { mode: 0o600 });
+    const res5b = runOnly(mm5, r5).find((x) => x.id === ID);
+    ok(res5b && res5b.status === 'ran' && res5b.report.migrated.length === 2, 'the file whole again ⇒ the next boot migrates it', res5b);
+    // (e) the 2.369.196 integration: "yesterday" is 2.369.195 — its B-f7ab r3 rule: a pin DATED 0 (the late browser key's
+    //     LANDING on the current default) authorized NOTHING, even on a narrowed record that carries no `scopeAt`; a dated
+    //     user pick did. The fold preserves exactly that: the landing is never folded into the list, the dated pick is.
+    {
+      const PZ = 'bp-0000e006', L0 = 'bk-0000e010', LD = 'bk-0000e011';
+      const docZ = () => ({ version: 1, profiles: [{ id: PZ, label: 'bank', dir: '/x/b', provider: 'chromium', owner: { kind: 'session', id: K1 }, sharing: 'owner' }], leases: [], browsers: {}, pins: {
+        [L0]: { profileId: PZ, origin: 'instance', at: 0, by: 'user' },  // a 2.369.195 late-key landing ⇒ never folded
+        [LD]: { profileId: PZ, origin: 'chosen', at: 5, by: 'user' },    // a dated user pick ⇒ folded
+      } });
+      const admits195 = (p, bk, pins) => { const pin = pins[bk]; const at = pin ? Number(pin.at) || 0 : 0; return !!(pin && pin.profileId === p.id && pin.by !== 'agent' && at > 0 && at >= (Number(p.scopeAt) || 0)); };
+      const z = docZ(); const pz = z.profiles[0];
+      ok(!admits195(pz, L0, z.pins) && admits195(pz, LD, z.pins) && oldAdmits(pz, L0, z.pins), 'setup (e): 2.369.195 refused the landing dated 0 and admitted the dated pick; the 2.369.194 rule (no date clause) would have admitted the landing — the fixture tells the two apart');
+      const rz = BP.migrateWhoList(z);
+      ok(rz.migrated.length === 1 && rz.migrated[0].folded.join() === LD && JSON.stringify(z.profiles[0].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: LD }] })
+        && !BP.mayAttach(z.profiles[0], { browserKey: L0 }).ok && BP.mayAttach(z.profiles[0], { browserKey: LD }).ok,
+      '(e) the fold preserves 2.369.195\'s admission: the late key\'s landing (dated 0) is NOT folded — nothing yesterday refused is opened — the dated user pick is', rz);
+      // CONTROL: migrateWhoList without the date clause (the 2.369.194 rule the lane was written against) folds the landing
+      const { mutantCopies } = await import('./mutant-copy.mjs');
+      const repoRoot = path.dirname(path.dirname(new URL(import.meta.url).pathname));
+      const MZ = mutantCopies('migrations-wholist', repoRoot);
+      const bpSrc = fs.readFileSync(path.join(repoRoot, 'src', 'browser-profiles.js'), 'utf-8');
+      const DATED = "      if (!(at > 0) || at < (Number(p.scopeAt) || 0)) continue; // 2.369.195's rule: a pin dated 0 (a landing) authorized nothing\n";
+      const foundDated = bpSrc.split(DATED).length === 2; // (this suite's ok() returns nothing — the condition is kept)
+      ok(foundDated, 'CONTROL (e) setup: the fold\'s date clause is found exactly once');
+      if (foundDated) {
+        try {
+          const B0 = MZ.load('src/browser-profiles.js', bpSrc.replace(DATED, "      if (at < (Number(p.scopeAt) || 0)) continue;\n"), 'fold-undated');
+          const z0 = docZ(); const r0 = B0.migrateWhoList(z0);
+          ok(r0.migrated.length === 1 && r0.migrated[0].folded.includes(L0) && B0.mayAttach(z0.profiles[0], { browserKey: L0 }).ok, 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
+        } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
+      }
+    }
+  }
   // ── 2026-09-channels-aggregated-im (lane R2 verify, 2026-09-26) ──
   // The runner is SYNCHRONOUS and the engine's edits land through the index's
   // promise chain: the report used to be filled INSIDE that chain, so the
