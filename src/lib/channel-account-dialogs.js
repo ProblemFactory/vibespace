@@ -22,6 +22,16 @@
 // client whose type declares a console setup (Lark: the redirect URL) draws
 // it as a read-only copy row + one hint line per prerequisite.
 //
+// FROM STORAGE (2.369.195, the mount → channel door): a storage mount that
+// holds its OWN client of the vendor this type signs in with (a Drive /
+// Gmail mount's custom Google client, for Gmail) is offered as `From
+// storage: {name} (custom client …)` in the Connect and Re-authorize
+// selects — listed by `GET /api/channels/oauth/mount-clients?kind=` (no
+// secret, only the id's prefix) and sent as `fromMount: <mountId>`; the
+// SERVER copies the id + secret onto the account (decrypted with the mounts'
+// key, re-sealed under the channels'), so the secret never passes through
+// this page. The account is then an ordinary `Custom client`.
+//
 // THE CHOICE LIVES ON THE ACCOUNT (§2.3): a preset is sent as `clientPreset:
 // '<k>'` (the storage spelling), a custom client as `clientId` +
 // `clientSecret` beside `clientPreset:'custom'`; the server seals the secret
@@ -126,22 +136,46 @@ export function clientValueOf(a, presets = (a && a.presets) || []) {
  *  (the setup block lives on the kind). */
 function specOf(x, kinds) {
   const k = (kinds || []).find((y) => y.kind === x.kind) || {};
-  return { kind: x.kind, integration: x.integration || k.integration || null, label: x.label || k.label || x.kind, presets: x.presets || k.presets || [], clientHint: x.clientHint || k.clientHint || null, clientFields: x.clientFields || k.clientFields || null, setup: k.setup || x.setup || null, optionsSchema: x.optionsSchema || k.optionsSchema || [] };
+  return { kind: x.kind, integration: x.integration || k.integration || null, label: x.label || k.label || x.kind, presets: x.presets || k.presets || [], clientHint: x.clientHint || k.clientHint || null, clientFields: x.clientFields || k.clientFields || null, setup: k.setup || x.setup || null, optionsSchema: x.optionsSchema || k.optionsSchema || [], mountClients: x.mountClients || k.mountClients || [] };
+}
+/** The select value of a storage mount's client (`mount:<mountId>`). */
+const MOUNT_PREFIX = 'mount:';
+const mountOf = (v) => (typeof v === 'string' && v.startsWith(MOUNT_PREFIX) ? v.slice(MOUNT_PREFIX.length) : null);
+/** The storage mounts whose own client an account of `kind` may borrow
+ *  (the owner-only list route — no secret, only the id's prefix). A failed
+ *  read offers none and says why in the console; the dialog still opens. */
+export async function mountClientsOf(kind) {
+  const r = await fetchJson(`/api/channels/oauth/mount-clients?kind=${enc(kind)}`);
+  if (!r || r.error || !Array.isArray(r.clients)) { if (r && r.error) console.warn('[channels] storage mount clients unavailable:', r.error); return []; }
+  return r.clients;
+}
+/** One storage mount's client as an option label — its name, the id's
+ *  prefix, and the mailbox it serves when the mount knows it. */
+function mountOptionLabel(m) {
+  const client = String(m.clientIdPrefix || '');
+  return m.email
+    ? tr('From storage: {name} (custom client {client}…, {email})', { name: m.name, client, email: m.email })
+    : tr('From storage: {name} (custom client {client}…)', { name: m.name, client });
 }
 /** THE `OAuth client` FIELD + its custom inputs (+ the setup copy row). */
 function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, secretType = 'password', hint, secretHint } = {}) {
   const presets = spec.presets || [];
+  const mounts = spec.mountClients || [];
   const options = presets.map((p) => [p.key, tr('Preset: {name}', { name: p.label })]);
   const v = value === undefined ? ((presets[0] && presets[0].key) || 'custom') : value;
   // a preset the cluster no longer provides stays visible — BY NAME — on the account that holds it
-  if (v !== 'custom' && !presets.some((p) => p.key === v)) options.push([v, tr('Preset: {name} (no longer provided)', { name: v })]);
+  if (v !== 'custom' && !mountOf(v) && !presets.some((p) => p.key === v)) options.push([v, tr('Preset: {name} (no longer provided)', { name: v })]);
+  // 2.369.195: a storage mount's own client of this vendor, copied server-side when chosen
+  for (const m of mounts) options.push([MOUNT_PREFIX + m.mountId, mountOptionLabel(m)]);
   options.push(['custom', tr('Custom (own client id/secret)')]);
   const on = when || (() => true);
   const isCustom = (vals) => on(vals) && vals[`client${sfx}`] === 'custom';
+  const isMount = (vals) => on(vals) && !!mountOf(vals[`client${sfx}`]);
   const cf = spec.clientFields || {};
   const out = [{ key: `client${sfx}`, label: tr('OAuth client'), type: 'select', options, value: v, when: when || undefined, hint: hint !== undefined ? hint : (spec.clientHint ? tr(spec.clientHint) : undefined) }];
   if (cf.id) out.push({ key: `cid${sfx}`, label: customLabel(cf.id.label), placeholder: cf.id.placeholder || '', value: (custom && custom.appId) || '', when: isCustom, hint: cf.id.help ? tr(cf.id.help) : undefined });
   if (cf.secret) out.push({ key: `csec${sfx}`, label: customLabel(cf.secret.label), type: secretType, value: (custom && custom.appSecret) || '', when: isCustom, hint: secretHint !== undefined ? secretHint : (cf.secret.help ? tr(cf.secret.help) : undefined) });
+  if (mounts.length) out.push({ key: `mnote${sfx}`, type: 'note', value: tr('The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page. The account then signs in under that client.'), when: isMount });
   if (spec.setup && spec.setup.callbackUrl) {
     out.push({ key: `cb${sfx}`, label: tr('Callback URL (register it on your app first)'), type: 'copy', value: spec.setup.callbackUrl, when: isCustom,
       hint: [spec.setup.callbackNote ? tr(spec.setup.callbackNote) : null, ...(spec.setup.prerequisites || []).map((p) => tr(p))] });
@@ -151,6 +185,7 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
 /** The client choice a set of values names, in the route's spelling. */
 function choiceBody(vals, sfx = '') {
   const c = vals[`client${sfx}`];
+  if (mountOf(c)) return { fromMount: mountOf(c) };
   if (c === 'custom') return { clientPreset: 'custom', clientId: vals[`cid${sfx}`] || '', clientSecret: vals[`csec${sfx}`] || '' };
   return c ? { clientPreset: c } : {};
 }
@@ -246,9 +281,12 @@ function authWatcher(app, id, base) {
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
 /** The panel's one entry: `Connect an account`. The record is created by
  *  Connect from a finished sign-in — a dialog closed half-way leaves nothing. */
-export function showConnectAccountDialog(app, kinds) {
-  const list = (kinds || []).filter((k) => k && k.kind);
-  if (!list.length) { showToast(tr('No account type can be connected on this instance'), { type: 'error' }); return null; }
+export async function showConnectAccountDialog(app, kinds) {
+  const found = (kinds || []).filter((k) => k && k.kind);
+  if (!found.length) { showToast(tr('No account type can be connected on this instance'), { type: 'error' }); return null; }
+  // each type's borrowable storage clients, read BEFORE the dialog draws (this file builds no option itself)
+  const lent = await Promise.all(found.map((k) => mountClientsOf(k.kind)));
+  const list = found.map((k, i) => ({ ...k, mountClients: lent[i] }));
   const is = (kind) => (v) => v.type === kind;
   const fields = [
     { key: 'type', label: tr('Type'), type: 'select', options: list.map((k) => [k.kind, k.label || k.kind]) },
@@ -276,7 +314,8 @@ export function showConnectAccountDialog(app, kinds) {
     wireOAuthConnect(ctx, {
       tokenKey: `flow${sfx}`, backend: k.kind, label: tr('Connect {label}', { label: signinOf(k) }),
       clientIdKey: `cid${sfx}`, clientSecretKey: `csec${sfx}`, provider: signinOf(k), pastePlaceholder: PASTE_PLACEHOLDER,
-      extra: () => ({ clientPreset: ctx.inputs[`client${sfx}`].value, options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
+      // a storage mount's client is named by its id ALONE — a stale hidden custom id/secret never rides beside it
+      extra: () => ({ ...(mountOf(ctx.inputs[`client${sfx}`].value) ? { fromMount: mountOf(ctx.inputs[`client${sfx}`].value), clientId: undefined, clientSecret: undefined } : { clientPreset: ctx.inputs[`client${sfx}`].value }), options: optionValues(Object.fromEntries(Object.entries(ctx.inputs).map(([key, e]) => [key, e.value])), k.optionsSchema, sfx, 1) }),
       endpoints: {
         start: async (body) => { const r = await post(CHANNEL_OAUTH_ENDPOINTS.start, body); flowId = r.flowId; return { url: r.url, notice: flowNotice(r.flow) }; },
         status: () => capi(`${CHANNEL_OAUTH_ENDPOINTS.status}?flowId=${enc(flowId || '')}`),
@@ -290,7 +329,7 @@ export function showConnectAccountDialog(app, kinds) {
 // ── RE-AUTHORIZE (§8.1 #3: the storage re-authorize dialog, verbatim + the client select) ──
 /** `preselect` = `{client, appId, appSecret}` (Edit's switched client). */
 export async function showReauthAccountDialog(app, a, { kinds = null, preselect = null } = {}) {
-  const spec = specOf(a, kinds);
+  const spec = { ...specOf(a, kinds), mountClients: await mountClientsOf(a.kind) };
   const provider = providerOf(a);
   const signin = signinOf(spec);
   let custom = null;

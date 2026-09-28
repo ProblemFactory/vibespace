@@ -22,10 +22,20 @@
 // planted English literal on a chrome path and must go red — an allowlist
 // that could excuse everything is not a census.
 //
+// ④ THE LOOK'S RECT CENSUS (channel-polish, 2026-09-27): the driver's IM pass
+// (a seeded Lark group + Gmail thread, the attention list at the 200 / 260 /
+// 340 / 500 px rails, an account card, the windows, the phone) under the
+// RUNNER'S face ('DejaVu Sans' forced — the .185 lesson), zh / ja / en, dark
+// (+ en light): `imCensus` — nothing overlaps, nothing is cut, no part leaves
+// its row, nothing scrolls sideways, every phone target ≥ 36 px, every
+// avatar's initials ≥ 4.5 : 1 on its computed fill. Its own negative control
+// (a planted overlap, a cut time, a 28 px phone button, a 3 : 1 avatar) runs
+// before chrome too.
+//
 // Everything is per-pid (scripts/scratch.mjs); chrome and the worktree server
 // are the driver's, torn down by it. Run: node scripts/test-channels-i18n.mjs
 // (SKIPs without chrome). VS_UI_LANGS narrows the languages (default zh,ja).
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -91,10 +101,13 @@ export const DATA_PATH_CLASSES = [
   // g3 (design §22, the IM-first panel): an agent GROUP's name, its last line and a source's label are
   // AGENT / vendor data; so are member names (the detail + the New group picker), an invite's context,
   // a system record's names and an @-autocomplete candidate
-  'chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item',
+  'chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item',
   // R3 (design §23): the first screen's tag names its AGENT in its own span (the words around it are chrome,
   // censused); an attachment's name is the vendor's file name
   'chan-tag-who', 'chanmsg-att-name',
+  // channel-polish (2026-09-27): THE PRINCIPAL PICKER — a session's / group's name (row, chip, trigger), a
+  // session's folder, its Task Group chip, a Task Group section's own title; an access row's principal name
+  'pp-name', 'pp-chip-name', 'pp-trigger-name', 'pp-folder', 'pp-tg', 'pp-tghead', 'chan-access-who',
 ];
 // The eight surfaces' shot-name stems; a leak seen ONLY on the house-style
 // reference shots (`house-*`, the full page) is not this feature's to answer for.
@@ -157,6 +170,66 @@ export const SURFACES = [
   ['integrations', /^integ-01-window$/],
 ];
 
+// ── THE LOOK'S RECT CENSUS (channel-polish, 2026-09-27; the owner: "这个当作 IM 用还是有必要把界面好好
+// 优化下至少保证人能看清楚必要的信息") ─────────────────────────────────────────────────────────────
+// The driver's IM pass (VS_UI_IM=only) writes, per shot, `im` = every row / bar / message / chip it knows
+// with the rect of each PART and whether a part that must be WHOLE is cut. `imCensus(shot)` = the
+// violations: two parts of one container OVERLAP (a time drawn over the text, an avatar over a name); a
+// part past its container's edge; a WHOLE part cut (a time, an unread count, a tag's words, a day pill, a
+// button's label, a file's size); a list that scrolls sideways; on a phone (viewport ≤ 480 px) an
+// interactive target under 36 px (tall, and wide when it carries no words); an avatar whose initials read
+// under 4.5 : 1 on its own fill (the COMPUTED colours — the palette as the theme resolved it).
+const IM_TARGET_EXEMPT = /(^|\s)(win-btn|chanblk-a)(\s|$)/;
+/** sRGB channels 0..255 from a computed colour (`rgb()` / `rgba()` / `color(srgb …)`). */
+export function parseColor(c) {
+  const s = String(c || '').trim();
+  let m = s.match(/^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  if (m) return [Number(m[1]), Number(m[2]), Number(m[3])];
+  m = s.match(/^color\(srgb\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)/i);
+  if (m) return [Number(m[1]) * 255, Number(m[2]) * 255, Number(m[3]) * 255];
+  return null;
+}
+/** WCAG 2 contrast ratio of two sRGB colours (0..255). */
+export function contrast(a, b) {
+  const L = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]); };
+  const x = L(a), y = L(b);
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+const overlapArea = (a, b) => { const w = Math.min(a[0] + a[2], b[0] + b[2]) - Math.max(a[0], b[0]); const h = Math.min(a[1] + a[3], b[1] + b[3]) - Math.max(a[1], b[1]); return w > 1.5 && h > 1.5 ? w * h : 0; };   // a shared 1 px border (a segmented control's seam) is not an overlap
+export function imCensus(shot) {
+  const out = [];
+  const im = shot && shot.im;
+  const where = `${shot && shot.tag}/${shot && shot.name}`;
+  if (!im || im.missing) return [{ where, what: 'no-measurement', detail: im && im.missing }];
+  for (const g of im.groups || []) {
+    const parts = Object.entries(g.parts || {});
+    for (let i = 0; i < parts.length; i++) for (let j = i + 1; j < parts.length; j++) {
+      const [an, a] = parts[i], [bn, b] = parts[j];
+      const area = overlapArea(a.r, b.r);
+      if (area > 2) out.push({ where, what: 'overlap', detail: `${g.name}#${g.idx} ${an} × ${bn} (${Math.round(area)} px²) ${JSON.stringify([a.text, b.text])}` });
+    }
+    for (const [pn, p] of parts) {
+      if (p.cut) out.push({ where, what: 'cut', detail: `${g.name}#${g.idx} ${pn} ${JSON.stringify(p.text)}` });
+      if (p.r[0] < g.r[0] - 1 || p.r[0] + p.r[2] > g.r[0] + g.r[2] + 1) out.push({ where, what: 'outside', detail: `${g.name}#${g.idx} ${pn} ${JSON.stringify(p.text)} [${p.r}] vs [${g.r}]` });
+    }
+    for (const w of g.whole || []) if (w.cut) out.push({ where, what: 'cut', detail: `${g.name}#${g.idx} ${w.sel} ${JSON.stringify(w.text)}` });
+  }
+  for (const h of im.hscroll || []) if (h.over) out.push({ where, what: 'hscroll', detail: h.cls });
+  const phone = Array.isArray(im.viewport) && im.viewport[0] <= 480;
+  if (phone) for (const tg of im.targets || []) {
+    if (IM_TARGET_EXEMPT.test(tg.cls || '')) continue;
+    const [, , w, h] = tg.r;
+    if (h < 35.5 || (tg.iconOnly && w < 35.5)) out.push({ where, what: 'small-target', detail: `${tg.tag}.${(tg.cls || '').split(/\s+/)[0]} ${JSON.stringify(tg.text)} ${Math.round(w)}×${Math.round(h)}` });
+  }
+  for (const a of im.avatars || []) {
+    const fg = parseColor(a.color), bg = parseColor(a.background);
+    const cr = fg && bg ? contrast(fg, bg) : 0;
+    if (cr < 4.5) out.push({ where, what: 'avatar-contrast', detail: `${JSON.stringify(a.text)} hue ${a.hue}${a.self ? ' (self)' : ''}: ${cr.toFixed(2)} : 1 (${a.color} on ${a.background})` });
+    if (a.ariaHidden !== 'true') out.push({ where, what: 'avatar-not-paint', detail: JSON.stringify(a.text) });
+  }
+  return out;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let pass = 0, fail = 0;
   const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
@@ -168,6 +241,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   // (the URL sits on a CHROME path here so the pattern rule — not the data-path rule — is what excuses it)
   const excusedData = census([{ text: 'Ops room', paths: ['span.chan-row-title < div.chan-row-line'], surfaces: ['panel-02-rows'] }, { text: LARK_CALLBACK_URL, paths: ['code < div.mounts-field-hint'], surfaces: ['wizard-02-connect-lark-custom'] }, { text: 'Lark / 飞书', paths: ['b < div.chan-sec-head'], surfaces: ['panel-02-rows'] }]);
   ok(excusedData.violations.length === 0 && excusedData.excused['data-path:chan-row-title'] === 1 && Object.keys(excusedData.excused).some((k) => k.startsWith('pattern:')), 'CONTROL: a fixture title (by path), a callback URL (by pattern) and a brand beside CJK are excused, each by a NAMED rule', JSON.stringify(excusedData.excused));
+  // the rect census's negative control (④ below): every rule fires on a planted shot
+  {
+    const planted = { tag: 'control', name: 'planted', im: { viewport: [375, 667], groups: [
+      { name: 'grow', idx: 0, r: [0, 0, 200, 40], parts: { title: { r: [40, 4, 120, 16], cut: false, text: 'A title' }, at: { r: [150, 4, 30, 16], cut: true, text: '12:00' } }, whole: [{ sel: '.chan-tag-words', text: 'to approve', cut: true }] },
+      { name: 'msg', idx: 0, r: [0, 50, 200, 40], parts: { body: { r: [44, 60, 150, 20], cut: false, text: 'words' }, hover: { r: [180, 60, 30, 14], cut: false, text: '12:01' } } },
+    ], targets: [{ tag: 'button', cls: 'icon-btn', text: '', iconOnly: true, r: [0, 0, 28, 28] }, { tag: 'button', cls: 'win-btn', text: '✕', iconOnly: false, r: [0, 0, 20, 20] }],
+    avatars: [{ text: 'AE', hue: '1', color: 'rgb(120, 120, 120)', background: 'rgb(60, 60, 60)', ariaHidden: 'true', r: [0, 0, 28, 28] }, { text: 'B', hue: '2', color: 'rgb(230, 230, 230)', background: 'rgb(30, 30, 50)', ariaHidden: null, r: [0, 0, 28, 28] }],
+    hscroll: [{ cls: 'chanwin-list', over: true }] } };
+    const v = imCensus(planted);
+    const kinds = [...new Set(v.map((x) => x.what))].sort();
+    ok(['avatar-contrast', 'avatar-not-paint', 'cut', 'hscroll', 'outside', 'overlap', 'small-target'].every((k) => kinds.includes(k)) && v.filter((x) => x.what === 'small-target').length === 1 && v.filter((x) => x.what === 'cut').length === 2,
+      `NEGATIVE CONTROL (the rect census): a planted shot trips every rule — an overlap (the hover time over the text), a part past its row, a cut time + cut tag words, a 28 px phone button (the window's own chrome exempt), a 2.3 : 1 avatar, an avatar exposed to assistive tech, a sideways scroll (${kinds.join(', ')})`, JSON.stringify(v));
+    const clean = imCensus({ tag: 'control', name: 'clean', im: { viewport: [1200, 800], groups: [{ name: 'seg', idx: 0, r: [0, 0, 200, 26], parts: { focus: { r: [0, 0, 101, 26], cut: false, text: 'a' }, all: { r: [100, 0, 100, 26], cut: false, text: 'b' } } }], targets: [{ tag: 'button', cls: 'icon-btn', text: '', iconOnly: true, r: [0, 0, 20, 20] }], avatars: [{ text: 'AE', color: 'color(srgb 0.9 0.9 0.95)', background: 'color(srgb 0.12 0.12 0.2)', ariaHidden: 'true' }], hscroll: [] } });
+    ok(clean.length === 0, 'CONTROL: a segmented control\'s shared 1 px seam, a 20 px desktop icon button and a 12 : 1 avatar (a `color(srgb …)` computed value) are NOT violations', JSON.stringify(clean));
+  }
   console.log('  … allowed words: ' + ALLOWED_WORDS.join(', '));
   console.log('  … allowed patterns: ' + ALLOWED_PATTERNS.map((r) => r.source).join('  |  '));
   console.log('  … data-path classes: ' + DATA_PATH_CLASSES.join(', '));
@@ -210,6 +298,52 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       c.violations.slice(0, 40).map((v) => `${JSON.stringify(v.text)} [${v.why}] on ${v.surfaces.slice(0, 3).join(', ')} at ${v.paths[0] || '?'}`).join('\n    '));
     // the census is NON-VACUOUS: the fixture's own data is on screen and was excused BY PATH
     ok((leaks || []).length > 0 && Object.keys(c.excused).some((k) => k.startsWith('data-path:')), `${lang}: the census saw the fixture's data and excused it by path (a census that sees nothing is not a census)`);
+  }
+
+  // ── ④ THE LOOK: the IM pass under the runner's face, the rect census over every shot ──
+  {
+    const hasDejaVu = (() => { try { return /DejaVu Sans/.test(execSync('fc-list : family', { encoding: 'utf8' })); } catch { return false; } })();
+    const FACE = hasDejaVu ? 'DejaVu Sans' : '';
+    if (!hasDejaVu) console.log("  SKIP (the face only): DejaVu Sans is not installed here (fc-list : family) — the IM pass runs under this box's own face");
+    const imOut = scratch('chan-look');
+    fs.mkdirSync(imOut, { recursive: true });
+    const IM_LANGS = (process.env.VS_UI_IM_LANGS || 'zh,ja,en').split(',').map((x) => x.trim()).filter(Boolean);
+    console.log(`④ the look: the IM pass (${IM_LANGS.join(' + ')} · desktop at 200 / 260 / 340 / 500 px + phone · dark + en light${FACE ? ` · '${FACE}'` : ''}) → ${imOut}`);
+    const t1 = Date.now();
+    const r2 = spawnSync(process.execPath, [path.join(repo, 'scripts/dbg-comm-surfaces.mjs')], {
+      cwd: repo, encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024, timeout: 20 * 60 * 1000,
+      env: { ...process.env, VS_UI_IM: 'only', VS_UI_FACE: FACE, VS_UI_SHOTS_DIR: imOut, VS_UI_LANGS: IM_LANGS.join(','), VS_UI_VIEWPORTS: 'desktop,mobile', VS_UI_THEMES: 'dark,light', VS_UI_LIGHT_LANGS: 'en' },
+    });
+    const log2 = (r2.stdout || '') + (r2.stderr || '');
+    fs.writeFileSync(path.join(imOut, 'driver.log'), log2);
+    ok(r2.status === 0, `the IM pass exited 0 in ${Math.round((Date.now() - t1) / 1000)}s (log: ${path.join(imOut, 'driver.log')})`, r2.status === 0 ? '' : log2.split('\n').slice(-12).join('\n'));
+    let idx2 = null;
+    try { idx2 = JSON.parse(fs.readFileSync(path.join(imOut, 'index.json'), 'utf-8')); } catch {}
+    const imShots = ((idx2 && idx2.shots) || []).filter((x) => x.im);
+    ok(!((idx2 && idx2.shots) || []).some((x) => x.name === 'PASS-FAILED'), 'no IM pass failed', JSON.stringify(((idx2 && idx2.shots) || []).filter((x) => x.name === 'PASS-FAILED')));
+    const want = ['list-focus-200', 'list-focus-260', 'list-focus-340', 'list-focus-500', 'list-all-260', 'accounts-260', 'win-lark', 'win-lark-top', 'win-lark-hover', 'win-gmail', 'win-gmail-open', 'win-readonly', 'm-list-focus', 'm-win-lark', 'm-win-gmail', 'm-win-readonly',
+      // the plain-words dialogs (Grant access… with the picker + the authority answers; Notify… as three questions + the preview)
+      'dlg-access', 'dlg-notify', 'dlg-notify-rule', 'm-dlg-access', 'm-dlg-notify', 'm-dlg-notify-rule'];
+    for (const lang of IM_LANGS) {
+      const tags = [`im-${lang}-desktop-dark`, `im-${lang}-mobile-dark`];
+      const missing = want.filter((n) => !imShots.some((x) => tags.includes(x.tag) && x.name === n && !x.missing));
+      ok(!missing.length, `${lang}: every IM surface was shot and measured (${want.length})`, JSON.stringify(missing));
+    }
+    const viol = [];
+    let groups = 0, avatars = 0, targets = 0;
+    for (const sh of imShots) {
+      let d = null;
+      try { d = JSON.parse(fs.readFileSync(path.join(imOut, sh.file.replace(/\.png$/, '.json')), 'utf-8')); } catch {}
+      if (!d) { viol.push({ where: sh.name, what: 'no-json' }); continue; }
+      groups += ((d.im && d.im.groups) || []).length; avatars += ((d.im && d.im.avatars) || []).length; targets += ((d.im && d.im.targets) || []).length;
+      if (FACE) ok(new RegExp(FACE).test((d.im && d.im.face) || ''), `${d.tag}/${d.name}: measured under '${FACE}'`, (d.im && d.im.face) || '');
+      viol.push(...imCensus(d));
+    }
+    const byKind = viol.reduce((m, x) => ({ ...m, [x.what]: (m[x.what] || 0) + 1 }), {});
+    console.log(`  … ${imShots.length} IM shots · ${groups} rows / bars / messages · ${avatars} avatars · ${targets} targets measured; violations ${JSON.stringify(byKind)}`);
+    ok(imShots.length >= want.length * IM_LANGS.length && groups > 200 && avatars > 100, 'the census is NON-VACUOUS (it measured the rows, the avatars and the targets it judges)', JSON.stringify({ shots: imShots.length, groups, avatars }));
+    ok(viol.length === 0, 'THE LOOK: nothing overlaps, nothing is cut, no part leaves its row, nothing scrolls sideways, every phone target ≥ 36 px, every avatar ≥ 4.5 : 1 and paint — at every rail width, in every language, under the runner\'s face',
+      viol.slice(0, 30).map((v) => `${v.what} ${v.where}: ${v.detail}`).join('\n    '));
   }
 
   console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

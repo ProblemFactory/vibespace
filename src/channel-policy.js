@@ -48,27 +48,81 @@
  *     text is the text the user approved; the line is appended at send time
  *     and the card says so BEFORE the approval.
  */
-const { inertFrames } = require('./channel-record.js');
+const { inertFrames, inertFrameLine } = require('./channel-record.js');
 
-const OUTBOX_STATES = Object.freeze(['draft', 'proposed', 'awaiting-approval', 'sending', 'sent', 'failed', 'unknown', 'rejected', 'expired']);
+const OUTBOX_STATES = Object.freeze(['draft', 'proposed', 'awaiting-approval', 'sending', 'sent', 'failed', 'unknown', 'rejected', 'expired', 'withdrawn']);
 /** Who may cause a transition. `policy` = decideOutbound's verdict; `adapter`
  *  = the send result; `ttl` = the sweep; `recheck` = the unconditional
- *  convCaps re-resolution at approval (§9.2 r4). */
+ *  convCaps re-resolution at approval (§9.2 r4); `agent` = the DRAFTING
+ *  agent taking its own proposal back (2026-09-27, the owner: "agent 似乎没有
+ *  撤回之前制作的 draft 的能力，必须要我手动 reject 是吗？") — only while
+ *  nobody has decided it yet: never from `sending` (the request may be
+ *  leaving), never from `sent` / `failed`, and never from `unknown` (a lost
+ *  outcome is the USER's to check, never the agent's to erase). */
 const TRANSITIONS = Object.freeze({
   draft: Object.freeze({ proposed: ['agent', 'user'] }),
-  proposed: Object.freeze({ sending: ['policy'], 'awaiting-approval': ['policy'] }),
-  'awaiting-approval': Object.freeze({ sending: ['user'], rejected: ['user'], expired: ['ttl'], failed: ['recheck'] }),
+  proposed: Object.freeze({ sending: ['policy'], 'awaiting-approval': ['policy'], withdrawn: ['agent'] }),
+  'awaiting-approval': Object.freeze({ sending: ['user'], rejected: ['user'], expired: ['ttl'], failed: ['recheck'], withdrawn: ['agent'] }),
   sending: Object.freeze({ sent: ['adapter'], failed: ['adapter'], unknown: ['adapter', 'boot'] }),
   unknown: Object.freeze({ sent: ['reconcile'], failed: ['reconcile'] }),
   sent: Object.freeze({}),
   failed: Object.freeze({}),
   rejected: Object.freeze({}),
   expired: Object.freeze({}),
+  withdrawn: Object.freeze({}),
 });
-const TERMINAL_STATES = Object.freeze(['sent', 'failed', 'rejected', 'expired']);
+const TERMINAL_STATES = Object.freeze(['sent', 'failed', 'rejected', 'expired', 'withdrawn']);
+/** The states the drafting agent may withdraw from (derived from the table —
+ *  never a second hand-written list). */
+const WITHDRAWABLE_STATES = Object.freeze(Object.keys(TRANSITIONS).filter((s) => TRANSITIONS[s].withdrawn && TRANSITIONS[s].withdrawn.includes('agent')));
 const POLICY_MODES = Object.freeze(['direct', 'review']);
 const DECISION_REASONS = Object.freeze(['channel-policy', 'links', 'attachments', 'off-hours', 'authority']);
-const RECEIPT_STATUSES = Object.freeze(['sent', 'rejected', 'edited', 'expired', 'failed']);
+const RECEIPT_STATUSES = Object.freeze(['sent', 'rejected', 'edited', 'expired', 'failed', 'withdrawn']);
+/** The reason stored on a withdrawal the agent gave no words for — a CONTRACT
+ *  string (the CLI prints it, the receipt carries it), never rendered as-is by
+ *  the card (the card words `outcomeOf`). */
+const WITHDRAWN_DEFAULT_REASON = 'withdrawn by the agent';
+const WITHDRAW_WHY_MAX = 300;
+
+/**
+ * MAY THIS AGENT WITHDRAW THIS PROPOSAL (2026-09-27)? The ONE verdict the
+ * engine and the route share — `{ok, code, why}`, code from a closed set:
+ *  - `not-yours`         the proposal was drafted by somebody else (another
+ *                        agent — a Task-Group sibling included — or the user):
+ *                        only its own drafter takes it back; the user rejects;
+ *  - `not-withdrawable`  its state is not one the table lets `agent` leave
+ *                        (`sending` — the request may be leaving; `unknown` —
+ *                        a lost outcome is the user's; any terminal state).
+ * Identity is the conversation id the proposal recorded (`draftedBy.id`),
+ * never a name.
+ */
+function withdrawVerdict(p, by) {
+  const q = p || {};
+  const d = q.draftedBy || {};
+  const who = by && typeof by === 'object' ? by : {};
+  if (d.kind !== 'agent' || !d.id || who.kind !== 'agent' || !who.id || String(who.id) !== String(d.id)) {
+    const drafter = d.kind === 'agent' ? (d.name || d.id || 'another agent') : 'the user';
+    return { ok: false, code: 'not-yours', why: `proposal ${q.id || '?'} was drafted by ${drafter} — only the agent that proposed it can withdraw it (the user can reject it)` };
+  }
+  if (!WITHDRAWABLE_STATES.includes(q.state)) {
+    const why = q.state === 'sending' ? 'it is being sent right now'
+      : q.state === 'unknown' ? 'its outcome is unknown — a lost send is the user\'s to check on the platform, never withdrawn'
+        : q.state === 'withdrawn' ? 'it is already withdrawn'
+          : `it is ${q.state || 'in no known state'} — decided already`;
+    return { ok: false, code: 'not-withdrawable', why: `proposal ${q.id || '?'} cannot be withdrawn: ${why}` };
+  }
+  return { ok: true, code: null, why: null };
+}
+/** The agent's own words for a withdrawal, one line, clipped (null = none). */
+function withdrawWhy(why) {
+  const w = String(why == null ? '' : why).replace(/[\r\n\t]+/g, ' ').trim();
+  return w ? w.slice(0, WITHDRAW_WHY_MAX) : null;
+}
+/** The stored contract reason for a withdrawal (`p.reason`). */
+function withdrawReason(why) {
+  const w = withdrawWhy(why);
+  return w ? `${WITHDRAWN_DEFAULT_REASON}: ${w}` : WITHDRAWN_DEFAULT_REASON;
+}
 /** Default TTL in `awaiting-approval` (§9.1): 24 h. */
 const PROPOSAL_TTL_MS = 24 * 3600 * 1000;
 const TEXT_MAX_BYTES = 16 * 1024;
@@ -307,6 +361,13 @@ function outcomeOf(p) {
       const r = q.reason && q.reason !== REJECTED_DEFAULT_REASON ? String(q.reason) : '';
       return { kind: 'rejected', code: null, detail: null, userReason: r };
     }
+    // 2026-09-27: the drafting agent took it back — WHO (its recorded name)
+    // and its own words (verbatim, rendered AFTER the device's sentence)
+    case 'withdrawn': {
+      const w = q.withdrawal || {};
+      const d = q.draftedBy || {};
+      return { kind: 'withdrawn', code: null, detail: null, userReason: w.why ? String(w.why) : '', who: d.kind === 'agent' ? (d.name || d.id || null) : null };
+    }
     default: return null;
   }
 }
@@ -324,6 +385,10 @@ function outcomeText(o, { t = defaultT, errorCodeText = (c) => String(c || '') }
     case 'refused': return o.detail ? t('Refused by the channel ({code}): {detail}', { code: code || o.code || '', detail: o.detail }) : t('Refused by the channel ({code}).', { code: code || o.code || '' });
     case 'expired': return t('Expired: not approved within 24 h.');
     case 'rejected': return o.userReason ? t('Rejected: {reason}', { reason: o.userReason }) : t('Rejected.');
+    case 'withdrawn':
+      if (o.who && o.userReason) return t('Withdrawn by {who} · {reason}', { who: o.who, reason: o.userReason });
+      if (o.who) return t('Withdrawn by {who}', { who: o.who });
+      return o.userReason ? t('Withdrawn by the agent: {reason}', { reason: o.userReason }) : t('Withdrawn.');
     default: return '';
   }
 }
@@ -347,6 +412,204 @@ function expiryVerdict(proposal, now = Date.now(), ttlMs = PROPOSAL_TTL_MS) {
   return { expired: proposal && proposal.state === 'awaiting-approval' && now >= ttlAt, ttlAt };
 }
 
+/** How long the receipt's diff may be (the agent's block; `status <id>`
+ *  prints the whole final text). */
+const RECEIPT_DIFF_MAX = 2000;
+/** THE WHOLE BLOCK'S BYTE BUDGET (verify r3, 2026-09-27): the drain site
+ *  (agent-routes renderMsgStash) renders a `channel-receipt` entry WHOLE only
+ *  up to channel-filter's BLOCK_MAX_BYTES and clips it past that — a CJK diff
+ *  of 1 800 characters is 5 200 bytes, so the owner's guidance sentence and
+ *  the "status prints the whole text" pointer were the part cut off. The
+ *  number is spelled here (this module imports only channel-record) and
+ *  test-channel-outbox pins it equal to channel-filter's. */
+const RECEIPT_BLOCK_MAX_BYTES = 4096;
+/** UTF-8 length without Buffer (this module runs in the browser bundle too). */
+function utf8Bytes(s) {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x80) n += 1; else if (c < 0x800) n += 2; else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; } else n += 3;
+  }
+  return n;
+}
+/** The one sentence a receipt carrying the owner's feedback ends with. */
+const RECEIPT_GUIDANCE = 'Use this as guidance for the next draft.';
+const splitLines = (s) => String(s == null ? '' : s).replace(/\r\n?/g, '\n').split('\n');
+/**
+ * WHAT THE USER CHANGED, as a compact LINE DIFF (2026-09-27, the owner: "如果
+ * 我修改后批准，agent 似乎也收不到我的修改动作 … 并不知道我希望以什么方式回复").
+ * `- ` = the agent proposed it, `+ ` = the user sent it, `  ` = one line of
+ * unchanged context beside a change; a longer unchanged run is ONE line
+ * ("… N unchanged lines"). '' when nothing changed. Every line is frame-inert
+ * (a proposal's text is an agent's, the edit a user's — both reach an agent's
+ * context), and the whole is at most `max` characters, clipped with a line
+ * that says so. PURE; LCS over the lines between the common head and tail.
+ */
+function receiptDiff(proposed, final, { max = RECEIPT_DIFF_MAX, maxBytes = Infinity } = {}) {
+  const a = splitLines(proposed), b = splitLines(final);
+  if (a.join('\n') === b.join('\n')) return '';
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head++;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail++;
+  const am = a.slice(head, a.length - tail), bm = b.slice(head, b.length - tail);
+  const mid = [];
+  if (am.length * bm.length <= 250000) {
+    // LCS table over the changed middle
+    const n = am.length, m = bm.length;
+    const L = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = am[i] === bm[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (am[i] === bm[j]) { mid.push([' ', am[i]]); i++; j++; }
+      else if (L[i + 1][j] >= L[i][j + 1]) mid.push(['-', am[i++]]);
+      else mid.push(['+', bm[j++]]);
+    }
+    while (i < n) mid.push(['-', am[i++]]);
+    while (j < m) mid.push(['+', bm[j++]]);
+  } else {
+    for (const l of am) mid.push(['-', l]);
+    for (const l of bm) mid.push(['+', l]);
+  }
+  const raw = [...a.slice(0, head).map((l) => [' ', l]), ...mid, ...a.slice(a.length - tail).map((l) => [' ', l])];
+  // a changed run reads PAIRWISE — each removed line beside the line that
+  // replaced it — so a clipped diff still shows what the user wrote
+  const ops = [];
+  for (let k = 0; k < raw.length;) {
+    if (raw[k][0] === ' ') { ops.push(raw[k++]); continue; }
+    const minus = [], plus = [];
+    while (k < raw.length && raw[k][0] !== ' ') (raw[k][0] === '-' ? minus : plus).push(raw[k++]);
+    for (let x = 0; x < Math.max(minus.length, plus.length); x++) { if (minus[x]) ops.push(minus[x]); if (plus[x]) ops.push(plus[x]); }
+  }
+  // keep ONE line of context beside a change; fold every longer unchanged run
+  const near = (k) => (ops[k - 1] && ops[k - 1][0] !== ' ') || (ops[k + 1] && ops[k + 1][0] !== ' ');
+  const out = [];
+  let run = [];
+  // one line is at most 600 characters, so a long paragraph's removed AND
+  // added forms both fit the budget (the user's version is never cut away).
+  // Frames: the complete tags first, then the clip, then the line rule (verify
+  // r3) — a clip can leave a complete tag DANGLING, and a dangling opener is
+  // completed by the `>` of a later line once the lines are joined
+  const clip = (l) => { let v = inertFrames(l); if (v.length > 600) v = v.slice(0, 599) + '…'; return inertFrameLine(v); };
+  const flush = () => {
+    if (run.length > 1) out.push(`  … ${run.length} unchanged lines`);
+    else if (run.length === 1) out.push(`  ${clip(run[0])}`);
+    run = [];
+  };
+  ops.forEach(([t, l], k) => {
+    if (t === ' ' && !near(k)) { run.push(l); return; }
+    flush();
+    out.push(`${t} ${clip(l)}`);
+  });
+  flush();
+  const whole = out.join('\n');
+  if (whole.length <= max && utf8Bytes(whole) <= maxBytes) return whole;
+  const cut = '… (the diff is longer — `vibespace-channels status <proposal id>` prints the whole final text)';
+  const room = Math.max(0, max - cut.length - 1);
+  const roomBytes = Math.max(0, maxBytes - utf8Bytes(cut) - 1);
+  const fits = (t) => t.length <= room && utf8Bytes(t) <= roomBytes;
+  let text = '';
+  for (const line of out) {
+    const next = text ? `${text}\n${line}` : line;
+    if (!fits(next)) {
+      // a single line longer than the room is clipped itself, never dropped whole
+      if (!text && room > 1) { let l = line.slice(0, room - 1); while (l.length > 1 && utf8Bytes(l) + 3 > roomBytes) l = l.slice(0, Math.max(1, Math.floor(l.length * 0.8))); text = inertFrameLine(l + '…'); }
+      break;
+    }
+    text = next;
+  }
+  return (text ? `${text}\n` : '') + cut.slice(0, max - (text ? text.length + 1 : 0));
+}
+/** How the decider wants the drafting agent told (2026-09-27, owner ruling:
+ *  the choice sits ON the Approve / Reject action, never in the account's
+ *  notification config): `next-turn` = free, it rides the agent's next
+ *  message (the default); `wake-now` = a billed turn now. */
+const RECEIPT_DELIVERIES = Object.freeze(['next-turn', 'wake-now']);
+/**
+ * THE RECEIPT'S DELIVERY VERDICT — PURE. `choice` = what the decider picked
+ * (anything else reads `next-turn`: the free one, fail closed), `proposal` =
+ * the stored record (its `receiptWake` row = a wake already taken), `session`
+ * = `{live}` of the drafting conversation (`false` = not live; `null` =
+ * unknown). `{deliver: 'wake-now'|'next-turn'|'none', why}`:
+ *  - `none`       the user drafted it (nobody to tell), or the agent withdrew
+ *                 it itself;
+ *  - `next-turn`  chosen; or `wake-now` asked for a session that is not live
+ *                 (`gone` — the stash keeps the receipt for when it comes
+ *                 back) or for a proposal whose ONE wake was already taken
+ *                 (`already-woken` — a second receipt never wakes twice);
+ *  - `wake-now`   chosen, live (or unknown), not yet woken.
+ */
+function receiptDeliveryVerdict(choice, proposal, session = {}) {
+  const p = proposal || {};
+  const d = p.draftedBy || {};
+  if (d.kind !== 'agent' || !d.id) return { deliver: 'none', why: 'user-draft' };
+  if (p.state === 'withdrawn') return { deliver: 'none', why: 'withdrawn' };
+  if (choice !== 'wake-now') return { deliver: 'next-turn', why: choice === undefined || choice === null || choice === 'next-turn' ? 'chosen' : 'unknown-choice' };
+  if (session && session.live === false) return { deliver: 'next-turn', why: 'gone' };
+  if (p.receiptWake) return { deliver: 'next-turn', why: 'already-woken' };
+  return { deliver: 'wake-now', why: 'chosen' };
+}
+/** Is this receipt the OWNER'S EXPLICIT FEEDBACK — an edit before the send,
+ *  or a rejection with words of their own? (The receipt then carries what
+ *  changed / why, and the guidance sentence.) PURE. */
+function receiptFeedback(rc) {
+  const r = rc || {};
+  if (r.status === 'edited') return { feedback: true, why: 'edited' };
+  if (r.status === 'rejected' && r.reason && r.reason !== REJECTED_DEFAULT_REASON) return { feedback: true, why: 'reason' };
+  return { feedback: false, why: null };
+}
+
+/**
+ * THE RECEIPT'S FATE, AS STRUCTURE (2026-09-27, the owner: "我在界面里完全看
+ * 不到有消息在 queue"): does the drafting agent KNOW yet? `handed` (the ladder
+ * handed it over at `at`, or the stash drained into the agent's next message
+ * at `at`), `waiting` (stored for its next message), `gone` (its session was
+ * not live when the receipt was made — kept for when it comes back),
+ * `undelivered` (neither handed nor stored — the ladder's reason), `recorded`
+ * (a receipt from before delivery was tracked), `evicted` (verify r2: the
+ * ladder's cap dropped the stored receipt UNREAD — never "waiting", never
+ * "handed"; the receipt itself stays on the proposal). `null` = no fate to
+ * speak of (no receipt, the user drafted it, or the agent withdrew it itself).
+ */
+function receiptFateOf(p) {
+  const q = p || {};
+  const d = q.draftedBy || {};
+  if (!q.receipt || d.kind !== 'agent' || q.state === 'withdrawn') return null;
+  const who = d.name || d.id || null;
+  const del = q.receiptDelivery;
+  if (!del) return { kind: 'recorded', who, at: null, woke: false };
+  // the cap dropped it before any message picked it up (recorded when it happened, so it wins over a later guess)
+  if (q.receiptEvictedAt) return { kind: 'evicted', who, at: Number(q.receiptEvictedAt) || null, woke: false, held: Number(q.receiptEvictedHeld) || null };
+  // `reconciled` (verify): its stash entry was found gone at a boot — handed
+  // by an earlier message, at a time nobody recorded (no `at`)
+  if (q.receiptDrainedAt) return q.receiptDrainedHow === 'reconciled' ? { kind: 'handed', who, at: null, woke: false, lane: 'next-message', reconciled: true } : { kind: 'handed', who, at: Number(q.receiptDrainedAt) || null, woke: false, lane: 'next-message' };
+  if (del.ok) return { kind: 'handed', who, at: Number(del.at) || null, woke: !!del.woke, lane: del.lane || null };
+  // a wake the decider asked for and the ladder refused (the spend ceiling) is SAID beside the wait
+  // …and a wake-now the ENGINE downgraded before the ladder (verify r4: the proposal's wake row could not be
+  // written — `row-unwritten`) is said the same way; `already-woken` / `gone` are not refusals
+  const rowLost = !del.woke && del.choice === 'wake-now' && del.verdict === 'row-unwritten';
+  if (del.stashed) return { kind: del.gone ? 'gone' : 'waiting', who, at: Number(del.at) || null, woke: false, wakeRefused: del.woke ? (del.refused || 'refused') : (rowLost ? 'row-unwritten' : null), why: del.woke ? (del.why || null) : null };
+  return { kind: 'undelivered', who, at: Number(del.at) || null, woke: false, refused: del.refused || null, why: del.why || null };
+}
+/** The fate line's words. `stamp(ms)` = the card's own clock format;
+ *  `refusalText(code)` = channel-caps' wake-refusal words (injected, so this
+ *  module keeps importing nothing but channel-record). */
+function receiptFateText(f, { t = defaultT, stamp = (ms) => new Date(Number(ms)).toISOString().slice(11, 16), refusalText = () => '' } = {}) {
+  if (!f || !f.kind) return '';
+  const agent = f.who || t('the agent');
+  switch (f.kind) {
+    case 'handed':
+      if (!f.at) return t('Handed to {agent} with an earlier message', { agent });
+      return f.woke ? t('Handed to {agent} at {time} — it was woken for it', { agent, time: stamp(f.at) }) : t('Handed to {agent} at {time}', { agent, time: stamp(f.at) });
+    case 'waiting': return f.wakeRefused ? t('Waiting for {agent}\'s next message — waking it was refused: {why}', { agent, why: refusalText(f.wakeRefused) || f.why || f.wakeRefused }) : t('Waiting for {agent}\'s next message', { agent });
+    case 'gone': return t('{agent} is gone — receipt kept', { agent });
+    case 'evicted': return t('Not delivered — {agent}\'s queue was full; the receipt is kept here', { agent });
+    case 'undelivered': return t('Receipt not delivered: {why}', { why: (f.refused && refusalText(f.refused)) || f.why || '' });
+    case 'recorded': return t('Receipt recorded');
+    default: return '';
+  }
+}
+
 /**
  * THE RECEIPT (§9.3). Null while the proposal is not in a state that owes
  * one — `unknown` owes the USER a look, not the agent a verdict (§9.4).
@@ -355,7 +618,7 @@ function receiptFor(p) {
   if (!p || !p.state) return null;
   let status = null;
   if (p.state === 'sent') status = p.edited ? 'edited' : 'sent';
-  else if (p.state === 'rejected' || p.state === 'expired' || p.state === 'failed') status = p.state;
+  else if (p.state === 'rejected' || p.state === 'expired' || p.state === 'failed' || p.state === 'withdrawn') status = p.state;
   if (!status) return null;
   const marking = p.identity && p.identity.marking ? p.identity.marking : 'unknown';
   return {
@@ -372,6 +635,8 @@ function receiptFor(p) {
     // whether a sender honesty line rode out with the message (§9.5).
     reconciled: !!(p.reconcile && p.reconcile.resolvedAt),
     honestyLine: !!(p.result && p.result.honestyLine),
+    // 2026-09-27: a withdrawal names the proposal that replaced it (if any)
+    replacedBy: p.state === 'withdrawn' ? (p.replacedBy || null) : null,
   };
 }
 
@@ -389,11 +654,11 @@ function safeInline(text, max) {
 
 /** The text an agent is handed with its receipt — a §7.5-shaped block, frame-inert
  *  in EVERY vendor-controlled field (label, title, vendor id, sentAs, reason). */
-function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text = null } = {}) {
+function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text = null, proposed = null, maxBytes = RECEIPT_BLOCK_MAX_BYTES } = {}) {
   const r = receipt || {};
   const lines = [];
   lines.push(`Channel receipt — ${safeInline(adapterLabel || r.adapterId || 'channel', 60)} · ${safeInline(title || r.convId || '', 120)}`.trim());
-  const what = r.status === 'edited' ? 'SENT after the user edited it' : r.status === 'sent' ? 'SENT' : r.status === 'rejected' ? 'REJECTED by the user' : r.status === 'expired' ? 'EXPIRED unapproved (24 h)' : r.status === 'failed' ? 'FAILED' : String(r.status || '').toUpperCase();
+  const what = r.status === 'edited' ? 'SENT after the user edited it' : r.status === 'sent' ? 'SENT' : r.status === 'rejected' ? 'REJECTED by the user' : r.status === 'expired' ? 'EXPIRED unapproved (24 h)' : r.status === 'failed' ? 'FAILED' : r.status === 'withdrawn' ? `WITHDRAWN by you (the drafting agent)${r.replacedBy ? ` — replaced by proposal ${safeInline(r.replacedBy, 80)}` : ''}` : String(r.status || '').toUpperCase();
   lines.push(`proposal ${safeInline(r.proposalId, 80)}: ${what}${r.vendorMessageId ? ` (vendor id ${safeInline(r.vendorMessageId, 200)})` : ''}`);
   if (r.status === 'sent' || r.status === 'edited') {
     lines.push(`sent as: ${safeInline(r.sentAs || 'unknown', 40)}`);
@@ -403,12 +668,34 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
   if (r.honestyLine) lines.push('a sender honesty line naming you as the drafting agent was appended (the channel\'s option is on)');
   if (r.reconciled) lines.push('this outcome was established by a reconcile check after the send\'s result was lost');
   if (r.reason) lines.push(`reason: ${inertFrames(String(r.reason)).slice(0, 400)}`);
-  if (r.status === 'edited' && text) lines.push(`final text:\n${inertFrames(String(text)).slice(0, 2000)}`);
-  return lines.join('\n');
+  // 2026-09-27: WHAT THE USER CHANGED, not only the final text — a line diff
+  // of the agent's proposal against what was sent (the final text itself only
+  // when the proposal's own words are not at hand: a pre-diff caller).
+  // verify r3: the diff takes the BYTES the rest of the block leaves under
+  // `maxBytes` (the guidance line counted first — it is the part that was
+  // being cut off), so the drain renders the block whole
+  const guidance = receiptFeedback(r).feedback ? RECEIPT_GUIDANCE : null;
+  const DIFF_HEAD = 'what the user changed (- you proposed / + the user sent):';
+  const FINAL_HEAD = 'final text:';
+  const used = utf8Bytes(lines.join('\n')) + (guidance ? utf8Bytes(guidance) + 1 : 0);
+  const diff = r.status === 'edited' && typeof proposed === 'string' && typeof text === 'string' ? receiptDiff(proposed, text, { maxBytes: Math.max(200, maxBytes - used - utf8Bytes(DIFF_HEAD) - 2) }) : '';
+  if (diff) lines.push(`${DIFF_HEAD}\n${diff}`);
+  else if (r.status === 'edited' && text) {
+    let fin = inertFrames(String(text)).slice(0, 2000);
+    const roomF = Math.max(200, maxBytes - used - utf8Bytes(FINAL_HEAD) - 2);
+    while (fin.length > 1 && utf8Bytes(fin) > roomF) fin = fin.slice(0, Math.floor(fin.length * 0.9));
+    lines.push(`${FINAL_HEAD}\n${fin}`);
+  }
+  if (guidance) lines.push(guidance);
+  // the belt (verify r3): whatever the fields above assembled, the BLOCK carries no live frame —
+  // a dangling opener at the end of one field and a `>` in the next would have joined into one
+  return inertFrames(lines.join('\n'));
 }
 
 module.exports = {
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,
+  WITHDRAWABLE_STATES, WITHDRAWN_DEFAULT_REASON, withdrawVerdict, withdrawWhy, withdrawReason,
+  RECEIPT_DIFF_MAX, RECEIPT_BLOCK_MAX_BYTES, RECEIPT_GUIDANCE, receiptDiff, receiptFeedback, receiptFateOf, receiptFateText, RECEIPT_DELIVERIES, receiptDeliveryVerdict, utf8Bytes,
   canTransition, isTerminal, policyMode, hasLinks, offHoursVerdict, decideOutbound, validateProposal, validateCompose, COMPOSE_MAX_RECIPIENTS, expiryVerdict, receiptFor, renderReceiptBlock,
   honestyLine, withHonestyLine, canReconcile, reconcileVerdict,
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,

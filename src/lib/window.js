@@ -1435,21 +1435,30 @@ class WindowManager {
     this.closeWindow(id);
     return true;
   }
-  closeWindow(id) {
+  /** THE ONE RETIREMENT of a closing window (inc-mukeyzpt-lpou). Every register that can bring a window back
+   *  forgets it in the SAME tick as its removal: the stage; every cached desktop record — switchTo's
+   *  merge-preserve (2.141.1) cannot tell "closed" from "not yet materialized" (both openSpec-backed + absent
+   *  from wm.windows), so a stale record resurrected the closed window on the next desktop round trip (2.151.1:
+   *  关闭→切桌面→切回来→窗口复活成history状态); and the layout manager's HELD CLOSE (a remote record older than
+   *  this close never re-creates it). Both terminal deletions run it — closeWindow's free branch and
+   *  removeFromTabChain — because the tab strip's ✕ reached removeFromTabChain without closeWindow and skipped
+   *  the purge: the owner's closed side-by-side viewer came back as a free window after two desktop switches.
+   *  `held: false` = a record-only id (nothing here to hold). */
+  _retireWindow(id, { held = true } = {}) {
     this._app?.stage?.onWindowClosed(id);
-    // A user-closed window must die in every cached desktop record too —
-    // switchTo's merge-preserve (2.141.1) cannot tell "closed" from "not yet
-    // materialized" (both openSpec-backed + absent from wm.windows), so stale
-    // records resurrected every closed window on the next desktop round-trip
-    // (2.151.1 real report: 关闭→切桌面→切回来→窗口复活成history状态).
     this._app?.desktopManager?.purgeClosedWindow(id);
-    const win = this.windows.get(id); if (!win) return;
+    if (held) this._app?.layoutManager?.noteClosed?.(id, this.windows.get(id)?._desktopId);
+  }
+  closeWindow(id) {
+    const win = this.windows.get(id);
+    if (!win) { this._retireWindow(id, { held: false }); return; } // a record-only id still leaves every cached record
     win._listenerCtl?.abort(); // release document-level drag/icon listeners
     if (win._tabChain) {
       this.removeFromTabChain(win._tabChain, id);
-      // onClose fires inside removeFromTabChain
+      // the retirement and onClose run inside removeFromTabChain (the one chained deletion)
       return;
     }
+    this._retireWindow(id);
     if (win.onClose) win.onClose(); win.element.remove(); this.windows.delete(id);
     // If closed window was active, focus the most recently used remaining window (highest z-index)
     if (this.activeWindowId === id) this._focusMostRecent();

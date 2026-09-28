@@ -17,6 +17,7 @@ const { createMessageManager, feedLive, feedPeerCard } = require('./src/normaliz
 const { Telemetry } = require('./src/telemetry');
 const { SyncStore } = require('./src/sync-store');
 const { cwdToProjectDir, SessionMessages, findSessionJsonlPath, dedupWebuiSockets } = require('./src/session-store');
+const { addressableId } = require('./src/claude-lock-capture'); // verify r5 (channel-withdraw): the roster's own-id rule — a pending fork is nobody's address
 const { readChildPids } = require('./src/cli-identity');   // THE process reader — /proc first, ONE `ps` table where there is none, never a fork per item
 const { CodexSessionMessages } = require('./src/codex-session-store');
 const { normalizeCodexSource, CODEX_SESSIONS_DIR } = require('./src/adapters/codex');
@@ -1255,12 +1256,12 @@ const deliver = require('./src/server/conversation-deliver.js').create({
   peerMsg: require('./src/peer-messaging.js'),
   getHosts: () => hosts,
   getConvIndex: () => hosts && hosts.convIndex,
-  serverSetting, activeSessions, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
+  serverSetting, activeSessions, onStashChange: () => { try { stashView.changed(); } catch { } }, authorizeSpend: (req) => spendGuard.authorize(req), noteSpend: (rec) => spendGuard.note(rec), releaseSpend: (rec) => spendGuard.release(rec), // THE SPEND CEILING (design §4.4c): every rung can open a BILLED turn on an idle session; a refusal is not a dropped message (the caller stashes and it rides the next injection)
   // 2.363.0: render the peer card at delivery time — server-posted injections
   // are body-less at the CLI, only the delivery site can show them live.
   emitPeerCard: (cid, card) => {
     for (const [, s] of activeSessions) {
-      if ((s.backendSessionId || s.claudeSessionId) !== cid || !s._normalizer) continue;
+      if (addressableId(s) !== cid || !s._normalizer) continue; // verify r6 (channel-withdraw): the card is drawn in the window that OWNS the conversation, never a pending fork's (it carries the parent's id)
       try { feedPeerCard(s, card); } catch { }
       return true;
     }
@@ -1273,7 +1274,12 @@ const jobsWiring = require('./src/server/jobs-wiring.js').create({
   broadcastAll: (msg) => { const payload = JSON.stringify(msg); for (const c of wss.clients) { try { if (c.readyState === WS_OPEN) c.send(payload); } catch {} } },
   userTodos, log: (...a) => console.log(...a), getTelemetry: () => { try { return telemetry; } catch { return null; } }, // jobs-archive-write-failed rides telemetry
   serverSetting, taskGroups: tasks, activeSessions, // owner auto-notify (2.344.0): toggles + channel-lane session lookup
+  onStash: () => { try { stashView.changed(); } catch { } }, // 2026-09-27: a job notification stashed / drained ⇒ the session's `stash` fact is re-published
 });
+// WHAT WAITS FOR AN AGENT (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): both stashes summarized as the `stash` session fact + the user's POST /api/sessions/:id/stash/hand-over (ONE ladder turn, spend reason stash-handover) — src/server/stash-handover.js
+const stashView = require('./src/server/stash-handover.js').create({ activeSessions, getDeliver: () => deliver, getJobs: jobsWiring.getJobs, broadcastSessions: () => broadcastActiveSessions(), renderMsgStash: require('./src/agent-routes.js').renderMsgStash, renderNotifStash: require('./src/job-model.js').renderNotifStash, dataDir: path.join(__dirname, 'data') }); stashView.register(app);   // verify r4: dataDir = the delivered-hand-over memory on disk (a restart between a delivery and its echo)
+deliver.registerFrameRestorer((cid, text, meta) => stashView.restoreHandedOver(cid, text, meta)); // verify r2: a hand-over's frame that comes back from a wrapper is restored as its ORIGINAL entries (each store, each kind), never one blob; r4: `meta.kind` — a peer's frame never
+function stashFactOf(s) { try { return stashView.summaryFor(s); } catch { return null; } } // boot-order safe: a payload built before the view exists states nothing
 // Channels v1 (2.362.0): per-session external reach override for agent
 // messaging — user-set (Session Properties), widening only; ACL reads the
 // live field, meta persists it across restarts.
@@ -1286,7 +1292,7 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
   try { writeSessionMeta(s.sockName, { ...readSessionMeta(s.sockName), msgReachability: s._msgReachability }); } catch { }
   res.json({ ok: true, level: lv });
 });
-setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
+setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getDesignKit: () => designKit, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches }); // lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3)
 app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
@@ -1583,7 +1589,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, pluginLoader,
+const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN,
@@ -1594,6 +1600,7 @@ const { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, 
   agentdMintDialPair: (...a) => agentdMintDialPair(...a),
   deviceForDial: (...a) => deviceForDial(...a),
   ensureAgentdOnHost: (...a) => ensureAgentdOnHost(...a),
+  readSessionMetaOf: (session) => (session?.sockName ? readSessionMeta(session.sockName) : null), integrationEnabled: () => integrationEnabled(), // B-f7ab: the late browser key extends the session's own record, under THE integration switch
   // + agent browser P3 (§4.3.1): the handback announcer forwards to THE ladder under 'browser-handback'; an idle handback files one inbox item // + agent browser P2 (§3.8 ③): a stamped last-used profile re-publishes the live facts // + agent browser P1 second half: the Task-Group default rung, the zero-billed notice queue, the pin's meta persistence — the notes used to sit MID-LINE and swallowed the two keys appended after them (2.369.134: getTelemetry never reached the wiring; the r-fix moved activeSessions after them and every browser route answered "no such live session")
   // lane H (2026-09-25): rebindSessionMeta = the SAME meta record written back, so the meta choke point's browser-binding rule re-runs (a real record only, never a partial one) // lane J r2: adapterRegistry = the permission-answer path (src/server/permission-answer.js) for the stale-approval sweep
   getPortForwards: () => { try { return portForwards; } catch { return null; } }, instanceUrl, onMountsUpdated: () => tasks.syncAllContextMd(), getTasks: () => tasks, sessionStatusKey, getSessionStatus: () => sessionStatus, persistSessionMeta: (session, patch) => { if (session?.sockName) writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), ...patch }); }, rebindSessionMeta: (session) => { const m = session?.sockName ? readSessionMeta(session.sockName) : null; if (m && m.browserKey && m.webuiSessionId) writeSessionMeta(session.sockName, { ...m }); }, broadcastActiveSessions: () => broadcastActiveSessions(), deliver, userTodos, getTelemetry: () => { try { return telemetry; } catch { return null; } }, activeSessions, adapterRegistry,
@@ -1603,10 +1610,10 @@ const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/s
 setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting });
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
-  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store,
+  app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)
   userTodos, // P1: a failing adapter files ONE "For you" item after 3 consecutive failed passes and the same engine retracts it on recovery (fence 8)
-  deliver, serverSetting, authEnabled: () => auth.enabled, // P2: THE delivery ladder (fence 2 — the one door to an unattended turn, spendReason 'channel-message', the authorizer inside it) + the coalescing window setting (fence 12) · r2: `authEnabled` — with auth OFF the owner's group routes are paced like an agent's (anyone local can reach them)
-  liveSessions: () => { const out = []; for (const [id, s] of activeSessions) { const cid = s.claudeSessionId || s.backendSessionId; if (!cid) continue; let groups = []; try { groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id); } catch { } out.push({ cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null }); } return out; }, groupSetting: (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } }, // P2: the agent sessions an assignment can address (group = task group, round-robin over its live members); §22 agent groups: + each session's msg-acl override and the Task Groups' externalVisibility = the reach msg-acl answers
+  deliver, serverSetting, authEnabled: () => auth.enabled, sessions: () => activeSessions, sessionMeta: () => ({ readSessionMeta, writeSessionMeta }), // §26 (B-099e): the channel witness's ring lives on the live session + its meta · P2: THE delivery ladder (fence 2 — the one door to an unattended turn, spendReason 'channel-message', the authorizer inside it) + the coalescing window setting (fence 12) · r2: `authEnabled` — with auth OFF the owner's group routes are paced like an agent's (anyone local can reach them)
+  liveSessions: () => { const out = []; for (const [id, s] of activeSessions) { const cid = addressableId(s); /* verify r5 (channel-withdraw): a BORROWED id (a pending fork) is nobody's address — listed under its parent's id it let a third session mint the pair under the parent and bill it; ONE predicate with agent-routes' _msgEndpoints */ if (!cid) continue; let groups = []; try { groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id); } catch { } out.push({ cid, name: s.name || null, groups, webuiId: id, reachability: s._msgReachability || null }); } return out; }, groupSetting: (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } }, // P2: the agent sessions an assignment can address (group = task group, round-robin over its live members); §22 agent groups: + each session's msg-acl override and the Task Groups' externalVisibility = the reach msg-acl answers
 });
 // Backend readiness for onboarding (src/server/backend-status-route.js)
 require('./src/server/backend-status-route.js').create({ app, machineProbes, accounts, claudeCmd: CLAUDE_CMD, codexCmd: CODEX_CMD });
@@ -1749,10 +1756,11 @@ function activeSessionsPayload() {
       accountName: s._accountId ? (accounts.get(s._accountId)?.name || 'API key') : null,
       accountTail: s._accountId ? (accounts.get(s._accountId)?.tail || null) : null,
       todo: s._todos || null, // {done, total, current} — the agent's own TodoWrite/plan
+      stash: stashFactOf(s), // 2026-09-27: what waits for this agent's next turn (both stashes, src/stash-summary.js) — the strip above its composer + the card's hint
       auth: sessionAuth(s), // billing identity (subscription / api-console / api-key / unknown)
       // outputStyle = the EFFECTIVE style (2.369.58; null = the agent's own config decides); worktree/worktreePath = the per-session git worktree (owner ruling 9) — the card badge + the path the CLI ITSELF announced in its init frame
       vcs: s._vcs || null, prLinks: Array.isArray(s._prLinks) && s._prLinks.length ? s._prLinks : null, // design-unknown-records: the last VCS fact (git chip) + the published changes (PR chips)
-      turn: require('./src/server/turn-facts.js').turnOf(s), mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, browserKey: s._browserKey || null, browserVariant: s._browserVariant || null, browserProfileId: s._browserProfileId || null, browserPinOrigin: s._browserPinOrigin || null, browserProfileActive: s._browserProfileActive === undefined ? null : s._browserProfileActive, browserCap: Number.isInteger(s._browserCap) ? s._browserCap : null /* MULTIVIEW D4: the conversation's EXPLICIT browser cap (null = the default) — Session Properties' row; the comment sits BEFORE the comma so the next key follows a `,` (test-worktree-userchan-ui's payload census) */, browserInput: (() => { try { const v = browserKeeper?.inputSummaryFor?.(s._browserKey); return v ? v.input : null; } catch { return null; } })(), browserLive: (() => { try { return browserKeeper?.liveHoldingFor?.(s._browserKey, s._browserProfileActive === undefined ? null : s._browserProfileActive) || ''; } catch { return ''; } })(), browserFact: (() => { try { return s._browserKey && browserKeeper?.factFor ? browserKeeper.factFor(require('./src/browser-fact.js').sessionFactsOf(s)) : null; } catch { return null; } })(), /* lane S2: THE browser fact — which browser this conversation uses NOW, its pin and why they differ (src/browser-fact.js); every surface prints its words */ // lane H: the LIVE browser the agent holds ('' / 'ephemeral' / a profile id) — the card + status chip // + agent browser P3 (§4.3): 'user' while somebody drives one of this conversation's browsers, 'agent' when it has one, null when none — the card badge / status-bar chip // + agent browser P2 (§3.8 ③): the profile the agent LAST USED (null = never, '' = the ephemeral one) beside the PINNED one — the status-bar Browser chip's pair, each with its own LIVE_SESSION_FACTS digest // + agent browser P1 (§3.2.5): the conversation's browser key/rung, the PINNED profile and which rung chose it (Session Properties' Browser section, the card picker) // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
+      turn: require('./src/server/turn-facts.js').turnOf(s), mode: s.mode || 'terminal', outputStyle: s._outputStyle || null, worktree: !!s._worktree, worktreePath: s._worktreePath || null, spawnModel: s._spawnModel || null, effort: s._effort || null, modelOrigin: s._modelOrigin || null, effortOrigin: s._effortOrigin || null, browserKey: s._browserKey || null, browserVariant: s._browserVariant || null, browserProfileId: s._browserProfileId || null, browserPinOrigin: s._browserPinOrigin || null, browserProfileActive: s._browserProfileActive === undefined ? null : s._browserProfileActive, browserCap: Number.isInteger(s._browserCap) ? s._browserCap : null /* MULTIVIEW D4: the conversation's EXPLICIT browser cap (null = the default) — Session Properties' row; the comment sits BEFORE the comma so the next key follows a `,` (test-worktree-userchan-ui's payload census) */, browserInput: (() => { try { const v = browserKeeper?.inputSummaryFor?.(s._browserKey); return v ? v.input : null; } catch { return null; } })(), browserLive: (() => { try { return browserKeeper?.liveHoldingFor?.(s._browserKey, s._browserProfileActive === undefined ? null : s._browserProfileActive) || ''; } catch { return ''; } })(), browserFact: (() => { try { return s._browserKey && browserKeeper?.factFor ? browserKeeper.factFor(require('./src/browser-fact.js').sessionFactsOf(s)) : (browserKeys?.keylessFactOf?.(s) || null); } catch { return null; } })(), /* B-f7ab: no key yet ⇒ "no browser yet" where its first browser command gets one */ /* lane S2: THE browser fact — which browser this conversation uses NOW, its pin and why they differ (src/browser-fact.js); every surface prints its words */ // lane H: the LIVE browser the agent holds ('' / 'ephemeral' / a profile id) — the card + status chip // + agent browser P3 (§4.3): 'user' while somebody drives one of this conversation's browsers, 'agent' when it has one, null when none — the card badge / status-bar chip // + agent browser P2 (§3.8 ③): the profile the agent LAST USED (null = never, '' = the ephemeral one) beside the PINNED one — the status-bar Browser chip's pair, each with its own LIVE_SESSION_FACTS digest // + agent browser P1 (§3.2.5): the conversation's browser key/rung, the PINNED profile and which rung chose it (Session Properties' Browser section, the card picker) // EFFECTIVE response style (2.369.58) + the model/effort this session was SPAWNED with and WHICH FACT each came from (B-6b6d: 'chosen'|'conversation'|'instance'|'harness'). null = the agent's own config decides / a session that predates the field. Session Properties names value AND origin, which neither the saved PICK nor the value itself can give it — a conversation's own value and the instance default are frequently the same string, and only the server ever read the conversation's records
     });
   }
   return activeList;
@@ -2026,7 +2034,18 @@ server.listen(PORT, HOST, () => {
 
 // On server shutdown: only kill the attach PTYs, NOT the dtach sessions
 // Claude processes in dtach survive the server restart
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  // verify r2: a hand-over in flight settles FIRST (its frame may be in the CLI's inbox while its drain is not on disk — exiting here re-delivered it at the next boot); ≤ 5 s
+  // verify r3: the door shuts BEFORE the wait — a press during it started a hand-over nobody waited for
+  let n = 0; try { stashView.close(); n = stashView.inFlightCount(); } catch { }
+  if (n > 0) { console.log(`  Shutting down: waiting for ${n} stash hand-over(s) in flight…`); stashView.settle(5000).then((k) => { if (k < 0) console.warn(`[stash] ${-k} hand-over(s) did not settle before the deadline — stamped, released at the next boot`); }).catch(() => { }).finally(shutdownNow); return; }
+  shutdownNow();
+}
+function shutdownNow() {
+  try { spendGuard.flush(); } catch {} // the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
   for (const [, s] of activeSessions) { try { if (s.pty) s.pty.kill(); } catch {} }
   // SyncStores + layouts persist on a debounce — flush so changes made within
   // the last couple seconds aren't lost across a restart
@@ -2034,7 +2053,7 @@ function shutdown() {
   try { flushLayouts(); } catch {}
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { userTodos.flush(); } catch {} // debounced user-todo writes
-  try { telemetry.flush(); } catch {} try { spendGuard.flush(); } catch {} // buffered telemetry records (2.219.0) + the unattended-spend ledger (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
+  try { telemetry.flush(); } catch {} // buffered telemetry records (2.219.0)
   try { sysinfo.persistHistory(); } catch {} // resource-history ring (2.223.0)
   try { channelsWiring.shutdown(); } catch {} // channel index + audit flush (atomic persistence law)
   try { jobsWiring.shutdown(); try { deliver.flush(); } catch { }; } catch {} // jobs store flush + engine lock release

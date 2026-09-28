@@ -18,6 +18,9 @@ import { createModalShell, createPopover, fetchJson, showToast } from './utils.j
 import { groupTitle } from './channel-words.js';
 import { frameKeyOf } from './desktop-seamless.js';
 import { pickerModel, shareSummary, MODES, proposalOf, setProposal, launchShare, launchSummary, rememberedCount } from '../window-reach.js';
+// the ONE principal picker (channel-polish, 2026-09-27): search + list + chips, keyed rows patched in place
+import { principalPicker } from './principal-picker.js';
+import { folderTail } from './principal-picker-model.js';
 
 export const REACH_KEY = 'desktopAppReach';
 const JSON_HDR = { 'Content-Type': 'application/json' };
@@ -52,34 +55,71 @@ export function rosterOf(app) {
 }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
+/** The picker's rows from the PURE model: a session (key `session:<durable key>`), a Task Group (`group:<id>`),
+ *  and every shared principal no longer in the roster (said on its row). `roster` / `app` only DECORATE a
+ *  session row (its folder, backend, Task Group) — who is checked is the model's. */
+function pickerItemsOf(model, { roster = null, app = null } = {}) {
+  const live = new Map(((roster && roster.sessions) || []).map((s) => [s.id, s]));
+  const sb = app && app.sidebar;
+  const out = [];
+  for (const g of model.groups) out.push({ key: `group:${g.id}`, kind: 'group', id: g.id, name: g.name, checked: g.checked, hint: g.checked ? t('every session in it, now or later') : '', groupIds: [], groupNames: [], ref: { kind: 'group', row: g } });
+  for (const s of model.sessions) {
+    const w = live.get(s.id) || {};
+    let tgs = [];
+    try { tgs = sb && typeof sb._getSessionTaskGroups === 'function' && w.id ? sb._getSessionTaskGroups(w) || [] : []; } catch { tgs = []; }
+    out.push({ key: `session:${s.key}`, kind: 'agent', id: s.key, name: s.name, folder: folderTail(w.cwd), backend: w.backend || 'claude', live: true, checked: s.checked, hint: s.checked && s.by && s.by !== 'user' ? originWord(s.by) : '', groupIds: tgs.map((g) => g.id), groupNames: tgs.map((g) => groupTitle(g)), ref: { kind: 'session', row: s } });
+  }
+  for (const o of model.others) {
+    const k = o.principal.kind === 'group' ? 'group' : 'session';
+    const row = k === 'session' ? { id: o.principal.id, key: o.principal.id, name: o.principal.name } : { id: o.principal.id, name: o.principal.name };
+    out.push({ key: `${k}:${o.principal.id}`, kind: k === 'group' ? 'group' : 'agent', id: o.principal.id, name: o.principal.name || o.principal.id, checked: true, hint: k === 'session' ? t('not running now') : t('not in the list now'), groupIds: [], groupNames: [], ref: { kind: k, row } });
+  }
+  return out;
+}
+
 /**
  * THE PICKER — ONE renderer for the three surfaces. `model` = PURE pickerModel's answer. `onToggle(kind, row, on)`,
- * `onMode(mode)`; `busy` greys everything while a write is in flight.
+ * `onMode(mode)`; `busy` greys everything while a write is in flight. The agents and Task Groups are the ONE
+ * principal picker (chips = who is shared with; a pick shares, a chip's ✕ stops sharing), kept on the
+ * container and PATCHED on every call — a repaint never re-creates the box the person is typing in.
  */
-export function renderPicker(container, { model, onToggle, onMode, busy = false, showMode = true } = {}) {
-  container.textContent = '';
+export function renderPicker(container, { model, onToggle, onMode, busy = false, showMode = true, roster = null, app = null } = {}) {
   container.classList.add('wshare-picker');
-  // the house CHECKBOX ROW (`label.dialog-check-row`: box left of its name, a hint under the name — it out-ranks
-  // `.dialog-body label`'s column flex, which stacked the box above its text)
-  const row = (kind, r, name, sub, checked) => {
-    const lab = el('label', 'dialog-check-row wshare-row');
-    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!checked; cb.disabled = busy;
-    cb.dataset.kind = kind; cb.dataset.id = kind === 'session' ? (r.key || r.id) : r.id;
-    cb.onchange = () => onToggle?.(kind, r, cb.checked);
-    const who = el('span', 'wshare-who', name);
-    lab.append(cb, who);
-    if (sub) lab.appendChild(el('span', 'dialog-check-hint', sub));
-    return lab;
-  };
-  container.appendChild(el('div', 'wshare-sec', t('Agents')));
-  if (!model.sessions.length) container.appendChild(el('div', 'wshare-empty', t('No agent session is running')));
-  for (const s of model.sessions) container.appendChild(row('session', s, s.name, s.checked && s.by && s.by !== 'user' ? originWord(s.by) : '', s.checked));
-  for (const o of model.others) if (o.principal.kind === 'session') container.appendChild(row('session', { id: o.principal.id, key: o.principal.id, name: o.principal.name }, o.principal.name || o.principal.id, t('not running now'), true));
-  container.appendChild(el('div', 'wshare-sec', t('Task Groups')));
-  if (!model.groups.length) container.appendChild(el('div', 'wshare-empty', t('No Task Group yet')));
-  for (const g of model.groups) container.appendChild(row('group', g, g.name, g.checked ? t('every session in it, now or later') : '', g.checked));
-  for (const o of model.others) if (o.principal.kind === 'group') container.appendChild(row('group', { id: o.principal.id, name: o.principal.name }, o.principal.name || o.principal.id, t('not in the list now'), true));
-  if (!showMode) return container;
+  let st = container.__wshare;
+  const items = pickerItemsOf(model, { roster, app });
+  if (!st) {
+    container.textContent = '';
+    st = { items, sel: [], onToggle: null };
+    st.picker = principalPicker({
+      items: () => st.items, multi: true,
+      placeholder: t('Search agents and Task Groups…'), label: t('Share with agents'),
+      emptyText: t('No agent session is running'),
+      onChange: (keys) => {
+        const before = new Set(st.sel), after = new Set(keys);
+        st.sel = keys.slice();
+        const byKey = new Map(st.items.map((r) => [r.key, r]));
+        for (const k of after) if (!before.has(k) && byKey.get(k)) st.onToggle?.(byKey.get(k).ref.kind, byKey.get(k).ref.row, true);
+        for (const k of before) if (!after.has(k) && byKey.get(k)) st.onToggle?.(byKey.get(k).ref.kind, byKey.get(k).ref.row, false);
+      },
+    });
+    st.picker.el.classList.add('wshare-pick');
+    container.appendChild(el('div', 'wshare-sec', t('Agents and Task Groups')));
+    container.appendChild(st.picker.el);
+    st.modeHost = el('div', 'wshare-mode-host');
+    container.appendChild(st.modeHost);
+    container.__wshare = st;
+  }
+  st.items = items;
+  st.onToggle = onToggle;
+  st.sel = items.filter((r) => r.checked).map((r) => r.key);
+  st.picker.setSelected(st.sel);
+  st.picker.refresh();
+  st.picker.setBusy(busy);
+  const root = container;
+  const modeHost = st.modeHost;
+  modeHost.textContent = '';
+  container = modeHost;
+  if (!showMode) return root;
   container.appendChild(el('div', 'wshare-sec', t('How the agent sees it')));
   const seg = el('div', 'wshare-mode');
   seg.setAttribute('role', 'radiogroup');
@@ -94,7 +134,7 @@ export function renderPicker(container, { model, onToggle, onMode, busy = false,
   }
   container.appendChild(seg);
   container.appendChild(el('div', 'wshare-mode-hint', modeHint(model.mode)));
-  return container;
+  return root;
 }
 
 // ── the per-app launch memory (user state `desktopAppReach`) — loaded once per page, kept in step by the broadcast ──
@@ -199,9 +239,10 @@ export function mountLaunchShareRow(app, rowEl, { isLocal = () => true } = {}) {
     e.stopPropagation();
     const pop = createPopover(btn, 'wshare-popover');
     const draw = () => {
-      const model = pickerModel({ ...rosterOf(app), record: { mode: choice.mode, rows: [] }, principals: choice.principals });
+      const roster = rosterOf(app);
+      const model = pickerModel({ ...roster, record: { mode: choice.mode, rows: [] }, principals: choice.principals });
       renderPicker(pop, {
-        model,
+        model, roster, app,
         onToggle: (kind, r, on) => {
           touched = true;
           const p = kind === 'session' ? { kind, id: r.key || r.id, name: r.name } : { kind, id: r.id, name: r.name };
@@ -249,6 +290,7 @@ function failText(r, fallback) {
   if (c === 'share_local_only') return t('Only windows on this machine can be shared with an agent');
   if (c === 'agent_forbidden') return t('Only you can share a window');
   if (c === 'no_conversation') return t('That agent has no conversation yet — say something to it first');
+  if (c === 'fork_pending') return t('That agent is a fork that has not announced its own conversation yet — try again in a moment');
   if (c === 'not_live') return t('That agent session is not running any more');
   return (r && r.error) || fallback;
 }
@@ -267,17 +309,23 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
   let view = await fetchJson(base);
   if (!view || view.error) { close(); showToast(failText(view, t('Could not read who this window is shared with')), { type: 'error' }); return null; }
   let busy = false;
+  // built ONCE — a repaint updates the lease line, the picker (patched in place: the box keeps its text and
+  // its focus) and the note; it never empties the dialog
+  body.appendChild(el('p', 'wshare-intro', t('Hidden from every agent until you share it. The agents and Task Groups you pick can see and control this window; removing one takes it away at once.')));
+  const leaseEl = el('p', 'wshare-lease', '');
+  const host = el('div', '');
+  const noteEl = el('div', 'wshare-note', '');
+  body.append(leaseEl, host, noteEl);
   const draw = () => {
-    body.textContent = '';
-    body.appendChild(el('p', 'wshare-intro', t('Hidden from every agent until you share it. Checked agents and Task Groups can see and control this window; unchecking takes it away at once.')));
-    if (view.lease && view.lease.sessionId) body.appendChild(el('p', 'wshare-lease', t('Held right now by {name}', { name: view.lease.sessionName || view.lease.sessionId })));
-    const host = el('div', '');
-    const model = pickerModel({ ...rosterOf(app), record: view });
+    leaseEl.textContent = view.lease && view.lease.sessionId ? t('Held right now by {name}', { name: view.lease.sessionName || view.lease.sessionId }) : '';
+    leaseEl.style.display = leaseEl.textContent ? '' : 'none';
+    const roster = rosterOf(app);
+    const model = pickerModel({ ...roster, record: view });
     renderPicker(host, {
-      model, busy,
+      model, busy, roster, app,
       onToggle: async (kind, r, on) => {
         busy = true; draw();
-        const principal = kind === 'session' ? { kind, id: r.key || r.id, name: r.name } : { kind, id: r.id, name: r.name }; // a session by its durable key (the server's own spelling — R.sessionKeyOf)
+        const principal = kind === 'session' ? { kind, id: r.id || r.key, name: r.name } : { kind, id: r.id, name: r.name }; // a LIVE session by its webui id — the ENGINE spells its durable key (verify r6, lane channel-withdraw: a pending fork's key is its placeholder, never its parent's conversation key; the client's `r.key` was the parent's)
         const res = await fetchJson(base, { method: on ? 'POST' : 'DELETE', headers: JSON_HDR, body: JSON.stringify({ principal }) });
         busy = false;
         if (!res || res.error) showToast(failText(res, on ? t('Could not share the window') : t('Could not stop sharing the window')), { type: 'error' });
@@ -293,9 +341,8 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         if (overlay.isConnected) draw();
       },
     });
-    body.appendChild(host);
     const resolved = view.modeInfo && view.mode === 'auto' && view.modeInfo.resolved ? t('Right now: {mode}', { mode: modeLabel(view.modeInfo.resolved) }) : '';
-    body.appendChild(el('div', 'wshare-note', `${t('A change takes effect at the agent\'s next action.')}${resolved ? ' ' + resolved : ''}`));
+    noteEl.textContent = `${t('A change takes effect at the agent\'s next action.')}${resolved ? ' ' + resolved : ''}`;
   };
   draw();
   const off = app.ws.onGlobal(async (m) => {
@@ -325,8 +372,14 @@ export async function openAskDialog(app, id, { label = '' } = {}) {
     return { close };
   }
   body.appendChild(el('p', 'wshare-intro', t('The agent gets a message naming this window and is given access to it.')));
-  const pick = document.createElement('select'); pick.className = 'wshare-agent';
-  for (const s of agents) { const o = document.createElement('option'); o.value = s.id; o.textContent = s.name; pick.appendChild(o); }
+  // the ONE picker, single-select: the agents with a conversation (key = the webui session id — the route's `sessionId`)
+  const live = new Map((rosterOf(app).sessions || []).map((s) => [s.id, s]));
+  const pick = principalPicker({
+    items: agents.map((s) => { const w = live.get(s.id) || {}; return { key: s.id, kind: 'agent', id: s.key, name: s.name, folder: folderTail(w.cwd), backend: w.backend || 'claude', live: true, groupIds: [], groupNames: [] }; }),
+    selected: agents.length ? [agents[0].id] : [], placeholder: t('Search agents…'), label: t('Agent'), onChange: () => sync(),
+  });
+  pick.el.classList.add('wshare-agent');
+  const pickedId = () => pick.selected()[0] || '';
   const note = document.createElement('textarea'); note.className = 'wshare-note-input'; note.rows = 3; note.maxLength = 1000; note.placeholder = t('What should it do? (optional)');
   const wakeLab = el('label', 'dialog-check-row wshare-row');
   const wake = document.createElement('input'); wake.type = 'checkbox'; wake.checked = false;
@@ -338,16 +391,18 @@ export async function openAskDialog(app, id, { label = '' } = {}) {
   holdLab.append(hold, el('span', 'wshare-who', lease ? t('End {name}\'s hold on this window', { name: lease.sessionName || lease.sessionId }) : ''));
   const sync = () => {
     explain.textContent = wake.checked ? t('It starts now — a billed turn, counted against the unattended-turn budget.') : t('It sees your request on its next turn — nothing is billed until then.');
-    holdLab.style.display = lease && lease.sessionId !== pick.value ? '' : 'none';
+    holdLab.style.display = lease && lease.sessionId !== pickedId() ? '' : 'none';
   };
-  wake.onchange = sync; pick.onchange = sync;
-  body.append(el('div', 'wshare-sec', t('Agent')), pick, note, wakeLab, holdLab, explain);
+  wake.onchange = sync;
+  body.append(el('div', 'wshare-sec', t('Agent')), pick.el, note, wakeLab, holdLab, explain);
   const cancel = el('button', 'btn-cancel', t('Cancel')); cancel.type = 'button'; cancel.onclick = () => close();
   const send = el('button', 'btn-create', t('Send')); send.type = 'button';
   send.onclick = async () => {
     send.disabled = true;
-    const who = (agents.find((s) => s.id === pick.value) || {}).name || pick.value;
-    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/reach/request`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ sessionId: pick.value, note: note.value, wake: wake.checked, endHold: !!(lease && lease.sessionId !== pick.value && hold.checked) }) });
+    const sid = pickedId();
+    if (!sid) { send.disabled = false; showToast(t('Pick an agent.'), { type: 'error' }); return; }
+    const who = (agents.find((s) => s.id === sid) || {}).name || sid;
+    const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/reach/request`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ sessionId: sid, note: note.value, wake: wake.checked, endHold: !!(lease && lease.sessionId !== sid && hold.checked) }) });
     send.disabled = false;
     if (!r || r.error) { showToast(failText(r, t('Could not send the request')), { type: 'error' }); return; }
     close();

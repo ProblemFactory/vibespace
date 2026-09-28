@@ -14,9 +14,11 @@ a message to another agent session now — one verb per authority semantics.
 vibespace-channels list                          # conversations visible to you
 vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
 vibespace-channels refresh <conv>                # fetch the newest messages NOW (a floor applies)
-vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
-vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]
+vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>] [--replaces <proposalId>]
+vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--replaces <proposalId>]
                                                  # PROPOSE a NEW message (needs access to the whole account)
+vibespace-channels withdraw <proposalId> [--why "…"]
+                                                 # take back YOUR proposal the user has not decided yet
 vibespace-channels search "words" [--account <id>] [--limit N]
                                                  # messages you can see (the stored logs)
 vibespace-channels status [<proposalId>]         # what you were given (access / notification) + your proposals
@@ -24,6 +26,8 @@ vibespace-channels request <conv> "why"          # ask for access (requestable r
 ```
 
 `<conv>` is the key `list` prints: `<adapter>/<conversation id>`.
+
+Everything you read or draft here is shown to the user as a clickable card in the chat — you never need to tell them where.
 
 ## Freshness (how new is what I read?)
 
@@ -105,6 +109,13 @@ The user gives you two DIFFERENT things, in this order:
   assignment that gave you only `draft` authority also forces approval.
 - The user may EDIT your text before sending, or REJECT it with a reason.
   A proposal nobody decides on EXPIRES after 24 h.
+- Changed your mind? `withdraw <proposalId>` takes back a proposal of YOURS
+  while it still awaits the user (their approval card disappears); `reply …
+  --replaces <proposalId>` / `compose … --replaces <proposalId>` withdraws it
+  and proposes the new text in one step — the old one goes only if the new one
+  is accepted. Never leave the user a stale draft to reject. Somebody else's
+  proposal answers `not-yours`; one already decided, being sent or of unknown
+  outcome answers `not-withdrawable`.
 - On a conversation where sending is not available (a read-only mailbox, a
   chat the user left, an adapter with no send permission yet — a Gmail account
   whose sign-in predates the drafts + sending permission answers
@@ -148,18 +159,21 @@ The user gives you two DIFFERENT things, in this order:
 ## Receipts
 
 - Every proposal ends with a receipt: `sent`, `edited` (the user changed
-  the text; the final text is in `status <id>`), `rejected` (with the
-  reason), `expired`, or `failed` (with the adapter's reason, e.g. the
-  conversation no longer accepts messages).
+  the text — the receipt shows WHAT changed as a line diff, `-` what you
+  proposed / `+` what the user sent; the whole final text is in `status
+  <id>`), `rejected` (with the reason), `expired`, `failed` (with the
+  adapter's reason, e.g. the conversation no longer accepts messages), or
+  `withdrawn` (you took it back). An edit or a rejection with a reason is the
+  user's feedback on how to write: use it for the next draft.
 - The receipt says WHO the other side saw: `sentAs` (user or bot) and the
   identity marking — `none` means the recipient sees the user with no
   application marker; `marked` means the channel shows an application /
   bot marker (the exact sentence is included); `unknown` means this has
   not been verified for that channel yet. Do not claim in chat that a
   message "looks like it came from the user" unless the receipt says `none`.
-- Receipts arrive in your NEXT turn as a "Channel receipt" block — nothing
-  wakes you for them unless the user turned that on for your notification.
-  Poll with `status` only when you need the answer now.
+- Receipts arrive in your NEXT turn as a "Channel receipt" block — unless
+  the user chose "wake the agent now" on that Approve / Reject (a turn
+  started for you). Poll with `status` only when you need the answer now.
 - An `unknown` outcome (the adapter lost the result) is NEVER retried
   automatically; the user is asked to check the platform. Do not re-propose
   the same text — a duplicate in someone else's room is worse than waiting.

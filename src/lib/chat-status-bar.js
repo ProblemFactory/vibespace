@@ -4,6 +4,10 @@ import { BACKEND_META, getBackendMeta, backendFeatureCaps, autoResumeCapsFor, ef
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
+import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
+
+/** The channels chip's glyph by the PURE glyphFor's closed answer (literal names — test-architecture §58). */
+const CHANNEL_GLYPH = { mail: UI_ICONS.mail, chat: UI_ICONS.chat, robot: UI_ICONS.robot };
 
 /** Gap kept between a status-bar dropdown and the right edge of the chat view
  *  (layout px). The panel is positioned OUT of the ≤768px bar's horizontal
@@ -38,8 +42,12 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null }) {
     this._ws = ws;
+    // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
+    // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
+    this._channelTouch = null;
+    this._onChannelOpen = onChannelOpen;
     // lane S1: the waiting chip names WHO waits (the server's pending asks, oldest
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
@@ -156,6 +164,8 @@ export class ChatStatusBar {
    *  pinnedLabel}` or null. Drawn only when the session has a browser key AND
    *  something to say (a pin, or a use); amber when the two halves differ. */
   setBrowserProfile(v) { this._browserProfile = v && v.key && v.fact && v.words ? v : null; this.render(); } // lane S2: {key, fact, words} — THE browser fact and its words
+  /** §26 (B-099e): the turn's touched conversations `{rows, latest}` (PURE chipView) or null. */
+  setChannelTouches(v) { this._channelTouch = v && v.latest && Array.isArray(v.rows) && v.rows.length ? v : null; this.render(); }
   /** Billing identity chip (mobile — windows have no title bar there, so the
       title-bar badge's click-to-switch has no home; this is its stand-in). */
   setBilling(auth, onSwitch) {
@@ -755,6 +765,15 @@ export class ChatStatusBar {
       chip('browser', `chat-status-browser chat-status-clickable${driving ? ' driving' : (w.amber ? ' amber' : '')}`, face + tip, `${UI_ICONS.browserLive} <span class="chat-status-browser-text">${escHtml(face + String(shown || ''))}</span>`);
     }
 
+    // Channels chip (§26, B-099e): the conversation this turn read or drafted last — "Channels · <title>"; a click
+    // opens it (several this turn ⇒ a menu, drafted first). The title is a vendor's / an agent's string: escHtml.
+    if (this._channelTouch) {
+      const v = this._channelTouch;
+      const glyph = CHANNEL_GLYPH[channelGlyphFor(v.latest.kind || v.latest.adapterId)] || UI_ICONS.chat;
+      const tip = v.rows.length > 1 ? t('{n} conversations this turn read or drafted — click for the list', { n: v.rows.length }) : t('The conversation this turn read or drafted — click to open it');
+      chip('channels', 'chat-status-channels chat-status-clickable', tip, `${glyph} <span class="chat-status-channels-text">${escHtml(channelChipText(v, t))}</span>`);
+    }
+
     // Remote reconnect chip — amber, only while the ssh pipe is down
     if (this._remoteState && this._remoteState.state === 'unprotected') {
       // B-0845: session predates the keeper (2.124.0) — claude hangs bare off
@@ -1155,6 +1174,34 @@ export class ChatStatusBar {
       if (f.pinned && (f.differs === 'agent_elsewhere' || f.differs === 'other_attached' || f.differs === 'pin_pending') && f.lastUsed) row('chat-status-browser-nudge', t('Remind on next message'), t('The reminder rides your next message — no billed turn'), (ev) => this._onBrowserAction?.('nudge', ev));
       row('chat-status-browser-live', t('Open live view'), '', (ev) => this._onBrowserAction?.('live', ev));
       row('chat-status-browser-pin', t('Change pin…'), '', (ev) => this._onBrowserAction?.('pin', ev));
+      return;
+    }
+    // Channels chip (§26) -> the turn's conversations, drafted first; ONE conversation opens at once
+    const chEl = e.target.closest('.chat-status-channels');
+    if (chEl && this._channelTouch) {
+      e.stopPropagation();
+      const rows = this._channelTouch.rows;
+      if (rows.length === 1) { this._onChannelOpen?.(rows[0]); return; }
+      const dropdown = showDropdown(chEl, { minWidth: 260, maxWidth: 440 });
+      if (!dropdown) return;
+      const head = document.createElement('div');
+      head.className = 'chat-status-dropdown-note';
+      head.textContent = t('This turn read or drafted:');
+      dropdown.appendChild(head);
+      for (const r of rows) {
+        const it = document.createElement('div');
+        it.className = 'chat-status-dropdown-item chat-status-channel-row';
+        it.dataset.key = r.key;
+        const name = document.createElement('div');
+        name.className = 'chat-status-channel-name';
+        name.textContent = channelRowName(r);
+        const words = document.createElement('div');
+        words.className = 'chat-status-dim chat-status-channel-words';
+        words.textContent = channelRowWords(r, t);
+        it.append(name, words);
+        it.onclick = (ev) => { ev.stopPropagation(); dropdown.remove(); this._onChannelOpen?.(r); };
+        dropdown.appendChild(it);
+      }
       return;
     }
     // Session-health chip -> the same rows the init card lists. Touch has no

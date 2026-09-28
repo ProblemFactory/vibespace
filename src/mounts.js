@@ -657,6 +657,71 @@ class MountManager {
 
   listShares() { return this._state.shares.map(s => ({ ...s, secretKey: undefined })); }
 
+  // ── A STORAGE MOUNT'S OWN OAUTH CLIENT, LENT TO A CHANNEL ACCOUNT (2.369.195) ──
+  // The owner typed a custom Google client (id + secret) once for Drive /
+  // Gmail-as-a-folder; a Channels account (the Gmail adapter) may sign in
+  // under the SAME client without anyone copying the secret by hand. Two
+  // halves, split by who may see what:
+  //  · `oauthClientsFor(vendor)` — the READ-ONLY list the account dialog
+  //    offers: `{mountId, name, type, email, clientIdPrefix}` per top-level
+  //    record holding its OWN client of that vendor (a client id AND a sealed
+  //    secret). No secret, no ciphertext, not even the whole id — the route
+  //    that serves it answers only the prefix.
+  //  · `oauthClientIdOf(mountId, {vendor})` — SERVER-ONLY, KEY-LESS (verify
+  //    r2): the mount's client ID + every refusal that needs no key (gone /
+  //    no client / another vendor), nothing decrypted — what a caller asks
+  //    FIRST when it can refuse on the id alone.
+  //  · `oauthClientOf(mountId, {vendor})` — SERVER-ONLY: the same plus the
+  //    secret DECRYPTED with `.mounts-key` (this store's key, decision 24),
+  //    handed to the channels engine, which re-seals the secret under ITS
+  //    key at once. No route answers it; a refusal is TYPED by `code` and
+  //    never carries a value; a mount of another vendor is refused BEFORE
+  //    its secret is opened (verify r1: nothing is decrypted for a body that
+  //    will be refused).
+  // A child mount never holds a client of its own (it resolves its parent's
+  // at use time), so only top-level records are listed; a preset-backed
+  // record holds no client to lend.
+  static OAUTH_CLIENT_VENDOR = Object.freeze({ drive: 'google', gmail: 'google', onedrive: 'microsoft' });
+  _lendsOAuthClient(m) {
+    return !!(m && !m.parentId && m.origin !== 'my-storage' && MountManager.OAUTH_CLIENT_VENDOR[m.type || 's3'] && m.clientId && m.clientSecretEnc);
+  }
+  oauthClientsFor(vendor) {
+    const v = String(vendor || '');
+    if (!v) return [];
+    return this._state.mounts
+      .filter((m) => this._lendsOAuthClient(m) && MountManager.OAUTH_CLIENT_VENDOR[m.type] === v)
+      .map((m) => ({ mountId: m.id, name: MountManager.lentName(m), type: m.type, email: m.email || null, clientIdPrefix: String(m.clientId).slice(0, 12) }));
+  }
+  /** A lent mount's name as a message / list may carry it: control characters
+   *  stripped, capped like add()/update() cap it (verify r2: a hand-edited
+   *  record's 2 000-char name with a newline forged a journal line). */
+  static lentName(m) { return String((m && m.name) || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60); }
+  /** THE KEY-LESS HALF (verify r2): every refusal that needs no key — the
+   *  mount is gone / lends no client / holds another vendor's — and the
+   *  client's ID, with NOTHING decrypted. `oauthClientOf` is this plus the
+   *  secret; a caller that can refuse on the id alone (a sign-in's client
+   *  compared by id, the registry's id rule) asks THIS first. */
+  oauthClientIdOf(mountId, { vendor = null } = {}) {
+    const refuse = (code, message) => { const e = new Error(message); e.code = code; return e; };
+    const m = this._state.mounts.find((x) => x.id === String(mountId || ''));
+    if (!m) throw refuse('mount-gone', 'that storage mount no longer exists');
+    if (!this._lendsOAuthClient(m)) throw refuse('mount-no-client', `the storage mount "${MountManager.lentName(m)}" holds no custom OAuth client of its own (a preset, or no client at all)`);
+    const v = MountManager.OAUTH_CLIENT_VENDOR[m.type];
+    // verify r1: the vendor is judged BEFORE the secret is opened — a body naming another vendor's
+    // mount is refused with nothing decrypted, and its refusal names the vendor, never the key state
+    // (an undecryptable OneDrive mount in a Gmail body answered `mount-secret-undecryptable`)
+    if (vendor && v !== vendor) throw refuse('mount-client-vendor', `the storage mount "${MountManager.lentName(m)}" holds a ${v} client, not a ${vendor} one`);
+    return { mountId: m.id, name: MountManager.lentName(m), vendor: v, clientId: String(m.clientId), _rec: m };
+  }
+  oauthClientOf(mountId, { vendor = null } = {}) {
+    const refuse = (code, message) => { const e = new Error(message); e.code = code; return e; };
+    const { _rec: m, ...head } = this.oauthClientIdOf(mountId, { vendor });
+    let clientSecret;
+    try { clientSecret = this._dec(m.clientSecretEnc); }
+    catch (e) { throw refuse('mount-secret-undecryptable', `the storage mount "${head.name}"'s client secret cannot be decrypted with .mounts-key (${(e && e.code) || 'decrypt-failed'})`); }
+    return { ...head, clientSecret };
+  }
+
   /**
    * Full DECRYPTED connection config for the edit dialog (user directive:
    * prefill the REAL current values — tokens and keys included — instead of

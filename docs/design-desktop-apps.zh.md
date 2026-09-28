@@ -287,6 +287,43 @@ Gate：test-xpra-client §6b（向下取整对 10 个比例 × 200..1400 每个�
 
 **未决（A1）。** (a) 用**鼠标**复制（应用的 编辑 ▸ 复制 菜单）仍是 chip：给点击盖 stamp 会让应用里一次点击之后的任何复制（agent 的、定时器的）在用户背后写剪贴板——seamless 设计把菜单点击列为可能，等 owner 定。(b) RFB 级（vnc-display / 单例）不传 stamp（noVNC 自己管画布的按键）——chip。(c) Firefox / Safari 未实测（退路是 chip）。(d) Chrome flag 这条 HTTPS 路线是文档行为，本机未实测。
 
+### 7.9 用 LibreOffice 打开 —— 文档在桌面应用里**编辑**（owner 裁定 2026-09-27，选项 ②）
+
+**裁定。** Word 文件（以及表格、演示文稿）的**编辑**方式是：在 VibeSpace 桌面应用（xpra 档）里运行的 LibreOffice 中打开它 —— 这是 VibeSpace 对一份自己不渲染的文档所能给出的最高保真度；浏览器内的 .docx 查看器保持只读。查看器工具栏上现在有 **Open in LibreOffice**（本 lane 的后续，2026-09-27）：工具栏右端的一个 SVG 图标加文字，由 title + aria-label 命名，永不禁用；点击走同一个入口，应用由判定给出（`openWithVerdict(…).catalogId` —— .docx 就是 Writer，绝不写死 exec），路径是窗口的**真实**路径，机器是**文件所在的**机器（`src/lib/file-viewer.js` `_officeOpener`）；文件所在机器没有 LibreOffice 时，点击在按钮下方显示与文件浏览器那一行相同的平实句子 + **Install LibreOffice on <machine>…**（`app.officeOfferAt` —— 同一组 `officeMenuItems` 行），绝不是变灰的按钮。门禁：test-office-open §9（查看器作为入口的第二个调用方，附两个被拒绝的补丁副本），test-docx-viewer ⑫（点击到达入口 + 被拦截的启动路由；缺失机器上的提供 —— 两台机器都是构造出来的）。
+
+**用户在哪里点。** 文件浏览器对办公文件的右键菜单有 **Open with LibreOffice**。当持有该文件的机器上没有安装 LibreOffice（该文件对应的模块）时，这一行**不是**变灰加提示（owner 的规则）：菜单用**一句**平实的话说 *"LibreOffice Writer is not installed on this machine"*，并提供 **Install LibreOffice on this machine…** —— 与 xpra 的安装对话框是同一个（先给计划，每条命令都展示，点 Install 之前什么都不运行）。判定在菜单打开之后才到，行会被原地替换（`_patchMenuRows`）。实测（test-office-desktop，本机）：点击 → 记录 `ready` 用时 **1.4 s**，VibeSpace 窗口标题是 LibreOffice 自己的 `Quarterly report <pid>.docx — LibreOffice Writer`，画面已绘制。
+
+**判定**（PURE `src/office-open.js` `openWithVerdict({row, file, ext, machine})`，不导入任何东西；路由在询问任何机器之前带着机器规则跑一次，机器在记录任何东西之前用**它自己的**目录再跑一次）：
+
+| 顺序 | 代码 | 何时 |
+|---|---|---|
+| 1 | `relative-path` | 不是**文件所在机器上**的绝对路径 —— `report.docx`、`~/r.docx`、带主机标签的显示串 `devbox: /x/r.docx`、NUL/CR/LF、目录、> 4096 |
+| 2 | `not-office-file` | 没有办公扩展名：docx doc odt rtf → Writer · xlsx xls ods csv → Calc · pptx ppt odp → Impress |
+| 3 | `machine-mismatch` | 文件所在机器 ≠ 应用所在机器 —— **应用在文件所在处运行**（`hostId` 是参数：'' / null / 'local' 都是本机） |
+| 4 | `host-unreachable` | 机器没有应答 |
+| 5 | `not-office-app` | 非办公目录行或手敲的命令带了文件 |
+| 6 | `host_needs_daemon` | 机器的目录里没有任何办公行（它的 agent 早于这些行 —— "重新连接以升级"） |
+| 7 | `app-absent` + `remedy` | 那台机器上没装**该文件的**模块；`remedy = {what, label, packages}`（安装） |
+| ok | `{catalogId, module, file, label, hostId}` | 由文件**自己的**模块行打开（向 Writer 要一个 .xlsx 会在 Calc 中打开）；label 是文件名 |
+
+**argv**（PURE `officeArgv(row, {file, profileDir})`）：`[模块开关] --nologo -env:UserInstallation=file://<本会话自己的 profile，百分号编码> <路径，最后，一个 argv 项>`。运行中 LibreOffice 的 /proc cmdline 以该路径（一个项）结尾（实测）。绝对路径永远不会以 `-` 开头；显示串到不了 argv（它是 `relative-path`）。
+
+**为什么每个会话一个 profile（实测）。** 不带 `-env:UserInstallation` 时，第二次启动 LibreOffice 会经 LibreOffice 的管道把文档交给第一个实例然后退出：文档会出现在另一个文件的 VibeSpace 窗口里、另一个显示上，第二个窗口随即关闭。所以每个会话在 `data/desktop-apps/<id>/profile` 下有自己的 profile（0700，由浏览器行的 `profileDirVerdict` 判定，由同一个 `profileRetireVerdict` 回收：人结束的删除，keeper 结束的保留）。全新的 26.2 profile 启动时没有首次运行对话框（实测）。Scale ▸ 重启**先停**（运行中的实例锁着文档）并带走 profile，与浏览器行一样。
+
+**文档的锁（实测，已修）。** SIGTERM 约 130 ms 结束 LibreOffice，但会在文档旁**留下** `.~lock.<name>#` —— 下一次打开会提示 "Document in use"。它的内容是 `,<user>,<host>,<date>,<UserInstallation URL>;`：最后一个字段是写它的那个 LibreOffice 的 profile。在**已验证干净**的 teardown 之后，机器只在该字段恰为**本会话**的 profile URL 时删除这把锁（PURE `staleLockVerdict` —— 凭见证识别身份，绝不凭时间）；其他任何锁（用户自己的 LibreOffice、另一个会话的）都保留并说明（`fileLockKept`）。
+
+**是否已安装（机器事实）。** SHARED `desktop-display.officeFacts`：PATH 上第一个 `libreoffice` / `soffice`，其真实路径所在目录即 program 目录，模块的库在那里就算装了 —— `libswlo.so`（Writer）/ `libsclo.so`（Calc）/ `libsdlo.so`（Impress）。本机实测（Ubuntu 的 LibreOffice 26.2.5.2，只装了 `libreoffice-writer`）：libswlo.so 在，另外两个不在 —— 光有二进制，`--calc` 也能启动却打不开表格。snap 不让看它的 program 目录：模块不可知，按已装判定。模块的"否"在 60 s 后重问，安装之后立即重问（`facts {fresh}`）。
+
+**安装（泛化，一套机制）。** `desktop-access.installXpra(h)` 就是 `installPackage(h, {what: 'xpra'})`；LibreOffice 的安装是 `installPackage(h, {what: 'libreoffice-writer'})` 等 —— 同样的 facts → 计划 → 按名拒绝（`no_x11` / `no_apt` / `no_sudo` + 命令）→ 以 root **脱离**运行在机器**唯一**的安装槽下（其 pidfile + 内核持有的锁沿用历史名 `xpra-install.*`：改名会让一次跨升级运行中的安装成为孤儿；dpkg 本来就一次只装一个）、跟随其日志、重新挂上正在运行的安装。计划是 PURE `packageInstallPlan(facts, spec)`，spec 来自**封闭**集合（`installSpecFor`：模块的包 + `fonts-crosextra-carlito` + `fonts-crosextra-caladea`，即 .docx 排版所用的 Calibri / Cambria 的度量兼容字体）；`apt-get -o DPkg::Lock::Timeout=300` 等待别的 apt 而不是立即失败。`POST /api/desktop/install {host, what}` 只在机器目录现在提供该行时才答 done，否则按名 `still-absent`。xpra 的计划与文案逐字不变。
+
+**入口。** `app.openWithDesktopApp({catalogId, file, host})`（src/lib/open-with.js）—— 一次 POST `{appId, file, fileHost}`；用户能处理的拒绝会打开启动对话框的 **FILE MODE**：简介点名该文档，机器选择器固定在文件所在机器（其余机器变灰并写明 "the file is on <machine>"），目录只显示该文档自己的行，缺失时是一句话 + "Install LibreOffice on <machine>…"；其他情况是带文字的 toast。目录（⚙ Desktop apps…）像其他行一样列出 Writer / Calc / Impress / LibreOffice；缺失的行变暗带原因，**并且**旁边带 "Install…"。
+
+**编辑之后。** 每条终止路径都经过机器的 teardown，它在持有文件的机器上记录文档 mtime 与启动时相比（`fileChanged`）；hub 把变化了的转成**一次** `file-changed {host, path, mtime}` 广播（标记 `fileSignalledAt` —— 绝不重复），页面把它转成 `vibespace:file-changed` 窗口事件（src/lib/file-changed.js），代码编辑器在匹配时运行其磁盘新鲜度检查（干净的编辑器立即重载，有改动的显示芯片）。实测：Stop 后约 3 s 收到广播；重写后 1.6 s 编辑器重载（从不靠 15 s 轮询）；未改动的文件什么都不说（对照）。docx 查看器的重载归查看器 lane。
+
+**门控。** test-office-open（fast，PURE + 一段进程内路由（stub），约 0.13 s：判定表、argv、锁的见证、事实矩阵、安装集合、启动请求、接线 pin、每条规则一个补丁副本对照）；test-office-desktop（heavy，约 45 s：真实 worktree 服务器 + xpra + LibreOffice Writer + chrome —— 浏览器行 → 入口 → 窗口；file-changed 信号及其未改动对照；锁的见证及其外来锁对照；代码编辑器；scratch PATH 上没有 LibreOffice 的机器 —— 那句话、计划、file mode）。
+
+**未决（§7.9）。** (a) 本机没有 Carlito / Caladea：用 Calibri 排的 .docx 会把字体标成缺失 —— 安装入口随模块一起装它们，但已经装有 LibreOffice 的机器得不到这个提示。(b) 在 LibreOffice 里关闭**最后一个**文档窗口会留下它的启动中心；关掉启动中心才结束应用（A2 随后关闭 VibeSpace 窗口）。(c) Stop（以及重启）用 SIGTERM 结束 LibreOffice：未保存的修改会丢失 —— 外层 ✕ 请 LibreOffice 关闭，它会询问是否保存。(d) 远程机器的 agent 必须是本版本或更新（旧的答 `host_needs_daemon`）。(e) 机器上已经在运行的另一个包的安装会被跟随，之后重新检查该行（不是 LibreOffice 的则 `still-absent`）。(f) 直接入口以不共享方式启动（启动对话框记住的共享不会应用）—— 从窗口菜单共享。(g) **配对机器**上的文档走同一个 op（文件在启动 `body` 里，设备用自己的目录跑判定）—— 结构上是同一条路，但本 lane 没有端到端驱动过（test-desktop-remote 未改）。
+
 ## 8. 决定（owner 已批：按建议）
 
 | # | 决定 | 建议 |

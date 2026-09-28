@@ -30,6 +30,51 @@ function setup(deps) { ctx = deps; }
 
 const bad = (res, code, error, extra = {}) => res.status(code).json({ error, ...extra });
 
+/** 2.369.195: a storage mount's OAuth client is the OWNER's — an agent's
+ *  session / job token may neither list the mounts that hold one nor start a
+ *  sign-in that borrows one (the reset-credit / desktop-apps rule). With
+ *  sign-in on, the cookie gate already stops a bearer-only caller; this is
+ *  the named refusal for the instance whose sign-in is off. */
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+function refuseAgentMountChoice(req, res) {
+  const b = req.method === 'GET' ? null : (req.body || {});
+  if (!isAgentBearer(req) || (b && typeof b.fromMount !== 'string')) return false;
+  bad(res, 403, 'a storage mount\'s OAuth client is the owner\'s — an agent token may not list or borrow one', { code: 'agent-forbidden' });
+  return true;
+}
+/** verify r2: the owner-only config (D3, the custom client's secret in the
+ *  clear) refuses a SELF-IDENTIFYING agent bearer by name too — the same
+ *  courtesy as the mount routes on an instance whose sign-in is off (with
+ *  sign-in on the cookie gate answers 401 before this). verify r4: so does
+ *  every verb that BEGINS or COMPLETES a consent (start / connect /
+ *  re-authorize / the two paste-backs) whatever the body names — a sign-in
+ *  is the owner's act (a browser page they approve), and since r3 the
+ *  consent machine ends the OLDEST open sign-in when a 33rd begins, so a
+ *  bearer that could begin 33 could end the owner's. */
+function refuseAgentBearer(req, res, what = 'an account\'s configuration is the owner\'s — an agent token may not read it') {
+  if (!isAgentBearer(req)) return false;
+  bad(res, 403, what, { code: 'agent-forbidden' });
+  return true;
+}
+const SIGNIN_IS_OWNERS = 'a sign-in is the owner\'s — an agent token may not start, follow or complete one';
+/** verify r5: the same courtesy on every verb that ENDS a sign-in or touches
+ *  an account's credential or standing (cancel / disconnect / remove /
+ *  duplicate / the Edit dialog's PUT — a secret rewrite, a policy flip) and
+ *  on the status poll (the running consent URL carries the flow's `state`:
+ *  read it and a forged landing ends the owner's sign-in with a vendor
+ *  refusal). The agent surface is /api/agent/channels/*, never these. */
+const ACCOUNT_IS_OWNERS = 'an account is the owner\'s — an agent token may not change, end or remove one';
+/** verify r2: a `fromMount` that is present but not a storage mount id (a
+ *  number, an object, an array, the empty string) is refused BY NAME — it
+ *  used to be dropped by `choiceOf` and the consent began under the DEFAULT
+ *  client, the field the request named deciding nothing. `null` = absent. */
+function refuseMalformedMount(req, res) {
+  const b = req.body || {};
+  if (b.fromMount === undefined || b.fromMount === null || (typeof b.fromMount === 'string' && b.fromMount)) return false;
+  bad(res, 400, 'fromMount must be a storage mount id (a non-empty string)', { code: 'bad-request' });
+  return true;
+}
+
 /** THE host parameter. v1 serves device #0 only and SAYS so for anything else. */
 function forHost(req) {
   const host = (req.method === 'GET' ? req.query.host : (req.body && req.body.host)) || null;
@@ -72,6 +117,8 @@ function fail(res, e) {
  *  plaintext reaches the engine, is sealed there and is never echoed). */
 function choiceOf(b) {
   const out = {};
+  // 2.369.195: a storage mount's own client, copied SERVER-SIDE (never a secret in this body)
+  if (typeof b.fromMount === 'string') out.fromMount = b.fromMount;
   if (typeof b.credentialKey === 'string') out.credentialKey = b.credentialKey;
   if (typeof b.clientPreset === 'string') out.clientPreset = b.clientPreset;
   if (b.credential && typeof b.credential === 'object' && !Array.isArray(b.credential)) out.credential = { appId: b.credential.appId, appSecret: b.credential.appSecret };
@@ -93,16 +140,39 @@ function choiceOf(b) {
 router.post('/api/channels/oauth/start', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentMountChoice(req, res)) return;
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
+    if (refuseMalformedMount(req, res)) return;
     const b = req.body || {};
     res.json({ ok: true, ...(await engine().startOAuth({ kind: typeof b.kind === 'string' ? b.kind : (typeof b.backend === 'string' ? b.backend : ''), ...choiceOf(b), options: b.options })) });
   } catch (e) { fail(res, e); }
 });
+/** THE STORAGE MOUNTS WHOSE OWN OAUTH CLIENT AN ACCOUNT OF `kind` MAY
+ *  BORROW (2.369.195): `?kind=gmail` → `{kind, vendor, clients:[{mountId,
+ *  name, type, email, clientIdPrefix}]}` — never a secret, never the whole
+ *  id; `vendor: null` + `[]` for a type no mount can serve (Lark). The
+ *  account dialogs offer each as "From storage: …"; `fromMount: <mountId>`
+ *  on start / connect / re-authorize copies it server-side. Owner only:
+ *  an agent bearer is `403 agent-forbidden`. Declared BEFORE
+ *  `GET /api/channels/:adapterId/:convId`, which would match. */
+router.get('/api/channels/oauth/mount-clients', (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentMountChoice(req, res)) return;
+    res.json(engine().mountClientsFor(typeof req.query.kind === 'string' ? req.query.kind : ''));
+  } catch (e) { fail(res, e); }
+});
 router.get('/api/channels/oauth/status', (req, res) => {
-  try { forHost(req); res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null)); } catch (e) { fail(res, e); }
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r5: the consent URL (its state) is the owner's
+    res.json(engine().oauthStatus(typeof req.query.flowId === 'string' ? req.query.flowId : null));
+  } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/oauth/callback', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     const b = req.body || {};
     const r = await engine().oauthCallback({ url: b.url, flowId: typeof b.flowId === 'string' ? b.flowId : null });
     if (!r.ok) return bad(res, 400, r.error || 'the consent flow failed', { code: 'auth-failed' });
@@ -123,6 +193,9 @@ router.post('/api/channels/oauth/callback', async (req, res) => {
 router.post('/api/channels/adapters/:kind/connect', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentMountChoice(req, res)) return;
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
+    if (refuseMalformedMount(req, res)) return;
     const b = req.body || {};
     // r4: `{flowId, name?, options?}` = the account dialog's Connect (the
     // record is created HERE from a finished sign-in); a client choice in
@@ -139,6 +212,9 @@ router.post('/api/channels/adapters/:kind/connect', async (req, res) => {
 router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentMountChoice(req, res)) return;
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
+    if (refuseMalformedMount(req, res)) return;
     res.json(await engine().reauthorize(req.params.id, choiceOf(req.body || {})));
   } catch (e) { fail(res, e); }
 });
@@ -148,6 +224,7 @@ router.post('/api/channels/adapters/:id/reauthorize', async (req, res) => {
 router.post('/api/channels/adapters/:id/duplicate', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;   // verify r5
     const b = req.body || {};
     res.json(await engine().duplicate(req.params.id, { name: typeof b.name === 'string' ? b.name : null }));
   } catch (e) { fail(res, e); }
@@ -157,15 +234,16 @@ router.post('/api/channels/adapters/:id/duplicate', async (req, res) => {
  *  account; otherwise the record and its index rows go. Disconnect is not
  *  this verb (it only drops the token). */
 router.delete('/api/channels/adapters/:id', async (req, res) => {
-  try { forHost(req); res.json(await engine().remove(req.params.id)); } catch (e) { fail(res, e); }
+  try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().remove(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
 });
 /** THE OWNER'S CONFIG (D3 — the storage `GET /api/mounts/:id/config` rule):
  *  every parameter the Edit dialog prefills, the custom client's secret in
  *  the clear. Cookie-auth only, never broadcast, never logged, never an
  *  agent route (the agent surface is /api/agent/channels/* and does not
- *  reach this). */
+ *  reach this); verify r2: a self-identifying agent bearer is refused
+ *  `403 agent-forbidden` here too (sign-in off: the named courtesy). */
 router.get('/api/channels/adapters/:id/config', (req, res) => {
-  try { forHost(req); res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }
+  try { forHost(req); if (refuseAgentBearer(req, res)) return; res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }
 });
 /** ONE ACCOUNT AS IT STANDS NOW (mirror-193): the same adapter view the digest carries, read fresh — the Grant
  *  access… / Notify… dialogs of the account and rule grains draw from THIS, never from the panel's broadcast-fed
@@ -182,6 +260,7 @@ router.get('/api/channels/adapters/:id/view', (req, res) => {
 router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4
     const url = req.body && req.body.url;
     if (!url || typeof url !== 'string') return bad(res, 400, 'url is required (the redirect URL your browser landed on)', { code: 'bad-request' });
     const r = await engine().finishAuth(req.params.id, url);
@@ -190,10 +269,10 @@ router.post('/api/channels/adapters/:id/auth/finish', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/adapters/:id/auth/cancel', async (req, res) => {
-  try { forHost(req); res.json(await engine().cancelAuth(req.params.id)); } catch (e) { fail(res, e); }
+  try { forHost(req); if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
 });
 router.post('/api/channels/adapters/:id/disconnect', async (req, res) => {
-  try { forHost(req); res.json(await engine().disconnect(req.params.id)); } catch (e) { fail(res, e); }
+  try { forHost(req); if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return; res.json(await engine().disconnect(req.params.id)); } catch (e) { fail(res, e); }   // verify r5
 });
 // ── 2026-09-26: THE ACCOUNT AND PATTERN GRAINS (design §7.3) ────────────
 // Declared BEFORE every `/api/channels/:adapterId/:convId/…` route, which
@@ -306,6 +385,7 @@ router.post('/api/channels/adapters/:id/estimate', (req, res) => {
 router.put('/api/channels/adapters/:id', async (req, res) => {
   try {
     forHost(req);
+    if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;   // verify r5: the Edit dialog's saves (a secret, the sending policy) are the owner's
     const b = req.body || {};
     let out = { ok: true };
     if (typeof b.enabled === 'boolean') out = { ...out, ...(await engine().setEnabled(req.params.id, b.enabled)) };
@@ -341,6 +421,36 @@ router.get('/api/channels/search', async (req, res) => {
     const r = await engine().search(String(req.query.adapter || ''), String(req.query.q || ''), { limit: Number(req.query.limit) || 100 });
     if (!r.ok) return res.status(r.code === 'not-found' ? 404 : 400).json({ error: r.error, code: r.code });
     res.json(r);
+  } catch (e) { fail(res, e); }
+});
+
+/** THE WITNESS'S TWO READS (§26, B-099e) — the owner's, cookie-only: an agent's session / job bearer is refused
+ *  403 `agent_forbidden` (the reset-credit rule; what the user sees an agent touch is not an agent surface).
+ *  `GET /api/channel-touches?sessionId=<webui id>` = that session's ring + its current turn's start (the chat
+ *  view's ONE fetch; an unknown / stopped session answers an empty ring, `live:false`);
+ *  `GET /api/channels/:adapterId/:convId/touches` = every live session that touched the conversation (the
+ *  window's "Drafted by …"): `{touches:[{sessionId, name, op, at, n}]}`, newest first. */
+// `isAgentBearer` — the ONE module-scope spelling above (the .195 merge: lane channel-jump and lane client-from-mount each declared it)
+function touchesOf(res) {
+  const w = ctx && ctx.getTouches && ctx.getTouches();
+  if (!w) { res.status(503).json({ error: 'the channel witness is not available', code: 'unavailable' }); return null; }
+  return w;
+}
+router.get('/api/channel-touches', (req, res) => {
+  try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\'s view — not an agent route', code: 'agent_forbidden' });
+    const sid = String(req.query.sessionId || '');
+    if (!/^[\w.:-]{1,120}$/.test(sid)) return bad(res, 400, 'sessionId is required', { code: 'bad-request' });
+    const w = touchesOf(res); if (!w) return;
+    res.json(w.list(sid));
+  } catch (e) { fail(res, e); }
+});
+router.get('/api/channels/:adapterId/:convId/touches', (req, res) => {
+  try {
+    if (isAgentBearer(req)) return res.status(403).json({ error: 'the user\'s view — not an agent route', code: 'agent_forbidden' });
+    forHost(req);
+    const w = touchesOf(res); if (!w) return;
+    res.json(w.forConversation(String(req.params.adapterId), String(req.params.convId)));
   } catch (e) { fail(res, e); }
 });
 
@@ -587,18 +697,33 @@ router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
  *  whose send starts a turn (the card's `wakes`) needs `expectWakes` (`409
  *  wake-count-mismatch`) and, auth off, is paced (`429 rate-floor`) — both
  *  refusals leave the proposal AWAITING (r3). */
+// 2026-09-27 (owner ruling: the delivery choice sits ON the action): `deliver`
+// = how the drafting agent hears of the decision — `next-turn` (free, the
+// default: with its next message) or `wake-now` (a billed turn now, counted
+// in the `expectWakes` echo; paced like any owner wake when sign-in is off).
+// Any other value is refused by name — never read as one of the two.
+const RECEIPT_DELIVERIES = require('../channel-policy.js').RECEIPT_DELIVERIES;
+function deliverOf(b) {
+  if (b.deliver === undefined || b.deliver === null || b.deliver === '') return { ok: true, deliver: null };
+  if (RECEIPT_DELIVERIES.includes(b.deliver)) return { ok: true, deliver: b.deliver };
+  return { ok: false, code: 'bad-request', error: `deliver must be ${RECEIPT_DELIVERIES.join(' | ')}` };
+}
 router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', ...wakeGuards(b) }));
+    const d = deliverOf(b);
+    if (!d.ok) return answer3(res, d);
+    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, ...wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    answer3(res, await engine().reject(req.params.id, { reason: b.reason ? String(b.reason) : null, by: 'user' }));
+    const d = deliverOf(b);
+    if (!d.ok) return answer3(res, d);
+    answer3(res, await engine().reject(req.params.id, { reason: b.reason ? String(b.reason) : null, by: 'user', deliver: d.deliver, ...wakeGuards(b) }));
   } catch (e) { fail(res, e); }
 });
 /** RECONCILE (§9.4, P4): a PERSON asks whether a LOST send landed — the only

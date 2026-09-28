@@ -25,8 +25,10 @@ const crypto = require('crypto');
 // drain — never dropped. The injection channel wraps at 10 KiB upstream and
 // the whole context is capped at INLINE_CAP, hence the section budget.
 const { BLOCK_MAX_BYTES: MSG_STASH_BLOCK_MAX_BYTES } = require('./channel-filter.js');
+const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a search's hits → one touch per conversation (PURE)
 // the backlog's ONE read order (priority, then newest) + its closed priority set
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
+const { liveForkPending, addressableId } = require('./claude-lock-capture.js'); // verify r3 (lane channel-withdraw): a pending fork carries its PARENT's conversation id — never an owner of a channel draft
 const { VIBESPACE_NOTICE_HEAD, stashKindOf, withoutNoticeHead } = require('./notification-senders.js'); // lane S3: a stashed VibeSpace notification drains under the head that names VibeSpace as its speaker — decided by the entry's PATH (`kind`), never its sender's name (S3 verify F3)
 const MSG_STASH_LINE_MAX = 400;
 const MSG_STASH_MAX_ENTRIES = 6;
@@ -73,7 +75,7 @@ function turnIsUserInitiated(s) {
   const m = Number(s && s._machineInputAt) || 0;
   return !(m > u);
 }
-function renderMsgStash(entries) {
+function renderMsgStash(entries, { maxEntries = MSG_STASH_MAX_ENTRIES, maxBytes = MSG_STASH_MAX_BYTES } = {}) {   // the stash HAND-OVER (src/server/stash-handover.js) renders every entry at once under a larger budget
   if (!entries || !entries.length) return { text: '', shown: [], rest: [] };
   const line = (e) => {
     const stamp = new Date(Number(e.ts) || Date.now()).toISOString().slice(5, 16) + 'Z';
@@ -90,6 +92,11 @@ function renderMsgStash(entries) {
     const said = notice ? `${VIBESPACE_NOTICE_HEAD} [${who}]` : `from "${who}":`;
     const text = notice ? withoutNoticeHead(e.text || '') : String(e.text || '');
     if (MSG_STASH_BLOCK_SOURCES.has(e.source)) return `- [${stamp}] ${said}\n${clipBytes(text, MSG_STASH_BLOCK_MAX_BYTES)}`;
+    // a NOTIFICATION is VibeSpace's own words (the PATH says so — a peer never gets here), and a long one is a whole
+    // delivered frame the wrapper handed back (a hand-over, a channel wake): it renders as a block under the block
+    // budget with its clip NAMED, never cut to a 400-char line in silence (channel-jump verify r4 — 5 channel
+    // messages and a job result came back as one line of 400 chars)
+    if (notice && text.length > MSG_STASH_LINE_MAX) return `- [${stamp}] ${said}\n${clipBytes(text, MSG_STASH_BLOCK_MAX_BYTES)}`;
     return `- [${stamp}] ${said} ${text.slice(0, MSG_STASH_LINE_MAX)}`;
   };
   const shown = [], rows = [];
@@ -97,7 +104,7 @@ function renderMsgStash(entries) {
   for (let i = entries.length - 1; i >= 0; i--) {          // newest first; the newest always shows
     const l = line(entries[i]);
     const b = Buffer.byteLength(l, 'utf-8') + 1;
-    if (shown.length && (shown.length >= MSG_STASH_MAX_ENTRIES || bytes + b > MSG_STASH_MAX_BYTES)) break;
+    if (shown.length && (shown.length >= maxEntries || bytes + b > maxBytes)) break;
     shown.unshift(entries[i]); rows.unshift(l); bytes += b;
   }
   const rest = entries.slice(0, entries.length - shown.length);
@@ -107,6 +114,67 @@ function renderMsgStash(entries) {
   if (shown.some((e) => e.source === 'channel')) hints.push('a channel message is answered with vibespace-channels reply <conversation> "..." (this PROPOSES; the user approves)');
   if (shown.some((e) => e.source === 'window-request')) hints.push('a window request is answered by acting on the window it names — vibespace-window attach <handle> (vibespace-docs window)');
   return { text: `### Messages that arrived while this conversation was unreachable\n${rows.join('\n')}${held}${hints.length ? `\n(${hints.join('; ')})` : ''}`, shown, rest };
+}
+// THE DRAINS FIT THE CAP OR WAIT (channel-jump verify r5, 2026-09-27 — reproduced on the REAL routes over the fake-
+// express harness: a claude RESUME's SessionStart with two groups' full context (8.2 KB) and a handed-back hand-over
+// frame waiting (r4's 4 KiB block) came to 9.1 KB; capInline cut the TAIL, which was the stash — five of six channel
+// messages never reached the agent, the entries were already gone from their store (drained BEFORE the cap), the
+// user's chat card showed all six, and the trim's own pointer named `vibespace-task show --full`, which holds no
+// notice; the codex first prompt is the same shape). Both routes now render the stash UNDER THE ROOM LEFT (`ahead` =
+// every byte before it) and take what fits BY IDENTITY — the hand-over's own idiom: the rest never leaves the store,
+// so nothing is re-stashed and every entry keeps its own `ts`. When even the newest entry does not fit, NOTHING is
+// taken: the notices wait for the next prompt (a quiet one — its head is a diff or nothing), the strip above the
+// composer keeps counting them, and the log says so by size. The jobs digest (≤ JOBS_DIGEST_BUDGET, rendered ahead
+// of the stash) holds the same way when its whole budget does not fit. Gate: scripts/test-stash-strip.mjs ②f.
+const INLINE_TAIL_MARGIN = 64;      // the margin the next-turn group reports keep under INLINE_CAP
+const JOBS_DIGEST_BUDGET = 900;     // job-model renderNotifStash's own default budget (pinned by the gate)
+function roomUnderCap(ahead) { return INLINE_CAP - (Number(ahead) || 0) - INLINE_TAIL_MARGIN; }
+/** The msg-stash section for ONE injection, or '' — and the entries it carries are the ones taken. */
+function drainStashUnderCap(deliver, cid, ahead, log = console.log) {
+  if (!deliver || !cid || typeof deliver.stashEntries !== 'function') return '';
+  const waiting = deliver.stashEntries(cid).filter((e) => e && typeof e === 'object' && !e.ho);   // a claimed entry is a hand-over's, never this drain's
+  if (!waiting.length) return '';
+  const room = roomUnderCap(ahead);
+  const needOf = (p) => Buffer.byteLength(p.text, 'utf-8') + (ahead > 0 ? 2 : 0);
+  let budget = Math.min(MSG_STASH_MAX_BYTES, Math.max(0, room));
+  let pm = renderMsgStash(waiting, { maxBytes: budget });
+  let need = needOf(pm);
+  // the render budgets its ROWS; the head, the held line and the hints ride on top of them — so a fill that reached
+  // the room overshoots it by that much and the whole section waited (verify r6: 37 % of a sweep held everything
+  // where the newest alone fit). Shrink the row budget by the overshoot and render again: the oldest rows leave first,
+  // the newest always shows, and only when even IT does not fit does the section wait whole.
+  while (need > room && pm.shown.length > 1) {
+    budget -= need - room;
+    pm = renderMsgStash(waiting, { maxBytes: Math.max(0, budget) });
+    need = needOf(pm);
+  }
+  if (!pm.shown.length || need > room) {
+    log(`[deliver] ${cid}: ${waiting.length} stashed message(s) wait for the next prompt — ${need} B do not fit the ${Math.max(0, room)} B left under the inline cap (${Number(ahead) || 0} B of context ahead of them)`);
+    return '';
+  }
+  deliver.drainStash(cid, new Set(pm.shown));
+  // a stash drain enters the AGENT's context invisibly — emit the same card the live lanes render so the user sees
+  // what arrived (2.363.0); the entry's PATH (S3 verify F3), never its name
+  for (const e of pm.shown) deliver.emitPeerCard(cid, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) });
+  return pm.text;
+}
+/** The jobs notification digest for ONE injection, or '' — drained only when its whole budget fits. */
+function drainNotifsUnderCap(jm, deliver, cid, ahead, log = console.log) {
+  if (!jm || !cid) return '';
+  const waiting = typeof jm.peekNotifs === 'function' ? jm.peekNotifs(cid).filter((n) => n && !n.ho) : [];
+  if (!waiting.length) return '';
+  const room = roomUnderCap(ahead);
+  if (room < JOBS_DIGEST_BUDGET + 2) {
+    log(`[jobs] ${cid}: ${waiting.length} stashed notification(s) wait for the next prompt — the ${JOBS_DIGEST_BUDGET} B digest does not fit the ${Math.max(0, room)} B left under the inline cap`);
+    return '';
+  }
+  const drained = jm.drainNotifs(cid, new Set(waiting));
+  if (!drained.length) return '';
+  // drained job notifications enter the agent's context invisibly — render the same card the live lane shows (2.363.0)
+  try { if (deliver) for (const e of drained) deliver.emitPeerCard(cid, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
+  // >2 entries: also spill the untruncated history to a file the agent can Read — the injected block elides its middle under budget
+  const spillPath = drained.length > 2 ? jm.spillNotifs(cid, drained) : null;
+  return require('./job-model.js').renderNotifStash(drained, { spillPath, budget: JOBS_DIGEST_BUDGET });   // module scope: `jobModel` is a binding INSIDE setupAgentRoutes (the lost-binding class, 2.340.2)
 }
 /**
  * THE STOP NUDGE'S WORDS (2.79.0; lane S3 rewording, naive-user study 2). The
@@ -130,7 +198,7 @@ function stopNudgeReason(T = {}, extra = '') {
   if (T.task) steps.push('if you completed meaningful work, log it — vibespace-task progress "summary"');
   return (extra ? extra + '\n' : '') + 'VibeSpace bookkeeping before you stop (your board state is stale; this note is from VibeSpace, not from the user): ' + steps.map((t, i) => `(${i + 1}) ${t}`).join('; ') + '. ' + STOP_NUDGE_CLOSE;
 }
-function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null }) {
+function setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard = null, integrationEnabled, scheduleCtxSync, remoteCtxBaseFor, readUserState, getJobs, deliver, getPublishedPages = () => null, getDesignKit = () => null, getChannels = () => null, getGroups = () => null, getTouches = () => null }) {
   // THE NUMBERED LIST EACH SESSION WAS SHOWN (2026-09-22): `vibespace-task
   // backlog` prints 1-based numbers over GET task's sortBacklog order, and a
   // mutating verb run LATER (`backlog-done 3`) must mean the item that was
@@ -157,7 +225,10 @@ app.post('/api/agent/user-todo', (req, res) => {
   if (!hit) return;
   if (!toolOn('Ask')) return toolDisabled(res, 'vibespace-ask');
   const [s, id] = hit;
-  const key = sessionStatusKey(s, id);
+  // verify r5 (channel-withdraw): a BORROWED id (a pending fork) is not a key an item may be filed under — the item
+  // stayed under the PARENT's key for good (nothing re-keys `claude:<parent>` to the fork's own id later) and the
+  // owner's reply was typed into the parent. The placeholder key migrates to the fork's OWN key at its next ask.
+  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);
   if (!key.startsWith('webui:')) userTodos.rekey(`webui:${id}`, key); // migrate early items once the real id exists
   const { add, list, resolve, show } = req.body || {};
   try {
@@ -342,6 +413,14 @@ function withPreamble(sessionObj, parts) {
   sessionObj._preambleSeen = hash;
   return [preambleBlock(text), ...parts];
 }
+/** The bytes `withPreamble` WILL prepend on this delivery (0 once seen) — the budget of a drain rendered before it
+ *  asks this instead of learning too late (verify r5: the drains fit the cap or wait). */
+function pendingPreambleBytes(sessionObj) {
+  const text = customPreamble();
+  if (!text) return 0;
+  const hash = require('crypto').createHash('sha1').update(text).digest('hex').slice(0, 12);
+  return sessionObj && sessionObj._preambleSeen === hash ? 0 : Buffer.byteLength(preambleBlock(text), 'utf-8') + 2;
+}
 
 // `sessionToolsIntro` lives at MODULE scope (below `setupAgentRoutes`) since
 // P0 r5: it depends on nothing in this closure, and the gate drives it directly.
@@ -359,6 +438,13 @@ app.get('/api/agent/task-context', (req, res) => {
   if (!integrationOnMaster()) return res.json({ success: true, context: '' });
   try {
     const [s, id] = hit;
+    // A HARNESS THAT IGNORES SessionStart OUTPUT GETS NOTHING FROM IT (channel-jump verify r7, 2026-09-27, reproduced on
+    // the real route): the codex app-server RUNS the hook (kb-features, measured 0.142.5) and throws its answer away —
+    // the seen-gates below knew (`honoursSessionStart`), the two DRAINS at the tail did not: three channel messages and
+    // a job result left their stores into a 7.6 KB answer nobody read, four cards shown, the wrapper's honoured first
+    // prompt found nothing. Nothing is rendered, drained, stamped or consumed here for such a harness — its first
+    // prompt-context call IS its delivery (a codex sub-agent thread's SessionStart is the same call).
+    if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });
     const key = sessionStatusKey(s, id);
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
@@ -366,6 +452,10 @@ app.get('/api/agent/task-context', (req, res) => {
     // injectContext toggle stays the finer-grained instrument.
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     let context = '';
+    const B = (t) => Buffer.byteLength(String(t), 'utf-8');
+    // r7: a once-per-session teaching rides only when it fits WHOLE beside what is committed (the pending preamble
+    // rides above it) — else it waits for the first prompt-context and is NOT stamped seen
+    const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) <= INLINE_CAP - INLINE_TAIL_MARGIN;
     if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
       context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: enabledTools(), isLiveClaim: liveClaimPredicate() });
@@ -391,14 +481,18 @@ app.get('/api/agent/task-context', (req, res) => {
       // tool can't self-report.
       // In no group: still teach the agent to report its status (baseline), once.
       // codex ignores SessionStart output, so it gets this via prompt-context.
-      context = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s) });
-      if (context) s._toolsIntroSeen = true;
+      // r7: beside a 3 000-char preamble the 6.4 KB intro crossed the cap — its tail (the last tools' teaching) was
+      // cut and it was stamped seen; now it waits for the first prompt when it does not fit whole.
+      const intro = sessionToolsIntro(enabledTools(), { browserVariant: s._browserVariant, browserSet: browserSetFacts(s) });
+      if (intro && fitsHere(intro)) { context = intro; s._toolsIntroSeen = true; }
+      else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the first prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s))} B left under the inline cap beside the user's preamble`);
     }
     // Designated Group MANAGER: teach the admin verbs ONCE — whichever route
-    // delivers first wins (s._mgrIntroSeen shared with prompt-context).
+    // delivers first wins (s._mgrIntroSeen shared with prompt-context). r7: only when it fits whole — a two-group
+    // context left no room, the intro was cut mid-verb and stamped seen (the manager never learned its powers).
     if (honoursSessionStart(s) && !s._mgrIntroSeen && isManagerSession(key)) {
-      context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO;
-      s._mgrIntroSeen = true;
+      if (fitsHere(MANAGER_INTRO)) { context = context ? context + '\n\n' + MANAGER_INTRO : MANAGER_INTRO; s._mgrIntroSeen = true; }
+      else console.log(`[inject] ${key}: the manager intro (${B(MANAGER_INTRO)} B) waits for the next prompt — it does not fit the ${Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - B(context) - pendingPreambleBytes(s))} B left under the inline cap`);
     }
     if (honoursSessionStart(s)) { // a harness that ignores SessionStart output must not burn the seen-gate
       const withPre = withPreamble(s, context ? [context] : []);
@@ -416,15 +510,10 @@ app.get('/api/agent/task-context', (req, res) => {
         // Offline notification stash FIRST (2.344.0): completions that could
         // not be delivered while this conversation was closed inject here at
         // resume, newest guaranteed, then the stash clears (drain-at-render,
-        // same accepted-lost stance as _jobsEventsSeenTs).
-        const drained = jm.drainNotifs(caller.conversationId);
-        // drained job notifications enter the agent's context invisibly —
-        // render the same card the live lane shows (2.363.0)
-        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
-        // >2 entries: also spill the untruncated history to a file the agent
-        // can Read — the injected block elides its middle under budget
-        const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
-        const missed = jobModel.renderNotifStash(drained, { spillPath });
+        // same accepted-lost stance as _jobsEventsSeenTs). UNDER THE ROOM LEFT
+        // (verify r5): the digest is drained only when its budget fits ahead
+        // of capInline's cut — else it waits for the next prompt, said in the log.
+        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, Buffer.byteLength(context || '', 'utf-8'));
         if (missed) context = context ? context + '\n\n' + missed : missed;
         const dig = jm.digestFor(caller, Buffer.byteLength(context || '', 'utf-8'));
         if (dig) context = context ? context + '\n\n' + dig : dig;
@@ -432,18 +521,15 @@ app.get('/api/agent/task-context', (req, res) => {
     } catch { }
     // msg-stash drain — INDEPENDENT of the jobs engine (review-caught: it sat
     // inside the jm.ready gate, so a jobs init failure silently held promised
-    // messages forever; messaging has its own failure domain)
+    // messages forever; messaging has its own failure domain). UNDER THE ROOM
+    // LEFT (verify r5, reproduced): a resume's full context + r4's 4 KiB block
+    // crossed INLINE_CAP and the cut fell on the drained stash — the section is
+    // rendered under what is left, taken by identity, or it waits whole.
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
-        const drained = deliver.drainStash(caller2.conversationId);
-        const pm = renderMsgStash(drained);
-        // stash drain enters the AGENT's context invisibly — emit the same
-        // card the live lanes render so the user sees what arrived (2.363.0);
-        // what did not fit the budget rides the next drain (own ts, in order)
-        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) }); // the entry's PATH (S3 verify F3), never its name
-        for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
-        if (pm.text) context = context ? context + '\n\n' + pm.text : pm.text;
+        const pmText = drainStashUnderCap(deliver, caller2.conversationId, Buffer.byteLength(context || '', 'utf-8'));
+        if (pmText) context = context ? context + '\n\n' + pmText : pmText;
       }
     } catch { }
     res.json({ success: true, context: capInline(context, injectGroups.length > 1) });
@@ -462,6 +548,13 @@ app.get('/api/agent/task-context', (req, res) => {
 app.get('/api/agent/prompt-context', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
+  // A HOOK'S CALL ON A SESSION THE WRAPPER DELIVERS TO IS DEAD (channel-jump verify r7, reproduced on the real route):
+  // the codex app-server runs the UserPromptSubmit hook at turn/start and ignores its answer, ~100 ms after the
+  // wrapper's own honoured call (thread/inject_items) — whatever arrived in that window (a peer line, the takeover's
+  // notice, a job event) was drained by the hook into nothing. The hook names its event (X-VibeSpace-Hook-Event; the
+  // shipped script since r7 — an older script's call keeps today's path); a hook-originated call on a chat session
+  // whose harness declares `inject.kind: 'wrapper'` answers empty and touches nothing.
+  if (hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });
   // Integration master switch (see task-context): no reminders, no group
   // context, no override notices — the turn reaches the CLI untouched.
   // Pending status-override notices are consumed AND DROPPED here: deferring
@@ -492,6 +585,27 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
+    // ── THE ROOM (channel-jump verify r7, 2026-09-27) ──
+    // Every producer below rides only when it FITS WHOLE under the cap beside what is already committed, or it WAITS
+    // for the next prompt — and a producer that waits CONSUMES NOTHING. r5 taught the drains, r6 counted the tail
+    // producers ahead of them; what remained (reproduced on the real routes) was the HEAD: after a restart every
+    // seen-marker is gone (session-schema: persisted null), so the first prompt re-delivers the FULL context of every
+    // group — 8.6 KB for two groups with a long owned backlog, 9.5 KB for three — and the persisted notices (the
+    // takeover's "wait for the handback", the user's status override) and the jobs update rode BEHIND it, consumed at
+    // the call, cut by capInline; the manager intro was stamped seen and cut mid-verb; beside a 3 000-char preamble
+    // the tools intro lost its tail, stamped seen. Decided in PAYLOAD ORDER, each against `committed()` (the parts so
+    // far + the pending preamble + the per-turn extra + the rescue line's reserve + the tail already decided): the
+    // tools intro, the manager intro, the jobs update, the notices, the nudge; then the drains fill what is left
+    // (r5/r6); the group reports last (their own rule). A producer that consumes state at render belongs in this
+    // list — one that does not is the r7 class again.
+    const B = (t) => Buffer.byteLength(String(t), 'utf-8');
+    const extraBlock = (() => { const x = customExtra('agents.perTurnExtra', 500); return x ? `<vibespace-reminder>${x}</vibespace-reminder>` : ''; })();
+    const rescueLine = tasks._persistRescueLine();
+    const rescueReserve = () => (parts.some((p) => p.includes('persisted-output')) ? 0 : B(rescueLine) + 2);
+    let tailHeld = 0;   // bytes of the tail producers decided so far and not yet in `parts`
+    const committed = () => B(parts.join('\n\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + rescueReserve() + tailHeld;
+    const roomLeft = () => Math.max(0, INLINE_CAP - INLINE_TAIL_MARGIN - committed());
+    const fits = (text) => B(text) + 2 <= INLINE_CAP - INLINE_TAIL_MARGIN - committed();
     // groups whose FULL context rides this prompt — their backlog note already
     // carries the cleanup nudge, the per-turn one below skips them
     const fullCovered = new Set();
@@ -612,46 +726,92 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // In no group: deliver the baseline tools intro on the FIRST prompt (covers
       // codex — its app-server runs the hook but ignores SessionStart output).
       const intro = sessionToolsIntro(toolFlags, { browserVariant: s._browserVariant, browserSet: browserSetFacts(s) });
-      if (intro) { parts.push(intro); s._toolsIntroSeen = true; }
+      if (intro && fits(intro)) { parts.push(intro); s._toolsIntroSeen = true; }   // r7: whole or it waits (a 3 000-char preamble rides above it)
+      else if (intro) console.log(`[inject] ${key}: the tools intro (${B(intro)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
     }
     // Designated Group MANAGER: teach the admin verbs once (this route is
-    // codex's ONLY delivery path; claude usually gets it via task-context).
+    // codex's ONLY delivery path; claude usually gets it via task-context). r7: whole or it waits, unstamped.
     if (!s._mgrIntroSeen && isManagerSession(key)) {
-      parts.push(MANAGER_INTRO);
-      s._mgrIntroSeen = true;
+      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); s._mgrIntroSeen = true; }
+      else console.log(`[inject] ${key}: the manager intro (${B(MANAGER_INTRO)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
     }
     // Background jobs: NEW events since this session's last delivery (view-
     // filtered at render time; ≤600B; zero events = zero bytes).
+    // WHAT RIDES AFTER THE DRAINS IS COUNTED BEFORE THEM (channel-jump verify r6, 2026-09-27 — reproduced on the real
+    // routes: a 5 KB diff head let a drain fill its room, and the producers pushed AFTER it — the rescue line the
+    // oversize belt prepends past 8 000 B, the status-override notices, the backlog nudge — carried the payload over
+    // the cap; capInline then cut the tail: the nudge, the CONSUMED notice (gone with it), the reply hint, and at the
+    // line boundary the newest DRAINED entry, its card already shown). r7: each of them is now decided here — FIT OR
+    // WAIT, consumed only when it rides — in payload order, and each is pushed where it always was. A new producer
+    // that rides after the drains is decided here, or it is the r6 class again.
+    // the jobs update (≤ 600 B): rendered first; its marker advances only when it rides (r7 — a head at the cap cut
+    // it after the marker had moved). An update that waits is re-rendered next prompt from the same marker.
+    let jobsUpdate = '';
+    let jm = null, caller = null;
     try {
-      const jm = getJobs && getJobs();
+      jm = getJobs && getJobs();
       if (jm && jm.ready) {
-        const caller = jobsCaller(s, id);
-        // stashed offline notifications (a resume that skipped SessionStart —
-        // codex — or entries stashed since it): drain here too
-        const drained = jm.drainNotifs(caller.conversationId);
-        // drained job notifications enter the agent's context invisibly —
-        // render the same card the live lane shows (2.363.0)
-        try { if (deliver) for (const e of drained) deliver.emitPeerCard(caller.conversationId, { fromName: 'Background Work · ' + (e.jobName || e.jobId), text: e.text, kind: 'notification' }); } catch { }
-        const spillPath = drained.length > 2 ? jm.spillNotifs(caller.conversationId, drained) : null;
-        const missed = jobModel.renderNotifStash(drained, { spillPath });
-        if (missed) parts.push(missed);
+        caller = jobsCaller(s, id);
         const u = jm.updatesFor(caller, s._jobsEventsSeenTs || 0);
-        if (u.text) parts.push(u.text);
-        s._jobsEventsSeenTs = u.lastTs; // marker advances at render (accepted-lost on drop)
+        if (!u.text) s._jobsEventsSeenTs = u.lastTs;   // nothing to say: the marker moves as it always did
+        else if (fits(u.text)) { jobsUpdate = u.text; tailHeld += B(u.text) + 2; s._jobsEventsSeenTs = u.lastTs; }
+        else console.log(`[jobs] ${caller.conversationId || key}: the jobs update (${B(u.text)} B) waits for the next prompt — it does not fit the ${roomLeft()} B left under the inline cap`);
+      }
+    } catch { jobsUpdate = ''; }
+    // THE NOTICE QUEUE IS DRAINED, never `break`-ed at the first (agent browser P1, §3.8 layer ②): a status override
+    // and a browser-profile change both pending must BOTH reach this prompt — and the record may still be under
+    // webui:<id>, so both keys are drained. r7: PEEKED and rendered first, CONSUMED only when every one of them rides
+    // whole (a restart's first prompt put the takeover notice behind a full context and cut it after the consume).
+    // whole, oldest first: the longest PREFIX of the queue whose rendered text fits rides and is consumed; the rest stays.
+    const noticeTexts = [];
+    try {
+      const keys = [key, `webui:${id}`];
+      const queue = [];   // [{k, n, text}] in the order they would ride (the record's key first, then the pre-id key)
+      // EVERY queued record is a POSITION (channel-jump verify r8): the prefix is consumed BY COUNT, so a record the
+      // renderer cannot spell (a kind a newer build wrote before a rollback) stays in the queue as an empty row —
+      // else the count lands on it and the renderable notice the fit admitted slides a prompt (reproduced). It rides
+      // as nothing, is consumed with its prefix, and is named in the log.
+      for (const k of keys) for (const n of (sessionStatus.pendingNotices(k) || [])) { const t = SessionStatusManager.renderNotice(n); queue.push({ k, text: t || '' }); if (!t) console.warn(`[inject] ${key}: a queued notice of unknown kind ${JSON.stringify(n && n.kind)} cannot be rendered by this build — dropped unrendered with its prefix`); }
+      let taken = 0, needAll = 0;
+      for (const q of queue) if (q.text) needAll += B(q.text) + 2;
+      const fitsPrefix = (m) => { const byKey = new Map(); for (const q of queue.slice(0, m)) if (q.text) byKey.set(q.k, [...(byKey.get(q.k) || []), q.text]); let need = 0; for (const ts of byKey.values()) need += B(ts.join('\n')) + 2; return need <= INLINE_CAP - INLINE_TAIL_MARGIN - committed(); };
+      for (let m = queue.length; m >= 1; m--) if (fitsPrefix(m)) { taken = m; break; }
+      if (taken) {
+        const byKey = new Map();
+        for (const q of queue.slice(0, taken)) byKey.set(q.k, (byKey.get(q.k) || 0) + 1);
+        for (const k of keys) if (byKey.get(k)) { const t = SessionStatusManager.renderNotices(sessionStatus.consumeNotices(k, byKey.get(k))); if (t) { noticeTexts.push(t); tailHeld += B(t) + 2; } }
+      }
+      if (taken < queue.length) console.log(`[inject] ${key}: ${queue.length - taken} of ${queue.length} pending notice(s) wait for the next prompt — ${needAll} B do not fit the ${roomLeft()} B left under the inline cap`);
+    } catch (e) { console.warn(`[inject] ${key}: notices not read — ${e && e.message}`); }
+    // THE BACKLOG CLEANUP NUDGE, EVERY TURN (2026-09-22 verifier: it rode only the full context injections, so a
+    // session that never ran a backlog verb saw it once per session). ONE paragraph under ONE 500 B budget for every
+    // injected group this session is over `tasks.backlogNudgeAt` in (0 = off), minus the groups whose full context
+    // this prompt already carries — the same words (tasks.backlogNudgeFor → nudgeTextAll) as the route's answer.
+    // Stateless: one that does not fit is simply not said this prompt (r7).
+    let backlogNudge = '';
+    try {
+      const nudgeIds = injectGroups.map((g) => g.id).filter((gid) => !fullCovered.has(gid));
+      if (nudgeIds.length) backlogNudge = tasks.backlogNudgeFor(nudgeIds, key, { multi: injectGroups.length > 1, tools: toolFlags });
+    } catch { backlogNudge = ''; }
+    let nudgeBlock = backlogNudge ? `<vibespace-reminder>${backlogNudge}</vibespace-reminder>` : '';
+    if (nudgeBlock && fits(nudgeBlock)) tailHeld += B(nudgeBlock) + 2; else nudgeBlock = '';
+    // the drains (verify r5/r6): each fits what is really left — everything ahead AND everything decided after it
+    const aheadOfDrains = () => committed();
+    try {
+      if (jm && jm.ready && caller) {
+        // stashed offline notifications (a resume that skipped SessionStart —
+        // codex — or entries stashed since it): drain here too, under the room left
+        const missed = drainNotifsUnderCap(jm, deliver, caller.conversationId, aheadOfDrains());
+        if (missed) parts.push(missed);
       }
     } catch { }
-    // msg-stash drain — INDEPENDENT of the jobs engine (see task-context note)
+    if (jobsUpdate) { parts.push(jobsUpdate); tailHeld -= B(jobsUpdate) + 2; }   // pushed where it always rode; now counted in `parts`
+    // msg-stash drain — INDEPENDENT of the jobs engine (see task-context note); under the room left (verify r5)
     try {
       if (deliver) {
         const caller2 = jobsCaller(s, id);
-        const drained = deliver.drainStash(caller2.conversationId);
-        const pm = renderMsgStash(drained);
-        // stash drain enters the AGENT's context invisibly — emit the same
-        // card the live lanes render so the user sees what arrived (2.363.0);
-        // what did not fit the budget rides the next drain (own ts, in order)
-        for (const e of pm.shown) deliver.emitPeerCard(caller2.conversationId, { fromName: e.fromName || null, text: e.text, kind: stashKindOf(e) }); // the entry's PATH (S3 verify F3), never its name
-        for (const e of pm.rest) deliver.stashFor(caller2.conversationId, e);
-        if (pm.text) parts.push(pm.text);
+        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains());
+        if (pmText) parts.push(pmText);
       }
     } catch { }
     // Oversize belt (2.113.0): full contexts + the mixed-delivery manifest
@@ -660,16 +820,10 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // threshold TOGETHER. If nothing in the payload teaches the rescue,
     // prepend it so a 2KB head preview always names the recovery path.
     if (parts.length && !parts.some((p) => p.includes('persisted-output')) && Buffer.byteLength(parts.join('\n\n'), 'utf-8') > 8000) {
-      parts.unshift(tasks._persistRescueLine());
+      parts.unshift(rescueLine);
     }
-    // THE NOTICE QUEUE IS DRAINED, never `break`-ed at the first (agent browser
-    // P1, §3.8 layer ②): a status override and a browser-profile change both
-    // pending must BOTH reach this prompt — and the record may still be under
-    // webui:<id>, so both keys are drained.
-    for (const k of [key, `webui:${id}`]) {
-      const list = sessionStatus.consumeNotices(k);
-      if (list && list.length) parts.push(SessionStatusManager.renderNotices(list));
-    }
+    // the status notices, decided and consumed above (verify r6/r7) — pushed where they always rode
+    for (const t of noticeTexts) parts.push(t);
     // Remote session about to receive a fresh/updated context → make sure the
     // synced copy refreshes promptly too (busy-guard makes over-calling cheap).
     if (s.host && parts.length) scheduleCtxSync(s, id);
@@ -684,19 +838,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     const extra = customExtra('agents.perTurnExtra', 500);
     // "Per turn" means per turn: on prompts that already carry a bigger
     // delivery the extra still rides at the very top as its own block.
-    if (outParts.length && extra) outParts.unshift(`<vibespace-reminder>${extra}</vibespace-reminder>`);
-    // THE BACKLOG CLEANUP NUDGE, EVERY TURN (2026-09-22 verifier: it rode only
-    // the full context injections, so a session that never ran a backlog verb
-    // saw it once per session). ONE paragraph under ONE 500 B budget for every
-    // injected group this session is over `tasks.backlogNudgeAt` in (0 = off),
-    // minus the groups whose full context this prompt already carries — the
-    // same words (tasks.backlogNudgeFor → nudgeTextAll) as the route's answer.
-    let backlogNudge = '';
-    try {
-      const nudgeIds = injectGroups.map((g) => g.id).filter((gid) => !fullCovered.has(gid));
-      if (nudgeIds.length) backlogNudge = tasks.backlogNudgeFor(nudgeIds, key, { multi: injectGroups.length > 1, tools: toolFlags });
-    } catch { backlogNudge = ''; }
-    if (outParts.length && backlogNudge) outParts.push(`<vibespace-reminder>${backlogNudge}</vibespace-reminder>`);
+    if (outParts.length && extraBlock) outParts.unshift(extraBlock);
+    // the backlog cleanup nudge, decided above (verify r6/r7) — pushed where it always rode
+    if (outParts.length && nudgeBlock) outParts.push(nudgeBlock);
     if (!outParts.length) {
       const multi = injectGroups.length > 1;
       const mgrClause = isManagerSession(key) ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';
@@ -725,7 +869,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // fit are marked; the rest wait for the next turn and are NAMED.
     try {
       const ge = groupsEngine();
-      const myCid = s.claudeSessionId || s.backendSessionId || null;
+      // verify r6 (lane channel-withdraw): the caller's OWN id — a pending fork read the raw id here, rendered the
+      // PARENT's pending group messages into its own prompt and moved the parent's markers (the parent never saw them)
+      const myCid = ownConversationIdOf(s).cid;
       if (ge && myCid && turnIsUserInitiated(s)) {
         const used = Buffer.byteLength(outParts.join('\n\n'), 'utf-8');
         const room = Math.min(GROUP_REPORT_BUDGET, INLINE_CAP - used - 64);
@@ -1146,8 +1292,14 @@ app.post('/api/agent/group-admin', (req, res) => {
 // existence oracle.
 function jobsCaller(s, id) {
   const key = sessionStatusKey(s, id);
+  // verify r5 (lane channel-withdraw, 2026-09-27): THE SAME OWN-ID RULE AS msgCaller — a job's owner conversation is
+  // recorded FOR GOOD at create, and every notification of it is a billed turn on that conversation. Read off the
+  // status key, a pending fork's job was OWNED BY ITS PARENT (reproduced: the parent's inbox billed for the fork's
+  // job, and still after the fork announced its own id). `conversationId` is null while the id is borrowed;
+  // `borrowed` carries the sentence; the create route refuses by name, the injection drains nothing of the parent's.
+  const own = ownConversationIdOf(s);
   return {
-    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1),
+    conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),
     sessionId: id, sessionCreatedAt: s.createdAt || 0,
     groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id)),
   };
@@ -1174,6 +1326,14 @@ const { has: hasHarness, get: getHarness } = require('./harnesses');
  *  prompt-context path, so the seen-gates must not advance here.) Unknown
  *  harness ⇒ false (never silently treated as claude). */
 const honoursSessionStart = (s) => { const b = s?.backend || 'claude'; return hasHarness(b) && !!getHarness(b).inject?.sessionStartHonoured; };
+/** r7: is this call the HOOK's (the shipped vibespace-hook.mjs names its event)? An older script sends no header and
+ *  keeps today's path. */
+const hookOriginated = (req) => !!(req && req.headers && req.headers['x-vibespace-hook-event']);
+/** r7: does this session's harness deliver the HOOK's prompt-context answer? A chat session whose descriptor says
+ *  `inject.kind: 'wrapper'` (codex: the app-server runs the hook and drops its output; the wrapper injects through
+ *  thread/inject_items) does not — a terminal session keeps the hook path (no wrapper stands in for it). Unknown
+ *  harness ⇒ honoured (never silently emptied). */
+const hookOutputHonoured = (s) => { const b = s?.backend || 'claude'; if (!hasHarness(b)) return true; return !(s?.mode === 'chat' && getHarness(b).inject?.kind === 'wrapper'); };
 const NOT_VISIBLE = (ref) => `no job "${ref}" visible to this session — vibespace-job list`;
 function findVisibleIn(all, caller, ref) {
   const vis = caller ? jobModel.visibleJobs(all, caller) : [];
@@ -1218,7 +1378,11 @@ function _msgEndpoints(exceptId) {
   const out = [];
   for (const [tid, t] of activeSessions) {
     if (tid === exceptId) continue;
-    const cid = t.claudeSessionId || t.backendSessionId;
+    // verify r5: a session whose id is BORROWED (a pending fork) is not an endpoint — listed under its parent's id
+    // it was addressable by its own name: with the parent not live, `send --wake "<fork>"` minted the pair group
+    // under the PARENT's id and authorized a billed turn on the parent; with the parent live, every message to the
+    // parent was refused `ambiguous`. ONE predicate with server.js's roster (`liveSessions`): addressableId.
+    const cid = addressableId(t);
     if (!cid) continue;
     const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId }) || []).map((g) => g.id);
     out.push({ id: tid, t, cid, groups, reachability: t._msgReachability || null });
@@ -1271,13 +1435,43 @@ function msgCaller(req, res) {
     // the owner's LIVE session (if any) lends its Task Groups to reach; a job
     // whose owner is not running still posts into groups it already has
     let s = null, id = null;
-    for (const [tid, t] of activeSessions) if ((t.claudeSessionId || t.backendSessionId) === cid) { s = t; id = tid; break; }
+    // verify r4: a PENDING FORK carrying the owner's id is never the session lent (its groups are the fork's)
+    for (const [tid, t] of activeSessions) if ((t.claudeSessionId || t.backendSessionId) === cid && !liveForkPending(t)) { s = t; id = tid; break; }
     return { job, cid, s, id, myGroups: s ? _myGroupIds(s, id) : [] };
   }
   const hit = agentSession(req, res);
   if (!hit) return null;
   const [s, id] = hit;
-  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };
+  // verify r4 (lane channel-withdraw, 2026-09-27): THE CALLER'S ID IS ITS OWN — a pending fork still carrying its
+  // parent's conversation id sent as the parent (`msg send`: the pair group held the PARENT's id, the target's reply
+  // woke the parent — a billed turn on the wrong conversation, for good) and asked for reach as the parent. `cid` is
+  // null while the id is borrowed; `cidWhy` is the sentence every verb that needs it answers with (409 bad-member).
+  const own = ownConversationIdOf(s);
+  return { job: null, cid: own.cid, cidWhy: own.why, s, id, myGroups: _myGroupIds(s, id) };
+}
+/** The refusal a verb that needs the session's CONVERSATION ID gives before it exists (verify r2: channels reply / compose / withdraw share `msg send`'s sentence). */
+const NO_CID_YET = 'this session has no conversation id yet — try again after its first turn';
+/** …and the one a PENDING FORK gets (verify r3, 2026-09-27): until the harness announces the fork's own id the
+ *  session carries its PARENT's conversation id, so a draft it made would be recorded as the parent's (the
+ *  receipt — and a "wake now" turn — would land on the parent) and it could withdraw the parent's drafts. The
+ *  rule is claude-lock-capture's `liveForkPending` (a codex fork's flag is never cleared; its adoption is read
+ *  off `forkedFrom`), never `_forkRequested` alone. */
+const FORK_PENDING = 'this session is a fork that has not announced its own conversation id yet (it still carries its parent\'s) — wait a moment and repeat the command (a fork announces its own id within seconds of starting)';   // verify r6: the way out is a WAIT, not a turn — a chat fork adopts before its first turn, a terminal fork off the lock capture
+/** `replaces` as the wire carries it (verify r3): a proposal id is a STRING — `String()` read a one-element
+ *  array as the id it held; anything else is refused by name. `{ok, id}` (id null = not given). */
+function replacesOf(b) {
+  const v = b ? b.replaces : undefined;
+  if (v === undefined || v === null || v === '') return { ok: true, id: null };
+  if (typeof v !== 'string' || !v.trim()) return { ok: false, error: 'replaces must be a proposal id (a string, as `vibespace-channels status` prints it)' };
+  return { ok: true, id: v.trim() };
+}
+/** The conversation id a channel verb may record as an OWNER: none while the session has no id of its own. */
+function ownConversationIdOf(s) {
+  if (!s) return { cid: null, why: NO_CID_YET };
+  const cid = s.claudeSessionId || s.backendSessionId || null;
+  if (!cid) return { cid: null, why: NO_CID_YET };
+  if (liveForkPending(s)) return { cid: null, why: FORK_PENDING };
+  return { cid: addressableId(s), why: null };   // verify r5: the ONE predicate (claude-lock-capture) — the same answer the rosters give
 }
 const JOB_NO_MEMBERSHIP = 'a job token may list, read and send — it never creates a group or changes membership (create / invite / leave / kick / rename / archive / notify); run that from the conversation that owns this job';
 app.post('/api/agent/msg/send', async (req, res) => {
@@ -1302,7 +1496,7 @@ app.post('/api/agent/msg/send', async (req, res) => {
     // discovery links its transcript) ⇒ the SAME refusal the group verbs give;
     // the pre-groups direct lane below would wake the receiver at once and
     // bypass every notify mode (2026-09-23 verifier)
-    if (!myCid) return res.status(409).json({ error: 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' });
+    if (!myCid) return res.status(409).json({ error: who.cidWhy || 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' });   // verify r4: …or a BORROWED one (a pending fork)
     // ONE resolution: a group id, a conversation id, or a bare name that is
     // exactly one of them — a name that is BOTH is refused `ambiguous`
     const tgt = ge.resolveTarget(to, myCid);
@@ -1343,8 +1537,12 @@ app.post('/api/agent/msg/send', async (req, res) => {
   const framed = `Message from session "${fromName}" (via vibespace-msg; reply: vibespace-msg send "${fromName}" "..."):\n${text}`;
   const r = deliver ? await deliver.deliverToConversation(target.cid, framed, { fromName, cardText: text, spendReason: 'peer-message' }) : { ok: false, reason: 'delivery not wired' };
   if (r.ok) return res.json({ delivered: true, lane: r.lane, peerName: r.peerName || target.t.name || null, machine: r.hostId || null });
-  deliver?.stashFor(target.cid, { source: 'agent', kind: 'peer', fromName, text }); // kind = the PATH (S3 verify F3): a session NAMED like VibeSpace still drains as a peer
-  res.json({ delivered: false, stashed: true, reason: r.reason || 'unreachable', note: 'queued — injected into that session on its next turn' });
+  let st = null;
+  try { st = deliver?.stashFor(target.cid, { source: 'agent', kind: 'peer', fromName, text }) || null; } // kind = the PATH (S3 verify F3): a session NAMED like VibeSpace still drains as a peer
+  catch (e) { return res.status(503).json({ delivered: false, stashed: false, reason: r.reason || 'unreachable', error: `not delivered and not queued: ${e.message}` }); }
+  // verify r5: the sender hears whether "queued" is on disk — a queue held in memory only is lost at a restart
+  const durable = !(st && st.stored === false);
+  res.json({ delivered: false, stashed: true, durable, reason: r.reason || 'unreachable', note: durable ? 'queued — injected into that session on its next turn' : `queued in memory only — ${st.why}` });
 });
 
 // ── vibespace-msg groups (design §22.5): the agent's verbs over the groups
@@ -1358,7 +1556,7 @@ function groupCaller(req, res) {
   const ge = groupsEngine();
   if (!ge) { res.status(503).json({ error: 'agent groups are not available on this instance', code: 'unavailable' }); return null; }
   const cid = who.cid;
-  if (!cid) { res.status(409).json({ error: 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' }); return null; }
+  if (!cid) { res.status(409).json({ error: who.cidWhy || 'this session has no conversation id yet — try again after its first turn', code: 'bad-member' }); return null; }   // verify r4: a pending fork is refused by name
   return { ge, cid, job: who.job };
 }
 app.get('/api/agent/msg/groups', (req, res) => {
@@ -1421,10 +1619,16 @@ function channelPrincipal(s, id) {
 }
 const channelsEngine = () => { try { const c = getChannels(); return c && typeof c.listFor === 'function' ? c : null; } catch { return null; } };
 const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'); return i > 0 ? { adapterId: k.slice(0, i), convId: k.slice(i + 1) } : null; };
+// THE WITNESS (§26, B-099e — the owner: "那就按照这个做吧", plan A, passive): every handler below that touches a
+// conversation records WHAT it touched on the calling session AFTER an answer the agent was allowed to see (a refused or
+// hidden one leaves nothing — the uniform not-found stays an oracle-free answer), so the chat can draw a clickable row
+// on the tool call's card — no tool, no injected context. test-architecture §63 is the census: every
+// `/api/agent/channels/` handler calls touchChannel, or is on its closed exemption list with the reason.
+const touchChannel = (id, touches) => { try { const w = getTouches(); if (w && touches && touches.length) w.recordMany(id, touches); } catch (e) { console.warn('[channel-touches] record failed:', (e && e.message) || e); } };
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' ? 404 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : code === 'stopped' ? 503 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409
+  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' ? 400 : code === 'stopped' ? 503 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
@@ -1447,7 +1651,9 @@ app.get('/api/agent/channels/read', (req, res) => {
   const key = splitConvKey(req.query.conv);
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>, as vibespace-channels list prints it)', code: 'bad-request' });
   const since = req.query.since !== undefined && req.query.since !== '' ? Number(req.query.since) : null;
-  chanAnswer(res, eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null }));
+  const r = eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null });
+  if (r && r.ok) touchChannel(id, [{ op: 'read', adapterId: key.adapterId, convId: key.convId, title: r.conversation && r.conversation.title, count: (r.records || []).length }]);
+  chanAnswer(res, r);
 });
 // THE AGENT'S OWN REFRESH (2026-09-26, design §6.5): reach first (invisible =
 // the uniform not-found), then the per-conversation floor
@@ -1460,7 +1666,11 @@ app.post('/api/agent/channels/:adapterId/:convId/refresh', async (req, res) => {
   const eng = channelsEngine();
   if (!eng || typeof eng.agentRefresh !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
-  try { chanAnswer(res, await eng.agentRefresh(channelPrincipal(s, id), String(req.params.adapterId), String(req.params.convId))); }
+  try {
+    const r = await eng.agentRefresh(channelPrincipal(s, id), String(req.params.adapterId), String(req.params.convId));
+    if (r && r.ok) touchChannel(id, [{ op: 'refresh', adapterId: String(req.params.adapterId), convId: String(req.params.convId), title: r.conversation && r.conversation.title, count: r.appended || 0 }]);
+    chanAnswer(res, r);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/agent/channels/reply', async (req, res) => {
@@ -1475,8 +1685,23 @@ app.post('/api/agent/channels/reply', async (req, res) => {
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
   // r3: where the reply's send starts a turn (the Agents adapter) and the policy sends it now, the
   // agent's own wake pace applies — the same persisted pacer its group wakes spend from
-  const cidR = s.claudeSessionId || s.backendSessionId || null;
-  try { chanAnswer(res, await eng.propose(channelPrincipal(s, id), key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, { mayWake: cidR ? wakeFloorFor(cidR) : null })); }
+  // verify r2 (2026-09-27): a draft needs a conversation id — `channelPrincipal`'s `webui:` fallback would
+  // stamp a drafter no drain ever asks for (the receipt stashed under a key the hook never drains, the live
+  // session read as "gone", its own later withdraw `not-yours`); the same refusal `msg send` gives.
+  // verify r3: …and its OWN id — a pending fork still carries its parent's (FORK_PENDING)
+  const ownR = ownConversationIdOf(s);
+  if (!ownR.cid) return res.status(409).json({ error: ownR.why, code: 'bad-member' });
+  const cidR = ownR.cid;
+  const ctxR = channelPrincipal(s, id);
+  const makeR = () => eng.propose(ctxR, key.adapterId, key.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments }, { mayWake: cidR ? wakeFloorFor(cidR) : null });
+  // 2026-09-27: `replaces` = withdraw that proposal of yours + this new one, atomic (the old one goes only if the new one is accepted)
+  const repR = replacesOf(b);
+  if (!repR.ok) return res.status(400).json({ error: repR.error, code: 'bad-request' });
+  try {
+    const r = repR.id ? await eng.replaceProposal({ replaces: repR.id, by: ctxR, make: makeR }) : await makeR();
+    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'reply', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);   // §26 (B-099e): the drafted conversation is a row on the tool card
+    chanAnswer(res, r);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // R4 (B-6acc): COMPOSE a NEW message on an account the agent has access to
@@ -1493,7 +1718,42 @@ app.post('/api/agent/channels/compose', async (req, res) => {
   const account = String(b.account || '').trim();
   if (!account) return res.status(400).json({ error: 'account is required (the account id, as `vibespace-channels status` prints it)', code: 'bad-request' });
   // R4 verify r2: a field the verb does not carry (bcc, replyTo) is handed to the validator so it is REFUSED BY NAME, never dropped here
-  try { chanAnswer(res, await eng.compose(channelPrincipal(s, id), account, { to: b.to, cc: b.cc, bcc: b.bcc, replyTo: b.replyTo, subject: b.subject, text: b.text, why: b.why, attachments: b.attachments })); }
+  const ownC = ownConversationIdOf(s);
+  if (!ownC.cid) return res.status(409).json({ error: ownC.why, code: 'bad-member' });   // verify r2: no `webui:` drafter; r3: no borrowed (pending fork) id
+  const ctxC = channelPrincipal(s, id);
+  const makeC = () => eng.compose(ctxC, account, { to: b.to, cc: b.cc, bcc: b.bcc, replyTo: b.replyTo, subject: b.subject, text: b.text, why: b.why, attachments: b.attachments });
+  const repC = replacesOf(b);
+  if (!repC.ok) return res.status(400).json({ error: repC.error, code: 'bad-request' });
+  try {
+    const r = repC.id ? await eng.replaceProposal({ replaces: repC.id, by: ctxC, make: makeC }) : await makeC();
+    if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'compose', adapterId: r.proposal.adapterId || account, convId: r.proposal.convId || null, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);   // §26 (B-099e)
+    chanAnswer(res, r);
+  }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// 2026-09-27 (the owner: "agent 似乎没有撤回之前制作的 draft 的能力，必须要我手动
+// reject 是吗？"): the drafting agent WITHDRAWS its own proposal while nobody
+// has decided it — a session (vsst_) as itself, a Background Work job (jbt_)
+// as the conversation that owns it. Somebody else's proposal is 403
+// `not-yours` (the uniform not-found when the caller cannot even see it); one
+// already decided / sending / of unknown outcome is 409 `not-withdrawable`.
+app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
+  // verify r2 (round 1 LOW 6): a BROWSER here (the owner's cookie / a fetch from a page, no agent token) is
+  // refused BY NAME — withdraw is the drafting agent's verb; the user rejects from the card — not "missing token"
+  if (!/^Bearer\s+\S/i.test(String(req.headers.authorization || '')) && !(req.body && req.body.token) && (req.headers.cookie || req.headers['sec-fetch-site'])) return res.status(403).json({ error: 'only the agent that proposed it can withdraw a proposal — reject it from the card instead', code: 'not-yours' });
+  const who = msgCaller(req, res);
+  if (!who) return;
+  if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is off' });
+  const eng = channelsEngine();
+  if (!eng || typeof eng.withdrawProposal !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
+  // verify r2: no `webui:` principal (its drafts were refused the same way); r3: a SESSION caller (vsst_) needs
+  // its OWN id — a pending fork carries its parent's and could take the parent's drafts back. A job (jbt_)
+  // speaks for the conversation that OWNS it, whichever live session carries that id.
+  if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }
+  const by = who.s ? channelPrincipal(who.s, who.id) : (who.cid ? { kind: 'agent', id: who.cid, name: (who.job && who.job.name) || null, groups: who.myGroups || [] } : null);
+  if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
+  const b = req.body || {};
+  try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // R4: SEARCH the messages the agent can SEE (reach filters every hit; the
@@ -1505,7 +1765,11 @@ app.get('/api/agent/channels/search', async (req, res) => {
   const eng = channelsEngine();
   if (!eng || typeof eng.searchFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
-  try { chanAnswer(res, await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50 })); }
+  try {
+    const r = await eng.searchFor(channelPrincipal(s, id), String(req.query.q || ''), { adapterId: req.query.account ? String(req.query.account) : null, limit: Number(req.query.limit) || 50 });
+    if (r && r.ok) touchChannel(id, searchTouches(r.results));   // one touch per conversation hit (the most hits first, bounded)
+    chanAnswer(res, r);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/agent/channels/status', (req, res) => {
@@ -1520,6 +1784,9 @@ app.get('/api/agent/channels/status', (req, res) => {
   // R4: WHAT YOU WERE GIVEN — every grain naming you (or a group of yours):
   // its access authority and whether a notification wakes you
   if (r && r.ok && !req.query.id && typeof eng.accessFor === 'function') { try { r.access = eng.accessFor(ctx).access; } catch { r.access = []; } }
+  // ONE draft's status names its conversation (the list form touches none)
+  const p = r && r.ok && r.proposal;
+  if (p) touchChannel(id, [{ op: 'status', adapterId: p.adapterId, convId: p.convId || null, title: p.title, account: p.adapterLabel, proposalId: p.id }]);
   chanAnswer(res, r);
 });
 app.post('/api/agent/channels/request', async (req, res) => {
@@ -1532,7 +1799,16 @@ app.post('/api/agent/channels/request', async (req, res) => {
   const b = req.body || {};
   const key = splitConvKey(b.conv);
   if (!key) return res.status(400).json({ error: 'conv is required (<adapter>/<conversation id>)', code: 'bad-request' });
-  try { chanAnswer(res, await eng.request(channelPrincipal(s, id), key.adapterId, key.convId, b.why)); }
+  // verify r4: a reach request RECORDS its principal (the owner grants THAT id) — a pending fork asked as its
+  // PARENT (the approval widened the parent's reach; the fork got nothing once it had its own id), a session with
+  // no id yet as a `webui:` placeholder nobody ever matches. The same refusal reply / compose / withdraw give.
+  const ownQ = ownConversationIdOf(s);
+  if (!ownQ.cid) return res.status(409).json({ error: ownQ.why, code: 'bad-member' });
+  try {
+    const r = await eng.request(channelPrincipal(s, id), key.adapterId, key.convId, b.why);
+    if (r && r.ok) touchChannel(id, [{ op: 'request', adapterId: key.adapterId, convId: key.convId }]);   // §26 (B-099e)
+    chanAnswer(res, r);
+  }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1569,7 +1845,7 @@ const pageAuth = (req, res) => {
   }
   const hit = agentSession(req, res);
   if (!hit) return null;
-  return { session: hit[0], sessionId: hit[1], conversationId: hit[0].claudeSessionId || null, hostId: hit[0].host || null };
+  return { session: hit[0], sessionId: hit[1], conversationId: ownConversationIdOf(hit[0]).cid, hostId: hit[0].host || null };   // verify r5: a page is attributed to the caller's OWN conversation (null while borrowed — the session id still names it)
 };
 const express = require('express');
 app.post('/api/agent/pages/publish', express.raw({ type: () => true, limit: '25mb' }), (req, res) => {
@@ -1614,6 +1890,9 @@ app.get('/api/agent/design-kit/file/:name', (req, res) => {
 app.post('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   if (a.selfJob) return res.status(403).json({ error: 'a job token cannot create jobs' });
+  // verify r5: a job is OWNED for good by the conversation that makes it — a borrowed id (a pending fork) is refused
+  // by name, like every verb that records a principal; a session with no id yet keeps its lineage-less job
+  if (a.caller.borrowed) return res.status(409).json({ error: a.caller.borrowed, code: 'bad-member' });
   const b = req.body || {};
   const spec = {
     kind: b.kind, name: b.name, note: b.note, cmd: b.cmd, envFrom: b.envFrom,
@@ -1848,4 +2127,4 @@ function browserSetLine(set) {
 
 
 module.exports = {
-  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE };
+  turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, browserIntroLine, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE };

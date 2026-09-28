@@ -216,7 +216,9 @@ async function run(input) {
     }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 3000);
-    const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token }, signal: ctl.signal });
+    // The hook NAMES its event (channel-jump verify r7): a harness that runs this hook and drops its answer (the codex
+    // app-server) gets an empty one and nothing is drained or consumed for it — the wrapper's own call is its delivery.
+    const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token, 'X-VibeSpace-Hook-Event': event }, signal: ctl.signal });
     clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();

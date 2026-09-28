@@ -36,6 +36,45 @@
  * scripts/test-oauth-loopback.mjs pins both lines. An extraction that dropped
  * one would turn a fixed, publicly known loopback port into a code-injection
  * target for any local process.
+ *
+ * A FLOW'S END IS THE END OF WHAT IT HELD (client-from-mount verify r3). The
+ * `exchange` closure an adapter hands in captures the vendor client — for
+ * Gmail the PLAINTEXT client secret (a storage mount's borrowed one, since
+ * 2.369.195) — and this map used to keep every flow for the process
+ * lifetime: `take()` had no caller, `cancel()` left the record in place, so a
+ * cancelled / timed-out / landed flow pinned its secret for ever and 10 000
+ * begins pinned 10 000 copies. Three rules now: (1) the closure is DROPPED
+ * the moment the flow can no longer use it — at cancel / timeout (unless an
+ * exchange is in flight, which consults `cancelled()` itself) and after the
+ * exchange returned; a code landing on an ended flow is reported by name
+ * ("… before its code arrived"), never exchanged; (2) an ENDED flow is
+ * RETIRED from the map `FLOW_RETIRE_MS` after its end (status() answers the
+ * dialog's polling meanwhile; the channels engine sweeps its own pending
+ * records on the same 30 min), swept at every begin() and status();
+ * (3) at most `MAX_RUNNING_FLOWS` run at once — the 33rd begin() ends the
+ * OLDEST running flow by name (a human never has 32 consents open; an
+ * automated caller cannot pin more than 32 secrets or listeners).
+ *
+ * VERIFY r4 — THE END DROPS EVERY CLOSURE THE ADAPTER HANDED IN, AND THE
+ * MACHINE'S OWN ENDS ARE SAID. (a) r3 dropped `exchange` and kept `onDone`
+ * "until a late code has been reported". Both adapters create the two in ONE
+ * scope (`const {clientId, clientSecret} = cred.values; … exchange: …,
+ * onDone: …`) and closures of one scope share ONE context, so the kept
+ * `onDone` kept the secret: a heap snapshot of the real Gmail adapter after a
+ * cancel still held the plaintext (30 min, until retirement). `forget(st)`
+ * drops BOTH; while an exchange is in flight both stay until it returns.
+ * (b) So nothing can report a flow that ended earlier — and two ends are
+ * nobody's act but this machine's: the TIMEOUT and the CAP. Each is REPORTED
+ * ONCE through `onDone` ({ok:false, cancelled, error}) and then forgotten
+ * (`endByItself`); a caller's own cancel (cancel / a newer begin of the same
+ * id / stopAll) reports nothing, as before. (c) The cap's cause is its own
+ * name, `over-limit`: r3 called it `superseded`, the word consumers read as
+ * "a NEWER sign-in of this account stands" — a cap eviction mid-exchange was
+ * logged as that and said nowhere. (d) begin()'s OWN exits: a flow ended
+ * while begin() awaits its listener (a same-tick second begin, the cap,
+ * stopAll) never keeps the listener it was binding — in fixed mode that
+ * listener held the registered port for the process lifetime — and a
+ * `buildConsentUrl` that throws leaves no flow, no listener, no closure.
  */
 const http = require('http');
 const crypto = require('crypto');
@@ -43,6 +82,14 @@ const { LARK_CALLBACK_URL } = require('./integration-registry.js');
 
 /** gmail-sync's own budget for a consent flow, carried over. */
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000;
+/** verify r3: an ENDED flow (done / cancelled / timed out) leaves the map this long after its end — the
+ *  same 30 min the channels engine keeps its own pending record (PENDING_FLOW_TTL_MS). */
+const FLOW_RETIRE_MS = 30 * 60 * 1000;
+/** verify r3: the most consent flows that may RUN at once; the next begin() ends the oldest (`over-limit`). */
+const MAX_RUNNING_FLOWS = 32;
+/** verify r4: the causes of the two ends that are this machine's OWN act (each reported once through `onDone`). */
+const CAUSE_TIMEOUT = 'timeout';
+const CAUSE_OVER_LIMIT = 'over-limit';
 const PORT_BUSY_CODE = 'port-busy';
 const MODES = Object.freeze(['ephemeral', 'fixed']);
 
@@ -77,11 +124,49 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     st.listening = false;
     if (st.timer) { clearTimeout(st.timer); st.timer = null; }
   }
+  /** verify r3: the flow's END — what it held is dropped. verify r4: BOTH closures the adapter handed in go
+   *  together (they are created in one scope and share one context: a kept `onDone` kept the secret `exchange`
+   *  captured). Returns the `onDone` it dropped, for the ONE report an end may still owe. */
+  function forget(st) { const cb = st.onDone; st.exchange = null; st.onDone = null; if (st.endedAt == null) st.endedAt = now(); return cb; }
+  async function report(cb, r) {
+    if (typeof cb === 'function') { try { await cb(r); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
+  }
+  /** verify r4: what an end that is this machine's own act says (the flow's status and its one report). */
+  const endSentence = (st, why) => (why === CAUSE_TIMEOUT
+    ? `the ${st.label} sign-in was not finished in time — sign in again`
+    : `the ${st.label} sign-in was ended to keep the number of open sign-ins at ${MAX_RUNNING_FLOWS} (newer ones were started while it waited) — sign in again`);
+  /** verify r4: THE MACHINE'S OWN END (the timeout, the cap) — cancelled by name, REPORTED ONCE, forgotten. While
+   *  an exchange is in flight its own return reports (it consults `cancelled()` and refuses by name). */
+  function endByItself(flowId, why) {
+    const st = flows.get(flowId);
+    if (!st || st.done || st.cancelled) return false;
+    const inFlight = st.exchanging;
+    const cb = st.onDone;
+    cancel(flowId, why);
+    if (inFlight) return true;
+    st.error = endSentence(st, why);
+    report(cb, { ok: false, result: null, error: st.error, cancelled: why, flowId: st.flowId, id: st.id });
+    return true;
+  }
+  /** verify r3: ENDED flows leave the map after FLOW_RETIRE_MS (a dialog still polls status() meanwhile). */
+  function sweep() {
+    const t = now();
+    for (const [id, st] of flows) if ((st.done || st.cancelled) && st.endedAt != null && t - st.endedAt > FLOW_RETIRE_MS) { st.onDone = null; st.exchange = null; flows.delete(id); }
+  }
 
   /** Exchange ONCE. A second code (a replayed callback, or the loopback AND a
    *  paste-back of the same URL) is ignored: the first exchange is the flow. */
   async function finish(st, code) {
     if (st.done || st.exchanging) return;
+    // verify r3: a code landing on a flow that ENDED (cancelled / timed out / over the cap) is never exchanged —
+    // the vendor is not called for a consent nobody can keep. verify r4: its closures went at the end (both of
+    // them), so the landing is SAID on the flow (status() reads it by name) and in the log, not through `onDone`
+    if (st.cancelled) {
+      if (!st.error) st.error = `the ${st.label} sign-in was ${st.cancelled === CAUSE_TIMEOUT ? 'past its time limit' : st.cancelled} before its code arrived — sign in again`;
+      st.result = null; st.done = true; st.finishedAt = now(); forget(st);
+      log.warn && log.warn(`[oauth-loopback] ${st.id}: a code landed on a sign-in that had ended (${st.cancelled}) — not exchanged`);
+      return;
+    }
     st.exchanging = true;
     try {
       // verify r7 (channels lane R5): the exchange is handed `cancelled()` — a disconnect, a cancel, a newer begin()
@@ -103,8 +188,9 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       st.done = true;
       st.finishedAt = now();
       release(st);
+      const cb = forget(st);   // verify r3: the exchange has returned — its closure (the client secret) is dropped here; r4: `onDone` with it
       if (byId.get(st.id) === st.flowId) byId.delete(st.id);
-      if (typeof st.onDone === 'function') { try { await st.onDone({ ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id }); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
+      await report(cb, { ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id });
     }
   }
 
@@ -138,8 +224,18 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
+    sweep();
     // One flow per id at a time — the same rule gmail-sync's startAuth() has.
     if (byId.has(id)) cancel(byId.get(id), 'superseded');
+    // verify r3: at most MAX_RUNNING_FLOWS run at once — the oldest is ended BY NAME so the set of live
+    // listeners and held clients stays bounded whatever a caller does (a human never has 32 consents open).
+    // verify r4: its cause is `over-limit`, never `superseded` (no newer sign-in of ITS id exists), and it is reported
+    const running = [...flows.values()].filter((s) => !s.done && !s.cancelled).sort((a, b) => a.startedAt - b.startedAt);
+    while (running.length >= MAX_RUNNING_FLOWS) {
+      const old = running.shift();
+      endByItself(old.flowId, CAUSE_OVER_LIMIT);
+      log.warn && log.warn(`[oauth-loopback] ${old.id}: ended (${CAUSE_OVER_LIMIT}) — ${MAX_RUNNING_FLOWS} consent flows were already running; the oldest is ended so the set stays bounded`);
+    }
 
     const state = crypto.randomBytes(12).toString('hex');
     const flowId = crypto.randomBytes(8).toString('hex');
@@ -166,14 +262,20 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       } catch (e) { st.error = e.message; }
     });
 
+    // verify r4: begin()'s OWN exits. `unlist` = this flow leaves both maps (never a NEWER flow's `byId` entry);
+    // `bound` = the listener is the flow's only while the flow still runs — one ended while begin() awaited the
+    // bind (a same-tick second begin of its id, the cap, stopAll) closes the listener it was given at once
+    // (cancel() had no server to release yet: the listener outlived the flow, and in fixed mode held the port)
+    const unlist = () => { flows.delete(flowId); if (byId.get(id) === flowId) byId.delete(id); };
+    const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };
     if (mode === 'ephemeral') {
       try {
         await listen(srv, 0);
-        st.server = srv; st.listening = true;
         st.port = srv.address().port;
         st.redirectUri = `http://127.0.0.1:${st.port}`;
+        bound();
       } catch (e) {
-        flows.delete(flowId); byId.delete(id);
+        unlist();
         throw new OAuthFlowError('listen-failed', `could not bind an ephemeral loopback port: ${(e && e.code) || (e && e.message) || e}`);
       }
     } else {
@@ -182,7 +284,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       st.redirectUri = target.url;          // registered byte for byte — the same whether or not we hold the port
       try {
         await listen(srv, target.port);
-        st.server = srv; st.listening = true;
+        bound();
       } catch (e) {
         try { srv.close(); } catch {}
         if (e && e.code === 'EADDRINUSE') {
@@ -192,15 +294,20 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
           st.refusal = { code: PORT_BUSY_CODE, port: target.port, message: `another VibeSpace or tool is running a ${st.label} consent flow on port ${target.port}; finish or cancel it, or use paste-back (paste the redirect URL your browser lands on)` };
           log.warn && log.warn(`[oauth-loopback] ${id}: ${st.refusal.message}`);
         } else {
-          flows.delete(flowId); byId.delete(id);
+          unlist();
           throw new OAuthFlowError('listen-failed', `could not bind the fixed loopback port ${target.port}: ${(e && e.code) || (e && e.message) || e}`);
         }
       }
     }
 
-    st.consentUrl = String(buildConsentUrl({ redirectUri: st.redirectUri, state }));
-    st.timer = setTimeout(() => cancel(flowId, 'timeout'), timeoutMs);
-    if (st.timer.unref) st.timer.unref();
+    // verify r4: a consent URL that cannot be built leaves NOTHING — the flow had a listener and no timer
+    // (nothing would ever have ended it), so the port and both closures go here and the caller gets the throw
+    try { st.consentUrl = String(buildConsentUrl({ redirectUri: st.redirectUri, state })); }
+    catch (e) { st.cancelled = st.cancelled || 'failed'; release(st); forget(st); unlist(); throw e; }
+    if (!st.cancelled && !st.done) {
+      st.timer = setTimeout(() => endByItself(flowId, CAUSE_TIMEOUT), timeoutMs);   // verify r4: the timeout is SAID (reported once), then forgotten
+      if (st.timer.unref) st.timer.unref();
+    }
     return status(flowId);
   }
 
@@ -219,6 +326,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   }
 
   function status(flowId) {
+    sweep();
     const st = flows.get(flowId);
     if (!st) return null;
     return {
@@ -236,7 +344,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     const st = flows.get(flowId);
     if (!st) return null;
     const out = { ok: st.done && !st.error, result: st.result, error: st.error, cancelled: st.cancelled };
-    if (st.done || st.cancelled) flows.delete(flowId);
+    if (st.done || st.cancelled) { st.onDone = null; st.exchange = null; flows.delete(flowId); }
     return out;
   }
 
@@ -246,6 +354,10 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (st.done || st.cancelled) return false;
     st.cancelled = why;
     release(st);
+    // verify r3: the closure goes with the flow — unless an exchange is in flight, which consults `cancelled()`
+    // itself and drops the closure when it returns (⑥). verify r4: `onDone` goes WITH it (one scope, one context:
+    // kept, it kept the secret); the machine's own ends report first (`endByItself`)
+    if (!st.exchanging) forget(st);
     if (byId.get(st.id) === st.flowId) byId.delete(st.id);
     return true;
   }
@@ -253,7 +365,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   function stopAll() { for (const id of [...flows.keys()]) cancel(id, 'shutdown'); }
   const runningFor = (id) => (byId.has(id) ? status(byId.get(id)) : null);
 
-  return { begin, status, forwardCallback, take, cancel, stopAll, runningFor, FLOW_TIMEOUT_MS };
+  return { begin, status, forwardCallback, take, cancel, stopAll, runningFor, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS };
 }
 
-module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, FLOW_TIMEOUT_MS, PORT_BUSY_CODE, MODES };
+module.exports = { createOAuthLoopback, OAuthFlowError, fixedTarget, FLOW_TIMEOUT_MS, FLOW_RETIRE_MS, MAX_RUNNING_FLOWS, CAUSE_TIMEOUT, CAUSE_OVER_LIMIT, PORT_BUSY_CODE, MODES };

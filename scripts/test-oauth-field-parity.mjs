@@ -33,6 +33,21 @@
 //      design edit that adds a key reddens here) is drawn where it belongs
 //      AS BUILT and carried by BOTH dictionaries; a key built under another
 //      spelling says which and why; a deleted key is drawn by no channel file
+//   §9 FROM STORAGE (2.369.195, the mount → channel door, design §2.7): the
+//      OAuth client field lists each storage mount that lends its own client
+//      (`mount:<id>`, between the presets and Custom) on BOTH dialogs that
+//      begin a consent — Connect (each type's list read before it draws) and
+//      Re-authorize — read from the owner-only route, sent as `fromMount`
+//      ALONE (never beside a stale custom id / secret), with the note that
+//      the server copies the secret
+//   §10 THE SHARED RE-AUTHORIZE DIALOG'S OWN STOP (client-from-mount verify r5):
+//      the consent machine ends a sign-in 10 min after it began and SAYS so on
+//      the record (the watcher's `fail`), but the dialog's client-side stop
+//      fired at the same instant and only cleared the interval — the last 1.5 s
+//      tick had run before the frame landed, so the dialog kept "A … sign-in
+//      page opened" and a disabled button for ever. The stop waits PAST the
+//      machine's end, reads the watcher once more, says what it found (the
+//      fail, or the timeout sentence — zh + ja) and re-enables the button
 //
 // Every SHARED row is asserted on BOTH sides: a spelling the channel side
 // carries by importing the module (the renderer's own classes) is asserted
@@ -288,6 +303,10 @@ export const DESIGN_I18N = [
   { key: 'Custom App Secret', where: 'channels' },
   { key: 'Included groups (optional)', built: null, where: 'channels', why: 'Lark declares no include-groups option in r4 (src/channels/lark.js: brand only) — nothing draws it' },
   { key: 'Include query (Gmail search syntax)', built: 'Include query', where: 'channels', why: 'the adapter\'s declared option label (src/channels/gmail.js i18nKey); the syntax is in its help line' },
+  // §2.7 (2.369.195): a storage mount's own client, borrowed
+  { key: 'From storage: {name} (custom client {client}…)', where: 'channels' },
+  { key: 'From storage: {name} (custom client {client}…, {email})', where: 'channels' },
+  { key: 'The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page. The account then signs in under that client.', where: 'channels' },
 ];
 // 删除键: drawn by NO channel file (manage-agents keeps its own "Add account…" for AI accounts)
 export const DESIGN_I18N_DELETED = ['Add account…'];
@@ -427,6 +446,33 @@ export function census(texts) {
     }
   }
   for (const k of DESIGN_I18N_DELETED) out.push({ rule: `§8 deleted: "${k}" is drawn by no channel file`, ok: !CHANNEL_SIDE.some((f) => (texts[f] || '').includes(`t('${k}')`) || (texts[f] || '').includes(`tr('${k}')`)), why: 'a channel file draws it again' });
+
+  // §9 FROM STORAGE (2.369.195, design §2.7): the mount → channel door on BOTH dialogs that begin a consent
+  const dtext = dlg || '';
+  const fnBody = (head) => { const i = dtext.indexOf(head); if (i < 0) return ''; const j = dtext.indexOf('\nexport ', i + 10); return dtext.slice(i, j < 0 ? dtext.length : j); };
+  const specsC = (/function clientFieldSpecs\([\s\S]*?\n\}\n/.exec(dtext) || [''])[0];
+  const connectC9 = fnBody('export async function showConnectAccountDialog(');
+  const reauthC9 = fnBody('export async function showReauthAccountDialog(');
+  out.push({ rule: '§9 FROM STORAGE: the OAuth client field lists each lent storage client as `mount:<id>`, between the presets and Custom',
+    ok: /const mounts = spec\.mountClients \|\| \[\];/.test(specsC) && /for \(const m of mounts\) options\.push\(\[MOUNT_PREFIX \+ m\.mountId, mountOptionLabel\(m\)\]\);\s*\n\s*options\.push\(\['custom'/.test(specsC), why: 'clientFieldSpecs no longer lists the storage clients (or lists them after Custom)' });
+  out.push({ rule: '§9 FROM STORAGE: chosen, the note says the server copies the secret (a note row `when: isMount`)',
+    ok: /type: 'note', value: tr\('The server copies this storage mount’s client id and secret onto the account[^']*'\), when: isMount \}/.test(specsC), why: 'the note is gone or no longer follows the choice' });
+  out.push({ rule: '§9 FROM STORAGE: the Connect dialog reads EACH type\'s lent clients before it draws',
+    ok: /mountClientsOf\(k\.kind\)/.test(connectC9) && /mountClients: lent\[i\]/.test(connectC9), why: 'the Connect dialog no longer reads the list (its select would offer none)' });
+  out.push({ rule: '§9 FROM STORAGE: the Re-authorize dialog reads the account type\'s lent clients',
+    ok: /mountClients: await mountClientsOf\(a\.kind\)/.test(reauthC9), why: 'the Re-authorize dialog no longer reads the list' });
+  out.push({ rule: '§9 FROM STORAGE: the list comes from the owner-only route',
+    ok: dtext.includes('`/api/channels/oauth/mount-clients?kind=${enc(kind)}`'), why: 'the dialogs read another route' });
+  out.push({ rule: '§9 FROM STORAGE: a storage choice is sent as `fromMount` ALONE — the route body and the consent block (no stale custom id / secret beside it)',
+    ok: /if \(mountOf\(c\)\) return \{ fromMount: mountOf\(c\) \};/.test(dtext) && /fromMount: mountOf\(ctx\.inputs\[`client\$\{sfx\}`\]\.value\), clientId: undefined, clientSecret: undefined/.test(connectC9), why: 'a storage choice is sent another way' });
+  // §10 the shared re-authorize dialog's own stop (client-from-mount verify r5)
+  const reauthM = (/export function reauthDialog\(\{[\s\S]*?\n\}\n/.exec(mod || '') || [''])[0];
+  const stopM = (/setTimeout\(async \(\) => \{[\s\S]*?\}, 10 \* 60 \* 1000 \+ \d+\);/.exec(reauthM) || [''])[0];
+  const TIMEOUT_KEY = 'The sign-in was not finished in time — sign in again';
+  out.push({ rule: '§10 the re-authorize dialog\'s client stop fires AFTER the consent machine\'s 10 min, reads the watcher once more, says the fail or the timeout, re-enables the button',
+    ok: !!stopM && /stopPoll\(\);/.test(stopM) && /st = await statusOf\(\);/.test(stopM) && /if \(st\.token\) return finish\(st\.token\);/.test(stopM) && stopM.includes(`status.textContent = st.fail || tr('${TIMEOUT_KEY}');`) && /btn\.disabled = false;/.test(stopM) && !/setTimeout\(stopPoll, 10 \* 60 \* 1000\);/.test(reauthM),
+    why: 'the stop is the pre-r5 `setTimeout(stopPoll, 10 min)` (silent, the button stays disabled), or it no longer reads the watcher / says the timeout / re-enables' });
+  out.push({ rule: `§10 "${TIMEOUT_KEY}" — zh + ja`, ok: ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => (texts[f] || '').includes(`"${TIMEOUT_KEY}":`)), why: 'a dictionary lacks the key' });
   return out;
 }
 
@@ -507,6 +553,20 @@ if (isMain) {
   reddens('a design key loses its ja translation', '"Connect an account" — zh + ja', (t) => { t['src/lib/i18n-ja.js'] = t['src/lib/i18n-ja.js'].replace('"Connect an account":', '"Connect an account (x)":'); });
   reddens('a design key is renamed on the channel side only', '"Cannot remove "{name}"" — the channel side', (t) => { t[CHANNEL_DIALOGS] = D(t).split(`'Cannot remove "{name}"'`).join(`'Can not remove "{name}"'`); });
   reddens('the deleted "Add account…" is drawn by the panel again', 'deleted: "Add account…"', (t) => { t[CHANNELS] += "\nconst x = t('Add account…');\n"; });
+  // §9 FROM STORAGE
+  reddens('the client field stops listing the storage clients', '§9 FROM STORAGE: the OAuth client field lists', (t) => { t[CHANNEL_DIALOGS] = D(t).replace('  for (const m of mounts) options.push([MOUNT_PREFIX + m.mountId, mountOptionLabel(m)]);\n', ''); });
+  reddens('…or lists them after Custom', '§9 FROM STORAGE: the OAuth client field lists', (t) => { const a = '  for (const m of mounts) options.push([MOUNT_PREFIX + m.mountId, mountOptionLabel(m)]);\n'; const b = "  options.push(['custom', tr('Custom (own client id/secret)')]);\n"; t[CHANNEL_DIALOGS] = D(t).replace(a + b, b + a); });
+  reddens('the Connect dialog stops reading the list', '§9 FROM STORAGE: the Connect dialog', (t) => { t[CHANNEL_DIALOGS] = D(t).replace('found.map((k) => mountClientsOf(k.kind))', 'found.map(() => [])'); });
+  reddens('the Re-authorize dialog stops reading the list', '§9 FROM STORAGE: the Re-authorize dialog', (t) => { t[CHANNEL_DIALOGS] = D(t).replace('mountClients: await mountClientsOf(a.kind)', 'mountClients: []'); });
+  reddens('a storage choice is sent as a preset key', 'sent as `fromMount` ALONE', (t) => { t[CHANNEL_DIALOGS] = D(t).replace('if (mountOf(c)) return { fromMount: mountOf(c) };', 'if (mountOf(c)) return { clientPreset: c };'); });
+  reddens('the consent block lets a stale custom id ride beside the storage choice', 'sent as `fromMount` ALONE', (t) => { t[CHANNEL_DIALOGS] = D(t).replace(', clientId: undefined, clientSecret: undefined', ''); });
+  reddens('the note stops following the choice', '§9 FROM STORAGE: chosen, the note', (t) => { t[CHANNEL_DIALOGS] = D(t).replace('then signs in under that client.\'), when: isMount })', 'then signs in under that client.\') })'); });
+  reddens('a §2.7 key loses its zh translation', '"From storage: {name} (custom client {client}…)" — zh + ja', (t) => { t['src/lib/i18n-zh.js'] = t['src/lib/i18n-zh.js'].replace('"From storage: {name} (custom client {client}…)":', '"From storage (x)":'); });
+  // §10 the re-authorize dialog's stop
+  reddens('the dialog\'s stop goes back to the silent pre-r5 shape', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace(/setTimeout\(async \(\) => \{[\s\S]*?\}, 10 \* 60 \* 1000 \+ \d+\);/, 'setTimeout(stopPoll, 10 * 60 * 1000);'); });
+  reddens('…or fires at the machine\'s own instant', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace('}, 10 * 60 * 1000 + 5000);', '}, 10 * 60 * 1000);'); });
+  reddens('…or leaves the button disabled', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace("status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');\n        btn.disabled = false;", "status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');"); });
+  reddens('the timeout sentence loses its ja translation', '"The sign-in was not finished in time — sign in again" — zh + ja', (t) => { t['src/lib/i18n-ja.js'] = t['src/lib/i18n-ja.js'].replace('"The sign-in was not finished in time — sign in again":', '"The sign-in was not finished in time (x)":'); });
 
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);

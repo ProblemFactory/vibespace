@@ -108,9 +108,9 @@ const rosterHas = (title) => evaljs(`(async () => {
   const w = window.app.openChannel('fake-poll', 'fake-poll-ops');
   for (let i = 0; i < 40; i++) { if (w.content.querySelector('[data-channel-assign]')) break; await new Promise((r) => setTimeout(r, 250)); }
   w.content.querySelector('[data-channel-assign]').click();
-  for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-access-dialog .chan-access-row select')) break; await new Promise((r) => setTimeout(r, 250)); }
-  const sel = document.querySelector('#chan-access-dialog .chan-access-row select');
-  const opts = sel ? [...sel.options].map((o) => o.textContent) : [];
+  // channel-polish (2026-09-27): the roster is the Grant access… PICKER's rows (the ONE principal picker)
+  for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-access-dialog .pp-list')) break; await new Promise((r) => setTimeout(r, 250)); }
+  const opts = [...document.querySelectorAll('#chan-access-dialog .pp-row .pp-name')].map((o) => o.textContent);
   for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
   for (const x of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(x.id);
   return opts.some((o) => o.includes(${JSON.stringify(title)}));

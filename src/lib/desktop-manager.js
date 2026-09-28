@@ -12,6 +12,7 @@ export class DesktopManager {
     this._desktops = [];           // [{ id, name }]
     this._activeId = null;
     this._savedStates = new Map(); // desktopId → capturedState (cached layout for non-active desktops)
+    this._wireIds = new Map();     // desktopId → Set of window ids its LAST record on the wire listed (sent, applied or loaded) — the base a newer remote record is diffed against (inc-mukeyzpt-lpou)
     this._restoring = false;
 
     // Listen for desktop metadata updates from other clients
@@ -63,7 +64,7 @@ export class DesktopManager {
       // (pre-2.209.0 raw switchTo while staged persisted the stage's window
       // set under that key; caching it would lazy-replay slot-bounds copies)
       for (const [id, dState] of Object.entries(desktopsData)) {
-        if (id !== '__stage__' && dState.autoSave) this._savedStates.set(id, dState.autoSave);
+        if (id !== '__stage__' && dState.autoSave) { this._savedStates.set(id, dState.autoSave); this.noteWire(id, dState.autoSave); }
       }
 
       // Restore the active (first) desktop
@@ -184,6 +185,33 @@ export class DesktopManager {
         if (kept.length !== st.windows.length) st.windows = kept;
       }
     }
+  }
+
+  /** The record `desktopId` was last seen as ON THE WIRE (a save this client sent, a remote record it applied or
+   *  cached, the disk record it booted from): the window ids it listed. */
+  noteWire(desktopId, state) {
+    if (!desktopId || desktopId === '__stage__' || !state || !Array.isArray(state.windows)) return;
+    this._wireIds.set(desktopId, new Set(state.windows.map((w) => String(w.winId || w.id))));
+  }
+
+  /** A remote record for a desktop this client is NOT showing (inc-mukeyzpt-lpou, the parked second client). It
+   *  replaces the cached record (as before) — and a window this client still HOLDS there, hidden, that the
+   *  record's sender REMOVED (the last record on the wire listed it, this one does not: somebody closed it) is
+   *  closed here now. Before, the stale window waited in this client's DOM: the next switch showed it again and
+   *  this client's next save wrote it back to every other client. A window the wire never listed for that desktop
+   *  (moved or opened here, not yet sent) is this client's own change and stays; a window on show (the stage) is
+   *  never touched. The closes are not this user's (no held close, no save: `_restoring` around them). */
+  cacheRemoteState(desktopId, state) {
+    const base = this._wireIds.get(desktopId);
+    const now = new Set(((state && state.windows) || []).map((w) => String(w.winId || w.id)));
+    const gone = base ? [...this.app.wm.windows.values()].filter((w) => w._desktopId === desktopId && w._hiddenByDesktop && !w._onStage && w._openSpec && base.has(String(w.id)) && !now.has(String(w.id))) : [];
+    if (gone.length) {
+      const lm = this.app.layoutManager, was = lm._restoring;
+      lm._restoring = true;
+      try { for (const w of gone) if (this.app.wm.windows.has(w.id)) this.app.wm.closeWindow(w.id); } finally { lm._restoring = was; }
+    }
+    this._savedStates.set(desktopId, state);
+    this.noteWire(desktopId, state);
   }
 
   async switchTo(desktopId) {
@@ -411,6 +439,8 @@ export class DesktopManager {
   _broadcastDesktopState(desktopId, state) {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
     this.app.ws.send({ type: 'layout-sync', state, desktopId });
+    this.app.layoutManager?._releaseHeldCloses?.(desktopId); // this record carries every close made on that desktop (inc-mukeyzpt-lpou)
+    this.noteWire(desktopId, state);
   }
 
   // ── UI: Ubuntu-style desktop previews in taskbar ──

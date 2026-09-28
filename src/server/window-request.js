@@ -21,6 +21,7 @@
  * (file, 'deliver-ladder'); the reason literal below is what its reason table reads.
  */
 const R = require('../window-reach.js');
+const { liveForkPending } = require('../claude-lock-capture.js');   // verify r5: a pending fork's id is its parent's — never a delivery target
 
 /** Who the message is from, as the agent's card and the stash name it (a stored string — English, never t()). */
 const FROM_NAME = 'The user (Desktop apps)';
@@ -35,7 +36,8 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
   /**
    * `{handle, sessionId, note?, wake?, endHold?}` → `{ok, delivered:'woken'|'next-turn', why?, whyCode?, granted, endedHold, text}`
    * or a typed throw: not-found (no such window here), not_live (the session is gone), no_conversation (it has no
-   * conversation id yet — nothing to deliver into), bad-request (no delivery ladder on this instance).
+   * conversation id yet — nothing to deliver into), fork_pending (verify r6: a fork still carrying its parent's id —
+   * ask again in a moment), bad-request (no delivery ladder on this instance).
    */
   async function request({ handle, sessionId, note = '', wake = false, endHold = false } = {}) {
     const view = engine.reachOf(handle);
@@ -44,6 +46,10 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     if (!s || s.backend === 'shell') throw namedError('not_live', 'that agent session is not live any more — pick another one');
     const cid = s.backendSessionId || s.claudeSessionId || null;
     if (!cid) throw namedError('no_conversation', `${s.name || sessionId} has no conversation yet — say something to it first, then ask again`);
+    // verify r5 (channel-withdraw): a BORROWED id (a fork that has not announced its own conversation id) is not a
+    // place to deliver into — the wake (a billed turn) and the stash both landed on the PARENT's conversation while
+    // the grant went to the fork's window. Refused by name; the fork adopts its own id within seconds.
+    if (liveForkPending(s)) throw namedError('fork_pending', `${s.name || sessionId} is a fork that has not announced its own conversation id yet — ask again in a moment`);   // verify r6: its OWN code — `no_conversation`'s client words ("say something to it first") were the wrong advice for a fork
     if (!deliver || typeof deliver.stashFor !== 'function') throw namedError('bad-request', 'the delivery ladder is not wired on this instance');
     const name = s.name || s.webuiName || String(sessionId);
     // 1. the grant (the request exposes the window to the asked agent)
@@ -55,8 +61,9 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     // 3. the words (agent-facing English; the user's line quoted as a note)
     const mi = g.modeInfo || {};
     const text = R.requestText({ label: view.label, handle: view.handle, mode: mi.mode, resolved: mi.resolved, note });
-    const stash = () => { deliver.stashFor(cid, { source: 'window-request', kind: 'peer', fromName: FROM_NAME, text }); };
     const out = { ok: true, granted: !!(g.granted && g.granted.changed), endedHold, text, sessionId: String(sessionId), name };
+    // verify r5: the stash answers whether the entry is on disk — a memory-only queue is named on the result (and logged), never a silent "next-turn"
+    const stash = () => { const st = deliver.stashFor(cid, { source: 'window-request', kind: 'peer', fromName: FROM_NAME, text }); if (st && st.stored === false) { out.durable = false; out.durableWhy = st.why; log.warn?.(`[window] request: ${view.handle} → ${name} — ${st.why}`); } };
     if (!wake) { stash(); log.log?.(`[window] request: ${view.handle} → ${name} — rides its next turn`); return { ...out, delivered: 'next-turn' }; }
     const last = lastWake.get(cid) || 0;
     if (now() - last < WAKE_FLOOR_MS) {

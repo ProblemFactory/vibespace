@@ -352,7 +352,18 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
           else if (st.fail) { stopPoll(); status.textContent = st.fail; btn.disabled = false; }
         } catch {}
       }, 1500);
-      setTimeout(stopPoll, 10 * 60 * 1000);
+      // client-from-mount verify r5: the consent machine ends a sign-in 10 min after it began and SAYS so on the record
+      // (the watcher's `fail`), but this stop used to fire at the same instant and only clear the interval — the last
+      // 1.5 s tick had run before the frame landed, so the dialog kept "A … sign-in page opened" and a disabled button
+      // for ever. The stop now waits past the machine's own end, reads the watcher once more, and says what it found.
+      setTimeout(async () => {
+        stopPoll();
+        if (!status.isConnected || !btn.disabled) return;
+        let st = {}; try { st = await statusOf(); } catch {}
+        if (st.token) return finish(st.token);
+        status.textContent = st.fail || tr('The sign-in was not finished in time — sign in again');
+        btn.disabled = false;
+      }, 10 * 60 * 1000 + 5000);
     } catch (e) {
       status.textContent = e.message || tr('Failed to start authorization');
       btn.disabled = false;

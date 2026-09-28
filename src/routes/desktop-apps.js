@@ -105,6 +105,25 @@
  *                                                  → {delivered:'woken'|'next-turn', why?, whyCode?, granted, endedHold}
  *   POST   /api/desktop/apps  {…, share:{principals, mode}}   D2 "before launch": applied to the new window
  *
+ *   §7.9 OPEN WITH LIBREOFFICE (the owner's ruling 2026-09-27 ②; PURE src/office-open.js — the ONE verdict):
+ *   POST /api/desktop/apps  {…, file, fileHost?}   a DOCUMENT opened in LibreOffice: `file` = its absolute path on
+ *                                                  `fileHost` (default `host`); THE MACHINE RULE here, before any machine
+ *                                                  is asked — the app runs where the file is (`machine-mismatch` 409),
+ *                                                  `relative-path` / `not-office-file` / `not-office-app` 400; with no
+ *                                                  `appId` the file's own module row is filled in; the machine runs the
+ *                                                  verdict again with ITS catalog (`app-absent` 409 + `remedy`,
+ *                                                  `file-missing` 404)
+ *   GET  /api/desktop/open-with?host=&path=&app=[&peek=1]   the verdict for one file WITHOUT launching (the explorer's menu row;
+ *                                                  `peek=1`: a paired machine not connected right now answers `unchecked` — a menu never connects):
+ *                                                  `{ok, catalogId, module, label}` | `{ok:false, code, error, remedy?}`
+ *                                                  — answered 200 either way (it is a question), the machine's catalog
+ *                                                  read through the keeper (`host-unreachable` when it does not answer)
+ *   GET  /api/desktop/install-plan?host=&what=     `what` = xpra (default) | a LibreOffice install (its catalog id)
+ *   POST /api/desktop/install {host, what}         the SAME streamed install as install-xpra for any `what` (one install
+ *                                                  slot per machine); a LibreOffice install ends `{done, what, available}`
+ *                                                  only when the machine's catalog now serves the row, else ONE
+ *                                                  `still-absent` error line by name
+ *
  * `host` (lane C2): GET /api/desktop/apps and the launch take `host` (query /
  * body) and run on THAT machine through src/server/desktop-access.js — this
  * machine in-process, a paired machine through the `desktop-serve` agentd op,
@@ -115,7 +134,8 @@
  * 200-with-nothing would be a silent failure of a user action.
  */
 const express = require('express');
-const { streamKindOf, scaleChoiceVerdict } = require('../desktop-apps');
+const { streamKindOf, scaleChoiceVerdict, INSTALL_WHATS } = require('../desktop-apps');
+const { openWithVerdict, installSpecFor } = require('../office-open'); // §7.9: the ONE open-with verdict
 const router = express.Router();
 
 let ctx = null;
@@ -134,17 +154,19 @@ function hostParam(req, res) {
 }
 /** The launch body without the routing field (the machine is not part of the app's request) — nor the share (lane E:
  *  the user's exposure choice is applied by the window-targets engine once the window exists, never by the keeper). */
-function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; return b; }
+function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; delete b.fileHost; return b; }
 /** Lane E: a share is the USER's act — an agent's session / job token is refused (the reset-credit / inbox-reply rule). */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
 function fail(res, e) {
   const code = e?.code || null;
-  const status = code === 'not-found' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host' ? 400
+  const status = code === 'not-found' || code === 'file-missing' ? 404 : code === 'bad-request' || code === 'exec-not-found' || code === 'cwd-missing' || code === 'needs-wayland' || code === 'bad-url' || code === 'not-a-browser' || code === 'automation-flag' || code === 'profile-not-owned' || code === 'profile-is-users' || code === 'unsupported-host'
+      || code === 'relative-path' || code === 'not-office-file' || code === 'not-office-app' ? 400
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
-      || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'wake_paced' ? 409
+      || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
+      || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' ? 409
       : code === 'agent_forbidden' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
-      : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' ? 503 : code === 'install_timeout' ? 504 : 500;
-  res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}) });
+      : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
+  res.status(status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}) });
 }
 const ID_RE = /^[A-Za-z0-9._-]{1,80}$/;
 
@@ -158,6 +180,17 @@ router.post('/api/desktop/apps', async (req, res) => {
   // predates the field would drop it silently; a bad value is the person's request refused by name, on every machine
   const sv = scaleChoiceVerdict(req.body);
   if (!sv.ok) return fail(res, { code: sv.code, message: sv.error });
+  // §7.9: a DOCUMENT — THE MACHINE RULE before any machine is asked (the app runs where the file is); the file's own
+  // module row is filled in when the request names none (the machine runs the verdict again with its catalog)
+  let fill = null;
+  if (req.body && req.body.file != null) {
+    const fh = req.body.fileHost == null || req.body.fileHost === '' ? host : String(req.body.fileHost);
+    if (!LOCAL.has(fh) && !HOST_RE.test(fh)) return fail(res, { code: 'bad-request', message: `bad fileHost ${JSON.stringify(fh.slice(0, 40))}` });
+    const asked = req.body.appId != null ? String(req.body.appId) : req.body.exec != null ? { id: null, label: String(req.body.exec).slice(0, 80) } : null;
+    const v = openWithVerdict({ row: asked, file: req.body.file, machine: { hostId: host, fileHost: LOCAL.has(fh) ? 'local' : fh, registry: null } });
+    if (!v.ok) return fail(res, { code: v.code, message: v.error, remedy: v.remedy });
+    if (asked == null) fill = v.catalogId;
+  }
   // lane E (D2 "before launch"): the dialog's share rides the launch — validated BEFORE anything starts, human-only,
   // this machine only (a paired machine's window is no agent target), applied once the window exists
   const share = req.body && req.body.share != null ? req.body.share : null;
@@ -169,7 +202,8 @@ router.post('/api/desktop/apps', async (req, res) => {
     if (host !== 'local' && v.share && v.share.principals.length) return fail(res, { code: 'share_local_only', message: 'a window on another machine cannot be shared with an agent — agents address this machine\'s windows only' });
   }
   try {
-    const r = host === 'local' ? await ctx.keeper.launch(bodyOf(req)) : await ctx.keeper.launch(bodyOf(req), { host });
+    const lb = fill ? { ...bodyOf(req), appId: fill } : bodyOf(req);
+    const r = host === 'local' ? await ctx.keeper.launch(lb) : await ctx.keeper.launch(lb, { host });
     let reach = null;
     if (share != null && host === 'local' && ctx.windowEngine && typeof ctx.windowEngine.shareAtLaunch === 'function' && r && r.id) {
       try { reach = ctx.windowEngine.shareAtLaunch(r.id, share); } catch (e) { return res.json({ ...r, reach: null, reachError: { error: String(e.message || e), code: e.code || null } }); } // the app runs; the share's failure is said, never silent
@@ -184,10 +218,16 @@ router.get('/api/desktop/machines', async (req, res) => {
 router.get('/api/desktop/install-plan', async (req, res) => {
   const host = hostParam(req, res); if (!host) return;
   if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
-  try { res.json(await ctx.access.installPlan(host)); } catch (e) { fail(res, e); }
+  // §7.9: `what` = which install (absent = xpra, the call exactly as before); a closed set — anything else 400 by name
+  const what = req.query.what == null || req.query.what === '' ? null : String(req.query.what);
+  if (what !== null && !INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
+  try { res.json(what === null ? await ctx.access.installPlan(host) : await ctx.access.installPlan(host, what)); } catch (e) { fail(res, e); }
 });
-router.post('/api/desktop/install-xpra', async (req, res) => {
-  const host = hostParam(req, res); if (!host) return;
+/** THE STREAMED INSTALL (lane C2; §7.9 shares it for every `what`): the machine's slot asked BEFORE the stream starts
+ *  (a busy machine answers 409), then NDJSON — `{reattached, pid, since}` first when a live install there was
+ *  re-attached (verify r2 F3 + F4), `{log}` lines, then ONE `{done, …}` (from `doneOf(r)`, which may throw a coded
+ *  refusal) or ONE `{error, code, plan?}`. */
+async function streamInstall(req, res, host, run, doneOf) {
   if (!ctx.access) return fail(res, { code: 'host_unavailable', message: 'the desktop access layer is not wired on this instance' });
   // ONE install per machine — the access layer owns the slot (it is held past a timed-out run until the child is
   // gone, which a per-request Set here could not see); asked BEFORE the stream starts so a busy machine answers 409
@@ -201,14 +241,59 @@ router.post('/api/desktop/install-xpra', async (req, res) => {
     // a live install on that machine (a restarted hub, another tab's run) is RE-ATTACHED, never started twice — the
     // dialog says so before its log replays from the start (verify r2 F3 + F4)
     const onReattach = (o) => line({ reattached: true, pid: o && o.pid, since: o && o.since });
-    const r = await ctx.access.installXpra(host, { onData, onReattach });
-    if (carry) line({ log: carry });
-    line({ done: true, installed: r.after && r.after.xpra, source: r.plan.source, hostId: r.hostId, reattached: !!r.reattached });
-    try { ctx.keeper.facts?.({ fresh: true })?.catch?.(() => { }); } catch { /* the local ladder is re-read on the next list */ }
+    const r = await run({ onData, onReattach });
+    if (carry) { line({ log: carry }); carry = ''; }
+    line(await doneOf(r));
   } catch (e) {
     if (carry) line({ log: carry });
     line({ error: String(e?.message || e), code: e?.code || 'install_failed', ...(e && e.plan ? { plan: e.plan } : {}) });
   } finally { try { res.end(); } catch { /* gone */ } }
+}
+const xpraDone = (r) => {
+  const out = { done: true, installed: r.after && r.after.xpra, source: r.plan.source, hostId: r.hostId, reattached: !!r.reattached };
+  try { ctx.keeper.facts?.({ fresh: true })?.catch?.(() => { }); } catch { /* the local ladder is re-read on the next list */ }
+  return out;
+};
+router.post('/api/desktop/install-xpra', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, o), xpraDone);
+});
+/** §7.9: after a LibreOffice install the MACHINE's catalog is asked again (its LibreOffice facts re-read at once —
+ *  `facts {fresh}`) and the install counts as done only when it now serves the row; otherwise `still-absent` by name
+ *  (a re-attached install was another package's, or apt put LibreOffice somewhere the machine cannot see). */
+const officeDone = (host, what) => async (r) => {
+  const spec = installSpecFor(what);
+  try { if (host === 'local') await ctx.keeper.facts?.({ fresh: true }); else await ctx.access.call(host, 'facts', { fresh: true }); } catch { /* the list below answers or throws */ }
+  const l = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host });
+  const row = ((l && l.registry) || []).find((x) => x && x.id === what);
+  if (!row || !row.available) { const e = new Error(`the install finished${r.reattached ? ' (it was an install already running there)' : ''}, but ${spec ? spec.label : what} is still not available on ${host === 'local' ? 'this machine' : host}${row && row.reason ? `: ${row.reason}` : ''} — check again`); e.code = 'still-absent'; e.plan = r.plan; throw e; }
+  return { done: true, what, available: true, label: spec ? spec.label : what, source: r.plan.source, hostId: r.hostId, reattached: !!r.reattached };
+};
+router.post('/api/desktop/install', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  const what = req.body && req.body.what != null && req.body.what !== '' ? String(req.body.what) : 'xpra';
+  if (!INSTALL_WHATS.includes(what)) return fail(res, { code: 'bad-request', message: `unknown install ${JSON.stringify(what.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` });
+  if (what === 'xpra') return streamInstall(req, res, host, (o) => ctx.access.installXpra(host, o), xpraDone);
+  return streamInstall(req, res, host, (o) => ctx.access.installPackage(host, { ...o, what }), officeDone(host, what));
+});
+/** §7.9: the open-with verdict for ONE file without launching — the explorer's menu row asks it (answered 200 either way:
+ *  it is a question). The file rule first (no machine is asked about a refused path), then the machine's catalog. */
+router.get('/api/desktop/open-with', async (req, res) => {
+  const host = hostParam(req, res); if (!host) return;
+  const file = req.query.path == null ? '' : String(req.query.path);
+  const app = req.query.app == null || req.query.app === '' ? null : String(req.query.app);
+  const pre = openWithVerdict({ row: app, file, machine: { hostId: host, fileHost: host, registry: null } });
+  if (!pre.ok) return res.json({ ...pre, host });
+  // `peek=1` (the explorer's menu): a paired machine that is not connected right now is NOT connected for a menu — the
+  // answer says the machine was not asked (`unchecked`), the click on the row connects
+  if (req.query.peek === '1' && host !== 'local' && ctx.access && typeof ctx.access.connectedNow === 'function' && !ctx.access.connectedNow(host)) return res.json({ ...pre, host, unchecked: true });
+  let registry = null, reachable = true, why = null;
+  try { const l = host === 'local' ? await ctx.keeper.list() : await ctx.keeper.list({ host }); registry = (l && l.registry) || []; }
+  catch (e) {
+    if (e && e.code === 'host_needs_daemon') return res.json({ ok: false, code: 'host_needs_daemon', error: String(e.message || e), host });
+    reachable = false; why = String((e && e.message) || e);
+  }
+  res.json({ ...openWithVerdict({ row: app, file, machine: { hostId: host, fileHost: host, registry, reachable, why } }), host });
 });
 router.get('/api/desktop/apps/:id', (req, res) => {
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });

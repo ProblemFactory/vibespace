@@ -37,6 +37,14 @@
 //      (GET /api/desktop/apps?host=), the launch carries `host`. A machine without xpra offers
 //      "Install xpra on <machine>…": the PLAN first (source, every command), then the run with its log streamed into
 //      the dialog; no passwordless sudo ⇒ the commands to copy, said by name.
+//   8. OPEN WITH LIBREOFFICE (§7.9, the owner's ruling 2026-09-27 ②) — the LibreOffice rows (Writer / Calc / Impress /
+//      the Start Center) are catalog rows like any; a dimmed one carries its own "Install …" beside it (the plan first,
+//      the SAME install dialog as xpra's, generalised: `showInstallDialog(m, {what})`). FILE MODE (`showLaunchDialog(app,
+//      {file, refusal})` — src/lib/open-with.js opens it when a document could not be opened straight away): the
+//      intro names the document, the machine picker is pinned to the machine that HOLDS the file (every other one
+//      greyed with the reason in words — the PURE verdict's `machine-mismatch`), the catalog shows the document's own
+//      LibreOffice row (a click opens it there), an absent one says so in one plain sentence with "Install
+//      LibreOffice on <machine>…" beside it; browsers and "Advanced" are hidden (a document is not a command).
 //   7. SHARE WITH AGENTS (desktop lane E, D2 "before launch" — src/lib/window-share.js `mountLaunchShareRow`): under
 //      the machine picker, a summary button + popover picker (live agent sessions, Task Groups, the mode Auto /
 //      Accessibility tree / Pixels); every window is hidden from agents unless shared; the choice rides the launch as
@@ -67,6 +75,7 @@ import { validateBrowserUrl } from '../desktop-apps.js';
 import { SCALE_PREF_KEY, scaleKeyOf, scaleChoiceOf, setScaleChoice, launchScaleChoice, scaleDefaultMenuModel } from './desktop-app-scale.js';
 import { wireAppPrefs, appPrefs, appPrefsReady, onAppPrefs, saveAppPrefs } from './desktop-app-prefs.js';
 import { mountLaunchShareRow, launchKeyOf } from './window-share.js';
+import { OFFICE_MODULES, installSpecFor } from '../office-open.js'; // §7.9: the LibreOffice table (PURE)
 
 export const COMMAND_ID = 'desktopApps.open';
 const RECENTS_KEY = 'desktopAppRecents';
@@ -75,7 +84,9 @@ const RECENTS_MAX = 8;
 const APPS_ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="10" rx="1"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/></svg>';
 // The card icon by registry CATEGORY (src/desktop-apps.js DEFAULT_REGISTRY
 // rows carry one) — all from icons.js, SVG only, never emoji.
-const CATEGORY_ICONS = Object.freeze({ terminal: UI_ICONS.terminal, editor: UI_ICONS.pencil, browser: FILE_ICONS.web, utility: UI_ICONS.wrench });
+const CATEGORY_ICONS = Object.freeze({ terminal: UI_ICONS.terminal, editor: UI_ICONS.pencil, browser: FILE_ICONS.web, utility: UI_ICONS.wrench, office: FILE_ICONS.word });
+// §7.9: a LibreOffice row's card by its module — the explorer's own document glyphs
+const OFFICE_ICONS = Object.freeze({ writer: FILE_ICONS.word, calc: FILE_ICONS.sheet, impress: FILE_ICONS.slides, any: FILE_ICONS.word });
 
 /** The launching client's devicePixelRatio for POST /api/desktop/apps (`dpr`, the route accepts 1..3):
  *  a zoomed-out page (< 1) launches at 1, anything above 3 at 3. */
@@ -121,6 +132,13 @@ export function browserReasonShort(code) {
   return null;
 }
 
+/** §7.9: the SHORT, translated reason a dimmed LibreOffice card shows (by the keeper's code — the machine's sentence, naming
+ *  the missing package, stays the card's tooltip, and "Install…" rides beside it). null ⇒ the card falls back to the sentence. */
+export function officeReasonShort(code) {
+  if (code === 'app-absent') return t('not installed');
+  return null;
+}
+
 /** The launch body of a browser card (PURE — the suite drives it): `{appId}` plus the typed URL when there is one
  *  (refused by name when it is not http/https — `{error}`) and `keepProfile` only when chosen. */
 export function browserLaunchBody(row, { url = '', keepProfile = false } = {}) {
@@ -149,6 +167,8 @@ export function availabilityText(av, machine = null) {
 
 /** lane C2: a machine picker row's name ("This machine" for the hub itself — a DISPLAY string, never a spawn input). */
 export function machineName(m) { return !m || !m.hostId || m.hostId === 'local' ? t('This machine') : String(m.label || m.hostId); }
+/** §7.9: a machine's name INSIDE a sentence ("… is not installed on this machine" — never a capitalised "This machine"). */
+export function machineInSentence(m) { return !m || !m.hostId || m.hostId === 'local' ? t('this machine') : String(m.label || m.hostId); }
 /** lane C2: why a machine row is greyed (or what choosing it does), by the PURE verdict's code. '' = nothing to say. */
 export function machineWhyText(code) {
   if (code === 'offline') return t('offline');
@@ -169,8 +189,13 @@ export function installOfferFor(av, m) {
   if (!av || (m && m.code === 'no_x11')) return false;
   return !(av.xpra && av.xpra.version);
 }
-/** lane C2: the install dialog's words for a plan the machine cannot run, by code. */
-export function installRefusalText(code) {
+/** lane C2: the install dialog's words for a plan the machine cannot run, by code. §7.9: `what` = the install (xpra by
+ *  default — its words unchanged; a LibreOffice install says its own words where they differ). */
+export function installRefusalText(code, what = 'xpra') {
+  if (what !== 'xpra') {
+    if (code === 'no_apt') return t('This Linux has no apt-get — install LibreOffice with its own package manager.');
+    if (code === 'still-absent') return t('The install finished, but LibreOffice is still not found on this machine — check again.');
+  }
   if (code === 'no_x11') return t('This machine runs macOS or Windows — it has no X11 server, so desktop apps cannot run there.');
   if (code === 'no_apt') return t('This Linux has no apt-get — install xpra 6.x by hand from xpra.org.');
   if (code === 'no_repo') return t('Its package sources offer only an old xpra and xpra.org publishes nothing for this release — install xpra 6.x by hand.');
@@ -184,10 +209,31 @@ export function installRefusalText(code) {
 }
 
 /** The SVG for a catalog card, by the row's category (falls back to the
- *  window glyph). PURE — the suite pins that every answer is an SVG. */
-export function cardIconFor(category) {
+ *  window glyph); §7.9: a LibreOffice row by its module. PURE — the suite pins that every answer is an SVG. */
+export function cardIconFor(category, office = null) {
+  if (office && OFFICE_ICONS[office]) return OFFICE_ICONS[office];
   return CATEGORY_ICONS[String(category || '')] || APPS_ICON;
 }
+
+/** §7.9: THE WORDS for every open-with refusal CODE (src/office-open.js openWithVerdict + the machine's launch) — the
+ *  explorer's menu row, the door's toast and the launch dialog's file mode all say these. `app` / `machine` / `file`
+ *  are display strings (a product label, a host's name, a basename) that only reach textContent. '' = no words of
+ *  our own (the caller falls back to the server's sentence). */
+export function openWithRefusalText(code, { app = 'LibreOffice', machine = '', file = '' } = {}) {
+  const m = machine || t('this machine');
+  if (code === 'app-absent') return t('{app} is not installed on {machine}', { app, machine: m });
+  if (code === 'machine-mismatch') return t('{file} is on {machine} — LibreOffice opens it there, on the machine that holds the file', { file, machine: m });
+  if (code === 'host-unreachable' || code === 'host_unavailable') return t('{machine} is not answering — try again once it is back', { machine: m });
+  if (code === 'host_needs_daemon') return t('The VibeSpace agent on {machine} is too old to open files in LibreOffice — reconnect the machine to upgrade it', { machine: m });
+  if (code === 'not-office-file') return t('{file} is not a document LibreOffice opens', { file });
+  if (code === 'not-office-app') return t('That app does not open documents — LibreOffice does');
+  if (code === 'relative-path') return t('This file has no absolute path on its machine — open it from the file explorer');
+  if (code === 'file-missing') return t('{file} is no longer there on {machine}', { file, machine: m });
+  if (code === 'still-absent') return t('The install finished, but {app} is still not available on {machine} — check again', { app, machine: m });
+  return '';
+}
+/** §7.9: the install offer's words — the owner's own phrase, one per machine. */
+export const officeInstallLabel = (machine) => t('Install LibreOffice on {machine}…', { machine: machine || t('this machine') });
 
 /** Is the "Advanced" disclosure open at dialog open? PURE: the persisted
  *  preference wins, and an EMPTY catalog forces it open (there is nothing
@@ -244,10 +290,77 @@ export function installDesktopAppLauncher(app) {
   app.ws.onStateChange?.((connected) => { if (connected && !app._desktopAppsAvailable) probe(); });
 }
 
+// ── lane C2: the INSTALL RUNG — the plan first, then the run with its log (never silent) ──
+/** §7.9: lifted out of the dialog and generalised by `what` — 'xpra' (the display rung; every word and route exactly as
+ *  before) or a LibreOffice install by its catalog id (the plan from `GET /api/desktop/install-plan?what=`, the run
+ *  streamed from `POST /api/desktop/install {host, what}`, which answers done only once the machine serves the row). */
+export async function showInstallDialog(m, { what = 'xpra', onDone = null } = {}) {
+  const xp = what === 'xpra';
+  const spec = xp ? null : installSpecFor(what);
+  const appLabel = spec ? spec.label : 'LibreOffice';
+  const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
+  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: xp ? t('Install xpra on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
+  ib.classList.add('desktop-install-body');
+  const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
+  const pre = document.createElement('pre'); pre.className = 'desktop-install-pre'; pre.style.display = 'none';
+  const log = document.createElement('pre'); log.className = 'desktop-install-pre desktop-install-log'; log.style.display = 'none';
+  const actions = document.createElement('div'); actions.className = 'desktop-install-actions';
+  const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'file-tool-btn'; copyBtn.style.cssText = 'width:auto;padding:0 10px'; copyBtn.textContent = t('Copy commands'); copyBtn.style.display = 'none';
+  const goBtn = document.createElement('button'); goBtn.type = 'button'; goBtn.className = 'btn-create'; goBtn.textContent = t('Install'); goBtn.style.display = 'none';
+  actions.append(copyBtn, goBtn);
+  ib.append(note, pre, actions, log);
+  const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
+  const r = await fetchJson(`/api/desktop/install-plan${q}${xp ? '' : `${q ? '&' : '?'}what=${encodeURIComponent(what)}`}`);
+  if (!r || r.error) { note.textContent = (r && r.error) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
+  const plan = r.plan || {};
+  if (!plan.ok) { note.textContent = installRefusalText(plan.code, what) || plan.error || ''; note.classList.add('is-bad'); return; }
+  pre.textContent = plan.commands.join('\n'); pre.style.display = '';
+  copyBtn.style.display = '';
+  copyBtn.onclick = async () => { const ok = await copyText(plan.commands.join('\n')); showToast(ok === false ? t('Could not copy — select the commands and copy them') : t('Commands copied'), ok === false ? { type: 'error' } : undefined); };
+  const src = plan.source === 'xpra.org' ? t('from xpra.org (xpra {major}.x, pinned) — the package sources on {machine} offer only {apt}', { major: '6', machine: name, apt: plan.aptXpra || t('no xpra') }) : t('from the package sources on {machine}', { machine: name });
+  // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
+  const running = !!(r.facts && r.facts.installing);
+  if (!plan.canRun && !running) { note.textContent = installRefusalText('no_sudo', what); note.classList.add('is-bad'); return; }
+  note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
+  if (running) goBtn.textContent = t('Follow the install');
+  goBtn.style.display = '';
+  goBtn.onclick = async () => {
+    goBtn.disabled = true; copyBtn.disabled = true;
+    log.style.display = ''; log.textContent = '';
+    note.textContent = t('Installing on {machine}…', { machine: name }); note.classList.remove('is-bad');
+    let res;
+    try { res = await fetch(xp ? '/api/desktop/install-xpra' : '/api/desktop/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(xp ? { host: m.hostId } : { host: m.hostId, what }) }); }
+    catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
+    if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && (installRefusalText(j.code, what) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n'); buf = parts.pop();
+      for (const p of parts) {
+        if (!p.trim()) continue;
+        let o; try { o = JSON.parse(p); } catch { continue; }
+        if (o.reattached && !o.done) { note.textContent = t('Still installing on {machine} — re-attached. Its log so far follows.', { machine: name }); note.classList.remove('is-bad'); }
+        if (o.log != null) { log.textContent += o.log + '\n'; log.scrollTop = log.scrollHeight; }
+        if (o.done || o.error) end = o;
+      }
+    }
+    if (end && end.done && xp) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }
+    else if (end && end.done) { note.textContent = t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name }); showToast(t('{app} is installed on {machine}', { app: end.label || appLabel, machine: name })); onDone?.(); }
+    else { note.textContent = (end && (installRefusalText(end.code, what) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(xp ? t('The xpra install on {machine} failed', { machine: name }) : t('The LibreOffice install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
+  };
+  void iclose;
+}
+
 const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) }).catch(() => {});
 
-export async function showLaunchDialog(app) {
-  const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: t('Desktop apps'), dialogClass: 'desktop-launch', escapeToClose: true });
+/** `opts.file` (§7.9, FILE MODE) = `{ path, host, module, label, hostLabel? }` — the document src/lib/open-with.js could not open
+ *  straight away (`opts.refusal` = `{code, error}` — the server's answer, said in words at the top). */
+export async function showLaunchDialog(app, opts = {}) {
+  const doc = opts && opts.file && typeof opts.file === 'object' && opts.file.path ? opts.file : null;
+  const refusal = doc && opts.refusal && opts.refusal.code ? opts.refusal : null;
+  const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: doc ? t('Open with LibreOffice') : t('Desktop apps'), dialogClass: 'desktop-launch', escapeToClose: true });
   body.innerHTML = `
     <p class="desktop-launch-intro">${escHtml(t('Opens a graphical program from this machine in a VibeSpace window you drive with your mouse and keyboard — agents cannot see it unless you share it. Click an application below to open it, or use “Advanced” to run any command.'))}</p>
     <div class="desktop-launch-machines" role="group" aria-label="${escHtml(t('Machine'))}"><span class="desktop-launch-machines-label">${escHtml(t('Run on'))}</span></div>
@@ -298,7 +411,7 @@ export async function showLaunchDialog(app) {
   const browsersSec = $('.desktop-launch-browsers-sec'), browsersEl = $('.desktop-launch-browsers'), urlIn = $('.desktop-launch-url'), keepIn = $('.desktop-launch-keep-profile');
   const runSec = $('.desktop-launch-running-sec'), countEl = $('.desktop-launch-count');
   const machinesEl = $('.desktop-launch-machines'), installEl = $('.desktop-launch-install');
-  let host = 'local';       // lane C2: the machine the catalog + a launch are for
+  let host = doc && doc.host ? String(doc.host) : 'local'; // lane C2: the machine the catalog + a launch are for (§7.9: a document's own machine)
   let machines = [];        // GET /api/desktop/machines (the PURE picker verdicts)
   let listError = null;     // { code, error } when the chosen machine's list failed
   const machineOf = (id) => machines.find((m) => m.hostId === id) || { hostId: id, label: id };
@@ -306,6 +419,19 @@ export async function showLaunchDialog(app) {
   const execIn = $('.desktop-launch-exec'), argsIn = $('.desktop-launch-args'), cwdIn = $('.desktop-launch-cwd'), runBtn = $('.desktop-launch-run');
   setupDirAutocomplete(cwdIn, $('.autocomplete-dropdown'));
 
+  // §7.9 FILE MODE: the intro names the document; browsers + "Advanced" are not for a document (a document is not a command)
+  if (doc) {
+    const intro = $('.desktop-launch-intro');
+    if (intro) intro.textContent = t('Opens {file} in LibreOffice in a VibeSpace window, on the machine that holds it — you edit it there, and Save writes it back in place.', { file: doc.label || doc.path });
+    const note = document.createElement('p'); note.className = 'desktop-launch-file-note';
+    const said = refusal && refusal.code !== 'app-absent' ? (openWithRefusalText(refusal.code, { file: doc.label, machine: doc.hostLabel || null }) || refusal.error || '') : '';
+    note.textContent = said; note.style.display = said ? '' : 'none';
+    intro?.after(note);
+    $('.desktop-launch-browsers-sec').style.display = 'none';
+    $('.desktop-launch-adv').style.display = 'none';
+    $('.desktop-launch-desk-sec').style.display = 'none'; // agents on the real desktop: not this dialog's question
+  }
+  const docMachineName = () => (doc ? (doc.hostLabel || machineInSentence(machineOf(doc.host || 'local'))) : '');
   let data = null;
   let recents = [];
   let advancedOpen = false;
@@ -392,12 +518,15 @@ export async function showLaunchDialog(app) {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'desktop-launch-machine';
       b.dataset.host = m.hostId;
       b.setAttribute('aria-pressed', m.hostId === host ? 'true' : 'false');
-      const why = machineWhyText(m.code);
+      // §7.9 FILE MODE: the app runs WHERE THE FILE IS — every other machine greyed with the reason in words (the PURE
+      // verdict's `machine-mismatch`), the file's own machine the one choice
+      const otherThanFile = !!doc && m.hostId !== (doc.host || 'local');
+      const why = otherThanFile ? t('the file is on {machine}', { machine: docMachineName() }) : machineWhyText(m.code);
       const nameEl = document.createElement('span'); nameEl.textContent = machineName(m); // a host's name is peer-controlled text
       b.appendChild(nameEl);
-      if (why && m.code !== 'ready') { const w = document.createElement('span'); w.className = 'desktop-launch-machine-why'; w.textContent = why; b.appendChild(w); }
-      b.disabled = !m.selectable;
-      b.title = m.selectable ? machineName(m) : `${machineName(m)} — ${why}`;
+      if (why && (otherThanFile || m.code !== 'ready')) { const w = document.createElement('span'); w.className = 'desktop-launch-machine-why'; w.textContent = why; b.appendChild(w); }
+      b.disabled = otherThanFile || !m.selectable;
+      b.title = !b.disabled ? machineName(m) : `${machineName(m)} — ${why}`;
       b.onclick = () => { if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); refresh(); };
       machinesEl.appendChild(b);
     }
@@ -411,64 +540,22 @@ export async function showLaunchDialog(app) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'file-tool-btn desktop-launch-install-btn';
     b.textContent = t('Install xpra on {machine}…', { machine: machineName(m) });
     b.title = t('Shows the install plan first — nothing runs until you confirm');
-    b.onclick = () => showInstallDialog(m, () => { if (overlay.isConnected) refresh(); });
+    b.onclick = () => showInstallDialog(m, { onDone: () => { if (overlay.isConnected) refresh(); } });
     installEl.appendChild(b);
   };
-  const render = () => {
-    const mName = host === 'local' ? null : machineName(machineOf(host));
-    availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
-    availEl.classList.toggle('desktop-launch-avail-bad', !!listError || !!(data && data.availability && !data.availability.backend));
-    renderInstall();
-    const dead = !!listError || !data?.availability?.backend;
-    const scales = !dead && data?.availability?.stream === 'xpra'; // lane D: only a rung that scales apps offers a default scale
+  // ── running ── (§7.9 verify: its OWN renderer, rebuilt only when what it shows changed — the 5 s tick's
+  // `desktop-apps-updated` used to rebuild the WHOLE dialog, catalog included, so a press that straddled a broadcast
+  // lost its click: the card under the pointer was replaced between pointerdown and pointerup — measured, the Launch of
+  // an xterm card did nothing in 4 of 7 runs once the catalog grew; a broadcast now touches the Running rows only, and
+  // only when an id / label / state / host / pending Stop / the slot count moved)
+  let runKey = null;
+  const renderRunning = () => {
     const capUsed = data?.cap?.used ?? 0, cap = data?.cap?.cap ?? 0;
-    // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
-    regEl.innerHTML = '';
-    browsersEl.innerHTML = '';
-    for (const row of (data?.registry || [])) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      const isLaunching = launching.has(row.id);
-      const unavailable = !row.available || !!row.parkedUntil;
-      b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
-      // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
-      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || row.reason || t('not on PATH'));
-      // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
-      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
-      b.disabled = unavailable || dead || isLaunching;
-      b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
-      if (isLaunching) b.setAttribute('aria-busy', 'true');
-      b.title = row.available ? (row.path || row.exec) : (row.reason || '');
-      if (row.browser) b.title = `${b.title ? b.title + ' — ' : ''}${browserNote()}`;
-      b.dataset.appId = row.id;
-      b.onclick = async () => {
-        if (b.disabled) return;
-        let body = { appId: row.id };
-        if (row.browser) {
-          const bb = browserLaunchBody(row, { url: urlIn.value, keepProfile: keepIn.checked });
-          if (bb.error) { showToast(t('Open URL must be an http:// or https:// address'), { type: 'error' }); focusQuiet(urlIn); return; }
-          body = bb.body;
-        }
-        launching.add(row.id); render();
-        const r = await launch(body, null);
-        if (!r) { launching.delete(row.id); render(); }
-      };
-      // lane D: the card + (on a scaling rung) its default-scale control, side by side — a control cannot live INSIDE
-      // the card's button, so the grid item is a wrapper holding both
-      const wrap = document.createElement('div'); wrap.className = 'desktop-launch-card-wrap';
-      wrap.appendChild(b);
-      if (scales) wrap.appendChild(cardScaleControl(row));
-      (row.browser ? browsersEl : regEl).appendChild(wrap);
-    }
-    if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
-    browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
-    shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
-    urlIn.disabled = keepIn.disabled = dead;
-    const registryEmpty = !regEl.children.length && !browsersEl.children.length;
-    if (!regEl.children.length) regEl.innerHTML = `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
-    // ── running ──
-    runEl.innerHTML = '';
     const live = (data?.apps || []).filter((a) => a.state === 'ready' || a.state === 'launching' || a.state === 'unknown-host-offline'); // lane C2: an app whose machine is not answering is still listed
+    const key = JSON.stringify([live.map((a) => [a.id, a.label, a.exec, a.state, a.hostId, a.hostLabel, busy.has(a.id)]), cap, capUsed]);
+    if (key === runKey) return;
+    runKey = key;
+    runEl.innerHTML = '';
     for (const a of live) {
       const row = document.createElement('div'); row.className = 'desktop-launch-run-row';
       row.innerHTML = `<span class="desktop-app-row-label">${escHtml(a.label || a.exec)}${a.hostLabel && a.hostId !== 'local' ? `<span class="desktop-launch-host-chip">${escHtml(t('on {machine}', { machine: a.hostLabel }))}</span>` : ''}</span><span class="desktop-app-row-state">${escHtml(a.state === 'ready' ? t('running') : a.state === 'unknown-host-offline' ? t('machine not answering') : t('starting'))}</span>`;
@@ -489,6 +576,87 @@ export async function showLaunchDialog(app) {
     runSec.classList.toggle('is-empty', !live.length);
     // the count is the LIVE list's (the broadcast refreshes `data.apps`, never the cap snapshot taken at open — a starting session read "0 of 6")
     countEl.textContent = live.length ? (cap ? t('{used} of {cap} slots in use', { used: Math.max(capUsed, live.length), cap }) : t('{n} running', { n: live.length })) : '';
+  };
+  const render = () => {
+    const mName = host === 'local' ? null : machineName(machineOf(host));
+    availEl.textContent = listError ? machineErrorText(listError.code, mName || machineName(null), listError.error) : availabilityText(data && data.availability, mName);
+    availEl.classList.toggle('desktop-launch-avail-bad', !!listError || !!(data && data.availability && !data.availability.backend));
+    renderInstall();
+    const dead = !!listError || !data?.availability?.backend;
+    const scales = !dead && data?.availability?.stream === 'xpra'; // lane D: only a rung that scales apps offers a default scale
+    // ── the catalog: applications, then browsers (B-bfe6) under their own heading ──
+    regEl.innerHTML = '';
+    browsersEl.innerHTML = '';
+    // §7.9 FILE MODE: the document's own LibreOffice row only (its module opens it — the PURE verdict's rule)
+    const rows = (data?.registry || []).filter((row) => !doc || (row.office && row.office === doc.module));
+    for (const row of rows) {
+      // §7.9: an absent LibreOffice row in FILE MODE is not a dimmed card — ONE plain sentence + "Install LibreOffice on
+      // <machine>…" (the owner's rule: never a greyed control with a hint)
+      if (doc && !row.available) {
+        const box = document.createElement('div'); box.className = 'desktop-launch-office-absent';
+        const said = document.createElement('p'); said.className = 'desktop-launch-office-absent-text';
+        said.textContent = openWithRefusalText('app-absent', { app: row.label, machine: machineInSentence(machineOf(host)) });
+        const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'file-tool-btn desktop-launch-office-install';
+        ib.textContent = officeInstallLabel(machineInSentence(machineOf(host)));
+        ib.title = t('Shows the install plan first — nothing runs until you confirm');
+        ib.onclick = () => showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } });
+        box.append(said, ib);
+        regEl.appendChild(box);
+        continue;
+      }
+      const b = document.createElement('button');
+      b.type = 'button';
+      const isLaunching = launching.has(row.id);
+      const unavailable = !row.available || !!row.parkedUntil;
+      b.className = 'desktop-launch-card' + (unavailable ? ' is-unavailable' : '') + (isLaunching ? ' is-launching' : '');
+      // a dimmed BROWSER row says its verdict SHORT and translated (by the server's code); the sentence is its tooltip
+      const sub = isLaunching ? t('Launching…') : row.available ? (row.reason || row.exec) : ((row.browser && browserReasonShort(row.reasonCode)) || (row.office && officeReasonShort(row.reasonCode)) || row.reason || t('not on PATH'));
+      // faces B: a startable browser card names its face ("Browser app · chromium"); a dimmed one says only its short reason
+      const docSub = doc && !isLaunching && !unavailable ? t('opens {file}', { file: doc.label || doc.path }) : null; // §7.9 FILE MODE: the card names the document it opens
+      b.innerHTML = `<span class="desktop-launch-card-icon">${isLaunching ? UI_ICONS.refresh : cardIconFor(row.category, row.office)}</span><span class="desktop-launch-card-label">${escHtml(row.label)}</span><span class="desktop-launch-card-sub">${docSub !== null ? escHtml(docSub) : escHtml(row.browser && !isLaunching && !unavailable ? `${t('Browser app')} · ${sub}` : sub)}</span>`;
+      b.disabled = unavailable || dead || isLaunching;
+      b.setAttribute('aria-disabled', b.disabled ? 'true' : 'false');
+      if (isLaunching) b.setAttribute('aria-busy', 'true');
+      b.title = row.available ? (row.path || row.exec) : (row.reason || '');
+      if (row.browser) b.title = `${b.title ? b.title + ' — ' : ''}${browserNote()}`;
+      b.dataset.appId = row.id;
+      b.onclick = async () => {
+        if (b.disabled) return;
+        let body = { appId: row.id };
+        if (doc) body = { appId: row.id, file: doc.path, fileHost: doc.host || 'local' }; // §7.9: the document opens in it, where it lives
+        if (row.browser) {
+          const bb = browserLaunchBody(row, { url: urlIn.value, keepProfile: keepIn.checked });
+          if (bb.error) { showToast(t('Open URL must be an http:// or https:// address'), { type: 'error' }); focusQuiet(urlIn); return; }
+          body = bb.body;
+        }
+        launching.add(row.id); render();
+        const r = await launch(body, null);
+        if (!r) { launching.delete(row.id); render(); }
+      };
+      // lane D: the card + (on a scaling rung) its default-scale control, side by side — a control cannot live INSIDE
+      // the card's button, so the grid item is a wrapper holding both
+      const wrap = document.createElement('div'); wrap.className = 'desktop-launch-card-wrap';
+      wrap.appendChild(b);
+      if (scales) wrap.appendChild(cardScaleControl(row));
+      // §7.9: a LibreOffice row that is not installed carries its install beside it (the plan first, never a silent apt)
+      if (row.office && !row.available && !dead) {
+        const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'desktop-launch-card-install';
+        ib.textContent = t('Install…'); ib.title = officeInstallLabel(machineInSentence(machineOf(host)));
+        ib.setAttribute('aria-label', ib.title);
+        ib.onclick = (e) => { e.stopPropagation(); showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } }); };
+        wrap.appendChild(ib);
+      }
+      (row.browser ? browsersEl : regEl).appendChild(wrap);
+    }
+    if (refocusScale) { const el = body.querySelector(`.desktop-launch-card-scale[data-scale-for="${CSS.escape(refocusScale)}"]`); refocusScale = null; focusQuiet(el); }
+    browsersSec.classList.toggle('is-empty', !browsersEl.children.length);
+    shareRow.decorateCards([regEl, browsersEl]); // lane E verify: a card that will launch shared names it (the app's remembered share)
+    urlIn.disabled = keepIn.disabled = dead;
+    const registryEmpty = !regEl.children.length && !browsersEl.children.length;
+    if (!regEl.children.length) regEl.innerHTML = doc
+      ? `<div class="desktop-launch-empty">${escHtml(listError ? '' : t('LibreOffice is not offered by {machine} — its VibeSpace agent may be too old; reconnect it to upgrade', { machine: machineInSentence(machineOf(host)) }))}</div>`
+      : `<div class="desktop-launch-empty">${escHtml(t('No known applications were found on this machine — use “Advanced” below to run any program.'))}</div>`;
+    renderRunning();
     // ── advanced: recents + the form ──
     recEl.innerHTML = '';
     for (const e of recents) {
@@ -514,61 +682,6 @@ export async function showLaunchDialog(app) {
     }
     return render();
   };
-  // ── lane C2: the INSTALL RUNG — the plan first, then the run with its log (never silent) ──
-  const showInstallDialog = async (m, onDone) => {
-    const name = machineName(m);
-    const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: t('Install xpra on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true });
-    ib.classList.add('desktop-install-body');
-    const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
-    const pre = document.createElement('pre'); pre.className = 'desktop-install-pre'; pre.style.display = 'none';
-    const log = document.createElement('pre'); log.className = 'desktop-install-pre desktop-install-log'; log.style.display = 'none';
-    const actions = document.createElement('div'); actions.className = 'desktop-install-actions';
-    const copyBtn = document.createElement('button'); copyBtn.type = 'button'; copyBtn.className = 'file-tool-btn'; copyBtn.style.cssText = 'width:auto;padding:0 10px'; copyBtn.textContent = t('Copy commands'); copyBtn.style.display = 'none';
-    const goBtn = document.createElement('button'); goBtn.type = 'button'; goBtn.className = 'btn-create'; goBtn.textContent = t('Install'); goBtn.style.display = 'none';
-    actions.append(copyBtn, goBtn);
-    ib.append(note, pre, actions, log);
-    const q = m.hostId === 'local' ? '' : `?host=${encodeURIComponent(m.hostId)}`;
-    const r = await fetchJson(`/api/desktop/install-plan${q}`);
-    if (!r || r.error) { note.textContent = (r && r.error) || t('Could not read the install plan'); note.classList.add('is-bad'); return; }
-    const plan = r.plan || {};
-    if (!plan.ok) { note.textContent = installRefusalText(plan.code) || plan.error || ''; note.classList.add('is-bad'); return; }
-    pre.textContent = plan.commands.join('\n'); pre.style.display = '';
-    copyBtn.style.display = '';
-    copyBtn.onclick = async () => { const ok = await copyText(plan.commands.join('\n')); showToast(ok === false ? t('Could not copy — select the commands and copy them') : t('Commands copied'), ok === false ? { type: 'error' } : undefined); };
-    const src = plan.source === 'xpra.org' ? t('from xpra.org (xpra {major}.x, pinned) — the package sources on {machine} offer only {apt}', { major: '6', machine: name, apt: plan.aptXpra || t('no xpra') }) : t('from the package sources on {machine}', { machine: name });
-    // an install already running there (a restarted hub, another tab) is FOLLOWED, never started twice (verify r2 F3/F4)
-    const running = !!(r.facts && r.facts.installing);
-    if (!plan.canRun && !running) { note.textContent = installRefusalText('no_sudo'); note.classList.add('is-bad'); return; }
-    note.textContent = running ? t('An install is already running on {machine} — follow its log here.', { machine: name }) : t('These commands run on {machine} as root, {source}:', { machine: name, source: src });
-    if (running) goBtn.textContent = t('Follow the install');
-    goBtn.style.display = '';
-    goBtn.onclick = async () => {
-      goBtn.disabled = true; copyBtn.disabled = true;
-      log.style.display = ''; log.textContent = '';
-      note.textContent = t('Installing on {machine}…', { machine: name }); note.classList.remove('is-bad');
-      let res;
-      try { res = await fetch('/api/desktop/install-xpra', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ host: m.hostId }) }); }
-      catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
-      if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && (installRefusalText(j.code) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
-      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const parts = buf.split('\n'); buf = parts.pop();
-        for (const p of parts) {
-          if (!p.trim()) continue;
-          let o; try { o = JSON.parse(p); } catch { continue; }
-          if (o.reattached && !o.done) { note.textContent = t('Still installing on {machine} — re-attached. Its log so far follows.', { machine: name }); note.classList.remove('is-bad'); }
-          if (o.log != null) { log.textContent += o.log + '\n'; log.scrollTop = log.scrollHeight; }
-          if (o.done || o.error) end = o;
-        }
-      }
-      if (end && end.done) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }
-      else { note.textContent = (end && (installRefusalText(end.code) || end.error)) || t('The install ended without an answer — the log above says what ran'); note.classList.add('is-bad'); showToast(t('The xpra install on {machine} failed', { machine: name }), { type: 'error' }); goBtn.disabled = false; copyBtn.disabled = false; }
-    };
-    void iclose;
-  };
   runBtn.onclick = () => {
     const exec = execIn.value.trim();
     if (!exec) { showToast(t('Type a command to run'), { type: 'error' }); focusQuiet(execIn); return; }
@@ -579,7 +692,7 @@ export async function showLaunchDialog(app) {
   execIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
   argsIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') runBtn.click(); });
 
-  const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; render(); } } });
+  const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; renderRunning(); } } }); // the Running rows only — never the catalog under the user's pointer
   // ── P10 (design-agent-browser-v2 §6.6 / D27 (b)): the user's side of the
   // OTHER window class — the switch's state and, per window an agent holds on
   // their real desktop, a Pause / Resume that rides the same takeover verdicts
@@ -624,11 +737,11 @@ export async function showLaunchDialog(app) {
   renderMachines();
   const [state, first] = await Promise.all([fetchJson('/api/user-state'), refresh()]);
   if (state && Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); }
-  setAdvanced(advancedOpenFor(state, !!first?.registryEmpty));
+  setAdvanced(doc ? false : advancedOpenFor(state, !!first?.registryEmpty)); // §7.9: a document never opens "Advanced"
   setTimeout(() => {
     if (!overlay.isConnected) return;
     if (advancedOpen) focusQuiet(execIn);
-    else focusQuiet(regEl.querySelector('.desktop-launch-card:not(:disabled)') || advToggle);
+    else focusQuiet(regEl.querySelector('.desktop-launch-card:not(:disabled)') || regEl.querySelector('.desktop-launch-office-install') || advToggle);
   }, 0);
   return { overlay, close };
 }

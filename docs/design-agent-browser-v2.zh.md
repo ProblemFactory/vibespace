@@ -361,6 +361,25 @@ AGENT_BROWSER_IDLE_TIMEOUT_MS=<bound, §3.2.3>
 这三个都不是细节：第一个每次 resume 泄漏一个浏览器，第二个让整个配置不可能成立，第三个让这个功能
 创造出来的每一个浏览器都没有任何东西去回收它。
 
+> **补记（B-f7ab，2026-09-27）—— key 也可以在「第一次使用」时拿到。** 上面说的是 spawn 时的四个变量；
+> 一个在本功能之前（或 `browser.isolateSessions` 关闭期间）启动、此后从未 resume 过的会话**没有 key**，
+> 每条 `vibespace-browser` 动词都得到 `409 "…it predates the feature — it cannot hold a profile"`，
+> owner 的 2026-09-17 会话就这样停下来等人。其实不需要重启：CLI 的子进程环境本来就是由 `/resolve`
+> 的回答构建的（会话记录的 pairs、**点名的** config、keeper 的 socket root，browser-verbs `childEnv`），
+> 所以一个**晚到**的 key 对已经在跑的进程同样有效。现在所有读 `browserKey` 的路由都先问**一个**引擎函数
+> `ensureBrowserKey(session)`（`src/server/browser-key.js`）：与 spawn 共用同一个铸造函数 `mintKey`、
+> 同一个会话字段写入者 `applyKey`、同一个 `envFor`（生成的 config / scratch 目录 + pin 符号链接 / socket 目录）、
+> 同一条 pin 阶梯；binding 仍然只经由**那一个** meta 咽喉点写入（`browserKeyFor` = 会话自己的对话 id）。
+> §3.2.1 的规则原样适用，写成纯函数 `lateKeyVerdict`：对话 id 必须已知且是它**自己的**（一个仍带着来源 id
+> 的 fork 拒绝为 `fork_pending`，否则会把父对话绑到它的 key 上）；对话已有 key 而没有别的活会话持有 ⇒ 还它
+> **那个** key（resume 的那一级），有活会话持有 ⇒ `held_elsewhere`；远程会话（它的 rung 在主机上 spawn 时决定）、
+> 隔离/集成开关关闭、会话已不在 ⇒ 各自**点名**拒绝（`no_browser_key` + `why`，或 `session-gone`），
+> 需要重启的那几类说"restart this session (Terminate → Resume) to get a browser key: <reason>"。
+> 同步执行 ⇒ 天然单飞；成功时 `/resolve` 回答带 `minted`，CLI 打印一次 `[browser_key_minted]`。
+> 活的本地无 key 会话在 active-sessions 里发布"no browser yet"的事实（`keylessFact`），而不是什么都不说。
+> **verify r2（2026-09-27）：默认值只在会话启动时到达对话。** r1 把 pin 落款在启动时刻，但晚到的 key 仍在铸造时**读取**阶梯——用户在会话启动**之后**把一个已收窄给别的对话的 profile 设为实例/Task Group 默认值，这个会话的第一条浏览器命令就被放进去了（落款 = 启动时刻 ≥ scopeAt），而同一时刻 spawn 拿到 key 的孪生会话停在它启动时生效的默认值上。现在**无 key 的 spawn 把阶梯的选择记成见证**（`browserPinAtStart`：profile / origin / 落款 / by / 当时生效的 group cap；fork = 父对话的 pin 行逐字），晚到的 key 只还原这个见证（纯函数 `lateDefaultPin`，keeper `restorePin`，`stampGroupCap({value})` 从不现读 group）；没有见证的旧记录把当前默认值当作**落点**、落款 0——对被收窄的 profile 永不构成授权，agent 的裸命令被拒 `not_owner` 并点名按钮。spawn ↔ late 的 8 行对照表两列一致。门：test-browser-share-model ③f (r2)（四个复现场景 + 对照表 + 两个 patched-copy 对照：r1 引擎会放行；现读 cap 的副本会盖上后来的 cap）。
+> **verify r1（2026-09-27）：晚到的 key 套用的默认 pin（Task Group / 实例默认 profile）以会话**启动**的时刻落款（`B.latePinAt`：记录与活会话两者中最早的一个；`keeper.setPin` 的 `at` 只能把 pin 落得更早，绝不更晚）。** pin 是授权（`userPinAuthorizes`：不早于 profile 的 `scopeAt`），而引擎原先按铸造瞬间落款——一个在用户把默认 profile 收窄给别的对话**之前**就启动的会话，在 agent 第一条浏览器命令时被放进了那个 profile（含登录态），而同一会话若在 spawn 时拿到 key 会被拒 `not_owner`。现在两者一致：拒绝并点名按钮；在收窄**之后**才启动的会话照旧被默认值接纳（spawn 本来也会）。门：test-browser-share-model ③f（含按铸造瞬间落款的 patched-copy 对照）。
+
 #### 3.2.1 `browserKey` 是那个对话，而 webui id 不是它
 
 第一轮写的是 `vs-<webuiId>`，理由是"我们的身份是对话，不是目录"。理由是对的，而拼写和它矛盾：

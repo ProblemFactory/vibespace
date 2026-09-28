@@ -23,7 +23,7 @@ const settings = {};
 let userState = {};
 setupAgentRoutes({
   app, activeSessions, tasks,
-  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
   SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
   userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
   sessionStatusKey: () => 'claude:abc-123',

@@ -465,6 +465,26 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   const r6 = await ann.announce(ev('explicit', { sessionId: 'sess-noid', browserKey: KEY_B }));
   ok(!r6.delivered && r6.noticed && /no id yet/.test(r6.why) && delivered.length === 4, 'a conversation with no id yet gets the notice (nothing to deliver into), never a throw — the ladder saw r1, r4, the REFUSED r5 and r5b, nothing more');
   ok(!(await ann.announce(ev('explicit', { sessionId: 'sess-gone', browserKey: 'bk-deadbeef' }))).delivered, 'no live session ⇒ nothing delivered');
+  // lane channel-withdraw verify r6: a PENDING FORK carries its parent's conversation id — a handback delivered by that id
+  // would open a billed turn on the PARENT; it gets the notice (its next message), like a conversation with no id yet
+  {
+    active.set('sess-fork', { _browserKey: 'bk-f0f0f0f0', claudeSessionId: 'conv-1', backendSessionId: 'conv-1', name: 'one (fork)', _forkRequested: true, _forkSourceId: 'conv-1' });
+    const nBefore = delivered.length, notBefore = notices.length;
+    const rf = await ann.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0' }));
+    ok(!rf.delivered && rf.noticed && /no id yet/.test(rf.why) && delivered.length === nBefore && notices.length === notBefore + 1 && notices.at(-1).id === 'sess-fork', 'a pending fork\'s handback is never delivered by its PARENT\'s conversation id — the zero-spend notice rides the fork\'s own next message');
+    const { mutantCopies: mcF, copiesCensus: ccF } = await import('./mutant-copy.mjs');
+    const MF = mcF('takeover-fork-r6', REPO);
+    const hsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
+    const CID = '  const conversationIdOf = (s) => addressableId(s);';
+    ok(hsrc.split(CID).length === 2, 'the announcer reads the session\'s conversation id through addressableId, once');
+    const Hc = MF.load('src/server/browser-handback.js', hsrc.replace(CID, "  const conversationIdOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;"), 'handback-rawcid');
+    const deliveredC = [];
+    const annC = Hc.create({ keeper, deliver: { deliverToConversation: async (cid, text, opts) => { deliveredC.push({ cid, opts }); return { ok: true }; }, stashFor: () => ({ stored: true }) }, serverSetting: (k) => settings2[k], activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: () => {}, log: { log() { }, warn() { } } });
+    const rfc = await annC.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0' }));
+    ok(rfc.delivered && deliveredC.length === 1 && deliveredC[0].cid === 'conv-1' && deliveredC[0].opts.spendReason === 'browser-handback', 'CONTROL: the raw-id copy delivers the fork\'s handback into the PARENT\'s conversation (a billed turn on the wrong session) — the leg would go red');
+    for (const r of ccF(MF.files, MF.dir, REPO, { minCopies: 1, label: 'r6 fork handback ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    active.delete('sess-fork');
+  }
   ok(ann.noteConfirmation({ kind: 'pending', browserKey: KEY_A, sessionId: 'sess-1', profileId: null, confirmation: { id: 'c_1', action: 'download' } }) && /confirm "download"/.test(inbox.at(-1).item.text) && /auto-denies/.test(inbox.at(-1).item.detail), 'a pending confirmation files ONE inbox item pointing at the live view');
   // the declaration, the literal and the census row
   ok(A.SPEND_REASONS['browser-handback'] && A.SPEND_REASONS['browser-handback'].turn === true && T.SPEND_REASON === 'browser-handback', 'the reason is DECLARED in SPEND_REASONS as a turn and equals the PURE constant');

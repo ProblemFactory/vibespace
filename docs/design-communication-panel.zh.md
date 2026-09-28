@@ -1445,8 +1445,30 @@ proposed ─(policy: review)──────────► awaiting-approval
 awaiting-approval ─(approve, maybe edited)─► sending ─► sent | failed | unknown
 awaiting-approval ─(reject)─────────► rejected
 awaiting-approval ─(TTL, default 24 h)─► expired
+proposed | awaiting-approval ─(agent)─► withdrawn        // 2026-09-27: 起草者自己撤回
 unknown ─(reconcile)────────────────► sent | failed      // never auto-retried; §9.4
 ```
+
+**撤回 (2026-09-27, owner: "agent 似乎没有撤回之前制作的 draft 的能力，必须要我手动 reject
+是吗？")。** `withdrawn` 是终态, 表里只有 `agent` 能进入它, 并且只能从 `proposed` /
+`awaiting-approval` 进入: `sending` 不行(请求可能正在离开), `sent`/`failed`/`rejected`/
+`expired` 不行(已经决定了), **`unknown` 更不行** —— 一个丢失的结果归用户去平台上核对, agent
+永远不能把它抹掉。"起草者" = proposal 记录的会话 id (`draftedBy.id`), 所以同一个 Task Group
+里的兄弟 agent 拿到的是按名字说出的 `not-yours`(看不见这个会话、又不同组的调用者拿到统一的
+not-found, 不做存在性预言)。撤回走同一个生产者撤掉该会话的 For-you 指针(那里再没有待批的
+proposal 时), 写一行 `withdraw` 审计, 广播一次 `channel-outbox-updated`; 回执被**记录**
+(`status` 能看见)但不回投给做这件事的 agent。卡片是一张暗色的已结束卡片 "Withdrawn by
+<agent> · <why>", 没有按钮。
+
+**替换 = 撤回 + 一条新 proposal, 原子的:** 先检查旧的那条(是你的、仍可撤回), 什么都不创建;
+再提议新的; 只有当策略**接受**了新的(创建了 —— 等审批或已直接发出)才撤回旧的, 并在两边记下
+`replaces` / `replacedBy`。新的被拒(`bad-proposal`、`send-not-available`、`rate-floor` …)⇒
+旧的原样保留。替换进行中旧 id 被**扣住**: 用户对它的 Approve / Reject 会等替换落定(然后发现
+它已撤回), TTL 扫描跳过它 —— 检查与撤回之间不可能插进一个决定。**verify (2026-09-27): 扫描在
+**写入时**再问一次这个 hold** —— 它先取好到期列表、忙着处理更早的一条时, 一次替换已经通过了自己的
+检查并造好了新草稿, 然后扫描对旧 id 的写入落在了检查与撤回之间: agent 收到一份 "EXPIRED unapproved"
+回执, 说的正是它刚替换掉的那条。hold 在替换的第一个 await 之前就同步设下, 所以在 store 串行写入
+里问它, 要么看得见(跳过), 要么替换的检查会读到这次到期而在创建任何东西之前拒绝。
 
 `src/channel-policy.js`(PURE)拥有这张转移表, 外加:
 
@@ -1543,6 +1565,51 @@ wrapper 的 RPC 之间结束 —— 而既有的扣款扣住机制(`peer_message
 
 回执默认 `noWake: true`: 一次批准通常在几分钟或几小时之后才发生, 而 agent 的下一个 turn 就
 是它得知这件事的自然地点(决定 8)。
+
+**2026-09-27 —— 投递方式由做决定的人在动作上选 (owner 裁决: "收件箱里的 approve 动作需要在账号
+-level 的通知配置里控制行为有点反直觉")。** agent 起草的卡片上 Approve 与 Reject 是**分裂按钮**:
+主按钮 = 这台设备上次用的选择, ▾ 菜单给出两种 —— "Approve — tell the agent with your next
+message"(免费: 回执进 stash, 随它的下一条消息) 与 "Approve and wake the agent now (starts a
+turn)"(一次计费 turn: `billedWake` 这一扇门, spendReason `channel-receipt`, 花费天花板在梯子
+里) —— 外加 "Approve with edits…"; Reject 同理("Reject — tell on its next message" / "Reject
+with a reason and wake now")。路由 `approve` / `reject` 收 `{deliver: 'next-turn'|'wake-now'}`
+(其它值按名字拒绝), wake-now 计入 `expectWakes` 回声, 登录关闭时像所有 owner 唤醒一样被节流
+(被节流 ⇒ 降级为下一条消息并说出来, 决定本身从不因此被拒)。PURE `receiptDeliveryVerdict`:
+**每个 proposal 最多一次唤醒**(那一行记在 proposal 自己身上, 在梯子之前于 outbox 的串行门内原
+子地预留 —— 同一回执再被要一次永远不会再唤醒), 会话不在线 ⇒ 下一条消息("gone", stash 保留回
+执), agent 自己撤回的 ⇒ 不投递。每 watcher 的 `receiptWake`(决定 8 的开关)**废弃**: 引擎不再
+读它, 存着的 `true` 被忽略, 启动时一行日志点名还带着它的 watcher。
+
+**verify r3 (2026-09-27, 真梯子 + 真 spend guard + 真路由):** 20 条并发 "批准并立即唤醒" 在花费上限 2 之下恰好 2 个计费 turn (其余 18 条按名拒绝并存入 stash); 主按钮的**字就是它的动作** —— 投递方式从按钮自己的 `data-deliver` 读, 菜单里选一次, 页面上每个主按钮当场换字 (之前: 在 A 卡选了 "拒绝并唤醒" 只开了理由框, B 卡还写着 "随下一条消息告诉", 按下去却发了 wake-now —— 一个按钮说免费、实际计费的 turn); 一个**还没宣布自己会话 id 的 fork** (仍带父会话的 id) 不能撤回父会话的草稿、也不能以父会话的身份起草 (409 按名拒绝; 已完成采用的 codex fork 照常以自己的身份起草); `withdrawn` 进入了 store 的裁剪集 (之前撤回的记录永远留在 outbox.json 里, 上限先裁掉的反而是 owner 已决定的记录)。
+**verify r4 (2026-09-27, 枚举 fork 形状 + Chrome 里的按下 + 裁剪 + 与 channel-jump 的接缝):** 一个还带着父会话 id 的 fork 用 `msg send --wake` 把配对群建在了**父会话**的 id 下, 对方的回复唤醒的是父会话 (计费 turn 落在错误的会话上, 配对永久绑定); 它的 reach `request` 以 fork 的名字记下了父会话的 id (owner 批准扩大的是父会话的 reach) —— 现在调用方的**自己的** id 在 `msgCaller` 一处判定 (每个 msg 动词都问它), request 路由与起草三动词同样守卫 (409 按名拒绝); 上限先裁没人决定过的记录 (`OUTBOX_PRUNE_RANK`: withdrawn, expired, 然后才是已决定的 —— 一个 agent 的 520 次 replace 曾把另一个起草者的十条已决定记录先挤出去); stash 写盘失败时回执按名标 `undelivered` (不再先 "等待" 再在下次启动变 "已交付"); store 记不下的 "立即唤醒" 在卡片上点名。十六种 fork 形状与 browser-key lane 的规则全部一致; 按钮的字与事实没有任何瞬间不一致; 任何按下、重入、重启都不会计费两次。
+**verify r5 (2026-09-27, 从另一侧看调用者身份 + 存储的读取开销 + stash 的唯一结局 + Chrome 里的卡片 + 合并预览):** 一个还带着父会话 id 的 fork 仍然是别人的"地址"——两份花名册 (server.js `liveSessions`、agent-routes `_msgEndpoints`) 都把它列在父会话 id 之下、用它自己的名字: 父会话不在线时, 第三个会话 `send --wake "<fork>"` 把配对群铸在了父会话 id 上并为父会话授权了一次计费回合; 父会话在线时, 父会话自己变成 `ambiguous`。它创建的 JOB 也归了父会话 (每条通知都是父会话上的计费回合, 直到永远)。现在只有一个谓词——`addressableId`——站在每份花名册和每个调用者解析器后面 (`_msgEndpoints`、`liveSessions`、`jobsCaller`、`pageAuth`; 窗口共享请求对 pending fork 点名拒绝)。读一条记录会深拷贝整个 outbox (界限处 16 KB 文本时每次 replace 占主线程 836 ms) —— 现在每次写只拷贝一次, 深冻结。每个 stash 生产者对失败的写都能听到一个具名结局 (`{stored:false}` + 句子; 条目留在内存; 30 s 重试)。四个拒绝码有了人话。Chrome 里: 手机的 ▾ 菜单 (40 px 行、Esc、外部按下)、Outbox 窗口 + 内嵌卡片在一次广播上同时更新、200 条草稿 7 ms 画完。
+**verify r6 (2026-09-27, 谓词的最后三个读者 + 收养交接 + 冻结副本 + 持久化裁决 + 金钱复跑 + 措辞):** 投递梯子自己还在按裸 id 找"承载这个对话的活会话"(rung 0、codex rpc rung、被计费的身份)——codex fork 的 wrapper 在 `thread/fork` 应答之前就已宣告 peer lane, 于是一个已停止父会话的后台工作通知被写进了 FORK 的 wrapper(fork 上一次计费回合, 记在 fork 的槽位上); 两者都在线但 fork 先被恢复时, 父会话的回合记到了 fork 的槽位。现在 `addressableId` 也是梯子的规则(+ peer 卡片、浏览器 handback)。对一个待定 fork 做"Share with agent…"把窗口授给了父会话, 而 fork 收养自己的 id 那一刻就失去了授权——window-targets 引擎把待定 fork 键为 `webui:<id>`, 对话框发活会话 id, 有歧义的 key 点名拒绝。待定 fork 的 prompt 渲染了父会话的群组报告并推进了父会话的标记——那里也走 `ownConversationIdOf`。`fork_pending` 有了自己的代码(客户端把 `no_conversation` 说成"先跟它说句话", 对 fork 是错的建议)。已证伪: 收养交接、冻结副本、stash 的裁决; 所有金钱攻击复跑全绿。已测量、归 owner: 16 KB 上限处每次变更 6.5 MB 的 outbox 广播。
+
+
+**回执带 DIFF (2026-09-27, owner: "如果我修改后批准，agent 似乎也收不到我的修改动作 … 并不知
+道我希望以什么方式回复")。** 一个被编辑后发出的回执不再只给最终文本, 而是 PURE
+`receiptDiff(proposed, final)` 的紧凑行 diff(`-` 你提议的 / `+` 用户发出的, 改动旁留一行上下
+文, 更长的不变段折成一行, 每行 ≤ 600 字符, 全部 ≤ 2000 字符并说明被截), 带理由的拒绝给出理由;
+这两种(= owner 的明确反馈)以 "Use this as guidance for the next draft." 结尾。
+
+**回执的去向在卡片上看得见。** PURE `receiptFateOf` / `receiptFateText`: "Handed to <agent> at
+14:02"(梯子交付了, 或 stash 被它下一条消息排空 —— 投递梯的 stash 现在对带 `ref` 的条目发出
+`stashed` / `drained` 事件, 引擎据此在 proposal 上记 `receiptDrainedAt`) / "Waiting for
+<agent>'s next message"(在 stash 里; 若唤醒被天花板拒绝则并排说出拒绝理由) / "<agent> is gone —
+receipt kept"(会话不在线)。卡片按 `data-proposal` + 签名**键控**: 只有记录变了的卡片会重绘, 只
+有去向变了就原地改那一行, 用户正在编辑的卡片在记录不变时不动。
+
+生产取证 (2026-09-27, 本实例, 只读): 最近 24 h 三条 proposal(gmail, 同一个 agent 起草) —— 两
+条编辑后批准、一条不带理由的拒绝 —— 三份回执全部 `stashed`(`no-wake`: "no free lane for this
+conversation — a delivery now would open a billed turn"), 没有一份唤醒; stash 在最后一份回执
+21 秒后(owner 给那个 agent 发下一条消息时)排空 —— verify 从 outbox、审计与起草者的转录核对: 是**两
+批**, 不是一批: 拒绝那条的回执 21 s 后(22:50:23Z)随下一条消息到达, 两条批准的回执在最后一份的 20 s 后
+(22:55:47Z)一起到达。也就是说: agent 并非收不到, 而是只在 owner 下一次开口时才收到, 而界面上完全看
+不出它在排队 —— 上面的去向行与投递选择就是为此。**这三条的去向行 (verify):** 它们的 stash 条目早于
+`ref`, 永远等不到 `drained` 事件, 卡片会一直写 "Waiting for 运维管理's next message" —— 而 agent 一小时前
+就读到了。所以引擎在启动时把每条 stashed 且未 drained 的回执到起草者的队列里找一遍(按 `ref`, 或——
+旧条目——按正文点名的 proposal id); 找不到的读作 `receiptDrainedHow: 'reconciled'`, 卡片说 "Handed to
+<agent> with an earlier message"(不带时间: 没人记下)。仍在队列里的照旧 "Waiting"。
 
 ### 9.4 恰好发送一次
 
@@ -3009,7 +3076,7 @@ P0 的整个集成层 +5.5, 而 P1 是净 ±0(secret-box 抽取 −1 挪去 P0, 
 | 5 | **Gmail 的 OAuth client** | 往现有的共享预设里加 `gmail.send` / 为 channels 注册一个专用 client | ~~给 channels 一个专用 client。~~ **owner 2026-09-13 定案: 复用既有的 VibeSpace OAuth client(`VIBESPACE_GDRIVE_CLIENTS` 预设)** —— 它已经有 Gmail 权限。代价重新算过: 一个 client 可以请求任意 scope, scope 是在**同意那一刻**绑到 token 上的, 所以 channels 走**自己的**一次同意、存**自己的** refresh token(`data/channels/` 下, 与挂载的 token 文件分开), 请求 `gmail.readonly` + `gmail.send`, 而挂载那份 token 一个字节都不动、不需要重新授权 —— 原先"共享预设会让一切重新授权"这条只在**往同一个 token 上加 scope** 时成立。仍然成立的是 client 的**认证状态**: `gmail.send` 是受限 scope, 对外部(published-unverified)client 意味着 7 天 refresh token 与审核; GCP **Internal** client(Workspace 内部)不受此限 —— P1 的连接向导要把这个 client 的状态**读出来并说出来**(§14 的 `setup.callbackNote`), 而不是让用户在第 8 天才发现。委托行 `gmail` 因此不再需要 `channels` 预设 key, `prefer` 指向既有预设 |
 | 6 | **默认 track 什么** | 在用户挑之前什么都不 track / 用户所在的全部群 | **什么都不。** 这是隐私的答案, 是轮询成本的答案, 也是让 panel 不变成一个邮件客户端的那件事。发现列表让 opt-in 只需一次点击 |
 | 7 | **审批的记录之面** | 新的 outbox store + "For you" 里一条指针条目 / 只用 "For you" 条目 | **新 store + 每个会话一条指针条目**(§9.2)。一条 proposal 有 todo store 装不下的结构(目标、正文、为什么、编辑、回执); 而且 `UserTodoManager` 有一个封闭参数集、按 `(sessionKey, text)` 跨所有状态去重、每个 session 封顶 20 条开放条目, 所以*按 proposal* 的指针在不对一个好几个生产者共用的 store 做 schema 变更的前提下根本表达不出来。按 proposal 的徽标可以用那次变更的代价换来(`proposalId` 字段 + 按它去重 + proposal 上的 `todoItemId`)—— 想要就说一声 |
-| 8 | **回执会叫醒 agent 吗?** | 从不(攒到下一个 turn)/ 总是 / 按 assignment 设 | **默认从不, 按 assignment opt-in。** 一次批准在几分钟到几小时之后才落地; 为一份回执唤醒, 就是每次批准一个计费 turn |
+| 8 | **回执会叫醒 agent 吗?** | 从不(攒到下一个 turn)/ 总是 / 按 assignment 设 | **默认从不, 按 assignment opt-in。** 一次批准在几分钟到几小时之后才落地; 为一份回执唤醒, 就是每次批准一个计费 turn **2026-09-27 owner 改判:** 在 Approve / Reject 动作上选("随下一条消息告诉" 免费默认 / "立即唤醒" 一个 turn, 每个 proposal 最多一次), 按 assignment 的 opt-in 废弃 —— §9.3 |
 | 9 | **默认策略 + 护栏** | 确认交互记录里的默认值 | **照记录确认:** 外部 = review, 内部 = direct; 审计开, 链接/附件强制 review 开, 非工作时间在配好时区之前是关的(配好之后那个时间窗是一个设置项) |
 | 10 | **花钱上限的形状** | 共用既有的按身份上限 / 一份独立的 channel 预算 | **共用。** 每个凭据槽一个上限正是 authorizer 的全部意义; 再加一个 per-assignment 的每日唤醒上限, 但只作为*节奏控制* |
 | 11 | **Agent CLI** | 新的 `vibespace-channels` / 扩 `vibespace-msg` | **新 CLI。** `send` 是投递, `reply` 是提议 —— 一个动词扛两种授权语义正是这个代码库要惩罚的那种孪生 |
@@ -3531,3 +3598,218 @@ heavy: test-channels-aggregate-ui ⑤/⑦ (owner 的例子 —— 工作只有�
 失败点名并继续 (它本就按会话被 `track` 兜住 —— 抛错从不终结整趟 pass)。再攻击: 就地重启 (+1ms stop, +2ms
 新启动) 把每条持有各投一次; 同一 kind 的两个账号在一个进程里彼此独立 (一个卡住的梯子绝不挡住另一个)。
 门: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫。
+
+## 25. 渲染层: raw → blocks → DOM (2026-09-27, lane channel-render)
+
+owner 原话 (附两张截图): "可以优化下 channel 部分的界面。架构层面你可能需要设计一个不同 connector 的 raw
+message to HTML 的接口，比如邮件展示的时候就需要自动折叠 quote 内容，lark 展示的时候需要自动把 markdown
+格式的一些链接之类的变成链接。这个当作 IM 用还是有必要把界面好好优化下至少保证人能看清楚必要的信息."
+
+截图里的五个问题: Lark 窗口里 `[image]` 作为文字出现在缩略图上面; 一条正文就是
+`[https://….ngrok.app](https://….ngrok.app/)` 的消息原样显示 (markdown 链接没有变成链接); 裸 URL 不是链接;
+composer 的页脚是一整句话; Gmail 窗口标题是 `====== Please reply above this line ====== Hi Team, …`, 正文把整段
+引用历史 (`> …`、"On Sat, Sep 19 … wrote:") 全部摊开, 只读页脚是一段话。
+
+### 25.1 接口是一棵**有类型的树**, 永远不是 HTML
+
+§10 规则 1 (每个厂商字符串都是敌意输入, textContent 到底, 不在浏览器里解析 markdown) 不变。变化的是**谁**把
+厂商的形状变成可读的结构: 适配器在 ingest 时产出 `record.blocks` —— 一棵**封闭**的块树 —— 客户端**唯一**的
+渲染器 (src/lib/channel-blocks-view.js) 用 createElement/textContent 把它变成 DOM。适配器从不产出 HTML;
+渲染器从不写 innerHTML (channel-chrome 的 `icon()` 仍是本功能唯一的 innerHTML, 写的是图标库自己的静态 SVG)。
+
+| 块 (`k`) | 字段 | 含义 |
+|---|---|---|
+| `p` | `runs` | 一个段落, 行内 run 的列表 (段内换行保留) |
+| `quote` | `attribution?`, `blocks`, `lines`, `forwarded?` | 引用 (可折叠) —— 邮件的引用历史、`>` 行 |
+| `sig` | `blocks`, `lines` | 签名 (可折叠) |
+| `banner` | `text` | 发件工具的一行系统说明 ("Please reply above this line") |
+| `code` | `text`, `lang?` | 预格式化文本 |
+| `img` / `file` | `attachmentId` | 附件引用 —— 字节只走我们的路由 (§23) |
+| `card` | `title`, `lines` | Lark 消息卡片 |
+| `sys` | `text`, `what?` | 系统记录; `what` ∈ 封闭词表 (sticker / share-chat / share-user / forward / deleted / location / call / calendar / todo / card / system / unknown), 客户端按设备语言措辞, `text` 为兜底 |
+
+| run (`k`) | 字段 |
+|---|---|
+| `t` | `text` |
+| `a` | `href`, `text` —— href **只**接受能解析为 `http(s):` (有主机、无 `user:pass@`) 或 `mailto:` (有地址) 的 URL, 否则整个 run 变成文字 |
+| `at` | `id`, `name` (提及 chip) |
+| `code` | `text` |
+| `b` | `text` |
+
+**模式住在 channel-record.js**, 与记录本身放在一起 (那个模块什么都不 import; 记录的形状只定义在一处):
+`validateBlocks(blocks)` 执行封闭集合与上限 (≤ 400 块, 可见文字合计 ≤ 64 KiB, 嵌套 ≤ 6, run ≤ 4000, 卡片行
+≤ 60, 每个 href ≤ 2048), 对**每一个**字符串跑 `inertFrames` (链接文字、href、引用归属、卡片标题与行、提及名、
+banner、系统行、代码及其语言、附件 id —— §4 规则 3 又一次), 丢弃未声明的字段, 把不安全的 href 降级为文字;
+违反规则按名字拒绝 (`not-an-array` / `unknown-kind` / `unknown-run` / `bad-field` / `too-many-blocks` /
+`too-many-runs` / `too-deep` / `too-much-text`), 记录不带 `blocks`, 仍按 `text` 走通用档画出来。
+`makeRecord` 接受可选的 `blocks` 字段 (在 `RECORD_FIELDS` 之后, `OPTIONAL_FIELDS`), 无效即不带。
+**`text` 始终是给 agent 的字符串**: 注入帧用 `text`; agent 的读取路由 (`readFor`) 把 `blocks` 剥掉。
+
+### 25.2 每个适配器一档 (PURE src/channel-blocks.js)
+
+- **通用档 `textToBlocks(text, opts)`** —— 每个适配器白得: 段落; 裸 `http(s)://` / `www.` / `mailto:` / e-mail
+  地址链接化; markdown `[text](url)`; `<url>`; 句末标点 (含中文 `。，）`) 留在链接外, 成对括号保留; 若标签本身
+  是**另一个主机**的 URL (`[https://bank](https://evil)`), 显示目标而非标签; `>`/`>>` 引用 (`>_<` 不算);
+  `-- ` 签名 (后面 ≤ 15 行); ``` 围栏代码; `**粗体**`; `` `代码` ``; `@_user_N` 按本条消息的 mentions 解析
+  (无人则保留原文, §4 规则 2); 附件声明的占位符 ("[image]") 就是那张图片本身 (`img` 块), 原位、按序。
+  它也是**没有树的旧记录**和什么都没声明的适配器的兜底。
+- **邮件档 `emailToBlocks(text, {subject, attachments})`** —— 通用档 + 邮件启发式:
+
+  | 标记 (按此顺序逐行测试, 行长 ≤ 400) | 归属 (attribution) |
+  |---|---|
+  | `On … wrote:` (en-wrote; 也接受 Gmail 在地址处折成两行的形态) | 那一行 (两行合并) |
+  | `在 …，… 写道：` / `<名> <地址> 于<时间>写道：` / `<名> <时间> 写道：` (zh-wrote, 含折行) | 那一行 |
+  | `… 書きました：` (ja-wrote) | 那一行 |
+  | `-----Original Message-----` / `原始邮件` / `元のメッセージ` (original) | 其后的头部块 |
+  | `---------- Forwarded message ---------` / `Begin forwarded message:` / `转发的邮件` (forwarded, `forwarded: true`) | 其后的头部块 |
+  | Outlook 头部块: `From:`/`发件人:` + ≥ 2 行 `Sent:`/`Date:`/`To:`/`Subject:`/`发送时间:`… (outlook; 其前的 `____` 分隔线去掉) | `From: … · Sent: …` |
+
+  标记之后到结尾是引用 (若每一行都带 `>`, 剥掉一层; 里面递归同一档, 历史嵌套成嵌套的 quote)。标记之上:
+  ticket banner (`Please reply above this line` / `do not write below this line` / `请在此行以上回复` …) 成为
+  一个 `banner` 块, 其 `======` 规则线去掉; 纯规则线 (`====`、`----`、`____`) 去掉; `-- ` 签名或末尾的手机签名
+  (`Sent from my iPhone` / `Get Outlook for iOS` / `发自我的iPhone` …) 成为 `sig`。主题以 `Fwd:`/`转发:` 开头时,
+  一个没有标记的头部块引用标为 forwarded。
+- **`cleanSubject(subject)`** —— 邮件线程的**标题** (窗口、行、搜索结果): 去掉 ticket banner 与 `======` 规则,
+  一串 `Re: RE: Fwd:` 折叠为第一个 (`回复：回复：` 同理), 空白折叠; 什么都不剩时调用方保留原字符串。
+  由适配器**声明** (`caps.titleForm: 'subject'`, Gmail), 引擎在 `rowView` 里按能力行清理 —— 索引保留厂商原字符串
+  (过滤器匹配它), 记录的 `raw.subject` 逐字不动。
+- **Lark 档 `larkToBlocks(item, mentions, {names, text})`**, ingest 时对**厂商条目**运行 (只有这里还看得到
+  post 的链接 / 提及 / 图片; `text` 已被压平):
+
+  | Lark | 块 |
+  |---|---|
+  | `text` | 通用档 + `@_user_N` / `<at user_id=…>…</at>` → `at` |
+  | `post` (顶层或 `zh_cn`/`en_us`/`ja_jp` 包裹) | 标题 → 粗体段落; 每行 → 段落内一行; `text` (style bold → `b`, 其余再过一遍链接化) / `md` / `a` (安全 href → `a`, 否则 "文字 (href)") / `at` → chip / `img` → `img` 块 (原位) / `media` → `file` 块 / `emotion` → `[TYPE]` / `code_block` → `code` / `hr` → 段落边界 |
+  | `image` | `img` 块 —— **树里没有 "[image]"**, `text` 仍保留给 agent |
+  | `file` / `folder` / `media` / `audio` | `file` 块 (原位的附件 chip) |
+  | `interactive` | `card` {title, lines} —— 列表接口的 post 形态 `elements: [[…]]` 与卡片 JSON 形态 `elements: [{…}]` 都读 |
+  | `system` | `sys` —— 模板里的 `{from_user}` 等**用名字填好** |
+  | `sticker` / `share_chat` / `share_user` / `merge_forward` / `location` / `video_chat` / `share_calendar_event` / `todo` / 未知 | `sys` + `what` |
+  | `deleted` | `sys` (`what: 'deleted'`) |
+
+  post 正文的唯一读者 `larkPostBody` 从 lark.js 移到这里 (text、attachments、blocks 读同一个)。
+- **存量记录 `blocksOf(record)`**: 这一层之前存下的记录没有树, 而 store 是只追加的 ndjson —— **不迁移**。声明
+  `caps.render: 'blocks'` 的适配器**必须**导出 `blocksOf` (注册表强制; 没声明却导出同样被拒), 引擎在
+  `messages()` / `loadOlder()` **读取时**为缺树的记录补上 (Lark: `larkStoredBlocks` —— 旧记录的 `[image]` / `[video]`
+  行按 mime 族对应到附件, 已解析的 `@name` 重新成为 chip; Gmail: 邮件档跑在 `text` 上)。什么都没声明的适配器
+  (fake、Agents) 由客户端的通用档从 `text` 画。
+- **一行预览**: 行的 `lastText` 取自最新记录的树 (`previewOf`: 段落、卡片、系统行 —— 不含 banner、引用、签名),
+  没有树的记录保留原文 (store 仍只用 node 内置模块)。
+
+### 25.3 渲染器与窗口
+
+- **唯一的正文路径**: `renderBlocks(blocksOfRecord(rec), ctx)` —— 记录自己的树, 否则通用档跑在 `text` 上。
+  渲染时**再次** `validateBlocks`, 并在赋值 `a.href` 的那一刻再问一次 `safeHref` (双保险: 一棵带着
+  `javascript:` href 越过 ingest 的树也只会画成文字)。链接 `target=_blank`、`rel="noopener noreferrer"`,
+  title 是真实目标。提及是 chip。树安置的图片在正文**原位**画出 (我们的路由, `img.src`, R3 的拒绝 chip + 重试);
+  树没安置的附件 (邮件附件) 照旧在消息下方的条里。
+- **折叠规则**: `quote` / `sig` 行数 ≥ 3 (`FOLD_MIN_LINES`) 且消息还有**别的**内容时默认折叠, 折叠按钮
+  "显示引用内容（N 行）" / "显示转发的邮件（N 行）" / "显示签名（N 行）", 旁边是归属 (谁在何时写的);
+  1–2 行的引用直接显示 (聊天里一行引用藏在按钮后更难读); **唯一的内容永不折叠** (一封纯转发就是它的内容)。
+  状态按记录存在窗口的内存里 (`folds`), 重绘时重新套用; 点按只原位替换那一个块。
+- **有键的行原位补丁**: `channels-updated` 广播点名这个会话时, 窗口重画 bar, 读最新一页, 只**追加**尚未画过的
+  记录 —— 屏幕上的行从不重建, 打开的引用保持打开, 读者不会被拽走 (只在原本就在底部时贴底); 一条落在已画记录
+  **之间**的记录 (厂商迟到) 才整页重画, 保留滚动位置。首次渲染、补丁、重连重读、向上翻页走**同一个队列**
+  (两次交错的渲染都清空列表、都追加自己的一页 —— 每行两遍: 打开时自己的 watch 心跳在首次渲染加载期间就广播了,
+  本 lane 的截图里就出现了)。
+  页脚按它**说的内容**加键: 模式、原因、措辞、修复都没变的重绘不动页脚 —— 正在输入的草稿活过每一次广播 (之前每次广播
+  都重建页脚、抹掉草稿); 变了 (重新授权、断开) 才重建, 并把已输入的文字带进新的 composer。
+- **同一作者 5 分钟内的连续消息**共用一行作者头 (已有), 后续每条的时间悬停显示 (`.chanmsg-at-hover`,
+  title 是完整时间)。正文 13 px。
+- **页脚一行**:
+  - 可以直接以你的身份发送: Lark/IM "以你的身份直接发送", 邮件 (`sendForm: 'draft'` —— 两阶段的草稿后发送,
+    按能力行判断, 不是适配器 id) "以你的身份起草并发送"; 策略那句话放在旁边 ⓘ 的 tooltip 里。会唤醒 agent 的发送
+    (`sendStartsTurn`) 把费用留在这一行里 (钱从不藏起来)。只提供 bot 身份时: "以提议提交 —— 这里不能以你的身份发送" + ⓘ。
+  - 只读且原因是 `send-scope-not-granted` 的可连接账号: "只读 —— 这个账号需要重新授权才能回复" + **重新授权**
+    按钮 (该账号自己的重新授权对话框, 与存储挂载同一套语法)。只有**声明了控制台步骤**的适配器 (Lark 的
+    `sendGrant: {scopes, console: true}`) 且账号**确实缺**某个发送 scope 时, 多一行 "请先在 {vendor} 应用里开启
+    {缺的 scope} 并发布一个版本。" —— Gmail 从不出现这句。其他只读原因沿用 "这里是只读的({why})"。
+- 手机宽度 (≤ 480 px): 折叠按钮与页脚按钮 ≥ 36 px。
+
+### 25.4 门
+
+- fast `test-channel-blocks` (in-process, ~2.4 s): 模式 (封闭集合、按名字拒绝、上限、每个字符串 inert、不安全 href
+  降级、未声明字段丢弃); `safeHref` + 链接化表 (21 行, 含 `javascript:`/`data:`/`vbscript:`/`file:`/相对/带凭据、
+  中文标点、成对括号、钓鱼标签); 通用档; 邮件档 12 份自造但形状真实的夹具 (英文折行 "On … wrote:"、中文三种
+  写道、Outlook 头部块、Original Message、转发、纯转发、只有 `>`、ticket banner、`-- ` 与手机签名、无引用) 的期望树;
+  `cleanSubject` 表; 真 `lark.toRecord` / `gmail.toRecord` → blocks (图片就是图片、`text` 不变) + 存量档;
+  注册表 (render / titleForm / blocksOf / sendGrant); **真引擎进程内** (禁用的 Lark + Gmail 记录, 零厂商调用:
+  存量记录带树返回、subject 标题清理而 name 标题不动、sendForm / sendGrant、预览); 渲染器跑在最小 DOM 上
+  (校验后的链接、chip、折叠规则 + 记忆、原位图片、零 innerHTML); 接线钉; 8 个 patched-copy 对照 (去掉 scheme
+  检查、去掉 inertFrames、去掉 trimUrl、去掉折行标记、去掉 Outlook 规则、去掉渲染时检查、去掉"唯一内容"守卫、
+  用文字画图片)。
+- heavy `test-channel-window-render` (真 worktree 服务器 + headless chrome, zh): 见 §25 的两张截图逐条; 截图写到
+  `/tmp/vibespace-lanes/channel-render-shots/`。
+- 保持绿: test-channel-record (④e: 树里每个字符串 inert)、test-channels-images (钉改为"原位画图")、
+  test-channels-aggregate-ui ②b (图片在正文里、没有 "[image]")、test-channels-e2e (一行页脚 + ⓘ)。
+
+### 25.5 凭据变化 = 每个会话的"能不能发"重新判定 (inc-muk9jj0j-rel3)
+
+owner: "已经重新授权过 但还是有个邮件提示没有发送权限"。`convCaps` 按会话缓存 (带 `at`, 6 小时 TTL), 重新授权
+写了新的 scopes 却没让任何一个失效 —— 只有下一趟 pass 恰好访问到的线程得到新判定。现在: 适配器声明 PURE 的
+`sendCapsOf(scopes)` (Gmail: `sendVerbsOf(scopes).reply`; Lark: 两个发送 scope 都持有), 自己的 `convCaps` 也用它;
+token 门在 scope 集合变化或同意落地时盖 `auth.scopesAt` (同 scope 的刷新不盖); `effectiveConvCaps(rec, en)` 是缓存
+判定的唯一读者 —— 早于凭据变化的判定, 发送一半按持有的 scopes 重算 (没有纯规则或读未验证 ⇒ 标记 stale, 下次打开
+向厂商重问); 同意钩子 / 换客户端重绑 / 断开 在各自那一次整份 digest 之前把整个账号的判定持久化, 启动时再补一次
+(本代码之前落地的同意 —— owner 现在的状态)。打开着的窗口随那份 digest 原位切换页脚。门: test-channels-engine ⑯、
+test-channel-window-render ⑦。
+
+**附带 (owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗"):** Push… 对话框第一行说推送是什么、两家各自需要什么,
+下拉框说明独占 / 共享; 菜单行的 tooltip 同一句。只改文字。门: test-channel-window-render ⑧。
+
+### 25.6 验证轮 (2026-09-27, 对抗式 verify-and-fix)
+
+三条真缺陷, 每条先复现再修, 各带钉子与 patched-copy 对照:
+
+1. **档是二次方的, 而且走的是原始正文。** 实测: 64 KiB 的一个单词 2 280 ms (e-mail 链接化的 local part 无上界 —— 引擎在**每一个**位置吞下整个词再回溯);
+   URL 后跟 60 000 个 `)` 11 394 ms (`trimUrl` 每剪一个字符就重数一遍括号); 16 K 行 `-- ` 1 074 ms (每个分隔行都数一遍余下正文)。而
+   Gmail / Lark 的 `toRecord` 把**原始**厂商正文交给档 (在 makeRecord 的 64 KiB 截断之前) —— 一封 1 MiB 单行邮件 = 服务器事件循环卡住数分钟
+   (每个会话、每个客户端), 同一段代码也在每个浏览器里按渲染跑。系统消息模板 `{a}` × 100 000 套在 64 KiB 的部件上抛 RangeError, 而 Lark 的
+   `history()` 逐条 `toRecord` 没有 per-item catch —— 一条毒消息让整个账号的 pass 失败。修: e-mail 模式每一部分按 RFC 上界; 括号只普查一次;
+   签名判定到上界即停; **每一档入口先截到记录自己的文字上界** (`bounded`); **档永不抛** (`guarded` → `plainOf(text)`); 系统模板与每个部件、
+   emotion 类型都有界; post 的 `at` chip 先按本条 mentions / 名册命名, 元素自带的 `user_name` 只是兜底。修后十五个病态输入全部 ≤ 73 ms。
+2. **mailto 链接带着一张撰写表单。** `mailto:you@x?bcc=evil%40y` 通过了"恰好一个 @"的正则 (邮件客户端会对 RFC 6068 hfields 做百分号解码) ——
+   点击即打开带隐藏收件人的撰写窗。修: mailto **只是一个地址** (`MAILTO_RE`, 无 `?` / `#` / 百分号转义)。
+3. **存下来的树原样送出。** 日志只追加, 写它的不一定是 makeRecord (敌意 / 有 bug 的适配器、手改的日志): 一棵带 `iframe` kind、活 frame、
+   `javascript:` href 的树原样到达每个客户端, 渲染器的复验是唯一的墙。修: **读取时也判定** —— 不过审即丢掉 `blocks` (正文照画), 过审即清洗后送出。
+
+附带: 断开连接时正在输入的回复**保留**到 composer 回来 (以前静默丢弃); 25.5 的**反向**也钉住 (test-channels-engine ⑯): 断开后该账号每个会话在读取与磁盘上都只读,
+刚才还能发的回复被按名字拒绝 `send-not-available · send-scope-not-granted`。
+
+门: test-channel-blocks ⑬ (线性表十五行 < 800 ms、1 MiB 输入、抛错的档、Lark 上界、引擎读取时拒绝存量树、banner-only 主题保留原标题; 对照 i / j / k / l / m / n);
+test-channel-window-render ⑨ (chrome 里的敌意批: 标签里的标记、javascript:/data:/vbscript:/jav&#x61;script:、带 ?bcc= 的 mailto、3 000 字符 URL、unicode 混淆
+(裸的是文字, markdown 的链到 punycode 并在 title 里说明)、post 的敌意 a/md/at/code_block/emotion/img、带 url action 的卡片、注入名字的系统模板、
+100 KB 未知类型、RTL 覆盖字符的文件名、两棵越过 makeRecord 写入的树 —— `window.__xss` 从未被设置, 无 script / on* / javascript:, 每个 img src 都是我们的路由;
+只有攻击者自己 "On … wrote:" 行或只有 `-- ` 签名的邮件**完整显示**、绝不折成空) + ⑩ (向上翻页期间三次广播: 60 行各画一次且有序; 草稿活过广播风暴、
+新消息到达与页脚重建; 打开的引用活过追加与迟到记录强制的整页重画)。
+
+LOW (未改): 攻击者自己的 "On … wrote:" 行**在正文之上**时会折叠其后文字 (与 Gmail 一致 —— 归属显示该行, 按钮显示行数); `lines` 最多 1 000 000 会原样出现在折叠按钮上;
+没有 `sendCapsOf` 的适配器其 stale 判定每次启动重写一次; 标签是目标主机自身的混淆字形时按标签显示 (title 带 punycode)。
+
+### 25.7 外观: 像 IM 一样一眼看清 (2026-09-27, lane channel-polish)
+
+owner: "界面美化别忘了做（channel 部分）… 至少保证人能看清楚必要的信息"。只改长相, 渲染规则 / 清洗 / 记录 / 引擎不动: 每个作者一个**头像** (名字前两个词的首字母, 中日韩名字取第一个字; 按作者 key 的稳定哈希落在 8 个主题色之一, 自己用强调色; 纯装饰 aria-hidden) —— 同一作者 5 分钟内的一串共用一个头像 + 名字行, 后续每条的时间悬停时显示在头像栏里 (以前画在正文**上面**); 系统消息居中变淡、没有头像、打断连串; 日期是细线上的小药丸; 窗口头 = 会话头像 + 一栏 (标题 · 授权芯片 · ⋯ 一行, 下面一行元信息), 手机上一行; 图片圆角卡片 (有名字时悬停显示说明), 文件是带类型图标、名字和大小的小卡片, 飞书卡片有边框、标题加粗, 引用是左边一条细线的块; composer 是一个柔和的框; 列表行 = 会话头像 · 名字 (未读加粗) · 时间 · 一个 tag · 最后一条消息 · 未读数 (默认宽度时头像在第一行、第二行保持整行宽, R3 的 tag 预算不变)。调色板: 填充 22 % 色相叠在底色上、首字母 35 % 色相混入 --text, 六个主题 × 两种底色 × 九个色相全部 ≥ 4.5 : 1 (最差 nord 4.85)。门: test-channel-blocks ⑭ (首字母表、色相、从样式表算出的对比度 + 对照)、test-channel-window-render ⑪ (连串 / 悬停时间 / 系统行 / 补丁后头像是同一个元素且颜色不变)、test-channels-i18n ④ (DejaVu Sans 下的矩形普查: 不重叠、不截断、不出界、不横向滚动、手机 ≥ 36 px、头像对比度)。详见 docs/design-communication-panel-ui.md §7。
+
+追加 (同一 lane): **选择 agent / 任务组不再是整张名单的下拉框** —— 所有挑选主体的地方 (授权访问…、通知…、可见范围里的"授予…"、新建群 / 邀请…、桌面应用的共享 / 请 agent 接管) 都是同一个选择器: 搜索框 (名字、目录、任务组、agent 类型、id 前缀; 不分大小写与重音, 中日文按子串) + 分组列表 (最近、任务组、各任务组下的会话、其他) + 多选时的 chip; 键盘 ↑↓ Enter / Esc / Backspace; 名单变化原位刷新。门: test-principal-picker、test-channel-window-render ⑫。**通知… 改成三个直白的问题** (唤醒谁? / 哪些消息? / 最多多频繁? —— 立即 / 每 N 分钟一份摘要, 下面单独一行"每天最多 N 次": 每日上限对摘要同样生效, 所以不是第三个互斥选项; 验证第二轮: 答案与存储的通知记录一一对应, `notifyAnswers` / `watcherOfAnswers`) 外加一句随改随变的复述 (`notifySentence`); 去掉每条通知的"回执唤醒"开关; **授权访问…** 问"谁可以在这里阅读和操作?", 权限写成"可以起草回复(由你批准)" / "可以直接回复"。线上载荷不变。门: test-channel-filter ⑫、test-channels-i18n ④。
+
+## 26. 从聊天跳到会话：被动见证 (2026-09-27, backlog B-099e)
+
+owner 批准 (2026-09-27): "那就按照这个做吧"。
+
+**问题。** 几百封邮件、几百个飞书群里, 慢的是**找到** agent 正在处理的那个会话 —— 而 agent 自己知道。两个方案: (A) 被动 —— 服务器本来就经手 agent 的每一次读 / 搜 / 回复 / 撰写 (它们都走我们自己的 `/api/agent/channels/*` 路由), 把这件事**记下来**, 在聊天里画出可点的行; (B) 主动 —— 给 agent 一个工具或一段注入上下文, 让它"报告自己在看哪儿"。选 A: 不给 agent 新工具、不注入任何上下文、不花 token, 也不依赖 agent 记得去报告 (它会忘, 而见证不会)。agent 那边唯一的变化是手册里一句话: "你在这里读过或起草的一切, 都会在聊天里给用户显示成可点的卡片 —— 你永远不需要告诉他们在哪儿"。
+
+**见证 (ORCH `src/server/channel-touches.js`)。** agent 路由的每个处理函数在引擎回答 `ok` **之后**记一次 touch (隐藏的会话 = 统一的 not-found, 不留任何痕迹 —— 不成为 oracle): `read` (读了几条)、`search` (每个命中的会话一条, 按命中数取前 20)、`reply` (起草的回复, 带 proposal id)、`compose` (新消息 —— 还没发出, 所以没有会话, 键为 `<账号>/~compose/<proposal>`)、`refresh`、`request`、`status` (查看某一条草稿)。`list` 豁免 (它列出能看见的会话, 一个也没读)。每条 touch 带记录**自己的**名字 (会话标题、账号标签、撰写的主题), 在服务器端 `inertFrames` 中和 (`<system-reminder>` 变成 `[system-reminder]`), 客户端一律 textContent。环挂在**会话**上 (`session._channelTouches`, 最新 200 条; 同一 op + 同一会话 2 s 内的重复合并成一条 —— agent 的读循环是一条, 不是冲掉其余的 200 条), 去抖写进 session meta (`channelTouches`), 关机时 flush, 三条 boot-restore 路径都读回来 —— taskRecords 的规矩: 卡片依赖的只在线上存在的记录, 经过时持久化, 每次重建时重放。每次调用**一次**广播 `{type:'channel-touch', sessionId, touches, turnAt}`。test-architecture §63 是普查: 每个 `/api/agent/channels/` 处理函数都调 `touchChannel`, 或在封闭的豁免表里写明理由。
+
+**绑定 (PURE `src/channel-touch.js` `bindToCall`)。** 一条 touch 属于**它发生那一刻正在运行的那个工具调用**。一个调用从它自己的时刻开始运行, 直到下一个**不在同一并行批次** (开始时间相差 > 1.5 s) 的调用开始 —— 顺序执行的 agent 只有在前一个返回之后才发下一个 —— 或下一条非工具消息。几个调用同时在运行 (一个并行批次、一个长时间运行的子 agent 卡片) 时: 命令里**点了这条 touch 名字**的那个优先 (会话键、`vibespace-channels search`、那个账号上的 compose、proposal id), 否则取最晚开始的那个。没有任何调用在运行 ⇒ 视图显示着对话尾部时, 取最新的那张卡片 (规格里的"会话最新的工具卡片"); 否则不绑定 (它的卡片不在当前渲染里; 渲染到时再绑)。允许 1.5 s 的时钟偏差 (服务器时钟对转录时间戳)。
+
+**折叠 (`foldTouches` / `foldView`)。** 每个会话一行: 图标 (Gmail 是信封、Agents 是机器人、其余是对话气泡)、`账号 › 标题`、那几个词 ("起草了一条回复 · 读了 12 条消息")、时间; 起草过 / 撰写过的排在最前, 其余按最后一次 touch 从新到旧; 显示 3 行, 其余收在 "另有 N 个" 后面, 原地展开。行按会话键**原地打补丁** (一次广播从不重建一行 —— 活卡片规则); 点击走**唯一的门** `app.openChannel` (已经开着的窗口被 reveal), 还没发出的新消息打开发件箱。一张带了行的卡片**不参与折叠** (图片成员的规则: owner 要点的东西不能藏进 "3 Bash" 里)。
+
+**状态栏 chip (`channels`, 按 key 原地更新)。** "频道 · <最新标题>", 只算**这一轮** (从这一轮开始的时刻起 —— 服务器给的是 normalizer 里最新一条用户消息或最后一次敲键, 客户端再用新来的实时用户消息推进); 一个会话就直接打开, 几个就弹菜单 (起草的在前); 新的一轮开始、还没 touch 任何会话时, chip 消失。
+
+**反向链接 (会话窗口的标题区)。** "<agent> 3 分钟前起草" / "<agent> 刚刚读过" —— 每个 touch 过这个会话的活会话一枚 chip (最强的 op: 起草胜过阅读), 点击 reveal 那个 agent 的聊天窗口。它是**一个自成一体的节点** (每个窗口创建一次, 窗口每次重绘时被重新 append), 所以对 `channel-window.js` 的改动是一行调用 + 一行 import。
+
+**路由 (仅 cookie; agent 的 bearer 403 `agent_forbidden`)。** `GET /api/channel-touches?sessionId=` = 这个会话的环 + 这一轮的开始时刻 (聊天视图的那一次读取; 已停止或未知的会话回答空环 `live:false`); `GET /api/channels/:adapterId/:convId/touches` = 每个 touch 过这个会话的活会话 (名字、最强的 op、最新时刻), 从新到旧。
+
+**没做的。** resume 之后的新 webui 会话不继承旧会话的环 (环按 webui 会话存, 旧会话的 meta 按年龄清扫); 只读的历史窗口 (`view-…`) 没有行; 终端模式的会话只有反向链接 (没有卡片也没有 chip)。
+
+门: test-channel-touch (fast: PURE 表 + 见证 + 两条 owner 路由 + 8 个 patched-copy 对照 + 接线钉) · test-architecture §63 (普查 + 3 个对照) · test-session-schema (`_channelTouches`) · heavy: test-channel-jump (真 chrome + 真 chat-wrapper 后面的 stub claude 跑真的 vibespace-channels: 三行、起草的在前、点击打开那个窗口、chip 与菜单、"由 … 起草" 与 reveal、敌意主题当文字 + innerHTML 对照、agent bearer 403、SIGKILL + 重启 + 新页面后行从持久化的 meta 重放)。

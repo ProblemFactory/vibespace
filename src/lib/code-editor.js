@@ -23,6 +23,7 @@ import prettierMarkdown from 'prettier/plugins/markdown';
 import prettierTypescript from 'prettier/plugins/typescript';
 import prettierYaml from 'prettier/plugins/yaml';
 import prettierGraphql from 'prettier/plugins/graphql';
+import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
 
@@ -421,6 +422,10 @@ class CodeEditor {
     // (and always via the explicit ⟳ button).
     if (!this._host) this._freshTimer = setInterval(check, 15000);
     window.addEventListener('focus', check, signal ? { signal } : undefined);
+    // §7.9: the server SAID this file changed (a LibreOffice session on it ended with its mtime moved — the
+    // `file-changed` broadcast, relayed by src/lib/file-changed.js): the same check at once, on either transport —
+    // a clean editor reloads, a dirty one shows its disk chip (edits are never discarded)
+    onFileChanged((d) => { if (sameFile(d, { host: this._host || null, path: this.filePath })) check(); }, { signal });
     signal?.addEventListener('abort', () => clearInterval(this._freshTimer));
   }
 

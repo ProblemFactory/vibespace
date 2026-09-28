@@ -100,6 +100,119 @@ function browserKeyFor({ prior, resume, fork, mint }) {
   return { key: mint(), origin: 'new' };
 }
 
+// ── B-f7ab: a LIVE session's browser key, minted on its FIRST USE ─────────────
+/**
+ * THE LATE KEY (B-f7ab, 2026-09-27). The key above is decided at SPAWN. A session that started before the feature (or
+ * while `browser.isolateSessions` was off) has none, and every `vibespace-browser` verb answered a 409 nobody could act
+ * on — the owner's 2026-09-17 chat read "it predates the feature — it cannot hold a profile", tried the old CLI name,
+ * was refused by the shim and parked itself waiting for a human. The key needs NO respawn: the CLI builds its child env
+ * from `/resolve`'s answer (the session's recorded pairs, the NAMED config, the keeper's socket root — browser-verbs
+ * `childEnv`), so a key minted at the first browser command works for the process that is already running.
+ *
+ * This verdict says whether one may be minted NOW, over facts the ORCH (src/server/browser-key.js) gathers. The rules
+ * are the binding store's (browser-bindings.js, D15 / r5–r7): a key belongs to the conversation it is decided for — so
+ * the conversation must be KNOWN (its id announced), must be THIS session's own (never a fork still carrying the id it
+ * was forked from: a key given then binds the PARENT), and must not already have a key another LIVE session holds (one
+ * conversation, one browser). A conversation that already has a key and no live holder gets THAT key back (a resume's
+ * rung), never a second one. Every refusal NAMES its reason and what a person does about it (`lateKeyRefusal`).
+ *   @returns {{ok:true, conversationId, reuse}} | a refusal ({ok:false, code, why, error, remedy})
+ */
+const LATE_KEY_WHYS = Object.freeze(['session_gone', 'remote', 'integration_off', 'isolation_off', 'unavailable', 'conversation_unknown', 'fork_pending', 'held_elsewhere']);
+function lateKeyVerdict({ live = true, remote = false, integrationOn = true, isolationOn = true, envAvailable = true, conversationId = '', forkPending = false, priorKey = '', priorHolder = null } = {}) {
+  if (!live) return lateKeyRefusal('session_gone');
+  if (remote) return lateKeyRefusal('remote');
+  if (!integrationOn) return lateKeyRefusal('integration_off');
+  if (!isolationOn) return lateKeyRefusal('isolation_off');
+  if (!envAvailable) return lateKeyRefusal('unavailable');
+  const sid = typeof conversationId === 'string' ? conversationId : '';
+  if (!sid) return lateKeyRefusal('conversation_unknown');
+  if (forkPending) return lateKeyRefusal('fork_pending');
+  const prior = isBrowserKey(priorKey) ? String(priorKey) : '';
+  if (prior && priorHolder) return lateKeyRefusal('held_elsewhere', { holderName: typeof priorHolder === 'string' ? priorHolder : '' });
+  return { ok: true, conversationId: sid, reuse: prior };
+}
+/** THE words of a late-key refusal: `error` = what happened (the restart-remedied reasons in the one shape "restart this
+ *  session (Terminate → Resume) to get a browser key: <reason>"), `remedy` = what a person does. Never a command line
+ *  (the agent's Ask-user card carries these to the owner). `code` is `session-gone` for a session that is not running,
+ *  else `no_browser_key` with the reason in `why`. */
+function lateKeyRefusal(why, { holderName = '' } = {}) {
+  const restart = (r) => `restart this session (Terminate → Resume) to get a browser key: ${r}`;
+  const W = {
+    session_gone: ['this session is not running any more — a browser key belongs to a running session', 'resume the conversation; its browser comes back with it'],
+    remote: [restart('it runs on another machine, where its browser is decided when the session starts'), 'the resumed session keeps its conversation; its first browser command then starts its browser'],
+    integration_off: ['VibeSpace agent integration is off on this instance, so no session gets a browser of its own', 'turn on Settings → Integration → “VibeSpace agent integration (master switch)”, then try again'],
+    isolation_off: ['per-session browsers are off on this instance (Settings → Agent browser → “Give each session its own agent browser”), so this session has no browser of its own', 'turn that setting on and try again — the next browser command gets one, no restart needed'],
+    unavailable: ['VibeSpace could not prepare a browser for this session on this server (the server journal says why)', 'tell the user — the server journal names the cause'],
+    conversation_unknown: [restart('its conversation id is not known yet, and a browser key belongs to a conversation'), 'or send the session one message and try again'],
+    fork_pending: [restart('it is a fork whose own conversation id has not been announced yet — a key given now would belong to the conversation it was forked from'), 'a message to the fork usually announces its id; if it does not, restart it'],
+    held_elsewhere: [`this conversation's browser belongs to another running session${holderName ? ` ("${String(holderName).slice(0, 80)}")` : ''} — one conversation, one browser`, 'use that session, or stop it and try again here'],
+  };
+  const w = W[why] || W.unavailable;
+  return { ok: false, code: why === 'session_gone' ? 'session-gone' : 'no_browser_key', why: W[why] ? why : 'unavailable', error: w[0], remedy: w[1] };
+}
+
+/**
+ * WHEN THE LATE KEY'S DEFAULT PIN IS DATED (B-f7ab verify r1, 2026-09-27 — reproduced on the real keeper + routes).
+ * A pin the USER chose is an authorization (`mayAttach`'s `pinned`, owner ruling A (4)) and THE USER'S LATEST CHOICE
+ * WINS: `userPinAuthorizes` admits a pin only when it is no older than the profile's last "Who can use it" change
+ * (`scopeAt`). The late key applies the spawn's pin ladder (Task Group default > instance default), and the keeper
+ * stamps a pin with its own clock — so a session that STARTED before the user kept a profile to another conversation
+ * got a pin dated AFTER that narrowing on its agent's first browser command, and was admitted to the profile (its
+ * logins included) with no user act in between; the same session keyed at spawn is refused `not_owner`. The late key
+ * stands in for the key the spawn would have given, so its default pin carries the instant the session STARTED:
+ * the OLDEST of what the record and the live session state (a restored session whose record states none carries its
+ * restore instant — never a start). Nothing finite ⇒ 0: an unknown start outranks no narrowing. The keeper only ever
+ * dates a pin EARLIER than its own clock (`setPin`'s `at`), so no caller can mint a fresher authorization.
+ */
+function latePinAt({ recordedAt = null, liveAt = null } = {}) {
+  const ts = [recordedAt, liveAt].map((v) => (typeof v === 'number' ? v : Number.NaN)).filter((v) => Number.isFinite(v) && v > 0);
+  return ts.length ? Math.min(...ts) : 0;
+}
+/**
+ * WHICH DEFAULT PIN THE LATE KEY APPLIES (B-f7ab verify r2, 2026-09-27 — reproduced on the real keeper + routes: an
+ * instance / Task Group default the user set to a narrowed profile AFTER a keyless session started reached that session
+ * on its agent's first browser command, dated at the session's START ⇒ admitted; its spawn-keyed twin had landed on the
+ * default in force at ITS start and never saw the new one). A default reaches a conversation ONLY AT ITS START — the
+ * cap's law (lane P finding 5) and the spawn's own: the ladder is read once, when the session is created. The late key
+ * stands in for that read, and it has no history to read from. So:
+ *   · a WITNESS — the spawn's own record of the pick its ladder made at the start (`browserPinAtStart`, written by
+ *     ws-create for a keyless spawn since r2: {profileId, origin, at, by}; a fork's = its parent's pin verbatim, the
+ *     copy the spawn would have made) — is applied AS THAT PICK: the profile, the origin, the date (never later than the
+ *     start: `startedAt` clamps it), the `by`. Full parity with the spawn for every session spawned since.
+ *   · no witness (a session from before r2, or one whose ladder did not run): the default the user has NOW is applied
+ *     as a LANDING only — dated 0, so it never authorizes a profile the user narrowed (`userPinAuthorizes`: a pin dated
+ *     0 authorizes nothing — r3: not even a narrowed profile that carries no `scopeAt`; a never-narrowed profile admits
+ *     everybody without a pin anyway). The agent's bare command still names the profile — refused `not_owner` by the
+ *     button, never a silent temporary browser. A witness on a record that states no start is dated 0 too (r3).
+ *   · the conversation's OWN pin (a kept key's row) is the record's, untouched — the resume rung, as at spawn.
+ * → {profileId, origin, at, by, source: 'witness'|'landing'|'conversation'|'none', refused?}
+ */
+const PIN_WITNESS_BYS = Object.freeze(['user', 'agent']);
+/** A witness that NAMES a profile (the ladder picked one at the start). */
+function isPinWitness(w) {
+  return !!(w && typeof w === 'object' && isProfileId(w.profileId) && PIN_ORIGINS.includes(w.origin) && w.origin !== 'harness'
+    && typeof w.at === 'number' && Number.isFinite(w.at) && w.at >= 0 && PIN_WITNESS_BYS.includes(w.by));
+}
+/** A witness that the ladder ran at the start and picked NOTHING (no default was in force) — no landing either. */
+function isEmptyPinWitness(w) {
+  return !!(w && typeof w === 'object' && !w.profileId && w.origin === 'harness' && typeof w.at === 'number' && Number.isFinite(w.at) && w.at >= 0);
+}
+/** The Task Group cap a witness carries (null = none was in force / not witnessed). */
+function witnessCap(w) { return w && typeof w === 'object' && Number.isInteger(w.cap) ? w.cap : null; }
+function lateDefaultPin({ witness = null, ladder = null, startedAt = 0 } = {}) {
+  const started = (typeof startedAt === 'number' && Number.isFinite(startedAt) && startedAt > 0) ? startedAt : 0;
+  const pick = ladder && typeof ladder === 'object' ? ladder : { profileId: '', origin: 'harness' };
+  if (pick.origin === 'conversation' && pick.profileId) return { profileId: String(pick.profileId), origin: 'conversation', at: null, by: null, source: 'conversation' };
+  // verify r3 (LOW): a witness is dated by the START it belongs to (the record's / the live session's, `latePinAt`) — a
+  // record that states NO start (ws-create writes `createdAt` in the same write as the witness; a witness without one is
+  // a damaged or hand-written record) is dated 0 like r1's unknown start, never by the witness's own claim
+  if (isPinWitness(witness)) return { profileId: witness.profileId, origin: witness.origin, at: started ? Math.min(started, witness.at) : 0, by: witness.by, source: 'witness' };
+  if (isEmptyPinWitness(witness)) return { profileId: '', origin: 'harness', at: null, by: null, source: 'witness' };
+  if (witness !== null && witness !== undefined) return { profileId: '', origin: 'harness', at: null, by: null, source: 'none', refused: 'the start-time pin record is not a pin witness' };
+  if (pick.profileId && (pick.origin === 'task-group' || pick.origin === 'instance')) return { profileId: String(pick.profileId), origin: pick.origin, at: 0, by: 'user', source: 'landing' };
+  return { profileId: '', origin: 'harness', at: null, by: null, source: 'none' };
+}
+
 // ── §3.2.2 the user-data-dir ladder (D12) ───────────────────────────────────
 /**
  * The variants a spawn can land on. Exported so the suite and the journal speak
@@ -1338,7 +1451,13 @@ function mayAttach(profile, { browserKey, taskIds = [], pinned = false, by = 'ag
  */
 function userPinAuthorizes({ pin = null, profile = null } = {}) {
   if (!pin || !profile || pin.profileId !== profile.id || pin.by === 'agent') return false;
-  return (Number(pin.at) || 0) >= (Number(profile.scopeAt) || 0);
+  const at = Number(pin.at) || 0;
+  // B-f7ab verify r3 (LOW): a pin DATED 0 is a LANDING (the late key's default on a record with no witness — never an
+  // authorization) — and `0 ≥ scopeAt` read TRUE on a narrowed profile that carries no scope date (a record only a
+  // hand-edited or restored-after-the-migration registry holds: every narrowing the product writes stamps `scopeAt`),
+  // so the landing admitted it. An authorization is DATED; a profile open to all admits without asking here (mayAttach).
+  if (!(at > 0)) return false;
+  return at >= (Number(profile.scopeAt) || 0);
 }
 /**
  * The panel switch (PATCH `{scope, conversation?}` — a USER act): the owner a scope change writes. 'all' ⇒ instance;
@@ -2305,7 +2424,7 @@ function floorNotice(v) {
 
 module.exports = {
   sessionNameFor, mintBrowserKey, isBrowserKey, BROWSER_KEY_RE,
-  browserKeyFor,
+  browserKeyFor, LATE_KEY_WHYS, lateKeyVerdict, lateKeyRefusal, latePinAt, lateDefaultPin, isPinWitness, isEmptyPinWitness, witnessCap, // B-f7ab: the late key (first use); r2: the witnessed default
   VARIANTS, REJECTED_VARIANTS, ISOLATED_VARIANTS, isolatedVariant, variantLadder, fencedRungReason, configNamesProfile,
   SOCKET_PATH_MAX, SOCKET_DIR_BASE, utf8Bytes, socketTailBytes, socketRootFor, socketDirBaseOf, socketDirDecision,
   USER_CONFIG_REL, PROJECT_CONFIG_NAME, layerProjectConfig,

@@ -449,5 +449,78 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   for (const r of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7 })) ok(r.pass, '§9 tree: ' + r.name, r.pass ? undefined : r.detail);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S CONVERSATION KEY (lane channel-withdraw verify r6)');
+// A fork carries its PARENT's conversation id until the harness announces its own; R.sessionKeyOf spelled the
+// parent's key for it, so "Share with agent…" on the fork stored the row under `claude:<parent>`: the PARENT
+// answered to it (it may act on the user's window) and the fork lost the grant the moment it adopted its own id.
+// The ENGINE (ORCH) keys a live session through claude-lock-capture's `addressableId`: a borrowed id is not a key.
+// Real engine over a fake keeper (the test-window-targets §4 shape), in-process.
+{
+  const { scratch } = await import('./scratch.mjs');
+  const ENGINE = require(path.join(REPO, 'src/server/window-targets-engine.js'));
+  const D = require(path.join(REPO, 'src/desktop-display.js'));
+  const P = 'aaaaaaaa-1111-4000-8000-000000000041', FOWN = 'cccccccc-3333-4000-8000-000000000043';
+  const dir = scratch('wreach-fork'); fs.mkdirSync(dir, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true }); } catch {} });
+  const mkRec = (id) => ({ id, label: `App ${id}`, exec: 'x', state: 'ready', display: ':77', pids: { app: 4242, x: null, server: null, wm: null }, starts: {}, backend: 'vnc-display', startedAt: 1 });
+  const mkEngine = (M, sub, sessions, records) => M.create({ keeper: { listApps: () => [...records.values()], get: (id) => records.get(id) || null, sessionPids: (rec) => Object.values(rec.pids).filter(Boolean), x11EnvFor: (id) => (records.get(id) ? D.x11Env({}, { display: ':77', authFile: path.join(dir, 'none') }) : null), launch: async (body) => { const rec = mkRec('da-opened'); records.set(rec.id, rec); return rec; }, registry: () => [{ id: 'gedit', label: 'gedit', exec: 'gedit', args: [], available: true, reason: null }] }, dataDir: path.join(dir, sub), env: () => ({}), activeSessions: sessions, bins: { xdotool: null, gdbus: null }, log: { warn() {}, log() {} }, procExe: () => null });
+  const mkWorld = (M, sub) => {
+    const Ps = { agentToken: 'vsst_P', claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'parent', mode: 'chat' };
+    const F = { agentToken: 'vsst_F', claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'parent (fork)', mode: 'chat', _forkRequested: true, _forkSourceId: P };
+    const sessions = new Map([['w-P', Ps], ['w-F', F]]);
+    const records = new Map([['da-one', mkRec('da-one')], ['da-key', mkRec('da-key')]]);
+    const engine = mkEngine(M, sub, sessions, records);
+    return { Ps, F, sessions, records, engine, fP: engine.factsForToken('vsst_P'), fF: engine.factsForToken('vsst_F') };
+  };
+  const handles = async (engine, facts) => (await engine.list(facts)).targets.map((t) => t.handle).sort().join(',');
+  async function run(M, sub) {
+    const W = mkWorld(M, sub);
+    const g = W.engine.grantReach('da-one', { kind: 'session', id: 'w-F', name: 'parent (fork)' });   // the picker's spelling since r6: the LIVE webui id
+    const out = { rowKey: g.rows[0].principal.id, parentBefore: await handles(W.engine, W.fP), forkBefore: await handles(W.engine, W.fF) };
+    // the OPENER's own row: a pending fork launches an app
+    let opened = null; try { opened = await W.engine.open({ appId: 'gedit' }, W.fF); } catch (e) { opened = { threw: e.code || e.message }; }
+    const st = JSON.parse(fs.readFileSync(W.engine.reachFile, 'utf8'));
+    out.openerKey = opened && opened.handle ? ((st.windows[opened.handle] || { rows: [] }).rows[0] || { principal: {} }).principal.id : `(open ${JSON.stringify(opened)})`;
+    // adoption: the fork announces its own id
+    W.F.claudeSessionId = FOWN; W.F.backendSessionId = FOWN; W.F.forkedFrom = [P]; W.F._forkRequested = false;
+    out.parentAfter = await handles(W.engine, W.fP); out.forkAfter = await handles(W.engine, W.fF);
+    let att = null; try { await W.engine.attach('da-one', W.fP); } catch (e) { att = e.code; }
+    out.parentAttach = att;
+    return out;
+  }
+  const r = await run(ENGINE, 'real');
+  ok(r.rowKey === 'webui:w-F', `the share is stored under the fork's PLACEHOLDER key (${r.rowKey})`);
+  ok(r.parentBefore === '' && r.forkBefore === 'da-one', `while pending: the fork reaches it, the parent does not (parent "${r.parentBefore}", fork "${r.forkBefore}")`);
+  ok(r.forkAfter === 'da-one,da-opened' && r.parentAfter === '' && r.parentAttach === 'not_exposed', `after adoption: the fork KEEPS the grant (and its own opened app), the parent still reaches nothing, its attach is not_exposed (parent "${r.parentAfter}", fork "${r.forkAfter}", ${r.parentAttach})`);
+  ok(r.openerKey === 'webui:w-F', `the opener's own row for an app a pending fork launched is its placeholder, never the parent's key (${r.openerKey})`);
+  // the KEY spelling (an older picker sends the row's `<backend>:<cid>`): the parent live ⇒ the parent's own key; the
+  // parent dead and ONE pending fork carrying it ⇒ the fork's placeholder; TWO ⇒ refused by name, never a guess
+  {
+    const W = mkWorld(ENGINE, 'keyed');
+    const g1 = W.engine.grantReach('da-key', { kind: 'session', id: 'claude:' + P });
+    ok(g1.rows[0].principal.id === 'claude:' + P, 'a key the parent answers to (it is live and addressable) stays the parent\'s');
+    W.sessions.delete('w-P');
+    W.records.set('da-key2', mkRec('da-key2'));
+    const g2 = W.engine.grantReach('da-key2', { kind: 'session', id: 'claude:' + P });
+    ok(g2.rows[0].principal.id === 'webui:w-F', `the same key with only the pending fork carrying it ⇒ the fork's placeholder (${g2.rows[0].principal.id})`);
+    W.sessions.set('w-F2', { agentToken: 'vsst_F2', claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'fork two', mode: 'chat', _forkRequested: true, _forkSourceId: P });
+    let e = null; try { W.engine.grantReach('da-key2', { kind: 'session', id: 'claude:' + P }); } catch (x) { e = x; }
+    ok(e && e.code === 'bad_principal' && /2 forks/.test(e.message), `two pending forks on one key ⇒ bad_principal by name (${e && e.code}: ${e && e.message.slice(0, 70)})`);
+  }
+  // the client's picker sends the LIVE id (the engine spells the key)
+  const share = fs.readFileSync(path.join(REPO, 'src/lib/window-share.js'), 'utf8');
+  ok(/const principal = kind === 'session' \? \{ kind, id: r\.id \|\| r\.key, name: r\.name \}/.test(share), 'PIN: the Share dialog sends a session by its LIVE id (the engine decides its key), never the client-spelled conversation key');
+  // NEGATIVE CONTROL: the engine keying through R.sessionKeyOf / R.callerKeys raw — the parent gets the fork's grant and the fork loses it at adoption
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
+  const K1 = "const keyOf = (s, id) => (addressableId(s) ? R.sessionKeyOf(s, id) : `webui:${id}`);";
+  const K2 = "const keysOf = (s, id) => (addressableId(s) ? R.callerKeys(s, id) : [`webui:${id}`]);";
+  ok(esrc.split(K1).length === 2 && esrc.split(K2).length === 2 && !/R\.sessionKeyOf\(s0?, /.test(esrc.replace(K1, '')) && !/R\.callerKeys\(s, /.test(esrc.replace(K2, '')), 'the engine spells every session key through the two fork-aware helpers (no raw R.sessionKeyOf / R.callerKeys call remains)');
+  const Ec = MUT.load('src/server/window-targets-engine.js', esrc.replace(K1, "const keyOf = (s, id) => R.sessionKeyOf(s, id);").replace(K2, "const keysOf = (s, id) => R.callerKeys(s, id);"), 'rawkey');
+  const rc = await run(Ec, 'ctl');
+  ok(rc.rowKey === 'claude:' + P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && /da-one/.test(rc.parentAfter) && /da-opened/.test(rc.parentAfter) && rc.openerKey === 'claude:' + P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
+  for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(r0.pass, '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -56,9 +56,13 @@
  */
 const crypto = require('crypto');
 const { makeRecord, makeConversation } = require('../channel-record.js');
-const { ChannelError, retryAfterSeconds } = require('./index.js');
+const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
 const { createLarkLive, NAMES_WAIT_MS } = require('./live/lark.js');
+// §25 (2026-09-27): THE RENDER RUNGS — a vendor item → the typed block tree
+// the window draws (a post's rich text kept, mentions as chips, a picture as
+// the picture); `text` stays the agent-facing string.
+const Blocks = require('../channel-blocks.js');
 
 const KIND = 'lark';
 const LABEL = 'Lark / 飞书';
@@ -153,6 +157,9 @@ const caps = Object.freeze({
   threading: 'reply-to',
   editSent: false,
   readReceipts: false,
+  // §25 (2026-09-27): every record carries its render tree (`blocks`), and a
+  // record stored before that is served through `blocksOf` at read time
+  render: 'blocks',
   // 2026-09-26 (the aggregated IM): images and files are fetched ON DEMAND
   // through `messages/:message_id/resources/:key`, history pages back with
   // `end_time`, and every request is metered against the account's budget —
@@ -195,6 +202,13 @@ function hasSendScopes(token) {
   const sc = Array.isArray(token && token.scopes) ? token.scopes : [];
   return SEND_SCOPES.every((s) => sc.includes(s));
 }
+/** The send verdict from the HELD scopes alone (inc-muk9jj0j-rel3): PURE — the
+ *  engine re-judges every chat of the account when its credential changes;
+ *  `convCaps` uses the SAME rule (its chat lookup is the READ half). */
+function sendCapsOf(scopes) {
+  const send = hasSendScopes({ scopes: Array.isArray(scopes) ? scopes : [] });
+  return { sendAs: send ? ['user'] : [], why: send ? null : 'send-scope-not-granted' };
+}
 
 // ── the vendor's message shape → ONE plain-text record ──────────────────
 /** `body.content` is a JSON string whose shape depends on `msg_type`. */
@@ -214,11 +228,7 @@ const VIDEO_TOKEN = '[video]';
  *  under a locale key (`zh_cn` / `en_us` — the event and some older answers).
  *  ONE reader for the text AND the attachments (R3: the two used to disagree
  *  about the wrapper, so a wrapped post named "[image]" with no attachment). */
-function postBody(c) {
-  if (c && Array.isArray(c.content)) return c;
-  for (const k of ['zh_cn', 'en_us', 'ja_jp']) if (c && c[k] && Array.isArray(c[k].content)) return c[k];
-  return { title: (c && c.title) || '', content: [] };
-}
+const postBody = Blocks.larkPostBody;   // §25: the ONE reader lives with the render rung (text, attachments AND blocks read it)
 function postText(c0) {
   const c = postBody(c0);
   const lines = Array.isArray(c && c.content) ? c.content : [];
@@ -304,14 +314,19 @@ function mentionsOf(item) {
 function toRecord(adapterId, convId, item, { names = new Map(), selfId = null } = {}) {
   const sender = item.sender || {};
   const sid = String(sender.id || '');
+  const text = textOf(item);
+  const mentions = mentionsOf(item);
   return makeRecord({
     adapterId, convId,
     vendorId: String(item.message_id || ''),
     at: Number(item.create_time) || 0,
     author: { id: sid, name: names.get(sid) || (sender.sender_type === 'app' ? 'app' : ''), isSelf: !!selfId && sid === selfId, isBot: sender.sender_type === 'app' },
-    text: textOf(item),
-    mentions: mentionsOf(item),
+    text,
+    mentions,
     attachments: attachmentsOf(item),
+    // §25: the render tree from the VENDOR item (the post's links / mentions /
+    // pictures survive here and nowhere else — `text` is flattened)
+    blocks: Blocks.larkToBlocks(item, mentions, { names, text }),
     replyTo: item.parent_id ? String(item.parent_id) : null,
     threadKey: item.thread_id ? String(item.thread_id) : (item.root_id ? String(item.root_id) : null),
     raw: { msg_type: item.msg_type || null, chat_id: item.chat_id || null, sender_type: sender.sender_type || null, updated: item.updated || null },
@@ -344,6 +359,9 @@ function typedFailure(status, body, what, retryAfterSec = null) {
 
 /** A bounded JSON round trip; a network failure is `transport` (retryable). */
 async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = null, what = 'lark', signal = null } = {}) {
+  // client-from-mount verify r4: what this request CARRIES in its secret fields (the app secret, a refresh
+  // token, the Bearer) never comes back in a refusal's words — scrubbed by exact value before the error is built
+  const sent = sentSecrets({ fields: body, headers });
   let r;
   try {
     r = await fetchFn(url, {
@@ -352,11 +370,11 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = nul
       signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
-    throw new ChannelError('transport', `${what}: ${(e && e.message) || e}`, { retryable: true });
+    throw new ChannelError('transport', withoutSent(`${what}: ${(e && e.message) || e}`, sent), { retryable: true });
   }
   let parsed = null;
   try { parsed = await r.json(); } catch { parsed = null; }
-  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));
+  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));
   return parsed;
 }
 
@@ -696,8 +714,7 @@ function create(record = {}, deps = {}) {
     async convCaps(convId) {
       try {
         await api(`/im/v1/chats/${encodeURIComponent(convId)}`, { what: 'lark chat' });
-        const send = hasSendScopes(readToken().token);
-        return { read: 'yes', sendAs: send ? ['user'] : [], why: send ? null : 'send-scope-not-granted', at: now() };
+        return { read: 'yes', ...sendCapsOf(((readToken().token || {}).scopes) || []), at: now() };
       } catch (e) {
         if (e instanceof ChannelError && (e.code === 'forbidden' || e.code === 'not-found')) return { read: 'no', sendAs: [], why: 'not-a-member', at: now() };
         throw e;
@@ -885,9 +902,15 @@ async function integrationTest({ resolved, signal } = {}, fetchFn = null) {
   return { ok: false, error: errors.join('; ') };
 }
 
-const adapter = { kind: KIND, caps, create, vendorNameOf };
+/** §25: WHAT UNLOCKS SENDING, for the window's read-only line — the send
+ *  scopes the token must HOLD, and `console: true` = they must first be
+ *  enabled in the app's developer console and a version published (a
+ *  re-consent alone cannot add a scope the app does not have). */
+const SEND_GRANT = Object.freeze({ scopes: SEND_SCOPES, console: true });
+const adapter = { kind: KIND, caps, create, vendorNameOf, blocksOf: Blocks.larkStoredBlocks, sendGrant: SEND_GRANT, sendCapsOf };
 module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
   EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, nextToken, uuidFor, hasSendScopes, vendorNameOf,
+  SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
 };

@@ -1046,7 +1046,8 @@ console.log('— wiring + docs pins');
   const ci = read('scripts/ci.mjs');
   ok('this suite runs in the release gate', /'test-queue-steer'/.test(ci));
   const cinput = read('src/lib/chat-input.js');
-  ok('the strip is the FIRST child of the input area (above the box, as designed)', /inputArea\.append\(this\._queueStrip, this\._attachArea/.test(cinput));
+  // (2.369.195: lane channel-jump's stash strip — what waits FOR the agent — sits above this one — what YOU sent; both above the box)
+  ok('the strip is above the box: the input area\'s second child, right under the stash strip (as designed)', /inputArea\.append\(this\._stashStrip\.el, this\._queueStrip, this\._attachArea/.test(cinput));
   ok('the strip renders nothing for a harness without queueOps (no dead control)', /const items = this\._queueCaps\.queueOps \? this\._queue : \[\];/.test(cinput));
   // ROUND-5: THE EDITOR OWNS THE BOX — a DOM-free pin on the guard itself, so
   // the shape survives an edit that never opens a browser.

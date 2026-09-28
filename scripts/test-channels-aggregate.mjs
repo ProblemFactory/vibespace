@@ -2015,8 +2015,10 @@ console.log('⑦ history on demand');
   ok(eng.cadenceOf('many', 'c0006').tier === 'hot', 'an OPEN window makes its conversation hot (30 s)');
   let page = eng.store.readTail('many', 'c0006', { limit: 50 });
   let total = page.length, rounds = 0, last = null;
+  // (verify r6: drain rule 19 — two vendor asks for one conversation are OLDER_FLOOR_MS apart; a person's next page is)
   while (rounds++ < 5) {
     const oldest = eng.store.readTail('many', 'c0006', { limit: 1000 })[0];
+    clock += 2000;
     last = await eng.loadOlder('many', 'c0006', { before: oldest.at, beforeId: oldest.vendorId, limit: 50 });
     if (!last.ok || last.exhausted) break;
   }
@@ -2027,8 +2029,16 @@ console.log('⑦ history on demand');
   ok(sorted && raw.every((r, i) => i === 0 || raw[i - 1].at <= r.at), 'the backfill was PREPENDED in order (the log file itself is sorted)');
   ok(new Set(raw.map((r) => r.vendorId)).size === raw.length, '…with no duplicate');
   ok(delivered.length === wBefore, 'backfill never enters the wake funnel (the account is assigned, nobody was woken)');
+  clock += 2000;
   const noOlder = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
   ok(noOlder.ok && noOlder.records.length === 0 && noOlder.exhausted, 'asking before the dawn of time answers exhausted, honestly');
+  // verify r6 (rule 19 on the aggregated IM): the end is REMEMBERED — a second ask, inside or past the floor, costs no vendor call and no unit
+  { const calls0 = W.calls.older; const spent0 = eng.digest().adapters.find((a) => a.id === 'many').budget.spent;
+    const again = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
+    clock += 5000;
+    const again2 = await eng.loadOlder('many', 'c0003', { before: 1, beforeId: '0', limit: 50 });
+    const spent1 = eng.digest().adapters.find((a) => a.id === 'many').budget.spent;
+    ok(again.ok && again.exhausted && again.source === 'memory' && again2.source === 'memory' && W.calls.older === calls0 && spent1 === spent0, `the remembered end answers twice more with ZERO vendor calls (${W.calls.older - calls0}) and the minute's units untouched (${spent0} → ${spent1}) — rule 9 is judged after rule 19`, JSON.stringify([again.source, again2.source, W.calls.older - calls0, spent0, spent1])); }
 }
 
 // ═══ ⑧ attachments through the ROUTE ═══════════════════════════════════════
@@ -2294,7 +2304,10 @@ console.log('⑨d R4 UI wiring: two operations, the picker = the access list, vi
   const srcAll = ['src/lib/channels-panel.js', 'src/lib/channel-filter-editor.js', 'src/lib/channel-window.js', 'src/lib/channel-words.js', 'src/lib/channel-reach-editor.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf-8')).join('\n');
   const alive = RETIRED.filter((k) => srcAll.includes(`t('${k}')`) || k in zh || k in ja);
   ok(!alive.length, `the retired single-assignment verb and its words are gone from the code AND both dictionaries (${RETIRED.length} keys)`, alive.join(' | '));
-  ok(/digestClamp\.textContent = notifySel\.value === 'digest' \? d\.note : ''/.test(ED) && /capClamp\.textContent = c\.note;/.test(ED) && /clampNoteText\(max, 'max'\)/.test(ED), 'a number past its bound is CLAMPED VISIBLY in the Notify dialog (the window and the cap each say "kept at the maximum, N")');
+  // channel-polish: the three plain questions — each clamp is said under ITS answer's field while that answer is chosen
+  // (channel-render verify round 2 made the cap ITS OWN line under both answers — its note is drawn whatever the `how`;
+  //  round 4 found this pin still spelling the pre-round-2 third-answer form: the heavy row was red on the lane)
+  ok(/digestClamp\.textContent = howNow\(\) === 'digest' \? d\.note : ''/.test(ED) && /capClamp\.textContent = c\.note;/.test(ED) && /clampNoteText\(max, 'max'\)/.test(ED), 'a number past its bound is CLAMPED VISIBLY in the Notify dialog (the digest window and the daily cap each say "kept at the maximum, N" under their own field)');
   // block comments FIRST, then whole-line // comments (the other order drops a JSDoc's closing
   // `*/` line and lets the block pattern swallow the code up to the NEXT comment's end)
   const strip = (x) => x.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

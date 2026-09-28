@@ -1,5 +1,6 @@
 import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
+import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
 
 /**
  * FileExplorer ops mixin — context/background menus, clipboard (copy/cut/
@@ -45,6 +46,7 @@ export function installExplorerOps(FileExplorer) {
     const isDir = dataset.isDir === 'true';
     const isArchive = /\.(zip|tar|tgz|tbz2|txz|gz|bz2|xz)$/i.test(dataset.name);
     const items = [];
+    let officeAsk = null; // §7.9: the open-with verdict still on its way when the menu opens
 
     // Touch (design-mobile-gaps #6): a long-press is the only way into a
     // multi-selection without modifier keys — the first row enters the mode.
@@ -65,6 +67,16 @@ export function installExplorerOps(FileExplorer) {
       items.push({ label: t('Open'), action: () => this.app.openFile(fullPath, dataset.name, { host: this._host || undefined }) });
       items.push({ label: t('Edit'), action: () => this.app.openEditor(fullPath, dataset.name, { host: this._host || undefined }) });
       items.push({ label: t('Open as Hex'), action: () => this.app.openFile(fullPath, dataset.name, { hex: true, host: this._host || undefined }) });
+      // §7.9 "Open with LibreOffice" — the file's REAL path on ITS machine (`fullPath` + `this._host`, never the window's
+      // host-labelled title): the app runs where the file is. LibreOffice absent there ⇒ ONE plain sentence + "Install
+      // LibreOffice on <machine>…" (app.officeMenuItems — never a greyed row); an answer that arrives after the menu
+      // opened patches these rows in place (_patchMenuRows)
+      if (isOfficeFile(dataset.name) && this.app.officeMenuItems && this.app.officeVerdictFor) {
+        const host = this._host || null;
+        const q = this.app.officeVerdictFor(host, fullPath);
+        items.push(...this.app.officeMenuItems(q.cached, { host, file: fullPath }));
+        if (!q.cached) officeAsk = { promise: q.promise, host, file: fullPath };
+      }
     }
     if (isArchive && !isDir) {
       items.push({ sep: true });
@@ -136,7 +148,18 @@ export function installExplorerOps(FileExplorer) {
     items.push({ label: t('Rename'), action: () => this._rename(dataset.name) });
     items.push({ label: t('Properties'), action: () => this._showProperties(dataset.name) });
     items.push({ label: t('Delete'), action: () => this._delete(dataset.name, isDir) });
-    this._buildMenu(x, y, items);
+    const menu = this._buildMenu(x, y, items);
+    if (officeAsk) officeAsk.promise.then((v) => { if (v && menu && menu.isConnected) this._patchMenuRows(menu, 'office', this.app.officeMenuItems(v, { host: officeAsk.host, file: officeAsk.file })); });
+  },
+
+  /** §7.9: replace the rows whose `key` starts with `prefix` in an OPEN menu (the open-with verdict arrived after it
+   *  opened) — built by the same `_menuItemEl` as every row, in place, the rest of the menu untouched. */
+  _patchMenuRows(menu, prefix, items) {
+    const old = [...menu.querySelectorAll('[data-key]')].filter((el) => el.dataset.key.startsWith(prefix));
+    if (!old.length) return false;
+    for (const item of items) menu.insertBefore(this._menuItemEl(menu, item), old[0]);
+    for (const el of old) el.remove();
+    return true;
   },
 
     _showBackgroundMenu(x, y) {
@@ -167,16 +190,15 @@ export function installExplorerOps(FileExplorer) {
     return sub;
   },
 
-    _buildMenu(x, y, items) {
-    document.querySelectorAll('.context-menu').forEach(m => m.remove());
-    const menu = document.createElement('div'); menu.className = 'context-menu';
-    menu.dataset.popover = '1'; // global Escape protocol
-    menu.style.visibility = 'hidden'; // clamped below before first paint
-    menu.style.left = x + 'px'; menu.style.top = y + 'px';
-    for (const item of items) {
-      if (item.sep) { const d = document.createElement('div'); d.className = 'context-menu-sep'; menu.appendChild(d); continue; }
-      const el = document.createElement('div'); el.className = 'context-menu-item'; el.textContent = item.label;
-      if (item.submenu) {
+  /** One menu row (the menu builder's and _patchMenuRows'): a plain item, a submenu head, or (§7.9) a NOTE — a plain
+   *  sentence, not a control (no click, no hover state: it says a state, the row after it is the action). */
+  _menuItemEl(menu, item) {
+      const el = document.createElement('div'); el.className = item.note ? 'context-menu-note' : 'context-menu-item'; el.textContent = item.label;
+      if (item.key) el.dataset.key = item.key;
+      if (item.note) {
+        el.setAttribute('role', 'note');
+        el.onmouseenter = () => menu.querySelectorAll('.context-submenu').forEach(sx => sx.remove());
+      } else if (item.submenu) {
         el.classList.add('has-submenu');
         el.onmouseenter = () => {
           menu.querySelectorAll('.context-submenu').forEach(sx => sx.remove());
@@ -204,7 +226,18 @@ export function installExplorerOps(FileExplorer) {
         el.onmouseenter = () => menu.querySelectorAll('.context-submenu').forEach(sx => sx.remove());
         el.onclick = () => { menu.remove(); item.action(); };
       }
-      menu.appendChild(el);
+      return el;
+  },
+
+    _buildMenu(x, y, items) {
+    document.querySelectorAll('.context-menu').forEach(m => m.remove());
+    const menu = document.createElement('div'); menu.className = 'context-menu';
+    menu.dataset.popover = '1'; // global Escape protocol
+    menu.style.visibility = 'hidden'; // clamped below before first paint
+    menu.style.left = x + 'px'; menu.style.top = y + 'px';
+    for (const item of items) {
+      if (item.sep) { const d = document.createElement('div'); d.className = 'context-menu-sep'; menu.appendChild(d); continue; }
+      menu.appendChild(this._menuItemEl(menu, item));
     }
     document.body.appendChild(menu);
     // Keep the menu on screen (this builder predates utils.showContextMenu and
@@ -223,6 +256,7 @@ export function installExplorerOps(FileExplorer) {
     if (mr.top < 0) menu.style.top = '4px';
     menu.style.visibility = '';
     attachPopoverClose(menu);
+    return menu; // §7.9: the caller may patch rows in place (_patchMenuRows)
   },
 
     _clipboardSet(op) {

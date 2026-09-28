@@ -35,6 +35,7 @@ import { openBrowser as openBrowserFn } from './browser-window.js';
 import { openDesktop as openDesktopFn } from './desktop-window.js';
 import { openDesktopApp as openDesktopAppFn } from './desktop-app-window.js';
 import { installDesktopAppLauncher } from './desktop-app-launcher.js';
+import { installOpenWith } from './open-with.js'; // §7.9: app.openWithDesktopApp (the ONE door) + the file-changed relay
 import { openBrowserLive as openBrowserLiveFn, openBrowserLiveBeside as openBrowserLiveBesideFn, installBrowserLive } from './browser-live-window.js'; // agent browser P2 (§4.4): the live view window; P7 (§4.6): auto-bind
 import { openTaskDetail as openTaskDetailFn } from './task-detail.js';
 import { openTaskLog as openTaskLogFn } from './task-log.js';
@@ -546,6 +547,7 @@ class App {
     // 被禁用"; F5 was the only cure).
     this._probeVncAvailability();
     installDesktopAppLauncher(this); // ⚙ row + toolbar Apps button + the launch dialog; probes /api/desktop/apps the same way
+    installOpenWith(this); // §7.9: "Open with LibreOffice" — the explorer row's door, its menu verdict, the file-changed relay
 
     // Mobile nav bar + gestures (only on mobile)
     this._mobileNav = this.isMobile ? new MobileNav(this) : null;

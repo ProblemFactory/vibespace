@@ -25,6 +25,23 @@
 //   VS_UI_LIGHT_LANGS the langs the light theme repeats (default en — light is a
 //                     colour question, not a wording one)
 //   VS_UI_ONLY        substring filter on shot names (skip everything else)
+//   VS_UI_IM          '' (default) = the classic passes only; '1' = the classic
+//                     passes AND the IM pass; 'only' = the IM pass alone. THE IM
+//                     PASS (channel-polish, 2026-09-27 — the owner: "当作 IM 用还是
+//                     有必要把界面好好优化下至少保证人能看清楚必要的信息") seeds a
+//                     scratch store through the worktree's own modules with real-
+//                     shape Lark + Gmail records (the REAL adapters' toRecord over
+//                     invented items: 3 authors + you, a mention, links, a picture
+//                     from the attachment cache, a card, a system line, a run of 4
+//                     within 2 min, a day boundary; a mail thread with a folded
+//                     quote and an attachment) on DISABLED accounts (no pass, zero
+//                     vendor calls), and shoots the attention list at every rail
+//                     width, an account card, the Lark / Gmail windows (a
+//                     continuation hovered, the quote opened) and the phone.
+//                     Each IM shot's JSON carries `im` = the rect census input
+//                     (scripts/test-channels-i18n.mjs imCensus).
+//   VS_UI_FACE        force a font face on the page (e.g. 'DejaVu Sans', the
+//                     runner's system-ui — the .185 lesson)
 //
 // Nothing here calls a vendor (§ban-safety): the Lark / Gmail consent flows are
 // STARTED (a consent URL is built, a loopback port is bound) and CANCELLED —
@@ -621,7 +638,10 @@ async function pass({ lang, viewport, theme }) {
   await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; window.app.wm.focusWindow(w.id); return 1; })()`);
   await waitFor(page, `(() => { const w = ${WIN('fake-poll-ops')}; return !!(w && w.content.querySelector('[data-channel-assign]')); })()`, 20);
   await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
-  await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-access-row select')`, 20);
+  // channel-polish: who = the ONE principal picker (the box focused on open) — type the group's name, Enter picks it
+  await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-access-pick .pp-input')`, 20);
+  await page.evaljs(`(() => { const b = document.querySelector('#chan-access-dialog .chan-access-pick .pp-input'); b.focus(); b.value = 'Ops'; b.dispatchEvent(new Event('input')); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); return 1; })()`);
+  await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-access-row')`, 20);
   await sleep(300);
   await capture(page, tag, 'dialog-access', '#chan-access-dialog .dialog', { pad: 8 });
   const granted = await clickBtn(page, lang, '#chan-access-dialog', 'Save');
@@ -629,10 +649,10 @@ async function pass({ lang, viewport, theme }) {
   await waitFor(page, `!document.querySelector('#chan-access-dialog')`, 30);
   await sleep(800);
   await page.evaljs(`(() => { const w = ${WIN('fake-poll-ops')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
-  await waitFor(page, `!!document.querySelector('#chan-notify-dialog .chan-watch-row select')`, 20);
+  await waitFor(page, `!!document.querySelector('#chan-notify-dialog .chan-watch-row .pp-trigger')`, 20);
   await sleep(300);
   await capture(page, tag, 'dialog-notify-default', '#chan-notify-dialog .dialog', { pad: 8 });
-  await page.evaljs(`(() => { const d = document.querySelector('#chan-notify-dialog'); const sels = d.querySelectorAll('.chan-watch-row select.chan-opt-input'); sels[1].value = 'filtered'; sels[1].dispatchEvent(new Event('change')); return 1; })()`);
+  await page.evaljs(`(() => { const d = document.querySelector('#chan-notify-dialog'); d.querySelector('.chan-watch-row input[type=radio][value=rule]').click(); return 1; })()`);
   await sleep(150);
   await clickBtn(page, lang, '#chan-notify-dialog', 'Add rule');
   // the fresh rule has an EMPTY value: the stat line words the validator's refusal (a3 r4 — it used
@@ -773,15 +793,366 @@ function latinLeaks(tag) {
   return out.length;
 }
 
+// ════════════════════════════════════════════════════════════════════════
+// THE IM PASS (VS_UI_IM, channel-polish 2026-09-27): a seeded store, the
+// attention list at every rail width, an account card, the Lark / Gmail
+// windows and the phone — each shot's JSON carries `im`, the RECT CENSUS
+// input (scripts/test-channels-i18n.mjs `imCensus`): per row / bar / message
+// the rect of every part and whether a part that must be WHOLE is cut, plus
+// the phone's interactive targets.
+// ════════════════════════════════════════════════════════════════════════
+const IM = String(process.env.VS_UI_IM || '').trim();
+const FACE = String(process.env.VS_UI_FACE || '').trim();
+const MIN = 60e3;
+
+/** Seed the scratch store (before boot) through the WORKTREE's own modules:
+ *  disabled Lark + Gmail accounts (no pass, zero vendor calls) whose records
+ *  are the REAL adapters' `toRecord` over invented items in the real shapes. */
+async function seedIm() {
+  const W = (rel) => require(path.join(wt, rel));
+  const { createChannelStore } = W('src/channel-store.js');
+  const lark = W('src/channels/lark.js');
+  const gmail = W('src/channels/gmail.js');
+  const store = createChannelStore({ dir: path.join(wt, 'data/channels'), log: { log() {}, warn() {}, error() {} } });
+  const NOW = Date.now();
+  const acct = (id, kind, label, scopes) => ({ id, kind, label, enabled: false, auth: { tokenEnc: null, expiresAt: null, scopes, user: 'Member A' }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null });
+  await store.adapters.update((ad) => {
+    ad.adapters.push(acct('lark', 'lark', 'Lark / 飞书', ['im:message', 'im:message.send_as_user', 'im:chat:readonly']));
+    ad.adapters.push(acct('lark:2', 'lark', 'Lark ops', ['im:message', 'im:chat:readonly']));
+    ad.adapters.push(acct('gmail', 'gmail', 'Gmail', ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose']));
+    // the fake POLL adapter (enabled — a local fixture, no vendor): its room carries an agent's draft
+    // awaiting approval, so the attention list shows that tag too (the engine seeds fakes only into an
+    // EMPTY store, so the record is written here, in the engine's own shape)
+    ad.adapters.push({ id: 'fake-poll', kind: 'fake-poll', label: 'fake-poll', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null });
+  });
+  const names = new Map([['ou_ada', 'Ada'], ['ou_brook', 'Brook'], ['ou_cass', 'Cass'], ['ou_me', 'Member A']]);
+  const item = (id, at, from, msg_type, content, extra = {}) => ({ message_id: id, msg_type, create_time: String(Math.round(at)), chat_id: 'oc_x', sender: { id: from, sender_type: 'user' }, body: { content: JSON.stringify(content) }, ...extra });
+  const L = (conv, it) => lark.toRecord('lark', conv, it, { names, selfId: 'ou_me' });
+  // THE LAUNCH ROOM: a day boundary (26 h back), a system line, Ada's run of four within 2 min
+  // (a link, a mention, a picture), Brook's rich-text post, Cass's card, a file, your own reply
+  const T = NOW - 40 * MIN;
+  const launch = [
+    L('oc_launch', item('om_y1', T - 26 * 60 * MIN, 'ou_cass', 'text', { text: 'Build 412 is on staging — shipping tonight if the checks stay green.' })),
+    L('oc_launch', item('om_y2', T - 26 * 60 * MIN + 3 * MIN, 'ou_me', 'text', { text: 'Sounds good — I will watch the dashboard.' })),
+    L('oc_launch', item('om_s1', T - 6 * MIN, 'ou_cass', 'system', { template: '{from_user} added {to_chatters} to the group', from_user: 'Cass', to_chatters: ['Brook'] })),
+    L('oc_launch', item('om_a1', T, 'ou_ada', 'text', { text: 'Morning! Quick update on the launch:' })),
+    L('oc_launch', item('om_a2', T + 35e3, 'ou_ada', 'text', { text: '@_user_1 the demo is up: [demo-7f3a](https://demo-7f3a.example/) — notes at https://docs.example/launch?v=2.' }, { mentions: [{ key: '@_user_1', id: 'ou_brook', name: 'Brook' }] })),
+    L('oc_launch', item('om_a3', T + 70e3, 'ou_ada', 'image', { image_key: 'img_launch' })),
+    L('oc_launch', item('om_a4', T + 110e3, 'ou_ada', 'text', { text: 'Can you run the checklist before 3pm?' })),
+    L('oc_launch', item('om_b1', T + 6 * MIN, 'ou_brook', 'post', { title: '', content: [[{ tag: 'at', user_id: 'ou_ada', user_name: 'Ada' }, { tag: 'text', text: ' on it — see ' }, { tag: 'a', text: 'the checklist', href: 'https://wiki.example/checklist' }]] })),
+    L('oc_launch', item('om_c1', T + 9 * MIN, 'ou_cass', 'interactive', { header: { title: { content: 'Deploy #412 finished' } }, elements: [{ tag: 'div', text: { content: 'Environment: staging' } }, { tag: 'div', text: { content: 'Duration: 4 min 12 s · all checks green' } }] })),
+    L('oc_launch', item('om_b2', T + 12 * MIN, 'ou_brook', 'file', { file_key: 'file_notes', file_name: 'release-notes-412.pdf' })),
+    L('oc_launch', item('om_m1', T + 15 * MIN, 'ou_me', 'text', { text: 'Thanks all — I will look after lunch.' })),
+  ];
+  store.appendRecords('lark', 'oc_launch', launch);
+  await store.attachmentPut('lark', 'oc_launch', 'img_launch', { data: picturePng(), mime: 'image/png', name: 'image' });
+  store.appendRecords('lark', 'oc_brook', [L('oc_brook', item('om_d1', T - 3 * 60 * MIN, 'ou_brook', 'text', { text: 'Do you have 10 minutes for the release notes?' }))]);
+  store.appendRecords('lark', 'oc_design', [L('oc_design', item('om_g1', T - 30 * 60 * MIN, 'ou_ada', 'text', { text: 'Mockups for the settings page are in the shared folder.' }))]);
+  store.appendRecords('lark:2', 'oc_ro', [lark.toRecord('lark:2', 'oc_ro', item('om_ro1', T - 20 * MIN, 'ou_cass', 'text', { text: 'status: all green' }), { names })]);
+  // THE MAIL THREAD: Ada's question, Brook's reply over the quoted history (folded) with a PDF
+  const b64u = (x) => Buffer.from(x, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
+  const reply = 'Hi Ada,\n\nThe numbers look right to us — the summary is attached.\nWe will confirm the forecast by Friday.\n\nBrook\n\nOn Mon, Sep 21, 2026 at 9:14 AM Ada Example <ada@example.com> wrote:\n> Hello Brook,\n> the Q3 numbers are in https://sheets.example/q3.\n> Revenue is up 4%.\n> Costs are flat.\n> Please confirm.\n> Ada\n';
+  const mail = (conv, id, at, from, subject, parts) => gmail.toRecord('gmail', conv, { id, threadId: conv, internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'multipart/mixed', headers: [{ name: 'From', value: from }, { name: 'Subject', value: subject }], parts } }, { selfEmail: 'member.a@example.com' });
+  store.appendRecords('gmail', 't_q', [
+    mail('t_q', 'm_q1', T - 90 * MIN, 'Ada Example <ada@example.com>', 'Quarterly numbers', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u('Hello Brook,\nthe Q3 numbers are in https://sheets.example/q3.\nRevenue is up 4%.\nCosts are flat.\nPlease confirm.\nAda\n') } }]),
+    mail('t_q', 'm_q2', T + 5 * MIN, 'Brook Example <brook@example.com>', 'Re: Quarterly numbers', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u(reply) } }, { partId: '1', mimeType: 'application/pdf', filename: 'Q3-summary.pdf', body: { attachmentId: 'ANGjdJ_q3', size: 248320 } }]),
+  ]);
+  store.appendRecords('gmail', 't_budget', [mail('t_budget', 'm_b1', T - 5 * 60 * MIN, 'Cass Example <cass@example.com>', 'Budget follow-up', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u('Can we close the budget this week?\n') } }])]);
+  const caps = (sendAs, why) => ({ read: 'yes', sendAs, why, at: NOW });
+  const conv = (a, c, title, kind, cc, { participants = '', unread = 0, lastText = '', lastAt = NOW } = {}) => { const en = store.index.entry(a, c); en.title = title; en.kind = kind; en.convCaps = cc; en.lastAt = lastAt; en.listedAt = NOW; en.participants = participants; en.unread = unread; en.lastText = lastText; };
+  await store.index.update(() => {
+    conv('lark', 'oc_launch', 'Launch room', 'group', caps(['user'], null), { participants: 'Ada, Brook, Cass, Member A', unread: 4, lastText: 'Thanks all — I will look after lunch.', lastAt: T + 15 * MIN });
+    conv('lark', 'oc_brook', 'Brook', 'dm', caps(['user'], null), { participants: 'Brook', unread: 1, lastText: 'Do you have 10 minutes for the release notes?', lastAt: T - 3 * 60 * MIN });
+    conv('lark', 'oc_design', 'Design review', 'group', caps(['user'], null), { participants: 'Ada, Member A', lastText: 'Mockups for the settings page are in the shared folder.', lastAt: T - 30 * 60 * MIN });
+    conv('lark:2', 'oc_ro', 'Ops room', 'group', caps([], 'send-scope-not-granted'), { participants: 'Cass', lastText: 'status: all green', lastAt: T - 20 * MIN });
+    conv('gmail', 't_q', 'Re: Quarterly numbers', 'thread', caps([], 'send-scope-not-granted'), { participants: 'Ada Example, Brook Example', unread: 2, lastText: 'Hi Ada, The numbers look right to us — the summary is attached.', lastAt: T + 5 * MIN });
+    conv('gmail', 't_budget', 'Budget follow-up', 'thread', caps([], 'send-scope-not-granted'), { participants: 'Cass Example', lastText: 'Can we close the budget this week?', lastAt: T - 5 * 60 * MIN });
+  });
+  store.index.flush && store.index.flush();
+  store.close && store.close();
+}
+/** A 240×150 two-tone gradient PNG (big enough to SEE the picture card). */
+function picturePng(w = 240, h = 150) {
+  const zlib = require('node:zlib');
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) { raw[y * (w * 3 + 1)] = 0; for (let x = 0; x < w; x++) { const o = y * (w * 3 + 1) + 1 + x * 3; raw[o] = 40 + Math.round(150 * x / w); raw[o + 1] = 90 + Math.round(100 * y / h); raw[o + 2] = 160; } }
+  const table = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0; }
+  const crc = (buf) => { let c = 0xffffffff; for (const b of buf) c = table[(c ^ b) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type, 'ascii'), data]); const c = Buffer.alloc(4); c.writeUInt32BE(crc(td)); return Buffer.concat([len, td, c]); };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+/** The DISABLED Lark / Gmail accounts drawn as CONNECTED (a page-side view of
+ *  the digest — the card's health line is what is shot; no pass ever runs).
+ *  Wraps `fetch('/api/channels')` and the ws `channels-updated` digests. */
+const IM_DOCTOR = `(() => {
+  const doctor = (d) => {
+    if (!d || !Array.isArray(d.adapters)) return d;
+    for (const a of d.adapters) {
+      if (!a || !a.connectable || a.id === 'lark:2') continue;
+      a.enabled = true;
+      a.auth = Object.assign({}, a.auth || {}, { state: 'connected', expiresAt: null, renews: a.kind === 'lark', why: null });
+      a.lane = { via: 'poll', why: null, live: false, carryContent: false };
+      a.lastPass = { ok: true, at: Date.now() - 95e3 }; a.lastOkAt = Date.now() - 95e3; a.consecutiveFailures = 0;
+      a.scheduler = Object.assign({ conversations: a.kind === 'lark' ? 3 : 2, unread: a.kind === 'lark' ? 5 : 2 }, a.scheduler || {}, { firstIngest: null });
+    }
+    return d;
+  };
+  window.__imDoctor = doctor;
+  const of = window.fetch;
+  window.fetch = async function (u, init, ...rest) {
+    const r = await of.call(this, u, init, ...rest);
+    try { const url = new URL(String(u && u.url ? u.url : u), location.href); if (url.pathname === '/api/channels' && (!init || !init.method || init.method === 'GET')) { const j = doctor(await r.clone().json()); return new Response(JSON.stringify(j), { status: r.status, headers: { 'Content-Type': 'application/json' } }); } } catch {}
+    return r;
+  };
+  const desc = Object.getOwnPropertyDescriptor(WebSocket.prototype, 'onmessage');
+  Object.defineProperty(WebSocket.prototype, 'onmessage', { configurable: true, get() { return desc.get.call(this); }, set(fn) {
+    desc.set.call(this, typeof fn !== 'function' ? fn : function (e) {
+      try { if (typeof e.data === 'string' && e.data.indexOf('channels-updated') >= 0) { const m = JSON.parse(e.data); if (m && m.type === 'channels-updated' && m.digest) { doctor(m.digest); return fn.call(this, { data: JSON.stringify(m) }); } } } catch {}
+      return fn.call(this, e);
+    });
+  } });
+})();`;
+
+/** THE IM MEASURER: `groups` = {name: {sel, parts: {part: sel}, whole: [part…], wholeAll: [sel…]}}.
+ *  Per matched container: its rect, each part's rect (first match inside it)
+ *  and — for the parts that must be WHOLE — whether the text is cut
+ *  (scrollWidth past clientWidth, or the part past the container's right edge);
+ *  `wholeAll` = every match of a selector inside the container must be whole.
+ *  Plus the interactive TARGETS (the phone's ≥ 36 px law) and the avatars'
+ *  computed colours. */
+const IM_MEASURE = `(function (rootSel, groups) {
+  const root = document.querySelector(rootSel);
+  if (!root) return { missing: rootSel };
+  const R = (el) => { const b = el.getBoundingClientRect(); return [Math.round(b.x * 10) / 10, Math.round(b.y * 10) / 10, Math.round(b.width * 10) / 10, Math.round(b.height * 10) / 10]; };
+  const vis = (el) => { if (!el) return false; const c = getComputedStyle(el); if (c.display === 'none' || c.visibility === 'hidden') return false; const b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+  // CUT = its own text overflows, OR it runs past its container, OR past any CLIPPING ancestor inside it
+  // (a tag's words clipped by the tag's overflow: hidden)
+  const cutOf = (el, box, stop) => {
+    const b = el.getBoundingClientRect();
+    if (el.scrollWidth > el.clientWidth + 0.5 || (box && b.right > box.right + 0.5)) return true;
+    for (let a = el.parentElement; a && a !== stop; a = a.parentElement) { const cs = getComputedStyle(a); if (cs.overflowX !== 'visible' || cs.overflow !== 'visible') { const ab = a.getBoundingClientRect(); if (b.right > ab.right + 0.5 || b.left < ab.left - 0.5) return true; } }
+    return false;
+  };
+  const out = { groups: [], targets: [], avatars: [], hscroll: [] };
+  const rootBox = root.getBoundingClientRect();
+  for (const [name, g] of Object.entries(groups)) {
+    const list = [...root.querySelectorAll(g.sel)].filter(vis).filter((el) => { const b = el.getBoundingClientRect(); return b.bottom > 0 && b.top < innerHeight; });
+    list.slice(0, 40).forEach((el, idx) => {
+      const box = el.getBoundingClientRect();
+      const parts = {};
+      for (const [pn, ps] of Object.entries(g.parts || {})) {
+        const p = el.querySelector(ps);
+        if (!vis(p)) continue;
+        parts[pn] = { r: R(p), cut: (g.whole || []).includes(pn) ? cutOf(p, box, el) : false, text: (p.textContent || '').trim().slice(0, 60) };
+      }
+      const whole = [];
+      for (const ws of g.wholeAll || []) for (const w of el.querySelectorAll(ws)) if (vis(w)) whole.push({ sel: ws, text: (w.textContent || '').trim().slice(0, 60), cut: cutOf(w, box, el), r: R(w), sw: w.scrollWidth, cw: w.clientWidth, pr: R(w.parentElement) });
+      out.groups.push({ name, idx, r: R(el), key: el.dataset.grow || el.dataset.vid || el.dataset.conv || el.dataset.adapter || '', cls: String(el.className || ''), parts, whole });
+    });
+  }
+  const T = 'button, a[href]:not(.chanblk-a), [role="button"], [role="option"], [tabindex="0"], select, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), label.chan-radio-row';
+  for (const el of root.querySelectorAll(T)) {
+    if (!vis(el)) continue;
+    const b = el.getBoundingClientRect();
+    if (b.bottom <= 0 || b.top >= innerHeight || b.right <= 0 || b.left >= innerWidth) continue;
+    const text = (el.textContent || '').trim();
+    out.targets.push({ tag: el.tagName.toLowerCase(), cls: String(el.className || '').slice(0, 80), text: text.slice(0, 40), iconOnly: !text, r: R(el) });
+  }
+  for (const el of root.querySelectorAll('.chan-av')) {
+    if (!vis(el)) continue;
+    const c = getComputedStyle(el);
+    out.avatars.push({ text: el.textContent, hue: el.dataset.hue || null, self: el.classList.contains('chan-av-self'), color: c.color, background: c.backgroundColor, r: R(el), ariaHidden: el.getAttribute('aria-hidden') });
+  }
+  for (const el of root.querySelectorAll('.chanwin-list, .chan-groups, .chan-list')) if (vis(el)) out.hscroll.push({ cls: String(el.className), over: el.scrollWidth > el.clientWidth + 1 });
+  out.root = R(root); out.viewport = [innerWidth, innerHeight];
+  out.face = getComputedStyle(document.body).fontFamily;
+  return out;
+})`;
+const IM_PANEL_GROUPS = {
+  grow: { sel: '.chan-groups > .chan-grow', parts: { av: '.chan-av', icon: '.chan-grow-ic', title: '.chan-grow-title', at: '.chan-grow-at', tag: '.chan-grow-tag', src: '.chan-src-chip', last: '.chan-grow-last', unread: '.chan-grow-unread' }, whole: ['at', 'unread'], wholeAll: ['.chan-tag-words'] },
+  bar: { sel: '.chan-find', parts: { input: '.chan-find-input', newgroup: '.chan-newgroup-btn', outbox: '.chan-outbox-btn' } },
+  seg: { sel: '.chan-bar', parts: { focus: '.chan-view-btn[data-view="focus"]', all: '.chan-view-btn[data-view="all"]' } },
+  head: { sel: '.chan-account > .chan-sec-head', parts: { chev: '.chan-sec-chev', kind: '.chan-sec-kind', name: '.chan-sec-name', chip: '.chan-cred-chip', dot: '.chan-dot', count: '.chan-sec-count', edit: '.chan-sec-edit', more: '.chan-sec-more' }, whole: ['count'] },
+  health: { sel: '.chan-account > .chan-sec-health', parts: { tag: '.mounts-typetag', text: '.chan-sec-health-text' }, whole: ['tag'] },
+  row: { sel: '.chan-account .chan-row', parts: { arrow: '.mounts-child-arrow', title: '.chan-row-title', chip: '.chan-row-line .chan-chip', who: '.chan-row-who', unread: '.chan-unread', awaiting: '.chan-awaiting' }, whole: ['chip', 'unread'] },
+};
+const IM_WIN_GROUPS = {
+  titlerow: { sel: '.chanwin-title-row', parts: { av: '.chan-av', title: ':scope > b, .chanwin-title', chip: '.chan-assign-chip', more: '.icon-btn' } },
+  bar: { sel: '.chanwin-bar', parts: { titlerow: '.chanwin-title-row', meta: '.chanwin-meta', chip: ':scope > .chan-assign-chip' } },
+  msg: { sel: '.chanwin-list > .chanmsg', parts: { av: '.chan-av', name: '.chanmsg-head b', at: '.chanmsg-head .chanmsg-at', hover: '.chanmsg-at-hover', body: '.chanmsg-body', atts: '.chanmsg-atts' }, whole: ['at', 'hover'] },
+  day: { sel: '.chanwin-list > .chanmsg-day', parts: { label: '.chanmsg-day-label' }, whole: ['label'] },
+  fold: { sel: '.chanblk-fold-row', parts: { toggle: '.chanblk-fold', attribution: '.chanblk-attribution' }, whole: ['toggle'] },
+  file: { sel: 'a.chanmsg-att', parts: { icon: '.chan-ic', name: '.chanmsg-att-name', size: '.chanmsg-att-size' }, whole: ['size'] },
+  card: { sel: '.chanblk-card', parts: { title: '.chanblk-card-title', line: '.chanblk-card-line' } },
+  composer: { sel: '.chanwin-composer-row', parts: { note: '.chanwin-note-text', info: '.chanwin-note-info', send: '.mounts-btn' }, whole: ['send'] },
+  readonly: { sel: '.chanwin-readonly', parts: { text: ':scope > span', btn: '.mounts-btn' }, whole: ['btn'] },
+};
+
+// the two plain-words dialogs (channel-polish): Grant access… and Notify… — their rows, radios, chips, picker rows
+const IM_DLG_GROUPS = {
+  header: { sel: '.dialog-header', parts: { title: 'h3', close: '.dialog-close, button' } },
+  access: { sel: '.chan-access-row', parts: { who: '.chan-access-who', auth: '.chan-access-auth', rm: '.chan-af-rm' } },
+  // `input[type=radio]` (verify round 2): the cap's own line is a `.chan-radio-row` WITHOUT a radio — a bare `input` read its number field as the radio, overlapping itself
+  radio: { sel: 'label.chan-radio-row', parts: { input: 'input[type=radio]', words: '.chan-radio-words', field: '.chan-radio-field' } },
+  chip: { sel: '.pp-chip', parts: { av: '.chan-av', name: '.pp-chip-name', x: '.pp-chip-x' }, whole: ['x'] },
+  option: { sel: '.pp-row', parts: { check: '.pp-check', av: '.pp-av, .pp-backend', name: '.pp-name', folder: '.pp-folder', live: '.pp-live', tg: '.pp-tg', hint: '.pp-hint' } },
+  watch: { sel: '.chan-watch-head', parts: { who: '.pp-trigger', rm: '.chan-af-rm' } },
+  preview: { sel: '.chan-watch-row', parts: { preview: '.chan-notify-preview', est: '.chan-af-stat' } },
+  actions: { sel: '.chan-flow-actions', parts: { a: 'button:nth-of-type(1)', b: 'button:nth-of-type(2)', c: 'button:nth-of-type(3)', d: 'button:nth-of-type(4)' }, whole: ['a', 'b', 'c', 'd'] },
+};
+
+async function imCapture(page, tag, name, rootSel, groups, { pad = 0, clipSel = rootSel } = {}) {
+  if (ONLY && !name.includes(ONLY)) return null;
+  await page.evaljs(`(() => { const s = document.getElementById('global-toasts'); if (s) s.textContent = ''; return 1; })()`);
+  await sleep(150);
+  const c = await page.evaljs(`(() => { const el = document.querySelector(${JSON.stringify(clipSel)}); if (!el) return null; const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, width: Math.min(b.width, innerWidth - Math.max(0, b.x)), height: Math.min(b.height, innerHeight - Math.max(0, b.y)) }; })()`);
+  const clip = c ? { x: c.x - pad, y: c.y - pad, width: c.width + pad * 2, height: c.height + pad * 2 } : null;
+  const file = path.join(OUT, `${tag}-${name}`);
+  await page.shot(file + '.png', clip);
+  const m = await page.evaljs(`${MEASURE}(${JSON.stringify(rootSel)}, ${PROBES})`);
+  const im = await page.evaljs(`${IM_MEASURE}(${JSON.stringify(rootSel)}, ${JSON.stringify(groups)})`);
+  fs.writeFileSync(file + '.json', JSON.stringify({ name, tag, rootSel, clip, ...(m || {}), im }, null, 1));
+  manifest.push({ tag, name, file: path.basename(file) + '.png', missing: m && m.missing, rect: m && m.rect, im: true });
+  log(tag, name, m && m.missing ? 'MISSING ' + m.missing : `${m.rect.w}×${m.rect.h} · ${im && im.groups ? im.groups.length : 0} groups · ${im && im.targets ? im.targets.length : 0} targets`);
+  return im;
+}
+
+async function imPass({ lang, viewport, theme }) {
+  const mobile = viewport === 'mobile';
+  const tag = `im-${lang}-${viewport}-${theme}`;
+  log(`=== IM PASS ${tag}${FACE ? ` [${FACE}]` : ''} ===`);
+  if (srv) { srv.kill('SIGKILL'); await waitDown(); srv = null; }
+  resetData();
+  await seedIm();
+  srv = bootServer(); if (!(await waitServer())) throw new Error('server did not boot (IM)');
+  const page = await newPage(mobile ? { width: 375, height: 667, mobile: true } : { width: 1200, height: 800, mobile: false });
+  await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: IM_DOCTOR });
+  if (FACE) await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `document.addEventListener('DOMContentLoaded', () => { const st = document.createElement('style'); st.textContent = "html, body { font-family: '${FACE}', sans-serif !important; }"; document.head.appendChild(st); });` });
+  await page.prime({ lang, theme, sidebarWidth: 260 });
+  if (!(await page.load())) throw new Error('app did not load (IM)');
+  await waitFor(page, `(() => { const s = document.getElementById('loading-screen'); return !s || getComputedStyle(s).display === 'none' || getComputedStyle(s).opacity === '0'; })()`, 40);
+  // THE ATTENTION LIST's rows: one conversation handed to an agent, one mail thread to another,
+  // an agent's draft awaiting approval (the fake poll adapter)
+  for (let i = 0; i < 80; i++) { const d = (await api('GET', '/api/channels')).json; if (d && (d.conversations || []).some((x) => x.id === 'oc_launch') && (d.conversations || []).some((x) => x.id === 'fake-poll-ops')) break; await sleep(250); }
+  for (const [a, c, who] of [['lark', 'oc_launch', { kind: 'agent', id: 'cid-scout', name: 'Scout' }], ['gmail', 't_q', { kind: 'agent', id: 'cid-relay', name: 'Relay' }]]) {
+    const r = await api('PUT', `/api/channels/${encodeURIComponent(a)}/${encodeURIComponent(c)}/assignment`, { assignment: { principal: who, mode: 'all', notify: 'digest', digestMinutes: 60 } });
+    if (r.status !== 200) log('IM assignment', a, c, 'HTTP', r.status, r.text.slice(0, 160));
+  }
+  // (from the PAGE, as the classic pass's PROPOSE does — the owner's own request)
+  { const r = await page.evaljs(`fetch('/api/channels/fake-poll/fake-poll-ops/propose', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'Could someone look at the staging box before 3pm?' }) }).then((x) => x.status)`);
+    if (r !== 200) log('IM propose', 'HTTP', r); }
+  await sleep(1500);
+  if (!mobile) {
+    await openPanel(page);
+    await waitFor(page, `document.querySelectorAll('.rail-panel-channels .chan-groups > .chan-grow').length >= 3`, 60);
+    await sleep(500);
+    for (const w of [260, 200, 340, 500]) {
+      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
+      await sleep(400);
+      await page.evaljs(`(() => { for (let n = document.querySelector('.rail-panel-channels .chan-bar'); n; n = n.parentElement) n.scrollTop = 0; return 1; })()`);
+      await imCapture(page, tag, `list-focus-${w}`, '#sidebar', IM_PANEL_GROUPS);
+    }
+    await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
+    await sleep(300);
+    await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels .chan-view-btn[data-view="all"]'); if (b) b.click(); return !!b; })()`);
+    await sleep(300);
+    await imCapture(page, tag, 'list-all-260', '#sidebar', IM_PANEL_GROUPS);
+    await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels .chan-view-btn[data-view="focus"]'); if (b) b.click(); return !!b; })()`);
+    for (const w of [260, 340]) {
+      await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(${w}); sb._applySidebarLayoutWidth(${w}); return 1; })()`);
+      await sleep(400);
+      await waitFor(page, `!!document.querySelector('.rail-panel-channels .chan-account[data-adapter="lark"] .chan-sec-health')`, 40);
+      await page.evaljs(`(() => { const el = document.querySelector('.rail-panel-channels .chan-account[data-adapter="lark"]'); if (el) el.scrollIntoView({ block: 'start' }); return !!el; })()`);
+      await sleep(300);
+      await imCapture(page, tag, `accounts-${w}`, '#sidebar', IM_PANEL_GROUPS);
+    }
+    await page.evaljs(`(() => { const sb = window.app.sidebar; sb._resizer._setSize(260); sb._applySidebarLayoutWidth(260); return 1; })()`);
+    await sleep(300);
+  } else {
+    await page.evaljs(`(() => { const w = window.app.openChannels({ forceWindow: true }); return !!w; })()`);
+    await waitFor(page, `document.querySelectorAll('.chan-window .chan-groups > .chan-grow').length >= 3`, 60);
+    await sleep(500);
+    await imCapture(page, tag, 'm-list-focus', '.chan-window', IM_PANEL_GROUPS, { clipSel: 'body' });
+    await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channels')) window.app.wm.closeWindow(w.id); return 1; })()`);
+  }
+  // ── THE WINDOWS ──
+  const winShot = async (adapterId, convId, name, ready, { size = null, before = null } = {}) => {
+    await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); const w = window.app.openChannel(${JSON.stringify(adapterId)}, ${JSON.stringify(convId)}); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; ${size && !mobile ? `window.app.wm.focusWindow(w.id); w.element.style.left = '300px'; w.element.style.top = '20px'; w.element.style.width = '${size[0]}px'; w.element.style.height = '${size[1]}px';` : ''} return w.id; })()`);
+    const okReady = await waitFor(page, `(() => { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.dataset.shot === 'win'); return !!(w && w.content.querySelector('.chanmsg') && (${ready})); })()`, 60);
+    if (!okReady) log(tag, name, 'window not ready');
+    await sleep(700);
+    await page.evaljs(`(() => { const l = document.querySelector('[data-shot="win"] .chanwin-list'); if (l) l.scrollTop = l.scrollHeight; return 1; })()`);
+    await sleep(200);
+    if (before) await before();
+    return imCapture(page, tag, name, '[data-shot="win"]', IM_WIN_GROUPS);
+  };
+  const hoverCont = async () => {
+    await page.evaljs(`(() => { const r = [...document.querySelectorAll('[data-shot="win"] .chanmsg.chanmsg-cont')].pop(); if (r) r.scrollIntoView({ block: 'center' }); return !!r; })()`);
+    await sleep(250);
+    const pt = await page.evaljs(`(() => { const r = [...document.querySelectorAll('[data-shot="win"] .chanmsg.chanmsg-cont')].pop(); if (!r) return null; const b = r.getBoundingClientRect(); return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + Math.min(10, b.height / 2)) }; })()`);
+    if (pt) { await page.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y }); await sleep(300); }
+  };
+  const toTop = async () => { await page.evaljs(`(() => { const l = document.querySelector('[data-shot="win"] .chanwin-list'); if (l) l.scrollTop = 0; return 1; })()`); await sleep(250); };
+  const W1 = mobile ? null : [560, 700];
+  await winShot('lark', 'oc_launch', `${mobile ? 'm-' : ''}win-lark`, "w.content.querySelector('img.chanmsg-thumb') && w.content.querySelector('img.chanmsg-thumb').complete && w.content.querySelector('.chanblk-card')", { size: W1 });
+  await winShot('lark', 'oc_launch', `${mobile ? 'm-' : ''}win-lark-top`, "w.content.querySelector('.chanmsg-day')", { size: W1, before: toTop });
+  await winShot('lark', 'oc_launch', `${mobile ? 'm-' : ''}win-lark-hover`, "w.content.querySelector('.chanmsg-cont')", { size: W1, before: hoverCont });
+  await page.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 });
+  await winShot('gmail', 't_q', `${mobile ? 'm-' : ''}win-gmail`, "w.content.querySelector('.chanblk-quote') && w.content.querySelector('.chanwin-readonly')", { size: W1 });
+  await winShot('gmail', 't_q', `${mobile ? 'm-' : ''}win-gmail-open`, "w.content.querySelector('.chanblk-quote')", { size: W1, before: async () => { await page.evaljs(`(() => { const t = document.querySelector('[data-shot="win"] .chanblk-quote .chanblk-fold'); if (t) t.click(); return !!t; })()`); await sleep(250); } });
+  await winShot('lark:2', 'oc_ro', `${mobile ? 'm-' : ''}win-readonly`, "w.content.querySelector('.chanwin-readonly')", { size: mobile ? null : [520, 420] });
+  // ── THE TWO PLAIN-WORDS DIALOGS (channel-polish): Grant access… (the picker, the authority radios) and
+  //    Notify… (three questions, the preview) on the poll room — a Task Group through the real store, six live
+  //    sessions as a page-side roster (the picker's rows) ──
+  { const r = await api('POST', '/api/tasks', { title: 'Ops triage', folders: ['/work/ops'] }); if (r.status !== 200) log('IM task group', 'HTTP', r.status, r.text.slice(0, 120)); }
+  await waitFor(page, `(window.app.sidebar._tasks || []).some((g) => g.title === 'Ops triage')`, 40);
+  await page.evaljs(`(() => { const s = []; for (const [n, cwd, b] of [['pager-01', '/work/ops/pager', 'claude'], ['pager-02', '/work/ops/pager', 'codex'], ['web-ui', '/work/web/app', 'claude'], ['invoice-sync', '/work/billing/inv', 'claude'], ['release notes', '/work/ops/rel', 'codex'], ['scratch', '/tmp/scratch', 'claude']]) s.push({ id: 'w-' + n, name: n, cwd, backend: b, backendSessionId: 'cid-' + n.replace(/\\s/g, '-'), claudeSessionId: 'cid-' + n.replace(/\\s/g, '-') }); Object.defineProperty(window.app.sidebar, '_webuiSessions', { configurable: true, get: () => s, set: () => {} }); return s.length; })()`);
+  const dlgWin = async () => {
+    await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); const w = window.app.openChannel('fake-poll', 'fake-poll-ops'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
+    await waitFor(page, `(() => { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.dataset.shot === 'win'); return !!(w && w.content.querySelector('[data-channel-assign]')); })()`, 60);
+    await page.evaljs(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.dataset.shot === 'win'); w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
+  };
+  await dlgWin();
+  if (await waitFor(page, `!!document.querySelector('#chan-access-dialog .pp-input')`, 40)) {
+    await sleep(250);
+    await page.evaljs(`(() => { const b = document.querySelector('#chan-access-dialog .pp-input'); b.focus(); b.value = 'Ops'; b.dispatchEvent(new Event('input')); b.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })); b.value = 'pager'; b.dispatchEvent(new Event('input')); return 1; })()`);
+    await waitFor(page, `!!document.querySelector('#chan-access-dialog .chan-access-row')`, 20);
+    await sleep(250);
+    await imCapture(page, tag, `${mobile ? 'm-' : ''}dlg-access`, '#chan-access-dialog .dialog', IM_DLG_GROUPS);
+    await page.evaljs(`(() => { const b = document.querySelector('#chan-access-dialog .pp-input'); b.value = ''; b.dispatchEvent(new Event('input')); const d = document.getElementById('chan-access-dialog'); const save = d.querySelector('.chan-flow-actions .mounts-btn-primary'); if (save) save.click(); return !!save; })()`);
+    await waitFor(page, `!document.querySelector('#chan-access-dialog')`, 30);
+    await sleep(600);
+    await dlgWin();
+    if (await waitFor(page, `!!document.querySelector('#chan-notify-dialog .chan-watch-row .chan-notify-preview')`, 40)) {
+      await sleep(500);
+      await imCapture(page, tag, `${mobile ? 'm-' : ''}dlg-notify`, '#chan-notify-dialog .dialog', IM_DLG_GROUPS);
+      await page.evaljs(`(() => { const d = document.getElementById('chan-notify-dialog'); d.querySelector('.chan-watch-row input[type=radio][value=rule]').click(); const add = d.querySelector('.chan-watch-row .chan-af-rules .chan-af-add'); if (add) add.click(); const i = d.querySelector('.chan-af-rule input'); if (i) { i.value = 'deploy'; i.dispatchEvent(new Event('input')); } d.querySelector('.chan-watch-row input[type=radio][value=digest]').click(); return 1; })()`);
+      await sleep(600);
+      await imCapture(page, tag, `${mobile ? 'm-' : ''}dlg-notify-rule`, '#chan-notify-dialog .dialog', IM_DLG_GROUPS);
+    } else log(tag, 'the Notify dialog did not open');
+  } else log(tag, 'the Grant access dialog did not open');
+  await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); return 1; })()`);
+  await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()]) window.app.wm.closeWindow(w.id); return 1; })()`);
+  page.close();
+}
+
 const runs = [];
 for (const theme of THEMES) for (const lang of LANGS) for (const viewport of VIEWPORTS) {
   if (theme !== 'dark' && !LIGHT_LANGS.includes(lang)) continue;
   runs.push({ lang, viewport, theme });
 }
-for (const r of runs) {
+if (IM !== 'only') for (const r of runs) {
   const tag = `${r.lang}-${r.viewport}-${r.theme}`;
   try { await pass(r); }
   catch (e) { log(`PASS ${tag} FAILED:`, e.message); manifest.push({ tag, name: 'PASS-FAILED', error: e.message }); }
+  if (r.lang !== 'en') log(tag, 'latin-only strings on screen:', latinLeaks(tag));
+}
+if (IM) for (const r of runs) {
+  const tag = `im-${r.lang}-${r.viewport}-${r.theme}`;
+  try { await imPass(r); }
+  catch (e) { log(`IM PASS ${tag} FAILED:`, e.message); manifest.push({ tag, name: 'PASS-FAILED', error: e.message }); }
   if (r.lang !== 'en') log(tag, 'latin-only strings on screen:', latinLeaks(tag));
 }
 fs.writeFileSync(path.join(OUT, 'index.json'), JSON.stringify({ at: new Date().toISOString(), runs, shots: manifest }, null, 1));

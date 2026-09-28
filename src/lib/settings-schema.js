@@ -456,7 +456,7 @@ const SETTINGS_SCHEMA = {
   'browser.isolateSessions': {
     type: 'boolean', default: true,
     label: t('Give each session its own agent browser'),
-    description: t('ON (default): a session that runs the agent-browser CLI gets its own browser — its own tabs, its own cookies and its own daemon — so two agents stop stealing each other\'s window and `close --all` can only close the caller\'s own. Costs four environment variables at spawn and nothing else: no extra VibeSpace process. OFF: sessions fall back to the single shared profile named by ~/.agent-browser/config.json, which is what every agent used before. Applies to sessions started after the change; a running session keeps the environment it was started with.'),
+    description: t('ON (default): a session that runs the agent-browser CLI gets its own browser — its own tabs, its own cookies and its own daemon — so two agents stop stealing each other\'s window and `close --all` can only close the caller\'s own. Costs four environment variables at spawn and nothing else: no extra VibeSpace process. OFF: sessions fall back to the single shared profile named by ~/.agent-browser/config.json, which is what every agent used before. Applies to sessions started after the change; a running session keeps the browser it has — and one that has none (it started while this was off, or before the feature) gets its own at its next browser command.'),
     category: t('Agent browser'), liveApply: true,
   },
   'browser.idleTimeoutMs': {

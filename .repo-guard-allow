@@ -44,3 +44,13 @@ own-client-SECRET-9q8w7e
 team-google-secret-0000
 cluster-bb-key-12345678
 dup-custom-secret-000000
+# client-from-mount (2.369.195): synthetic storage-mount client secrets + echoed vendor tokens in test-channels-engine / -gmail-shape / -lark-shape fixtures, not real
+GOCSPX-odd-MOUNT-s3cret-0dd
+GOCSPX-hn-MOUNT-s3cret-00
+GOCSPX-long-MOUNT-s3cret-0
+GOCSPX-edited-MOUNT-s3cret-9
+GOCSPX-third-MOUNT-s3cret-8
+GOCSPX-agent-own-secret-x
+GOCSPX-agent-rewrote-it-000
+1//echo-refresh-000
+ur-echo-refresh-000

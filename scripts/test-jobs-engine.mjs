@@ -154,8 +154,9 @@ try {
     // the injection site is the ONLY consumer of that stash (a second consumer
     // that re-delivered per entry is exactly the failure this pins against)
     const ar = fs.readFileSync(new URL('../src/agent-routes.js', import.meta.url), 'utf-8');
-    ok(/const drained = jm\.drainNotifs\(caller\.conversationId\);[\s\S]{0,900}?jobModel\.renderNotifStash\(drained/.test(ar) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar),
-      'wiring pin: the drain sites render ONE block and never re-enter the delivery ladder per entry');
+    // channel-jump verify r5: the ONE drain site is the fit-or-wait helper (drainNotifsUnderCap) both hook routes call
+    ok(/const drained = jm\.drainNotifs\(cid, new Set\(waiting\)\);[\s\S]{0,900}?\.renderNotifStash\(drained/.test(ar) && !/for \(const [a-z] of drained\) [\s\S]{0,80}deliverToConversation/.test(ar) && ar.split('= drainNotifsUnderCap(jm, deliver, ').length === 3,
+      'wiring pin: the drain sites render ONE block and never re-enter the delivery ladder per entry (r5: one helper, two routes)');
   }
 
   // 7d. notify-ACTION crons reach the OWNER CONVERSATION too (2.361.5, the

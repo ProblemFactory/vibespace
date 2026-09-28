@@ -20,6 +20,22 @@ function writeJsonAtomic(file, obj) {
   fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1));
   fs.renameSync(tmp, file);
 }
+/** The per-conversation notification cap (30): the oldest UNCLAIMED entries fall off; an entry stamped `ho` is being
+ *  handed over and leaves by that hand-over's own drain (channel-jump verify r4 — the ladder's store has the same
+ *  rule, conversation-deliver `capUnclaimed`). The store may exceed the cap by the claimed count while one is in flight. */
+const NOTIF_STASH_CAP = 30;
+function capUnclaimedNotifs(q) {
+  // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
+  // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off
+  let over = q.filter((e) => !(e && e.ho)).length - NOTIF_STASH_CAP;
+  if (over <= 0) return 0;
+  let n = 0;
+  for (let i = 0; i < q.length && over > 0;) {
+    if (q[i] && q[i].ho) { i++; continue; }
+    q.splice(i, 1); over--; n++;
+  }
+  return n;
+}
 function readStarttime(pid) {
   try {
     const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf-8');
@@ -162,7 +178,18 @@ class JobManager {
   _loadNotifs() {
     try {
       const obj = JSON.parse(fs.readFileSync(this.notifsFile, 'utf-8'));
-      for (const [cid, list] of Object.entries(obj)) if (Array.isArray(list) && list.length) this.pendingNotifs.set(cid, list);
+      this.releasedAtBoot = [];
+      for (const [cid, list] of Object.entries(obj)) {
+        if (!Array.isArray(list) || !list.length) continue;
+        // a hand-over the previous process did not settle (verify r2, the ladder's stash has the same rule): the
+        // entries wait again, by name in the log — the shutdown waits for a hand-over in flight, so a stamp here is a
+        // process killed mid-post
+        const ids = new Set();
+        for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
+        if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); this.d.log(`[jobs] ${cid}: a hand-over (${[...ids].join(', ')}) was in flight when the previous server stopped — its job results wait again`); }
+        this.pendingNotifs.set(cid, list);
+      }
+      if (this.releasedAtBoot.length && !this.readOnly) this._saveNotifs();
     } catch { }
   }
 
@@ -389,11 +416,15 @@ class JobManager {
   _stashNotif(cid, job, ev, reason, { stampLast = true, held = null } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     q.push({ jobId: job.id, jobName: job.name, text: (ev && ev.what) || job.state, ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
-    if (q.length > 30) q.splice(0, q.length - 30); // per-conversation cap; oldest fall off
+    const unclaimed = q.filter((e) => !(e && e.ho));
+    const dropped = unclaimed.slice(0, Math.max(0, unclaimed.length - NOTIF_STASH_CAP));
+    const n = capUnclaimedNotifs(q); // per-conversation cap; the oldest UNCLAIMED fall off (a claimed one is being handed over — verify r4)
+    if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
     this.pendingNotifs.set(cid, q);
     if (stampLast) job.lastNotify = { ts: now(), lane: 'stash', ok: true, reason: reason || null };
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
+    try { this.d.onStash?.(cid); } catch { } // the conversation's `stash` session fact (the strip above its composer) follows
   }
   /** explicit per-conversation subscription to a VISIBLE job's notifications
    *  (2.345.0). View access is the route's responsibility; dedupe by
@@ -471,12 +502,56 @@ class JobManager {
         : 'your conversation has no live inbox right now — notifications will be stashed and injected when it next resumes',
     };
   }
-  /** drain + clear a conversation's stash (called by the injection routes at render time). */
-  drainNotifs(cid) {
+  /** The notifications waiting for a conversation (the SAME objects — `drainNotifs(cid, new Set(these))` takes them). */
+  peekNotifs(cid) { return cid ? (this.pendingNotifs.get(cid) || []).slice() : []; }
+  /** A CLAIM on entries a hand-over is about to deliver (channel-jump verify, 2026-09-27; the ladder's stash has the
+   *  same door — conversation-deliver `claimStash`): a full drain leaves a claimed entry in place; the returned
+   *  release gives it back. verify r2: the claim is the entry's own `ho` stamp (the hand-over's id), written to the
+   *  notifs file SYNCHRONOUSLY — a restart used to forget an in-memory claim while the entries stayed on disk. */
+  claimNotifs(cid, entries, id = null) {
+    const mine = (Array.isArray(entries) ? entries : []).filter((n) => n && typeof n === 'object');
+    const tag = id ? String(id) : 'ho';
+    for (const n of mine) n.ho = tag;
+    if (mine.length) this._saveNotifs();
+    let released = false;
+    return () => { if (released) return; released = true; let k = 0; for (const n of mine) if (n.ho === tag) { delete n.ho; k++; } if (k) this._saveNotifs(); };
+  }
+  /** the notifs file alone, NOW (a claim, a drain — a delivery's bookkeeping never waits for the 2 s save tick). */
+  _saveNotifs() {
+    if (this.readOnly) return;
+    try { writeJsonAtomic(this.notifsFile, Object.fromEntries(this.pendingNotifs)); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
+  }
+  /** Put drained notifications BACK as themselves (a hand-over's frame came back undelivered — verify r2). */
+  restoreNotifs(cid, items) {
+    const mine = (Array.isArray(items) ? items : []).filter((n) => n && typeof n === 'object');
+    if (!cid || !mine.length) return 0;
+    const q = this.pendingNotifs.get(cid) || [];
+    for (const n of mine) { delete n.ho; if (!q.includes(n)) q.push(n); }
+    q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+    // no cap on a restore (verify r4): the restored are the oldest — trimming here would evict exactly what came back
+    this.pendingNotifs.set(cid, q);
+    this._saveNotifs();
+    try { this.d.onStash?.(cid); } catch { }
+    return mine.length;
+  }
+  /** drain + clear a conversation's stash (called by the injection routes at render time). `only` (a Set of entries
+   *  `peekNotifs` returned) takes exactly those — the stash hand-over's delivered set — and keeps the rest. A full
+   *  drain keeps every CLAIMED entry (`claimNotifs`: a hand-over in flight owns it). Every drain persists NOW
+   *  (verify r2: a killed process re-delivered what its 2 s save tick had not yet written off). */
+  drainNotifs(cid, only = null) {
     if (!cid) return [];
-    const q = this.pendingNotifs.get(cid);
+    let q = this.pendingNotifs.get(cid);
     if (!q || !q.length) return [];
-    this.pendingNotifs.delete(cid);
+    const byId = only instanceof Set;
+    if (byId || q.some((n) => n && n.ho)) {
+      const mine = byId ? (n) => only.has(n) : (n) => !(n && n.ho);
+      const keep = q.filter((n) => !mine(n));
+      q = q.filter(mine);
+      if (!q.length) return [];
+      if (keep.length) this.pendingNotifs.set(cid, keep); else this.pendingNotifs.delete(cid);
+      for (const n of q) if (n && n.ho) delete n.ho;
+    } else this.pendingNotifs.delete(cid);
+    this._saveNotifs();
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
     // conversation sees it on its next turn. A stash entry older than the
@@ -486,6 +561,7 @@ class JobManager {
       if (job && Number(n.ts) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });
     }
     try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
+    try { this.d.onStash?.(cid); } catch { }
     return q;
   }
   /** ACKNOWLEDGE a terminal one-shot (triage §13): `by` ∈ notified |

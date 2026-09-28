@@ -4,6 +4,7 @@ import { registerCommand, registerMenuItem, menuItems } from './contributions.js
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
 import { UI_ICONS } from './icons.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
+import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -230,6 +231,7 @@ function renderDetailGroups(container, sessionRef, clickToCopy, state) {
 export function renderSessionCard(s, { state, app, settings, expandedCardId, onExpandToggle, onRename, showCwd }) {
   const card = document.createElement('div'); card.className = 'session-item-card';
   card._sessionId = s.sessionId; // Store for highlight lookup
+  card._webuiId = s.webuiId || null; // the live session's id — the sidebar patches the "N waiting" hint in place by it
   card.draggable = true;
   card.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData('application/x-session-id', s.sessionId);
@@ -390,6 +392,10 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
     gchip.dataset.tip = tr('Last git event the agent reported: {kind}{branch}{when}', { kind: s.vcs.kind, branch: s.vcs.branch ? ' on ' + s.vcs.branch : '', when: s.vcs.at ? ' · ' + new Date(s.vcs.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '' });
     stateChip?.after(gchip);
   }
+  // WHAT WAITS (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): "N waiting" — notices held for
+  // this agent's next turn (the stash fact); the tooltip names them; kept current in place by patchStashHints
+  const stashChip = (s.status === 'live' || s.status === 'tmux') && s.webuiId ? stashHintChip(s.stash) : null;
+  if (stashChip) stateChip?.after(stashChip);
   // AGENT BROWSER CHIP (lane H, 2026-09-25 — the owner watched an agent's
   // ephemeral browser start and nothing said so): shown while a browser of this
   // session runs (`browserFact.live`). lane S2: its words are THE browser fact's

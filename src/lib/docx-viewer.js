@@ -236,17 +236,20 @@ async function registerEmbeddedFonts(doc, signal) {
  * Render a Word document with its toolbar into `container`.
  * Throws on a fetch/parse failure (renderInto shows the reason in the pane);
  * a file that is not a renderable Word document gets a NAMED refusal instead.
+ * `office` (§7.9, optional) = { file: the basename, open(anchor) } — the
+ * toolbar's "Open in LibreOffice"; file-viewer.js decides what a click does
+ * (the office-open verdict + the door), this module only draws and calls it.
  */
-export async function renderDocxViewer(container, rawUrl, { signal } = {}) {
+export async function renderDocxViewer(container, rawUrl, { signal, office = null } = {}) {
   try {
-    return await renderDocxViewerInner(container, rawUrl, signal);
+    return await renderDocxViewerInner(container, rawUrl, signal, office);
   } catch (e) {
     if (signal?.aborted) return null; // a closed window / a newer preview — never paint over it
     throw e;
   }
 }
 
-async function renderDocxViewerInner(container, rawUrl, signal) {
+async function renderDocxViewerInner(container, rawUrl, signal, office) {
   const root = el('div', 'docx-viewer');
   const bar = el('div', 'media-toolbar docx-toolbar');
   bar.setAttribute('role', 'toolbar');
@@ -271,7 +274,14 @@ async function renderDocxViewerInner(container, rawUrl, signal) {
 
   // ── toolbar: built once, patched in place ──
   const items = new Map();
-  const act = (id) => {
+  let officeBusy = false; // one launch per click: a second click while the first is on its way does nothing
+  const act = async (id) => {
+    if (id === 'office') {
+      if (officeBusy || !office) return;
+      officeBusy = true;
+      try { await office.open(items.get('office')); } finally { officeBusy = false; }
+      return;
+    }
     if (state.rendering) return;
     if (id === 'fit') setMode('fit');
     else if (id === 'actual') setScale(1);
@@ -279,13 +289,14 @@ async function renderDocxViewerInner(container, rawUrl, signal) {
     else if (id === 'in') setScale(zoomStep(state.scale, +1));
   };
   const drawBar = () => {
-    for (const it of toolbarModel(state, t)) {
+    for (const it of toolbarModel(state, t, { office: office ? office.file : null })) {
       let node = items.get(it.id);
       if (!node) {
         if (it.kind === 'button') {
           node = el('button', 'file-tool-btn media-btn docx-tool-' + it.id);
           node.type = 'button';
           if (it.icon) node.innerHTML = UI_ICONS[it.icon] || '';
+          if (it.icon && it.withLabel) { const w = el('span', 'docx-tool-label'); w.textContent = it.label; node.appendChild(w); } // icon + words
           node.addEventListener('click', () => act(it.id), signal ? { signal } : undefined);
         } else if (it.kind === 'spacer') node = el('span', 'docx-spacer');
         else node = el('span', it.id === 'zoom' ? 'media-zoom-label docx-zoom' : 'docx-pages');
@@ -295,10 +306,10 @@ async function renderDocxViewerInner(container, rawUrl, signal) {
       if (it.kind === 'button') {
         if (!it.icon && node.textContent !== it.label) node.textContent = it.label;
         node.title = it.title;
-        node.setAttribute('aria-label', it.title);
-        node.disabled = !!it.disabled || state.rendering;
+        node.setAttribute('aria-label', it.aria || it.title);
+        node.disabled = !!it.disabled || (state.rendering && !it.live);
         node.classList.toggle('active', !!it.pressed);
-        node.setAttribute('aria-pressed', it.pressed ? 'true' : 'false');
+        if (it.id !== 'office') node.setAttribute('aria-pressed', it.pressed ? 'true' : 'false'); // "Open in LibreOffice" is an action, never a toggle
       } else if (it.kind === 'label') {
         if (node.textContent !== it.text) node.textContent = it.text;
         if (it.title !== undefined) node.title = it.title;

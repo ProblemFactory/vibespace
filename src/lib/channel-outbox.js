@@ -30,7 +30,20 @@
 // Every vendor / agent string is textContent (fence 5): a proposal's text is
 // an agent's, the reason is an adapter's, the why is a label — none of it
 // reaches innerHTML.
-import { fetchJson, showToast } from './utils.js';
+//
+// 2026-09-27: WITHDRAWN — the drafting agent took its proposal back: a dim,
+// settled card ("Withdrawn by <agent> · <why>"), no buttons. THE DELIVERY
+// CHOICE ON THE ACTION (owner ruling): an agent's draft is decided with a
+// SPLIT button — "Approve ▾" / "Reject ▾" — whose primary is this device's
+// last-used choice ("tell the agent with your next message", free, or "wake
+// the agent now", a started turn) and whose menu offers both (+ "Approve with
+// edits…"). THE FATE LINE says whether the agent knows yet ("Handed to <agent>
+// at 14:02" / "Waiting for <agent>'s next message" / "<agent> is gone —
+// receipt kept"). CARDS ARE KEYED (`data-proposal` + a signature): a
+// broadcast re-renders only a card whose record changed, a fate-only change
+// patches the fate line in place, and a card the user is editing is left
+// alone while its record stands.
+import { fetchJson, showToast, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem } from './contributions.js';
@@ -44,8 +57,41 @@ import { routeErrorText } from './channel-words.js';
 const ICON = svgIcon16('<path d="M2.5 4.5h11v8h-11z"/><path d="M2.5 4.5l5.5 4 5.5-4"/><path d="M8 2v3"/>');
 const JSON_HDR = { 'Content-Type': 'application/json' };
 /** The Outbox's All view: the order states are grouped in (attention first). */
-const STATE_ORDER = ['awaiting-approval', 'sending', 'unknown', 'failed', 'sent', 'rejected', 'expired', 'proposed'];
-const STATE_TONE = { 'awaiting-approval': 'attn', sending: 'attn', unknown: 'warn', failed: 'bad', sent: 'ok', rejected: 'idle', expired: 'idle', proposed: 'idle' };
+const STATE_ORDER = ['awaiting-approval', 'sending', 'unknown', 'failed', 'sent', 'rejected', 'expired', 'withdrawn', 'proposed'];
+const STATE_TONE = { 'awaiting-approval': 'attn', sending: 'attn', unknown: 'warn', failed: 'bad', sent: 'ok', rejected: 'idle', expired: 'idle', withdrawn: 'idle', proposed: 'idle' };
+/** This device's last-used receipt delivery (the split buttons' primary). */
+const DELIVER_KEY = 'vibespace.channels.receiptDeliver';
+export function rememberedDelivery() { try { return localStorage.getItem(DELIVER_KEY) === 'wake-now' ? 'wake-now' : 'next-turn'; } catch { return 'next-turn'; } }
+function rememberDelivery(v) { try { localStorage.setItem(DELIVER_KEY, v === 'wake-now' ? 'wake-now' : 'next-turn'); } catch { } }
+/** THE PRESS DOES WHAT THE BUTTON SAYS (verify r3, 2026-09-27): a primary
+ *  Approve's delivery is read off the button's OWN `data-deliver` — the one
+ *  fact its label was worded from — never off the remembered choice at click
+ *  time. Reproduced: "Reject with a reason and wake now" picked on card A
+ *  (the box opens, nothing is posted, no broadcast), then card B's primary
+ *  still reading "Approve — tell the agent with your next message" posted
+ *  `deliver: wake-now, expectWakes: 1` — a billed turn the words said was
+ *  free. The remembered choice reaches every visible primary through
+ *  `relabelPrimaries` the moment it moves. */
+export function pressedDelivery(button) { return button && button.dataset && button.dataset.deliver === 'wake-now' ? 'wake-now' : 'next-turn'; }
+/** Every visible agent-draft primary on this page follows the remembered choice, words and fact together. */
+export function relabelPrimaries(want = rememberedDelivery(), root = document) {
+  for (const b of root.querySelectorAll('.chan-prop button[data-approve][data-deliver]')) {
+    if (b.dataset.deliver === want) continue;
+    b.dataset.deliver = want;
+    const card = b.closest('.chan-prop');
+    b.textContent = approveLabel(want, { edited: !!(card && card.querySelector('.chan-prop-edit')) });
+  }
+}
+/** The Approve words for a delivery choice — the COST in plain language. */
+export function approveLabel(deliver, { edited = false } = {}) {
+  if (deliver === 'wake-now') return edited ? t('Approve edited and wake the agent now (starts a turn)') : t('Approve and wake the agent now (starts a turn)');
+  return edited ? t('Approve edited — tell the agent with your next message') : t('Approve — tell the agent with your next message');
+}
+/** The Reject menu's words and the reject box's button. */
+export function rejectLabel(deliver, { box = false } = {}) {
+  if (deliver === 'wake-now') return box ? t('Reject and wake now') : t('Reject with a reason and wake now');
+  return box ? t('Reject') : t('Reject — tell on its next message');
+}
 /** Decided-and-closed cards the inline section keeps (the newest N). */
 const INLINE_RECENT = 2;
 
@@ -65,6 +111,7 @@ export function stateLabel(state) {
     case 'unknown': return t('outcome unknown');
     case 'rejected': return t('rejected');
     case 'expired': return t('expired');
+    case 'withdrawn': return t('withdrawn');
     case 'proposed': return t('proposed');
     default: return String(state || '');
   }
@@ -195,11 +242,13 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     // the refusal is a CODE (worded); the sentence beside it is the fallback
     card.appendChild(el('div', 'chan-prop-foot chan-prop-reason', t('Cannot be checked by the machine: {why}', { why: P.reconcileWhyText(p.reconcileWhyCode, { t }) || p.reconcileWhy })));
   }
-  if (p.receipt && p.draftedBy && p.draftedBy.kind === 'agent') {
-    const d = p.receiptDelivery;
-    card.appendChild(el('div', 'chan-prop-foot chan-prop-receipt', d
-      ? (d.ok ? t('Receipt handed to the agent ({lane})', { lane: chanCaps.deliveryLaneText(d.lane, { t }) }) : d.stashed ? t('Receipt stored for the agent\'s next turn') : t('Receipt not delivered: {why}', { why: chanCaps.wakeRefusalText(d.refused, { t }) || d.why || '' }))
-      : t('Receipt recorded')));
+  // THE FATE LINE (2026-09-27): does the drafting agent know yet? Its own
+  // element, patched in place when only the fate moved (patchFate)
+  const fateText = fateLineText(p);
+  if (fateText) {
+    const f = el('div', 'chan-prop-foot chan-prop-receipt chan-prop-fate', fateText);
+    f.dataset.fate = (P.receiptFateOf(p) || {}).kind || '';
+    card.appendChild(f);
   }
   // ── actions: right-aligned, ONE primary ──
   if (p.state === 'unknown' && p.canReconcile) {
@@ -215,62 +264,172 @@ export function renderProposalCard(app, p, { compact = false } = {}) {
     act.appendChild(chk);
     card.appendChild(act);
   }
-  // DECISIONS — only while awaiting.
+  // DECISIONS — only while awaiting. An AGENT's draft is decided with the
+  // split buttons (how it hears of the decision is chosen right here); a
+  // user's own draft has nobody to tell — plain Approve / Reject….
   if (p.state === 'awaiting-approval') {
     const act = el('div', 'chan-prop-actions');
+    const toAgent = !!(p.draftedBy && p.draftedBy.kind === 'agent');
     let editor = null;
     const reject = btn(t('Reject…'), null);
     reject.dataset.reject = '1';
     const edit = btn(t('Edit…'), null);
     edit.dataset.edit = '1';
-    const approve = btn(t('Approve'), null, 'mounts-btn-primary');
+    const approve = btn(toAgent ? approveLabel(rememberedDelivery()) : t('Approve'), null, 'mounts-btn-primary');
     approve.dataset.approve = '1';
-    approve.onclick = async () => {
-      approve.disabled = true; edit.disabled = true; reject.disabled = true;
+    if (toAgent) approve.dataset.deliver = rememberedDelivery();
+    const lock = (on) => { for (const b of act.querySelectorAll('button')) b.disabled = on; };
+    const doApprove = async (deliver) => {
+      lock(true);
       const text = editor ? editor.value : null;
-      // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`)
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: Number(p.wakes) || 0 });
-      if (!r) { approve.disabled = false; edit.disabled = false; reject.disabled = false; return; }
+      // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`) — and a receipt woken now is one more
+      const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
+      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}) });
+      if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
       showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
+      if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
     };
+    approve.onclick = () => doApprove(toAgent ? pressedDelivery(approve) : null);   // verify r3: what the button SAYS
     edit.onclick = () => {
       if (editor) return;
       editor = el('textarea', 'chan-prop-edit');
       editor.value = p.text || '';
       body.replaceWith(editor);
-      approve.textContent = t('Approve edited');
+      approve.textContent = toAgent ? approveLabel(pressedDelivery(approve), { edited: true }) : t('Approve edited');
       edit.disabled = true;
       editor.focus();
     };
-    reject.onclick = () => {
-      if (card.querySelector('.chan-prop-rejectbox')) return;
+    const openReject = (deliver) => {
+      const old = card.querySelector('.chan-prop-rejectbox');
+      if (old) old.remove();
       const box = el('div', 'chan-prop-rejectbox');
       const inp = el('input', 'chan-opt-input');
       inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
-      const go = btn(t('Reject'), null, 'mounts-btn-primary');
+      const go = btn(toAgent ? rejectLabel(deliver, { box: true }) : t('Reject'), null, 'mounts-btn-primary');
+      if (toAgent) go.dataset.deliver = deliver;
       go.onclick = async () => {
         go.disabled = true;
-        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value });
-        if (!r) go.disabled = false; else showToast(t('Rejected'));
+        const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
+        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver, expectWakes: woke } : {}) });
+        if (!r) { go.disabled = false; return; }
+        showToast(t('Rejected'));
+        if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
       };
       inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
       box.append(inp, go);
       act.after(box);
       inp.focus();
     };
-    act.append(reject, edit, approve);
+    reject.onclick = () => openReject(toAgent ? rememberedDelivery() : null);
+    /** THE ▾ HALF of a split button: the menu of delivery choices. */
+    const chevron = (kind, items) => {
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'mounts-btn chan-split-more' + (kind === 'approve' ? ' mounts-btn-primary' : '');
+      c.dataset.more = kind;
+      c.title = kind === 'approve' ? t('More ways to approve') : t('More ways to reject');
+      c.setAttribute('aria-label', c.title);
+      c.appendChild(icon('chevronDown', 11));
+      c.onclick = (ev) => {
+        ev.stopPropagation();
+        const r = c.getBoundingClientRect();
+        // ONE class name (the item class is derived from it); the modifier after
+        const menu = showContextMenu(r.left, r.bottom + 2, items());
+        if (menu) { menu.classList.add('chan-split-menu'); menu.dataset.menu = kind; }
+      };
+      return c;
+    };
+    if (toAgent) {
+      // a pick is remembered AND said on every primary on this page at once (verify r3)
+      const pick = (v) => { rememberDelivery(v); relabelPrimaries(v); };
+      const approveItems = () => [
+        { label: approveLabel('next-turn', { edited: !!editor }), action: () => { pick('next-turn'); doApprove('next-turn'); } },
+        { label: approveLabel('wake-now', { edited: !!editor }), action: () => { pick('wake-now'); doApprove('wake-now'); } },
+        ...(editor ? [] : [{ separator: true }, { label: t('Approve with edits…'), action: () => edit.onclick() }]),
+      ];
+      const rejectItems = () => [
+        { label: rejectLabel('next-turn'), action: () => { pick('next-turn'); openReject('next-turn'); } },
+        { label: rejectLabel('wake-now'), action: () => { pick('wake-now'); openReject('wake-now'); } },
+      ];
+      const rs = el('span', 'chan-split'); rs.append(reject, chevron('reject', rejectItems));
+      const as = el('span', 'chan-split'); as.append(approve, chevron('approve', approveItems));
+      act.append(rs, edit, as);
+    } else act.append(reject, edit, approve);
     card.appendChild(act);
   }
   return card;
+}
+
+/** The fate line's words for one proposal ('' = none). */
+function fateLineText(p) {
+  const f = P.receiptFateOf(p);
+  return f ? P.receiptFateText(f, { t, stamp: fateStamp, refusalText: (c) => chanCaps.wakeRefusalText(c, { t }) }) : '';
+}
+/** "14:02" today, "09-26 14:02" on another day (the owner's own example). */
+function fateStamp(ms) {
+  const d = new Date(Number(ms)), n = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return d.toDateString() === n.toDateString() ? hm : `${stamp(ms)}`;
+}
+/** A card's signature WITHOUT its fate (a fate-only change patches the line). */
+function cardSig(p, compact) {
+  const q = { ...p };
+  delete q.receiptDelivery; delete q.receiptDrainedAt; delete q.receiptDrainedHow; delete q.receiptEvictedAt; delete q.receiptEvictedHeld;
+  return JSON.stringify([q, !!compact, rememberedDelivery()]);
+}
+const fateSig = (p) => JSON.stringify([p.receiptDelivery || null, p.receiptDrainedAt || null, p.receiptDrainedHow || null, p.receiptEvictedAt || null]);
+/** Is the user in the middle of deciding on this card (an editor or a reject box open)? */
+const inUse = (card) => !!card.querySelector('.chan-prop-edit, .chan-prop-rejectbox');
+/**
+ * THE KEYED CARD FOR ONE PROPOSAL: the existing element when its record did
+ * not change (its fate line patched in place when only the fate moved; left
+ * alone while the user edits it and it still awaits), else a fresh one.
+ */
+function keyedCard(app, p, prev, { compact = false } = {}) {
+  const sig = cardSig(p, compact);
+  if (prev && (prev.dataset.sig === sig || (inUse(prev) && p.state === 'awaiting-approval' && prev.dataset.state === 'awaiting-approval'))) {
+    if (prev.dataset.fateSig !== fateSig(p)) {
+      const text = fateLineText(p);
+      let line = prev.querySelector(':scope > .chan-prop-fate');
+      if (text) {
+        if (!line) { line = el('div', 'chan-prop-foot chan-prop-receipt chan-prop-fate'); const act = prev.querySelector(':scope > .chan-prop-actions'); if (act) prev.insertBefore(line, act); else prev.appendChild(line); }
+        if (line.textContent !== text) line.textContent = text;
+        line.dataset.fate = (P.receiptFateOf(p) || {}).kind || '';
+      } else if (line) line.remove();
+      prev.dataset.fateSig = fateSig(p);
+    }
+    // verify r2 (round 1 LOW 5): a card left alone while the user edits it keeps
+    // its primary Approve; when this device's remembered choice moved meanwhile
+    // (another card's menu), the label followed the OLD choice while the click
+    // does the new one — patch the words in place, the editor untouched
+    const want = rememberedDelivery();
+    const approveBtn = prev.querySelector(':scope > .chan-prop-actions button[data-approve]');
+    if (approveBtn && p.draftedBy && p.draftedBy.kind === 'agent' && approveBtn.dataset.deliver !== want) {
+      approveBtn.dataset.deliver = want;
+      approveBtn.textContent = approveLabel(want, { edited: !!prev.querySelector('.chan-prop-edit') });
+    }
+    return prev;
+  }
+  const card = renderProposalCard(app, p, { compact });
+  card.dataset.sig = sig;
+  card.dataset.fateSig = fateSig(p);
+  card.dataset.state = p.state;
+  return card;
+}
+/** Put `nodes` into `container` in order, moving a node only when it is out of place. */
+function placeNodes(container, nodes) {
+  const want = new Set(nodes);
+  for (const c of [...container.children]) if (!want.has(c)) c.remove();
+  nodes.forEach((n, i) => { if (container.children[i] !== n) container.insertBefore(n, container.children[i] || null); });
 }
 
 /** The section a conversation window draws above its composer (design C4):
  *  the cards that need the user — awaiting first, then an unknown or failed
  *  outcome — plus the newest two decided ones (the outcome of a click stays
  *  in view), with a link to the rest in the Outbox. Empty ⇒ nothing. */
-export function renderInlineProposals(app, proposals) {
+export function renderInlineProposals(app, proposals, prev = null) {
   const all = (proposals || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
   if (!all.length) return null;
   const awaiting = all.filter((p) => p.state === 'awaiting-approval' || p.state === 'sending');
@@ -278,15 +437,24 @@ export function renderInlineProposals(app, proposals) {
   const recent = all.filter((p) => !awaiting.includes(p) && !attention.includes(p)).slice(0, INLINE_RECENT);
   const shown = [...awaiting, ...attention, ...recent];
   const hidden = all.length - shown.length;
-  const sec = el('div', 'chanwin-outbox');
-  const head = el('div', 'chanwin-outbox-head');
-  head.appendChild(el('span', '', awaiting.length ? `${t('Awaiting your approval')} · ${awaiting.length}` : t('Proposals for this conversation')));
-  const link = el('a', 'chan-prop-link', hidden > 0 ? t('{n} more in the Outbox', { n: hidden }) : t('Open the Outbox'));
-  link.href = '#';
-  link.onclick = (ev) => { ev.preventDefault(); app.openChannelOutbox(); };
-  head.appendChild(link);
-  sec.appendChild(head);
-  for (const p of shown) sec.appendChild(renderProposalCard(app, p, { compact: true }));
+  // KEYED (2026-09-27): the section a previous render drew is patched — its
+  // head re-worded, each card kept unless its record changed
+  const sec = prev && prev.classList && prev.classList.contains('chanwin-outbox') ? prev : el('div', 'chanwin-outbox');
+  let head = sec.querySelector(':scope > .chanwin-outbox-head');
+  if (!head) {
+    head = el('div', 'chanwin-outbox-head');
+    head.appendChild(el('span', 'chanwin-outbox-title'));
+    const link = el('a', 'chan-prop-link');
+    link.href = '#';
+    link.onclick = (ev) => { ev.preventDefault(); app.openChannelOutbox(); };
+    head.appendChild(link);
+  }
+  const title = awaiting.length ? `${t('Awaiting your approval')} · ${awaiting.length}` : t('Proposals for this conversation');
+  const linkText = hidden > 0 ? t('{n} more in the Outbox', { n: hidden }) : t('Open the Outbox');
+  if (head.firstElementChild.textContent !== title) head.firstElementChild.textContent = title;
+  if (head.lastElementChild.textContent !== linkText) head.lastElementChild.textContent = linkText;
+  const byId = new Map([...sec.querySelectorAll(':scope > .chan-prop')].map((c) => [c.dataset.proposal, c]));
+  placeNodes(sec, [head, ...shown.map((p) => keyedCard(app, p, byId.get(p.id) || null, { compact: true }))]);
   return sec;
 }
 
@@ -313,32 +481,45 @@ export function openChannelOutbox(app, opts = {}) {
   let view = null;
   let last = null;
 
+  // KEYED (2026-09-27): a broadcast re-renders only the cards whose record
+  // changed; a card the user is editing is left alone; section heads are
+  // re-worded in place
   function draw(ob) {
     last = ob;
-    list.textContent = '';
     const ps = ((ob && ob.proposals) || []).slice().sort((a, b) => (b.at || 0) - (a.at || 0));
     const awaiting = ps.filter((p) => p.state === 'awaiting-approval');
     const v = view || (awaiting.length ? 'awaiting' : 'all');
     segAwait.classList.toggle('chan-seg-on', v === 'awaiting');
     segAll.classList.toggle('chan-seg-on', v === 'all');
     summary.textContent = ps.length ? t('{a} awaiting your approval · {n} proposals', { a: awaiting.length, n: ps.length }) : t('No proposals yet');
-    if (!ps.length) { list.appendChild(el('div', 'empty-hint', t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.'))); return; }
-    if (v === 'awaiting') {
-      if (!awaiting.length) list.appendChild(el('div', 'empty-hint', t('Nothing is waiting for your approval.')));
-      for (const p of awaiting) list.appendChild(renderProposalCard(app, p));
-      return;
+    const byId = new Map([...list.querySelectorAll(':scope > .chan-prop')].map((c) => [c.dataset.proposal, c]));
+    const heads = new Map([...list.querySelectorAll(':scope > .chan-outbox-sec')].map((h) => [h.dataset.state, h]));
+    const hint = (text) => { const h = el('div', 'empty-hint', text); return h; };
+    const nodes = [];
+    if (!ps.length) nodes.push(hint(t('When an agent proposes a reply with vibespace-channels, it waits here for you to approve, edit or reject it.')));
+    else if (v === 'awaiting') {
+      if (!awaiting.length) nodes.push(hint(t('Nothing is waiting for your approval.')));
+      for (const p of awaiting) nodes.push(keyedCard(app, p, byId.get(p.id) || null));
+    } else {
+      const known = new Set(STATE_ORDER);
+      const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
+      for (const st of [...new Set(groups)]) {
+        const mine = ps.filter((p) => p.state === st);
+        if (!mine.length) continue;
+        let h = heads.get(st);
+        if (!h) {
+          h = el('div', 'chan-outbox-sec');
+          h.dataset.state = st;
+          h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
+          h.appendChild(el('span', ''));
+        }
+        const words = `${stateLabel(st)} · ${mine.length}`;
+        if (h.lastElementChild.textContent !== words) h.lastElementChild.textContent = words;
+        nodes.push(h);
+        for (const p of mine) nodes.push(keyedCard(app, p, byId.get(p.id) || null));
+      }
     }
-    const known = new Set(STATE_ORDER);
-    const groups = [...STATE_ORDER, ...ps.map((p) => p.state).filter((s) => !known.has(s))];
-    for (const st of [...new Set(groups)]) {
-      const mine = ps.filter((p) => p.state === st);
-      if (!mine.length) continue;
-      const h = el('div', 'chan-outbox-sec');
-      h.appendChild(el('span', `chan-dot chan-dot-${STATE_TONE[st] || 'idle'}`));
-      h.appendChild(el('span', '', `${stateLabel(st)} · ${mine.length}`));
-      list.appendChild(h);
-      for (const p of mine) list.appendChild(renderProposalCard(app, p));
-    }
+    placeNodes(list, nodes);
   }
   segAwait.onclick = () => { view = 'awaiting'; draw(last); };
   segAll.onclick = () => { view = 'all'; draw(last); };

@@ -76,6 +76,7 @@
  * `vibespace-window`, and nothing queued there acts on a page.
  */
 const T = require('../browser-takeover.js');
+const { addressableId } = require('../claude-lock-capture.js');   // verify r6 (lane channel-withdraw): the ONE own-id predicate
 const VERBS = require('../browser-verbs.js'); // the CLI's own verb table: a pending `vibespace-browser status` is never stale, `click` is
 
 const FROM_NAME = 'VibeSpace browser';
@@ -98,7 +99,9 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   }
   const labelOf = (profileId) => { if (!profileId || !keeper) return null; try { return keeper.profile(profileId)?.label || profileId; } catch { return profileId; } };
   const isWindow = (ev) => !!ev && ev.target === 'window';
-  const conversationIdOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
+  // verify r6 (lane channel-withdraw): the session's OWN conversation id — a pending fork carries its parent's, and a
+  // handback delivered by that id would open a billed turn on the PARENT (the notice rides the fork's next message instead)
+  const conversationIdOf = (s) => addressableId(s);
 
   function queueNotice(sess, n) {
     if (!notice || !sess) return false;
@@ -160,7 +163,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     // A refusal loses nothing: the ladder's own stash carries the words to the
     // next injection, and the zero-spend notice rides the next message too.
     out.why = (r && r.reason) || 'delivery refused';
-    try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); out.stashed = true; } } catch (e) { log.warn?.(`[browser] handback stash failed — ${e && e.message}`); }
+    try { if (typeof deliver.stashFor === 'function') { const st = deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); out.stashed = true; if (st && st.stored === false) { out.durable = false; out.durableWhy = st.why; log.warn?.(`[browser] handback for ${cid} — ${st.why}`); } } } catch (e) { log.warn?.(`[browser] handback stash failed — ${e && e.message}`); }
     // ONE carrier (the owner's ruling, 2026-09-27): the stash rides the same next prompt the notice would — the notice only when the stash could not take the words
     if (!out.stashed) out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
     log.log?.(`[browser] handback (${cause}) for ${sess.id}: NOT delivered (${out.why})${out.stashed ? ' — stashed for the next injection' : ''}${out.noticed ? '; the notice rides the next message' : ''}`);

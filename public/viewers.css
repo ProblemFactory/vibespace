@@ -476,6 +476,12 @@
 .docx-toolbar .docx-zoom { min-width: 44px; }
 .docx-toolbar .docx-spacer { flex: 1; }
 .docx-toolbar .docx-pages { font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* §7.9 "Open in LibreOffice" (docs/design-desktop-apps.zh.md): the icon + its words; a narrow bar keeps the icon alone
+   (still named by its title + aria-label) so Fit width / 100% / zoom / the page count never fall off the bar */
+.docx-toolbar { container-type: inline-size; }
+.docx-toolbar .file-tool-btn.media-btn.docx-tool-office { gap: 5px; padding: 3px 8px; white-space: nowrap; flex: none; }
+.docx-toolbar .docx-tool-office svg { flex: none; }
+@container (max-width: 520px) { .docx-toolbar .docx-tool-label { display: none; } }
 .docx-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-gutter: stable; position: relative; background: var(--bg-workspace); padding: 16px 24px; }
 .docx-sizer { position: relative; margin: 0 auto; overflow: hidden; }
 .docx-host { position: absolute; top: 0; left: 0; width: max-content; transform-origin: 0 0; cursor: text; }

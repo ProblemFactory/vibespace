@@ -17,6 +17,9 @@
 //   ⑤ Rename; Delete… with two pins ⇒ the warning's count, every pin cleared, the browser stopped, the directory set aside
 //   ⑥ the migration over a PRE-RULING registry fixture (a session-owned "bank"): refused before (the CONTROL), then
 //      another conversation opens it — one real Chrome
+//   ⑦ B-f7ab the LATE KEY: a session created WITHOUT a key (the pre-feature spawn: key, pairs, config stripped after
+//      create) runs `vibespace-browser open <local url>` from a shell with no browser pairs ⇒ it succeeds (the first
+//      command minted the key, said once), the binding names that conversation, the live view + the fact name the browser
 // SKIPs with evidence without the real binary (a VibeSpace shim first on PATH is skipped, like the runtime does) or a
 // chrome. ~60-120 s. The suite reaps only processes that name ITS scratch root.
 import fs from 'node:fs';
@@ -232,6 +235,49 @@ else await (async () => {
     ok(res && res.status === 'ran' && res.report.migrated.length === 1 && !e2 && a2 && k2.profile('bp-0000d0b1').createdBy === KA && chromesOn(bankDir) === 1, '⑥ the migration makes the pre-ruling "bank" usable by every conversation (createdBy = its old owner): conversation 2 opens it — ONE real Chrome on its directory', e2 ? e2.message : res && res.report);
     await k2.stop('bp-0000d0b1').catch(() => { });
     k2.shutdown();
+
+    // ── ⑦ B-f7ab THE LATE KEY on the real binary: a session created WITHOUT a key (the pre-feature spawn, simulated by
+    //    stripping its key, its pairs, its generated config and its record's key after create) runs the shipped CLI from
+    //    a shell that carries NO browser pairs — its first command gets it a key (the note says so), browses, and the
+    //    live view + the fact name the browser; the binding names THAT conversation; a second command mints nothing ──
+    {
+      const BK = require('../src/server/browser-key.js');
+      const BB = require('../src/server/browser-bindings.js');
+      const BF = require('../src/browser-fact.js');
+      const K4 = 'bk-0000d004', CONV4 = 'c0f7ab00-late-4000-8000-00000000d004';
+      const s4 = mkSession(K4, 'Late chat', 4);
+      s4.claudeSessionId = CONV4; s4.sockName = 'cw-late'; s4.cwd = CWD;
+      const metas = new Map([['cw-late', { webuiSessionId: 'sess-4', name: 'Late chat', cwd: CWD, claudeSessionId: CONV4 }]]);
+      delete s4._browserKey; delete s4._browserVariant; delete s4._browserEnv; // what a session spawned before the feature carries
+      fs.rmSync(be.configPathFor(K4), { force: true });
+      active.set('sess-4', s4);
+      const store = BB.create({ dataDir: DATA, log: quiet });
+      const persist = (session, patch) => { const meta = { ...(metas.get(session.sockName) || {}), ...patch }; metas.set(session.sockName, meta); if (meta.browserKey) { const sid = store.bindableIdOf(meta); if (sid) store.record(sid, meta.browserKey); } };
+      const eng = BK.create({ browserEnv: () => be, keeper: () => k, activeSessions: active, readMeta: (x) => metas.get(x.sockName) || null, persistMeta: persist, log: quiet });
+      R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [], ensureBrowserKey: (x, o) => eng.ensureBrowserKey(x, o) });
+      ok(!s4._browserKey && !fs.existsSync(be.configPathFor(K4)) && BF.browserFactWords(eng.keylessFactOf(s4)).line === 'no browser yet', '⑦ setup: a live session with no key, no pairs, no config — its fact says "no browser yet"');
+      // the shell of a pre-feature session: no AGENT_BROWSER_* pair at all (never the spawn pairs `cli()` would add)
+      const bare = (args) => new Promise((resolve) => execFile(process.execPath, ['--require', pw, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: { ...kenv, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: s4.agentToken, VIBESPACE_SESSION_CWD: CWD }, cwd: CWD, encoding: 'utf8', timeout: 90000 }, (err, so, se) => resolve({ ok: !err, code: err ? err.code : 0, out: String(so || ''), err: String(se || '') })));
+      const o1 = await bare(['open', PAGE('LATE')]);
+      const late = s4._browserKey;
+      const t1 = await bare(['get', 'title']);
+      ok(o1.ok && B.isBrowserKey(late) && late !== K4 && /\[browser_key_minted\]/.test(o1.err) && /nothing needs restarting/.test(o1.err) && t1.ok && /LATE/.test(titleOf(t1)) && !/\[browser_key_minted\]/.test(t1.err),
+        `⑦ \`vibespace-browser open <local url>\` from the pre-feature shell SUCCEEDS: the first command minted ${late} (said once: [browser_key_minted]), the page is "${titleOf(t1)}"; the second command minted nothing`, { o1, t1 });
+      ok(BB.create({ dataDir: DATA }).lookup(CONV4) === late && metas.get('cw-late').browserKeyFor === CONV4 && s4._browserVariant === 'D' && fs.existsSync(be.configPathFor(late)) && k.ephemeralFor(late),
+        '⑦ bindings.json names THAT conversation → the key; rung D\'s config is written; the keeper manages the conversation\'s own browser');
+      const f4 = k.factFor(BF.sessionFactsOf(s4));
+      const w4 = BF.browserFactWords(f4);
+      ok(f4 && f4.key === late && f4.live && w4.line === 'no profile (temporary browser)' && f4.using.state === 'running', `⑦ the fact (the card / status-bar chip) names the browser: "Agent browser · ${w4.line}" — ${w4.state}, live`, JSON.stringify(f4));
+      const ws4 = new WebSocket(`ws://127.0.0.1:${PORT}${S.STREAM_PATH}?session=sess-4`);
+      const in4 = [];
+      ws4.on('message', (d) => { try { in4.push(JSON.parse(String(d))); } catch { in4.push({ type: '(frame)' }); } });
+      await new Promise((res, rej) => { ws4.once('open', res); ws4.once('error', rej); });
+      for (let i = 0; i < 80 && !in4.some((m) => m.type === 'hello'); i++) await sleep(100);
+      const h4 = in4.find((m) => m.type === 'hello');
+      try { ws4.close(); } catch { /* closed */ }
+      ok(h4 && h4.target && h4.target.kind === 'ephemeral' && h4.target.ns === B.sessionNameFor(late), '⑦ the live view of that session answers (the real bridge): its target is the conversation\'s own browser under the late key', h4);
+      R.setup({ keeper: k, activeSessions: active, browserEnv: () => be, adoptRoots: { homeDir: KH, dataDir: DATA }, notice: (sid, s, nn) => notices.push({ sid, n: nn }), persistPin: () => { }, tasksForSession: () => [] });
+    }
   } catch (e) { ok(false, 'the legs threw', e && (e.stack || e.message)); }
   finally {
     try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }

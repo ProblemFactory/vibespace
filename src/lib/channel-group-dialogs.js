@@ -19,7 +19,10 @@ import { fetchJson, showToast, createModalShell, showConfirmDialog, showInputDia
 import { t } from './i18n.js';
 import { icon, el, btn, noteLine } from './channel-chrome.js';
 import { groupErrorText, notifyModeText, wakeEchoText, groupTitle } from './channel-words.js';
-import { pickerSections, memberRows, NOTIFY_MODES, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+import { memberRows, NOTIFY_MODES, GROUP_ADAPTER_ID } from './channel-groups-view.js';
+// the ONE principal picker (search + list, keyed, recent picks) — never a checkbox wall of the whole roster
+import { principalPicker } from './principal-picker.js';
+import { folderTail } from './principal-picker-model.js';
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 /** POST a group verb; a refusal is TOASTED by its code (no silent failure)
@@ -40,31 +43,29 @@ async function loadRoster(app) {
 }
 
 /**
- * The member PICKER: one section per Task Group (its title, or "No task
- * group"), a checkbox per live session — never a whole-group checkbox (D1).
- * Returns `{node, selected(), onChange(fn)}`.
+ * The member PICKER (channel-polish, 2026-09-27 — the owner: "session 特别多的话 … dropdown 交互会很不友好"):
+ * the ONE principal picker, multi-select, over the LIVE sessions only (a Task Group is never added whole, D1):
+ * a search box, each session under its Task Group, a chip per pick; a session already in the group is
+ * listed and not pickable ("already a member"). Returns `{node, selected(), onChange(fn)}` — `selected()`
+ * = the session conversation ids, exactly the old checkboxes' values.
  */
-function memberPicker(sections) {
-  const node = el('div', 'chan-gpick');
-  const boxes = [];
-  let changed = () => {};
-  if (!sections.length) node.appendChild(el('div', 'empty-hint empty-hint-inline', t('No live agent session to add — start one, then come back.')));
-  for (const sec of sections) {
-    node.appendChild(el('div', 'chan-gpick-sec', sec.title === null ? t('No task group') : sec.title));
-    for (const s of sec.sessions) {
-      const lab = el('label', 'dialog-check-row chan-gpick-item');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox'; cb.value = s.cid; cb.disabled = !!s.disabled;
-      cb.onchange = () => changed();
-      const name = el('span', 'chan-gpick-name', s.name);
-      name.title = s.cid;
-      lab.append(cb, name);
-      if (s.disabled) { lab.classList.add('chan-gpick-member'); lab.appendChild(el('span', 'dialog-check-hint', t('already a member'))); }
-      node.appendChild(lab);
-      boxes.push(cb);
-    }
+function memberPicker(app, roster, { exclude = [] } = {}) {
+  const live = new Map(((app && app.sidebar && app.sidebar._webuiSessions) || []).map((s) => [s.backendSessionId || s.claudeSessionId, s]));
+  const titles = new Map((roster.tasks || []).map((g) => [g.id, g.title]));
+  const ex = new Set(exclude || []);
+  const seen = new Set();
+  const items = [];
+  for (const s of roster.sessions || []) {
+    if (!s || !s.cid || seen.has(s.cid)) continue;
+    seen.add(s.cid);
+    const w = live.get(s.cid) || {};
+    const gids = (Array.isArray(s.groups) ? s.groups : []).filter((g) => titles.has(g));
+    items.push({ key: s.cid, kind: 'agent', id: s.cid, name: s.name || String(s.cid).slice(0, 8), folder: folderTail(w.cwd), backend: w.backend || 'claude', live: true, groupIds: gids, groupNames: gids.map((g) => titles.get(g)), disabled: ex.has(s.cid), hint: ex.has(s.cid) ? t('already a member') : '' });
   }
-  return { node, selected: () => boxes.filter((b) => b.checked && !b.disabled).map((b) => b.value), onChange: (fn) => { changed = fn; } };
+  let changed = () => {};
+  const p = principalPicker({ items, multi: true, placeholder: t('Search live agent sessions…'), label: t('Members'), emptyText: t('No live agent session to add — start one, then come back.'), onChange: () => changed() });
+  p.el.classList.add('chan-gpick');
+  return { node: p.el, selected: () => p.selected(), onChange: (fn) => { changed = fn; } };
 }
 
 /**
@@ -78,7 +79,6 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   const roster = await loadRoster(app);
   if (!roster) return;
   const existing = invite ? (group.members || []).map((m) => m.member) : [];
-  const sections = pickerSections(roster.sessions, roster.tasks, { exclude: existing });
   const shell = createModalShell({ id: 'chan-group-new-dialog', title: invite ? t('Invite to {name}', { name: group.name }) : t('New group'), dialogClass: 'chan-dialog chan-group-new', escapeToClose: true });
   const { body, close } = shell;
   let nameInput = null;
@@ -91,7 +91,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   }
   body.appendChild(el('div', 'chan-opt-label', invite ? t('Agents to invite') : t('Members')));
   body.appendChild(el('div', 'chan-flow-note', t('Live agent sessions, by Task Group. Pick each one — a Task Group is never added whole.')));
-  const picker = memberPicker(sections);
+  const picker = memberPicker(app, roster, { exclude: existing });
   body.appendChild(picker.node);
   body.appendChild(el('div', 'chan-opt-label', t('Opening context (optional)')));
   const ctx = document.createElement('textarea');

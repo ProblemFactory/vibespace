@@ -9,9 +9,10 @@ const M = require('../job-model.js');
 const fs = require('fs');
 const path = require('path');
 
-function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null }) {
+function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {} }) {
   const jm = new JobManager({
     dataDir,
+    onStash: (cid) => onStash(cid), // every stash write / drain — the conversation's `stash` session fact follows (the strip above its composer)
     // every jobs-updated carries the HELD digest (5b ①): one dirty signal, one
     // computation — the rail badge, the panel summary and every chat window's
     // status-bar chip read it off the same frame (`jm` is bound lazily: the

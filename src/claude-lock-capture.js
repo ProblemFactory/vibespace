@@ -292,6 +292,34 @@ function restoredForkPending(meta) {
   return !(ff.length > 0 && !ff.includes(cur));
 }
 
+/** THE SAME QUESTION OF A LIVE SESSION (lane channel-withdraw verify r3,
+ *  2026-09-27): does this session still carry its fork SOURCE's conversation
+ *  id? `_forkRequested` alone is not the fact — it stays `true` for ever on a
+ *  codex fork (nothing clears it; the wrapper_meta adoption pushes the old id
+ *  into `forkedFrom`) — so the rule is `restoredForkPending`'s, read off the
+ *  live fields. While it answers true the session's `claudeSessionId` is its
+ *  PARENT's: a verb that records that id as an OWNER (a channel draft, a
+ *  withdraw of the parent's drafts) is refused by name until the harness
+ *  announces the fork's own id. */
+function liveForkPending(session) {
+  if (!session || !session._forkRequested) return false;
+  return restoredForkPending({ forkRequested: true, claudeSessionId: session.claudeSessionId, backendSessionId: session.backendSessionId, forkSourceId: session._forkSourceId, forkedFrom: session.forkedFrom });
+}
+
+/** THE CONVERSATION ID A LIVE SESSION MAY BE ADDRESSED BY (lane channel-withdraw
+ *  verify r5, 2026-09-27): its own, or none — a BORROWED id (a pending fork
+ *  still carrying its parent's) is nobody's address. ONE predicate for every
+ *  roster and caller resolver (server.js `liveSessions`, agent-routes'
+ *  `_msgEndpoints` / `ownConversationIdOf`): listed under its parent's id a
+ *  pending fork let a third session mint the pair group under the PARENT and
+ *  authorize a billed turn on it, and made the parent `ambiguous` while both
+ *  lived. */
+function addressableId(session) {
+  if (!session) return null;
+  const cid = session.claudeSessionId || session.backendSessionId || null;
+  return cid && !liveForkPending(session) ? cid : null;
+}
+
 /** May this restored meta take part in the boot DEDUP (boot-restore: one
  *  socket per conversation, the losers SIGTERMed + unlinked)? Only a record
  *  that holds its id AS ITS OWN (round 3, reproduced on a scratch server): a
@@ -306,5 +334,5 @@ function ownsItsId(meta) {
 
 module.exports = {
   lockCaptureWanted, claimedLockIds, pickClaudeLock, wrapperDepthOf, readClaudeLocks, wrapperPidOf,
-  lockWrittenByItsPid, captureLockId, captureDelay, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId,
+  lockWrittenByItsPid, captureLockId, captureDelay, armLockCapture, adoptCapturedId, restoredForkPending, liveForkPending, addressableId, ownsItsId,
 };

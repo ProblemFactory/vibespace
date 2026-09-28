@@ -145,14 +145,18 @@ function validateRule(rule) {
   const out = { kind: r.kind };
   switch (r.kind) {
     case 'mention': {
-      const v = str(r.value).trim().replace(/^@/, '');
+      // EVERY leading @ (verify round 3): one strip stored `@@x` as `@x`, which matched nothing, and the dialog's
+      // unchanged save then wrote `x` — a widening nobody asked for. A mention name never starts with @.
+      const v = str(r.value).trim().replace(/^@+/, '').slice(0, 200).trim();
       if (!v) return refuse('value-required', 'mention: value (a name or id, with or without @) is required', { kind: r.kind });
-      out.value = v.slice(0, 200); break;
+      out.value = v; break;
     }
     case 'keyword': case 'not-contains': case 'from-address': case 'subject': {
-      const v = str(r.value).trim();
+      // slice THEN trim (verify round 3): trim-then-slice kept a trailing space at the bound, which the dialog's
+      // unchanged save then trimmed — the exact-match value changed under the person
+      const v = str(r.value).trim().slice(0, 500).trim();
       if (!v) return refuse('value-required', `${r.kind}: value is required`, { kind: r.kind });
-      out.value = v.slice(0, 500); break;
+      out.value = v; break;
     }
     case 'sender-in-group': {
       const members = (Array.isArray(r.members) ? r.members : str(r.value).split(',')).map((x) => str(x).trim()).filter(Boolean);

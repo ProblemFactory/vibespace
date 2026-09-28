@@ -129,6 +129,14 @@ const T = require('../browser-takeover');
 const DESK = require('../window-desktop');
 const M = require('../desktop-apps'); // takeover r2: browserLaunchVerdict (which launches are web browsers)
 const R = require('../window-reach'); // lane E: reach + the share mode + the pixel road (PURE)
+// verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which key does this live session answer to" —
+// a pending fork carries its PARENT's conversation id, so R.sessionKeyOf spelled the PARENT's key for it: a window
+// shared with the fork was granted to the parent (it answered to `claude:<parent>`), and the fork lost the grant the
+// moment it adopted its own id. A borrowed id is never a key: the fork's key is its `webui:<id>` placeholder (the same
+// rule as the For-you item and the status record), which it answers to for life.
+const { addressableId } = require('../claude-lock-capture.js');
+const keyOf = (s, id) => (addressableId(s) ? R.sessionKeyOf(s, id) : `webui:${id}`);
+const keysOf = (s, id) => (addressableId(s) ? R.callerKeys(s, id) : [`webui:${id}`]);
 
 const AUDIT_FILE = 'window-audit.jsonl';
 const SHOT_DIR = 'window-shots';
@@ -282,7 +290,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const s = (facts && sessionsMap().get(facts.sessionId)) || (facts && facts.session) || {};
     let groupIds = [], unreadable = false;
     if (typeof groupsOf === 'function') { try { groupIds = (groupsOf(s, facts.sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); } catch (e) { unreadable = true; log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }
-    return { sessionKeys: R.callerKeys(s, facts.sessionId), groupIds, ...(unreadable ? { unreadable: true } : {}) };
+    return { sessionKeys: keysOf(s, facts.sessionId), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key
   }
   const reachOfFacts = (rec, facts) => R.reachFor(reachRecord(rec.id), ctxOf(facts));
   /** THE REACH GATE (D1): a VibeSpace-started window this caller does not reach is refused `not_exposed` by name; a
@@ -603,7 +611,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const rec = await keeper.launch({ appId, label: b.label || b.title || undefined });
     // lane E (D1's one exception): a window an agent opened itself is exposed to that agent's own session
     const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
-    const g = R.openerGrant(reachRecord(rec.id), { key: R.sessionKeyOf(s0, facts.sessionId), name: facts.name || '', at: now() });
+    const g = R.openerGrant(reachRecord(rec.id), { key: keyOf(s0, facts.sessionId), name: facts.name || '', at: now() });   // verify r6: the opener's OWN key
     if (g.ok) { reach.set(rec.id, g.record); commitReach(); }
     const l = newLease(rec, facts);
     l.modeSeen = reachRecord(rec.id).mode;
@@ -1152,7 +1160,20 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (p && typeof p === 'object' && p.kind === 'session') {
       const id = String(p.id == null ? '' : p.id);
       const s = sessionsMap().get(id);
-      if (s) return { kind: 'session', id: R.sessionKeyOf(s, id), name: String(p.name || s.name || s.webuiName || '') };
+      if (s) return { kind: 'session', id: keyOf(s, id), name: String(p.name || s.name || s.webuiName || '') };   // verify r6: a pending fork is shared under its placeholder, never its parent's key
+      // verify r6: a KEY the client spelled (an older picker sends the row's `<backend>:<cid>`) that NO addressable
+      // session answers to, while a PENDING FORK carries that id — the user picked the fork's row (its parent is not
+      // live, or that row would have been the parent's): it is the fork's placeholder key, never the parent's
+      if (id.includes(':') && !id.startsWith('webui:')) {
+        let addressable = false; const pending = [];
+        for (const [wid, t] of sessionsMap()) {
+          if (!t || t.backend === 'shell' || R.sessionKeyOf(t, wid) !== id) continue;
+          if (addressableId(t)) { addressable = true; break; }
+          pending.push([wid, t]);
+        }
+        if (!addressable && pending.length === 1) return { kind: 'session', id: `webui:${pending[0][0]}`, name: String(p.name || pending[0][1].name || pending[0][1].webuiName || '') };
+        if (!addressable && pending.length > 1) throw namedError('bad_principal', `${pending.length} forks still carry that conversation id and none has announced its own yet — pick the session by its live id, or ask again in a moment`);
+      }
     }
     const n = R.normPrincipal(p);
     if (!n) throw namedError('bad_principal', 'a principal is {kind: session|group, id} — a live session by its id or its conversation key, a Task Group by its id');
@@ -1167,7 +1188,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     for (const [id, s] of sessionsMap()) {
       if (!s || s.backend === 'shell') continue;
       let hit = false;
-      if (row.principal.kind === 'session') hit = R.callerKeys(s, id).includes(row.principal.id);
+      if (row.principal.kind === 'session') hit = keysOf(s, id).includes(row.principal.id);
       else {
         const c = ctxOf({ sessionId: id, session: s });
         if (c.unreadable) { unreadable++; continue; }

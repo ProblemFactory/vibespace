@@ -93,8 +93,13 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             // same honesty rule as the codex rpc-queue lane: a promised message never silently dies
             const cid = session.backendSessionId;
             console.log(`[deliver] acp wrapper delivery failed (${msg.reason || 'unknown'}) — re-stashing for ${cid}`);
-            try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
-            catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+            // the codex twin's rule (channel-jump verify r2): a frame naming a remembered hand-over restores its originals
+            let restored = 0;
+            try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
+            if (!restored) {
+              try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
+              catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+            }
           }
           if (newLabel !== null && session._streamingLabel !== newLabel) {
             session._streamingLabel = newLabel;

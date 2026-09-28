@@ -78,9 +78,12 @@
  * the census reads code.
  */
 const { makeRecord, makeConversation } = require('../channel-record.js');
-const { ChannelError, retryAfterSeconds } = require('./index.js');
+const { ChannelError, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { namelessSentence, looksLikeEmail } = require('../channel-identity.js');   // verify r6: a consent must name its account; r7: an address by the ONE rule
 const { createGmailLive, PUBSUB_SCOPE } = require('./live/gmail.js');
+// §25 (2026-09-27): THE MAIL RUNG — the quoted history folded with its
+// attribution, ticket banners and signatures set apart; `text` stays whole.
+const Blocks = require('../channel-blocks.js');
 
 const KIND = 'gmail';
 const LABEL = 'Gmail';
@@ -109,6 +112,15 @@ function sendVerbsOf(scopes) {
   const s = new Set(Array.isArray(scopes) ? scopes.map(String) : []);
   const drafts = s.has(SCOPE_COMPOSE) || s.has(SCOPE_MODIFY) || s.has(SCOPE_MAIL);
   return { reply: drafts, compose: drafts || s.has(SCOPE_SEND), drafts };
+}
+/** A REPLY's send verdict from the HELD scopes alone (inc-muk9jj0j-rel3,
+ *  2026-09-27): PURE — no request — so the engine re-judges every thread of
+ *  the account the moment its credential changes (a re-authorization), never
+ *  only the threads the next pass happens to visit. `convCaps` below uses the
+ *  SAME function (one rule, two callers). */
+function sendCapsOf(scopes) {
+  const reply = sendVerbsOf(scopes).reply;
+  return { sendAs: reply ? ['user'] : [], why: reply ? null : 'send-scope-not-granted' };
 }
 /** The header a composed message carries so a lost answer can be matched to
  *  its PROPOSAL without trusting Gmail to keep our Message-ID (R4 verify). */
@@ -197,6 +209,11 @@ const caps = Object.freeze({
   threading: 'reply-to',
   editSent: false,
   readReceipts: false,
+  // §25 (2026-09-27): every record carries its render tree (the mail rung),
+  // a stored one is served through `blocksOf`; a thread's title is its
+  // SUBJECT — the window and the row show it cleaned (`cleanSubject`)
+  render: 'blocks',
+  titleForm: 'subject',
   // 2026-09-26 (the aggregated IM): attachments FETCHED on demand
   // (`messages.get` → the part → `attachments.get`), no "older" paging (a
   // thread's first walk is the whole thread), and every request METERED in
@@ -330,6 +347,7 @@ function toRecord(adapterId, convId, m, { selfEmail = null } = {}) {
   const from = parseAddress(header(headers, 'From'));
   const parts = walkParts(m.payload);
   const text = (parts.plain && parts.plain.trim()) ? parts.plain.trim() : (parts.html ? stripHtml(parts.html) : String(m.snippet || ''));
+  const subject = header(headers, 'Subject') || null;
   return makeRecord({
     adapterId, convId,
     vendorId: String(m.id || ''),
@@ -340,8 +358,15 @@ function toRecord(adapterId, convId, m, { selfEmail = null } = {}) {
     attachments: parts.attachments,
     replyTo: null,          // In-Reply-To names a Message-ID header, not a vendor id; the thread is the link
     threadKey: String(m.threadId || convId),
-    raw: { subject: header(headers, 'Subject') || null, labelIds: Array.isArray(m.labelIds) ? m.labelIds.slice(0, 20) : [], messageId: header(headers, 'Message-ID') || null, to: header(headers, 'To') || null },
+    raw: { subject, labelIds: Array.isArray(m.labelIds) ? m.labelIds.slice(0, 20) : [], messageId: header(headers, 'Message-ID') || null, to: header(headers, 'To') || null },
+    blocks: Blocks.emailToBlocks(text, { subject, attachments: parts.attachments }),
   });
+}
+/** §25: the render tree of a record stored BEFORE this layer (read time —
+ *  the store is never rewritten): the same mail rung over its `text`. */
+function blocksOf(record) {
+  const r = record || {};
+  return Blocks.emailToBlocks(String(r.text || ''), { subject: (r.raw && r.raw.subject) || null, attachments: r.attachments });
 }
 
 // ── the outbound message (P4): RFC 5322 text, threading headers ─────────
@@ -403,6 +428,12 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   const msg = (err && (err.message || err.status)) || (body && (body.error_description || body.error)) || `HTTP ${status}`;
   const reason = err && Array.isArray(err.errors) && err.errors[0] && err.errors[0].reason;
   const domain = err && Array.isArray(err.errors) && err.errors[0] && err.errors[0].domain;
+  // client-from-mount verify r5: `invalid_client` (Google: HTTP 401 "Unauthorized") is the CLIENT refused — the id is
+  // unknown or the secret is wrong — not the token; measured on a channel account whose borrowed storage-mount client
+  // had its secret re-entered on the storage side: the words said "Unauthorized (401)" / "the vendor refused to refresh
+  // the login", the owner re-authorized under the same held copy and hit the same 401. Named here so every carrier
+  // of the sentence (lastPass, lastAuthError, the For-you item) says what to do: re-enter the secret or pick the mount again
+  if (body && body.error === 'invalid_client') return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client: the client id is unknown or its secret is wrong; if the client came from a storage mount whose secret was re-entered, pick that mount again in Re-authorize, else re-enter the client secret) (${status})`, { retryable: false, detail: { status, reason: 'invalid_client', clientRefused: true } });
   if (status === 401 || body && body.error === 'invalid_grant') return new ChannelError('auth-expired', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason: reason || (body && body.error) || null } });
   if (status === 429 || RATE_REASONS.includes(reason) || (status === 403 && (domain === 'usageLimits' || RATE_WORDS.test(String(msg))))) return new ChannelError('rate-limited', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, reason: reason || null, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403) return new ChannelError('forbidden', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
@@ -411,6 +442,9 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   return new ChannelError('vendor-error', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
 }
 async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = null, json = null, what = 'gmail', signal = null } = {}) {
+  // client-from-mount verify r4: what this request CARRIES in its secret fields (the client secret, a refresh
+  // token, the Bearer) never comes back in a refusal's words — scrubbed by exact value before the error is built
+  const sent = sentSecrets({ fields: form || json, headers });
   let r;
   try {
     r = await fetchFn(url, {
@@ -419,11 +453,11 @@ async function callJson(fetchFn, url, { method = 'GET', headers = {}, form = nul
       signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
-    throw new ChannelError('transport', `${what}: ${(e && e.message) || e}`, { retryable: true });
+    throw new ChannelError('transport', withoutSent(`${what}: ${(e && e.message) || e}`, sent), { retryable: true });
   }
   let parsed = null;
   try { parsed = await r.json(); } catch { parsed = null; }
-  if (!r.ok) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));   // lane R5: the vendor's own wait, when it says one
+  if (!r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));   // lane R5: the vendor's own wait, when it says one
   return parsed || {};
 }
 
@@ -808,8 +842,7 @@ function create(record = {}, deps = {}) {
     async convCaps(convId) {
       try {
         await metaFor(convId);
-        const send = hasReplyScope();
-        return { read: 'yes', sendAs: send ? ['user'] : [], why: send ? null : 'send-scope-not-granted', at: now() };
+        return { read: 'yes', ...sendCapsOf(((readToken().token || {}).scopes) || []), at: now() };
       } catch (e) {
         if (e instanceof ChannelError && (e.code === 'not-found' || e.code === 'forbidden')) return { read: 'no', sendAs: [], why: 'not-a-member', at: now() };
         throw e;
@@ -1073,9 +1106,10 @@ async function integrationTest({ resolved } = {}) {
   return { ok: true, detail: { source: r.source, clusterKey: r.clusterKey || null, clientId: id, authHost: new URL(url).host, scope: SCOPE } };
 }
 
-const adapter = { kind: KIND, caps, create };
+const adapter = { kind: KIND, caps, create, blocksOf, sendCapsOf };
 module.exports = {
   kind: KIND, caps, create, adapter, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader,
+  blocksOf, sendCapsOf,
 };

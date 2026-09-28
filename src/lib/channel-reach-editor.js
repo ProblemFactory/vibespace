@@ -28,6 +28,8 @@ import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 // a3 i18n: route failures by CODE; the policy mode and a Task Group's title in words.
 import { routeErrorText, policyModeText, groupTitle } from './channel-words.js';
+// the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
+import { principalPicker, rosterFromApp } from './principal-picker.js';
 
 const JSON_HDR = { 'Content-Type': 'application/json' };
 async function api(pathname, body, method = 'PUT') {
@@ -73,8 +75,14 @@ export async function showReachDialog(app, conv0) {
   const full = await fetchJson(base);
   if (!full || full.error) { showToast(routeErrorText(full), { type: 'error' }); return; }
   const conv = full.conversation;
-  const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true });
+  // the picker's roster listener (and its open popover) end WITH the dialog (verify round 2)
+  let who = null;
+  const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); } });
   let current = conv;
+  // "Grant reach to…": ONE picker for the dialog's life (a repaint re-appends it — never re-created, a
+  // popover the person has open survives a broadcast); its rows are the live roster, re-read on its broadcasts
+  who = principalPicker({ items: () => rosterFromApp(app), app, compact: true, placeholder: t('Grant reach to…'), label: t('Grant reach to…') });
+  who.el.classList.add('chan-reach-who-pick');
 
   function draw() {
     body.textContent = '';
@@ -130,21 +138,20 @@ export async function showReachDialog(app, conv0) {
     }
     // add a grant
     const add = el('div', 'chan-reach-add');
-    const whoSel = el('select', 'chan-opt-input');
-    const ph = el('option', '', t('Grant reach to…')); ph.value = ''; whoSel.appendChild(ph);
     const lvSel = el('select', 'chan-opt-input');
     for (const o of [{ value: 'visible', label: t('visible') }, { value: 'requestable', label: t('may request') }]) { const op = el('option', '', o.label); op.value = o.value; lvSel.appendChild(op); }
     const go = btn(t('Grant'), null, 'mounts-btn-primary');
-    for (const p of roster) { const op = el('option', '', `${p.kind === 'group' ? t('group') : t('agent')}: ${p.name}`); op.value = `${p.kind}:${p.id}`; whoSel.appendChild(op); }
     go.onclick = async () => {
-      const p = roster.find((x) => `${x.kind}:${x.id}` === whoSel.value);
+      // the picker's key IS the old option value (`agent:<cid>` / `group:<id>`) — the wire is unchanged
+      const k = who.selected()[0];
+      const p = principals(app).find((x) => `${x.kind}:${x.id}` === k);
       if (!p) { showToast(t('Pick an agent or a group.'), { type: 'error' }); return; }
       go.disabled = true;
       const r = await api(`${base}/reach`, { principal: { kind: p.kind, id: p.id, name: p.name }, level: lvSel.value });
       go.disabled = false;
-      if (r) showToast(t('Reach granted'));
+      if (r) { showToast(t('Reach granted')); who.setSelected([]); }
     };
-    add.append(whoSel, lvSel, go);
+    add.append(who.el, lvSel, go);
     body.appendChild(add);
 
     // ── REQUESTS ──

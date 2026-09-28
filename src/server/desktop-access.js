@@ -55,6 +55,7 @@ function access() {
     machines: async () => [{ hostId: 'local', label: null, transport: 'local', link: 'online', connected: true, selectable: true, code: 'ready' }],
     installPlan: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installXpra: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
+    installPackage: async () => { const e = new Error('the desktop access layer is not wired on this instance'); e.code = 'host_unavailable'; throw e; },
     installBusy: () => null,
   };
 }
@@ -189,10 +190,14 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     }));
     return out.concat(rows);
   }
-  /** The install rung's facts + the PURE plan for one machine: the plan is SHOWN before anything runs. */
-  async function installPlan(hostId) {
+  /** The install rung's facts + the PURE plan for one machine: the plan is SHOWN before anything runs. `what` (§7.9) =
+   *  which install — absent / 'xpra' the display rung, a LibreOffice install by its catalog id (M.installPlanFor: a
+   *  closed set, anything else `bad-request` by name, before the machine is asked). */
+  async function installPlan(hostId, what = 'xpra') {
+    const w = what || 'xpra';
+    if (!M.INSTALL_WHATS.includes(w)) throw named('bad-request', `unknown install ${JSON.stringify(String(w).slice(0, 40))} — one of ${M.INSTALL_WHATS.join(', ')}`);
     const r = await call(hostId, 'facts', { install: true });
-    const plan = M.xpraInstallPlan(r.install);
+    const plan = M.installPlanFor(w, r.install);
     return { hostId: isLocal(hostId) ? 'local' : hostId, facts: r.install || null, plan };
   }
   const machineKey = (hostId) => (isLocal(hostId) ? 'local' : String(hostId));
@@ -281,7 +286,15 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
    *  a live one is RE-ATTACHED (`onReattach({pid, since})` first, then its log from the start), never a second apt; a
    *  second click on THIS hub while it follows / waits one out is `busy`. The slot of a run this hub stopped following
    *  (install_timeout / install_link_lost) is held until the machine's facts say the install is gone (or holdMs). */
-  async function installXpra(hostId, { onData = () => { }, onReattach = () => { } } = {}) {
+  async function installXpra(hostId, opts = {}) { return installPackage(hostId, { ...opts, what: 'xpra' }); }
+  /** §7.9 — THE INSTALL RUNG, GENERALISED: the xpra install's machinery verbatim (facts → plan → refusals by name → the
+   *  script as root, DETACHED under the machine's ONE install slot — its pidfile + lock, `xpra-install.*` by their
+   *  historical names: renaming them would orphan an install running across an upgrade — its log followed, a live one
+   *  RE-ATTACHED, `busy` / held slots as before) for any plan M.installPlanFor names: `what` = 'xpra' | a LibreOffice
+   *  install. The machine has ONE slot for every package (dpkg runs one install at a time anyway): an install of
+   *  another package already running there is FOLLOWED like any live install (the dialog is told `reattached`), and
+   *  the caller re-checks what it wanted afterwards (the route: `still-absent` by name). */
+  async function installPackage(hostId, { what = 'xpra', onData = () => { }, onReattach = () => { } } = {}) {
     const key = machineKey(hostId);
     const cur = installs.get(key);
     if (cur) throw named('busy', `an install is already running on ${machineName(hostId)} (started ${new Date(cur.since).toISOString()}) — wait for it to finish, then check again`);
@@ -289,12 +302,12 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     installs.set(key, slot);
     let held = null;
     try {
-      const { plan, facts } = await installPlan(hostId);
+      const { plan, facts } = await installPlan(hostId, what);
       const running = facts && facts.installing && facts.installing.pid ? facts.installing : null;
       if (!running) {
         if (!plan.ok) { const e = named(plan.code, plan.error); e.plan = plan; throw e; }
         if (!plan.canRun) { const e = named('no_sudo', plan.error); e.plan = plan; throw e; }
-        log.log?.(`[desktop] installing xpra on ${hostId || 'this machine'} from ${plan.source} (${plan.packages.join(' ')}), detached`);
+        log.log?.(`[desktop] installing ${plan.label || 'xpra'} on ${hostId || 'this machine'} from ${plan.source} (${plan.packages.join(' ')}), detached`);
       } else {
         if (running.since) slot.since = running.since;
         log.log?.(`[desktop] an install is still running on ${hostId || 'this machine'} (pid ${running.pid}) — re-attached to its log`);
@@ -307,7 +320,7 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
       if (r.code === M.INSTALL_UNRECORDED_EXIT) { const e = named('install_unrecorded', `the install on ${hostId || 'this machine'} ended without recording its exit (it was stopped, or the machine restarted) — check again`); e.plan = plan; throw e; }
       if (r.code !== 0) { const e = named('install_failed', `the install exited ${r.code} on ${hostId || 'this machine'} — the log above says why`); e.plan = plan; throw e; }
       const after = await call(hostId, 'facts', { install: true });
-      return { ok: true, hostId: isLocal(hostId) ? 'local' : hostId, plan, before: facts, after: after.install || null, facts: after.facts || null, reattached: !!running };
+      return { ok: true, what, hostId: isLocal(hostId) ? 'local' : hostId, plan, before: facts, after: after.install || null, facts: after.facts || null, reattached: !!running };
     } finally {
       if (!held) installs.delete(key);
       else holdUntilGone(hostId, key, slot, held);
@@ -325,7 +338,15 @@ function create({ hosts = null, local = null, env = () => process.env, log = con
     return r.data;
   }
 
-  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installBusy, runArgv, readFile };
+  /** §7.9: is this machine reachable RIGHT NOW without starting a connect ladder (this machine, or a paired machine
+   *  whose agent handle is already connected)? The explorer's menu asks it so a right-click never bootstraps an ssh
+   *  machine's agent — the click on "Open with LibreOffice" (an explicit act) is what connects. */
+  function connectedNow(hostId) {
+    if (isLocal(hostId)) return true;
+    try { return !!(hosts && typeof hosts.connectedDevice === 'function' && hosts.connectedDevice(hostId)); } catch { return false; }
+  }
+
+  const layer = { call, forwardPort, closeForward, forwards: listForwards, hostKnown, isLocal, shutdown, machines, installPlan, installXpra, installPackage, installBusy, runArgv, readFile, connectedNow };
   if (install) installed = layer;
   return layer;
 }

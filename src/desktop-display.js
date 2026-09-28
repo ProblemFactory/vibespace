@@ -109,6 +109,7 @@ const { spawn, execFile } = require('child_process');
 const cliIdentity = require('./cli-identity');
 const { BROWSER_BINS } = require('./desktop-apps'); // B-bfe6: the browser families' binary names — ONE list, the PURE model's
 const { INSTALL_FILES } = require('./desktop-apps'); // lane C verify r2 (F3/F4): the detached install's log / pidfile / exit file names — ONE spelling, the launcher's
+const OFFICE = require('./office-open'); // §7.9: the LibreOffice binaries + each module's library name — ONE table, the PURE model's
 
 const LOCAL_HOST_IDS = new Set([null, undefined, '', 'local']);
 function assertLocal(hostId, what) {
@@ -186,16 +187,54 @@ function browserConfinement(binPath) {
   return out;
 }
 
-/** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, browsers: { name: { path, confinement } }, at }`.
- *  The browser families' binaries (B-bfe6) are probed beside the rung binaries; `browsers` names the present ones. */
-async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now } = {}) {
+/** `{ hostId, bins: { name: path|null }, xpra: { version, raw } | null, browsers: { name: { path, confinement } }, office, at }`.
+ *  The browser families' binaries (B-bfe6) and LibreOffice's (§7.9) are probed beside the rung binaries; `browsers`
+ *  names the present browsers, `office` = officeFacts (which binary, which modules). `fresh` (§7.9): a NO about
+ *  LibreOffice is re-asked now — an install that just ended must be seen at once, not after BIN_RECHECK_MS. */
+async function hostFacts({ hostId = null, env = process.env, bins = PROBE_BINS, now = Date.now, fresh = false } = {}) {
   assertLocal(hostId, 'hostFacts');
+  if (fresh) { for (const e of OFFICE.OFFICE_EXECS) { const hit = _binMemo.get(e); if (hit && !hit.path) forgetBin(e); } _officeMemo.clear(); }
   const out = {};
-  for (const b of [...bins, ...BROWSER_BINS]) if (!(b in out)) out[b] = binOnPath(b, { env, now });
+  for (const b of [...bins, ...BROWSER_BINS, ...OFFICE.OFFICE_EXECS]) if (!(b in out)) out[b] = binOnPath(b, { env, now });
   const xpra = out.xpra ? { ...(await xpraVersion({ binPath: out.xpra, env })), www: xpraWwwDir({ binPath: out.xpra, env }) } : null;
   const browsers = {};
   for (const b of BROWSER_BINS) if (out[b]) browsers[b] = { path: out[b], confinement: browserConfinement(out[b]) };
-  return { hostId: 'local', bins: out, xpra, browsers, at: now() };
+  const office = await officeFacts({ bins: out, now });
+  return { hostId: 'local', bins: out, xpra, browsers, office, at: now() };
+}
+
+/**
+ * §7.9 — IS LIBREOFFICE HERE, AND WHICH MODULES? (a FACT; the PURE office-open.js `officeRowFor` decides what it
+ * means). The binary is the first of OFFICE_EXECS on PATH (`bins` — hostFacts' probe); its REAL path's directory is
+ * LibreOffice's program dir, and a module is installed when its library is there (MEASURED on this box, Ubuntu's
+ * LibreOffice 26.2.5.2: libreoffice-writer ⇒ libswlo.so; libsclo.so / libsdlo.so absent until Calc / Impress are
+ * installed — the binary alone starts without them). A snap (/usr/bin/snap, /snap/…) keeps its program dir to itself:
+ * `modules: null` (not knowable — judged present, the snap decides), `confinement: 'snap'`. Async stats only, never a
+ * spawn; a module's YES is remembered for the program dir's life, a NO re-asked after BIN_RECHECK_MS (an install must
+ * be seen without a restart; hostFacts' `fresh` clears it). Never throws.
+ *   → { exec: 'libreoffice'|'soffice'|null, path, program, confinement: 'snap'|null, modules: {writer, calc, impress}|null }
+ */
+const _officeMemo = new Map(); // `${program}|${lib}` → { at, yes }
+async function officeFacts({ bins = null, env = process.env, now = Date.now } = {}) {
+  const none = { exec: null, path: null, program: null, confinement: null, modules: null };
+  let exec = null, p = null;
+  for (const e of OFFICE.OFFICE_EXECS) { const hit = bins && bins[e] !== undefined ? bins[e] : binOnPath(e, { env, now }); if (hit) { exec = e; p = hit; break; } }
+  if (!p) return none;
+  let real = null;
+  try { real = await fs.promises.realpath(p); } catch { return none; } // vanished between the probe and now
+  if (real.startsWith('/snap/') || path.basename(real) === 'snap') return { exec, path: p, program: null, confinement: 'snap', modules: null };
+  const program = path.dirname(real);
+  const modules = {};
+  for (const k of OFFICE.MODULE_KEYS) {
+    const key = `${program}|${OFFICE.OFFICE_MODULES[k].lib}`;
+    const hit = _officeMemo.get(key);
+    if (hit && (hit.yes || now() - hit.at < BIN_RECHECK_MS)) { modules[k] = hit.yes; continue; }
+    let yes = false;
+    try { await fs.promises.access(path.join(program, OFFICE.OFFICE_MODULES[k].lib), fs.constants.R_OK); yes = true; } catch { yes = false; }
+    _officeMemo.set(key, { at: now(), yes });
+    modules[k] = yes;
+  }
+  return { exec, path: p, program, confinement: null, modules };
 }
 
 // ── env for a process on a private X display ─────────────────────────────────
@@ -1112,7 +1151,7 @@ async function installFacts({ env = process.env, now = Date.now, osRelease = '/e
 }
 
 module.exports = {
-  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, x11Env,
+  assertLocal, binOnPath, resetBinMemo, forgetBin, assertExecutable, PROBE_BINS, BROWSER_BINS, browserConfinement, hostFacts, officeFacts, x11Env,
   newCookie, writeXauthority, xauthEntry, freePort, rfbBanner, waitForRfb, httpProbe, waitForHttp, waitForListen, portAnswers, LISTEN_PROBES,
   listenerInode, pidHoldsInode, listenerHeldBy,
   spawnDetached, X_SERVER_ARGS, startXServer, startX11vnc, startWindowManager, startApp, applyXResources, waitForXftDpi, RECIPES,

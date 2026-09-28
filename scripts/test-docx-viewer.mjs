@@ -40,6 +40,19 @@
 //     the master render executes the altChunk script, restyles <body>, shows no
 //     running head on page 2, misplaces the tab stop under a transform, and
 //     drops @font-face inside a shadow root — each leg above could go red
+//   ⑫ "Open in LibreOffice" (§7.9 of docs/design-desktop-apps.zh.md — the office
+//     lane's door): the button is on the toolbar (an SVG + its words, named by
+//     title + aria-label, enabled); a trusted click reaches the DOOR with the
+//     office-open verdict's app (libreoffice-writer) and the fixture's REAL path,
+//     and the launch POST carries the same (the route is SPIED — CDP Fetch holds
+//     it, nothing launches). Then the server is rebooted on a machine WITHOUT
+//     LibreOffice Writer and the same click shows the explorer row's plain
+//     sentence + "Install LibreOffice on this machine…" under the button (never
+//     a greyed button), no door call, no launch; the offer opens the install
+//     dialog. Both machines are CONSTRUCTED on every box (a scratch LibreOffice:
+//     a `libreoffice` on a prepended PATH dir whose program dir has — or lacks —
+//     Writer's libswlo.so, exactly what desktop-display.officeFacts reads), so the
+//     leg never depends on what the runner has installed
 //
 // Screenshots: set DOCX_SHOTS=<dir>. Run: node scripts/test-docx-viewer.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -77,6 +90,18 @@ const OLE = Buffer.concat([Buffer.from('d0cf11e0a1b11ae1', 'hex'), Buffer.alloc(
 fs.writeFileSync(path.join(FX, 'legacy.doc'), OLE);
 fs.writeFileSync(path.join(FX, 'protected.docx'), OLE);
 fs.writeFileSync(path.join(FX, 'garbage.docx'), 'this is not a zip, just text\n');
+// ⑫'s two machines: a scratch LibreOffice whose program dir has Writer's library (present) or not (absent) —
+// officeFacts resolves the FIRST `libreoffice` on PATH to its real program dir and reads the module libraries there
+const LO = scratch('docxview-lo');
+const loBin = (kind, writer) => {
+  const prog = path.join(LO, kind, 'program'), bin = path.join(LO, kind, 'bin');
+  fs.mkdirSync(prog, { recursive: true }); fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(prog, 'soffice'), '#!/bin/sh\n# test-docx-viewer ⑫: a scratch LibreOffice — never launched (the route is spied)\nexit 0\n', { mode: 0o755 });
+  if (writer) fs.writeFileSync(path.join(prog, 'libswlo.so'), '');
+  fs.symlinkSync(path.join(prog, 'soffice'), path.join(bin, 'libreoffice'));
+  return bin;
+};
+const LO_PRESENT = loBin('present', true), LO_ABSENT = loBin('absent', false);
 
 // ── a worktree server of THIS tree ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
@@ -84,7 +109,8 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+const bootSrv = (loBinDir) => spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: `${loBinDir}${path.delimiter}${process.env.PATH || ''}`, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1' }, stdio: 'ignore' });
+let srv = bootSrv(LO_PRESENT); // ⑫ reboots it on LO_ABSENT
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1500,1000',
   '--disable-background-timer-throttling', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
@@ -92,7 +118,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch { }
   try { endRootedProcesses(wt); } catch { }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [prof, FX]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  for (const d of [prof, FX, LO]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
 process.on('SIGINT', () => process.exit(130));
@@ -105,9 +131,11 @@ for (let i = 0; i < 40 && !target; i++) { try { target = (await (await fetch(`ht
 const ws = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 256 * 1024 * 1024 });
 await new Promise((r) => ws.on('open', r));
 let seq = 0; const pend = new Map(); const dialogs = []; const requests = [];
+let onPaused = null; // ⑫: the spied launch route (CDP Fetch)
 ws.on('message', (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); return; }
+  if (m.method === 'Fetch.requestPaused' && onPaused) { onPaused(m.params); return; }
   if (m.method === 'Page.javascriptDialogOpening') { dialogs.push(m.params.message); cdp('Page.handleJavaScriptDialog', { accept: false }).catch(() => { }); }
   if (m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url);
 });
@@ -510,6 +538,79 @@ try {
   const rl = await evalJs(`(() => { const span = [...document.querySelectorAll('.__dxraw span')].find((s) => s.textContent === ${JSON.stringify(EMBED_TEXT)}); const r = document.createRange(); r.selectNodeContents(span); return r.getBoundingClientRect().width; })()`);
   ok(near(rl, WANT, 2), `POSITIVE CONTROL: the same font via the library in the light DOM measures ${rl.toFixed(1)} px — the expected width is the font's, not a guess`);
   await cleanRaw();
+
+  // ── ⑫ "Open in LibreOffice" ──
+  console.log('⑫ "Open in LibreOffice": the button → the door → the (spied) launch route; then a machine without LibreOffice Writer');
+  const DOCX12 = path.join(FX, 'apa-title-page.docx');
+  const SPY_WORDS = 'test-docx-viewer held this launch at the route — nothing was started';
+  const spied = [];
+  const spyOn = async () => {
+    spied.length = 0;
+    onPaused = (p) => {
+      if (p.request.method === 'POST') {
+        spied.push({ url: p.request.url, body: p.request.postData || '' });
+        cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 409, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify({ error: SPY_WORDS, code: 'gate-spy' })).toString('base64') }).catch(() => { });
+      } else cdp('Fetch.continueRequest', { requestId: p.requestId }).catch(() => { }); // the launcher's catalog GET goes through
+    };
+    await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/desktop/apps', requestStage: 'Request' }] });
+  };
+  const spyOff = async () => { await cdp('Fetch.disable').catch(() => { }); onPaused = null; };
+  const DOOR_SPY = `(() => { window.__doorCalls = []; const d = app.openWithDesktopApp; if (typeof d !== 'function') return false; app.openWithDesktopApp = (o) => { window.__doorCalls.push(JSON.parse(JSON.stringify(o || {}))); return d(o); }; return true; })()`;
+  const waitFor = async (expr, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await evalJs(expr); if (v) return v; await sleep(100); } return null; };
+  const verdictAt = async () => { try { return await (await fetch(`http://127.0.0.1:${PORT}/api/desktop/open-with?path=${encodeURIComponent(DOCX12)}`)).json(); } catch (e) { return { threw: String(e.message || e) }; } };
+
+  const v1 = await verdictAt();
+  ok(v1.ok === true && v1.catalogId === 'libreoffice-writer', 'the constructed machine WITH LibreOffice Writer: the verdict route says ok / libreoffice-writer', v1);
+  await cdp('Page.reload'); await boot();
+  await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
+  const b1 = await evalJs(`(() => { const b = __dx.btn('office'); if (!b) return null; const r = b.getBoundingClientRect(); return { aria: b.getAttribute('aria-label'), title: b.title, svg: !!b.querySelector('svg'), words: b.querySelector('.docx-tool-label')?.textContent || null, disabled: b.disabled, pressed: b.getAttribute('aria-pressed'), inBar: !!b.closest('.docx-toolbar'), w: r.width, h: r.height }; })()`);
+  ok(!!b1 && b1.aria === 'Open in LibreOffice' && b1.svg && b1.words === 'Open in LibreOffice' && b1.title.includes('apa-title-page.docx') && !b1.disabled && b1.pressed === null && b1.inBar && b1.w > 0 && b1.h > 0, 'the toolbar carries "Open in LibreOffice": an SVG icon + its words, named by title + aria-label, enabled, not a toggle', b1);
+  await shot('after-office-button.png');
+  ok(await evalJs(DOOR_SPY), 'the door is on the App (the mediator) — spied, then called through');
+  await spyOn();
+  const bc = await evalJs(`__dx.center(__dx.btn('office'))`);
+  await click(bc.x, bc.y);
+  const got = await waitFor(`(window.__doorCalls || []).length ? window.__doorCalls : null`, 10000);
+  { const t0 = Date.now(); while (Date.now() - t0 < 10000 && !spied.length) await sleep(100); }
+  ok(!!got && got.length === 1 && got[0].catalogId === 'libreoffice-writer' && got[0].file === DOCX12 && got[0].host === null, 'a trusted click reaches THE DOOR once, with the office-open verdict\'s app (libreoffice-writer), the fixture\'s REAL path and the file\'s machine (this one)', got);
+  let posted = null; try { posted = JSON.parse(spied[0]?.body || 'null'); } catch { posted = null; }
+  ok(spied.length === 1 && /\/api\/desktop\/apps$/.test(spied[0].url) && !!posted && posted.appId === 'libreoffice-writer' && posted.file === DOCX12 && posted.fileHost === 'local' && !('host' in posted), 'the door\'s ONE launch POST carries the same app + path + the file\'s machine (the route spied — nothing launched)', { spied: spied.map((x) => x.url), posted });
+  const said = await waitFor(`(document.getElementById('global-toasts')?.textContent || '').includes(${JSON.stringify(SPY_WORDS)})`, 5000);
+  ok(!!said && !(await evalJs(`!!document.querySelector('.office-offer')`)), 'the door said the route\'s refusal as a toast (never silent); no absent-machine offer on a machine that has Writer');
+  await spyOff();
+
+  // the SAME button on a machine WITHOUT LibreOffice Writer: the server rebooted on the scratch LibreOffice that lacks libswlo.so
+  try { srv.kill('SIGTERM'); } catch { }
+  for (let i = 0; i < 100 && srv.exitCode === null && srv.signalCode === null; i++) await sleep(100);
+  srv = bootSrv(LO_ABSENT);
+  let up = false;
+  for (let i = 0; i < 160 && !up; i++) { try { await fetch(`http://127.0.0.1:${PORT}/api/home`); up = true; } catch { await sleep(250); } }
+  ok(up, 'the server rebooted on the machine WITHOUT LibreOffice Writer');
+  const v2 = await verdictAt();
+  ok(v2.ok === false && v2.code === 'app-absent' && v2.remedy?.what === 'libreoffice-writer', 'that machine\'s verdict route says app-absent with the install remedy (what the viewer is about to be told)', v2);
+  await cdp('Page.reload'); await boot();
+  await evalJs(`__dx.open(${P('apa-title-page.docx')}, 'apa-title-page.docx')`);
+  await evalJs(DOOR_SPY);
+  await spyOn();
+  const b2 = await evalJs(`(() => { const b = __dx.btn('office'); return b ? { disabled: b.disabled, opacity: getComputedStyle(b).opacity, words: b.querySelector('.docx-tool-label')?.textContent || null } : null; })()`);
+  ok(!!b2 && !b2.disabled && Number(b2.opacity) === 1 && b2.words === 'Open in LibreOffice', 'on that machine it is the same button — not greyed, not disabled (the click answers)', b2);
+  const bc2 = await evalJs(`__dx.center(__dx.btn('office'))`);
+  await click(bc2.x, bc2.y);
+  const offer = await waitFor(`(() => { const p = document.querySelector('.office-offer'); if (!p) return null; const n = p.querySelector('[data-key="office-note"]'), i = p.querySelector('[data-key="office-install"]'), br = __dx.btn('office').getBoundingClientRect(), pr = p.getBoundingClientRect();
+    return { note: n?.textContent ?? null, noteCls: n?.className ?? null, noteRole: n?.getAttribute('role') ?? null, noteOpacity: n ? getComputedStyle(n).opacity : null, inst: i?.textContent ?? null, instCls: i?.className ?? null, instRole: i?.getAttribute('role') ?? null, open: !!p.querySelector('[data-key="office-open"]'), below: pr.top >= br.bottom - 1 }; })()`, 10000);
+  ok(!!offer && offer.note === 'LibreOffice Writer is not installed on this machine' && /context-menu-note/.test(offer.noteCls) && offer.noteRole === 'note' && Number(offer.noteOpacity) === 1
+    && offer.inst === 'Install LibreOffice on this machine…' && /context-menu-item/.test(offer.instCls) && offer.instRole === 'menuitem' && !offer.open && offer.below,
+  'the click shows the explorer row\'s plain sentence + "Install LibreOffice on this machine…" under the button (a note and a real menu item — never a greyed button)', offer);
+  await sleep(300);
+  const doorCalls = await evalJs('window.__doorCalls.length');
+  ok(doorCalls === 0 && spied.length === 0, 'no door call and no launch POST on the machine without LibreOffice', { door: doorCalls, posted: spied.length });
+  await shot('after-office-absent-offer.png');
+  const ic = await evalJs(`__dx.center(document.querySelector('.office-offer [data-key="office-install"]'))`);
+  await click(ic.x, ic.y);
+  const dlg = await waitFor(`(() => { const d = document.getElementById('desktop-install-dialog'); return d ? (d.querySelector('h3')?.textContent || d.textContent.slice(0, 160)) : null; })()`, 10000);
+  ok(!!dlg && /Install LibreOffice on this machine/.test(dlg) && !(await evalJs(`!!document.querySelector('.office-offer')`)), 'the offer opens the install dialog (the plan first — the explorer row\'s dialog) and closes itself', dlg);
+  await evalJs(`document.getElementById('desktop-install-dialog')?.remove(); true`);
+  await spyOff();
 } catch (e) {
   fail++; console.error('  ✗ threw: ' + (e.stack || e.message));
 } finally {

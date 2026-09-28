@@ -23,6 +23,8 @@
 //   ⑥  THE CENSUS: every surface prints the fact — no surface file reads the raw identity fields (browserProfileId /
 //      browserProfileActive / browserLive / browserPinOrigin); the payload publishes `browserFact`; the live facts
 //      table gates on its string digest. CONTROL: a patched copy of chat-view.js deriving its own answer is caught.
+//   ⑦  B-f7ab: the KEYLESS fact — a live local session with no browser key yet says "no browser yet" (its first
+//      browser command gets one), in the payload and in the live view; never "predates the feature"
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -607,6 +609,28 @@ function censusOf(file, text) {
   const caught = censusOf('chat-view (patched copy)', fs.readFileSync(mutPath, 'utf8'));
   ok(caught.length === 2, `⑥ CONTROL: a chat-view copy that reads browserProfileId / browserProfileActive again is caught (${caught.length} finding(s))`, caught.join('\n'));
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { label: '⑥ controls: ' })) ok(c.pass, c.name, c.detail);
+}
+
+// ═══ ⑦ THE KEYLESS FACT (B-f7ab) ═══
+// A live local session with no browser key YET (it started before per-session browsers, or while they were off) gets
+// one on its first browser command (src/server/browser-key.js) — so every surface says "no browser yet", never
+// "predates the feature" and never nothing at all where a key is on its way.
+console.log('— ⑦ the keyless fact: "no browser yet" where the first browser command gets one');
+{
+  const f = BF.keylessFact();
+  const w = BF.browserFactWords(f);
+  ok(f.key === '' && f.keyless === true && f.using.kind === 'none' && f.using.state === 'not-started' && !f.live && !f.differs && !f.pinned && typeof f.digest === 'string' && f.digest.length > 0,
+    '⑦ keylessFact: no key, nothing in use, nothing live, nothing pinned — a string digest (the sidebar\'s LIVE_SESSION_FACTS row re-renders when the key arrives)', JSON.stringify(f));
+  ok(w.line === 'no browser yet' && w.name === 'no browser yet' && w.state === 'not started yet' && w.show === false && w.amber === false && /first browser command gets one, no restart needed/.test(w.tooltip) && noRawId(w.tooltip) && !/predates/.test(w.tooltip + w.line),
+    '⑦ its words: "no browser yet", the tooltip says the first browser command gets one (no restart), never "predates", no raw id; show false (the status-bar chip stays hidden — it needs a key)', JSON.stringify(w));
+  const translated = BF.browserFactWords(f, (x) => '<' + x + '>');
+  ok(translated.line === '<no browser yet>' && /^<This session has no browser yet/.test(translated.tooltip), '⑦ every word goes through the caller\'s t() (literal keys — the extractor finds them)');
+  ok(f.digest !== BF.factDigest(BF.browserFactFor({ browserKey: KEY, variant: 'D', remote: false }, { profiles: PROFILES, now: 1 })), '⑦ the keyless digest differs from the first real fact (the key\'s arrival moves every surface)');
+  const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(/sessionFactsOf\(s\)\) : \(browserKeys\?\.keylessFactOf\?\.\(s\) \|\| null\); \} catch \{ return null; \} \}\)\(\),/.test(srv), '⑦ the active-sessions payload publishes the keyless fact for a session with no key (the late-key engine decides where one is on its way)');
+  const stream = require('../src/browser-stream.js');
+  const nk = stream.streamTargetFor({ browserKey: '' });
+  ok(nk.code === 'no-key' && /no browser yet/.test(nk.error) && !/predates/.test(nk.error), '⑦ the live view of such a session says "no browser yet" too (a view never starts a browser nor mints a key)', nk.error);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -52,7 +52,7 @@
 // SKIPs without chrome / Xvfb / x11vnc. Worktree-isolated (own data/, a
 // scratch HOME, VIBESPACE_SKIP_AGENT_HOOKS=1), free ports, per-pid names.
 // Run: node scripts/test-desktop-app-window.mjs
-import { execSync, spawn } from 'node:child_process';
+import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -95,6 +95,33 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 fs.writeFileSync(path.join(wt, 'data', 'settings.json'), JSON.stringify({ 'desktop.backendPrefs': 'vnc-display, xpra, desktop-singleton' })); // the pin (see the header)
 execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 
+// §E's SHARE legs need an agent the SERVER runs (the .195 merge: since lane channel-withdraw verify r6 the Share dialog
+// sends a session by its LIVE webui id and the engine spells the durable key — a client-only roster entry is refused
+// `bad_principal`, rightly). ONE stub agent session — a dtach socket + its meta — restored at boot as `w-lane-e`
+// (test-channels-aggregate-ui's recipe). Without dtach those legs SKIP by name. The ask leg's "not running any more"
+// refusal keeps a CLIENT-ONLY ghost (the server must NOT run it).
+const HAVE_DTACH = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e.code !== 'ENOENT'; } })();
+const LANE_E = { id: 'w-lane-e', cid: 'a99e0003-0000-4000-8000-0000000000e5', name: 'lane-e agent', sockName: `cw-1-${Date.now()}` };
+const LANE_E_KEY = 'claude:' + LANE_E.cid;
+const LANE_E_STUB = path.join(wt, 'stub-cli.cjs');
+if (HAVE_DTACH) {
+  fs.writeFileSync(LANE_E_STUB, `'use strict';
+// a STUB agent CLI: publishes this process in the CLI session registry of $HOME and stays alive
+const fs = require('fs'), path = require('path');
+const [cid, name] = process.argv.slice(2);
+const dir = path.join(process.env.HOME, '.claude', 'sessions');
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, process.pid + '.json'), JSON.stringify({ pid: process.pid, sessionId: cid, name }));
+setInterval(() => {}, 1 << 30);
+`);
+  const SOCK_DIR = path.join(wt, 'data/sockets'), META_DIR = path.join(wt, 'data/session-meta');
+  fs.mkdirSync(SOCK_DIR, { recursive: true }); fs.mkdirSync(META_DIR, { recursive: true });
+  fs.writeFileSync(path.join(META_DIR, LANE_E.sockName + '.json'), JSON.stringify({
+    webuiSessionId: LANE_E.id, sockName: LANE_E.sockName, claudeSessionId: LANE_E.cid, backendSessionId: LANE_E.cid,
+    name: LANE_E.name, mode: 'chat', backend: 'claude', cwd: wt, createdAt: Date.now(), agentToken: 'vsst_' + 'e2edeskappwindowlanee0000000001',
+  }));
+  execFileSync('dtach', ['-n', path.join(SOCK_DIR, LANE_E.sockName), '-E', '-z', process.execPath, LANE_E_STUB, LANE_E.cid, LANE_E.name], { env: { ...process.env, HOME: home } });
+}
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1' };
 let srv = null;
 const bootServer = () => { srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' }); return srv; };
@@ -116,6 +143,7 @@ const cleanup = () => {
   try { srv?.kill('SIGKILL'); } catch {}
   try { ctlSrv?.kill('SIGKILL'); } catch {}
   for (const p of recordedPids()) { try { process.kill(p, 'SIGKILL'); } catch {} } // a failed leg leaves no X server behind
+  if (HAVE_DTACH) { try { execFileSync('pkill', ['-KILL', '-f', LANE_E_STUB], { stdio: 'ignore' }); } catch {} } // §E's stub agent + its dtach master: THIS suite's, by evidence (their argv names this scratch tree)
   for (const p of [...ourXvnc(), ...onOurDisplay()]) { try { process.kill(p, 'SIGTERM'); } catch {} } // …nor the singleton it caused (a SIGKILLed server runs no shutdown; SIGTERM lets Xvnc remove its own lock + socket after we are gone — the reaper is the net)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
   try { fs.rmSync(scratch('deskapp-chrome'), { recursive: true, force: true }); } catch {}
@@ -184,6 +212,7 @@ const GEOM = `(() => {
 const shot = async (p, name) => { if (!SHOTS) return; const r = await p.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); };
 const INTRO_KEY = (() => { const m = /desktop-launch-intro">\$\{escHtml\(t\('([^']+)'\)\)\}/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })();
 const SNAP_SHORT_KEY = (() => { const m = /'snap-profile-unreachable'\) return t\('([^']+)'\)/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })();
+const OFFICE_SHORT_KEY = (() => { const m = /code === 'app-absent'\) return t\('([^']+)'\)/.exec(fs.readFileSync(path.join(repo, 'src/lib/desktop-app-launcher.js'), 'utf8')); return m ? m[1] : null; })(); // §7.9: a dimmed LibreOffice card's short reason
 
 let p1 = await page(target);
 try {
@@ -225,10 +254,11 @@ try {
     let g = await p1.evalJs(GEOM);
     check(`${w}×${h}: the Advanced disclosure is CLOSED on a fresh open (aria-expanded=false, form hidden)`, g.adv === 'false' && !g.advBodyVisible, { adv: g.adv, advBodyVisible: g.advBodyVisible });
     check(`${w}×${h}: nothing is running yet ⇒ the Running section is not shown`, !g.runningVisible);
-    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && (/not on PATH|parked/i.test(c.sub) || c.sub === SNAP_SHORT_KEY)), g.cards); // B-bfe6 r1: a browser row a snap cannot serve here is dimmed with the SHORT reason (the verdict's sentence is its tooltip)
+    check(`${w}×${h}: every registry row is a visible card with an SVG icon — an absent binary is DIMMED with its reason, never hidden`, g.cards.length >= 3 && g.cards.every((c) => c.visible && c.svg) && g.cards.filter((c) => c.unavailable).every((c) => c.disabled && (/not on PATH|parked/i.test(c.sub) || c.sub === SNAP_SHORT_KEY || (!!OFFICE_SHORT_KEY && c.sub === OFFICE_SHORT_KEY))), g.cards); // B-bfe6 r1: a browser row a snap cannot serve here is dimmed with the SHORT reason (the verdict's sentence is its tooltip)
     // lane D (b): the default-scale control rides a card ONLY on a rung that scales apps (xpra) — this suite's vnc-display
     // rung draws a whole display at the browser's pixels, so there is nothing to choose (the xpra leg: test-desktop-xpra-window §14)
-    check(`${w}×${h}: on the vnc-display rung no card carries a default-scale control, and every card is its wrapper's only child`, await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); const cards = [...d.querySelectorAll('.desktop-launch-card')]; return d.querySelectorAll('.desktop-launch-card-scale').length === 0 && cards.length > 0 && cards.every((c) => c.parentElement.classList.contains('desktop-launch-card-wrap') && c.parentElement.children.length === 1); })()`));
+    // §7.9: a LibreOffice row that is not installed carries its "Install…" segment beside the card (never a scale control)
+    check(`${w}×${h}: on the vnc-display rung no card carries a default-scale control — a card's wrapper holds the card, plus only a not-installed LibreOffice row's "Install…"`, await p1.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); const cards = [...d.querySelectorAll('.desktop-launch-card')]; return d.querySelectorAll('.desktop-launch-card-scale').length === 0 && cards.length > 0 && cards.every((c) => c.parentElement.classList.contains('desktop-launch-card-wrap') && c.parentElement.firstElementChild === c && [...c.parentElement.children].slice(1).every((x) => x.classList.contains('desktop-launch-card-install') && c.classList.contains('is-unavailable'))); })()`));
     await shot(p1, `after-fresh-open-${w}x${h}@2x.png`);
     // the closed state has no columns to measure; open the disclosure (a real click) and measure the form
     await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-adv-toggle');
@@ -456,8 +486,13 @@ try {
     check('a Task Group exists to share with (POST /api/tasks)', !!gid, grp);
     await until(() => p1.evalJs(`(app.sidebar._tasks || []).some((t) => t.id === ${JSON.stringify(gid)})`), 8000, 200);
     // this worktree server runs no agent: ONE live agent session is placed in the client's roster (the picker's source)
-    const FAKE = { id: 'w-lane-e', name: 'lane-e agent', backend: 'claude', backendSessionId: 'conv-lane-e' };
-    const injectRoster = (p) => p.evalJs(`(() => { const s = app.sidebar; s._webuiSessions = [...(s._webuiSessions || []).filter((x) => x.id !== 'w-lane-e'), ${JSON.stringify(FAKE)}]; return true; })()`);
+    // the SHARE legs' agent is the server's stub (above); a GHOST the server does not run is placed in the client's roster
+    // for the ask leg's refusal
+    const GHOST = { id: 'w-lane-e-ghost', name: 'lane-e ghost', backend: 'claude', backendSessionId: 'a99e0003-0000-4000-8000-0000000000e6' };
+    const injectRoster = (p) => p.evalJs(`(() => { const s = app.sidebar; s._webuiSessions = [...(s._webuiSessions || []).filter((x) => x.id !== 'w-lane-e-ghost'), ${JSON.stringify(GHOST)}]; return true; })()`);
+    const stubLive = HAVE_DTACH && !!(await until(() => p1.evalJs(`(app.sidebar._webuiSessions || []).some((x) => x.id === ${JSON.stringify(LANE_E.id)})`), 20000, 200));
+    if (HAVE_DTACH) check('FIXTURE: the stub agent the server runs (w-lane-e, restored from its dtach socket) is in the client\'s roster', stubLive);
+    else console.log('  SKIP §E share-with-agent legs: they need an agent the server runs (a dtach stub) — no dtach on PATH');
     await injectRoster(p1);
     const winSel = `[...app.wm.windows.values()].find((w) => w._desktopAppId === '${appId}')`;
     const reach = () => p1.evalJs(`fetch('/api/desktop/apps/${appId}/reach').then((r) => r.json())`);
@@ -474,13 +509,14 @@ try {
       check(`the ⋯ menu carries "Share with agent…" and "Ask an agent to take control…" — and no Scale ▸ / Show window frame ▸ on a whole-display rung (${JSON.stringify(rows)})`, rows.includes('Share with agent…') && rows.includes('Ask an agent to take control…') && !rows.some((r) => /^Scale|^Show window frame/.test(r)), rows);
       await trustedClick(p1, '.context-menu > .context-menu-item:nth-child(' + (rows.indexOf('Share with agent…') + 1) + ')');
     }
-    const dlg = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-share-dialog'); if (!d || !d.querySelector('.wshare-picker')) return null; return { sessions: [...d.querySelectorAll('input[data-kind=session]')].map((i) => i.dataset.id), groups: [...d.querySelectorAll('input[data-kind=group]')].map((i) => i.dataset.id), mode: d.querySelector('.wshare-mode-btn.active')?.dataset.mode, intro: d.querySelector('.wshare-intro')?.textContent || '' }; })()`), 8000, 150);
-    check('"Share with agent…" opens the dialog: the live agent (by its conversation key) and the Task Group as checkboxes, the mode Auto', !!dlg && dlg.sessions.includes('claude:conv-lane-e') && dlg.groups.includes(gid) && dlg.mode === 'auto' && /Hidden from every agent until you share it/.test(dlg.intro), dlg || { toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), menu: await p1.evalJs(`[...document.querySelectorAll('.context-menu')].length`), reach: await reach() });
+    const dlg = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-share-dialog'); if (!d || !d.querySelector('.wshare-picker')) return null; return { sessions: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('session:')).map((k) => k.slice(8)), groups: [...d.querySelectorAll('.wshare-pick .pp-row')].map((i) => i.dataset.key).filter((k) => k.startsWith('group:')).map((k) => k.slice(6)), mode: d.querySelector('.wshare-mode-btn.active')?.dataset.mode, intro: d.querySelector('.wshare-intro')?.textContent || '' }; })()`), 8000, 150);
+    check('"Share with agent…" opens the dialog: the live agent (by its conversation key) and the Task Group in the ONE principal picker, the mode Auto', !!dlg && (!stubLive || dlg.sessions.includes(LANE_E_KEY)) && dlg.groups.includes(gid) && dlg.mode === 'auto' && /Hidden from every agent until you share it/.test(dlg.intro), dlg || { toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), menu: await p1.evalJs(`[...document.querySelectorAll('.context-menu')].length`), reach: await reach() });
     await shot(p1, 'lane-e-share-dialog.png');
-    await trustedClick(p1, '#window-share-dialog input[data-kind=session][data-id="claude:conv-lane-e"]');
+    if (stubLive) {
+    await trustedClick(p1, `#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]`);
     const c1 = await until(async () => { const c = await chipOf(); return c && c.shown && /^Shared with 1 · Auto$/.test(c.text) ? c : null; }, 8000, 150);
     const r1 = await reach();
-    check(`checking the agent SHARES the window (POST …/reach) and the chip appears at once: "${c1 && c1.text}" (its tooltip names the agent)`, !!c1 && /lane-e agent/.test(c1.title) && r1.rows.length === 1 && r1.rows[0].principal.id === 'claude:conv-lane-e' && r1.rows[0].by === 'user', { c1, rows: r1.rows });
+    check(`picking the agent SHARES the window (POST …/reach) and the chip appears at once: "${c1 && c1.text}" (its tooltip names the agent)`, !!c1 && /lane-e agent/.test(c1.title) && r1.rows.length === 1 && r1.rows[0].principal.id === LANE_E_KEY && r1.rows[0].by === 'user', { c1, rows: r1.rows });
     await trustedClick(p1, '#window-share-dialog .wshare-mode-btn[data-mode="pixels"]');
     const c2 = await until(async () => { const c = await chipOf(); return c && /· Pixels$/.test(c.text) ? c : null; }, 8000, 150);
     check('D7: the Pixels segment switches the share\'s mode (PUT …/reach/mode) and the chip names it', !!c2 && (await reach()).mode === 'pixels', c2);
@@ -498,20 +534,23 @@ try {
       check(`the taskbar menu carries "Share with agent…" and "Ask an agent to take control…" (${JSON.stringify(trows)})`, trows.includes('Share with agent…') && trows.includes('Ask an agent to take control…'), trows);
       const idx = trows.indexOf('Share with agent…');
       if (idx >= 0) await trustedClick(p1, `.taskbar-context-menu > .taskbar-context-menu-item:nth-child(${idx + 1})`);
-      const checked = await until(() => p1.evalJs(`(() => { const i = document.querySelector('#window-share-dialog input[data-kind=session][data-id="claude:conv-lane-e"]'); return i ? { checked: i.checked, mode: document.querySelector('#window-share-dialog .wshare-mode-btn.active')?.dataset.mode } : null; })()`), 8000, 150);
-      check('…it opens the same dialog, the agent CHECKED and Pixels active (the current share)', !!checked && checked.checked && checked.mode === 'pixels', checked);
-      await trustedClick(p1, '#window-share-dialog input[data-kind=session][data-id="claude:conv-lane-e"]');
+      const checked = await until(() => p1.evalJs(`(() => { const i = document.querySelector('#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]'); return i ? { checked: i.getAttribute('aria-selected') === 'true', mode: document.querySelector('#window-share-dialog .wshare-mode-btn.active')?.dataset.mode } : null; })()`), 8000, 150);
+      check('…it opens the same dialog, the agent PICKED and Pixels active (the current share)', !!checked && checked.checked && checked.mode === 'pixels', checked);
+      await trustedClick(p1, `#window-share-dialog .pp-row[data-key="session:${LANE_E_KEY}"]`);
       const gone = await until(async () => { const c = await chipOf(); return c && !c.shown ? true : null; }, 8000, 150);
-      check('unchecking REVOKES (DELETE …/reach): the chip goes and the window is hidden again', !!gone && (await reach()).rows.length === 0);
+      check('un-picking REVOKES (DELETE …/reach): the chip goes and the window is hidden again', !!gone && (await reach()).rows.length === 0);
       await p1.evalJs(`document.getElementById('window-share-dialog')?.remove(); true`);
     }
-    // the ASK dialog: one agent, an optional line, "wake it now" OFF by default — the fake agent has no live session on
+    } else await p1.evalJs(`document.getElementById('window-share-dialog')?.remove(); true`);   // (no stub agent: the share legs SKIPped by name above)
+    // the ASK dialog: one agent, an optional line, "wake it now" OFF by default — the GHOST agent has no live session on
     // the server, so the send is refused BY NAME (a toast), never silently
+    await injectRoster(p1);   // (a sessions broadcast since the first injection replaces the client's roster)
     await p1.evalJs(`${winSel}._desktopAppAsk(); true`);
-    const ask = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-ask-dialog'); if (!d || !d.querySelector('.wshare-intro')) return null; const wake = [...d.querySelectorAll('input[type=checkbox]')][0]; return { agents: [...d.querySelectorAll('select.wshare-agent option')].map((o) => o.textContent), wakeOff: wake && wake.checked === false, explain: d.querySelector('.wshare-note')?.textContent || '' }; })()`), 8000, 150);
-    check('"Ask an agent to take control…": the live agent in the picker, "Wake it now" OFF by default, the plain words ("its next turn — nothing is billed")', !!ask && ask.agents.includes('lane-e agent') && ask.wakeOff && /next turn — nothing is billed/.test(ask.explain), ask);
+    const ask = await until(() => p1.evalJs(`(() => { const d = document.getElementById('window-ask-dialog'); if (!d || !d.querySelector('.wshare-intro')) return null; const wake = [...d.querySelectorAll('input[type=checkbox]')][0]; return { agents: [...d.querySelectorAll('.wshare-agent .pp-row .pp-name')].map((o) => o.textContent), wakeOff: wake && wake.checked === false, explain: d.querySelector('.wshare-note')?.textContent || '' }; })()`), 8000, 150);
+    check('"Ask an agent to take control…": the live agent in the picker, "Wake it now" OFF by default, the plain words ("its next turn — nothing is billed")', !!ask && ask.agents.includes('lane-e ghost') && (!stubLive || ask.agents.includes('lane-e agent')) && ask.wakeOff && /next turn — nothing is billed/.test(ask.explain), ask);
     await shot(p1, 'lane-e-ask-dialog.png');
     if (ask) {
+      await trustedClick(p1, '#window-ask-dialog .pp-row[data-key="w-lane-e-ghost"]');   // the agent the server does not run
       await trustedClick(p1, '#window-ask-dialog .btn-create');
       const toast = await until(() => p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent).find((t) => /not running any more|Could not send/.test(t)) || null`), 6000, 150);
       check(`…a send for an agent the server does not run is refused by name — a toast, never silent ("${toast}")`, !!toast);
@@ -527,8 +566,8 @@ try {
       const row = await p1.evalJs(`(() => { const r = document.querySelector('#desktop-launch-dialog .desktop-launch-share'); const b = r && r.querySelector('.desktop-launch-share-btn'); return r ? { shown: getComputedStyle(r).display !== 'none', text: b.textContent } : null; })()`);
       check(`the launch dialog has the "Share with agents" row under the machine picker, hidden-by-default in its words ("${row && row.text}")`, !!row && row.shown && /Hidden from agents/.test(row.text), row);
       await trustedClick(p1, '#desktop-launch-dialog .desktop-launch-share-btn');
-      await until(() => p1.evalJs(`!!document.querySelector('.wshare-popover input[data-kind=group]')`), 4000, 100);
-      await trustedClick(p1, `.wshare-popover input[data-kind=group][data-id=${JSON.stringify(gid)}]`);
+      await until(() => p1.evalJs(`!!document.querySelector('.wshare-popover .pp-row[data-key^="group:"]')`), 4000, 100);
+      await trustedClick(p1, `.wshare-popover .pp-row[data-key=${JSON.stringify('group:' + gid)}]`);
       await trustedClick(p1, '.wshare-popover .wshare-mode-btn[data-mode="pixels"]');
       const sum = await p1.evalJs(`document.querySelector('#desktop-launch-dialog .desktop-launch-share-btn').textContent`);
       check(`the popover picks the Task Group and Pixels; the row says so ("${sum}")`, /Lane E group/.test(sum) && /Pixels/.test(sum), sum);
@@ -537,7 +576,7 @@ try {
       await trustedClick(p1, `#desktop-launch-dialog .desktop-launch-card[data-app-id="${launchApp.id}"]`);
       const nw = await until(() => p1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w.type === 'desktop-app' && w._desktopAppId !== '${appId}'); return w ? w._desktopAppId : null; })()`), 15000, 200);
       const nr = nw ? await p1.evalJs(`fetch('/api/desktop/apps/${nw}/reach').then((r) => r.json())`) : null;
-      check(`the launched ${launchApp.label} carries the share from the dialog (the Task Group, mode pixels)`, !!nr && nr.mode === 'pixels' && nr.rows.length === 1 && nr.rows[0].principal.kind === 'group' && nr.rows[0].principal.id === gid, nr);
+      check(`the launched ${launchApp.label} carries the share from the dialog (the Task Group, mode pixels)`, !!nr && nr.mode === 'pixels' && nr.rows.length === 1 && nr.rows[0].principal.kind === 'group' && nr.rows[0].principal.id === gid, nr || { launched: nw, toasts: await p1.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`), dialog: await p1.evalJs(`!!document.getElementById('desktop-launch-dialog')`), popover: await p1.evalJs(`document.querySelectorAll('.wshare-popover, .pp-pop').length`), active: await p1.evalJs(`document.activeElement ? document.activeElement.className : null`) });
       const mem = await until(() => p1.evalJs(`fetch('/api/user-state').then((r) => r.json()).then((s) => s.desktopAppReach && s.desktopAppReach[${JSON.stringify(launchApp.id)}] ? s.desktopAppReach[${JSON.stringify(launchApp.id)}] : null)`), 5000, 150);
       check(`the choice is remembered PER APP (user state desktopAppReach[${launchApp.id}])`, !!mem && mem.mode === 'pixels' && mem.principals.some((p) => p.id === gid), mem);
       // a fresh page (the memory loaded from user state), the row untouched: the next launch of that app proposes it

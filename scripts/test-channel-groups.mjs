@@ -903,7 +903,7 @@ console.log('§4 the turn gate through the REAL prompt-context route');
   AR.setupAgentRoutes({
     app, activeSessions,
     tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '' },
-    sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
     getGroups: () => f.eng,
@@ -981,7 +981,8 @@ console.log('§4b wiring pins');
   ok(/const tgt = ge\.resolveTarget\(to, myCid\);/.test(ar) && /ge\.post\(\{ group: tgt\.group\.id, from: myCid, text, wake: req\.body\?\.wake === true, mayWake, consent \}\)/.test(ar) && /const consent = agentConsent\(req\.body\?\.yes\);/.test(ar), 'PIN: send resolves its target ONCE (resolveTarget) and every post it makes carries the wake pace AND the --yes consent');
   ok((ar.match(/mayWake: wakeFloorFor\(c\.cid\), consent: agentConsent\(b\.yes\)/g) || []).length === 2, 'PIN: group create AND invite carry the wake pace and the consent (an invite is a wake)');
   ok(/return ge && typeof ge\.pacerFor === 'function' \? ge\.pacerFor\(senderCid\) : null;/.test(ar) && !/_wakeFloor/.test(ar), 'PIN: the agent routes\' pace IS the engine\'s persisted pacer — no in-memory floor Map left');
-  ok(/if \(!myCid\) return res\.status\(409\)\.json\(\{ error: 'this session has no conversation id yet[^']*', code: 'bad-member' \}\)/.test(ar), 'PIN: with a groups engine, a cid-less sender is refused before the legacy lane');
+  ok(/if \(!myCid\) return res\.status\(409\)\.json\(\{ error: who\.cidWhy \|\| 'this session has no conversation id yet[^']*', code: 'bad-member' \}\)/.test(ar), 'PIN: with a groups engine, a cid-less sender is refused before the legacy lane — by the caller\'s own sentence (r4: a pending fork is "a fork that has not announced its own conversation id yet")');
+  ok(/const own = ownConversationIdOf\(s\);\s*\n\s*return \{ job: null, cid: own\.cid, cidWhy: own\.why, s, id, myGroups: _myGroupIds\(s, id\) \};/.test(ar), 'PIN (channel-withdraw verify r4): msgCaller answers a session caller with its OWN conversation id — null while a fork still carries its parent\'s (a pending fork sent as the parent: the pair group held the parent\'s id, the target\'s reply woke the parent)');
   ok(/const fits = !rep\.text \|\| used \+ 2 \+ Buffer\.byteLength\(rep\.text, 'utf-8'\) <= INLINE_CAP - 64;\s*\n\s*if \(fits\) \{/.test(ar), 'PIN: prompt-context pushes the section (and commits its marks) only when it fits WHOLE');
   ok(/reachability: s\._msgReachability \|\| null/.test(read('server.js')) && /groupSetting: \(gid\) =>/.test(read('server.js')), 'PIN: the roster carries the msg-acl override + the Task Group setting');
 }

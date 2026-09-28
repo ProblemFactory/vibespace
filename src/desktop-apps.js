@@ -30,6 +30,7 @@
  * path|null }, singletonRunning }`. Nothing in this file asks the machine.
  */
 const LIMITS = require('./keeper-limits');
+const O = require('./office-open'); // PURE — the LibreOffice rows, the open-with verdict, the office installs (§7.9)
 
 /** The fixed stream id of the pre-existing in-container desktop (src/vnc.js)
  *  on the ONE ws bridge — `/api/vnc` is an alias for `/api/desktop/<this>/stream`. */
@@ -550,7 +551,7 @@ function relaunchVerdict(rec, backends = DISPLAY_BACKENDS) {
 }
 /** The launch body that starts the same app again: a catalog row by its id, a typed command as typed. */
 function relaunchBodyOf(rec) {
-  if (rec.source === 'registry' && rec.appId) return { appId: rec.appId };
+  if (rec.source === 'registry' && rec.appId) return { appId: rec.appId, ...(rec.office && rec.file ? { file: rec.file } : {}) }; // §7.9: a document's app reopens its document
   return { exec: rec.exec, args: Array.isArray(rec.args) ? rec.args.slice() : [], cwd: rec.cwd || null, label: rec.label };
 }
 
@@ -811,12 +812,19 @@ function validateAppRow(row) {
   if (row.needsWayland !== undefined && typeof row.needsWayland !== 'boolean') return { ok: false, error: 'needsWayland must be a boolean' };
   // B-bfe6: a BROWSER row names its family, the bare exec names it may resolve to (first on PATH wins), and may never
   // carry a profile or an automation flag of its own — the profile is the keeper's, and a human's browser is not driven
+  const execsOk = (x) => Array.isArray(x) && x.length && x.every((e) => typeof e === 'string' && /^[A-Za-z0-9._+-]{1,64}$/.test(e));
   if (row.browser !== undefined && row.browser !== null) {
     if (!Object.prototype.hasOwnProperty.call(BROWSER_KINDS, row.browser)) return { ok: false, error: `browser must be one of ${Object.keys(BROWSER_KINDS).join('/')}` };
-    if (row.execs !== undefined && !(Array.isArray(row.execs) && row.execs.length && row.execs.every((e) => typeof e === 'string' && /^[A-Za-z0-9._+-]{1,64}$/.test(e)))) return { ok: false, error: 'execs must be a non-empty array of bare binary names' };
+    if (row.execs !== undefined && !execsOk(row.execs)) return { ok: false, error: 'execs must be a non-empty array of bare binary names' };
     const flag = (row.args || []).find(isForbiddenBrowserArg);
     if (flag) return { ok: false, error: `a browser row may not carry ${JSON.stringify(flag)} — its profile is the keeper's and a desktop-app browser is never an automated one`, code: 'automation-flag' };
-  } else if (row.execs !== undefined) return { ok: false, error: 'execs is for a browser row only' };
+  } else if (row.office !== undefined && row.office !== null) {
+    // §7.9: a LibreOffice row names its module ('any' = the Start Center) and the bare names it may resolve to; its
+    // profile is the keeper's (-env:UserInstallation is spelled by officeArgv, never by a row)
+    if (!O.isOfficeModule(row.office)) return { ok: false, error: `office must be one of ${[...O.MODULE_KEYS, O.OFFICE_ANY].join('/')}` };
+    if (row.execs !== undefined && !execsOk(row.execs)) return { ok: false, error: 'execs must be a non-empty array of bare binary names' };
+    if ((row.args || []).some((a) => /^-env:UserInstallation=/.test(a))) return { ok: false, error: 'an office row may not carry its own -env:UserInstallation — the session\'s profile is the keeper\'s' };
+  } else if (row.execs !== undefined) return { ok: false, error: 'execs is for a browser or office row only' };
   return { ok: true, error: null };
 }
 
@@ -844,16 +852,23 @@ function validateLaunchRequest(body, registry = []) {
   // B-bfe6: `url` + `keepProfile` belong to a BROWSER row — anywhere else they are refused by name, never ignored
   const hasUrl = body.url !== undefined && body.url !== null && body.url !== '';
   if (body.keepProfile !== undefined && typeof body.keepProfile !== 'boolean') return { ok: false, error: 'keepProfile must be a boolean', code: 'bad-request' };
+  // §7.9: `file` = a document to open, for a LibreOffice row of the catalog only — anywhere else refused by name (never
+  // ignored); the PURE file rule (absolute on this machine, an office extension) here, the machine rule at the route
+  const hasFile = body.file !== undefined && body.file !== null;
+  let file = null;
+  if (hasFile) { const fv = O.fileVerdict(body.file); if (!fv.ok) return { ok: false, error: fv.error, code: fv.code }; file = fv.file; }
   if (body.appId !== undefined) {
     if (!ID_RE.test(String(body.appId))) return { ok: false, error: 'appId is not a valid id' };
     const row = registry.find((r) => r.id === body.appId);
     if (!row) return { ok: false, error: `unknown appId ${JSON.stringify(body.appId)}` };
     if (!row.browser && (hasUrl || body.keepProfile !== undefined)) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app — ${row.label} is not one`, code: 'not-a-browser' };
+    if (hasFile && !O.isOfficeModule(row.office)) return { ok: false, error: `${row.label} does not open documents — LibreOffice does`, code: 'not-office-app' };
     let url = null;
     if (hasUrl) { const u = validateBrowserUrl(body.url); if (!u.ok) return { ok: false, error: u.error, code: u.code }; url = u.url; }
-    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice, ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}) } };
+    return { ok: true, error: null, launch: { source: 'registry', row, dpr: normalizeDpr(body.dpr), uiScale: normalizeUiScale(body.uiScale), scaleChoice, ...(row.browser ? { url, keepProfile: body.keepProfile === true } : {}), ...(file ? { file } : {}) } };
   }
   if (hasUrl || body.keepProfile !== undefined) return { ok: false, error: `${hasUrl ? 'url' : 'keepProfile'} is only for a browser app from the catalog — a command you type is run as typed`, code: 'not-a-browser' };
+  if (hasFile) return { ok: false, error: 'a document opens in a LibreOffice app from the catalog — a command you type is run as typed', code: 'not-office-app' };
   const row = { id: null, label: cleanStr(body.label, 80) ? body.label : null, exec: body.exec, args: body.args === undefined ? [] : body.args, cwd: body.cwd === undefined || body.cwd === '' ? null : body.cwd };
   if (!row.label) row.label = typeof row.exec === 'string' ? row.exec.split('/').pop().slice(0, 80) : null;
   const v = validateAppRow({ ...row, id: 'adhoc' });
@@ -952,6 +967,9 @@ const DEFAULT_REGISTRY = Object.freeze([
   Object.freeze({ id: 'xterm', label: 'xterm', exec: 'xterm', args: Object.freeze([]), category: 'terminal' }),
   Object.freeze({ id: 'gnome-calculator', label: 'Calculator (GNOME)', exec: 'gnome-calculator', args: Object.freeze([]), category: 'utility' }),
   Object.freeze({ id: 'gedit', label: 'gedit', exec: 'gedit', args: Object.freeze([]), category: 'editor' }),
+  // §7.9 (the owner's ruling 2026-09-27 ②) — LibreOffice Writer / Calc / Impress + the Start Center: `execs` =
+  // libreoffice → soffice, `office` = the module; a document opens through the PURE open-with verdict (office-open.js)
+  ...O.OFFICE_ROWS,
   // B-bfe6 — a browser AS AN APP: the human's own window with its OWN profile (browserArgv); `exec` is the family's
   // first name, the keeper serves the row with the first of `execs` found on PATH (browserRowFor)
   Object.freeze({ id: 'chromium', label: 'Chromium', exec: 'chromium', execs: BROWSER_KINDS.chromium.execs, args: Object.freeze([]), category: 'browser', browser: 'chromium' }),
@@ -1136,12 +1154,59 @@ function xpraInstallPlan(f) {
   steps.push('apt-get update');
   steps.push(`DEBIAN_FRONTEND=noninteractive apt-get install -y ${packages.join(' ')}`);
   steps.push('xpra --version');
-  const script = ['set -e', ...steps.map((l) => `echo '+ ${l.replace(/'/g, '\'"\'"\'')}'; ${l}`)].join('\n');
-  const commands = steps.map((l) => (l === 'xpra --version' ? l : l.startsWith('(') || l.startsWith('printf') ? `sudo sh -c ${shq(l)}` : `sudo ${l}`));
+  const { script, commands } = planLines(steps, { plain: ['xpra --version'] });
   const canRun = !!(f.root || f.sudo);
   return { ok: true, source, packages, script, commands, canRun, code: canRun ? null : 'no_sudo', error: canRun ? null : 'this machine has no passwordless sudo — run the commands below yourself, then check again', already, aptXpra: f.aptXpra || null, installed: f.xpra || null, root: !!f.root };
 }
 const shq = (s) => `'${String(s).replace(/'/g, '\'"\'"\'')}'`;
+/** THE ROOT SCRIPT + THE COMMANDS A PERSON TYPES for a plan's steps (PURE — every install plan spells them here, §7.9
+ *  generalised the xpra plan's two lines): the script runs every step as root, each echoed first, under `set -e`; in
+ *  `commands` a step carries sudo (a subshell / printf line as `sudo sh -c '<line>'`), a step named in `plain` is
+ *  typed as is (a check a person runs as themselves). */
+function planLines(steps, { plain = [] } = {}) {
+  const script = ['set -e', ...steps.map((l) => `echo '+ ${l.replace(/'/g, '\'"\'"\'')}'; ${l}`)].join('\n');
+  const commands = steps.map((l) => (plain.includes(l) ? l : l.startsWith('(') || l.startsWith('printf') ? `sudo sh -c ${shq(l)}` : `sudo ${l}`));
+  return { script, commands };
+}
+/** Debian's package-name rule — every name that reaches a plan's root script line is re-checked against it. */
+const PKG_RE = /^[a-z0-9][a-z0-9+.-]{1,63}$/;
+/** How long apt waits for ANOTHER apt's lock (a desktop's unattended-upgrades, an xpra install on the same machine —
+ *  each its own slot) before it gives up by name, instead of failing at once with "Could not get lock". */
+const APT_LOCK_WAIT_S = 300;
+/**
+ * A PACKAGE INSTALL PLAN from the machine's OWN apt sources (PURE; §7.9 — LibreOffice; the xpra plan's shape and
+ * refusals): `no_facts` / `no_x11` / `no_apt` BY NAME before anything runs, then `apt-get update` + ONE
+ * `apt-get install -y <packages>` + the spec's check, and `canRun` (root or passwordless sudo, else `no_sudo` with the
+ * commands to copy). `spec` = `{what, label, packages, verify}` from a CLOSED table (src/office-open.js
+ * installSpecFor) — a request never names a package; every name is re-checked against PKG_RE and the check against a
+ * fixed shape before either reaches a root shell line (else `bad-request`).
+ *   → { ok:true, source:'apt', what, label, packages, script, commands[], canRun, code:null|'no_sudo', error, root }
+ */
+function packageInstallPlan(f, spec) {
+  const s = spec && typeof spec === 'object' ? spec : null;
+  if (!s || !Array.isArray(s.packages) || !s.packages.length || !s.packages.every((p) => typeof p === 'string' && PKG_RE.test(p)) || !/^command -v [a-z][a-z0-9.-]{0,63}$/.test(String(s.verify || ''))) return { ok: false, code: 'bad-request', error: 'not a known install' };
+  const label = String(s.label || s.what || 'the package');
+  if (!f || typeof f !== 'object') return { ok: false, code: 'no_facts', error: 'the machine did not report its install facts (an older agent?)' };
+  if (f.platform && f.platform !== 'linux') return { ok: false, code: 'no_x11', error: `${f.platform === 'darwin' ? 'macOS' : f.platform === 'win32' ? 'Windows' : f.platform} has no X11 server — desktop apps need Linux` };
+  if (!f.apt) return { ok: false, code: 'no_apt', error: `${f.prettyName || f.distro || 'this Linux'} has no apt-get — install ${label} with its own package manager (VibeSpace drives apt only)` };
+  const packages = s.packages.slice();
+  const wait = `-o DPkg::Lock::Timeout=${APT_LOCK_WAIT_S}`;
+  const steps = [`apt-get ${wait} update`, `DEBIAN_FRONTEND=noninteractive apt-get ${wait} install -y ${packages.join(' ')}`, s.verify];
+  const { script, commands } = planLines(steps, { plain: [s.verify] });
+  const canRun = !!(f.root || f.sudo);
+  return { ok: true, source: 'apt', what: s.what || null, label, packages, script, commands, canRun, code: canRun ? null : 'no_sudo', error: canRun ? null : 'this machine has no passwordless sudo — run the commands below yourself, then check again', root: !!f.root };
+}
+/** Every install the product can plan: xpra (the display rung) and the LibreOffice set (§7.9). */
+const INSTALL_WHATS = Object.freeze(['xpra', ...O.INSTALL_WHATS]);
+/** THE ONE PLAN LOOKUP (the access layer's `installPlan(hostId, what)`): absent / 'xpra' ⇒ xpraInstallPlan, a
+ *  LibreOffice install ⇒ packageInstallPlan over its closed spec, anything else refused `bad-request` by name. */
+function installPlanFor(what, f) {
+  const w = what === undefined || what === null || what === '' ? 'xpra' : String(what);
+  if (w === 'xpra') return xpraInstallPlan(f);
+  const spec = O.installSpecFor(w);
+  if (!spec) return { ok: false, code: 'bad-request', error: `unknown install ${JSON.stringify(w.slice(0, 40))} — one of ${INSTALL_WHATS.join(', ')}` };
+  return packageInstallPlan(f, spec);
+}
 /** The argv that RUNS a plan's script on its machine (the same argv on every transport: in-process spawn on this
  *  machine, the agentd `run-stream` op on a paired one). */
 function installArgv(plan) { return plan && plan.root ? ['sh', '-c', plan.script] : ['sudo', '-n', 'sh', '-c', plan.script]; }
@@ -1334,5 +1399,6 @@ module.exports = {
   TRANSITIONS, transition, isLiveState, isTerminalState,
   idleState, capVerdict, profileRetireVerdict, PERSON_ENDINGS, adoptVerdict, streamTargetOf, newRecord,
   HOST_OFFLINE_STATE, XPRA_APT_MIN_MAJOR, XPRA_PIN_MAJOR, XPRA_REPO_URL, XPRA_KEY_URL, XPRA_APT_PACKAGES, XPRA_ORG_EXTRA, xpraInstallPlan, installArgv, machinePickRow, // lane C2
+  planLines, PKG_RE, APT_LOCK_WAIT_S, packageInstallPlan, INSTALL_WHATS, installPlanFor, // §7.9: the generalised install plan (LibreOffice)
   INSTALL_FILES, INSTALL_UNRECORDED_EXIT, INSTALL_LOCK_PREFIX, INSTALL_RUNNER, INSTALL_LAUNCHER, installLauncherArgv, // lane C verify r2 (F3 + F4), r4 (the kernel-held lock)
 };

@@ -6,6 +6,7 @@ import { hasDedicatedViewer, getViewerType, getFileIcon } from './file-types.js'
 import { FILE_ICONS } from './icons.js';
 import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
 import { viewerVerdict, refusalText } from './docx-viewer-model.js';
+import { openWithVerdict } from '../office-open.js'; // §7.9: the viewer's "Open in LibreOffice" — the ONE open-with verdict names the app
 import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -181,7 +182,7 @@ class FileViewer {
         // ended in JSZip's "Can't find end of central directory".
         const verdict = viewerVerdict(ext);
         if (verdict.kind === 'refuse') showDocxRefusal(container, refusalText(verdict.code, t));
-        else await renderDocxViewer(container, rawUrl, { signal: ctl.signal });
+        else await renderDocxViewer(container, rawUrl, { signal: ctl.signal, office: FileViewer._officeOpener(app, filePath, host) });
       } else if (viewerType === 'pptx') {
         FileViewer._renderPptx(container, filePath, rawUrl);
       } else {
@@ -195,6 +196,34 @@ class FileViewer {
       container.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(t('Error: {msg}', { msg: err.message }))}</div>`;
       return true; // error shown, don't fall through to editor
     }
+  }
+
+  /**
+   * §7.9 (docs/design-desktop-apps.zh.md) the Word viewer's "Open in LibreOffice" → { file, open(anchor) } | null
+   * (no button: no door on this page, or a path the verdict refuses — never a string LibreOffice cannot be handed).
+   * The app is the office-open VERDICT's (`catalogId` — the file's own module: Writer for .docx), never a hard-coded
+   * exec; `file` = the REAL path on the file's machine (the window's `filePath`, never its host-labelled title);
+   * `host` = the FILE's machine — the app runs where the file is. LibreOffice absent there ⇒ the explorer row's plain
+   * sentence + "Install LibreOffice on <machine>…" under the button (app.officeOfferAt — never a greyed button);
+   * otherwise THE DOOR (app.openWithDesktopApp), which says its own refusals. A throw is a toast, never silent.
+   */
+  static _officeOpener(app, filePath, host = '') {
+    if (!app || typeof app.openWithDesktopApp !== 'function') return null;
+    const h = host && host !== 'local' ? host : null;
+    const v = openWithVerdict({ file: filePath, machine: { hostId: h, fileHost: h } });
+    if (!v.ok) return null;
+    return {
+      file: v.label,
+      open: async (anchor) => {
+        try {
+          if (await app.officeOfferAt?.(anchor, { host: h, file: v.file })) return null;
+          return await app.openWithDesktopApp({ catalogId: v.catalogId, file: v.file, host: h });
+        } catch (e) {
+          showToast(t('Could not open the document in LibreOffice') + (e && e.message ? ': ' + e.message : ''), { type: 'error' });
+          return null;
+        }
+      },
+    };
   }
 
   // ── Image viewer with zoom controls ──

@@ -1,11 +1,14 @@
 import { track } from './telemetry-client.js';
 import { cssVarDefault } from './utils.js';
 import { isTransientWindowType } from './window-types.js';
-import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
+import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
 // records with the same members differ only in layout and are applied in place.
 const membersOf = (c) => ((c && Array.isArray(c.tabs)) ? c.tabs : []).map(String).join(',');
+// THE HELD CLOSE (inc-mukeyzpt-lpou): how long a LOCAL close outranks a remote record that still lists the window
+// when no save carrying the close has left this client yet — §6b's dirty expiry, the held ratio's RATIO_HOLD_MS.
+const CLOSE_HOLD_MS = 60000;
 
 // Window types that legitimately carry no openSpec (never persisted/synced):
 // chat/terminal restore by session identity + get their openSpec async after
@@ -119,13 +122,16 @@ class LayoutManager {
     if (dm && msg.desktopId) {
       // Desktop-aware: only apply if it's for our active desktop
       if (msg.desktopId !== dm.activeDesktopId) {
-        // Cache state for non-active desktop
-        dm._savedStates.set(msg.desktopId, msg.state);
+        // Cache state for non-active desktop — through the desktop manager: a window this client still holds
+        // (hidden) that the record's sender REMOVED is closed here now, never shown again by the next switch
+        // (inc-mukeyzpt-lpou, the parked second client)
+        dm.cacheRemoteState(msg.desktopId, msg.state);
         dm._renderSwitcher(); // update window counts
         return;
       }
     }
     this._applyRemoteState(msg.state);
+    if (dm && msg.desktopId) dm.noteWire(msg.desktopId, msg.state); // the record this desktop was last seen as on the wire
     if (msg.desktopMeta && dm) dm.updateFromMeta(msg.desktopMeta);
   }
 
@@ -134,6 +140,8 @@ class LayoutManager {
     if (!state) return;
     this._restoring = true;
     let heldKept = false; // a local divider drag kept over the record (v2 verify r1 ①) — re-sent once below
+    let heldClosed = false; // a window THIS client closed, still listed by the record (inc-mukeyzpt-lpou) — the close is re-sent once below
+    const heldIds = (state.windows || []).map((rw) => rw.winId || rw.id).filter((id) => this._closeHeld(id));
     try {
       // Grid
       if (state.grid) {
@@ -160,6 +168,9 @@ class LayoutManager {
           const win = this.app.wm.windows.get(winId);
 
           if (!win) {
+            // THE HELD CLOSE (inc-mukeyzpt-lpou): this client closed it and no save carrying that close has left
+            // yet — the record is OLDER than the close; it never re-creates the window (the close goes out below)
+            if (heldIds.includes(winId)) { heldClosed = true; continue; }
             // Window doesn't exist locally — create it
             this._createRemoteWindow(rw);
             continue;
@@ -244,9 +255,13 @@ class LayoutManager {
         const remoteByMembers = new Map(); // tabs.join(',') -> key
         for (const rw of state.windows) {
           if (!rw.tabChain || rw.isTabGuest) continue;
-          const key = chainSyncKey(rw.tabChain);
-          remoteChains.set(key, rw.tabChain);
-          remoteByMembers.set(membersOf(rw.tabChain), key);
+          // a held close leaves the record's chain exactly as it left the local one (PURE removeTab, the same
+          // arithmetic — same key): never a rebuild around a member that is gone, which flattened the split
+          const tc = heldIds.length ? withoutMembers(rw.tabChain, heldIds) : rw.tabChain;
+          if (!tc) continue;
+          const key = chainSyncKey(tc);
+          remoteChains.set(key, tc);
+          remoteByMembers.set(membersOf(tc), key);
         }
         // Break local chains not in remote
         // A LOCAL divider drag this record could not have known (it was held
@@ -307,6 +322,49 @@ class LayoutManager {
     // record's, and its own save was just dropped by the clear above — send it once, after the gate opens
     // (same delay, scheduled later ⇒ runs later).
     if (heldKept) setTimeout(() => this._resendHeldRatio(), 1000);
+    if (heldClosed) setTimeout(() => this._resendHeldClose(), 1000); // …and a close the record could not know, the same way
+  }
+
+  /** THE HELD CLOSE (inc-mukeyzpt-lpou; the held ratio's twin). A LOCAL close is a local change like a drag: until a
+   *  save carrying it has left this client, a remote record that still lists the window was captured before the
+   *  close reached anybody — it must not re-create it (and the apply's user-dirty clear must not drop the close).
+   *  Recorded by the ONE retirement (wm._retireWindow) for a close made while this user is active (an idle
+   *  client's programmatic close would never be sent — §6b's expiry — so it is not held); never for a close an
+   *  apply or the boot restore made (`_restoring`). Released by the save that carries it (_releaseHeldCloses),
+   *  expired after CLOSE_HOLD_MS, and void once a window with that id exists again (an explicit re-open). */
+  noteClosed(id, desktopId) {
+    if (!id || this._restoring) return;
+    const now = Date.now();
+    if (!this._lastUserInputAt || now - this._lastUserInputAt > CLOSE_HOLD_MS) return;
+    (this._heldCloses ||= new Map()).set(String(id), { at: now, desk: desktopId || null });
+  }
+
+  /** Is `id` a held close right now (fresh, not re-opened)? */
+  _closeHeld(id) {
+    const h = this._heldCloses && this._heldCloses.get(String(id));
+    if (!h) return false;
+    if (Date.now() - h.at > CLOSE_HOLD_MS || this.app.wm.windows.has(String(id))) { this._heldCloses.delete(String(id)); return false; }
+    return true;
+  }
+
+  /** A save of `desktopId`'s state left this client (or was identical to the last one sent): it carries every
+   *  close made on that desktop — release them (a missing desktop id = every held close). */
+  _releaseHeldCloses(desktopId) {
+    if (!this._heldCloses) return;
+    for (const [id, h] of this._heldCloses) if (!desktopId || !h.desk || h.desk === desktopId) this._heldCloses.delete(id);
+  }
+
+  /** A remote apply REFUSED to re-create a held close — send the close ONCE, as the user's own act (the
+   *  _resendHeldRatio shape): the dirty bit re-set with the close's REAL time, §6b's 60 s expiry keeping its
+   *  meaning, through the ordinary autosave (the no-op guard included). */
+  _resendHeldClose(tries = 0) {
+    if (this._restoring) { if (tries < 25) setTimeout(() => this._resendHeldClose(tries + 1), 200); return; }
+    let at = 0;
+    for (const [id] of this._heldCloses || []) if (this._closeHeld(id)) at = Math.max(at, this._heldCloses.get(id).at);
+    if (!at) return; // a later save (or the expiry) already carried it
+    this._userDirty = true;
+    this._lastUserInputAt = Math.max(this._lastUserInputAt || 0, at);
+    this.scheduleAutoSave();
   }
 
   /** v2 verify r1 ①: a remote apply KEPT a local divider drag (PURE heldRatio) — send it ONCE, as the user's own
@@ -797,11 +855,12 @@ class LayoutManager {
     // unchanged state — skip the send (and the server disk write + rebroadcast
     // + every other client's full diff pass) when nothing actually changed.
     const json = JSON.stringify({ state, desktopId });
-    this._releaseHeldRatios(); // this state (or the identical one already sent) carries every held divider ratio
+    this._releaseHeldRatios(); this._releaseHeldCloses(desktopId); // this state (or the identical one already sent) carries every held divider ratio and every close made here
     if (json === this._lastSentJson) return;
     this._lastSentJson = json;
     // Full state to server for disk persistence
     this.app.ws.send({ type: 'layout-sync', state, desktopId });
+    if (desktopId) this.app.desktopManager?.noteWire(desktopId, state);
   }
 
   // Load auto-saved state on startup

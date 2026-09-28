@@ -22,6 +22,8 @@ function create({ app, server, rootDir, HOST, PORT, BUFFERS_DIR, PERMISSION_MODE
   // agent browser P1 second half (§3.2.5 / §3.8): the Task-Group default rung, the
   // zero-billed notice queue and the session-meta writer the pin persists through
   getTasks = null, sessionStatusKey = null, getSessionStatus = null, persistSessionMeta = null, rebindSessionMeta = null,
+  // B-f7ab: the late browser key reads the record it extends (never a partial one) and asks THE integration switch
+  readSessionMetaOf = null, integrationEnabled = null,
   // agent browser P3 (§4.3.1): the ONE delivery ladder the handback announcer forwards to, and the "For you" inbox
   deliver = null, userTodos = null,
   // lane J r2: the adapter registry the browser takeover's stale sweep answers pending approvals through (THE one permission answer)
@@ -462,10 +464,25 @@ app.post('/api/mounts/rclone/install', async (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// A STORAGE MOUNT'S OAUTH CLIENT AND ITS CONSENT ARE THE OWNER'S (client-from-mount
+// verify r5): a self-identifying agent bearer (vsst_ / jbt_) is refused by name on
+// the routes that begin / follow / finish / cancel a Drive or Gmail consent, that
+// write a minted token, and on the config read that prefills the client secret in
+// the clear — the courtesy src/routes/channels.js gives its consent verbs and its
+// mount-clients list (the same secret, lent to a channel account, would otherwise
+// have been one GET away on this side). With sign-in on the cookie gate answers
+// 401 before this; on a sign-in-off instance this is the named refusal.
+const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+function refuseAgentBearer(req, res) {
+  if (!isAgentBearer(req)) return false;
+  res.status(403).json({ error: 'a storage mount\'s OAuth client and its sign-in are the owner\'s — an agent token may not read, start or complete one', code: 'agent-forbidden' });
+  return true;
+}
 // Guided Google Drive OAuth (see mounts.js startDriveAuth for the model).
 // With mountId: re-authorize an EXISTING Drive mount/credential using its own
 // OAuth client creds (invalid_grant recovery).
 app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
+  if (refuseAgentBearer(req, res)) return;
   try {
     const { mountId, ...opts } = req.body || {};
     res.json(mountId ? await mounts.startDriveAuthForMount(mountId) : await mounts.startDriveAuth(opts));
@@ -475,15 +492,17 @@ app.post('/api/mounts/gdrive-auth/start', async (req, res) => {
 // `client` = the OAuth client it was minted under (D2: a client switch lands
 // WITH its token — never a new client beside the old token)
 app.post('/api/mounts/:id/drive-token', async (req, res) => {
+  if (refuseAgentBearer(req, res)) return;
   try { await mounts.applyDriveToken(req.params.id, req.body?.token, req.body?.client); res.json({ success: true, mounts: mounts.list() }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/mounts/gdrive-auth/status', (req, res) => res.json(mounts.driveAuthStatus()));
+app.get('/api/mounts/gdrive-auth/status', (req, res) => { if (refuseAgentBearer(req, res)) return; res.json(mounts.driveAuthStatus()); });
 app.post('/api/mounts/gdrive-auth/callback', async (req, res) => {
+  if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.forwardDriveCallback(req.body?.url)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/mounts/gdrive-auth/cancel', (req, res) => { mounts.cancelDriveAuth(); res.json({ success: true }); });
+app.post('/api/mounts/gdrive-auth/cancel', (req, res) => { if (refuseAgentBearer(req, res)) return; mounts.cancelDriveAuth(); res.json({ success: true }); });
 // Shared Drive picker (2.131.0): list the Shared Drives a drive credential can
 // see — by existing record id, or transiently by pasted token (add dialog).
 app.post('/api/mounts/shared-drives', async (req, res) => {
@@ -494,15 +513,17 @@ app.post('/api/mounts/shared-drives', async (req, res) => {
 // consent URL; same-machine completes hands-free via the local listener;
 // remote users paste the 127.0.0.1 redirect back to /callback.
 app.post('/api/mounts/gmail-auth/start', async (req, res) => {
+  if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.gmail.startAuth(req.body || {})); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/mounts/gmail-auth/status', (req, res) => res.json(mounts.gmail.authStatus()));
+app.get('/api/mounts/gmail-auth/status', (req, res) => { if (refuseAgentBearer(req, res)) return; res.json(mounts.gmail.authStatus()); });
 app.post('/api/mounts/gmail-auth/callback', async (req, res) => {
+  if (refuseAgentBearer(req, res)) return;
   try { res.json(await mounts.gmail.forwardCallback(req.body?.url)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.post('/api/mounts/gmail-auth/cancel', (req, res) => { mounts.gmail.cancelAuth(); res.json({ success: true }); });
+app.post('/api/mounts/gmail-auth/cancel', (req, res) => { if (refuseAgentBearer(req, res)) return; mounts.gmail.cancelAuth(); res.json({ success: true }); });
 // Labels picker (2.135.0): the account's real labels for the sync filter.
 app.post('/api/mounts/gmail-labels', async (req, res) => {
   try { res.json({ labels: await mounts.listGmailLabels(req.body || {}) }); }
@@ -538,6 +559,7 @@ app.post('/api/mounts/:id/unmount', async (req, res) => {
 // Decrypted connection config for the edit dialog (prefill REAL values —
 // user directive; cookie-authed, single-user instance model)
 app.get('/api/mounts/:id/config', (req, res) => {
+  if (refuseAgentBearer(req, res)) return;   // verify r5: the plaintext client secret — the owner's dialog only
   try { res.json(mounts.config(req.params.id)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -604,6 +626,7 @@ function createSessionMessages(session, sessionId) {
   // boot reconciliation (server.js, after restoreSessions) is what may start
   // its tick. The spawn env it hands a browser is the sanitised base env.
   let browserKeeper = null;
+  let browserKeys = null; // B-f7ab: the late browser key (src/server/browser-key.js)
   let browserHandback = null;
   let browserAccess = null;
   let egressProxy = null;
@@ -692,6 +715,24 @@ function createSessionMessages(session, sessionId) {
       return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
     };
     let browserEnvMemo;
+    // the pin route re-points a RUNNING session's indirection through the
+    // same module ws-create resolves it with (file-based, so a second
+    // instance reads the same objects); B-f7ab's late key composes through it too
+    const browserEnvFn = () => {
+      if (browserEnvMemo !== undefined) return browserEnvMemo;
+      try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, serverNotice: null, telemetry: null }); }
+      catch (e) { console.warn('[browser] pin re-point unavailable — ' + (e && e.message)); browserEnvMemo = null; }
+      return browserEnvMemo;
+    };
+    // B-f7ab: a live session with no browser key YET gets one on its first browser use — the spawn's mint, env and pin
+    // ladder (src/server/browser-key.js); the binding rides THE meta choke point (persistSessionMeta → writeSessionMeta)
+    browserKeys = require('./browser-key').create({
+      browserEnv: browserEnvFn, keeper: () => browserKeeper, activeSessions,
+      integrationEnabled: () => (typeof integrationEnabled === 'function' ? integrationEnabled() : true),
+      readMeta: (session) => (typeof readSessionMetaOf === 'function' ? readSessionMetaOf(session) : null),
+      persistMeta: (session, patch) => { if (persistSessionMeta && session) persistSessionMeta(session, patch); },
+      onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
+    });
     const { router: browserRouter, setup: setupBrowserRoutes } = require('../routes/browser');
     setupBrowserRoutes({
       keeper: browserKeeper, activeSessions,
@@ -723,15 +764,9 @@ function createSessionMessages(session, sessionId) {
       // MULTIVIEW D4: the conversation's explicit browser cap rides the meta (the properties row + a restart); the keeper keeps the conversation-level fact
       persistCap: (session, v) => { if (persistSessionMeta && session) persistSessionMeta(session, { browserCap: Number.isInteger(v) ? v : undefined }); },
       onLiveFactsChanged: () => { try { broadcastActiveSessions?.(); } catch (e) { console.warn('[browser] live facts not re-published — ' + (e && e.message)); } },
-      // the pin route re-points a RUNNING session's indirection through the
-      // same module ws-create resolves it with (file-based, so a second
-      // instance reads the same objects)
-      browserEnv: () => {
-        if (browserEnvMemo !== undefined) return browserEnvMemo;
-        try { browserEnvMemo = require('./browser-env').create({ dataDir: path.join(rootDir, 'data'), serverSetting, serverNotice: null, telemetry: null }); }
-        catch (e) { console.warn('[browser] pin re-point unavailable — ' + (e && e.message)); browserEnvMemo = null; }
-        return browserEnvMemo;
-      },
+      browserEnv: browserEnvFn,
+      // B-f7ab: THE late key — every route that reads a session's browser key asks it for a session that has none
+      ensureBrowserKey: (session, o) => browserKeys.ensureBrowserKey(session, o),
     });
     app.use(browserRouter);
     // lane H (2026-09-25): the session card's + status chip's `browserLive` fact moves when a browser STARTS or
@@ -860,6 +895,6 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace };
+  return { mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys };
 }
 module.exports = { create };

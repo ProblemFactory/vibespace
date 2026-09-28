@@ -59,6 +59,73 @@ class ChannelError extends Error {
   toJSON() { return { ok: false, code: this.code, retryable: this.retryable, detail: this.detail }; }
 }
 
+/**
+ * WHAT WE SENT NEVER COMES BACK IN OUR WORDS (client-from-mount verify r4,
+ * credential class). An adapter words a vendor refusal from the vendor's own
+ * body (`typedFailure`), and that sentence travels far: the account's
+ * `lastAuthError` / `lastPass` (written to adapters.json in the clear and
+ * BROADCAST to every client in the digest), the For-you item's "Vendor said:",
+ * the log. A vendor — or a gateway in front of it — that echoes the request
+ * in its error ("the secret … was rejected") therefore published the client
+ * secret the request carried; for an account that borrowed a storage mount's
+ * client, the mount's. Google and Lark do not echo today; nothing here may
+ * depend on that. So the adapters' ONE round-trip function scrubs the
+ * vendor's body (and a transport error's text) of the EXACT VALUES the
+ * request carried in its secret-bearing fields, BEFORE the typed error is
+ * built (its message, its detail and its stack are born clean). By value,
+ * never by pattern: the vendor's own words are left as they are.
+ *   sentSecrets({fields, headers}) → [{name, value}] — `fields` = the form /
+ *     JSON body the request sends; the Bearer of `headers.Authorization`.
+ *   withoutSent(value, sent) → a scrubbed COPY of a string / JSON value.
+ * verify r5: a value is withheld in EVERY spelling it left in — plain, as
+ * `encodeURIComponent` spells it AND as the form body actually carried it
+ * (`URLSearchParams` percent-encodes `!'()~` and writes a space as `+`, where
+ * encodeURIComponent leaves them; a gateway echoing the raw body echoes that
+ * form) — and the Bearer is read WITHOUT a regex: V8 keeps the subject of the
+ * last regex match in the legacy `RegExp.input` / `lastMatch` statics (the
+ * heap's regexp_last_match_info) until the next match anywhere, so a regex
+ * over the Authorization header parked the live bearer there after every call.
+ */
+const SENT_SECRET_FIELDS = Object.freeze(['client_secret', 'app_secret', 'refresh_token']);
+const SENT_SECRET_MIN = 6;   // a shorter value would rewrite ordinary words
+function sentSecrets({ fields = null, headers = null } = {}) {
+  const out = [];
+  const f = fields && typeof fields === 'object' ? fields : {};
+  for (const k of SENT_SECRET_FIELDS) { const v = f[k]; if (typeof v === 'string' && v.length >= SENT_SECRET_MIN) out.push({ name: k, value: v }); }
+  const a = headers && typeof headers === 'object' ? (headers.Authorization || headers.authorization) : null;
+  const bearer = bearerOf(a);   // verify r5: no regex — a regex would park the header in RegExp.input until the next match
+  if (bearer && bearer.length >= SENT_SECRET_MIN) out.push({ name: 'access_token', value: bearer });
+  return out;
+}
+/** The token of a `Bearer <token>` header (the scheme case-insensitive, the token a single run of non-blank
+ *  characters), read by slicing: never a regex over a string that holds a live credential. null = not a Bearer. */
+function bearerOf(a) {
+  if (typeof a !== 'string' || a.length < 8 || a.slice(0, 7).toLowerCase() !== 'bearer ') return null;
+  const v = a.slice(7).trim();
+  if (!v) return null;
+  for (let i = 0; i < v.length; i++) { const c = v.charCodeAt(i); if (c === 32 || c === 9 || c === 10 || c === 13 || c === 11 || c === 12) return null; }
+  return v;
+}
+/** Every spelling a sent value can come back in: plain, encodeURIComponent's, and the form body's own (URLSearchParams). */
+const spellingsOf = (value) => new Set([value, encodeURIComponent(value), new URLSearchParams([['v', value]]).toString().slice(2)]);
+function withoutSent(value, sent) {
+  if (!Array.isArray(sent) || !sent.length) return value;
+  const scrub = (str) => {
+    let o = str;
+    for (const x of sent) {
+      for (const v of spellingsOf(x.value)) if (o.includes(v)) o = o.split(v).join(`[${x.name} withheld]`);
+    }
+    return o;
+  };
+  const walk = (v, depth) => {
+    if (typeof v === 'string') return scrub(v);
+    if (!v || typeof v !== 'object' || depth > 6) return v;
+    if (Array.isArray(v)) return v.map((x) => walk(x, depth + 1));
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, depth + 1)]));
+  };
+  return walk(value, 0);
+}
+
 const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
 const SCAN_SOURCES = Object.freeze(['store', 'ui']);
 const HISTORY_MODES = Object.freeze(['page', 'since', 'none']);
@@ -71,6 +138,13 @@ const OLDER_HISTORY = Object.freeze(['page', 'none']);
 const BUDGET_UNITS = Object.freeze(['request', 'quota-unit']);
 /** Lane R5: the drain actions a `caps.pace.cost` may price (drain rule 18). */
 const PACE_COSTS = Object.freeze(['fetch', 'discover', 'scanHost']);
+/** §25 (2026-09-27): how a record is DRAWN — `text` (the default: the window's
+ *  generic rung over `text`) or `blocks` (the adapter writes the typed render
+ *  tree at ingest AND the module exports `blocksOf(record)`, the rung for a
+ *  record stored before that); and what a conversation's TITLE is — a `name`
+ *  (a chat) or a mail `subject` (shown through `cleanSubject`). */
+const RENDER_MODES = Object.freeze(['text', 'blocks']);
+const TITLE_FORMS = Object.freeze(['name', 'subject']);
 
 /**
  * THE VENDOR'S OWN RETRY HINT (lane R5): seconds from a response's
@@ -152,6 +226,8 @@ function validateCaps(kind, caps) {
       }
     }
   }
+  if (c.render !== undefined && !RENDER_MODES.includes(c.render)) bad(`caps.render must be one of ${RENDER_MODES.join('|')}`);
+  if (c.titleForm !== undefined && !TITLE_FORMS.includes(c.titleForm)) bad(`caps.titleForm must be one of ${TITLE_FORMS.join('|')}`);
   if (c.vendorName !== undefined && !(typeof c.vendorName === 'string' && c.vendorName.trim() && c.vendorName.length <= 40)) bad('caps.vendorName must be a non-empty string of at most 40 characters (the vendor as the card names it)');
   if (c.receive === 'push') {
     if (!c.pushTransport) bad("caps.receive 'push' must declare pushTransport");
@@ -219,6 +295,19 @@ function createChannelRegistry() {
     if (mods.has(kind)) throw new Error(`registerChannelAdapter: duplicate kind '${kind}'`);
     validateCaps(kind, mod.caps);
     if (typeof mod.create !== 'function') throw new Error(`channel adapter '${kind}': create(record, deps) is required`);
+    // §25: `render: 'blocks'` is DECLARED ⇒ the stored-record rung must exist;
+    // a rung nobody declared is refused (it would half-work on read only)
+    const blocksDeclared = mod.caps.render === 'blocks';
+    if (blocksDeclared && typeof mod.blocksOf !== 'function') throw new Error(`channel adapter '${kind}': caps.render 'blocks' needs blocksOf(record) — the rung for a record stored before its tree existed`);
+    if (!blocksDeclared && mod.blocksOf !== undefined) throw new Error(`channel adapter '${kind}': blocksOf is exported but caps.render is not 'blocks'`);
+    // inc-muk9jj0j-rel3: the PURE send verdict from held scopes (the engine re-judges every conversation on a credential change)
+    if (mod.sendCapsOf !== undefined && (typeof mod.sendCapsOf !== 'function' || !(mod.caps.sendAs || []).length)) throw new Error(`channel adapter '${kind}': sendCapsOf must be a function of the held scopes, on a sendable adapter`);
+    // what unlocks SENDING (the window's read-only line): {scopes: [...], console: boolean}
+    if (mod.sendGrant !== undefined) {
+      const g = mod.sendGrant;
+      if (!g || !Array.isArray(g.scopes) || !g.scopes.length || !g.scopes.every((x) => typeof x === 'string' && x) || typeof g.console !== 'boolean') throw new Error(`channel adapter '${kind}': sendGrant must be {scopes: [non-empty strings], console: boolean}`);
+      if (!(mod.caps.sendAs || []).length) throw new Error(`channel adapter '${kind}': sendGrant on a read-only adapter (caps.sendAs is empty)`);
+    }
     mods.set(kind, mod);
     return mod;
   }
@@ -360,6 +449,6 @@ function createChannelRegistry() {
 
 module.exports = {
   createChannelRegistry, ChannelError, validateCaps, validateMethods,
-  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS,
-  retryAfterSeconds,
+  CHANNEL_ERROR_CODES, RECEIVE_MODES, SCAN_SOURCES, HISTORY_MODES, SEND_IDENTITIES, IDENTITY_MARKING, TOS_RISK, METHOD_GATES, OLDER_HISTORY, BUDGET_UNITS, PACE_COSTS, RENDER_MODES, TITLE_FORMS,
+  retryAfterSeconds, sentSecrets, withoutSent, bearerOf, SENT_SECRET_FIELDS,
 };

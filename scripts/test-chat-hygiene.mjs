@@ -470,7 +470,7 @@ console.log('§4b WHO MAY BE A NOTICE — a peer is never VibeSpace, whatever it
     }
   }
   const noKind = sites.filter(([, a]) => !/\bkind\b/.test(a));
-  ok(`CENSUS: ${sites.length} card writers (emitPeerCard / feedPeerCard) in the tree — every one states the card's kind`, sites.length >= 8 && noKind.length === 0, noKind.length ? noKind : sites);
+  ok(`CENSUS: ${sites.length} card writers (emitPeerCard / feedPeerCard) in the tree — every one states the card's kind`, sites.length >= 6 && noKind.length === 0, noKind.length ? noKind : sites);   // ≥ 6 since channel-jump verify r5: the four drain sites of agent-routes are TWO helpers (one writer per store)
   const stashNoKind = stashSites.filter(([, a]) => !/\bkind\b/.test(a) && !/, e\)$/.test(a.trim()));
   ok(`CENSUS: ${stashSites.length} stash writers — every one states the entry's kind (a re-stash of a drained entry carries its own)`, stashSites.length >= 8 && stashNoKind.length === 0, stashNoKind.length ? stashNoKind : stashSites);
   // the wrappers write the path into their marker, and echo it on a refusal

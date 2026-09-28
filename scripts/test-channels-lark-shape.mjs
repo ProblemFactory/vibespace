@@ -718,5 +718,51 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   ok(lark.EGRESS.includes(got[0].host), 'the resource host is one the adapter DECLARES (test-channels-egress judges the file)');
 }
 
+// ── ⑨ WHAT WE SENT NEVER COMES BACK IN OUR WORDS (client-from-mount verify r4; the Gmail suite's ⑧, on the JSON-bodied vendor) ──
+// The Lark exchange and refresh carry `client_secret` in a JSON body; a vendor / gateway echoing it (or the refresh
+// token, or the Bearer) is withheld BY VALUE before the typed error is built. CONTROL: a copy that hands typedFailure the
+// body unscrubbed lets the echo through.
+console.log('\n⑨ what we sent never comes back in our words (verify r4)');
+{
+  const SECRET = CRED.values.appSecret;
+  const echoing = (f0) => async (url, init) => {
+    const u = new URL(String(url)); const body = init && init.body ? JSON.parse(init.body) : null;
+    if (u.pathname === '/open-apis/authen/v2/oauth/token' && body && body.grant_type === 'authorization_code') return jsonRes({ code: 20050, error: 'invalid_client', error_description: `the secret ${body.client_secret} was rejected (fake vendor echo)` }, 400);
+    if (u.pathname === '/open-apis/authen/v2/oauth/token' && body && body.grant_type === 'refresh_token') return jsonRes({ code: 20050, msg: `refresh_token ${body.refresh_token} under ${body.client_secret} was revoked (fake vendor echo)`, data: { echo: [body.client_secret] } }, 400);
+    if (u.pathname === '/open-apis/im/v1/chats') return jsonRes({ code: 99991668, msg: `Invalid access token ${String((init.headers || {}).Authorization || '').replace(/^Bearer /, '')} (fake vendor echo)` }, 401);
+    return f0(url, init);
+  };
+  const drive = async (mod) => {
+    const rg = CH.createChannelRegistry(); rg.register(mod.adapter);
+    const v = mkVendor(); const fetchFn = echoing(v.fetchFn);
+    const port = await freePort(); const oauth = OL.createOAuthLoopback({ now, log: { warn() {}, log() {}, error() {} }, fixedCallbackUrl: `http://127.0.0.1:${port}/lark/cb` });
+    const done = []; const tokens = mkTokens();
+    const a = rg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, oauth, resolveIntegration: () => CRED, onAuthDone: (id, r) => done.push(r), log: { warn() {} } });
+    const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
+    const pb = await a.auth.finish(f.flowId, `${f.redirectUri}?state=${st}&code=c`);
+    oauth.stopAll();
+    const t2 = mkTokens(); t2.st.token = { access_token: 'u-echo-bearer-0001', expiresAt: now() - 1, refresh_token: 'ur-echo-refresh-0001', refreshExpiresAt: now() + 86400000, scopes: ['im:message'] };
+    const b = rg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens: t2, resolveIntegration: () => CRED, log: { warn() {} } });
+    const e1 = await threw(() => b.listConversations({ limit: 1 }));
+    const t3 = mkTokens(); t3.st.token = { access_token: 'u-echo-bearer-0002', expiresAt: now() + 3600000, refresh_token: 'ur-echo-refresh-0002', refreshExpiresAt: now() + 86400000, scopes: ['im:message'] };
+    const c = rg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens: t3, resolveIntegration: () => CRED, log: { warn() {} } });
+    const e2 = await threw(() => c.listConversations({ limit: 1 }));
+    return { pb, done, e1, e2 };
+  };
+  const all = (e) => `${e && e.message}|${e && e.stack}|${JSON.stringify(e && e.detail)}`;
+  const r = await drive(lark);
+  ok(r.pb.ok === false && !String(r.pb.error).includes(SECRET) && /the secret \[client_secret withheld\] was rejected \(fake vendor echo\)/.test(r.pb.error) && r.done.length === 1 && !String(r.done[0].error).includes(SECRET), `(a) the consent exchange refused with an echo of the app secret: withheld by value in the paste-back answer and the report ("${r.pb.error}")`);
+  ok(r.e1 && !all(r.e1).includes(SECRET) && !all(r.e1).includes('ur-echo-refresh-0001') && /\[refresh_token withheld\] under \[client_secret withheld\] was revoked/.test(r.e1.message), `(b) the token refresh refused with an echo: message, detail and stack are born clean (${r.e1 && r.e1.message})`);
+  ok(r.e2 && !all(r.e2).includes('u-echo-bearer-0002') && /Invalid access token \[access_token withheld\]/.test(r.e2.message), `(c) an API refusal echoing the Bearer: withheld (${r.e2 && r.e2.message})`);
+  const M9 = mutantCopies('chan-lark-scrub', REPO);
+  const srcL = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+  const SCRUB = "  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));";
+  ok(srcL.split(SCRUB).length === 2, 'CONTROL setup: the scrub line is present once');
+  const lm = M9.load('src/channels/lark.js', srcL.replace(SCRUB, "  if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));"), 'unscrubbed');
+  const rc = await drive(lm);
+  ok(String(rc.pb.error).includes(SECRET) && all(rc.e1).includes(SECRET), 'CONTROL: a copy that hands the body over unscrubbed words the echoed secret into the refusal — the checks above would be red');
+  for (const c of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1 })) ok(c.pass, c.name, c.detail);
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

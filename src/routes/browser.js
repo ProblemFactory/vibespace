@@ -127,10 +127,14 @@ const STATUS = { 'not-found': 404, no_lease: 404, 'bad-request': 400, label_requ
   // r4/r5: a profile's browser closed and not started again (a failed / unidentified relaunch), or its heal budget spent
   profile_locked: 409, browser_closed: 409, browser_unstable: 409,
   // MULTIVIEW (design-browser-multiview §2 / D4): a Stop of a browser that has not started (a view's refusal is lane H's browser_stopped); a shared profile is not one of yours to stop
-  browser_released: 409, shared: 409 };
+  browser_released: 409, shared: 409,
+  // B-f7ab: a live session that could not get its browser key on first use (the reason in `why`), or is not running any more
+  no_browser_key: 409, 'session-gone': 410 };
 function fail(res, e) {
   const code = e?.code || null;
-  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}),
+  // B-f7ab verify r2 (LOW): a key minted by THIS call rides a refused answer too (`res.locals.minted`, set by needKey) — the
+  // agent's first command may be refused (not_owner, launch_failed…) and it still needs to know nothing needs restarting
+  res.status(STATUS[code] || 500).json({ error: String(e?.message || e), code, ...(e?.holders ? { holders: e.holders } : {}), ...(e?.why ? { why: e.why } : {}), ...(e?.remedy ? { remedy: e.remedy } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}),
     // P4 (§7.4): a refusal carries its ACTIONABLE way out (`action.openIntegration`), the ways out of a refused downgrade, and whether one human confirmation would do
     // MULTIVIEW D4: WHICH cap refused (this conversation's own, or the machine's) + the counts — never another session's name
     ...(e?.scope ? { scope: e.scope } : {}), ...(Number.isFinite(e?.others) ? { others: e.others } : {}), ...(Number.isFinite(e?.capOwn) ? { own: e.capOwn, cap: e.capOf } : {}),
@@ -146,7 +150,7 @@ function rulingExtras(v) {
     ...(v && Number.isFinite(v.retryAfterMs) ? { retryAfterMs: v.retryAfterMs } : {}), ...(v && v.pinned ? { pinned: true, pinnedProfile: v.pinnedProfile || null } : {}) };
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
-function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...rulingExtras(v) }); }
+function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...rulingExtras(v), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
 /** P3 (§4.3): resolve the browser a takeover/handback/confirm names — a handle,
  *  a profile id, or (nothing) the set's default / only member / the ephemeral one. */
 function inputTargetFor(k, f, ref) {
@@ -214,9 +218,26 @@ function sessionFacts(id) {
   try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch { taskIds = []; }
   return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds };
 }
+/** B-f7ab: a live session with no browser key YET (it started before per-session browsers, or while they were off)
+ *  gets one here, on its first browser use — THE engine function (src/server/browser-key.js `ensureBrowserKey`: the
+ *  spawn's own mint, env composition and pin ladder; the binding rides the ONE meta choke point). Idempotent and
+ *  synchronous; what it cannot mint is refused BY NAME (`no_browser_key` + `why` + the words a person can act on, or
+ *  `session-gone`), never the old "it predates the feature" dead end. `f.minted` rides to the resolve answer. */
 function needKey(res, f) {
   if (!f) { res.status(404).json({ error: 'no such live session', code: 'not-found' }); return null; }
-  if (!f.browserKey) { res.status(409).json({ error: 'this session has no browser key (browser isolation is off, or it predates the feature) — it cannot hold a profile', code: 'bad-request' }); return null; }
+  if (!f.browserKey) {
+    const B = require('../browser-profiles.js');
+    let r = null;
+    try { r = typeof ctx?.ensureBrowserKey === 'function' ? ctx.ensureBrowserKey(f.session, { sessionId: f.sessionId }) : B.lateKeyRefusal('unavailable'); }
+    catch (e) { console.warn(`[browser] ${f.sessionId}: the late browser key threw — ${e && e.message}`); r = B.lateKeyRefusal('unavailable'); }
+    if (!r || !r.ok || !B.isBrowserKey(r.key)) {
+      const v = r && !r.ok ? r : B.lateKeyRefusal('unavailable');
+      res.status(STATUS[v.code] || 409).json({ error: v.error, code: v.code, why: v.why, remedy: v.remedy });
+      return null;
+    }
+    f.browserKey = r.key;
+    if (r.minted) { f.minted = { key: r.key, origin: r.origin || 'new', variant: r.variant || null }; if (res && res.locals) res.locals.minted = f.minted; }
+  }
   return f;
 }
 /** The wrapper's answer WITHOUT the CDP url (§5.1) — only the wrapper form asks for it, and it asks explicitly. */
@@ -792,6 +813,8 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
   const B = require('../browser-profiles.js');
+  // B-f7ab: a key minted by THIS call (the session had none) is said in the answer — the CLI prints one note line
+  const send = (o) => res.json(f.minted ? { ...o, minted: f.minted } : o);
   try {
     // the owner's ruling (2026-09-27): a verb refused while the user drives goes on the handback's re-run list (its NAME only)
     const verb = require('../browser-profiles.js').auditVerbOf(Array.isArray(req.body?.argv) ? req.body.argv.map(String) : []);
@@ -822,10 +845,10 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
         const e = await k.ensureEphemeral({ browserKey: f.browserKey, sessionId: f.sessionId, envPairs: pairs, sessionName: sessionNameOf(f), variant: f.session._browserVariant || null });
         stampActive(f, '');
         ensureBindingOnce(f); // lane H: its actions stay findable after the conversation stops
-        return res.json({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt });
+        return send({ ok: true, kind: 'ephemeral', shared: false, handle: null, env: pairs, ...envBasis(f, { k, pairs }), profile: e.profile, browser: e.browser, lease: e.lease, created: e.created, handles: v.handles, pinTab: false, at: resolvedAt });
       }
       stampActive(f, '');
-      return res.json({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
+      return send({ ok: true, kind: 'none', shared, handle: null, env: [], ...envBasis(f, { k, pairs: f.session._browserEnv, ephemeral: !shared }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     if (v.kind === 'child') {
       const env = childEnvOf(f, v.handle);
@@ -836,14 +859,14 @@ router.post('/api/agent/browser/resolve', async (req, res) => {
       const childPairs = B.childPairsOver(parentPairs || (Array.isArray(f.session._browserEnv) ? f.session._browserEnv : []), env);
       if (parentPairs && typeof k.ensureEphemeral === 'function') {
         const e = await k.ensureEphemeral({ browserKey: v.handle, sessionId: f.sessionId, envPairs: childPairs, sessionName: `${sessionNameOf(f)} · child ${v.handle.slice(v.handle.indexOf('.') + 1)}`, variant: f.session._browserVariant || null });
-        return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt });
+        return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, profile: e.profile, browser: e.browser, at: resolvedAt });
       }
-      return res.json({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
+      return send({ ok: true, kind: 'child', handle: v.handle, env: env.pairs, unset: env.unset, ...envBasis(f, { k, pairs: childPairs }), handles: v.handles, pinTab: false, at: resolvedAt });
     }
     const r = await k.attach({ profileId: v.attachment.profileId, browserKey: f.browserKey, sessionId: f.sessionId, taskIds: f.taskIds });
     stampActive(f, v.attachment.profileId); // the command RUNS on this attachment: that is what the chip calls "last used"
     // r2: an attachment's daemon lives under the keeper's own root (its pairs never carry SOCKET_DIR), whatever the session's spawn pairs say
-    res.json({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt });
+    send({ ok: true, kind: 'attachment', handle: v.handle, ...attachAnswer(r, { cdp: req.body?.wrapper === true }), ...envBasis(f, { k, pairs: r.env, ephemeral: false }), handles: v.handles, isDefault: !!v.attachment.isDefault, at: resolvedAt });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/new-child', (req, res) => {

@@ -37,7 +37,9 @@ import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
 import * as chanCaps from '../channel-caps.js';
 // a3 i18n: route failures by CODE; a principal's kind and a Task Group's title in words.
-import { routeErrorText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText } from './channel-words.js';
+import { routeErrorText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
+// the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
+import { principalPicker, rosterFromApp } from './principal-picker.js';
 
 const RULE_LABELS = () => ({
   'mention': t('mentions'),
@@ -148,6 +150,8 @@ async function readGrain(target) {
     const own = conv.own || { access: [], watchers: [] };
     return {
       kind: 'conversation', target, conv, name: conv.title || conv.id, base,
+      // the account's own sign-in name — "Only when this name is mentioned" starts from it
+      selfName: (full.adapter && full.adapter.auth && full.adapter.auth.user) || '',
       access: own.access || [], watchers: own.watchers || [],
       caps: conv.authorityCaps || { offersSend: false, sendWhy: 'unknown', policyRequiresReview: true },
       latencyNote: wakeLatencyText(conv.wakeLatency), stats: conv.stats || null,
@@ -181,13 +185,13 @@ async function readGrain(target) {
   };
   if (target.kind === 'account') {
     const g = a.accountGrain || { access: [], watchers: [] };
-    return { kind: 'account', target, adapter: a, name: a.label || a.id, access: g.access || [], watchers: g.watchers || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, estimate: scopeEstimate('account') };
+    return { kind: 'account', target, adapter: a, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', access: g.access || [], watchers: g.watchers || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, estimate: scopeEstimate('account') };
   }
   const pa = target.id ? (a.patterns || []).find((p) => p.id === target.id) : null;
   if (target.id && !pa) { showToast(t('That rule no longer exists'), { type: 'error' }); return null; }
   const pat = pa && pa.pattern ? { match: pa.pattern.match, rules: pa.pattern.rules.map((r) => ({ ...r })) } : { match: 'any', rules: [{ kind: 'title', value: '' }] };
   return {
-    kind: 'pattern', target, adapter: a, id: pa ? pa.id : null, name: a.label || a.id, pattern: pat, patternLabel: pa ? pa.patternLabel : null,
+    kind: 'pattern', target, adapter: a, id: pa ? pa.id : null, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', pattern: pat, patternLabel: pa ? pa.patternLabel : null,
     access: pa ? (pa.access || []) : [], watchers: pa ? (pa.watchers || []) : [], caps,
     accessUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/access` : `/api/channels/adapters/${aid}/patterns`,
     watchersUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/watchers` : null,
@@ -259,27 +263,52 @@ function patternEditor(body, pat, onChange) {
  * with its pattern). Removing a principal's access removes its notification
  * in the same write (said under the rows before the save).
  */
+/** A REFUSED SAVE KEEPS THE KEYBOARD (verify round 5, 2026-09-27): disabling the focused Save button (or the picker's
+ *  box while the write is in flight) drops the focus to `body`, and a dialog whose Esc listens on its own overlay is
+ *  then deaf to the keyboard — a keyboard user who Tabbed to Save and pressed Enter could not leave a failed save
+ *  without the mouse. When the focus fell out of the dialog, it goes back to the button (a no-op once the dialog closed). */
+function refocus(btn) {
+  try { if (btn && btn.isConnected && (document.activeElement === document.body || !btn.closest('.dialog-overlay')?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
+}
 export async function showGrantAccessDialog(app, target) {
   const st = await grainState(target);
   if (!st) return;
-  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: grainTitle(st, 'access'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true });
+  // plain words (channel-polish, 2026-09-27): the dialog ASKS its question; the grain is said under it
+  // the picker's roster listener ends WITH the dialog (verify round 2: it used to live until the next broadcast)
+  let picker = null;
+  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (picker) picker.close(); } });
+  body.appendChild(el('div', 'chan-dialog-sub', st.kind === 'conversation' ? st.name : st.kind === 'account' ? t('The whole account — {label}', { label: st.name }) : t('The conversations matching a rule — {label}', { label: st.name })));
   body.appendChild(noteEl(st.kind === 'account'
     ? t('Who may see every conversation of this account — now and later — and act on them: read, search, refresh, reply (and write a new message where the account can). Access alone never wakes anyone.')
     : st.kind === 'pattern'
       ? t('Who may see the conversations that match the rule — now and later — and act on them. Access alone never wakes anyone.')
       : t('Who may see this conversation and act on it: read, search, refresh and reply. Access alone never wakes anyone.')));
   if (st.kind === 'pattern') patternEditor(body, st.pattern, () => {});
-  const choices = principalChoices(app, st.access);
   const cap = F.authorityCapCode(st.caps);
   const capWords = (c) => F.authorityCapText(c, { t, sendWhyText: chanCaps.sendWhyText });
   const rows = st.access.map((r) => ({ key: pkOf(r.principal), authority: r.authority === 'send' && !cap ? 'send' : 'draft' }));
-  if (!rows.length && choices.length) rows.push({ key: choices[0].value, authority: 'draft' });
-  const list = el('div', 'chan-access-list');
+  // WHO (the ONE picker, multi-select — chips, the box focused on open): the live roster + every principal
+  // that already holds access here but is not live now (said on its row); a pick adds its authority row
+  const pickRows = () => {
+    const live = rosterFromApp(app);
+    const have = new Set(live.map((r) => r.key));
+    for (const c of principalChoices(app, st.access)) if (!have.has(c.value)) live.unshift({ key: c.value, kind: c.kind === 'group' ? 'group' : 'agent', id: c.id, name: c.name || c.id, hint: t('not live now'), groupIds: [], groupNames: [] });
+    return live;
+  };
   body.appendChild(fieldLabel(t('Access')));
+  picker = principalPicker({
+    items: pickRows, app, multi: true, selected: rows.map((r) => r.key), autofocus: true,
+    placeholder: t('Add an agent or group…'), label: t('Add an agent or group'),
+    onChange: (keys) => {
+      for (let i = rows.length - 1; i >= 0; i--) if (!keys.includes(rows[i].key)) rows.splice(i, 1);
+      for (const k of keys) if (!rows.some((r) => r.key === k)) rows.push({ key: k, authority: 'draft' });
+      draw();
+    },
+  });
+  picker.el.classList.add('chan-access-pick');
+  body.appendChild(picker.el);
+  const list = el('div', 'chan-access-list');
   body.appendChild(list);
-  const addB = btn(t('Add an agent or group'), null, 'chan-af-add');
-  addB.prepend(icon('plus', 11));
-  body.appendChild(addB);
   const watchedNote = noteEl('', true);
   body.appendChild(watchedNote);
   if (cap) body.appendChild(noteEl(t('Direct send is not offered here: {why}', { why: capWords(cap) })));
@@ -290,27 +319,33 @@ export async function showGrantAccessDialog(app, target) {
     rows.forEach((r, i) => {
       const row = el('div', 'chan-access-row');
       row.dataset.principal = r.key;
-      const used = new Set(rows.filter((x, j) => j !== i).map((x) => x.key));
-      const who = selectBox(choices.filter((c) => !used.has(c.value)).map((c) => ({ value: c.value, label: c.label })), r.key);
-      who.onchange = () => { r.key = who.value; draw(); };
-      who.title = t('Agent or group');
-      const auth = selectBox(cap ? [{ value: 'draft', label: t('draft replies (the user approves)') }] : [{ value: 'draft', label: t('draft replies (the user approves)') }, { value: 'send', label: t('send replies directly') }], r.authority);
-      auth.onchange = () => { r.authority = auth.value; };
-      auth.title = t('Authority');
+      const who = el('span', 'chan-access-who', picker.nameOf(r.key));
+      who.title = picker.nameOf(r.key);
+      // the AUTHORITY as two plain answers (the wire's draft | send); where direct sending is not offered
+      // only the first is drawn — the note under the rows says why, once
+      const auth = el('div', 'chan-access-auth');
+      auth.setAttribute('role', 'radiogroup');
+      auth.setAttribute('aria-label', t('Authority'));
+      const opts = cap ? [['draft', t('May draft replies (you approve)')]] : [['draft', t('May draft replies (you approve)')], ['send', t('May reply directly')]];
+      for (const [value, words] of opts) {
+        const lab = el('label', 'dialog-check-row chan-radio-row');
+        const inp = document.createElement('input');
+        inp.type = 'radio'; inp.name = `chan-auth-${i}-${r.key}`; inp.value = value; inp.checked = r.authority === value;
+        inp.onchange = () => { if (inp.checked) r.authority = value; };
+        lab.append(inp, el('span', 'chan-radio-words', words));
+        auth.appendChild(lab);
+      }
       const rm = document.createElement('button');
       rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove'); rm.setAttribute('aria-label', t('Remove'));
       rm.appendChild(icon('close', 12));
-      rm.onclick = () => { rows.splice(i, 1); draw(); };
+      rm.onclick = () => { rows.splice(i, 1); picker.setSelected(rows.map((x) => x.key)); draw(); };
       row.append(who, auth, rm);
       list.appendChild(row);
     });
-    const free = choices.filter((c) => !rows.some((r) => r.key === c.value));
-    addB.style.display = free.length ? '' : 'none';
     const gone = st.watchers.filter((w) => !rows.some((r) => r.key === pkOf(w.principal)));
     watchedNote.textContent = gone.length ? t('Removing access also removes the notification of: {list}', { list: gone.map((w) => principalText(w.principal)).join(', ') }) : '';
     watchedNote.style.display = gone.length ? '' : 'none';
   };
-  addB.onclick = () => { const free = choices.find((c) => !rows.some((r) => r.key === c.value)); if (free) { rows.push({ key: free.value, authority: 'draft' }); draw(); } };
   draw();
   const actions = el('div', 'chan-flow-actions');
   if (st.kind === 'pattern' && st.id) {
@@ -324,12 +359,21 @@ export async function showGrantAccessDialog(app, target) {
   actions.appendChild(btn(t('Cancel'), close));
   const save = btn(t('Save'), null, 'mounts-btn-primary');
   save.onclick = async () => {
+    // the payload's principals come from the SAME choices as before (kind, id, name) — the wire is unchanged;
+    // re-read at the click (a session that went live after the dialog opened is in it)
+    const choices = principalChoices(app, st.access);
     const access = rows.map((r) => { const c = choices.find((x) => x.value === r.key); return c ? { principal: { kind: c.kind, id: c.id, name: c.name }, authority: r.authority } : null; }).filter(Boolean);
     const v = F.validateAccess(access, st.caps);
     if (!v.ok) { showToast(routeErrorText({ code: v.code, error: v.error, why: v.why, principal: v.principal }), { type: 'error' }); return; }
     if (st.kind === 'pattern') { const pv = F.validatePattern(st.pattern); if (!pv.ok) { showToast(t('The rule is incomplete: {why}', { why: F.filterProblemText(pv, { t, ruleLabel: (k) => PATTERN_LABELS()[k] || k }) }), { type: 'error' }); return; } }
     if (st.kind === 'pattern' && !access.length) { showToast(t('A rule needs at least one agent or group with access'), { type: 'error' }); return; }
     save.disabled = true;
+    // THE LIST IN FLIGHT IS THE LIST SAVED (verify round 4, r3's LOW): a chip removed while the write is in flight was
+    // lost silently (the dialog closed on the earlier payload) — the picker and every row stop taking input until the
+    // write answers, so what the person sees IS what was written
+    picker.setBusy(true);
+    const rowBtns = [...list.querySelectorAll('button, input')];
+    for (const b of rowBtns) b.disabled = true;
     try {
       // the STAMP of the lists this dialog drew rides with the whole list (mirror-193): a grain that moved since is
       // refused by name and the dialog re-opens on it — never written over
@@ -341,7 +385,7 @@ export async function showGrantAccessDialog(app, target) {
       const names = access.map((a) => principalText(a.principal)).join(', ');
       showToast(access.length ? t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }) : t('Access removed'));
       close();
-    } finally { save.disabled = false; }
+    } finally { save.disabled = false; picker.setBusy(false); for (const b of rowBtns) b.disabled = false; refocus(save); }
   };
   actions.appendChild(save);
   body.appendChild(actions);
@@ -349,53 +393,88 @@ export async function showGrantAccessDialog(app, target) {
 
 /** One WATCHER row of the Notify dialog — the pre-R4 form's fields for ONE
  *  principal the grain already gave access to. */
+let cardSeq = 0;
+/** One NOTIFICATION as THREE PLAIN QUESTIONS (channel-polish, 2026-09-27 — the owner: "那个通知配置项目本身就有
+ *  点 confusing"): ① Who gets woken? (the principal picker, over the principals that hold access here) ② On
+ *  which messages? (Every message / Only messages matching a rule… — the filter editor folded under it / Only
+ *  when … is mentioned) ③ How often at most? (Right away, every time / A digest every N minutes — and, its OWN
+ *  line under both, At most N times a day), the clamps said under the field, the live estimate, and ONE preview
+ *  sentence at the bottom that says the whole thing back (PURE `notifySentence`). The WIRE is the watcher's
+ *  unchanged shape {principal, mode, notify, digestMinutes, dailyWakeCap, receiptWake, filter?}, and the
+ *  answers map onto it ONE TO ONE (PURE `notifyAnswers` / `watcherOfAnswers`, channel-words.js — verify round 2:
+ *  the cap was a third exclusive answer, so a digest's cap sat in a disabled field). The per-notification
+ *  receipt switch is gone from the dialog and NO control sets `receiptWake` today (lane channel-withdraw
+ *  retires the field; the engine still honours a stored `true`); a stored value rides through untouched. */
 function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onRemove }) {
+  const seq = ++cardSeq;
   const box = el('div', 'chan-watch-row');
+  const q = (text) => el('div', 'chan-q', text);
+  // ── ① WHO ──
   const head = el('div', 'chan-watch-head');
-  const whoSel = el('select', 'chan-opt-input');
-  whoSel.title = t('Who is notified');
+  let key = w ? pkOf(w.principal) : '';
+  let usedNow = new Set();
+  const whoItems = () => principals.filter((p) => !(usedNow.has(p.value) && p.value !== key)).map((p) => ({ key: p.value, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || p.label, groupIds: [], groupNames: [], hint: accessAuthorityText(p.authority) }));
+  const whoPick = principalPicker({ items: whoItems, compact: true, selected: key ? [key] : [], placeholder: t('Who gets woken?'), label: t('Who gets woken?'), onChange: (keys) => { key = keys[0] || ''; authLine(); changed(); } });
+  whoPick.el.classList.add('chan-watch-who');
   const rm = document.createElement('button');
   rm.type = 'button'; rm.className = 'icon-btn chan-af-rm'; rm.title = t('Remove this notification'); rm.setAttribute('aria-label', t('Remove this notification'));
   rm.appendChild(icon('close', 12));
   rm.onclick = () => onRemove();
-  head.append(whoSel, rm);
-  box.appendChild(head);
-  let key = w ? pkOf(w.principal) : '';
+  head.append(whoPick.el, rm);
+  box.append(q(t('Who gets woken?')), head);
   const authNote = noteEl('');
+  const authLine = () => { const p = principals.find((x) => x.value === key); authNote.textContent = p ? t('Authority comes from its access: {authority}', { authority: accessAuthorityText(p.authority) }) : ''; };
   let whoSig = null;
   const setWho = (usedByOthers) => {
-    // rebuild the options only when what they offer changed (an estimate
-    // landing must not close a dropdown the user has open)
+    // re-read the picker's rows only when what they offer changed (the picker patches its rows in place —
+    // an estimate landing never closes the list the person has open)
     const sig = `${key}|${[...usedByOthers].sort().join(',')}`;
     if (sig === whoSig) return;
     whoSig = sig;
-    whoSel.textContent = '';
-    for (const p of principals) {
-      if (usedByOthers.has(p.value) && p.value !== key) continue;
-      const op = el('option', '', p.label); op.value = p.value; if (p.value === key) op.selected = true; whoSel.appendChild(op);
-    }
-    if (!key && whoSel.options.length) { key = whoSel.options[0].value; whoSel.value = key; }
-    const p = principals.find((x) => x.value === key);
-    authNote.textContent = p ? t('Authority comes from its access: {authority}', { authority: accessAuthorityText(p.authority) }) : '';
+    usedNow = usedByOthers;
+    if (!key) { const free = principals.find((p) => !usedByOthers.has(p.value)); if (free) key = free.value; }
+    whoPick.setSelected(key ? [key] : []);
+    whoPick.refresh();
+    authLine();
+    syncShape();   // the preview names who was just chosen (setWho runs after the card is built)
   };
-  whoSel.onchange = () => { key = whoSel.value; onAnyChange(); reestimate(); };
-  // ── WHAT + HOW on one grid ──
-  const grid1 = el('div', 'chan-af-grid');
-  const modeSel = selectBox([{ value: 'all', label: t('every message') }, { value: 'filtered', label: t('messages matching a filter') }], w ? w.mode : 'all');
-  grid1.appendChild(field(t('On'), modeSel));
-  const notifySel = selectBox([{ value: 'wake', label: t('wake the agent per batch') }, { value: 'digest', label: t('one digest per window') }], w ? w.notify : 'wake');
-  grid1.appendChild(field(t('Deliver'), notifySel));
-  box.appendChild(grid1);
-  const digestRow = el('div', 'chan-af-row');
-  digestRow.appendChild(el('span', 'chan-af-inline', t('Window (minutes)')));
-  const digestMin = numberInput(w ? w.digestMinutes : F.DEFAULT_DIGEST_MINUTES, { min: F.MIN_DIGEST_MINUTES, max: F.MAX_DIGEST_MINUTES, step: 5 });
-  digestRow.appendChild(digestMin);
-  box.appendChild(digestRow);
-  const digestClamp = noteEl('', true);
-  digestClamp.dataset.clamp = 'digest';
-  box.appendChild(digestClamp);
-  if (st.kind !== 'conversation') box.appendChild(noteEl(t('One digest per window for ALL the conversations this covers — never one per conversation.')));
-  // ── THE FILTER ──
+  /** A radio row: `label.dialog-check-row` (the house row — box · words · an inline field) */
+  const radio = (group, value, words, checked, extra = null) => {
+    const lab = el('label', 'dialog-check-row chan-radio-row');
+    const inp = document.createElement('input');
+    inp.type = 'radio'; inp.name = `${group}-${seq}`; inp.value = value; inp.checked = !!checked;
+    lab.append(inp, el('span', 'chan-radio-words', words));
+    if (extra) lab.appendChild(extra);
+    return { lab, inp };
+  };
+  /** A radio row whose words hold a FIELD where the sentence has its placeholder — ONE key per language, the
+   *  field set where that language puts the number (en "A digest every [30] minutes", zh "每 [30] 分钟一份摘要") */
+  const radioWith = (group, value, words, checked, field) => {
+    const [before, after] = String(words('\u0000')).split('\u0000');
+    const r = radio(group, value, (before || '').trim(), checked);
+    if (!(before || '').trim()) r.lab.querySelector('.chan-radio-words').remove();
+    r.lab.appendChild(field);
+    if ((after || '').trim()) r.lab.appendChild(el('span', 'chan-radio-words', after.trim()));
+    return r;
+  };
+  // ── ② ON WHICH MESSAGES ──
+  const selfName = st.selfName || '';
+  // the stored watcher AS ANSWERS (PURE — the same function the round-trip gate walks)
+  const a0 = notifyAnswers(w ? { ...w, filter: f } : null);
+  const mention0 = a0.mention || null;
+  const what0 = a0.what;
+  // a filtered watcher whose rule the store no longer holds (a damaged store — the engine wakes nobody on it, fail
+  // closed): SAID, not blamed on the person's input (verify round 3)
+  const lostRule = !!(w && w.mode === 'filtered' && w.filterId && !f);
+  const mentionInp = textInput(mention0 || selfName, t('name'));
+  mentionInp.classList.add('chan-radio-field');
+  const wAll = radio('what', 'all', t('Every message'), what0 === 'all');
+  const wRule = radio('what', 'rule', t('Only messages matching a rule…'), what0 === 'rule');
+  const wMen = radioWith('what', 'mention', (x) => t('Only when {name} is mentioned', { name: x }), what0 === 'mention', mentionInp);
+  box.append(q(t('On which messages?')));
+  if (lostRule) box.appendChild(noteEl(t('This notification\'s rule is missing from the store — nobody is woken by it until you pick the messages again.'), true));
+  box.append(wAll.lab, wRule.lab);
+  // THE FILTER (folded under "Only messages matching a rule…")
   const rulesBox = el('div', 'chan-af-rules');
   const matchRow = el('div', 'chan-af-row');
   matchRow.appendChild(el('span', 'chan-af-inline', t('Match')));
@@ -407,17 +486,17 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
   const addRule = btn(t('Add rule'), null, 'chan-af-add');
   addRule.prepend(icon('plus', 11));
   rulesBox.appendChild(addRule);
-  box.appendChild(rulesBox);
-  const rules = (f && Array.isArray(f.rules) ? f.rules : []).map((r) => ({ ...r }));
+  box.append(rulesBox, wMen.lab);
+  const rules = (what0 === 'rule' && f && Array.isArray(f.rules) ? f.rules : []).map((r) => ({ ...r }));
   const problemWords = (v) => F.filterProblemText(v, { t, ruleLabel: (k) => RULE_LABELS()[k] || PATTERN_LABELS()[k] || k });
   function ruleRow(rule, idx) {
     const row = el('div', 'chan-af-rule');
     const kindSel = selectBox(F.RULE_KINDS.map((k) => ({ value: k, label: RULE_LABELS()[k] || k })), rule.kind);
     kindSel.title = t('Rule kind');
-    kindSel.onchange = () => { rules[idx] = freshRule(kindSel.value); drawRules(); reestimate(); };
+    kindSel.onchange = () => { rules[idx] = freshRule(kindSel.value); drawRules(); changed(); };
     row.appendChild(kindSel);
     const fields = el('span', 'chan-af-fields');
-    const bind = (inp, k, transform = (v) => v) => { inp.oninput = () => { rule[k] = transform(inp.value); reestimate(); }; fields.appendChild(inp); };
+    const bind = (inp, k, transform = (v) => v) => { inp.oninput = () => { rule[k] = transform(inp.value); changed(); }; fields.appendChild(inp); };
     switch (rule.kind) {
       case 'mention': bind(textInput(rule.value, t('name or id')), 'value'); break;
       case 'keyword': case 'not-contains': case 'subject': case 'from-address': bind(textInput(rule.value, t('text')), 'value'); break;
@@ -428,9 +507,9 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     }
     if (fields.childNodes.length) row.appendChild(fields); else row.classList.add('chan-af-rule-nofield');
     const rmR = document.createElement('button');
-    rmR.type = 'button'; rmR.className = 'icon-btn chan-af-rm'; rmR.title = t('Remove');
+    rmR.type = 'button'; rmR.className = 'icon-btn chan-af-rm'; rmR.title = t('Remove'); rmR.setAttribute('aria-label', t('Remove'));
     rmR.appendChild(icon('close', 12));
-    rmR.onclick = () => { rules.splice(idx, 1); drawRules(); reestimate(); };
+    rmR.onclick = () => { rules.splice(idx, 1); drawRules(); changed(); };
     row.appendChild(rmR);
     return row;
   }
@@ -439,47 +518,86 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     if (!rules.length) rulesList.appendChild(noteEl(t('No rules yet — add one below. With no rule nothing matches (a wake is money, so the filter fails closed).')));
     rules.forEach((r, i) => rulesList.appendChild(ruleRow(r, i)));
   }
-  addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); reestimate(); const last = rulesList.querySelector('.chan-af-rule:last-child input'); if (last) last.focus(); };
+  addRule.onclick = () => { rules.push(freshRule('keyword')); drawRules(); changed(); const last = rulesList.querySelector('.chan-af-rule:last-child input'); if (last) last.focus(); };
   drawRules();
-  const syncMode = () => { rulesBox.style.display = modeSel.value === 'filtered' ? '' : 'none'; };
-  modeSel.onchange = () => { syncMode(); reestimate(); };
-  matchSel.onchange = () => reestimate();
-  syncMode();
-  // ── ESTIMATE (live) ──
-  const est = el('div', 'chan-af-stat chan-flow-status', t('Estimating…'));
-  const estHint = el('div', 'chan-af-stat-hint', '');
-  box.append(est, estHint);
-  const state = { lastEstimate: null, expected: 0 };
-  let estTimer = null;
-  const currentFilter = () => (modeSel.value !== 'filtered' ? null : { match: matchSel.value, rules: rules.map((r) => ({ ...r })) });
-  // ── PACING (its OWN cap) + the authority its access carries ──
-  const grid2 = el('div', 'chan-af-grid');
-  const capInp = numberInput(w ? w.dailyWakeCap : F.DEFAULT_DAILY_WAKE_CAP, { min: 0, max: F.MAX_DAILY_WAKE_CAP, step: 1 });
-  grid2.appendChild(field(st.kind === 'conversation' ? t('Wakes per day (at most)') : t('Wakes per day (at most, for all of them together)'), capInp));
-  box.appendChild(grid2);
+  const whatNow = () => (wRule.inp.checked ? 'rule' : wMen.inp.checked ? 'mention' : 'all');
+  // ── ③ HOW OFTEN AT MOST ──
+  const cap0 = a0.cap;
+  const how0 = a0.how;
+  const digestMin = numberInput(how0 === 'digest' ? a0.digestMinutes : F.DEFAULT_DIGEST_MINUTES, { min: F.MIN_DIGEST_MINUTES, max: F.MAX_DIGEST_MINUTES, step: 5 });
+  digestMin.classList.add('chan-radio-field');
+  const capInp = numberInput(cap0, { min: 0, max: F.MAX_DAILY_WAKE_CAP, step: 1 });
+  capInp.classList.add('chan-radio-field');
+  const hNow = radio('how', 'now', t('Right away, every time'), how0 === 'now');
+  const hDig = radioWith('how', 'digest', (x) => t('A digest every {n} minutes', { n: x }), how0 === 'digest', digestMin);
+  // THE CAP IS ITS OWN LINE under both answers (it bounds a digest as it bounds a wake) — the same words, the
+  // field where the language puts the number, ALWAYS editable
+  const capRow = el('label', 'dialog-check-row chan-radio-row chan-cap-row');
+  {
+    const [before, after] = String(st.kind === 'conversation' ? t('At most {n} times a day', { n: '\u0000' }) : t('At most {n} times a day, for all of them together', { n: '\u0000' })).split('\u0000');
+    if ((before || '').trim()) capRow.appendChild(el('span', 'chan-radio-words', before.trim()));
+    capRow.appendChild(capInp);
+    if ((after || '').trim()) capRow.appendChild(el('span', 'chan-radio-words', after.trim()));
+  }
+  const digestClamp = noteEl('', true);
+  digestClamp.dataset.clamp = 'digest';
   const capClamp = noteEl('', true);
   capClamp.dataset.clamp = 'cap';
-  box.appendChild(capClamp);
-  box.appendChild(authNote);
+  box.append(q(t('How often at most?')), hNow.lab, hDig.lab, digestClamp, capRow, capClamp);
+  if (st.kind !== 'conversation') box.appendChild(noteEl(t('One digest per window for ALL the conversations this covers — never one per conversation.')));
+  const howNow = () => (hDig.inp.checked ? 'digest' : 'now');
+  // ── ESTIMATE (live) + the authority its access carries ──
+  const est = el('div', 'chan-af-stat chan-flow-status', t('Estimating…'));
+  const estHint = el('div', 'chan-af-stat-hint', '');
+  box.append(est, estHint, authNote);
+  // ── THE PREVIEW: the whole notification said back ──
+  const preview = el('div', 'chan-notify-preview');
+  preview.setAttribute('aria-live', 'polite');
+  box.appendChild(preview);
+  const state = { lastEstimate: null, expected: 0 };
+  let estTimer = null;
   // CLAMPED VISIBLY (the hotfix's finding: 9999 silently read as 1440)
   const clampOf = (inp, min, max) => { const n = Number(inp.value); if (!Number.isFinite(n) || inp.value === '') return { value: null, note: '' }; if (n > max) return { value: max, note: clampNoteText(max, 'max') }; if (n < min) return { value: min, note: clampNoteText(min, 'min') }; return { value: Math.round(n), note: '' }; };
-  const syncClamps = () => {
+  const currentFilter = () => {
+    const wn = whatNow();
+    // the stored filter's NAME rides through (verify round 3: every save wrote `name: null` over it)
+    if (wn === 'rule') return { ...(f && f.name ? { name: f.name } : {}), match: matchSel.value, rules: rules.map((r) => ({ ...r })) };
+    if (wn === 'mention') return { match: 'any', rules: [{ kind: 'mention', value: mentionInp.value.trim() }] };
+    return null;
+  };
+  /** The watcher as the dialog holds it right now (the wire's shape). */
+  const current = () => {
+    const p = principals.find((x) => x.value === key);
     const d = clampOf(digestMin, F.MIN_DIGEST_MINUTES, F.MAX_DIGEST_MINUTES);
-    digestClamp.textContent = notifySel.value === 'digest' ? d.note : '';
+    const c = clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP);
+    const wn = whatNow();
+    // the answers → the watcher through the ONE PURE mapping (the clamped numbers; an empty field = the default)
+    return watcherOfAnswers(
+      { what: wn, mention: mentionInp.value, how: howNow(), digestMinutes: d.value, cap: c.value },
+      { principal: p ? { kind: p.kind, id: p.id, name: p.name || (p.label || null) } : null, ruleFilter: wn === 'rule' ? currentFilter() : null, stored: w },
+    );
+  };
+  const syncShape = () => {
+    rulesBox.style.display = whatNow() === 'rule' ? '' : 'none';
+    mentionInp.disabled = whatNow() !== 'mention';
+    digestMin.disabled = howNow() !== 'digest';
+    const d = clampOf(digestMin, F.MIN_DIGEST_MINUTES, F.MAX_DIGEST_MINUTES);
+    digestClamp.textContent = howNow() === 'digest' ? d.note : '';
     digestClamp.style.display = digestClamp.textContent ? '' : 'none';
     const c = clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP);
     capClamp.textContent = c.note;
     capClamp.style.display = capClamp.textContent ? '' : 'none';
+    preview.textContent = notifySentence(current(), t, { scope: st.kind });
   };
+  function changed() { syncShape(); onAnyChange(); reestimate(); }
   function reestimate() {
-    syncClamps();
     if (estTimer) clearTimeout(estTimer);
     estTimer = setTimeout(async () => {
       estTimer = null;
       const filter = currentFilter();
       if (filter) { const v = F.validateFilter(filter); if (!v.ok) { est.className = 'chan-af-stat chan-flow-status chan-warn'; est.textContent = t('Filter is incomplete: {why}', { why: problemWords(v) }); estHint.textContent = ''; state.lastEstimate = null; onAnyChange(); return; } }
-      const p = principals.find((x) => x.value === key);
-      const r = await st.estimate(filter, { notify: notifySel.value, digestMinutes: Number(digestMin.value), dailyWakeCap: Number(capInp.value) }, p ? { kind: p.kind, id: p.id } : null);
+      const cur = current();
+      const r = await st.estimate(filter, { notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap }, cur.principal ? { kind: cur.principal.kind, id: cur.principal.id } : null);
       if (!r || r.error) { est.className = 'chan-af-stat chan-flow-status chan-warn'; est.textContent = (r && r.error) || t('Estimate failed'); estHint.textContent = ''; state.lastEstimate = null; onAnyChange(); return; }
       state.lastEstimate = r.estimate;
       est.className = 'chan-af-stat chan-flow-status';
@@ -488,17 +606,13 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
       onAnyChange();
     }, 250);
   }
-  const syncNotify = () => { digestRow.style.display = notifySel.value === 'digest' ? '' : 'none'; };
-  notifySel.onchange = () => { syncNotify(); reestimate(); };
-  syncNotify();
-  digestMin.oninput = () => reestimate();
-  capInp.oninput = () => reestimate();
-  // ── RECEIPTS (P3, decision 8) — a billed turn per approval, said out loud ──
-  const rwRow = el('label', 'dialog-check-row chan-opt-check');
-  const rwInp = el('input'); rwInp.type = 'checkbox'; rwInp.checked = !!(w && w.receiptWake);
-  rwRow.append(rwInp, el('span', '', t('Wake the agent with each outbox receipt')), el('span', 'dialog-check-hint', t('A billed turn per approval; off = the receipt rides its next turn.')));
-  box.appendChild(rwRow);
+  for (const r of [wAll, wRule, wMen, hNow, hDig]) r.inp.onchange = () => changed();
+  matchSel.onchange = () => changed();
+  mentionInp.oninput = () => changed();
+  digestMin.oninput = () => changed();
+  capInp.oninput = () => changed();
   host.appendChild(box);
+  syncShape();
   reestimate();
   return {
     box,
@@ -506,18 +620,21 @@ function watcherRow(host, { w = null, f = null, st, principals, onAnyChange, onR
     setWho,
     expected() {
       const e = state.lastEstimate;
-      return { notify: notifySel.value, digestMinutes: clampOf(digestMin, F.MIN_DIGEST_MINUTES, F.MAX_DIGEST_MINUTES).value || F.DEFAULT_DIGEST_MINUTES, matchedPerDay: e ? e.matchedPerDay : 0, dailyWakeCap: clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP).value ?? F.DEFAULT_DAILY_WAKE_CAP };
+      const cur = current();
+      return { notify: cur.notify, digestMinutes: cur.digestMinutes, matchedPerDay: e ? e.matchedPerDay : 0, dailyWakeCap: cur.dailyWakeCap };
     },
     read() {
       const p = principals.find((x) => x.value === key);
-      if (!p) return { error: t('Pick who is notified.') };
-      const filter = currentFilter();
+      if (!p) return { error: t('Pick who gets woken.') };
+      // THE WIRE IS THE PURE MAPPING'S ANSWER (`current()` = watcherOfAnswers) — its filter too
+      const cur = current();
+      const filter = cur.filter || null;
       if (filter) { const v = F.validateFilter(filter); if (!v.ok) return { error: t('Filter is incomplete: {why}', { why: problemWords(v) }) }; }
       const d = clampOf(digestMin, F.MIN_DIGEST_MINUTES, F.MAX_DIGEST_MINUTES);
       const c = clampOf(capInp, 0, F.MAX_DAILY_WAKE_CAP);
       if (d.value !== null) digestMin.value = String(d.value);
       if (c.value !== null) capInp.value = String(c.value);
-      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name }, mode: modeSel.value, notify: notifySel.value, digestMinutes: d.value ?? F.DEFAULT_DIGEST_MINUTES, dailyWakeCap: c.value ?? F.DEFAULT_DAILY_WAKE_CAP, receiptWake: !!rwInp.checked, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!(d.note || c.note) };
+      return { watcher: { principal: { kind: p.kind, id: p.id, name: p.name }, mode: cur.mode, notify: cur.notify, digestMinutes: cur.digestMinutes, dailyWakeCap: cur.dailyWakeCap, receiptWake: cur.receiptWake, ...(filter ? { filter } : {}), estimateAtSet: state.lastEstimate }, clamped: !!((howNow() === 'digest' && d.note) || c.note) };
     },
   };
 }
@@ -596,7 +713,7 @@ export async function showNotifyDialog(app, target) {
       if (!r) return;
       showToast(watchers.length ? t('Notifications saved: {list}', { list: watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ') }) + (clamped ? ' · ' + t('numbers past their bounds were kept at the bound') : '') : t('Nobody is notified here any more'));
       close();
-    } finally { save.disabled = false; }
+    } finally { save.disabled = false; refocus(save); }
   };
   actions.appendChild(save);
   body.appendChild(actions);

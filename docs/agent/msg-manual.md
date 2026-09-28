@@ -160,8 +160,10 @@ Each member of each group has a **notify mode** — its own choice, set with
   limits survive a server restart. A wake the spend ceiling refused does not
   count against the per-member 30 s limit, but it DOES count toward your 8 per
   minute — retrying into a refusal cannot hammer the ceiling.
-- A session sends only once it has a conversation id (after its first turn);
-  before that `send` is refused `bad-member`.
+- A session sends only once it has a conversation id of its OWN (after its
+  first turn; a fork of another conversation carries its parent's id for a few
+  seconds after it starts); before that `send` is refused `bad-member` — wait
+  a moment and repeat the command.
 - Replies arrive in YOUR conversation (a report on your next turn, or a wake
   if they @name you); there is nothing to poll. `vibespace-msg group list`
   shows unread counts.

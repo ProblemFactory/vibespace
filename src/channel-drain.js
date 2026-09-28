@@ -171,6 +171,32 @@
  *     the minute's budget (any 60 s ≤ the budget + one burst; rule 9's cut
  *     still caps each minute window). Gmail's defaults (40/s, 3000/min):
  *     ≤ 80 units in any second, ≤ 2440 in any 60 s, one thread read a second.
+ * 19. HISTORY ON DEMAND (lane channel-render verify r6, 2026-09-27 — the
+ *     SERVER BELT under the window's upward page): `POST …/older` is a METERED
+ *     vendor call, and five verify rounds each found one more way the window
+ *     made it without a person paging up (a rebuild's clear, a maximize, a
+ *     wheel down + a clamp, an equal-room clamp, a caret key, then a zoom
+ *     wheel and a nested code block's own scrolling). Reproduced on the real
+ *     engine: 20 concurrent /older for ONE conversation = 20 vendor calls for
+ *     the same page; 20 in 2 s after the vendor said `exhausted` = 16 more
+ *     vendor calls answering nothing; the account's whole minute budget was
+ *     the only bound (546 calls before the first refusal). Whatever a client
+ *     does, per CONVERSATION the vendor's `older` is asked
+ *       · ONCE AT A TIME — a second ask JOINS the one in flight and reads the
+ *         log it filled (`join`; a joiner never waits twice);
+ *       · at most once per OLDER_FLOOR_MS — a second ask inside the floor is
+ *         refused `floor` with the wait (the local page it has is still
+ *         answered; the window holds and says "paused for a moment");
+ *       · never again for what the vendor answered `exhausted` — remembered
+ *         per conversation (`exhausted`, no call) until the conversation
+ *         CHANGED (a record appended by an ingest, the owner's Refresh, a
+ *         re-authorization — the memory lives on the account's live entry
+ *         and dies with it) or OLDER_MEMORY_MS passed (a belt: a vendor's
+ *         false "nothing older" is never remembered for good).
+ *     Rule 9 (the minute budget) and rule 18 (the adapter's own pace) stay
+ *     the outer caps: this rule is judged BEFORE the budget, so a joined or
+ *     remembered answer costs no unit. The memory is `{askedAt, inflight,
+ *     exhaustedAt}` per conversation, moved only by `olderApply`.
  */
 
 const REFRESH_QUEUE_CAP = 200;
@@ -186,6 +212,12 @@ const ANSWER_OUTCOMES = Object.freeze(['stopped', 'account-changed', 'not-connec
 const PACE_WAIT_MAX_MS = 1000;
 /** Float slack of the bucket arithmetic (tokens are fractional). */
 const PACE_EPS = 1e-6;
+/** Rule 19: two vendor asks for one conversation's older history are at least this far apart. */
+const OLDER_FLOOR_MS = 1500;
+/** Rule 19: a remembered `exhausted` answers without a vendor call for this long (a belt against a false one). */
+const OLDER_MEMORY_MS = 6 * 3600e3;
+/** Rule 19's memory events (`olderApply`). */
+const OLDER_EVENTS = Object.freeze(['ask', 'landed', 'failed', 'changed']);
 
 const isHuman = (o) => o === 'owner' || o === 'open';
 const ids = (rs) => rs.map((r) => r.id);
@@ -501,9 +533,55 @@ function apply(snap, act, result) {
   return { ...snap, requests, pass: p };
 }
 
+
+// ── RULE 19: HISTORY ON DEMAND — one conversation's older-history memory ──
+/** A conversation's empty memory: never asked, nothing in flight, nothing remembered. */
+function olderEmpty() { return { askedAt: 0, inflight: false, exhaustedAt: 0 }; }
+/**
+ * THE VERDICT on one more `/older` for a conversation whose LOCAL log ran out
+ * (the caller answers from the log first and asks here only past its start):
+ *   { act: 'join' }                    an ask is in flight — wait for it and read the log it fills
+ *   { act: 'exhausted' }               the vendor said "nothing older" and nothing changed since — no call
+ *   { act: 'floor', retryAfterMs }     the last vendor ask was under OLDER_FLOOR_MS ago — no call, the wait named
+ *   { act: 'vendor' }                  ask the vendor (the budget and the pace are judged after this)
+ * Join first (an ask in flight answers everyone), then the memory, then the floor.
+ */
+function olderVerdict(mem, now) {
+  const m = mem || olderEmpty();
+  const t = Number(now) || 0;
+  if (m.inflight) return { act: 'join' };
+  const ex = Number(m.exhaustedAt) || 0;
+  if (ex > 0 && t - ex < OLDER_MEMORY_MS) return { act: 'exhausted' };
+  const asked = Number(m.askedAt) || 0;
+  if (asked > 0 && t - asked < OLDER_FLOOR_MS) return { act: 'floor', retryAfterMs: Math.min(OLDER_FLOOR_MS, Math.max(1, OLDER_FLOOR_MS - (t - asked))) };   // never longer than the floor (a clock that went backwards)
+  return { act: 'vendor' };
+}
+/**
+ * THE MEMORY'S ONLY MOVER. `ask` (a vendor ask starts: the floor's clock and the flight), `landed`
+ * ({ exhausted }: the flight ended with the vendor's answer — an `exhausted` one is remembered, any
+ * other clears the memory), `failed` (the flight ended without an answer — nothing remembered, the
+ * floor's clock kept), `changed` (a record appended / a refresh / a re-authorization: the memory is
+ * forgotten, the floor's clock kept — a new record never makes a vendor ask cheaper). Returns the next
+ * memory; never mutates the one given.
+ */
+function olderApply(mem, ev, now) {
+  const m = { ...(mem || olderEmpty()) };
+  const t = Number(now) || 0;
+  const type = ev && typeof ev === 'object' ? ev.type : ev;
+  switch (type) {
+    case 'ask': return { ...m, askedAt: t, inflight: true };
+    case 'landed': return { ...m, inflight: false, exhaustedAt: ev && ev.exhausted ? t : 0 };
+    case 'failed': return { ...m, inflight: false };
+    case 'changed': return { ...m, exhaustedAt: 0 };
+    default: throw new Error(`channel-drain: no such older event ${type}`);
+  }
+}
+
 module.exports = {
   REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, STREAK_MAX, ORIGINS, REFUSAL_CODES, ANSWER_OUTCOMES, PACE_WAIT_MAX_MS,
+  OLDER_FLOOR_MS, OLDER_MEMORY_MS, OLDER_EVENTS,
   empty, admit, withdraw, census, hasRequests, takenRequests, queueAsk,
   open, wantsTurn, turn, close, next, apply,
   paceFresh, paceLevel, paceNeed, paceWaitMs, paceCharge, paceCost,
+  olderEmpty, olderVerdict, olderApply,
 };

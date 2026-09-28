@@ -26,6 +26,7 @@ import { attachSlab } from './view-visibility.js'; // perf r1: which slab an att
 import { heldText } from './jobs-layout.js';
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
+import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
@@ -224,6 +225,8 @@ class ChatView {
     this._readOnly = readOnly;
     // agent browser P5 (§4.5 / D35): ONE batched loader fills every browser-driving tool card's trace strip
     this._browserTrace = createCardTraceLoader(this);
+    // §26 (B-099e): the channel WITNESS's rows — ONE per ChatView (one ring fetch, the broadcast upserts, keyed rows)
+    this._channelTouches = createChannelTouchView(this);
     // A sub-agent's own conversation opened from its parent (codex collab
     // child thread via viewSession, agentKind 'subagent'): read-only by
     // nature — resuming it would spawn a standalone session on a thread that
@@ -374,6 +377,8 @@ class ChatView {
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
+      // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
+      onChannelOpen: (row) => openTouchRow(this.app, row),
     });
     // The chip's facts ride the `active-sessions` payload; a window opened
     // between two broadcasts reads the sidebar's last copy at once.
@@ -957,6 +962,8 @@ class ChatView {
       onSteerSend: (msgId) => this._steerAfterSend(msgId),
     });
     this._chatInput.popupContainer = container;
+    // the `stash` fact read before the composer existed (the sidebar's last copy, at construction)
+    if (this._stashFact) this._chatInput.setStash(this._stashFact.stash, { turn: this._stashFact.turn });
 
     // THE CHORD'S KEYBINDING. Per view (its `when` scopes it to this window,
     // and the binding leaves with the view), bound to the window's
@@ -1210,6 +1217,7 @@ class ChatView {
         // attach, reattach) — _reattach compares against it to detect a
         // server restart (ID-space reset).
         this._lastAttachedAt = Date.now(); // clears the _reattach no-reply fallback
+        this._channelTouches?.onAttached(); // §26: the witness's ring is the server's (it survived a restart) — read it again
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
@@ -1231,6 +1239,9 @@ class ChatView {
       } else if (msg.type === 'browser-trace-status') {
         // lane H verify r2 L5: the recorder could not tap this conversation's browser — the empty rows say so
         this._browserTrace?.onStatus?.(msg);
+      } else if (msg.type === 'channel-touch') {
+        // §26 (B-099e): the agent read / drafted a channel conversation — the view keeps only this session's
+        this._channelTouches?.onTouch(msg);
       }
     };
     this.ws.onGlobal(this._handler);
@@ -3729,6 +3740,9 @@ class ChatView {
     // the server picks the NEWEST init over the whole record list, which a
     // page-up never can.
     this._applyInitHealth(initFrameOf(msg), { replay: this._loadingHistory });
+    // §26 (B-099e): a LIVE user message starts a turn — the channels chip keeps only what this turn touches (above
+    // the deferral, like the init frame: the turn changed whether or not the reader is scrolled back)
+    if (!this._loadingHistory && msg.role === 'user' && !msg.imageAttachment) this._channelTouches?.noteTurn(msg.ts);
 
     // Live message while viewing history: don't render, just track count.
     // Teleport mode is always "viewing history" \u2014 its window accounting is
@@ -4351,6 +4365,9 @@ class ChatView {
     //    the loader fills it (thumbnails + the expander) — here, because this is
     //    the ONE hook every element-making path calls (create / swap / gap).
     this._browserTrace?.observe(el);
+    // ④ the channel WITNESS's rows (§26, B-099e): the conversations this call read or drafted — bound by the
+    //    PURE src/channel-touch.js bindToCall over the rendered cards (debounced; keyed rows patched in place)
+    this._channelTouches?.observe(el);
   }
 
   /** ONE place that turns the mark into DOM (create-path and live op share it,
@@ -4668,6 +4685,9 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
   _onActiveSessions(list) {
     const row = Array.isArray(list) ? list.find((s) => s && s.id === this.sessionId) : null;
     if (!row) return;
+    // 2026-09-27: what waits for this agent's next turn — the strip above the composer (kept until the input exists)
+    this._stashFact = { stash: row.stash || null, turn: row.turn || null };
+    this._chatInput?.setStash?.(this._stashFact.stash, { turn: this._stashFact.turn });
     const fact = row.browserFact || null;
     if (!fact) { if (this._browserFacts) { this._browserFacts = null; this._statusBar?.setBrowserProfile?.(null); } return; }
     if (this._browserFacts && this._browserFacts.fact.digest === fact.digest) return;
@@ -6451,6 +6471,10 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
         // hides nothing is a dead control.
         const inline = new Set(members.filter((el) => memberKind(el) === 'image'));
         if (inline.size === members.length) { run = []; runKind = null; return; }
+        // §26 (B-099e): a card the channel WITNESS bound conversations to is exempt the same way — its rows are
+        // the jump the owner asked for ("finding the conversation is the slow part"), and a folded card hides them
+        for (const el of members) if (el.classList.contains('chat-channel-touched')) inline.add(el);
+        if (inline.size === members.length) { run = []; runKind = null; return; }
         if (members.length >= (hasTool ? 1 : 2)) {
           const header = document.createElement('div');
           header.className = 'chat-run-header';
@@ -6834,6 +6858,7 @@ Create this as a design canvas HOSTED BY THIS VIBESPACE (not claude.ai):
     if (this._sleepTicker) { clearInterval(this._sleepTicker); this._sleepTicker = null; }
     if (this._readOnlyPollTimer) clearTimeout(this._readOnlyPollTimer);
     this._browserTrace?.dispose(); this._browserTrace = null;
+    this._channelTouches?.dispose(); this._channelTouches = null;
     this.ws.offGlobal(this._handler);
     this.ws.offStateChange(this._stateHandler);
     for (const [key, fn] of this._settingsListeners || []) this.app.settings?.off(key, fn);

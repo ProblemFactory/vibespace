@@ -221,8 +221,15 @@ function create({ engine, deliverRef, permissionRulesRef }) {
           if (msg.type === 'event_msg' && msg.payload?.type === 'peer_message_result' && msg.payload.ok === false && msg.payload.text) {
             const cid = session.backendSessionId || session.claudeSessionId;
             console.log(`[deliver] rpc-queue wrapper delivery failed (${msg.payload.reason || 'unknown'}) — re-stashing for ${cid}`);
-            try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.payload.kind || null, fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } // kind = the wrapper's echo of the frame's PATH (S3 verify F3; an older wrapper echoes none ⇒ unknown, never guessed from the name)
-            catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+            // A HAND-OVER'S FRAME THAT CAME BACK IS ITS ORIGINAL ENTRIES (channel-jump verify r2): the frame's text names
+            // its hand-over; the hub restores each entry to its own store with its own kind / label (was: ONE combined
+            // notice — "1 VibeSpace notice" for five, the job results gone from their store). Property access on the ref.
+            let restored = 0;
+            try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.payload.text), { kind: msg.payload.kind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4: a peer's frame is never a hand-over)
+            if (!restored) {
+              try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.payload.kind || null, fromName: msg.payload.fromName || null, text: String(msg.payload.text) }); } // kind = the wrapper's echo of the frame's PATH (S3 verify F3; an older wrapper echoes none ⇒ unknown, never guessed from the name)
+              catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+            }
           }
           // A notification that could NOT be steered fell back to the queue
           // (the turn ended between the check and the RPC, or it was a

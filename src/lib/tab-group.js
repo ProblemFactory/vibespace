@@ -803,7 +803,7 @@ const tabGroupMethods = {
       const closeBtn = document.createElement('button');
       closeBtn.className = 'tab-close';
       closeBtn.textContent = '\u2715';
-      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); if (tabWin.onCloseRequest && tabWin.onCloseRequest() === false) return; this.removeFromTabChain(chain, tabWinId); }); // a user close: the window may answer first (WindowManager.requestClose)
+      closeBtn.addEventListener('click', (e) => { e.stopPropagation(); this.requestClose(tabWinId); }); // a user close through the ONE door (the window may answer first) — requestClose → closeWindow → removeFromTabChain → the one retirement; the pre-fix direct removeFromTabChain skipped the purge (inc-mukeyzpt-lpou)
 
       // A grouped guest's own titlebar is hidden — the tab carries its
       // waiting blink (kept live by refreshTabWaiting via the taskbar funnel).
@@ -1377,6 +1377,7 @@ const tabGroupMethods = {
     const win = this.windows.get(winId);
     if (!win) return;
     win._listenerCtl?.abort(); // release document-level listeners (also reached via tab ✕, not just closeWindow)
+    this._retireWindow(winId); // THE ONE RETIREMENT (inc-mukeyzpt-lpou): every register forgets it before the removal, as closeWindow's free branch does
     this._detachFromChain(chain, winId);
     if (win.onClose) win.onClose();
     win.element.remove();

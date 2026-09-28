@@ -29,11 +29,14 @@
 // TWO RULES GOVERN WHAT IT DRAWS:
 //
 // 1. EVERY VENDOR STRING IS HOSTILE INPUT (fence 5). A Lark body and a Gmail
-//    part are peer-controlled and sync to every client, so v1 renders PLAIN
-//    TEXT through textContent — no innerHTML on any path, and no markdown
-//    parse of a stranger's message. (The sanitizer is good; the attack
-//    surface is the point. Rich rendering is a later phase and its home is the
-//    published-pages sandbox-iframe pattern, not our own DOM.)
+//    part are peer-controlled and sync to every client, so EVERY string is
+//    textContent — no innerHTML on any path, no HTML from an adapter, no
+//    markdown parse in the browser. Since §25 (2026-09-27) a body is the
+//    record's TYPED TREE (`record.blocks`, else the generic rung over `text`)
+//    drawn by ONE renderer (src/lib/channel-blocks-view.js): links and
+//    pictures are built from VALIDATED fields (an http(s)/mailto href, an
+//    attachment id loaded through our route), quoted history and signatures
+//    fold, a mention is a chip — and the rule above holds on every node.
 //
 // 2. THE SEND CONTROL EXISTS ONLY IF `offers()` SAYS SO. That answer is the
 //    server's, resolved from BOTH the adapter's static `caps` and this
@@ -57,7 +60,7 @@ import { fetchJson, showToast, showContextMenu, showImageOverlay } from './utils
 import { t, deviceLocale } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { menuItems } from './contributions.js';
-import { icon, el, btn } from './channel-chrome.js';
+import { icon, el, btn, avatar, convAvatar, fileIcon } from './channel-chrome.js';
 // P2: the Assign & filter editor and the one-line summary the bar draws.
 import { showAssignFilterDialog, assignmentSummary } from './channel-filter-editor.js';
 // P3: the inline approval cards (the SAME renderer the Outbox window uses —
@@ -68,15 +71,23 @@ import { routeErrorText, attachmentReasonText } from './channel-words.js';
 // R3 (§23): a picture's next step (retry / the named chip) and the text line its placeholder leaves — PURE, shared with the engine
 import * as Att from '../channel-attachments.js';
 import { track } from './telemetry-client.js';
+// §25: THE ONE body path — the record's typed tree (or the generic rung over its
+// text) through the ONE renderer; the pictures a tree places are drawn IN PLACE
+import { renderBlocks, placedAttachments, blocksOfRecord } from './channel-blocks-view.js';
+// verify round 3: THE UPWARD PAGE'S VERDICT — a scroll event is displacement; the person's input is intent (PURE)
+import { pageUpVerdict, isGutterPress, isUpKey, isTypingTarget, wheelTowardOlder, nestedScrollTop, holdUntilAfter, atTail, PULL_PX } from './channel-paging.js';
+// §25: the read-only footer's Re-authorize is the account's own re-auth dialog
+import { showReauthAccountDialog } from './channel-account-dialogs.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern): the
 // server sends STRUCTURE and the sentence is composed HERE, because the
 // digest is broadcast to every client while the language is per DEVICE.
 import * as chanCaps from '../channel-caps.js';
 // g3 (design §22): the composer's mode by conversation kind, the @-autocomplete,
 // the wake preview, and the group dialogs + words.
-import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, OWNER } from './channel-groups-view.js';
+import { composerMode, isGroupConv, mentionQuery, mentionCandidates, insertMention, wakePreview, OWNER, GROUP_ADAPTER_ID } from './channel-groups-view.js';
 import { showGroupDetail, showGroupMembersDialog, renameGroup, archiveGroup } from './channel-group-dialogs.js';
 import { groupErrorText, wakeEchoText } from './channel-words.js';
+import { touchedByRow } from './channel-touch-view.js'; // §26 (B-099e): "Drafted by <agent>" — the reverse link to the chat
 
 const ICON = svgIcon16('<path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/>');
 
@@ -103,6 +114,10 @@ function dayLabel(ms, now = Date.now()) {
   try { return new Date(Number(ms) || 0).toLocaleDateString(deviceLocale(), { month: 'short', day: 'numeric' }); } catch { return k; }
 }
 const authorKey = (rec) => (rec.author && (rec.author.id || rec.author.name)) || '';
+/** A message's full instant in the DEVICE's language (a time's tooltip). */
+function fullStamp(ms) {
+  try { return new Date(Number(ms) || 0).toLocaleString(deviceLocale(), { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return stamp(ms); }
+}
 
 /** A byte count in a chip's words. */
 function sizeText(n) {
@@ -125,40 +140,48 @@ function sizeText(n) {
  *  does not ⇒ the chip NAMES the reason (budget spent / not found / not
  *  cached / vendor error …, the whole sentence in its title) with a Retry that
  *  asks past the remembered refusal. A file that is there but is no raster
- *  picture (HEIC …) becomes the download chip, said as "no preview". The
- *  record's placeholder ("[image]") leaves the text line once its picture is
- *  drawn (PURE `bodyShown`; the record itself is untouched). */
-function renderAttachments(rec, base, { body = null } = {}) {
-  const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id) : [];
+ *  picture (HEIC …) becomes the download chip, said as "no preview".
+ *
+ *  §25 (2026-09-27): a picture the record's TREE places (an `img` / `file`
+ *  block — a Lark image, a picture inside a rich text, a placeholder line of
+ *  the generic rung) is drawn IN PLACE by `attachmentNode`, so the "[image]"
+ *  words never reach the body at all; `renderAttachments` draws the REST in
+ *  the strip under the message, exactly as before. */
+function attachmentNode(rec, a, base) {
+  const url = `${base}/attachment/${encodeURIComponent(a.id)}?msg=${encodeURIComponent(rec.vendorId || '')}`;
+  const chipOf = () => {
+    const c = document.createElement('a');
+    c.className = 'chanmsg-att chanmsg-file';
+    c.href = url;
+    c.setAttribute('download', a.name || 'attachment');
+    c.rel = 'noopener';
+    c.dataset.channelAttachment = a.id;
+    // THE LOOK (channel-polish): a file is a small card — its type glyph, its name, its size
+    c.appendChild(fileIcon(a.name, 16, 'chanmsg-att-type'));
+    const words = el('span', 'chanmsg-att-words');
+    words.appendChild(el('span', 'chanmsg-att-name', a.name || t('attachment')));
+    const sz = sizeText(a.bytes);
+    if (sz) words.appendChild(el('span', 'chanmsg-att-size', sz));
+    c.appendChild(words);
+    c.appendChild(icon('download', 12, 'chanmsg-att-dl'));
+    c.title = t('Download {name} — it is saved, never opened here', { name: a.name || t('attachment') });
+    return c;
+  };
+  if (!Att.isImage(a)) return chipOf();
+  // A PICTURE is a rounded card; its name (when the vendor gave one) is a caption on hover —
+  // `data-caption` read by CSS as plain text, never markup. A refusal chip replaces the <img>
+  // INSIDE the card, so the card never outlives its picture as an empty frame.
+  const card = el('span', 'chanmsg-pic');
+  const named = a.name && !/^image$/i.test(String(a.name));
+  if (named) card.dataset.caption = [a.name, sizeText(a.bytes)].filter(Boolean).join(' · ');
+  card.appendChild(thumbOf(a, url, { attempt: 0, chipOf }));
+  return card;
+}
+function renderAttachments(rec, base, { skip = null } = {}) {
+  const list = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id && !(skip && skip.has(a.id))) : [];
   if (!list.length || !base) return null;
   const box = el('div', 'chanmsg-atts');
-  const drawn = [];   // the placeholders of the pictures that DREW (bodyShown's input)
-  const syncBody = () => {
-    if (!body) return;
-    const shown = Att.bodyShown(rec.text || '', drawn);
-    body.textContent = shown;
-    body.classList.toggle('chanmsg-body-empty', !shown);
-  };
-  for (const a of list) {
-    const url = `${base}/attachment/${encodeURIComponent(a.id)}?msg=${encodeURIComponent(rec.vendorId || '')}`;
-    const chipOf = () => {
-      const c = document.createElement('a');
-      c.className = 'chanmsg-att';
-      c.href = url;
-      c.setAttribute('download', a.name || 'attachment');
-      c.rel = 'noopener';
-      c.dataset.channelAttachment = a.id;
-      c.appendChild(icon('attachment', 11));
-      c.appendChild(el('span', 'chanmsg-att-name', a.name || t('attachment')));
-      const sz = sizeText(a.bytes);
-      if (sz) c.appendChild(el('span', 'chanmsg-att-size', sz));
-      c.appendChild(icon('download', 11, 'chanmsg-att-dl'));
-      c.title = t('Download {name} — it is saved, never opened here', { name: a.name || t('attachment') });
-      return c;
-    };
-    if (Att.isImage(a)) box.appendChild(thumbOf(a, url, { attempt: 0, chipOf, onDrawn: () => { if (a.placeholder) { drawn.push(a.placeholder); syncBody(); } } }));
-    else box.appendChild(chipOf());
-  }
+  for (const a of list) box.appendChild(attachmentNode(rec, a, base));
   return box;
 }
 
@@ -229,17 +252,50 @@ function refusedChip(a, url, code, answer, ctx) {
   return c;
 }
 
+/** A SYSTEM LINE (a vendor's "X added Y to the group"): a record whose whole
+ *  tree is `sys` blocks of the `system` kind. It is drawn as a centred dim line
+ *  with its time — no avatar, no author head (the author did not SAY it) — and
+ *  it never starts or continues an author's run. A seam row carries the flag. */
+function isSysRow(rec) {
+  if (!rec) return false;
+  if (rec.sys === true) return true;
+  const blocks = blocksOfRecord(rec);
+  return Array.isArray(blocks) && blocks.length > 0 && blocks.every((b) => b && b.k === 'sys' && b.what === 'system');
+}
+/** The author's avatar (THE LOOK, channel-polish): initials on the author's
+ *  stable hue — the self author in the accent; paint, the name is the head. */
+function authorAvatar(rec) {
+  const a = rec.author || {};
+  return avatar({ name: a.name || a.id || '', key: authorKey(rec), self: !!a.isSelf }, null, 'chanmsg-av');
+}
+
 /** ONE row. EVERYTHING is textContent — see rule 1. `cont` = a continuation
- *  of the previous author's run (no head, tighter). `base` = the
- *  conversation's route prefix (its attachments load through it). */
-function renderRecord(rec, { cont = false, base = null } = {}) {
-  const row = el('div', 'chanmsg' + (cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : ''));
+ *  of the previous author's run (no avatar, no head, tighter; its time shows
+ *  on hover in the avatar's gutter). `base` = the conversation's route prefix
+ *  (its attachments load through it). `folds` = the window's memory of which
+ *  quotes the person opened. */
+function renderRecord(rec, { cont = false, base = null, folds = null } = {}) {
+  const sys = isSysRow(rec);
+  const self = !!(rec.author && rec.author.isSelf);
+  const row = el('div', 'chanmsg' + (sys ? ' chanmsg-sysrow' : cont ? ' chanmsg-cont' : '') + (rec.author && rec.author.isBot ? ' chanmsg-agent' : '') + (self && !sys ? ' chanmsg-self' : ''));
   row.dataset.at = String(rec.at || 0);
-  row.dataset.author = authorKey(rec);
+  row.dataset.author = sys ? '' : authorKey(rec);
+  row.dataset.vid = rec.vendorId || '';
+  const full = fullStamp(rec.at);
+  if (sys) {
+    const body = renderBlocks(blocksOfRecord(rec), { t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '' });
+    row.appendChild(body);
+    const when = el('span', 'chanmsg-at', stamp(rec.at));
+    when.title = full;
+    row.appendChild(when);
+    return row;
+  }
   if (!cont) {
+    row.appendChild(authorAvatar(rec));
     const head = el('div', 'chanmsg-head');
     const who = el('b', '', (rec.author && rec.author.name) || (rec.author && rec.author.id) || t('unknown'));
     const when = el('span', 'chanmsg-at', stamp(rec.at));
+    when.title = full;
     head.append(who, when);
     if (rec.raw && rec.raw.synthetic) {
       // A scraped source mints its own key. Saying so on the row is the same
@@ -250,15 +306,37 @@ function renderRecord(rec, { cont = false, base = null } = {}) {
       head.appendChild(s);
     }
     row.appendChild(head);
+  } else {
+    // a continuation line's own time, shown on hover (the run's head says the first)
+    const when = el('span', 'chanmsg-at chanmsg-at-hover', stamp(rec.at));
+    when.title = full;
+    row.appendChild(when);
   }
-  const body = el('div', 'chanmsg-body', rec.text || '');
+  // THE BODY: the record's typed tree (else the generic rung over its text)
+  // through the ONE renderer — a picture the tree places is drawn in place
+  const blocks = blocksOfRecord(rec);
+  const atts = Array.isArray(rec.attachments) ? rec.attachments.filter((a) => a && a.id) : [];
+  const placed = new Set();
+  const body = renderBlocks(blocks, {
+    t, folds, foldKey: rec.vendorId || rec.id || '', fallbackText: rec.text || '',
+    attachment: (id) => {
+      const a = base ? atts.find((x) => x.id === id) : null;
+      if (!a) return null;
+      placed.add(id);
+      return attachmentNode(rec, a, base);
+    },
+  });
   row.appendChild(body);
-  const atts = renderAttachments(rec, base, { body });
-  if (atts) row.appendChild(atts);
+  // what the tree did not place (a mail's attachments, a fixture's files) goes in the strip below
+  for (const id of placedAttachments(blocks)) if (atts.some((a) => a.id === id)) placed.add(id);
+  const rest = renderAttachments(rec, base, { skip: placed });
+  if (rest) row.appendChild(rest);
   return row;
 }
+/** A day separator: a centred pill on a hairline. */
 function daySeparator(ms) {
-  const d = el('div', 'chanmsg-day', dayLabel(ms));
+  const d = el('div', 'chanmsg-day');
+  d.appendChild(el('span', 'chanmsg-day-label', dayLabel(ms)));
   d.dataset.day = dayKey(ms);
   return d;
 }
@@ -290,6 +368,11 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
 
   const bar = el('div', 'chanwin-bar');
   const list = el('div', 'chanwin-list');
+  // FOCUSABLE, LIKE THE CHAT VIEW'S LIST (verify round 4): a click on a row lands the keyboard's scrolling here,
+  // so PageUp / Home / ArrowUp reach the list's own keydown — without a tabIndex the keys scrolled the list from
+  // `body` and its keydown listener never fired: a keyboard reader who reached the top never paged (never in the
+  // tab order: -1)
+  list.tabIndex = -1;
   const foot = el('div', 'chanwin-foot');
   root.append(bar, list, foot);
   // an agent GROUP is a different object behind the same window type (g3)
@@ -303,6 +386,16 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   /** The conversation summary the last render drew — the ONLY thing the
    *  pointer handler consults, so it never POSTs about a stale unread. */
   let lastConv = null;
+  /** §25: THE WINDOW'S MEMORY — which quotes / signatures the person opened
+   *  (per record, re-applied on every repaint) and which records are drawn
+   *  (a broadcast APPENDS the new ones; it never rebuilds a row the person
+   *  is reading). */
+  const folds = new Map();
+  const drawn = new Set();
+  /** §25 (verify round): the composer's text across a footer rebuild — a
+   *  disconnect flips the footer to the read-only line; the words the person
+   *  typed come back with the composer after the re-authorization. */
+  let heldDraft = '';
 
   async function renderBar() {
     const r = await fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}`);
@@ -320,6 +413,12 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     // "Channel" and two open conversations were indistinguishable — the same
     // silent-optional-call shape as the `off?.()` r2 removed.
     app.wm.setTitle(winInfo.id, c.title || convId);
+    // THE LOOK (channel-polish): the conversation's avatar, then ONE column —
+    // the title row (title · the access chip · ⋯) over the meta line; on a
+    // phone the bar is one line (the avatar and the meta line hidden by CSS)
+    bar.appendChild(convAvatar({ key: `${adapterId}/${convId}`, title: c.title || convId, kind: c.kind }, null, 'chanwin-av'));
+    const headCol = el('div', 'chanwin-head');
+    bar.appendChild(headCol);
     const titleRow = el('div', 'chanwin-title-row');
     titleRow.appendChild(el('b', '', c.title || convId));
     // the ONE control at title height: the row menu (the panel's contribution
@@ -331,7 +430,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     more.appendChild(icon('more', 13));
     more.onclick = (ev) => { ev.stopPropagation(); const rr = more.getBoundingClientRect(); showContextMenu(rr.left, rr.bottom + 2, menuItems('channel-row', { app, conv: c, inWindow: true })); };
     titleRow.appendChild(more);
-    bar.appendChild(titleRow);
+    headCol.appendChild(titleRow);
     const bits = [c.adapterLabel || c.adapterId];   // the adapter's LABEL, never its id (a3 i18n)
     if (c.participants) bits.push(c.participants);
     const fresh = chanCaps.freshnessText(c.freshness, { t });
@@ -340,7 +439,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (c.refresh && c.refresh.every !== 'paused') bits.push(t('refresh set to every {age}', { age: chanCaps.humanAge(c.refresh.every) }));
     const meta = el('div', 'chanwin-meta', bits.join(' · '));
     meta.title = t('How fresh this row is — the lane actually carrying it, not the one the adapter declares.');
-    bar.appendChild(meta);
+    headCol.appendChild(meta);
+    headCol.appendChild(touchedByRow(app, winInfo, adapterId, convId));   // §26: ONE node per window (created once, re-appended by every repaint) — under the meta line, in the head column (the .195 merge: channel-render moved the meta into it)
     // P2: the assignment IN EFFECT as a CHIP (every conversation is fetched
     // since 2026-09-26, so every one can wake somebody); inherited from the
     // account or a rule it is dim and says so; it opens the editor.
@@ -354,15 +454,29 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       chipEl.appendChild(icon(c.assignment ? 'filter' : 'plus', 10));
       // unassigned: the chip is the VERB (short); the fact rides its tooltip
       chipEl.appendChild(el('span', '', c.assignment ? assignmentSummary(c) + (held ? ' · ' + t('last wake held') : '') : t('Grant access…')));
-      chipEl.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(c.stats.lastWake.refused, { t }) || c.stats.lastWake.why || '' }) : (c.assignment ? t('Grant access… / Notify…') : t('No agent has access here — nobody sees it, nobody is woken.'));
+      chipEl.title = held ? t('Last wake was held or stashed: {why}', { why: chanCaps.wakeRefusalText(c.stats.lastWake.refused, { t }) || c.stats.lastWake.why || '' }) : (c.assignment ? `${assignmentSummary(c)} — ${t('Grant access… / Notify…')}` : t('No agent has access here — nobody sees it, nobody is woken.'));
       chipEl.onclick = () => showAssignFilterDialog(app, c);
-      bar.appendChild(chipEl);
+      if (!c.assignment) chipEl.setAttribute('aria-label', t('Grant access…'));
+      // aligned on the title row, before ⋯ (the title keeps its share; the chip ellipsizes, its whole text in the tooltip)
+      titleRow.insertBefore(chipEl, more);
     }
 
     // The send half by the capability row (g3): DIRECT as you, the proposal
     // path when only the bot identity is offered, or NOT offered WITH its
     // reason (never silence).
     const cm = composerMode({ conv: c });
+    // §25: THE FOOTER IS KEYED BY WHAT IT SAYS — a repaint whose composer mode,
+    // words and fix are unchanged leaves it alone (a draft being typed survives
+    // every broadcast); a change (a re-authorization, a disconnect) rebuilds it
+    // and carries the typed text over into the new composer
+    const ad0 = r.adapter || {};
+    const footKey = JSON.stringify([cm.mode, cm.why || null, (c.offers && c.offers.sendAsUser && c.offers.sendAsUser.why) || null, !!ad0.sendStartsTurn, ad0.sendForm || null, !!ad0.connectable, ad0.id || null, ad0.sendGrant ? ad0.sendGrant.missing : null, c.policy ? c.policy.mode : null]);
+    if (foot.dataset.footKey === footKey && foot.firstChild) return c;
+    // a draft being typed is HELD across every rebuild — including the flip to the
+    // read-only line (a disconnect mid-sentence) — and restored when the composer returns
+    const typed = (foot.querySelector('textarea') || {}).value || heldDraft;
+    heldDraft = typed;
+    foot.dataset.footKey = footKey;
     if (cm.mode === 'direct' || cm.mode === 'propose') {
       const direct = cm.mode === 'direct';
       // r3: a send that STARTS A TURN (the adapter declares `sendStartsTurn` —
@@ -374,11 +488,30 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       const ta = document.createElement('textarea');
       ta.placeholder = direct ? t('Write a message — it is sent at once, as you') : t('Write a reply…');
       ta.rows = 2;
+      ta.value = typed;
       const row = el('div', 'chanwin-composer-row');
+      // §25 (the owner: the footer was "a long sentence"): ONE SHORT LINE — how
+      // this send goes out, by the adapter's declared form (`sendForm`, never
+      // its id) — and the policy sentence behind the ⓘ beside it. A send that
+      // WAKES an agent keeps its cost in the line itself (money is never hidden).
+      const sendForm = (r.adapter && r.adapter.sendForm) || 'direct';
       const pol = direct
-        ? (wakes ? t('Sent at once, as you — it wakes this agent: 1 billed turn.') : t('Sent at once, as you — no policy, no approval. The outbox holds only replies an agent drafts.'))
+        ? (wakes ? t('Sent at once, as you — it wakes this agent: 1 billed turn.') : sendForm === 'draft' ? t('Drafted and sent as you') : t('Sent at once, as you'))
+        : t('Proposed — sending as you is not offered here');
+      const polWhy = direct
+        ? t('Sent at once, as you — no policy, no approval. The outbox holds only replies an agent drafts.')
         : `${t('Sending as you is not offered here ({why})', { why: chanCaps.sendWhyText(cm.why, { t }) })} — ${c.policy && c.policy.mode === 'direct' ? t('Policy: direct — your reply is sent at once unless a guard (link, attachment, off-hours) sends it to the outbox for approval.') : t('Policy: review — your reply waits in the outbox for your approval.')}`;
-      const note = el('div', 'chanwin-note' + (wakes && direct ? ' chan-warn' : ''), pol);
+      const note = el('div', 'chanwin-note' + (wakes && direct ? ' chan-warn' : ''));
+      note.appendChild(el('span', 'chanwin-note-text', pol));
+      if (!wakes) {
+        const info = el('span', 'chanwin-note-info');
+        info.appendChild(icon('info', 11));
+        info.title = polWhy;
+        info.tabIndex = 0;
+        info.setAttribute('aria-label', polWhy);
+        note.appendChild(info);
+      }
+      note.title = polWhy;
       const sendBtn = btn(direct ? t('Send') : t('Propose'), null, 'mounts-btn-primary');
       if (direct) { sendBtn.dataset.channelDirect = '1'; sendBtn.prepend(icon('send', 11)); } else sendBtn.dataset.channelPropose = '1';
       sendBtn.onclick = async () => {
@@ -389,6 +522,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         sendBtn.disabled = false;
         if (!r2 || r2.error) { showToast(routeErrorText(r2), { type: 'error' }); return; }
         ta.value = '';
+        heldDraft = '';
         const st = r2.proposal && r2.proposal.state;
         // the policy's reasons are an ENUM — worded through the card's own `reasonLabel` (a3 i18n)
         if (st === 'failed') showToast(t('The channel refused the send: {error}', { error: (r2.proposal && r2.proposal.reason) || '' }), { type: 'error' });
@@ -404,10 +538,36 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       // NO composer element at all — the P0 exit condition.
       foot.textContent = '';
       const ro = el('div', 'chanwin-readonly');
+      if (heldDraft) ro.dataset.channelDraftHeld = '1';   // the typed words are kept for the composer's return
       const why = (c.offers && c.offers.sendAsUser.why) || 'unknown';
-      // P4: the reason in words (a `send-scope-not-granted` answer says what
-      // unlocks sending — never a greyed control), never a bare code.
-      ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
+      const a = r.adapter || null;
+      if (why === 'send-scope-not-granted' && a && a.connectable) {
+        // §25 (the owner's screenshot: a paragraph where one line belongs): the
+        // account's sign-in lacks the send permission — ONE short sentence and
+        // the fix RIGHT THERE (the account's own re-authorize dialog)
+        ro.dataset.channelReadonly = 'reauth';
+        ro.appendChild(el('span', '', t('Read-only — this account needs a re-authorization to reply')));
+        const fix = btn(t('Re-authorize'), async () => {
+          const d = await fetchJson('/api/channels');
+          if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }
+          const acct = (d.adapters || []).find((x) => x.id === a.id) || a;
+          showReauthAccountDialog(app, acct, { kinds: d.kinds || [] });
+        }, 'mounts-btn-primary');
+        fix.dataset.channelReauth = a.id;
+        ro.appendChild(fix);
+        // the app-console step, ONLY where the account's adapter DECLARES one
+        // (Lark: a scope the app itself lacks cannot be granted by a consent)
+        // and only for the scopes this account does not hold
+        const g = a.sendGrant;
+        if (g && g.console && Array.isArray(g.missing) && g.missing.length) {
+          const step = el('div', 'chanwin-readonly-step', t('First enable {scopes} in the {vendor} app and publish a version.', { scopes: g.missing.join(' + '), vendor: a.vendor ? t(a.vendor) : (a.label || a.kind) }));
+          step.dataset.channelConsoleStep = '1';
+          ro.appendChild(step);
+        }
+      } else {
+        // P4: the reason in words, never a bare code
+        ro.appendChild(el('span', '', t('Read-only here ({why})', { why: chanCaps.sendWhyText(why, { t }) })));
+      }
       foot.appendChild(ro);
     }
     return c;
@@ -432,20 +592,15 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   /** Past the local log's start: nothing older here AND the vendor said so. */
   let historyExhausted = false;
   let olderInFlight = false;
-  // ONE LIST, ONE WRITER (mirror-193, measured on a starved box): render() is re-entered by the open, by every
-  // broadcast naming this conversation (the watch beat's fetch and the open's mark-read each send one) and by a
-  // reconnect; each cleared the list and then awaited its page, so two renders in flight BOTH appended — every
-  // message twice or three times (the room's six messages ×3; the picture a suite waited on was the stale copy's
-  // lazy <img>, never loaded). Every render takes a generation, and a page is applied only by the render that is
-  // still the newest (`pageFor`); a page upward that a render overtook is dropped, and one is in flight at a time.
-  let renderGen = 0;
-  let upInFlight = false;
-  // the list is being rebuilt (cleared, its page not yet applied): the clear drops scrollTop to 0 and the scroll
-  // event it causes must not ask for the page ABOVE a boundary the clear just reset (that is the tail again —
-  // prepended beside the render's own copy)
-  let listReady = false;
-  const pageFor = (gen) => gen === renderGen;
-  async function loadPage({ prepend = false, gen = renderGen } = {}) {
+  // ONE LIST, ONE WRITER (mirror-193, measured on a starved box; the .195 merge kept ONE mechanism): render() is
+  // re-entered by the open, by every broadcast naming this conversation (the watch beat's fetch and the open's
+  // mark-read each send one) and by a reconnect; each cleared the list and then awaited its page, so two renders in
+  // flight BOTH appended — every message twice or three times. mirror-193 fixed it with a render GENERATION; lane
+  // channel-render (built on the same base) with a SERIAL QUEUE (`serial` below: every list mutation — a render, a
+  // patch, an upward page — runs one after another, so no two ever interleave). The queue is the one writer by
+  // construction; mirror-193's other rule — the clear's own scroll event never asks for the page above the boundary
+  // the clear reset — is `listReady` (false from the clear to the last row), read by PURE `pageUpVerdict`.
+  async function loadPage({ prepend = false } = {}) {
     const q = new URLSearchParams({ limit: String(PAGE) });
     if (prepend && oldest !== null) {
       q.set('before', String(oldest));
@@ -464,27 +619,95 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       if (o && !o.error) {
         recs = o.records || [];
         if (o.exhausted && !recs.length) { historyExhausted = true; markStart(o.vendorHasNoOlder); }
-        if (o.refused === 'vendor-budget') showToast(o.error || t('The vendor budget for this minute is spent — scroll again shortly'), { type: 'warn' });
+        // verify round 6: a REFUSAL (the server's per-conversation floor, the minute's budget) or a page that landed
+        // NOTHING holds the window (PURE `holdUntilAfter`) — the reader is still at the top and every further event
+        // would ask again; the refusal is said ONCE per hold, in plain words (the engine's sentence is the agent's)
+        const h = holdUntilAfter({ now: Date.now(), refused: o.refused || null, retryAfterMs: o.retryAfterMs, retryAfterSec: o.retryAfterSec, landed: recs.length, exhausted: !!o.exhausted });
+        if (h) { holdUntil = h; if (o.refused && !recs.length) showToast(t('Loading older messages is paused for a moment'), { type: 'warn' }); }   // (a refusal that still carries rows — a joiner's short page — shows the rows, not a pause)
       } else if (o && o.error) showToast(routeErrorText(o), { type: 'error' });
     }
     if (!recs.length) return 0;
-    if (!pageFor(gen)) return 0;   // a newer render owns the list now — this page is not applied
     // The page arrives oldest-first in the SAME order the store pages by, so
     // its first element IS the boundary for the next page up.
     const head = recs[0];
     oldest = Number(head.at) || 0;
     oldestId = head.vendorId || null;
-    const frag = document.createDocumentFragment();
-    let prev = null;
-    for (const rec of recs) {
-      if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
-      const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic);
-      frag.appendChild(renderRecord(rec, { cont, base }));
-      prev = rec;
-    }
-    if (prepend) list.insertBefore(frag, list.firstChild); else list.insertBefore(frag, outboxSec.isConnected ? outboxSec : null);
+    list.insertBefore(rowsOf(recs, null), prepend ? list.firstChild : (outboxSec.isConnected ? outboxSec : null));
     dedupeDays();
     return recs.length;
+  }
+  /** Rows for records oldest-first; `prev` = the record the first one follows
+   *  (its author run and day continue across the seam). */
+  function rowsOf(recs, prev) {
+    const frag = document.createDocumentFragment();
+    for (const rec of recs) {
+      if (rec && rec.vendorId) drawn.add(rec.vendorId);
+      if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
+      const cont = !!prev && dayKey(prev.at) === dayKey(rec.at) && authorKey(prev) === authorKey(rec) && (Number(rec.at) - Number(prev.at)) < GROUP_MS && !(rec.raw && rec.raw.synthetic) && !(prev.raw && prev.raw.synthetic) && !isSysRow(prev) && !isSysRow(rec);
+      frag.appendChild(renderRecord(rec, { cont, base, folds }));
+      prev = rec;
+    }
+    return frag;
+  }
+  /** The newest drawn row as a record-shaped seam for the next append. */
+  function tailSeam() {
+    const rows = list.querySelectorAll('.chanmsg');
+    const last = rows.length ? rows[rows.length - 1] : null;
+    return last ? { at: Number(last.dataset.at) || 0, vendorId: last.dataset.vid || '', author: { id: last.dataset.author || '' }, raw: {}, sys: last.classList.contains('chanmsg-sysrow') } : null;
+  }
+  /** ONE QUEUE for every list mutation (§25): a first render, a broadcast's
+   *  patch, a reconnect's re-read and an upward page run one after another —
+   *  two interleaved renders both cleared the list and both appended their
+   *  page (every row twice: the open's own watch beat broadcasts while the
+   *  first render is still loading). */
+  let queue = Promise.resolve();
+  const serial = (fn) => { const run = queue.then(fn, fn); queue = run.catch(() => {}); return run; };
+  function patch() { return serial(patchNow); }
+  /** A REBUILD THAT IS ONLY WAITING IN THE QUEUE IS ONE REBUILD (verify round 2, 2026-09-27): a rebuild asked
+   *  while another still waits joins it — three reconnects behind a page in flight emptied and redrew the list
+   *  three times. One that already STARTED is not joined (what it read may be older than the asker's reason). */
+  let queuedRender = null;
+  function render(opts) {
+    if (queuedRender) return queuedRender;
+    const run = serial(() => { queuedRender = null; return renderNow(opts); });
+    queuedRender = run;
+    return run;
+  }
+  /** THE LIST IS READY = no rebuild is in flight (master's mirror-193 name for the same fact). A rebuild's own
+   *  clear drops scrollTop to 0 and the browser dispatches a scroll event for it: NOBODY SCROLLED. Unguarded,
+   *  that event read the page above the boundary — and on a room shorter than a page it fell through to
+   *  `POST …/older`: a metered vendor request a repaint caused, which also marked the beginning reached, so the
+   *  person's own scroll to the top never asked again. */
+  let listReady = false;
+  /**
+   * A BROADCAST NAMING THIS CONVERSATION (§25 — keyed rows patched in place):
+   * the bar repaints; the newest page is read and only the records not yet
+   * drawn are APPENDED below the last one. Rows already on screen are never
+   * rebuilt, so an opened quote stays open and the reader is never yanked;
+   * the list sticks to the bottom only when it was there. A record that lands
+   * BETWEEN drawn ones (a vendor's late delivery) is the one case that
+   * redraws the page — the scroll position kept.
+   */
+  async function patchNow() {
+    const c = await renderBar();
+    if (!c) return;
+    if (!drawn.size) return renderNow();
+    const r = await fetchJson(`${base}/messages?${new URLSearchParams({ limit: String(PAGE) })}`);
+    if (!r || r.error) return;
+    const fresh = (r.records || []).filter((x) => x && x.vendorId && !drawn.has(x.vendorId));
+    if (!fresh.length) return;
+    const seam = tailSeam();
+    const after = (x) => !seam || Number(x.at) > seam.at || (Number(x.at) === seam.at && String(x.vendorId) > seam.vendorId);
+    const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    if (!fresh.every(after)) {
+      const top = list.scrollTop;
+      await renderNow({ keepScroll: stick ? null : top });
+      return;
+    }
+    list.querySelector('.chanwin-empty')?.remove();
+    list.insertBefore(rowsOf(fresh, seam), outboxSec.isConnected ? outboxSec : null);
+    dedupeDays();
+    if (stick) list.scrollTop = list.scrollHeight;
   }
 
   /**
@@ -511,39 +734,112 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   const outboxSec = el('div', 'chanwin-outbox-slot');
   async function renderOutbox() {
     const r = await fetchJson(`/api/channels/outbox?conv=${encodeURIComponent(`${adapterId}/${convId}`)}`);
-    outboxSec.textContent = '';
-    if (!r || r.error) return;
-    const sec = renderInlineProposals(app, r.proposals || []);
-    if (sec) outboxSec.appendChild(sec);
+    if (!r || r.error) { outboxSec.textContent = ''; return; }
+    // KEYED (2026-09-27): the section the last render drew is patched in place
+    const prev = outboxSec.firstElementChild;
+    const sec = renderInlineProposals(app, r.proposals || [], prev);
+    if (!sec) { outboxSec.textContent = ''; return; }
+    if (sec !== prev) outboxSec.replaceChildren(sec);
   }
 
-  async function render({ read = false } = {}) {
-    const gen = ++renderGen;
+  async function renderNow({ read = false, keepScroll = null } = {}) {
     const c = await renderBar();
     if (!c) return;
-    if (read && c.unread) markRead();   // the OPEN marks read, whichever render ends up drawing the list
-    if (!pageFor(gen)) return;
-    listReady = false;
-    list.textContent = '';
-    oldest = null; oldestId = null;
-    historyExhausted = false;
-    const n = await loadPage({ gen });
-    if (!pageFor(gen)) return;
-    if (!n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
-    list.appendChild(outboxSec);
-    // ready only once the render's own scroll is settled at the bottom: its clear's scroll event (and the 0 it left)
-    // is never read as the person asking for older history
-    try { await renderOutbox(); } finally { if (pageFor(gen)) { list.scrollTop = list.scrollHeight; listReady = true; } }
+    listReady = false;   // from the clear to the last row: a scroll event in between is the rebuild's own
+    try {
+      list.textContent = '';
+      drawn.clear();
+      oldest = null; oldestId = null;
+      historyExhausted = false;
+      const n = await loadPage({});
+      if (!n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
+      list.appendChild(outboxSec);
+      await renderOutbox();
+      list.scrollTop = keepScroll === null ? list.scrollHeight : keepScroll;
+    } finally { listReady = true; }
+    if (read && c.unread) markRead();
   }
 
   // Paging upward: one page per top-scroll, oldest-first (the same shape the
   // panel and the chat view use — a window never loads a 90-day log whole).
-  list.addEventListener('scroll', () => {
-    if (list.scrollTop > 4 || upInFlight || !listReady) return;
-    const before = list.scrollHeight;
-    upInFlight = true;
-    loadPage({ prepend: true }).then((n) => { if (n) list.scrollTop = list.scrollHeight - before; }).catch(() => {}).finally(() => { upInFlight = false; });
-  });
+  //
+  // A SCROLL EVENT IS DISPLACEMENT; THE PERSON'S INPUT IS INTENT (verify round 3, 2026-09-27 — the chat view's
+  // 2.307.0 rule). Round 2's `listReady` knows the rebuild's own clear; a MAXIMIZE whose pane outgrows the
+  // content (any resize: the sidebar, a rotation, another client's layout sync), a fold of a quote, a day
+  // pill's dedupe and a refused picture shrinking to a chip all CLAMP scrollTop to 0 and the browser dispatches
+  // the same event — reproduced: a maximize read `?before=` and POSTed `/older`, a metered vendor request from a
+  // window button. So the page is asked of PURE `pageUpVerdict`: a scroll event pages only with the person's
+  // positioning input on record (a wheel, a touch move, a keyboard scroll, a held press on the scrollbar
+  // gutter — never a press on a row: the fold toggle's own click is the clamp this guards); a wheel up / a
+  // finger pulled down while ALREADY at the top asks directly (a room that fits its pane fires no scroll event
+  // at all — it had no way to ask for older history before). `historyExhausted` refuses a wheel held at the top
+  // from becoming a local fetch per event.
+  let prepending = false;   // one upward page queued at a time (a scroll at the top fires many events)
+  // THE INPUT ON RECORD IS TOWARD OLDER AND REMEMBERS THE ROOM IT SAW (verify round 4): round 3 recorded every
+  // wheel, and a wheel DOWN at the bottom + a maximize 200 ms later paged — and POSTed /older — on the maximize's
+  // own clamp. Only a wheel up, a finger moving DOWN, an up key and a gutter press are input; each records the
+  // room (scrollHeight − clientHeight) it saw, and a scroll event on a SMALLER room is a clamp (the browser clamps
+  // scrollTop only when the room shrinks; a scroll, a prepend and an append never shrink it) — refused by name.
+  let inputAt = 0, roomAtInput = null, gutterDrag = false, touchY = null, touchPrevY = null;
+  // verify round 6: quiet until this instant after a page that landed nothing or a refusal (PURE `holdUntilAfter`)
+  let holdUntil = 0;
+  const roomOf = () => list.scrollHeight - list.clientHeight;
+  const noteInput = () => { inputAt = Date.now(); roomAtInput = roomOf(); };
+  const facts = (cause) => ({ cause, scrollTop: list.scrollTop, prepending, listReady, historyExhausted, inputAt, now: Date.now(), gutterDrag, room: roomOf(), roomAtInput, holdUntil });
+  // verify round 6: THE SCROLLERS BETWEEN AN EVENT'S TARGET AND THE LIST (a code block over its max-height, an edit box)
+  // — one that can still scroll UP owns a wheel up / a finger down / an up key made inside it (the browser scrolls IT,
+  // not the list); at its top the input chains to the list and is the list's (PURE `nestedScrollTop`)
+  const innerScrollTop = (target) => {
+    const boxes = [];
+    for (let el = target; el && el !== list && el.nodeType === 1; el = el.parentElement) boxes.push({ scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight });
+    return nestedScrollTop(boxes);
+  };
+  function pageUp(cause) {
+    if (!pageUpVerdict(facts(cause)).page) return;
+    prepending = true;
+    // the height is read INSIDE the queued job (the list may have grown — a patch's append — between this
+    // event and the job's turn), so the reader's row stays where it was whatever ran in between
+    serial(async () => { const before = list.scrollHeight; const n = await loadPage({ prepend: true }); if (n) list.scrollTop = list.scrollHeight - before; }).catch(() => {}).finally(() => { prepending = false; });
+  }
+  // a wheel is input toward older only as a PLAIN vertical wheel up (round 6: Ctrl = the browser's zoom / a pinch,
+  // Shift = a horizontal scroll — neither moves the list, both POSTed /older at the top) made on the list itself, not
+  // inside a nested scroller that can still scroll up (a code block over 360 px: 4/4 POSTs on a fitting room)
+  list.addEventListener('wheel', (e) => { if (wheelTowardOlder({ deltaY: e.deltaY, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey, innerScrollTop: innerScrollTop(e.target) })) { noteInput(); pageUp('wheel'); } }, { passive: true });
+  list.addEventListener('touchstart', (e) => { touchY = touchPrevY = e.touches && e.touches[0] ? e.touches[0].clientY : null; }, { passive: true });
+  list.addEventListener('touchmove', (e) => {
+    const y = e.touches && e.touches[0] ? e.touches[0].clientY : null;
+    if (innerScrollTop(e.target) > 0) { touchPrevY = y; return; }   // round 6: the finger is scrolling a nested scroller (a code block), not the list
+    if (y !== null && touchPrevY !== null && y > touchPrevY) noteInput();   // the finger moving DOWN = toward older
+    touchPrevY = y;
+    if (touchY !== null && y !== null && y - touchY >= PULL_PX) { touchY = y; pageUp('pull'); }
+  }, { passive: true });
+  // an up key: on record for the scroll it makes; at the top already (no scroll event can come) it asks directly —
+  // unless it was TYPED in a text field inside the list (verify round 5: the inline proposal card's Reject reason
+  // box / Edit textarea; a caret key there bubbled here and, on a room that fits its pane, POSTed /older) or pressed
+  // with the focus in a nested scroller that can still scroll up (round 6: a focused code block — Chrome focuses an
+  // overflow:auto element — ArrowUp / PageUp there scroll the block and POSTed /older)
+  list.addEventListener('keydown', (e) => { if (isUpKey(e.key) && !isTypingTarget({ tagName: e.target && e.target.tagName, type: e.target && e.target.type, editable: !!(e.target && e.target.isContentEditable) }) && !(innerScrollTop(e.target) > 0)) { noteInput(); pageUp('key'); } });
+  list.addEventListener('pointerdown', (e) => {
+    const r = list.getBoundingClientRect();
+    if (isGutterPress({ clientX: e.clientX, left: r.left, clientWidth: list.clientWidth })) { gutterDrag = true; noteInput(); }
+  }, { passive: true });
+  // the press ends wherever the pointer is released (a gutter drag routinely leaves the list) — bound to the
+  // window's controller like every other document-level listener here
+  const endDrag = () => { if (gutterDrag) { gutterDrag = false; noteInput(); } };
+  window.addEventListener('pointerup', endDrag, { signal: winInfo._listenerCtl?.signal });
+  window.addEventListener('pointercancel', endDrag, { signal: winInfo._listenerCtl?.signal });
+  /** The reader is at the newest (the last scroll event's fact; a fresh window is) — a resize keeps them there. */
+  let tail = true;
+  list.addEventListener('scroll', () => { tail = atTail(list); pageUp('scroll'); });
+  // A RESIZE KEEPS THE READER AT THE NEWEST (round 3): a maximize that lets the content fit clamps the offset to
+  // 0, and the un-maximize after it left the reader at the OLDEST row of the page (the browser has nothing to
+  // restore); a phone's keyboard shrinking the pane is the same. The list's own box is observed; the re-tail is
+  // a scroll SET, which the verdict above never pages on.
+  if (typeof ResizeObserver === 'function') {
+    const ro = new ResizeObserver(() => { if (tail && listReady && list.clientHeight > 0) list.scrollTop = list.scrollHeight; });
+    ro.observe(list);
+    winInfo._listenerCtl?.signal.addEventListener('abort', () => ro.disconnect());
+  }
 
   // Multi-client: the engine broadcasts ONE recomputed digest per pass, and a
   // window re-reads its own tail when its id is named (§10.4). It never marks
@@ -577,7 +873,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const key = `${adapterId}/${convId}`;
     if (msg.partial) { if (!Array.isArray(msg.changedKeys) || !msg.changedKeys.includes(key)) return; }
     else if (Array.isArray(msg.changed) && msg.changed.length && !msg.changed.includes(convId)) return;
-    render().catch(() => {});
+    // §25: an in-place PATCH (new rows appended, drawn rows untouched), never a rebuild
+    patch().catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
   // a broadcast naming THIS conversation sent while the socket was down never
@@ -659,10 +956,17 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
     row.dataset.at = String(rec.at || 0);
     row.dataset.author = authorKey(rec);
     row.dataset.vid = rec.vendorId || '';
+    const who = self ? t('You') : nameOf(rec.author && rec.author.id) || (rec.author && rec.author.name) || t('unknown');
     if (!cont) {
+      // THE LOOK (channel-polish): the same author circle the channel window draws (the owner in the accent)
+      row.appendChild(avatar({ name: who, key: authorKey(rec), self }, null, 'chanmsg-av'));
       const head = el('div', 'chanmsg-head');
-      head.append(el('b', '', self ? t('You') : nameOf(rec.author && rec.author.id) || (rec.author && rec.author.name) || t('unknown')), el('span', 'chanmsg-at', stamp(rec.at)));
+      head.append(el('b', '', who), el('span', 'chanmsg-at', stamp(rec.at)));
       row.appendChild(head);
+    } else {
+      const when = el('span', 'chanmsg-at chanmsg-at-hover', stamp(rec.at));
+      when.title = fullStamp(rec.at);
+      row.appendChild(when);
     }
     row.appendChild(el('div', 'chanmsg-body', rec.text || ''));
     return row;
@@ -706,6 +1010,9 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
   function drawBar() {
     bar.textContent = '';
     app.wm.setTitle(winInfo.id, group.name || groupId);
+    bar.appendChild(avatar({ name: group.name || groupId, key: `${GROUP_ADAPTER_ID}/${groupId}`, glyph: 'users' }, null, 'chanwin-av'));
+    const headCol = el('div', 'chanwin-head');
+    bar.appendChild(headCol);
     const titleRow = el('div', 'chanwin-title-row');
     titleRow.appendChild(el('b', '', group.name || groupId));
     const chipB = document.createElement('button');
@@ -733,12 +1040,12 @@ function openGroupWindow(app, winInfo, groupId, { bar, list, foot }) {
       showContextMenu(rr.left, rr.bottom + 2, items);
     };
     titleRow.appendChild(more);
-    bar.appendChild(titleRow);
+    headCol.appendChild(titleRow);
     const names = (group.members || []).map((m) => m.name || String(m.member).slice(0, 8));
     const kind = group.pair && group.pair.length ? t('Direct conversation') : t('Agent group');
     const meta = el('div', 'chanwin-meta', [kind, t('You (observer)'), ...names].join(' · ') + (group.archivedAt ? ' · ' + t('Archived') : ''));
     meta.title = t('You see every message; each agent is woken only by its own notify mode or an @mention.');
-    bar.appendChild(meta);
+    headCol.appendChild(meta);
   }
 
   function drawFoot() {

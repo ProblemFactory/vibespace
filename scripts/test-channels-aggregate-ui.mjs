@@ -35,11 +35,13 @@
 //     reads GET …/adapters/:id/view); every save is judged by its toast's ARRIVAL (a MutationObserver log), never
 //     by counting a stack that also shrinks (⑦'s control: an older toast leaving mid-save reads the runner's
 //     `[]`); ⑧ a grant landing WHILE the dialog is open is refused `grain-changed` (nothing written) and the dialog
-//     re-opens on it; ⑨/⑨b the conversation window's list has ONE writer (three renders in flight; a repaint's
+//     re-opens on it; ⑨/⑨b the conversation window's list has ONE writer (three writers in flight; a rebuild's
 //     clear and its scroll event), constructed and judged once every bar and page parsed; CONTROL = one scratch
-//     bundle with the three client fixes reverted. A page throw names its line.
+//     bundle with the client fixes reverted (the .195 merge: the dialog's fresh read, the window's SERIAL QUEUE made
+//     "run now", the paging verdict's ready rule + scroll-evidence clauses removed). A page throw names its line.
+//   ⑦b (channel-polish verify round 2): a stored digest's own daily cap is a field a person can type into
 //   ②b R3 (2026-09-26, "lark图像不能预览吗？"): a LARK-SHAPED picture (`image/*`, no name, text "[image]")
-//     is drawn and its "[image]" line leaves; a click opens the shared overlay; a picture the vendor
+//     is drawn IN PLACE of its "[image]" line (§25: the words never drawn); a click opens the shared overlay; a picture the vendor
 //     rate-limits once draws on its own retry; a refused one is the chip that NAMES the reason (zh) with a
 //     Retry that asks again
 //
@@ -214,6 +216,10 @@ const WIN = (conv) => `(async () => {
   const w = window.app.openChannel('fake-poll', '${conv}');
   for (let i = 0; i < 80; i++) {
     const imgs = [...w.content.querySelectorAll('img.chanmsg-thumb')];
+    // a picture is loaded LAZILY (img.loading = 'lazy'): one above the fold loads when it scrolls into view —
+    // since channel-polish's taller IM rows the room's first picture sits above the opening scroll (the list
+    // opens at its newest message), so the reader scrolls it into view, as a person would
+    for (const im of imgs) if (!im.complete) im.scrollIntoView({ block: 'nearest' });
     if (w.content.querySelectorAll('.chanmsg').length && imgs.length && imgs.every((im) => im.complete)) {
       return {
         id: w.id, msgs: w.content.querySelectorAll('.chanmsg').length,
@@ -251,7 +257,7 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
     for (let i = 0; i < 40 && !img.dataset.drawn; i++) await new Promise((r) => setTimeout(r, 150));
     const row = img.closest('.chanmsg');
     const body = row.querySelector('.chanmsg-body');
-    const out = { drawn: img.dataset.drawn === '1', w: img.naturalWidth, src: img.getAttribute('src'), bodyText: body.textContent, bodyShown: getComputedStyle(body).display !== 'none', alt: img.alt };
+    const out = { drawn: img.dataset.drawn === '1', w: img.naturalWidth, src: img.getAttribute('src'), bodyText: body.textContent, inBody: body.contains(img), alt: img.alt };
     img.click();
     await new Promise((r) => setTimeout(r, 100));
     const ov = document.querySelector('.chat-img-overlay img');
@@ -261,7 +267,8 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
     return out;
   })()`);
   ok(!lark1.fail && lark1.drawn && lark1.w === 8 && /\/attachment\/fake-poll-room-1-img0\?msg=[^&]+&inline=1$/.test(lark1.src), 'a LARK-SHAPED picture (`image/*`, no name) is DRAWN — fetched on demand through OUR route and decoded', JSON.stringify(lark1));
-  ok(lark1.bodyText === '' && !lark1.bodyShown, '…and its "[image]" text line LEAVES once the picture is drawn (the record keeps it for agents and search)', JSON.stringify(lark1));
+  // §25 (2026-09-27): the record's tree draws the picture IN PLACE of its placeholder — the "[image]" words never reach the body at all
+  ok(lark1.bodyText === '' && lark1.inBody, '…IN the message body, in place of its "[image]" line — the words never drawn (the record keeps them for agents and search)', JSON.stringify(lark1));
   ok(lark1.alt === '图片', 'the picture is named in the device\'s language (图片), never the adapter\'s English', lark1.alt);
   ok(!!lark1.overlay && lark1.overlay.endsWith(lark1.src) && lark1.overlayGone, 'a click opens THE shared image overlay on the same route (and a click closes it)', JSON.stringify(lark1));
   const refused = await p1.evaljs(`(async () => {
@@ -271,7 +278,7 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
       const flaky = w.content.querySelector('img.chanmsg-thumb[data-channel-image="fake-poll-room-2-flaky"]');
       if (gone && flaky && flaky.dataset.drawn === '1') {
         const row = flaky.closest('.chanmsg');
-        return { gone: { text: gone.textContent, title: gone.title, why: gone.querySelector('.chanmsg-att-why').textContent, retry: !!gone.querySelector('[data-channel-retry]'), refused: gone.dataset.refused }, flaky: { w: flaky.naturalWidth, src: flaky.getAttribute('src') }, body: row.querySelector('.chanmsg-body').textContent, sawWait: !!window.__sawWait };
+        return { gone: { text: gone.textContent, title: gone.title, why: gone.querySelector('.chanmsg-att-why').textContent, retry: !!gone.querySelector('[data-channel-retry]'), refused: gone.dataset.refused }, flaky: { w: flaky.naturalWidth, src: flaky.getAttribute('src') }, body: row.querySelector('.chanmsg-body').textContent, chipInBody: row.querySelector('.chanmsg-body').contains(gone), sawWait: !!window.__sawWait };
       }
       if (w.content.querySelector('.chanmsg-att-wait')) window.__sawWait = w.content.querySelector('.chanmsg-att-wait').textContent;
       await new Promise((r) => setTimeout(r, 250));
@@ -280,7 +287,7 @@ ok(win.text && !/跟踪|Track/.test(win.text), 'the window says nothing about tr
   })()`);
   ok(!refused.fail && refused.flaky.w === 8 && /&n=1$/.test(refused.flaky.src), 'a picture the vendor RATE-LIMITED once waits the vendor\'s time and draws on its own retry (`&n=1`)', JSON.stringify(refused));
   ok(!refused.fail && refused.gone.refused === 'forbidden' && refused.gone.why === '被禁止' && refused.gone.retry && /图片加载失败/.test(refused.gone.title) && /图片/.test(refused.gone.text), 'a picture the vendor REFUSES is the chip that NAMES the reason in zh (图片 · 被禁止, the sentence in its title) with a Retry — never a bare "image ⬇"', JSON.stringify(refused.gone));
-  ok(!refused.fail && refused.body === '[image]', '…and the message keeps ONE "[image]" line — for the picture that did not draw', JSON.stringify(refused.body));
+  ok(!refused.fail && !/\[image\]/.test(refused.body) && refused.chipInBody, '…standing IN the body where the picture would be — no "[image]" words left over (§25)', JSON.stringify([refused.body, refused.chipInBody]));
   const retried = await p1.evaljs(`(async () => {
     const w = [...window.app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.convId === 'fake-poll-room-2');
     w.content.querySelector('[data-channel-retry="fake-poll-room-2-gone"]').click();
@@ -302,7 +309,7 @@ const older = await p1.evaljs(`(async () => {
   for (let i = 0; i < 60 && !w.content.querySelectorAll('.chanmsg').length; i++) await new Promise((r) => setTimeout(r, 250));
   const before = w.content.querySelectorAll('.chanmsg').length;
   const list = w.content.querySelector('.chanwin-list');
-  for (let k = 0; k < 6; k++) { list.scrollTop = 0; list.dispatchEvent(new Event('scroll')); await new Promise((r) => setTimeout(r, 500)); }
+  for (let k = 0; k < 6; k++) { list.scrollTop = 0; list.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })); await new Promise((r) => setTimeout(r, 500)); }   // the person's wheel up at the top (round 3: a bare scroll event is displacement)
   return { before, after: w.content.querySelectorAll('.chanmsg').length, start: w.content.querySelector('.chanwin-start') ? w.content.querySelector('.chanwin-start').textContent : null };
 })()`);
 ok(older.start && /会话的开头|最早/.test(older.start), 'scrolling past the local log asks the vendor for older history and says where the conversation begins', JSON.stringify(older));
@@ -417,26 +424,24 @@ const grant = await p1.evaljs(`(async () => {
   const dlg = document.getElementById('chan-access-dialog');
   if (!dlg) return { fail: 'Grant access… did not open' };
   const title = dlg.querySelector('.dialog-header h3').textContent;
-  const before = [...dlg.querySelectorAll('.chan-access-row')].map((r) => r.querySelector('select').selectedOptions[0].textContent);
-  // the evidence the construction held and the dialog read the server: the panel's copy has no Xi, the dialog
-  // fetched the account's fresh view
+  const sub = dlg.querySelector('.chan-dialog-sub') ? dlg.querySelector('.chan-dialog-sub').textContent : null;
+  // channel-polish (2026-09-27): who = the ONE principal picker; a pick adds the principal's authority row
+  const before = [...dlg.querySelectorAll('.chan-access-row .chan-access-who')].map((r) => r.textContent);
+  // the evidence the construction held and the dialog read the server (mirror-193): the panel's copy has no Xi,
+  // the dialog fetched the account's fresh view
   const panelLine = ${PANEL_LINE};
   const readFresh = (window.__vsFetchLog || []).some((u) => /\\/api\\/channels\\/adapters\\/fake-poll\\/view$/.test(u));
-  const add = [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加 agent 或组');
-  if (!add) return { fail: 'no 添加 agent 或组' };
-  add.click(); await sleep(50);
-  const rows = [...dlg.querySelectorAll('.chan-access-row')];
-  const who = rows[rows.length - 1].querySelector('select');
-  const opt = [...who.options].find((o) => o.textContent === '组 · 工作');
-  if (!opt) return { fail: 'the group is not offered as 组 · 工作', opts: [...who.options].map((o) => o.textContent) };
-  who.value = opt.value; who.dispatchEvent(new Event('change')); await sleep(50);
+  for (let i = 0; i < 40 && !dlg.querySelector('.chan-access-pick .pp-row'); i++) await sleep(100);
+  const opt = [...dlg.querySelectorAll('.chan-access-pick .pp-row')].find((o) => o.querySelector('.pp-name') && o.querySelector('.pp-name').textContent === '工作');
+  if (!opt) return { fail: 'the group 工作 is not offered by the picker', opts: [...dlg.querySelectorAll('.chan-access-pick .pp-row')].map((o) => o.textContent) };
+  opt.click(); await sleep(50);
   ${TOAST_LOG}
   const out = await (${SAVE_OUTCOME('chan-access-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
-  return { title, before, panelLine, readFresh, ...out };
+  return { title, sub, before, panelLine, readFresh, ...out };
 })()`);
 const released = await p1.evaljs(HOLD(false));
 ok(!grant.fail && !/Xi/.test(grant.panelLine) && released.released > 0, `CONSTRUCTION held: when the dialog opened, page 1's panel copy had not heard of Xi (its account line: "${grant.panelLine}"; ${released.released} held frame(s) released after)`, JSON.stringify({ panelLine: grant.panelLine, released }));
-ok(!grant.fail && /授权访问整个账号/.test(grant.title) && grant.before.length === 1 && /Xi/.test(grant.before[0]) && grant.readFresh, '授权访问… opens "授权访问整个账号 — …" with the account\'s access rows as the SERVER holds them (Xi, kept though not live) — read fresh (GET …/adapters/fake-poll/view), never from the stale panel copy', JSON.stringify(grant));
+ok(!grant.fail && grant.title === '谁可以在这里阅读和操作？' && /^整个账号 —— /.test(grant.sub || '') && grant.before.length === 1 && /Xi/.test(grant.before[0]) && grant.readFresh, '授权访问… asks "谁可以在这里阅读和操作？" over "整个账号 —— …" (channel-polish: plain words) with the account\'s access rows as the SERVER holds them (Xi, kept though not live) — read fresh (GET …/adapters/fake-poll/view), never from the stale panel copy (mirror-193)', JSON.stringify(grant));
 ok(grant.closed && !(grant.toasts || []).some((x) => x.error) && (grant.toasts || []).some((x) => /访问权限已保存/.test(x.text) && /通知…/.test(x.text)), 'adding 组 · 工作 and saving closes with the toast "访问权限已保存 … 除非添加通知（通知…），否则不会唤醒任何人"', JSON.stringify(grant.toasts));
 const acc1 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
 ok(acc1 && acc1.access.map((r) => `${r.principal.name}:${r.authority}`).sort().join() === 'Xi:draft,工作:draft' && acc1.watchers.length === 0, 'the wire: ACCESS = Xi + 工作 (both draft), WATCHERS = none', JSON.stringify(acc1 && { access: acc1.access, watchers: acc1.watchers }));
@@ -448,12 +453,12 @@ const notify = await p1.evaljs(`(async () => {
   const dlg = document.getElementById('chan-notify-dialog');
   if (!dlg) return { fail: 'Notify… did not open' };
   const row = dlg.querySelector('.chan-watch-row');
-  const who = row.querySelector('select');
-  const picker = [...who.options].map((o) => o.textContent);
+  // channel-polish: who = the compact principal picker (its list in a popover)
+  row.querySelector('.chan-watch-who .pp-trigger').click(); await sleep(100);
+  const picker = [...document.querySelectorAll('.pp-pop .pp-row .pp-name')].map((o) => o.textContent);
   const addNote = [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加通知');
-  const sels = row.querySelectorAll('select.chan-opt-input');
-  who.value = [...who.options].find((o) => /Xi/.test(o.textContent)).value; who.dispatchEvent(new Event('change'));
-  sels[1].value = 'filtered'; sels[1].dispatchEvent(new Event('change')); await sleep(50);
+  [...document.querySelectorAll('.pp-pop .pp-row')].find((o) => /Xi/.test(o.textContent)).click(); await sleep(50);
+  row.querySelector('input[type=radio][value=rule]').click(); await sleep(50);   // ② "只有符合规则的消息…"
   [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加规则').click(); await sleep(50);
   const inp = row.querySelector('.chan-af-rule input'); inp.value = 'deploy'; inp.dispatchEvent(new Event('input'));
   for (let i = 0; i < 40; i++) { const st = row.querySelector('.chan-af-stat'); if (st && !/估算中|估计中|Estimating/.test(st.textContent)) break; await sleep(150); }
@@ -463,7 +468,7 @@ const notify = await p1.evaljs(`(async () => {
   const out = await (${SAVE_OUTCOME('chan-notify-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
   return { picker, canAdd: !!addNote && addNote.style.display !== 'none', estimate, total, ...out };
 })()`);
-ok(!notify.fail && notify.picker.length === 2 && notify.picker.some((o) => /Xi/.test(o)) && notify.picker.includes('组 · 工作'), 'the NOTIFY picker is EXACTLY the account\'s access list (Xi, 组 · 工作) — nobody without access is offered', JSON.stringify(notify.picker));
+ok(!notify.fail && notify.picker.length === 2 && notify.picker.some((o) => /Xi/.test(o)) && notify.picker.includes('工作'), 'the NOTIFY picker is EXACTLY the account\'s access list (Xi, 工作) — nobody without access is offered', JSON.stringify(notify.picker));
 ok(notify.closed && !(notify.toasts || []).some((x) => x.error) && /每天约/.test(notify.total || ''), 'one watcher (Xi, wake, 按过滤器 keyword deploy) saves with no error; the total line sums the ceilings', JSON.stringify(notify));
 const acc2 = ((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll').accountGrain;
 ok(acc2 && acc2.watchers.length === 1 && acc2.watchers[0].principal.name === 'Xi' && acc2.watchers[0].notify === 'wake' && acc2.watchers[0].mode === 'filtered' && acc2.watchers[0].filter && acc2.watchers[0].filter.rules[0].value === 'deploy' && acc2.access.length === 2, 'the wire: Xi WATCHES (wake on its filter); 工作 has ACCESS ONLY — no watcher', JSON.stringify(acc2 && acc2.watchers));
@@ -502,7 +507,7 @@ const drop = await p1.evaljs(`(async () => {
   [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === '授权访问…').click();
   for (let i = 0; i < 300 && !document.getElementById('chan-access-dialog'); i++) await sleep(100);   // a deadline for a dialog that never opens (it re-reads the grain first)
   const dlg = document.getElementById('chan-access-dialog');
-  const row = [...dlg.querySelectorAll('.chan-access-row')].find((r) => /Xi/.test(r.querySelector('select').selectedOptions[0].textContent));
+  const row = [...dlg.querySelectorAll('.chan-access-row')].find((r) => /Xi/.test(r.querySelector('.chan-access-who').textContent));
   row.querySelector('.chan-af-rm').click(); await sleep(50);
   const note = [...dlg.querySelectorAll('.chan-flow-note')].map((x) => x.textContent).find((x) => /也会移除这些通知/.test(x)) || null;
   [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存').click();
@@ -553,14 +558,15 @@ const OWNER_NOTIFY = (edit, construct = false) => `(async () => {
   const dlg = document.getElementById('chan-notify-dialog');
   if (!dlg) return { fail: 'Notify… did not open' };
   const row = dlg.querySelector('.chan-watch-row');
-  const sels = row.querySelectorAll('select.chan-opt-input');
   const rules = () => [...row.querySelectorAll('.chan-af-rules .chan-af-rule')];
   let prefill = null, clamps = null;
   if (${edit}) {
-    prefill = { who: sels[0].selectedOptions[0].textContent, mode: sels[1].value, notify: sels[2].value, rules: rules().map((r) => [...r.querySelectorAll('input')].map((i) => i.value)), nums: [...row.querySelectorAll('input[type=number]')].map((i) => i.value) };
+    prefill = { who: row.querySelector('.chan-watch-who .pp-trigger-name').textContent, mode: row.querySelector('input[type=radio][value=rule]').checked ? 'filtered' : 'all', notify: row.querySelector('input[type=radio][value=digest]').checked ? 'digest' : 'wake', preview: (row.querySelector('.chan-notify-preview') || {}).textContent || null, rules: rules().map((r) => [...r.querySelectorAll('input')].map((i) => i.value)), nums: [...row.querySelectorAll('input[type=number]')].map((i) => i.value) };
   } else {
-    if (sels[0].selectedOptions[0].textContent !== '组 · 工作') return { fail: 'the only principal with access is not preselected', who: sels[0].selectedOptions[0].textContent };
-    sels[1].value = 'filtered'; sels[1].dispatchEvent(new Event('change'));
+    const who0 = row.querySelector('.chan-watch-who .pp-trigger-name').textContent;
+    if (who0 !== '工作') return { fail: 'the only principal with access is not preselected', who: who0 };
+    // channel-polish: the THREE plain questions — ② "只有符合规则的消息…" folds the rule editor open
+    row.querySelector('input[type=radio][value=rule]').click();
     const add = [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === '添加规则');
     const windows = [['09:00', '12:00'], ['14:00', '18:00']];
     for (let k = 0; k < windows.length; k++) {
@@ -571,8 +577,11 @@ const OWNER_NOTIFY = (edit, construct = false) => `(async () => {
       ins[0].value = windows[k][0]; ins[0].dispatchEvent(new Event('input'));
       ins[1].value = windows[k][1]; ins[1].dispatchEvent(new Event('input'));
     }
-    sels[2].value = 'digest'; sels[2].dispatchEvent(new Event('change'));
+    // ③ "每 [9999] 分钟一份摘要" (its own clamp) and, its OWN line under the answers, "每天最多 [9999] 次" (its
+    // clamp under it) — the owner's two 9999s, each said at its own field (verify round 2: the cap bounds the
+    // digest too, so it is no third answer to click)
     const nums = [...row.querySelectorAll('input[type=number]')];
+    row.querySelector('input[type=radio][value=digest]').click();
     nums[0].value = '9999'; nums[0].dispatchEvent(new Event('input'));
     nums[1].value = '9999'; nums[1].dispatchEvent(new Event('input'));
     await sleep(100);
@@ -612,8 +621,53 @@ ok(line === '访问：组 · 工作（起草） · 通知：组 · 工作 每 14
 const acctW = ((((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll') || {}).accountGrain || { watchers: [] }).watchers[0] || {};
 ok(acctW.mode === 'filtered' && acctW.filterId === `f-account-fake-poll|group:${GID}` && acctW.filter && acctW.filter.rules.map((r) => `${r.from}-${r.to}`).join() === '09:00-12:00,14:00-18:00' && acctW.principal.name === '工作' && acctW.notify === 'digest' && acctW.digestMinutes === 1440 && acctW.dailyWakeCap === 1000, 'the wire holds the watcher: 工作, filtered by f-account-fake-poll|group:<id> (09:00-12:00, 14:00-18:00), digest 1440, cap 1000', JSON.stringify(acctW));
 const again = await p1.evaljs(OWNER_NOTIFY(true));
-ok(!again.fail && again.prefill && again.prefill.who === '组 · 工作' && again.prefill.mode === 'filtered' && again.prefill.notify === 'digest' && JSON.stringify(again.prefill.rules) === JSON.stringify([['09:00', '12:00'], ['14:00', '18:00']]) && JSON.stringify(again.prefill.nums) === JSON.stringify(['1440', '1000']), 're-opening 通知… prefills 组 · 工作 with the two saved windows and the numbers AS STORED (1440, 1000)', JSON.stringify(again));
+ok(!again.fail && again.prefill && again.prefill.who === '工作' && again.prefill.mode === 'filtered' && again.prefill.notify === 'digest' && JSON.stringify(again.prefill.rules) === JSON.stringify([['09:00', '12:00'], ['14:00', '18:00']]) && JSON.stringify(again.prefill.nums) === JSON.stringify(['1440', '1000']), 're-opening 通知… prefills 组 · 工作 with the two saved windows and the numbers AS STORED (1440, 1000)', JSON.stringify(again));
 ok(again.closed && !(again.toasts || []).some((x) => x.error), 'saving the edit (the filter re-sent inline) closes with no error toast', JSON.stringify(again.toasts));
+
+// ── ⑦b A DIGEST KEEPS ITS OWN DAILY CAP, AND A PERSON CAN CHANGE IT (verify round 2, 2026-09-27) ──
+// The watcher's `dailyWakeCap` bounds a digest as it bounds a wake (the engine reads it for both), and the owner's
+// own save above is exactly that shape: a digest every 1440 minutes, at most 1000 a day. Question ③ drew the cap
+// as a THIRD exclusive answer beside "right away" and "a digest" — so with "a digest" chosen the cap's field was
+// DISABLED: a stored digest's cap could be read in the preview and never changed, and a new digest could not be
+// given one. The cap is its own line now, always editable. TRUSTED typing (CDP) — a disabled field takes no focus.
+{
+  const opened = await p1.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    document.querySelector('.rail-panel-channels .chan-sec[data-adapter="fake-poll"] .chan-sec-more').click(); await sleep(200);
+    [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => x.textContent.trim() === '通知…').click();
+    for (let i = 0; i < 40 && !document.querySelector('#chan-notify-dialog .chan-watch-row'); i++) await sleep(100);
+    const row = document.querySelector('#chan-notify-dialog .chan-watch-row');
+    if (!row) return { fail: 'Notify… did not open' };
+    const nums = [...row.querySelectorAll('input[type=number]')];
+    const cap = nums[1];
+    cap.focus(); cap.select();
+    const R = cap.getBoundingClientRect();
+    return { n: nums.length, disabled: cap.disabled, focused: document.activeElement === cap, value: cap.value, shown: R.width > 0 && R.height > 0, how: [...row.querySelectorAll('input[type=radio]')].filter((r) => r.checked && /^(now|digest|cap)$/.test(r.value)).map((r) => r.value), answers: [...row.querySelectorAll('input[type=radio]')].map((r) => r.value) };
+  })()`);
+  ok(!opened.fail && opened.n === 2 && JSON.stringify(opened.how) === JSON.stringify(['digest']) && opened.value === '1000' && opened.shown && !opened.disabled && opened.focused, 'a stored DIGEST opens with its own daily cap (1000) in a field a person can use — shown, enabled, focusable', JSON.stringify(opened));
+  ok(!opened.fail && !opened.answers.includes('cap'), 'the cap is not a third exclusive answer beside "right away" and "a digest" (it bounds both)', JSON.stringify(opened.answers));
+  await p1.cdp('Input.insertText', { text: '7' });
+  const saved = await p1.evaljs(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const dlg = document.getElementById('chan-notify-dialog');
+    const row = dlg.querySelector('.chan-watch-row');
+    const cap = [...row.querySelectorAll('input[type=number]')][1];
+    await sleep(400);
+    for (let i = 0; i < 40; i++) { const st = row.querySelector('.chan-af-stat'); if (st && !/估算中|估计中|Estimating/.test(st.textContent)) break; await sleep(150); }
+    const out = { typed: cap.value, preview: (row.querySelector('.chan-notify-preview') || {}).textContent || '' };
+    for (const x of document.querySelectorAll('#global-toasts .global-toast')) x.dataset.seenBefore = '1';   // by MARK, never by index (an older toast expiring shifts every index)
+    [...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存').click();
+    for (let i = 0; i < 50 && document.getElementById('chan-notify-dialog'); i++) await sleep(100);
+    await sleep(200);
+    out.closed = !document.getElementById('chan-notify-dialog');
+    out.toasts = [...document.querySelectorAll('#global-toasts .global-toast:not([data-seen-before])')].map((x) => ({ error: x.classList.contains('global-toast-error'), text: x.textContent }));
+    if (!out.closed) document.getElementById('chan-notify-dialog').remove();
+    return out;
+  })()`);
+  ok(saved.typed === '7' && /7/.test(saved.preview) && /1440/.test(saved.preview), 'typing 7 into it lands in the field, and the preview says the digest AND its new cap', JSON.stringify(saved));
+  const w7 = ((((await api('GET', '/api/channels')).json.adapters || []).find((x) => x.id === 'fake-poll') || {}).accountGrain || { watchers: [] }).watchers[0] || {};
+  ok(saved.closed && !(saved.toasts || []).some((x) => x.error) && w7.notify === 'digest' && w7.digestMinutes === 1440 && w7.dailyWakeCap === 7 && w7.mode === 'filtered' && w7.filter && w7.filter.rules.length === 2, 'the wire: still the digest every 1440 minutes on its two windows — at most 7 a day', JSON.stringify([saved.toasts, w7]));
+}
 
 // ── ⑧ mirror-193: a list that changes WHILE the dialog is open is never written over ──
 // The dialog now draws the server's lists — but it stays open while the user edits, and its Save is still the
@@ -625,7 +679,7 @@ const OPEN_ROWS = `(async () => {
   for (let i = 0; i < 300 && !document.querySelector('#chan-access-dialog .chan-access-row'); i++) await new Promise((r) => setTimeout(r, 100));
   const dlg = document.getElementById('chan-access-dialog');
   if (!dlg) return { fail: 'Grant access… did not open' };
-  return { rows: [...dlg.querySelectorAll('.chan-access-row')].map((r) => r.querySelector('select').selectedOptions[0].textContent), readFresh: (window.__vsFetchLog || []).filter((u) => /\\/api\\/channels\\/adapters\\/fake-poll\\/view$/.test(u)).length };
+  return { rows: [...dlg.querySelectorAll('.chan-access-row')].map((r) => r.querySelector('.chan-access-who').textContent), readFresh: (window.__vsFetchLog || []).filter((u) => /\\/api\\/channels\\/adapters\\/fake-poll\\/view$/.test(u)).length };
 })()`;
 const SAVE_OPEN = `(async () => {
   ${TOAST_LOG}
@@ -633,19 +687,19 @@ const SAVE_OPEN = `(async () => {
   const out = await (${SAVE_OUTCOME('chan-access-dialog')})([...dlg.querySelectorAll('button')].find((b) => b.textContent.trim() === '保存'));
   // a refusal re-opens the dialog on the lists as they are now: wait for a dialog that is NOT the one saved
   let rows = null;
-  for (let i = 0; i < 300; i++) { const d = document.getElementById('chan-access-dialog'); if (d && d !== dlg && d.querySelector('.chan-access-row')) { rows = [...d.querySelectorAll('.chan-access-row')].map((r) => r.querySelector('select').selectedOptions[0].textContent); break; } await new Promise((r) => setTimeout(r, 100)); }
+  for (let i = 0; i < 300; i++) { const d = document.getElementById('chan-access-dialog'); if (d && d !== dlg && d.querySelector('.chan-access-row')) { rows = [...d.querySelectorAll('.chan-access-row')].map((r) => r.querySelector('.chan-access-who').textContent); break; } await new Promise((r) => setTimeout(r, 100)); }
   const d2 = document.getElementById('chan-access-dialog');
   if (d2) { const cancel = [...d2.querySelectorAll('button')].find((b) => b.textContent.trim() === '取消'); if (cancel) cancel.click(); else d2.remove(); }
   return { ...out, reopened: rows };
 })()`;
 const m8 = await p1.evaljs(MENU('授权访问…'));
 const o8 = m8.fail ? m8 : await p1.evaljs(OPEN_ROWS);
-ok(!o8.fail && o8.rows.length === 1 && o8.rows[0] === '组 · 工作', 'FIXTURE: 授权访问… is open on the account\'s one access row (组 · 工作)', JSON.stringify(o8));
+ok(!o8.fail && o8.rows.length === 1 && o8.rows[0] === '工作', 'FIXTURE: 授权访问… is open on the account\'s one access row (工作)', JSON.stringify(o8));
 const g8 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal: WORK_P, authority: 'draft' }, { principal: YU, authority: 'draft' }] });
 ok(g8.status === 200 && (await accessNames()) === 'Yu,工作', 'WHILE IT IS OPEN, Yu is granted through the route (another window, an agent\'s approved request)', JSON.stringify(g8.json).slice(0, 200));
 const s8 = await p1.evaljs(SAVE_OPEN);
 ok(s8.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text)) && !s8.toasts.some((x) => /访问权限已保存/.test(x.text)), `Save (the dialog's list [工作], drawn before Yu) is REFUSED by name — the toast says the list changed while the dialog was open and nothing was saved (${s8.ms} ms)`, JSON.stringify(s8));
-ok(Array.isArray(s8.reopened) && s8.reopened.some((x) => /Yu/.test(x)) && s8.reopened.some((x) => x === '组 · 工作'), `…and the dialog RE-OPENS on the lists as they are now (${JSON.stringify(s8.reopened)})`, JSON.stringify(s8.reopened));
+ok(Array.isArray(s8.reopened) && s8.reopened.some((x) => /Yu/.test(x)) && s8.reopened.some((x) => x === '工作'), `…and the dialog RE-OPENS on the lists as they are now (${JSON.stringify(s8.reopened)})`, JSON.stringify(s8.reopened));
 ok((await accessNames()) === 'Yu,工作', 'the wire: Yu KEPT its access — the stale whole list was never written', await accessNames());
 
 // ── ⑨ mirror-193: ONE CONVERSATION WINDOW, ONE COPY OF ITS MESSAGES ──
@@ -694,10 +748,12 @@ const RACE = (conv) => `(async () => {
   if (w) window.app.wm.closeWindow(w.id);
   return { ...seen, shown, page };
 })()`;
-// ⑨b the REPAINT of an open window (a broadcast naming it) while it is scrolled away from the top: the render's
-// clear drops scrollTop to 0 and the scroll handler asks for the page ABOVE the boundary the clear just reset — the
-// tail page again, prepended beside the render's own. Constructed: the window open and settled at its bottom, one
-// broadcast; judged once its page (and any upward page) parsed.
+// ⑨b the REPAINT of an open window while it is scrolled away from the top: the rebuild's clear drops scrollTop to 0
+// and the scroll handler asks for the page ABOVE the boundary the clear just reset — the tail page again, prepended
+// beside the rebuild's own. Constructed: the window open and settled at its bottom, ONE REBUILD; judged once its page
+// (and any upward page) parsed. THE .195 MERGE: since lane channel-render (§25) a broadcast naming the conversation
+// PATCHES the list in place (new rows appended, never a clear) — the rebuild that still clears is a reconnect's
+// re-read (`onStateChange` → render()), so that is the trigger here; the broadcasts stay held so no patch interleaves.
 const REPAINT = (conv) => `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const MSG = '/api/channels/fake-poll/' + encodeURIComponent(${JSON.stringify(conv)}) + '/messages?';
@@ -720,8 +776,8 @@ const REPAINT = (conv) => `(async () => {
   sock.onmessage = (e) => { let ty = null; try { ty = JSON.parse(e.data).type; } catch {} if (ty === 'channels-updated') { held.push(e); return; } orig.call(sock, e); };
   let after = -1;
   try {
-    orig.call(sock, { data: JSON.stringify({ type: 'channels-updated', partial: true, changedKeys: ['fake-poll/' + ${JSON.stringify(conv)}], changed: [${JSON.stringify(conv)}], digest: null }) });
-    // the render's CLEAR (its page still held) drops scrollTop to 0; the scroll event a visible page dispatches for
+    window.app.ws._notifyState(true);   // the rebuild: a reconnect's re-read (the broadcast only patches since §25)
+    // the rebuild's CLEAR (its page still held) drops scrollTop to 0; the scroll event a visible page dispatches for
     // it at its next frame is dispatched here explicitly (a background page runs no frames) — that is the event
     for (let i = 0; i < 600 && list().querySelectorAll('.chanmsg').length; i++) await sleep(20);
     seen.cleared = list().querySelectorAll('.chanmsg').length === 0;
@@ -737,7 +793,7 @@ const baseRooms = ((await api('GET', '/api/channels')).json.conversations || [])
 ok(baseRooms.length >= 2, `FIXTURE: two base rooms no window has opened yet (${baseRooms.join(', ')})`, JSON.stringify(baseRooms));
 const race = await p1.evaljs(RACE(baseRooms[0]));
 const rp = await p1.evaljs(REPAINT(baseRooms[0]));
-ok(rp.before > 0 && rp.cleared && rp.parsed === rp.started && rp.after === rp.before, `ONE LIST, ONE WRITER (⑨b): a broadcast repainting an open window (its clear dropping scrollTop to 0 and that scroll event dispatched) draws its ${rp.before} message(s) once (${rp.after} drawn; pages read: ${rp.urls.join(' ')})`, JSON.stringify(rp));
+ok(rp.before > 0 && rp.cleared && rp.parsed === rp.started && rp.after === rp.before, `ONE LIST, ONE WRITER (⑨b): a rebuild (a reconnect's re-read) repainting an open window (its clear dropping scrollTop to 0 and that scroll event dispatched) draws its ${rp.before} message(s) once (${rp.after} drawn; pages read: ${rp.urls.join(' ')})`, JSON.stringify(rp));
 ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.started && race.page > 0 && race.shown === race.page, `ONE LIST, ONE WRITER: three renders in flight together (the open's page answering last; ${race.started} of them fetched a page) — the window shows the page's ${race.page} record(s) ONCE (${race.shown} drawn)`, JSON.stringify(race));
 
 // ── ⑧ CONTROL: the PRE-FIX DIALOG (it draws the panel's copy) rebuilt into the scratch bundle ──
@@ -750,14 +806,27 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   const FRESH = "  const fresh = await fetchJson(`/api/channels/adapters/${encodeURIComponent(target.adapter.id)}/view`);\n  if (!fresh || fresh.error || !fresh.adapter) { showToast(routeErrorText(fresh), { type: 'error' }); return null; }\n  const a = fresh.adapter;\n";
   ok(src.split(FRESH).length === 2, 'CONTROL setup: the fresh read is spelled once where the control reverts it to the panel copy');
   fs.writeFileSync(MOD, src.replace(FRESH, '  const a = target.adapter;\n'));
-  // ⑨'s guard reverted in the SAME control bundle: a page is applied whichever render fetched it
+  // ⑨ / ⑨b's ONE mechanism neutered in the SAME control bundle (the .195 merge kept lane channel-render's): the
+  // window's SERIAL QUEUE becomes "run now" (every list writer — a render, a patch, an upward page — interleaves
+  // again), and the rule that a scroll event the rebuild's own clear caused is nobody's scroll is removed WHOLE —
+  // `listReady` ('not-ready') AND the three clauses that make a scroll event prove itself (no-input / shrunk /
+  // no-room): each alone refuses the clear's event (the clear is a clamp to a room of 0), so a control that removed
+  // one layer would stay green for the wrong reason (the layered-guard rule)
   const WMOD = path.join(wt, 'src/lib/channel-window.js');
   const wsrc = fs.readFileSync(WMOD, 'utf8');
-  const GUARD = '    if (!pageFor(gen)) return 0;   // a newer render owns the list now — this page is not applied\n';
-  ok(wsrc.split(GUARD).length === 2, 'CONTROL setup: the window\'s page guard is spelled once where the control removes it');
-  const READY = '    if (list.scrollTop > 4 || upInFlight || !listReady) return;\n';
-  ok(wsrc.split(READY).length === 2, 'CONTROL setup: the window\'s list-ready guard is spelled once where the control removes it');
-  fs.writeFileSync(WMOD, wsrc.replace(GUARD, '').replace(READY, '    if (list.scrollTop > 4) return;\n'));
+  const SERIAL = '  const serial = (fn) => { const run = queue.then(fn, fn); queue = run.catch(() => {}); return run; };\n';
+  ok(wsrc.split(SERIAL).length === 2, 'CONTROL setup: the window\'s serial queue is spelled once where the control makes it "run now"');
+  fs.writeFileSync(WMOD, wsrc.replace(SERIAL, '  const serial = (fn) => Promise.resolve().then(fn);\n'));
+  const PMOD = path.join(wt, 'src/lib/channel-paging.js');
+  const psrc = fs.readFileSync(PMOD, 'utf8');
+  const READY = [
+    "  if (!listReady) return { page: false, why: 'not-ready' };\n",
+    "  if (cause === 'scroll' && !inputFresh({ inputAt, now, gutterDrag })) return { page: false, why: 'no-input' };\n",
+    "  if (cause === 'scroll' && roomAtInput !== null && roomAtInput !== undefined && Number.isFinite(Number(roomAtInput)) && Number(room) < Number(roomAtInput)) return { page: false, why: 'shrunk' };\n",
+    "  if (cause === 'scroll' && Number(room) <= TOP_PX) return { page: false, why: 'no-room' };\n",
+  ];
+  ok(READY.every((c) => psrc.split(c).length === 2), 'CONTROL setup: the list-ready rule and the three scroll-event clauses are each spelled once in the paging verdict');
+  fs.writeFileSync(PMOD, READY.reduce((acc, c) => acc.replace(c, ''), psrc));
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
   ok(await p1.reload(), 'CONTROL: page 1 reloaded on the pre-fix bundle');
   const cp = await p1.evaljs(PANEL);
@@ -772,9 +841,9 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   ok(sc.toasts.some((x) => x.error && /在对话框打开期间被改动/.test(x.text)) && (await accessNames()) === 'Yu,Zed,工作', 'CONTROL: …and its stale Save is refused by the server\'s stamp check alone — Zed kept (the second half of the fix holds without the first)', JSON.stringify({ toasts: sc.toasts, wire: await accessNames() }));
   await p1.evaljs(HOLD(false));
   const rpc = await p1.evaljs(REPAINT(baseRooms[1]));
-  ok(rpc.before > 0 && rpc.cleared && rpc.after > rpc.before, `CONTROL (⑨b): without the ready guard the repaint's clear asks for the page above a reset boundary — the tail again — and the window draws ${rpc.after} for ${rpc.before} (pages read: ${rpc.urls.join(' ')})`, JSON.stringify(rpc));
+  ok(rpc.before > 0 && rpc.cleared && rpc.after > rpc.before, `CONTROL (⑨b): without the queue and the ready rule the rebuild's clear asks for the page above a reset boundary — the tail again — and the window draws ${rpc.after} for ${rpc.before} (pages read: ${rpc.urls.join(' ')})`, JSON.stringify(rpc));
   const rc = await p1.evaljs(RACE(baseRooms[1]));
-  ok(rc.bars >= 3 && rc.started >= 2 && rc.parsed === rc.started && rc.page > 0 && rc.shown >= 2 * rc.page, `CONTROL (⑨): without the page guard the same three renders draw the page ${Math.round(rc.shown / Math.max(1, rc.page) * 10) / 10}× (${rc.shown} for ${rc.page}) — the slow runner's duplicate list; the leg above would go red`, JSON.stringify(rc));
+  ok(rc.bars >= 3 && rc.started >= 2 && rc.parsed === rc.started && rc.page > 0 && rc.shown >= 2 * rc.page, `CONTROL (⑨): without the serial queue the same three list writers draw the page ${Math.round(rc.shown / Math.max(1, rc.page) * 10) / 10}× (${rc.shown} for ${rc.page}) — the slow runner's duplicate list; the leg above would go red`, JSON.stringify(rc));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

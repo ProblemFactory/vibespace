@@ -47,8 +47,9 @@ const statusExpr = /const status = ([^;]+);/.exec(chanAnswerSrc);
 const ROUTE_STATUS = new Map();   // code → status
 if (statusExpr) for (const part of statusExpr[1].split(' : ')) { const m = /^(.*)\?\s*(\d{3})\s*$/.exec(part.trim()); if (!m) continue; for (const c of m[1].matchAll(/code === '([^']+)'/g)) ROUTE_STATUS.set(c[1], Number(m[2])); }
 const RETRYABLE = new Set([429, 409, 503]);
-// R4 (B-6acc): `compose-not-available` belongs to the COMPOSE verb alone, the same way
-const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available'];
+// R4 (B-6acc): `compose-not-available` belongs to the COMPOSE verb alone, the same way;
+// 2026-09-27: `not-withdrawable` belongs to WITHDRAW (and reply/compose --replaces) alone
+const REPLY_ONLY = ['send-not-available', 'rate-floor', 'compose-not-available', 'not-withdrawable'];
 const routeRetryable = [...ROUTE_STATUS].filter(([, st]) => RETRYABLE.has(st)).map(([c]) => c);
 const expectedRefused = routeRetryable.filter((c) => !REPLY_ONLY.includes(c)).sort();
 const cliSrc = fs.readFileSync(CLI, 'utf-8');
@@ -101,7 +102,19 @@ const server = http.createServer((req, res) => {
     if (url.pathname === '/api/agent/channels/reply') {
       if (body.conv === READONLY.key) return send(409, { ok: false, code: 'send-not-available', error: 'sending is not available on this conversation (read-only-mailbox)', why: 'read-only-mailbox' });
       if (body.conv !== VISIBLE.key) return send(404, notFound());
-      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null } }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] } });
+      // 2026-09-27: --replaces — the engine's replace answers (accepted / the old one decided first)
+      if (body.replaces === 'p-sent') return send(409, { ok: false, code: 'not-withdrawable', error: 'proposal p-sent cannot be withdrawn: it is sent — decided already', replaces: 'p-sent' });
+      const replaced = body.replaces ? { replaces: body.replaces, replaced: { id: body.replaces, state: 'withdrawn' } } : {};
+      return send(200, { ok: true, proposal: { id: 'p-1', state: 'awaiting-approval', adapterId: 'fake-poll', convId: 'ops', policy: { mode: 'review', reasons: ['channel-policy', 'authority'] }, sendAs: 'user', identity: { marking: 'unknown', text: null }, ...(body.replaces ? { replaces: body.replaces } : {}) }, decision: { mode: 'review', reasons: ['channel-policy', 'authority'] }, ...replaced });
+    }
+    // 2026-09-27: WITHDRAW — the engine's three answers (own: ok; somebody else's: 403 not-yours; decided: 409 not-withdrawable)
+    const wd = /^\/api\/agent\/channels\/proposals\/([^/]+)\/withdraw$/.exec(url.pathname);
+    if (wd && req.method === 'POST') {
+      const id = decodeURIComponent(wd[1]);
+      if (id === 'p-other') return send(403, { ok: false, code: 'not-yours', error: 'proposal p-other was drafted by Beta — only the agent that proposed it can withdraw it (the user can reject it)', state: 'awaiting-approval' });
+      if (id === 'p-sent') return send(409, { ok: false, code: 'not-withdrawable', error: 'proposal p-sent cannot be withdrawn: it is sent — decided already', state: 'sent' });
+      if (id !== 'p-1') return send(404, { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' });
+      return send(200, { ok: true, proposal: { id: 'p-1', state: 'withdrawn', withdrawal: { why: body.why || null } } });
     }
     if (url.pathname === '/api/agent/channels/status') {
       const p = { id: 'p-1', state: 'sent', adapterId: 'fake-poll', convId: 'ops', title: 'Ops room', at: 1, updatedAt: 2, text: 'hello', policy: { mode: 'review', reasons: [] }, receipt: { status: 'edited', edited: true, sentAs: 'user', vendorMessageId: 'v-9', identityMarking: 'marked', identityMarkingText: 'The channel shows this message as sent by Example App' } };
@@ -186,6 +199,29 @@ const reply = await run(['reply', 'fake-poll/ops', 'on it — the fix is deployi
 ok(reply.code === 0 && /proposed — proposal p-1 is awaiting the user's approval/.test(reply.out) && /channel-policy, authority/.test(reply.out), 'reply PROPOSES and prints the verdict + id', reply.out);
 ok(/UNVERIFIED sender identity/.test(reply.out), 'on an unknown-marking channel the reply notes the recipient identity is unverified');
 ok(calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/agent/channels/reply' && calls[0].body.text === 'on it — the fix is deploying' && calls[0].body.why.label === 'alert al-1', 'exactly ONE request: POST /reply — nothing else (the CLI never sends, it proposes)', JSON.stringify(calls));
+
+// ── 2026-09-27: WITHDRAW and --replaces ──
+calls.length = 0;
+const wdOk = await run(['withdraw', 'p-1', '--why', 'wrong thread']);
+ok(wdOk.code === 0 && /withdrawn — proposal p-1 is taken back; the user's approval card for it is gone \(why: wrong thread\)/.test(wdOk.out) && calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/agent/channels/proposals/p-1/withdraw' && calls[0].body.why === 'wrong thread', 'withdraw POSTs ONE request to the proposal\'s withdraw route with the why, and says the card is gone', JSON.stringify({ out: wdOk.out, calls }));
+const wdOther = await run(['withdraw', 'p-other']);
+ok(wdOther.code === 1 && /not-yours/.test(wdOther.err) && /drafted by Beta/.test(wdOther.err), 'somebody else\'s proposal ⇒ refused BY NAME (not-yours), exit 1', wdOther.err);
+const wdSent = await run(['withdraw', 'p-sent']);
+ok(wdSent.code === 1 && /not-withdrawable/.test(wdSent.err) && /it is sent/.test(wdSent.err), 'a decided proposal ⇒ refused BY NAME (not-withdrawable)', wdSent.err);
+const wdUse = await run(['withdraw']);
+ok(wdUse.code === 1 && /usage: vibespace-channels withdraw <proposalId>/.test(wdUse.err), 'withdraw without an id prints its usage');
+const wdJob = await run(['withdraw', 'p-1'], { VIBESPACE_SESSION_TOKEN: '', VIBESPACE_JOB_TOKEN: 'vsst_test' });
+ok(wdJob.code === 0 && /withdrawn/.test(wdJob.out), 'inside a Background Work job (only VIBESPACE_JOB_TOKEN) withdraw still runs, as the job\'s owner conversation');
+const noSessList = await run(['list'], { VIBESPACE_SESSION_TOKEN: '', VIBESPACE_JOB_TOKEN: 'jbt_x' });
+ok(noSessList.code === 2, 'a job token alone offers no other verb (list refuses: not inside a session)');
+calls.length = 0;
+const rep = await run(['reply', 'fake-poll/ops', 'the better text', '--replaces', 'p-0']);
+ok(rep.code === 0 && /proposed — proposal p-1/.test(rep.out) && /replaced — your earlier proposal p-0 is WITHDRAWN/.test(rep.out) && calls.length === 1 && calls[0].body.replaces === 'p-0' && calls[0].body.text === 'the better text', 'reply --replaces sends ONE request carrying `replaces` and says the earlier proposal is WITHDRAWN', JSON.stringify({ out: rep.out, body: calls[0] && calls[0].body }));
+const repSent = await run(['reply', 'fake-poll/ops', 'again', '--replaces', 'p-sent']);
+ok(repSent.code === 1 && /not-withdrawable/.test(repSent.err), 'reply --replaces of a decided proposal ⇒ refused by name, nothing proposed', repSent.err);
+calls.length = 0;
+const cmpRep = await run(['compose', 'gmail', '--to', 'bob@example.com', '--subject', 'Numbers', 'v2', '--replaces', 'p-9']);
+ok(cmpRep.code === 0 && calls.length === 1 && calls[0].body.replaces === 'p-9' && calls[0].body.text === 'v2', 'compose --replaces carries `replaces` (and the text is still the positional one)', JSON.stringify(calls[0] && calls[0].body));
 
 const ro = await run(['reply', 'fake-poll/announce', 'hello']);
 ok(ro.code === 1 && /send-not-available/.test(ro.err) && /read-only-mailbox/.test(ro.err) && !/proposal/.test(ro.out), 'reply on a sendAs:[] conversation prints send-not-available with the reason and creates nothing', ro.err);

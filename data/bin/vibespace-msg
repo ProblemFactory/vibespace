@@ -52,6 +52,7 @@ const REMEDY = {
   'bad-name': 'a group name is 1–80 characters',
   'too-few-members': 'a group needs at least one other agent besides you',
   self: 'that is this session',
+  'bad-member': 'this session cannot act as itself yet (no conversation id of its own) — wait a moment and repeat the command; the server\'s line above says when',
   'confirm-wakes': 'nothing was sent. Repeat with --yes if waking them all NOW is worth that many billed turns — or send without --wake (add --quiet to an invite): they read it on their next turn, free',
 };
 function refused(j, status) {

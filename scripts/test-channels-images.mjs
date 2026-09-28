@@ -343,7 +343,10 @@ console.log('⑤ wiring pins');
 {
   const W = fs.readFileSync(path.join(REPO, 'src/lib/channel-window.js'), 'utf-8');
   const R = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
-  ok(/const v = Att\.thumbVerdict\(answer, attempt\);/.test(W) && /Att\.bodyShown\(rec\.text \|\| '', drawn\)/.test(W), 'PIN: the window asks thumbVerdict for a picture that did not draw and bodyShown for the text line');
+  // §25 (2026-09-27): the placeholder line no longer reaches the body at all — the record's TREE draws the
+  // picture IN PLACE (an `img` block; the generic rung maps a declared placeholder to one), so `bodyShown`'s
+  // text surgery is superseded in the window; its PURE table (②) stays as the rule for any text consumer
+  ok(/const v = Att\.thumbVerdict\(answer, attempt\);/.test(W) && /placed\.add\(id\);\s*return attachmentNode\(rec, a, base\);/.test(W) && /const body = renderBlocks\(blocks, \{/.test(W), 'PIN: the window asks thumbVerdict for a picture that did not draw, and draws a placed picture IN the body through the one renderer (no "[image]" words)');
   ok(/img\.src = `\$\{url\}&inline=1/.test(W) && /img\.onclick = \(\) => showImageOverlay\(img\.src\);/.test(W) && !/innerHTML/.test(W.replace(/^\s*(\/\/|\*).*$/gm, '')), 'PIN: a thumbnail loads through OUR route as a property (img.src), opens THE shared overlay, and the window writes no innerHTML');
   ok(/attachmentReasonText\(code\)/.test(W) && /t\('Retry'\)/.test(W) && /track\('event', 'chan-attachment-failed'/.test(W), 'PIN: the refused chip names its reason, offers Retry, and the failure is reported (telemetry) — never a silent chip');
   ok(/retry: String\(req\.query\.retry \|\| ''\) === '1'/.test(R) && /res\.setHeader\('Cache-Control', 'no-store'\); return readerAnswer\(res, r\);/.test(R), 'PIN: the route passes the person\'s Retry and never lets a browser cache a refusal');

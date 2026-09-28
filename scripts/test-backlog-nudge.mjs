@@ -141,7 +141,7 @@ const mkRoutes = (mod, settingKeyReads = []) => {
   const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; } };
   mod.setupAgentRoutes({
     app, activeSessions: new Map([['big', { agentToken: 'vsst_big', backend: 'claude', cwd, name: 'big' }], ['small', { agentToken: 'vsst_small', backend: 'claude', cwd, name: 'small' }]]), tasks,
-    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
+    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
     sessionStatusKey: (s, id) => `claude:${id}`,
@@ -260,7 +260,7 @@ const ctxHarness = (routesMod, TGM, { groups = 1, n = 25, cjk = false, backend =
   const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { routes[`POST ${p}`] = h; } };
   routesMod.setupAgentRoutes({
     app, activeSessions: new Map([['s1', { agentToken: 'vsst_s1', backend, cwd: work, name: 's1' }]]), tasks: store,
-    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
     sessionStatusKey: (x, id) => `claude:${id}`, serverSetting: (k) => settings[k], scheduleCtxSync: () => {}, remoteCtxBaseFor: () => null,
@@ -320,7 +320,7 @@ const turnLegs = async (routesMod, TGM) => {
   // NEGATIVE CONTROLS — the pre-fix route (the nudge rode only full contexts)
   const pre = await turnLegs(loadPatched('src/agent-routes.js', [
     ['const body = [extra, std, backlogNudge]', 'const body = [extra, std]'],
-    ['if (outParts.length && backlogNudge) outParts.push(', 'if (false) outParts.push('],
+    ['if (outParts.length && nudgeBlock) outParts.push(nudgeBlock);', 'if (false) outParts.push(nudgeBlock);'],   // channel-jump verify r6: the nudge is rendered ahead of the drains (counted) and pushed here
   ]), TaskGroupManager);
   check('negative control: the pre-fix route (full contexts only) FAILS the quiet-turn and diff-turn legs', paragraphs(pre.tc) === 1 && paragraphs(pre.p1) === 0 && paragraphs(pre.p2) === 0 && paragraphs(pre.p3) === 0);
   const dup = await turnLegs(loadPatched('src/agent-routes.js', [['          for (const g of firstGroups) fullCovered.add(g.id);\n', '']]), TaskGroupManager);
@@ -417,7 +417,7 @@ console.log('(5) setting + wiring');
   check("agent-routes pin: the route reads serverSetting('tasks.backlogNudgeAt') through nudgeThreshold into backlogNudge", /raw = serverSetting\('tasks\.backlogNudgeAt'\)/.test(AR) && /backlogNudge\(updated\.backlog, key, \{ threshold: nudgeThreshold\(raw\) \}\)/.test(AR) && /text: nudgeText\(n, /.test(AR));
   const TG = strip(fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8'));
   check("task-groups pin: backlogNudgeAt reads getSetting('tasks.backlogNudgeAt'); the note pushes nudgeTextAll([e]); renderMultiContext aggregates once", /nudgeThreshold\(this\._getSetting\?\.\('tasks\.backlogNudgeAt'\)\)/.test(TG) && /if \(e\) out\.push\(nudgeTextAll\(\[e\]\)\);/.test(TG) && /isLiveClaim, highBudget, mineBudget, nudge: false \}\)/.test(TG) && /const nudge = this\.backlogNudgeFor\(ids, sessionKey, \{ multi: true, tools \}\);\s*if \(nudge\) head\.push\('', nudge\);/.test(TG));
-  check('agent-routes pin: prompt-context computes backlogNudgeFor over the groups no full block covers, rides the reminder body or its own block; BOTH hook payloads pass capInline', /tasks\.backlogNudgeFor\(nudgeIds, key, \{ multi: injectGroups\.length > 1, tools: toolFlags \}\)/.test(AR) && /const body = \[extra, std, backlogNudge\]/.test(AR) && /if \(outParts\.length && backlogNudge\) outParts\.push\(/.test(AR) && /context: capInline\(context, injectGroups\.length > 1\)/.test(AR) && /const ctx = capInline\(outParts\.join\('\\n\\n'\), injectGroups\.length > 1\);/.test(AR));
+  check('agent-routes pin: prompt-context computes backlogNudgeFor over the groups no full block covers, rides the reminder body or its own block; BOTH hook payloads pass capInline', /tasks\.backlogNudgeFor\(nudgeIds, key, \{ multi: injectGroups\.length > 1, tools: toolFlags \}\)/.test(AR) && /const body = \[extra, std, backlogNudge\]/.test(AR) && /let nudgeBlock = backlogNudge \? `<vibespace-reminder>\$\{backlogNudge\}<\/vibespace-reminder>` : '';\n    if \(nudgeBlock && fits\(nudgeBlock\)\) tailHeld \+= B\(nudgeBlock\) \+ 2; else nudgeBlock = '';/.test(AR) && /if \(outParts\.length && nudgeBlock\) outParts\.push\(nudgeBlock\);/.test(AR) && /context: capInline\(context, injectGroups\.length > 1\)/.test(AR) && /const ctx = capInline\(outParts\.join\('\\n\\n'\), injectGroups\.length > 1\);/.test(AR));
   const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'); // raw: server.js carries '/*' inside strings, the comment stripper would eat code
   check('server.js pin: the store is built with getSetting = serverSetting; agent-routes gets serverSetting', /new TaskGroupManager\(\{[\s\S]{0,200}getSetting: \(k\) => serverSetting\(k\)/.test(SV) && /setupAgentRoutes\(\{[^}]*serverSetting,/.test(SV));
   const BS = fs.readFileSync(path.join(REPO, 'src/backlog-select.js'), 'utf8');

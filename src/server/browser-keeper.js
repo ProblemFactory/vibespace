@@ -714,14 +714,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * pinned: a USER pin is an authorization (mayAttach's `pinned`), an AGENT's pin must itself be admitted (a profile the
    * user kept to another conversation is refused `not_owner` with the button sentence).
    */
-  function setPin(browserKey, profileId, { origin = 'chosen', by = 'user' } = {}) {
+  function setPin(browserKey, profileId, { origin = 'chosen', by = 'user', at = null } = {}) {
     ensureLoaded();
     if (!B.isBrowserKey(browserKey)) throw namedError('bad-request', 'a pin needs a browser key');
     if (!profileId) { const had = !!reg.pins[browserKey]; delete reg.pins[browserKey]; pinFailures.delete(browserKey); if (had) commit(); return null; }
     const p = profile(profileId);
     if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
     if (by === 'agent') { const may = B.mayAttach(p, { browserKey, by: 'agent' }); if (!may.ok) throw namedError(may.code, may.error, may.remedy ? { remedy: may.remedy } : {}); }
-    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };
+    // B-f7ab verify r1: `at` DATES a pin EARLIER than this clock, never later (the late key's default pin carries the
+    // instant its session STARTED — B.latePinAt — so a narrowing made since then still wins; copyPin's "no laundering")
+    const stamp = (typeof at === 'number' && Number.isFinite(at) && at >= 0) ? Math.min(now(), at) : now();
+    reg.pins[browserKey] = { profileId: p.id, origin, at: stamp, by: by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(browserKey);
     commit();
     return pinFor(browserKey);
@@ -734,6 +737,24 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * pin as the default ATTACHMENT the keeper's record is the ONLY carrier, and a fork whose Session properties said
    * "Pinned: work" browsed in a temporary browser, silently — the study's path B in a new coat. → the copy, or null.
    */
+  /**
+   * B-f7ab verify r2: THE SPAWN'S WITNESSED PICK, written as the spawn would have written it. A keyless spawn (per-session
+   * browsers off) still ran the pin ladder and recorded its pick (`browserPinAtStart`: profile, origin, date, by — a
+   * fork's = its parent's row verbatim); the late key restores that row under the key it mints — the copy `copyPin`
+   * makes for a fork, from a record instead of a live row (no `by:'agent'` re-admission: the pick was already made,
+   * this only restores it). The date is clamped to this clock like `setPin`'s. A vanished profile ⇒ null, said by the
+   * caller as the spawn says it ("pinned profile … no longer exists — starting ephemeral"). → the pin, or null.
+   */
+  function restorePin(browserKey, witness) {
+    ensureLoaded();
+    if (!B.isBrowserKey(browserKey) || !B.isPinWitness(witness)) return null;
+    const p = profile(witness.profileId);
+    if (!p || isEph(p)) return null;
+    reg.pins[browserKey] = { profileId: p.id, origin: witness.origin, at: Math.min(now(), Number(witness.at) || 0), by: witness.by === 'agent' ? 'agent' : 'user' };
+    pinFailures.delete(browserKey);
+    commit();
+    return pinFor(browserKey);
+  }
   function copyPin(fromKey, toKey) {
     ensureLoaded();
     if (!B.isBrowserKey(fromKey) || !B.isBrowserKey(toKey) || fromKey === toKey) return null;
@@ -767,6 +788,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     try { const v = taskGroupDefault(facts); return v && B.isProfileId(v) ? String(v) : ''; } catch (e) { log.warn?.(`[browser] task-group default unreadable — ${e && e.message}`); return ''; }
   }
   /** The instance default (setting `browser.defaultProfile`, an id or label). */
+  /** B-f7ab verify r2: the Task Group's default CAP for a create's facts, READ (not stamped) — a keyless spawn records it
+   *  as part of its start-time witness so the late key stamps what was in force at the START, never the group's later edit. */
+  function taskGroupCapFor(facts = {}) {
+    if (typeof taskGroupCap !== 'function') return null;
+    try { return B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); return null; }
+  }
   function instanceDefault() {
     const v = setting('browser.defaultProfile', '');
     if (!v) return '';
@@ -824,14 +851,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * Task Group's default cap is stamped ONCE — a conversation that already has its stamp keeps it (a later edit
    * of the group never reaches a running conversation, nor its resume). No group default ⇒ nothing stamped.
    */
-  function stampGroupCap(browserKey, facts = {}) {
+  function stampGroupCap(browserKey, facts = {}, { value = undefined } = {}) {
     ensureLoaded();
     const bk = B.parentKeyOf(browserKey);
     if (!B.isBrowserKey(bk)) return capFor(bk);
     const v = reg.caps[bk] || null;
     if (v && Number.isInteger(v.group)) return capFor(bk);
+    // B-f7ab verify r2: the late key hands in the value its spawn WITNESSED at the start (`value`; null = none was in
+    // force) instead of reading the group live — a group edited after the conversation started never reaches it
     let g = null;
-    if (typeof taskGroupCap === 'function') { try { g = B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); g = null; } }
+    if (value !== undefined) g = B.clampConversationCap(value);
+    else if (typeof taskGroupCap === 'function') { try { g = B.clampConversationCap(taskGroupCap(facts || {})); } catch (e) { log.warn?.(`[browser] task-group cap unreadable — ${e && e.message}`); g = null; } }
     if (g === null) return capFor(bk);
     reg.caps[bk] = { cap: v && Number.isInteger(v.cap) ? v.cap : null, group: g, at: now() };
     commit();
@@ -3294,6 +3324,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
     pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
+    restorePin, taskGroupCapFor, // B-f7ab verify r2: the spawn's witnessed pick, restored under the late key; the group cap READ for the witness
     // owner ruling A: the user's pin authorizes (lane S2's pinnedBy / clearPin are exported above); a pin that did not open
     // is said; one driver at a time; Delete… releases everything first; the adopt stops the conversation's own browser first
     userPinned, copyPin, notePinFailure, pinFailureOf, clearPinFailure, driveVerdictFor, activeDrivers, releaseAll, stopEphemeralOf,

@@ -16,6 +16,7 @@
 //   brain     src/server/session-brain.js (dual-feed gate)
 //   boot      src/server/boot-restore.js (restore-time backfill)
 //   dial      dial/agentd transport plumbing
+//   channel-touches  src/server/channel-touches.js (the channel witness, §26)
 // persisted: 'meta' = session-meta json, 'wrapper' = wrapper meta file,
 //            null = in-memory only (dies with the process by design).
 
@@ -30,6 +31,7 @@ const SESSION_FIELDS = {
   _taskRecordsTimer:   { owner: 'stdout', persisted: null,      note: 'debounce for the taskRecords session-meta write' },
   _helperAskedAt:      { owner: 'stdout', persisted: 'session-meta helperAskedAt', note: 'lane S1 verify r3: {requestId: ms} — each WAITING helper ask\'s first-seen instant, written by helper-asks.sync when the map changes, restored by boot-restore, stamped onto the rebuilt ask by rebuildHistory so the 60 s For-you clock does not restart with the server' },
   _helperAskedAtKey:   { owner: 'stdout', persisted: null,      note: 'lane S1 verify r3: the JSON of the last persisted _helperAskedAt map (write only on change)' },
+  _channelTouches:     { owner: 'channel-touches', persisted: 'session-meta channelTouches', note: 'the channel WITNESS ring (§26, B-099e): every agent read / search / reply / compose / refresh / request / status of a channel conversation this session made, recorded by the agent routes through src/server/channel-touches.js (newest 200, a repeat inside 2 s folded); restored by all three boot-restore paths so the chat rows survive a restart' },
   _taskRecords:        { owner: 'stdout', persisted: 'session-meta taskRecords', note: 'latest task_started / task_progress (tree kept field-wise) / task_notification per tool_use_id — replayed into the normalizer after a rebuild (2.369.140: the records are live-only and the stdout ring drops them)' },
   _historyLoaded:      { owner: 'ws',     persisted: null,      note: 'first-attach full-JSONL rebuild flag (set AFTER success, 2.89.2)' },
   _heldPeerCards:      { owner: 'ws',     persisted: null,      note: 'verify r5 (S2): the display-only peer cards (no msgId) fed by normalizers.feedPeerCard BEFORE the first-attach rebuild — bounded (32), replayed by rebuildHistory after the history and cleared; a card fed during the rebuild rides _rebuildQueue instead. In memory: a restart loses them like every injected card (the zero-spend notice is the durable half).' },

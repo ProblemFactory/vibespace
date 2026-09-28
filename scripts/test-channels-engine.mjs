@@ -1332,25 +1332,28 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   await ingest(eng, OPS, 'GPU three');
   const batch = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A');
   ok(batch.length === 1 && /GPU three/.test(batch[0].text) && !(en().pending || []).some((p) => p.for === 'group:tg-ops'), `Alpha named directly AND the Ops group (Alpha its only live member): ONE wake for the batch (${batch.length}), the group's copy counted delivered — never two billed turns`);
-  // (e) RECEIPTS: only the drafter whose OWN watcher opted in is woken by its receipt
+  // (e) RECEIPTS (2026-09-27, owner ruling "收件箱里的 approve 动作需要在账号-level 的通知配置里控制行为有点反直觉"):
+  // how the drafter hears of a decision is the DECIDER's choice AT the Approve / Reject — the per-watcher
+  // `receiptWake` opt-in is DEPRECATED and IGNORED (a stored true no longer wakes anybody)
   await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake', receiptWake: true }]);
+  ok(eng.deprecatedReceiptWakes().some((d) => d.principal === 'agent:agent-A' && d.grain === 'conversation'), 'the boot census names the watcher that still carries receiptWake:true (one boot line says it is ignored)');
   const pr = await eng.propose({ kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] }, A, OPS, { text: 'on it' });
   ok(pr.ok && pr.proposal.state === 'awaiting-approval', 'Alpha (draft authority) proposes — awaiting approval');
   const c1 = ladder.calls.length;
   await eng.approve(pr.proposal.id, {});
   const rcA = ladder.calls.slice(c1).find((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
-  ok(rcA && rcA.opts.noWake === false, 'Alpha\'s OWN watcher opted in (receiptWake) ⇒ its receipt WAKES it (noWake false)');
-  await eng.setWatchers(A, OPSC, [{ principal: OPSG, notify: 'wake', receiptWake: true }]);
+  ok(rcA && rcA.opts.noWake === true, 'Alpha\'s watcher still carries receiptWake:true — IGNORED: a plain approve (no choice ⇒ next-turn) rides its next turn (noWake true)');
   const pr2 = await eng.propose({ kind: 'agent', id: 'agent-W', name: 'Worker', groups: ['tg-work'] }, A, OPS, { text: 'noted' });
   const c2 = ladder.calls.length;
-  await eng.approve(pr2.proposal.id, {});
+  await eng.approve(pr2.proposal.id, { deliver: 'wake-now' });
   const rcW = ladder.calls.slice(c2).find((c) => c.cid === 'agent-W' && c.opts.spendReason === 'channel-receipt');
-  ok(rcW && rcW.opts.noWake === true, 'Worker drafts through 工作\'s ACCESS (no watcher of its own; Ops\' opt-in is not its) ⇒ its receipt rides its next turn (noWake true)');
+  const q2 = eng.store.outbox.snapshot().proposals[pr2.proposal.id];
+  ok(rcW && rcW.opts.noWake === false && q2.receiptChoice === 'wake-now' && q2.receiptWake && q2.receiptWake.ok === true && q2.receiptWake.reserved === false, 'Worker has NO watcher at all — the decider chose "wake it now" ⇒ its receipt WAKES it (noWake false), the proposal holds its ONE wake row', JSON.stringify(q2.receiptWake));
   const pr3 = await eng.propose({ kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] }, A, OPS, { text: 'again' });
   const c3 = ladder.calls.length;
-  await eng.approve(pr3.proposal.id, {});
+  await eng.approve(pr3.proposal.id, { deliver: 'next-turn' });
   const rcG = ladder.calls.slice(c3).find((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
-  ok(rcG && rcG.opts.noWake === false, 'Alpha drafts as a member of Ops, whose watcher opted in ⇒ woken (the drafter\'s GROUPS are read — the pre-R4 path passed none)');
+  ok(rcG && rcG.opts.noWake === true && !eng.store.outbox.snapshot().proposals[pr3.proposal.id].receiptWake, '"tell it with its next message" ⇒ noWake, no wake row — whatever the watcher config says');
   // (f) the AUTHORITY is the access row's, per principal, finest grain
   const capped = await eng.setAccess(A, { kind: 'account' }, [{ principal: BE, authority: 'send' }]);
   ok(!capped.ok && capped.code === 'authority-capped' && capped.principal.id === 'agent-B', '`send` on the account is refused while the account policy is review (the cap is the ACCESS row\'s), naming the row');
@@ -1455,86 +1458,222 @@ const esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 
     const mfc = await midFlight(require(cp), 'r4-midflight-ctl');
     ok(mfc.stashedForA === 1, `CONTROL: a copy that never re-asks stashes the refused block for the revoked Alpha (${mfc.stashedForA}) — the leg above would go red`);
   }
-  // ── (g) R4 verify r2 (money): A RECEIPT WAKE IS A BILLED TURN AND COUNTS AGAINST THE WATCHER'S CAP.
-  // Alpha (wake, cap 2, receiptWake) drafts five replies; the owner rejects all five ⇒ five receipts,
-  // at most TWO of them wakes (the rest ride the next turn with noWake), both on Alpha's ledger.
+  // ── (g) 2026-09-27 (money): A RECEIPT WAKE IS THE DECIDER'S CHOICE, ONE PER PROPOSAL. Five rejects,
+  // each "wake it now" ⇒ five receipts, five billed turns (each one the owner's own act, the spend ceiling
+  // inside the ladder), each on its proposal's ONE row; the SAME proposal's receipt asked again (a
+  // reconcile, a retry) never wakes twice; "tell it with its next message" never wakes; a session that is
+  // not live is never woken (the stash keeps it); the ceiling's refusal is named and the stash keeps it.
   const Actx = { kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] };
-  async function receiptCap(ENGmod2, name) {
+  async function receiptChoice(ENGmod2, name) {
     const e = mk(ENGmod2, name);
     await e.pass(A, { force: true });
     await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
-    await e.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake', dailyWakeCap: 2, receiptWake: true }]);
     const c0 = ladder.calls.length;
     const ids = [];
     for (let i = 0; i < 5; i++) { const r = await e.propose(Actx, A, OPS, { text: `draft ${i}`, why: 'x' }); ids.push(r.proposal.id); }
-    for (const id of ids) await e.reject(id, { by: 'user', reason: 'no' });
-    await e.settleWakes();
+    for (const id of ids) await e.reject(id, { by: 'user', reason: 'no', deliver: 'wake-now' });
+    const again = await Promise.all([e.receipt(ids[0]), e.receipt(ids[0]), e.receipt(ids[1])]);   // the same receipts asked again, concurrently
     const rc = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
-    const w = (e.store.index.snapshot().conversations[`${A}/${OPS}`].watchers || [])[0];
-    // a fresh record after the receipts spent the cap: HELD, not a third billed turn
-    offset += 61e3; world[OPS].push(mint(OPS, 'after receipts')); await e.pass(A, { force: true }); await e.settleWakes();
-    const fresh = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-message');
-    return { receipts: rc.length, billed: rc.filter((c) => c.opts.noWake === false).length, ledger: ((w && w.stats.wakes) || []).filter((x) => x.ok !== false && x.receipt).length, lastRefusal: (w && w.stats.lastRefusal && w.stats.lastRefusal.why) || null, freshWakes: fresh.length };
+    const rows = ids.map((id) => e.store.outbox.snapshot().proposals[id].receiptWake);
+    // a next-turn reject never wakes
+    const pn = await e.propose(Actx, A, OPS, { text: 'quiet', why: 'x' });
+    const cN = ladder.calls.length;
+    await e.reject(pn.proposal.id, { by: 'user', reason: 'no', deliver: 'next-turn' });
+    const quiet = ladder.calls.slice(cN).filter((c) => c.opts.noWake === false).length;
+    // a drafter whose session is not live: never woken, the stash keeps the receipt, the fate says gone
+    const gctx = { kind: 'agent', id: 'agent-gone', name: 'Gone', groups: [] };
+    await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }, { principal: { kind: 'agent', id: 'agent-gone', name: 'Gone' }, authority: 'draft' }]);
+    const pg = await e.propose(gctx, A, OPS, { text: 'from a dead session', why: 'x' });
+    const cG = ladder.calls.length, sG = ladder.stash.length;
+    // the real ladder finds no lane to a session that is not live — the fake says so for this one
+    const origL = ladder.deliverToConversation;
+    ladder.deliverToConversation = async (cid, text, opts) => (cid === 'agent-gone' ? (ladder.calls.push({ cid, text, opts }), { ok: false, reason: 'no live session for this conversation', refused: 'unreachable' }) : origL.call(ladder, cid, text, opts));
+    await e.reject(pg.proposal.id, { by: 'user', reason: 'no', deliver: 'wake-now' });
+    ladder.deliverToConversation = origL;
+    const gp = e.store.outbox.snapshot().proposals[pg.proposal.id];
+    const goneCalls = ladder.calls.slice(cG).filter((c) => c.cid === 'agent-gone' && c.opts.noWake === false).length;
+    return { receipts: rc.length, billed: rc.filter((c) => c.opts.noWake === false).length, rows: rows.filter((r) => r && r.ok).length, again: again.filter(Boolean).length, quiet, goneCalls, goneStash: ladder.stash.slice(sG).filter((x) => x.cid === 'agent-gone' && x.ref === pg.proposal.id).length, goneFate: P.receiptFateOf(gp), goneWake: gp.receiptWake || null };
   }
-  const rcp = await receiptCap(ENG, 'r4-receiptcap');
-  ok(rcp.receipts === 5 && rcp.billed === 2, `five rejected proposals ⇒ five receipts, exactly TWO of them wakes under the cap of 2 (billed ${rcp.billed})`, JSON.stringify(rcp));
-  ok(rcp.ledger === 2 && /receipt: daily wake cap/.test(rcp.lastRefusal || '') && rcp.freshWakes === 0, `both receipt wakes are on Alpha's ledger (${rcp.ledger}), the third receipt named the cap (${rcp.lastRefusal}), and a fresh record after them is HELD (${rcp.freshWakes} wakes)`, JSON.stringify(rcp));
+  const P = require(path.join(REPO, 'src/channel-policy.js'));
+  const rcp = await receiptChoice(ENG, 'r4-receiptchoice');
+  ok(rcp.billed === 5 && rcp.rows === 5, `five rejects, each "wake it now" ⇒ five billed receipt wakes, each on its proposal's ONE row (billed ${rcp.billed}, rows ${rcp.rows})`, JSON.stringify(rcp));
+  ok(rcp.receipts === 8 && rcp.again === 3, `the SAME receipts asked again (twice for one, once for another, concurrently) are delivered (${rcp.receipts - 5} more) and NEVER wake twice (still ${rcp.billed} billed)`, JSON.stringify(rcp));
+  ok(rcp.quiet === 0, '"tell it with its next message" never wakes (noWake on every ladder call)');
+  ok(rcp.goneCalls === 0 && rcp.goneStash === 1 && rcp.goneFate && rcp.goneFate.kind === 'gone' && !rcp.goneWake, `a drafter whose session is not live is NEVER woken: the stash keeps the receipt (ref = the proposal), the fate reads "gone" (${rcp.goneFate && rcp.goneFate.kind}), no wake row`, JSON.stringify(rcp));
   {
-    const LINE = 'let wake = !!optIn && pace.ok && !stopped;';
-    ok(esrc2.split(LINE).length === 2, 'the receipt pace line is present once (the control patches exactly it)');
-    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, 'let wake = !!optIn && !stopped;'));
-    const rcc = await receiptCap(require(cp), 'r4-receiptcap-ctl');
-    ok(rcc.billed === 5, `CONTROL: a copy that never paces a receipt bills all five (${rcc.billed}) — the leg above would go red`);
+    // CONTROL: a copy whose wake row is not checked (a second receipt re-reserves) wakes the same proposal again
+    const LINE = "      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; } }); got = took; }";
+    ok(esrc2.split(LINE).length === 2, 'the ONE-row reservation line is present once (the control patches exactly it)');
+    const VERD = '    let verdict = P.receiptDeliveryVerdict(cur.receiptChoice, cur, { live });';
+    ok(esrc2.split(VERD).length === 2, 'the verdict line is present once (the control strips its row read)');
+    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, LINE.replace('if (q && !q.receiptWake)', 'if (q)')).replace(VERD, '    let verdict = P.receiptDeliveryVerdict(cur.receiptChoice, { ...cur, receiptWake: null }, { live });'));
+    const rcc = await receiptChoice(require(cp), 'r4-receiptchoice-ctl');
+    ok(rcc.billed > 5, `CONTROL: a copy that never reads the proposal's wake row bills the repeated receipts again (${rcc.billed} > 5) — the leg above would go red`);
   }
-  // ── (h) R4 verify r3 (money): THE RECEIPT IS PACED INSIDE THE WATCHER'S SERIAL SECTION. Five
-  // CONCURRENT rejects (five HTTP requests — the owner clearing an outbox) each read the ledger before
-  // the ladder's await and wrote it after: five billed receipt wakes under a cap of 2; a wake in
-  // flight beside a receipt made two billed turns under a cap of 1. Now the receipt queues on the
-  // conversation's chain (then its scope's, the order every wake takes) and reads the ledger there.
-  async function receiptRace(ENGmod2, name) {
-    const e = mk(ENGmod2, name);
+  // THE CEILING: the ladder refuses the wake by name ⇒ the stash keeps the receipt, the fate names the refusal
+  {
+    const e = mk(ENG, 'r4-receiptceiling');
     await e.pass(A, { force: true });
     await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
-    await e.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake', dailyWakeCap: 2, receiptWake: true }]);
-    const ids = [];
-    for (let i = 0; i < 5; i++) { const r = await e.propose(Actx, A, OPS, { text: `race ${i}`, why: 'x' }); ids.push(r.proposal.id); }
-    const c0 = ladder.calls.length;
-    let release; ladder.hang = new Promise((r) => { release = r; });
-    const all = Promise.all(ids.map((id) => e.reject(id, { by: 'user', reason: 'no' })));   // five requests at once
-    await sleep(60);
-    release(); ladder.hang = null;
-    await all; await e.settleWakes();
-    const rc = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
-    const w = (e.store.index.snapshot().conversations[`${A}/${OPS}`].watchers || [])[0];
-    // a wake and a receipt in flight together under a cap of 1
-    const e2 = mk(ENGmod2, name + '-straddle');
-    await e2.pass(A, { force: true });
-    await e2.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
-    await e2.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake', dailyWakeCap: 1, receiptWake: true }]);
-    const pr = await e2.propose(Actx, A, OPS, { text: 'straddle', why: 'x' });
-    const c1 = ladder.calls.length;
-    let release2; ladder.hang = new Promise((r) => { release2 = r; });
-    offset += 61e3; world[OPS].push(mint(OPS, 'news beside a receipt'));
-    const both = Promise.all([e2.pass(A, { force: true }), e2.reject(pr.proposal.id, { by: 'user', reason: 'no' })]);
-    await sleep(60);
-    release2(); ladder.hang = null;
-    await both; await e2.settleWakes();
-    const billed2 = ladder.calls.slice(c1).filter((c) => c.cid === 'agent-A' && c.opts.noWake !== true).length;
-    return { receipts: rc.length, billed: rc.filter((c) => c.opts.noWake === false).length, ledger: ((w && w.stats.wakes) || []).filter((x) => x.ok !== false && x.receipt).length, straddleCalls: ladder.calls.slice(c1).length, straddleBilled: billed2 };
+    const pc = await e.propose(Actx, A, OPS, { text: 'over the ceiling', why: 'x' });
+    const orig = ladder.deliverToConversation;
+    ladder.deliverToConversation = async (cid, text, opts) => { ladder.calls.push({ cid, text, opts }); return opts.noWake === false ? { ok: false, reason: 'the spend ceiling holds — 12 of 12 unattended turns in the last hour', refused: 'spend' } : { ok: true, lane: 'message' }; };
+    const s0 = ladder.stash.length;
+    await e.approve(pc.proposal.id, { deliver: 'wake-now' });
+    ladder.deliverToConversation = orig;
+    const q = e.store.outbox.snapshot().proposals[pc.proposal.id];
+    const fate = P.receiptFateOf(q);
+    ok(q.receiptDelivery && q.receiptDelivery.stashed && q.receiptDelivery.refused === 'spend' && ladder.stash.slice(s0).some((x) => x.ref === pc.proposal.id) && fate.kind === 'waiting' && fate.wakeRefused === 'spend' && /spend ceiling/.test(fate.why), `the ceiling refuses the wake BY NAME (${q.receiptDelivery && q.receiptDelivery.refused}) and the stash keeps the receipt — the fate line: "${P.receiptFateText(fate)}"`, JSON.stringify(q.receiptDelivery));
+    ok(q.receiptWake && q.receiptWake.ok === false && q.receiptWake.refused === 'spend', 'the proposal\'s ONE wake row records the refusal (never re-tried as a second wake)');
+    e.stop();
   }
-  const rr = await receiptRace(ENG, 'r4-receiptrace');
-  ok(rr.receipts === 5 && rr.billed === 2 && rr.ledger === 2, `five CONCURRENT rejects under a cap of 2 ⇒ five receipts, exactly TWO billed, two on the ledger (billed ${rr.billed}, ledger ${rr.ledger})`, JSON.stringify(rr));
-  ok(rr.straddleCalls >= 1 && rr.straddleBilled === 1, `a wake and a receipt in flight together under a cap of 1 ⇒ ONE billed turn (${rr.straddleBilled}; the other is held or rides the next turn)`, JSON.stringify(rr));
+  // THE ROUTE (verify 2026-09-27): `deliver` is refused BY NAME, a wake-now needs the `expectWakes` echo (409,
+  // nothing billed, the proposal still awaits), a missing field is next-turn; the user-facing router has no withdraw
   {
-    // R4 verify r4: the control is r3's shape — a receipt started OUTSIDE the ONE door (billedWake) whose row is written
-    // AFTER the ladder (no reservation). The same copy is ⑫'s bypass control: its census reddens on the door line.
-    const LINE = '    return billedWake({ conv: key, scopeOf }, () => receiptNow(id, p, rc, cid, rec, key, optInOf));';
-    const RES = "    const resId = wake ? await reserveWake(rec, en ? p.convId : null, optIn, wk0) : null;";
-    ok(esrc2.split(LINE).length === 2 && esrc2.split(RES).length === 2, 'the receipt door line and its reservation line are present once each (the control patches exactly them)');
-    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '    return receiptNow(id, p, rc, cid, rec, key, optInOf);').replace(RES, "    const resId = wake ? 'late' : null;"));
+    const e = mk(ENG, 'r4-receiptroute');
+    await e.pass(A, { force: true });
+    await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
+    routes.setup({ getEngine: () => e, authEnabled: () => true });
+    const call = (method, url, body) => new Promise((resolve) => {
+      const req = { method, url, params: url.params, query: {}, body: body || {} };
+      const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; }, setHeader() {} };
+      const layer = routes.router.stack.find((l) => l.route && l.route.path === url.path && l.route.methods[method.toLowerCase()]);
+      if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
+      Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+    });
+    const billedN = () => ladder.calls.filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt' && c.opts.noWake === false).length;
+    const pr = await e.propose(Actx, A, OPS, { text: 'route', why: 'x' });
+    const st = () => e.store.outbox.snapshot().proposals[pr.proposal.id].state;
+    const b0 = billedN();
+    const bad = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake' });
+    const badR = await call('POST', { path: '/api/channels/outbox/:id/reject', params: { id: pr.proposal.id } }, { deliver: 'WAKE-NOW' });
+    ok(bad.status === 400 && bad.body.code === 'bad-request' && /deliver must be next-turn \| wake-now/.test(bad.body.error) && badR.status === 400 && st() === 'awaiting-approval', 'approve / reject with a `deliver` that is neither word ⇒ 400 by name, the proposal untouched', JSON.stringify(bad.body));
+    const noEcho = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake-now' });
+    ok(noEcho.status === 409 && noEcho.body.code === 'wake-count-mismatch' && noEcho.body.wakes === 1 && billedN() === b0 && st() === 'awaiting-approval', 'approve wake-now WITHOUT the expectWakes echo ⇒ 409 wake-count-mismatch (wakes: 1), nothing billed, still awaiting');
+    const okA = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr.proposal.id } }, { deliver: 'wake-now', expectWakes: 1 });
+    ok(okA.status === 200 && billedN() === b0 + 1 && st() === 'sent', 'with the echo ⇒ sent, ONE billed receipt wake');
+    const pr2 = await e.propose(Actx, A, OPS, { text: 'route 2', why: 'x' });
+    const rj = await call('POST', { path: '/api/channels/outbox/:id/reject', params: { id: pr2.proposal.id } }, { reason: 'no', deliver: 'wake-now' });
+    const rj2 = await call('POST', { path: '/api/channels/outbox/:id/reject', params: { id: pr2.proposal.id } }, { reason: 'no', deliver: 'wake-now', expectWakes: 1 });
+    ok(rj.status === 409 && rj.body.code === 'wake-count-mismatch' && rj2.status === 200 && billedN() === b0 + 2, 'reject wake-now: 409 without the echo (still awaiting), rejected + ONE billed with it');
+    const pr3 = await e.propose(Actx, A, OPS, { text: 'route 3', why: 'x' });
+    const plain = await call('POST', { path: '/api/channels/outbox/:id/approve', params: { id: pr3.proposal.id } }, {});
+    ok(plain.status === 200 && billedN() === b0 + 2 && e.store.outbox.snapshot().proposals[pr3.proposal.id].receiptChoice === 'next-turn', 'no `deliver` at all ⇒ next-turn (the remembered per-device choice never rides the wire as a server default), nothing billed');
+    ok(!routes.router.stack.some((l) => l.route && /withdraw/.test(l.route.path)), 'the user-facing router has NO withdraw route — the user rejects; withdraw is the agent route behind msgCaller (a browser there is 403 by name)');
+    e.stop();
+  }
+  // (g2) THE REAL AGENT ROUTES (verify r2, 2026-09-27): a session with no conversation id yet may not draft
+  // (`channelPrincipal`'s `webui:` fallback stamped a drafter no drain ever asks for — its receipt stashed under
+  // a key the hook never drains, the live session read as "gone", its own later withdraw `not-yours`) — reply /
+  // compose / withdraw answer 409 `bad-member` with msg send's sentence and create NOTHING; a browser on the
+  // withdraw route (a cookie, no agent token) is 403 `not-yours` by name, never "missing token"
+  async function agentRouteLeg(ARmod, name) {
+    const e = mk(ENG, name);
+    await e.pass(A, { force: true });
+    // Alpha by its own id; the Ops Task Group too — a newborn session spawned INTO that group holds the group's
+    // access with no conversation id at all (the real-world path to a `webui:` drafter)
+    await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }, { principal: OPSG, authority: 'draft' }]);
+    await e.setAccess(A, { kind: 'account' }, [{ principal: AL, authority: 'draft' }]).catch(() => null);
+    const sessions = new Map([
+      ['w-A', { agentToken: 'vsst_A', claudeSessionId: 'agent-A', name: 'Alpha', cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true }],
+      ['w-N', { agentToken: 'vsst_N', name: 'Newborn', cwd: '/tmp', _initialGroupId: 'tg-ops', _toolsIntroSeen: true, _mgrIntroSeen: true }],   // no conversation id yet, in the Ops group
+      // verify r3: a PENDING fork of Alpha — it still carries Alpha's conversation id (`_forkRequested`, nothing adopted yet)
+      ['w-F', { agentToken: 'vsst_F', claudeSessionId: 'agent-A', name: 'Alpha (fork)', cwd: '/tmp', _forkRequested: true, _toolsIntroSeen: true, _mgrIntroSeen: true }],
+      // …and a codex-shaped ADOPTED fork: its flag is never cleared, its adoption is read off `forkedFrom` (its own id differs from the source)
+      ['w-C', { agentToken: 'vsst_C', backendSessionId: 'thread-C', name: 'Codex fork', cwd: '/tmp', _initialGroupId: 'tg-ops', _forkRequested: true, forkedFrom: ['thread-P'], _toolsIntroSeen: true, _mgrIntroSeen: true }],
+    ]);
+    const handlers = {};
+    const app = { get: (p, h) => { handlers['GET ' + p] = h; }, post: (p, h) => { handlers['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+    ARmod.setupAgentRoutes({
+      app, activeSessions: sessions,
+      tasks: { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '' },
+      sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+      userTodos: {}, sessionStatusKey: (s) => 'claude:' + (s.claudeSessionId || 'none'), serverSetting: () => undefined,
+      integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+      getChannels: () => e, getGroups: () => null,
+    });
+    const call = (key, { token = null, headers = {}, body = {}, params = {} } = {}) => new Promise((resolve) => {
+      const req = { headers: { ...(token ? { authorization: 'Bearer ' + token } : {}), ...headers }, body, params, query: {} };
+      const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(o) { resolve({ status: this.statusCode, body: o }); return this; }, setHeader() {} };
+      const h = handlers[key];
+      if (!h) return resolve({ status: 0, body: { error: 'no such route ' + key } });
+      Promise.resolve(h(req, res)).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+    });
+    const n0 = Object.keys(e.store.outbox.snapshot().proposals).length;
+    const own = await call('POST /api/agent/channels/reply', { token: 'vsst_A', body: { conv: `${A}/${OPS}`, text: 'from Alpha' } });
+    const noCidReply = await call('POST /api/agent/channels/reply', { token: 'vsst_N', body: { conv: `${A}/${OPS}`, text: 'from a newborn' } });
+    const noCidCompose = await call('POST /api/agent/channels/compose', { token: 'vsst_N', body: { account: A, to: ['x@example.com'], subject: 's', text: 'from a newborn' } });
+    const noCidWithdraw = await call('POST /api/agent/channels/proposals/:id/withdraw', { token: 'vsst_N', params: { id: own.body && own.body.proposal ? own.body.proposal.id : 'p-none' } });
+    const browser = await call('POST /api/agent/channels/proposals/:id/withdraw', { headers: { cookie: 'vs_token=deadbeef', 'sec-fetch-site': 'same-origin' }, params: { id: own.body && own.body.proposal ? own.body.proposal.id : 'p-none' } });
+    const bare = await call('POST /api/agent/channels/proposals/:id/withdraw', { params: { id: 'p-none' } });
+    // verify r3: the pending fork may neither take Alpha's draft back nor draft as Alpha; the adopted codex fork drafts as itself
+    const ownId = own.body && own.body.proposal ? own.body.proposal.id : 'p-none';
+    const forkWithdraw = await call('POST /api/agent/channels/proposals/:id/withdraw', { token: 'vsst_F', params: { id: ownId }, body: { why: 'I am the fork' } });
+    const forkReply = await call('POST /api/agent/channels/reply', { token: 'vsst_F', body: { conv: `${A}/${OPS}`, text: 'from the pending fork' } });
+    const forkCompose = await call('POST /api/agent/channels/compose', { token: 'vsst_F', body: { account: A, to: ['x@example.com'], subject: 's', text: 'from the pending fork' } });
+    const forkArray = await call('POST /api/agent/channels/reply', { token: 'vsst_A', body: { conv: `${A}/${OPS}`, text: 'v2', replaces: [ownId] } });
+    const stateAfterFork = e.store.outbox.snapshot().proposals[ownId] ? e.store.outbox.snapshot().proposals[ownId].state : null;
+    const madeBeforeCodex = Object.keys(e.store.outbox.snapshot().proposals).length - n0;
+    const codex = await call('POST /api/agent/channels/reply', { token: 'vsst_C', body: { conv: `${A}/${OPS}`, text: 'from the adopted codex fork' } });
+    // verify r4 (2026-09-27): the FOURTH verb that RECORDS a principal — a reach REQUEST. The lounge is requestable
+    // for Alpha (and the Ops group); the pending fork asked AS Alpha (the owner's approval widened Alpha's reach; the
+    // fork had nothing once it announced its own id), the newborn as a `webui:` placeholder nobody ever matches
+    await e.setAccess(A, { kind: 'account' }, []).catch(() => null);   // Alpha's account-wide access off: the lounge is only REQUESTABLE for it
+    await e.setReach(A, LOUNGE, { principal: AL, level: 'requestable' });
+    await e.setReach(A, LOUNGE, { principal: OPSG, level: 'requestable' });
+    const forkRequest = await call('POST /api/agent/channels/request', { token: 'vsst_F', body: { conv: `${A}/${LOUNGE}`, why: 'the fork wants in' } });
+    const noCidRequest = await call('POST /api/agent/channels/request', { token: 'vsst_N', body: { conv: `${A}/${LOUNGE}`, why: 'the newborn wants in' } });
+    const ownRequest = await call('POST /api/agent/channels/request', { token: 'vsst_A', body: { conv: `${A}/${LOUNGE}`, why: 'Alpha wants in' } });
+    const requests = ((e.store.index.snapshot().conversations[`${A}/${LOUNGE}`] || {}).reachRequests || []).map((r) => `${r.principal.id}:${r.principal.name}`);
+    const ownWithdraw = await call('POST /api/agent/channels/proposals/:id/withdraw', { token: 'vsst_A', params: { id: ownId } });
+    const made = Object.keys(e.store.outbox.snapshot().proposals).length - n0;
+    const drafters = Object.values(e.store.outbox.snapshot().proposals).map((p) => p.draftedBy && p.draftedBy.id);
+    e.stop();
+    return { own: own.status, ownState: own.body && own.body.proposal && own.body.proposal.state, noCid: [noCidReply, noCidCompose, noCidWithdraw].map((r) => `${r.status}:${r.body.code}`), sentence: noCidReply.body.error, browser: `${browser.status}:${browser.body.code}`, browserText: browser.body.error, bare: bare.status, ownWithdraw: ownWithdraw.status, made, drafters,
+      fork: [forkWithdraw, forkReply, forkCompose].map((r) => `${r.status}:${r.body.code}`), forkSentence: forkWithdraw.body.error, stateAfterFork, madeBeforeCodex, forkArray: `${forkArray.status}:${forkArray.body.code}`, codex: `${codex.status}:${codex.body.code || (codex.body.proposal && codex.body.proposal.state)}`,
+      request: [forkRequest, noCidRequest, ownRequest].map((r) => `${r.status}:${r.body.code || 'ok'}`), requestSentence: forkRequest.body.error, requests };
+  }
+  {
+    const AR = require(path.join(REPO, 'src/agent-routes.js'));
+    const g2 = await agentRouteLeg(AR, 'r4-agentroutes');
+    ok(g2.own === 200 && g2.ownState === 'awaiting-approval' && g2.made === 2 && g2.drafters.every((d) => d === 'agent-A' || d === 'thread-C'), 'the REAL reply route: a session WITH its conversation id proposes (drafter = the id; r3: the adopted codex fork\'s draft is the second)', JSON.stringify(g2));
+    ok(g2.noCid.every((x) => x === '409:bad-member') && /no conversation id yet — try again after its first turn/.test(g2.sentence), `reply / compose / withdraw from a session with NO conversation id yet ⇒ 409 bad-member by name (${g2.noCid.join(', ')}), nothing created, never a "webui:" drafter`, JSON.stringify(g2));
+    ok(g2.browser === '403:not-yours' && /reject it from the card/.test(g2.browserText) && g2.bare === 401, `a BROWSER on the withdraw route (a cookie, no agent token) is 403 not-yours by name — "${g2.browserText}"; a bare call stays 401`);
+    ok(g2.ownWithdraw === 200, 'the drafter\'s own withdraw through the real route still answers 200');
+    // verify r3 (2026-09-27): A PENDING FORK CARRIES ITS PARENT'S ID — it withdrew the parent's draft (200), drafted AS the
+    // parent (the receipt and a "wake now" turn landed on the parent), until the harness announced its own id
+    ok(g2.fork.every((x) => x === '409:bad-member') && /a fork that has not announced its own conversation id yet/.test(g2.forkSentence) && g2.stateAfterFork === 'awaiting-approval' && g2.madeBeforeCodex === 1, `a PENDING fork (its parent's conversation id): withdraw / reply / compose ⇒ 409 bad-member by name (${g2.fork.join(', ')}), the parent's draft stands, nothing created`, JSON.stringify(g2));
+    ok(g2.codex === '200:awaiting-approval' && g2.drafters.includes('thread-C'), `an ADOPTED codex fork (flag never cleared, adoption in forkedFrom) still drafts, as itself (${g2.codex})`, JSON.stringify(g2.drafters));
+    ok(g2.forkArray === '400:bad-request', `\`replaces\` that is not a string (an array naming the id) ⇒ 400 by name (${g2.forkArray})`);
+    // verify r4 (2026-09-27): a reach REQUEST records its principal — the pending fork (its parent's id) and the
+    // newborn (a `webui:` placeholder) are refused by the same name; Alpha's own request is the ONLY row recorded
+    ok(g2.request[0] === '409:bad-member' && g2.request[1] === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(g2.requestSentence) && g2.request[2] === '200:ok' && g2.requests.length === 1 && g2.requests[0] === 'agent-A:Alpha', `a reach request from a PENDING fork / a session with NO id ⇒ 409 bad-member by name (${g2.request.join(', ')}); the recorded requests are Alpha's own only (${g2.requests.join(', ')})`, JSON.stringify(g2));
+    const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const G1 = "  const ownR = ownConversationIdOf(s);\n  if (!ownR.cid) return res.status(409).json({ error: ownR.why, code: 'bad-member' });\n  const cidR = ownR.cid;";
+    const G2 = "  const ownC = ownConversationIdOf(s);\n  if (!ownC.cid) return res.status(409).json({ error: ownC.why, code: 'bad-member' });   // verify r2: no `webui:` drafter; r3: no borrowed (pending fork) id";
+    const G3 = "  if (who.s && !who.job) { const ownW = ownConversationIdOf(who.s); if (!ownW.cid) return res.status(409).json({ error: ownW.why, code: 'bad-member' }); }";
+    const G4 = "  const ownQ = ownConversationIdOf(s);\n  if (!ownQ.cid) return res.status(409).json({ error: ownQ.why, code: 'bad-member' });";
+    ok([G1, G2, G3, G4].every((g) => asrc.split(g).length === 2), 'the four own-conversation-id guards (reply / compose / withdraw / request) are present once each (the control removes exactly them)');
+    const cp = patchPath('src', 'agent-routes'); writeCopy(cp, asrc.replace(G1, "  const cidR = s.claudeSessionId || s.backendSessionId || null;").replace(G2, '').replace(G3, '').replace(G4, ''));
+    const g2c = await agentRouteLeg(require(cp), 'r4-agentroutes-ctl');
+    ok(g2c.noCid[0] === '200:undefined' && g2c.drafters.some((d) => /^webui:/.test(d)), `CONTROL: the routes without the guards create a draft whose drafter is "webui:<id>" (${g2c.drafters.find((d) => /^webui:/.test(d))}) — the leg would go red`, JSON.stringify(g2c));
+    ok(g2c.fork[0] === '200:undefined' && g2c.stateAfterFork === 'withdrawn' && g2c.fork[1] === '200:undefined', `CONTROL: without the guard the pending fork withdraws its parent's draft and drafts as the parent (${g2c.fork.join(', ')}) — the leg would go red`);
+    ok(g2c.request[0] === '200:ok' && g2c.requests.some((r) => r === 'agent-A:Alpha (fork)') && g2c.requests.some((r) => /^webui:/.test(r)), `CONTROL: without the request guard the pending fork asks AS Alpha under the fork's name and the newborn as webui:<id> (${g2c.requests.join(', ')}) — the leg would go red`);
+  }
+  // ── (h) THE DOOR: the receipt still enters only through `billedWake` (the census ⑫ below reads the shipped
+  // bytes); this copy starts it OUTSIDE the door — ⑫'s bypass control reddens on it
+  {
+    const LINE = '    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key));';
+    ok(esrc2.split(LINE).length === 2, 'the receipt door line is present once (the control patches exactly it)');
+    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '    return receiptNow(id, p, rc, cid, rec, key);'));
     BYPASS_COPY = cp;
-    const rrc = await receiptRace(require(cp), 'r4-receiptrace-ctl');
-    ok(rrc.billed === 5 && rrc.straddleBilled === 2, `CONTROL: a copy whose receipt skips the chain bills all five concurrent receipts (${rrc.billed}) and both of the straddle (${rrc.straddleBilled}) — the legs above would go red`);
+    const e = mk(require(cp), 'r4-receipt-bypass');
+    await e.pass(A, { force: true });
+    await e.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }]);
+    const pb = await e.propose(Actx, A, OPS, { text: 'bypass', why: 'x' });
+    const r = await e.reject(pb.proposal.id, { by: 'user', reason: 'no' });
+    ok(r.ok, 'the bypass copy still runs (the census, not a behaviour change, is what catches it)');
+    e.stop();
   }
   // ── (i) R4 verify r3: A DEAD GROUP MEMBER IS NOT A REMOVED NOTIFICATION. The member a group wake
   // was sent to dies while the wake sits in the ladder; the group (other members live) still
@@ -1829,7 +1968,8 @@ function chainCensus(src) {
   const calls = c.rows.filter((r) => r.kind === 'section-call');
   ok(calls.length >= 4 && calls.every((r) => r.door) && SECTIONS.every((n) => calls.some((r) => r.name === n)), `every section-body call (${calls.length}) is billedWake's fn, on its line (${calls.map((r) => `${r.name}@${r.line}`).join(' · ')})`, JSON.stringify(calls));
   const helpers = c.rows.filter((r) => r.kind === 'helper-call');
-  ok(helpers.length >= 6 && helpers.every((r) => r.section), `the ledger helpers are called from section bodies only (${helpers.length} calls)`, JSON.stringify(helpers));
+  // (2026-09-27: the receipt's wake row lives on the PROPOSAL — receiptNow no longer calls the watcher-ledger helpers)
+  ok(helpers.length >= 4 && helpers.every((r) => r.section), `the ledger helpers are called from section bodies only (${helpers.length} calls)`, JSON.stringify(helpers));
   ok(c.violations.length === 0, 'THE CENSUS: no billed-wake writer outside the ONE door', JSON.stringify(c.violations));
   console.log('    chain census rows: ' + c.rows.map((r) => `${r.kind}${r.name ? ':' + r.name : ''}${r.reason ? ':' + r.reason : ''}@${r.line}${r.section ? '→' + r.section : ''}`).join(' · '));
   // CONTROLS: each bypass the census exists to catch, planted in the shipped bytes (text-level; the (h) copy is also loaded above)
@@ -1851,6 +1991,626 @@ function chainCensus(src) {
   ok(c6.violations.some((v) => /reserveWake\(\) called outside a section/.test(v)), `CONTROL: a reservation outside a section body reddens (${c6.violations.join('; ')})`);
   const c7 = chainCensus(esrc12.replace('    let r = null;\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };', '    let r = null; // if (!per.length) await deliver.deliverToConversation(\'x\', \'y\', { spendReason: \'channel-message\' });\n    if (!deliver || typeof deliver.deliverToConversation !== \'function\') {\n      r = { ok: false, reason: \'no delivery ladder wired\', refused: \'unwired\' };'));
   ok(c7.violations.length === 0 && c7.rows.filter((r) => r.kind === 'ladder').length === 3, 'CONTROL (comment hygiene): a ladder call spelled inside an inline comment is not counted, and the real three still are');
+}
+
+// ── ⑮ A STORAGE MOUNT'S OWN OAUTH CLIENT, BORROWED BY AN ACCOUNT (2.369.195) ──
+// The owner: "帮我把 mounts 里（某个存储挂载）那个 gmail 在 channels 里也配置一份吧，至少 oauth
+// 信息转移进去 … 我没办法在界面里看到 oauth client 和 secret". A REAL MountManager in
+// a scratch dir holds a custom Google client (sealed under ITS `.mounts-key`); the
+// REAL engine borrows it through `mountClients` (`fromMount`): the list carries no
+// secret and only the id's prefix; the consent runs under the mount's id; the
+// account holds `custom` + the secret RE-SEALED under `.channels-key` (never the
+// mounts' ciphertext, never the plaintext on disk); refusals are named; the copy
+// is an audit line; no route body / frame / log line ever carries the secret; an
+// agent bearer is 403. CONTROLS: a copy that skips the seal is SEEN by the disk
+// check; a copy that echoes the copied client in the start answer is SEEN by the
+// body check; a route copy without the agent refusal is SEEN by the 403 check.
+// verify r2: EVERY refusal that needs no key is judged before the key (the
+// options, the registry's id rule, another mount at Connect compared by ID —
+// `mountClients.head`, the key-less read), a refused Connect never takes the
+// finished flow, a malformed fromMount is 400 by name (never the default
+// client), the owner-only config refuses an agent bearer, names are bounded;
+// controls (6)–(10) each re-open one of those doors.
+console.log('\n⑮ a storage mount\'s own OAuth client, borrowed by a Gmail account');
+{
+  const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
+  const SB = require(path.join(REPO, 'src/secret-box.js'));
+  const gmailMod = require(path.join(REPO, 'src/channels/gmail.js'));
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const http = require('node:http');
+  const mdir = path.join(ROOT, 'cfm-mounts'); fs.mkdirSync(mdir, { recursive: true });
+  const mm = new MountManager({ dataDir: mdir });
+  const CID = '111122223333-mailfake.apps.googleusercontent.com', CSEC = 'GOCSPX-mail-MOUNT-s3cret-Q9zZ';   // unmistakable in any byte stream (fake)
+  const DID = '444455556666-drivefake.apps.googleusercontent.com', DSEC = 'GOCSPX-drive-MOUNT-s3cret-7fX';
+  const tok = '{"access_token":"fake-at","refresh_token":"fake-rt"}';
+  const P = mm.add({ type: 'gmail', name: 'mail archive', token: tok, clientId: CID, clientSecret: CSEC, email: 'archive.owner@example.com' });
+  const D = mm.add({ type: 'drive', name: 'work drive', token: tok, clientId: DID, clientSecret: DSEC });
+  const PR = mm.add({ type: 'drive', name: 'preset drive', token: tok, clientPreset: 'org1' });
+  const NS = mm.add({ type: 'gmail', name: 'id only', token: tok, clientId: '777788889999-nosecret.apps.googleusercontent.com' });
+  const MSEC = 'ms-fake-000000';   // another vendor's (fake) client
+  const OD = mm.add({ type: 'onedrive', name: 'one drive', token: tok, clientId: 'ms-fake-client-id', clientSecret: MSEC });
+  // verify r1: an other-vendor mount whose secret CANNOT be opened (sealed under another key) — the order
+  // probe: a vendor judged before the decrypt answers `mount-client-vendor`; a decrypt first answered
+  // `mount-secret-undecryptable` (the key state of a mount the body may not even borrow)
+  const UNOD = mm.add({ type: 'onedrive', name: 'stale one drive', token: tok, clientId: 'ms-stale', clientSecret: 'placeholder' });
+  mm._state.mounts.find((m) => m.id === UNOD).clientSecretEnc = SB.secretBox(path.join(ROOT, 'cfm-other-key')).enc('ms-stale-secret');
+  mm._save();
+  let mountDecs = 0;   // every opening of a mount's ciphertext with .mounts-key
+  { const realDec = mm._box.dec.bind(mm._box); mm._box.dec = (b) => { mountDecs++; return realDec(b); }; }
+  const mRaw = fs.readFileSync(path.join(mdir, 'mounts.json'), 'utf-8');
+  const mountCipher = JSON.parse(mRaw).mounts.find((m) => m.id === P).clientSecretEnc;
+  ok(!mRaw.includes(CSEC) && typeof mountCipher === 'string' && SB.secretBox(path.join(mdir, '.mounts-key')).dec(mountCipher) === CSEC, 'FIXTURE: the mount holds the custom client with its secret sealed under .mounts-key');
+
+  // (a) the read-only list: exactly the top-level records holding their OWN client of the vendor
+  const lg = mm.oauthClientsFor('google');
+  ok(JSON.stringify(lg.map((x) => x.name).sort()) === JSON.stringify(['mail archive', 'work drive']) && mm.oauthClientsFor('microsoft').length === 2 && mm.oauthClientsFor('').length === 0,
+    `oauthClientsFor('google') lists the Gmail + Drive mounts that hold a custom client — never a preset one, never an id without its secret, never another vendor's (${JSON.stringify(lg.map((x) => x.name))})`);
+  ok(lg.every((x) => JSON.stringify(Object.keys(x).sort()) === JSON.stringify(['clientIdPrefix', 'email', 'mountId', 'name', 'type'])) && !JSON.stringify(lg).includes(CSEC) && !JSON.stringify(lg).includes(mountCipher) && !JSON.stringify(lg).includes(CID) && lg.find((x) => x.mountId === P).clientIdPrefix === CID.slice(0, 12),
+    'each row is {mountId, name, type, email, clientIdPrefix} — no secret, no ciphertext, not even the whole client id');
+  const got = mm.oauthClientOf(P);
+  ok(got.clientId === CID && got.clientSecret === CSEC && got.vendor === 'google', 'oauthClientOf (server-only) decrypts the mount\'s client with .mounts-key');
+  const refusal = (fn) => { try { fn(); return null; } catch (e) { return e; } };
+  const rs = [[PR, 'mount-no-client'], [NS, 'mount-no-client'], ['mnt-nope', 'mount-gone']].map(([id, code]) => { const e = refusal(() => mm.oauthClientOf(id)); return !!e && e.code === code && !String(e.message).includes(CSEC); });
+  ok(rs.every(Boolean), 'oauthClientOf refuses BY CODE: a preset record / an id without its secret = mount-no-client, an unknown id = mount-gone (no value in any message)', JSON.stringify(rs));
+
+  // the fake Google: every token call records the client it received
+  const calls = [];
+  let n = 0;
+  const byAt = new Map();
+  let echoSecret = false;   // verify r4: a vendor (or a gateway) that ECHOES the request's client_secret in its refusal
+  const fetchG = async (url, init = {}) => {
+    const u = new URL(String(url));
+    const raw = init.body == null ? '' : String(init.body);
+    const form = raw && !raw.startsWith('{') ? Object.fromEntries(new URLSearchParams(raw)) : null;
+    calls.push({ host: u.hostname, path: u.pathname, form });
+    const J = (body, status = 200) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
+    if (u.hostname === 'oauth2.googleapis.com') {
+      if (echoSecret) return J({ error: 'invalid_client', error_description: `the secret ${form.client_secret} was rejected (fake vendor echo)` }, 401);
+      const at = `ya29.fake.${++n}`; byAt.set(at, form.code || 'refresh');
+      return J({ access_token: at, expires_in: 3600, refresh_token: `1//fake-${form.code || 'r'}`, scope: `${gmailMod.SCOPE} https://www.googleapis.com/auth/gmail.compose`, token_type: 'Bearer' });
+    }
+    const who = byAt.get(String((init.headers || {}).Authorization || '').replace(/^Bearer /, ''));
+    if (!who) return J({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
+    const p = u.pathname.replace('/gmail/v1/users/me', '');
+    if (p === '/profile') return J({ emailAddress: who === 'code-d' ? 'drive.owner@example.com' : 'archive.owner@example.com', historyId: '100' });
+    if (p === '/threads') return J({ threads: [] });
+    if (p === '/history') return J({ historyId: '100' });
+    return J({ error: { code: 404, message: `unrouted ${p}` } }, 404);
+  };
+  const logs = [];
+  const capLog = { log: (...a) => logs.push(a.join(' ')), warn: (...a) => logs.push(a.join(' ')), error: (...a) => logs.push(a.join(' ')) };
+  const mountClients = { list: (v) => mm.oauthClientsFor(v), head: (id, opts) => mm.oauthClientIdOf(id, opts), of: (id, opts) => mm.oauthClientOf(id, opts) };   // the wiring's shape: the vendor rides down; verify r2: `head` = the key-less read
+  const edir = path.join(ROOT, 'cfm-eng');
+  const frames = [];
+  const mkCfm = (E, dir) => { const e = E.create({ dataDir: dir, env: {}, broadcast: (m) => frames.push(m), fetch: fetchG, log: capLog, mountClients }); engines.push(e); return e; };
+  const eng = mkCfm(ENG, edir);
+  const chBox = SB.secretBox(path.join(edir, ENG.KEY_FILE));
+  const disk = (dir) => { try { return fs.readFileSync(path.join(dir, 'channels', 'adapters.json'), 'utf-8'); } catch { return ''; } };
+  const land = async (flow, code) => {
+    const cu = new URL(flow.consentUrl);
+    await new Promise((resolve) => http.get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve));
+    for (let i = 0; i < 40; i++) { const st = eng.oauthStatus(flow.flowId); if (st.done) return st; await sleep(10); }
+    return eng.oauthStatus(flow.flowId);
+  };
+  // (b) the engine's list, per TYPE (Gmail borrows Google clients; Lark borrows none)
+  const lm = eng.mountClientsFor('gmail');
+  ok(lm.vendor === 'google' && lm.clients.length === 2 && lm.clients.every((x) => !('clientId' in x) && !('clientSecret' in x)) && !JSON.stringify(lm).includes(CSEC), 'mountClientsFor(gmail): vendor google, the two mounts, re-whitelisted (no id, no secret)');
+  const ll = eng.mountClientsFor('lark');
+  ok(ll.vendor === null && ll.clients.length === 0, 'mountClientsFor(lark): no storage mount holds a Lark app — none offered');
+
+  // (c) the consent under the mount's client; the account holds a RE-SEALED copy
+  const st = await eng.startOAuth({ kind: 'gmail', fromMount: P });
+  ok(st.credentialKey === 'custom' && new URL(st.url).searchParams.get('client_id') === CID && !JSON.stringify(st).includes(CSEC), `start {fromMount} begins the consent under the MOUNT's client id (${new URL(st.url).searchParams.get('client_id')}) — the answer carries no secret`);
+  ok(!disk(edir).includes(CID), 'and NO record exists yet (the transient flow: Connect creates it)');
+  const s1 = await land(st.flow, 'code-p');
+  ok(s1.done && s1.ok && s1.token === st.flowId, 'the redirect lands; the sign-in finished', JSON.stringify(s1));
+  const ex = calls.find((c) => c.form && c.form.grant_type === 'authorization_code' && c.form.code === 'code-p');
+  ok(ex && ex.form.client_id === CID && ex.form.client_secret === CSEC, 'the code exchange carried the mount\'s id AND secret — the one place the secret leaves: the vendor call itself');
+  const c1 = await eng.connect('gmail', { flowId: st.flowId, name: 'borrowed mail', fromMount: P });
+  const recOf = (dir, id) => JSON.parse(disk(dir)).adapters.find((r) => r.id === id);
+  const rec = recOf(edir, c1.adapter.id);
+  const sealedOk = (dir, r) => { try { return !!r && r.credentialKey === 'custom' && !!r.credential && r.credential.appId === CID && SB.secretBox(path.join(dir, ENG.KEY_FILE)).dec(r.credential.appSecretEnc) === CSEC; } catch { return false; } };
+  const opensWithMounts = (() => { try { return SB.secretBox(path.join(mdir, '.mounts-key')).dec(rec.credential.appSecretEnc) === CSEC; } catch { return false; } })();
+  ok(sealedOk(edir, rec) && rec.credential.appSecretEnc !== mountCipher && !opensWithMounts, 'Connect {flowId, fromMount} creates the account: `custom` + {appId: the mount\'s id, appSecretEnc} RE-SEALED under .channels-key (a new blob — the mounts ciphertext is NOT copied and does not open with .mounts-key)');
+  const plainOnDisk = (dir) => disk(dir).includes(CSEC);
+  ok(!plainOnDisk(edir) && !disk(edir).includes(mountCipher), 'the plaintext secret (and the mounts ciphertext) appear nowhere in adapters.json');
+  ok(c1.adapter.auth.tokenHeld && c1.adapter.credentialKey === 'custom' && c1.adapter.customClient.appId === CID && c1.adapter.customClient.secretMasked === '••••' + CSEC.slice(-4), 'the account is connected — an ordinary Custom client (the card masks the secret)');
+  const au = eng.store.auditTail().filter((l) => l.kind === 'auth' && l.op === 'client-from-mount');
+  ok(au.length === 1 && au[0].mountId === P && au[0].by === 'user' && au[0].adapterKind === 'gmail' && au[0].clientIdPrefix === CID.slice(0, 12) && !JSON.stringify(au).includes(CSEC), `ONE audit line {kind:'auth', op:'client-from-mount', mountId, by:'user'} for the copy (Connect's re-check of the same mount is not a second copy) (${JSON.stringify(au)})`);
+  // (d) re-authorize under ANOTHER mount's client = a rebind (the mount semantics)
+  const ra = await eng.reauthorize(c1.adapter.id, { fromMount: D });
+  ok(ra.rebind === true && new URL(ra.flow.consentUrl).searchParams.get('client_id') === DID && recOf(edir, c1.adapter.id).credential.appId === CID, 're-authorize {fromMount: another mount} is a REBIND under that mount\'s client — the account keeps its own until the consent lands');
+  await eng.cancelAuth(c1.adapter.id).catch(() => {});
+  ok(eng.store.auditTail().filter((l) => l.op === 'client-from-mount').length === 2, 'the rebind\'s copy is audited too');
+  // (e) refusals BY NAME, nothing begun, no value in any message
+  const refs = [];
+  const decsBefore = mountDecs;
+  for (const [what, body, status, code] of [
+    ['a preset-backed mount', { kind: 'gmail', fromMount: PR }, 409, 'mount-no-client'],
+    ['an id without its secret', { kind: 'gmail', fromMount: NS }, 409, 'mount-no-client'],
+    ['another vendor\'s client', { kind: 'gmail', fromMount: OD }, 400, 'mount-client-vendor'],
+    ['a gone mount', { kind: 'gmail', fromMount: 'mnt-gone' }, 404, 'mount-gone'],
+    ['a Lark account', { kind: 'lark', fromMount: P }, 400, 'mount-client-unsupported'],
+    ['two clients at once', { kind: 'gmail', fromMount: P, clientPreset: 'custom', clientId: CID, clientSecret: 'x-other-secret' }, 400, 'ambiguous-client'],
+  ]) {
+    const e = await (async () => { try { await eng.startOAuth(body); return null; } catch (err) { return err; } })();
+    if (!(e && e.status === status && e.code === code && !String(e.message).includes(CSEC))) refs.push({ what, status: e && e.status, code: e && e.code });
+  }
+  ok(refs.length === 0, 'each refused choice answers its status + closed code (409 mount-no-client ×2, 400 mount-client-vendor, 404 mount-gone, 400 mount-client-unsupported, 400 ambiguous-client) with no value in the message', JSON.stringify(refs));
+  ok(mountDecs === decsBefore, `verify r1: NONE of those refusals opened a mount's secret (${mountDecs - decsBefore} decrypts) — the vendor, the ambiguity and the lendability are judged before .mounts-key is used`);
+  const eUnod = await (async () => { try { await eng.startOAuth({ kind: 'gmail', fromMount: UNOD }); return null; } catch (err) { return err; } })();
+  ok(eUnod && eUnod.status === 400 && eUnod.code === 'mount-client-vendor' && mountDecs === decsBefore, `verify r1: an UNDECRYPTABLE other-vendor mount in a Gmail body is 400 mount-client-vendor with no decrypt (${eUnod && eUnod.code}, ${mountDecs - decsBefore} decrypts) — the refusal names the vendor, never the key state`);
+  // verify r1: Connect's own body obeys the ONE-client rule — the sign-in's mount beside a stale preset is refused, the flow stays pending
+  const st5 = await eng.startOAuth({ kind: 'gmail', fromMount: P });
+  await land(st5.flow, 'code-p5');
+  const eAmb = await (async () => { try { await eng.connect('gmail', { flowId: st5.flowId, fromMount: P, credentialKey: 'cluster:org1' }); return null; } catch (err) { return err; } })();
+  ok(eAmb && eAmb.status === 400 && eAmb.code === 'ambiguous-client', `verify r1: Connect {flowId, fromMount: the sign-in's mount, credentialKey} is 400 ambiguous-client (${eAmb && eAmb.code}) — never accepted with the extra field ignored`);
+  const c5 = await eng.connect('gmail', { flowId: st5.flowId, fromMount: P, name: 'after the refusal' });
+  ok(c5.adapter && c5.adapter.credentialKey === 'custom' && c5.adapter.customClient.appId === CID, 'and the flow was not taken by the refusal: Connect naming the mount alone lands');
+  const bare = ENG.create({ dataDir: path.join(ROOT, 'cfm-bare'), env: {}, broadcast: () => {}, fetch: fetchG, log: capLog });
+  engines.push(bare);
+  const nb = await (async () => { try { await bare.startOAuth({ kind: 'gmail', fromMount: P }); return null; } catch (err) { return err; } })();
+  ok(nb && nb.status === 503 && nb.code === 'no-mounts' && bare.mountClientsFor('gmail').clients.length === 0, 'an engine with no mounts wired refuses `fromMount` 503 no-mounts and lists none');
+  const Wd = await import(path.join(REPO, 'src/lib/channel-words.js'));
+  const unworded = ['mount-gone', 'mount-no-client', 'mount-client-vendor', 'mount-client-unsupported', 'mount-secret-undecryptable', 'no-mounts', 'ambiguous-client', 'agent-forbidden'].filter((c) => { const w = Wd.routeErrorText({ code: c, error: 'RAW-SENTENCE' }); return !w || w.includes('RAW-SENTENCE') || w === Wd.routeErrorText({ code: 'zz-unknown', error: 'RAW-SENTENCE' }); });
+  ok(unworded.length === 0, 'every new refusal code has its own words in channel-words (the toast never prints the English contract sentence)', unworded.join());
+
+  // (f) the routes: the list, the start, the agent refusal; no body carries the secret
+  const serveWith = async (routesMod, engine) => {
+    routesMod.setup({ getEngine: () => engine });
+    const app = express(); app.use(express.json()); app.use(routesMod.router);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    const bodies = [];
+    const call = (method, p, body, headers = {}) => new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port, method, path: p, headers: { 'Content-Type': 'application/json', ...headers } }, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => { bodies.push(b); let j = null; try { j = JSON.parse(b); } catch {} resolve({ status: res.statusCode, body: j, raw: b }); }); });
+      req.on('error', (e) => resolve({ status: 0, body: null, raw: String(e.message) }));
+      req.end(body === undefined ? undefined : JSON.stringify(body));
+    });
+    return { call, bodies, close: () => new Promise((r) => server.close(r)) };
+  };
+  const R1 = await serveWith(routes, eng);
+  const gl = await R1.call('GET', '/api/channels/oauth/mount-clients?kind=gmail');
+  ok(gl.status === 200 && gl.body.clients.length === 2 && gl.body.clients.some((x) => x.mountId === P && x.name === 'mail archive' && x.email === 'archive.owner@example.com' && x.clientIdPrefix === CID.slice(0, 12)), 'GET /api/channels/oauth/mount-clients?kind=gmail → the list (declared before the conversation route)', gl.raw.slice(0, 300));
+  const glk = await R1.call('GET', '/api/channels/oauth/mount-clients?kind=lark');
+  ok(glk.status === 200 && glk.body.vendor === null && glk.body.clients.length === 0, '…?kind=lark → vendor null, none');
+  const AG = { Authorization: 'Bearer vsst_fake-agent-token' };
+  const ga = await R1.call('GET', '/api/channels/oauth/mount-clients?kind=gmail', undefined, AG);
+  const sa = await R1.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P }, AG);
+  const raA = await R1.call('POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/reauthorize`, { fromMount: P }, { Authorization: 'Bearer jbt_fake-job-token' });
+  ok(ga.status === 403 && ga.body.code === 'agent-forbidden' && sa.status === 403 && sa.body.code === 'agent-forbidden' && raA.status === 403, 'an agent\'s session / job bearer is 403 agent-forbidden on the list, on a start and on a re-authorize that borrows a mount\'s client');
+  const sr = await R1.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P });
+  ok(sr.status === 200 && new URL(sr.body.url).searchParams.get('client_id') === CID, 'POST /api/channels/oauth/start {kind, fromMount} (the owner) → the consent under the mount\'s client');
+  const sg = await R1.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: 'mnt-gone' });
+  ok(sg.status === 404 && sg.body.code === 'mount-gone', 'a gone mount → 404 mount-gone on the wire');
+  const bodyLeak = (bodies) => bodies.some((b) => b.includes(CSEC) || b.includes(mountCipher));
+  ok(!bodyLeak(R1.bodies), `NO route answer carries the mount's secret or its ciphertext (${R1.bodies.length} bodies checked)`);
+  ok(!frames.some((f) => JSON.stringify(f).includes(CSEC)) && !logs.some((l) => l.includes(CSEC)), 'no broadcast frame and no log line carried it either');
+  await R1.close();
+
+  // CONTROLS — each check above is not decorative
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const SEAL = '    const credential = sealCustom(mod, { appId: c.clientId, appSecret: c.clientSecret });';
+  const READ = '    try { secret = box.dec(c.appSecretEnc); }\n';
+  ok(esrc.split(SEAL).length === 2 && esrc.split(READ).length === 2, 'CONTROL setup: the seal and the read-back lines are present once');
+  // (1) a copy that SKIPS THE SEAL (and reads the value back unopened, so it runs end to end)
+  const p1 = patchPath('src/server', 'channels-engine');
+  writeCopy(p1, esrc.replace(SEAL, '    const credential = { appId: c.clientId, appSecretEnc: c.clientSecret };').replace(READ, '    try { secret = c.appSecretEnc; }\n'));
+  const d1 = path.join(ROOT, 'cfm-ctl1');
+  const e1 = mkCfm(require(p1), d1);
+  const s1c = await e1.startOAuth({ kind: 'gmail', fromMount: P });
+  const cu1 = new URL(s1c.flow.consentUrl);
+  await new Promise((resolve) => http.get(`${s1c.flow.redirectUri}/?state=${cu1.searchParams.get('state')}&code=code-c1`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve));
+  for (let i = 0; i < 40 && !e1.oauthStatus(s1c.flowId).done; i++) await sleep(10);
+  const k1 = await e1.connect('gmail', { flowId: s1c.flowId, fromMount: P });
+  ok(plainOnDisk(d1) && !sealedOk(d1, recOf(d1, k1.adapter.id)), 'CONTROL: a copy that skips the seal writes the plaintext — the disk check above would be red');
+  // (2) a copy that echoes the copied client in the start answer
+  const START = '    auditMountCopy(choice, mod);\n    return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);';
+  ok(esrc.split(START).length === 2, 'CONTROL setup: the start answer line is present once');
+  const p2 = patchPath('src/server', 'channels-engine');
+  writeCopy(p2, esrc.replace(START, '    auditMountCopy(choice, mod);\n    return withMount({ ...r, url: r.flow && r.flow.consentUrl, copied: input.fromMount ? mountClients.of(input.fromMount) : null }, choice);'));
+  const e2 = mkCfm(require(p2), path.join(ROOT, 'cfm-ctl2'));
+  const R2 = await serveWith(routes, e2);
+  await R2.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P });
+  ok(bodyLeak(R2.bodies), 'CONTROL: a copy whose start answer echoes the copied client leaks it — the body check above would be red');
+  await R2.close();
+  // (3) a routes copy without the agent refusal
+  const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  const GUARD = "    if (refuseAgentMountChoice(req, res)) return;\n    res.json(engine().mountClientsFor(";
+  ok(rsrc.split(GUARD).length === 2, 'CONTROL setup: the list route\'s agent refusal is present once');
+  const p3 = patchPath('src/routes', 'channels');
+  writeCopy(p3, rsrc.replace(GUARD, '    res.json(engine().mountClientsFor('));
+  const R3 = await serveWith(require(p3), eng);
+  const ga3 = await R3.call('GET', '/api/channels/oauth/mount-clients?kind=gmail', undefined, AG);
+  ok(ga3.status === 200, 'CONTROL: a route copy without the refusal answers an agent bearer 200 — the 403 check above would be red');
+  await R3.close();
+  // (4) a mounts copy that OPENS THE SECRET BEFORE judging the vendor (the pre-verify order). verify r2: the
+  // engine asks the KEY-LESS head first, so this order is judged on the mounts module itself — the door the
+  // r1 pin (`oauthClientOf(UNOD, {vendor})` → mount-client-vendor, 0 decrypts) holds on its own
+  const msrc = fs.readFileSync(path.join(REPO, 'src/mounts.js'), 'utf-8');
+  const VENDOR_FIRST = "    const { _rec: m, ...head } = this.oauthClientIdOf(mountId, { vendor });\n    let clientSecret;\n    try { clientSecret = this._dec(m.clientSecretEnc); }\n";
+  ok(msrc.split(VENDOR_FIRST).length === 2, 'CONTROL setup: the head-before-decrypt lines are present once');
+  const p4 = patchPath('src', 'mounts');
+  writeCopy(p4, msrc.replace(VENDOR_FIRST, "    const m0 = this._state.mounts.find((x) => x.id === String(mountId || ''));\n    let clientSecret;\n    try { clientSecret = this._dec(m0 && m0.clientSecretEnc); }\n    catch (e) { throw refuse('mount-secret-undecryptable', `the storage mount's client secret cannot be decrypted with .mounts-key (${(e && e.code) || 'decrypt-failed'})`); }\n    const { _rec: m, ...head } = this.oauthClientIdOf(mountId, { vendor });\n    try { clientSecret = this._dec(m.clientSecretEnc); }\n"));
+  const mm4 = new (require(p4).MountManager)({ dataDir: mdir });   // the same store, the same key
+  let decs4 = 0; { const rd = mm4._box.dec.bind(mm4._box); mm4._box.dec = (b) => { decs4++; return rd(b); }; }
+  const dReal = mountDecs;
+  const eReal = (() => { try { mm.oauthClientOf(UNOD, { vendor: 'google' }); return null; } catch (err) { return err; } })();
+  ok(eReal && eReal.code === 'mount-client-vendor' && mountDecs === dReal, `the REAL oauthClientOf(UNOD, {vendor:'google'}) refuses mount-client-vendor with no decrypt (${eReal && eReal.code}, ${mountDecs - dReal})`);
+  const eU4 = (() => { try { mm4.oauthClientOf(UNOD, { vendor: 'google' }); return null; } catch (err) { return err; } })();
+  ok(eU4 && eU4.code === 'mount-secret-undecryptable' && decs4 === 1, `CONTROL: a mounts copy that decrypts before judging the vendor answers mount-secret-undecryptable after 1 decrypt — the order checks above would be red (${eU4 && eU4.code}, ${decs4})`);
+  // (5) an engine copy whose Connect skips the ONE-client rule (the pre-verify line)
+  const ONE = '    const sameMount = namesMount(b) && !!p.choice.fromMount && p.choice.fromMount.mountId === b.fromMount;';
+  ok(esrc.split(ONE).length === 2, 'CONTROL setup: Connect\'s one-client line is present once');
+  const p5 = patchPath('src/server', 'channels-engine');
+  writeCopy(p5, esrc.replace(ONE, "    const sameMount = typeof b.fromMount === 'string' && !!p.choice.fromMount && p.choice.fromMount.mountId === b.fromMount;"));
+  const e5 = mkCfm(require(p5), path.join(ROOT, 'cfm-ctl5'));
+  const s5c = await e5.startOAuth({ kind: 'gmail', fromMount: P });
+  { const cu5 = new URL(s5c.flow.consentUrl); await new Promise((resolve) => http.get(`${s5c.flow.redirectUri}/?state=${cu5.searchParams.get('state')}&code=code-c5`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve)); }
+  for (let i = 0; i < 40 && !e5.oauthStatus(s5c.flowId).done; i++) await sleep(10);
+  const k5 = await (async () => { try { return await e5.connect('gmail', { flowId: s5c.flowId, fromMount: P, credentialKey: 'cluster:org1' }); } catch (err) { return { err }; } })();
+  ok(k5.adapter && k5.adapter.credentialKey === 'custom', 'CONTROL: an engine copy whose Connect skips the one-client rule accepts the mount beside a stale preset — the ambiguity check above would be red');
+
+  // ── verify r2: EVERY refusal that needs no key comes before the key; a refusal never takes the flow ──
+  // a google mount whose stored id the registry's rule refuses (the storage side never validated it), an
+  // undecryptable GOOGLE mount (the r1 UNOD probe's same-vendor twin), a name with a newline, a 2 000-char name
+  const BAD = mm.add({ type: 'drive', name: 'odd id drive', token: tok, clientId: 'not-a-google-client-id', clientSecret: 'GOCSPX-odd-MOUNT-s3cret-0dd' });
+  const UNG = mm.add({ type: 'gmail', name: 'stale key mail', token: tok, clientId: 'stale.apps.googleusercontent.com', clientSecret: 'placeholder' });
+  mm._state.mounts.find((m) => m.id === UNG).clientSecretEnc = SB.secretBox(path.join(ROOT, 'cfm-other-key')).enc('GOCSPX-stale-MOUNT-s3cret');
+  const HN = mm.add({ type: 'gmail', name: 'x\n[channels] gmail: connected as root (FORGED)', token: tok, clientId: 'hn.apps.googleusercontent.com', clientSecret: 'GOCSPX-hn-MOUNT-s3cret-00' });
+  const LONG = mm.add({ type: 'gmail', name: 'long', token: tok, clientId: 'long.apps.googleusercontent.com', clientSecret: 'GOCSPX-long-MOUNT-s3cret-0' });
+  mm._state.mounts.find((m) => m.id === LONG).name = 'L'.repeat(2000);
+  mm._save();
+  const R4 = await serveWith(routes, eng);
+  const st6 = await eng.startOAuth({ kind: 'gmail', fromMount: P });
+  await land(st6.flow, 'code-p6');
+  const refs2 = [];
+  const d2 = mountDecs;
+  for (const [what, method, p, body, status, code] of [
+    ['start + an unknown option', 'POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P, options: { bogus: 'x' } }, 400, 'unknown-option'],
+    ['start + non-object options', 'POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: P, options: 'x' }, 400, 'bad-request'],
+    ['start + a mount whose id the row refuses', 'POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: BAD }, 400, 'invalid-client'],
+    ['connect newAccount + that mount', 'POST', '/api/channels/adapters/gmail/connect', { newAccount: true, fromMount: BAD }, 400, 'invalid-client'],
+    ['connect newAccount + an unknown option', 'POST', '/api/channels/adapters/gmail/connect', { newAccount: true, fromMount: P, options: { bogus: 'x' } }, 400, 'unknown-option'],
+    ['re-authorize + that mount', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/reauthorize`, { fromMount: BAD }, 400, 'invalid-client'],
+    ['Connect {flowId} + ANOTHER mount (another id)', 'POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: D }, 400, 'flow-client-mismatch'],
+    ['Connect {flowId} + an UNDECRYPTABLE other mount', 'POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: UNG }, 400, 'flow-client-mismatch'],
+    ['Connect {flowId} + the sign-in\'s mount + an unknown option', 'POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: P, options: { bogus: 'x' } }, 400, 'unknown-option'],
+    ['start + a numeric fromMount', 'POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: 123 }, 400, 'bad-request'],
+    ['start + an empty fromMount', 'POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: '' }, 400, 'bad-request'],
+    ['Connect {flowId} + an object fromMount', 'POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: { id: P } }, 400, 'bad-request'],
+    ['re-authorize + an array fromMount', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/reauthorize`, { fromMount: [P] }, 400, 'bad-request'],
+  ]) {
+    const dd = mountDecs;
+    const r = await R4.call(method, p, body);
+    if (!(r.status === status && r.body && r.body.code === code && mountDecs === dd)) refs2.push({ what, status: r.status, code: r.body && r.body.code, decrypts: mountDecs - dd });
+  }
+  ok(refs2.length === 0 && mountDecs === d2, 'verify r2: a body refused on its OPTIONS, on a mount id the row refuses, on ANOTHER mount at Connect (compared by id — an undecryptable one answers flow-client-mismatch, never its key state), or on a malformed fromMount (400 bad-request, never the default client) opens NO mount secret', JSON.stringify(refs2));
+  const stAfter = await R4.call('GET', `/api/channels/oauth/status?flowId=${encodeURIComponent(st6.flowId)}`);
+  ok(stAfter.status === 200 && stAfter.body.done && stAfter.body.ok, 'verify r2: the finished sign-in SURVIVED every refused Connect (a refusal never takes the flow — the options are judged before it is taken)', stAfter.raw.slice(0, 160));
+  const c6 = await R4.call('POST', '/api/channels/adapters/gmail/connect', { flowId: st6.flowId, fromMount: P, name: 'after r2 refusals' });
+  ok(c6.status === 200 && c6.body.adapter.credentialKey === 'custom', 'and Connect naming the mount alone still lands it');
+  const cfgA = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`, undefined, AG);
+  ok(cfgA.status === 403 && cfgA.body.code === 'agent-forbidden' && !cfgA.raw.includes(CSEC), 'verify r2: the owner-only config refuses a self-identifying agent bearer 403 agent-forbidden (the plaintext prefill is the owner\'s)');
+  const cfgO = await R4.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`);
+  ok(cfgO.status === 200 && cfgO.body.config.client && cfgO.body.config.client.appSecret === CSEC, '…and the owner (no bearer) still reads the Edit prefill (D3)');
+  R4.bodies.pop();   // the owner's config read is the D3 door — excluded from the leak census by design
+  const gl2 = await R4.call('GET', '/api/channels/oauth/mount-clients?kind=gmail');
+  const rowL = gl2.body.clients.find((x) => x.mountId === LONG), rowH = gl2.body.clients.find((x) => x.mountId === HN);
+  ok(rowL && rowL.name.length <= 60 && rowH && !rowH.name.includes('\n'), `verify r2: a stored 2 000-char name is bounded on the list (${rowL && rowL.name.length}) and a newline in a name is a space`);
+  const st7 = await eng.startOAuth({ kind: 'gmail', fromMount: HN });
+  const forged = logs.filter((l) => l.includes('storage mount') && l.includes('\n'));
+  ok(forged.length === 0 && logs.some((l) => l.includes('(FORGED)') && !l.includes('\n')), 'verify r2: the copy\'s log line carries the name on ONE line (a newline in a name forged a second journal line)');
+  await eng.cancelAuth(c1.adapter.id).catch(() => {}); void st7;
+  const nsl = await R4.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: (() => { const id = mm.add({ type: 'gmail', name: 'n', token: tok, clientId: 'nsl.apps.googleusercontent.com' }); mm._state.mounts.find((m) => m.id === id).name = 'N'.repeat(2000); return id; })() });
+  ok(nsl.status === 409 && nsl.body.code === 'mount-no-client' && nsl.raw.length < 400, `verify r2: a refusal naming a 2 000-char mount is bounded on the wire (${nsl.raw.length} bytes)`);
+  ok(!bodyLeak(R4.bodies), `verify r2: no route answer of this leg carries the secret (${R4.bodies.length} bodies)`);
+  await R4.close();
+  // CONTROLS for the r2 pins
+  // (6) an engine copy that TAKES the flow before judging the options (the pre-r2 order)
+  const OPT_FIRST = '    const options = normalizeOptions(mod, b.options, p.rec.options);\n';
+  const OPT_USE = '    rec.options = options;\n';
+  ok(esrc.split(OPT_FIRST).length === 2 && esrc.split(OPT_USE).length === 2, 'CONTROL setup: Connect judges the options once, before the take');
+  const p6 = patchPath('src/server', 'channels-engine');
+  writeCopy(p6, esrc.replace(OPT_FIRST, '').replace(OPT_USE, '    rec.options = normalizeOptions(mod, b.options, p.rec.options);\n'));
+  const e6 = mkCfm(require(p6), path.join(ROOT, 'cfm-ctl6'));
+  const s6 = await e6.startOAuth({ kind: 'gmail', fromMount: P });
+  { const cu = new URL(s6.flow.consentUrl); await new Promise((resolve) => http.get(`${s6.flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=code-c6`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve)); }
+  for (let i = 0; i < 40 && !e6.oauthStatus(s6.flowId).done; i++) await sleep(10);
+  const k6 = await (async () => { try { await e6.connect('gmail', { flowId: s6.flowId, fromMount: P, options: { bogus: 'x' } }); return null; } catch (err) { return err; } })();
+  const k6b = await (async () => { try { e6.oauthStatus(s6.flowId); return null; } catch (err) { return err; } })();
+  ok(k6 && k6.code === 'unknown-option' && k6b && k6b.code === 'no-flow', 'CONTROL: an engine copy that takes the flow first loses the finished sign-in on a refused option — the survival check above would be red');
+  // (7) an engine copy whose Connect resolves ANOTHER mount through the DECRYPTING read (the pre-r2 line)
+  const HEAD_CMP = "      const h = mountHead(mod, b.fromMount);\n      if (p.choice.credentialKey !== CUSTOM_KEY || String(h.clientId) !== String(p.choice.credential.appId)) throw mismatch(`the client of storage mount \"${h.name}\"`);\n      named = clientFromMount(mod, b.fromMount);   // the same id: the secrets are compared (needs the key)\n";
+  ok(esrc.split(HEAD_CMP).length === 2, 'CONTROL setup: Connect\'s id-first comparison is present once');
+  const p7 = patchPath('src/server', 'channels-engine');
+  writeCopy(p7, esrc.replace(HEAD_CMP, '      named = clientFromMount(mod, b.fromMount);\n'));
+  const e7 = mkCfm(require(p7), path.join(ROOT, 'cfm-ctl7'));
+  const s7 = await e7.startOAuth({ kind: 'gmail', fromMount: P });
+  { const cu = new URL(s7.flow.consentUrl); await new Promise((resolve) => http.get(`${s7.flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=code-c7`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve)); }
+  for (let i = 0; i < 40 && !e7.oauthStatus(s7.flowId).done; i++) await sleep(10);
+  const d7 = mountDecs;
+  const k7 = await (async () => { try { await e7.connect('gmail', { flowId: s7.flowId, fromMount: UNG }); return null; } catch (err) { return err; } })();
+  ok(k7 && k7.code === 'mount-secret-undecryptable' && mountDecs - d7 === 1, `CONTROL: an engine copy that resolves the other mount through the decrypting read answers mount-secret-undecryptable after 1 decrypt — the r2 table would be red (${k7 && k7.code}, ${mountDecs - d7})`);
+  // (8) an engine copy whose head skips the registry's id rule
+  const ID_RULE = "    if (!v.ok) throw httpErr(400, 'invalid-client', `the storage mount \"${h.name}\"'s client is not one ${row.label} can use — ${Object.entries(v.errors).map(([k, why]) => `${k}: ${why}`).join('; ')}`, { errors: v.errors });\n";
+  ok(esrc.split(ID_RULE).length === 2, 'CONTROL setup: the head\'s id rule is present once');
+  const p8 = patchPath('src/server', 'channels-engine');
+  writeCopy(p8, esrc.replace(ID_RULE, ''));
+  const e8 = mkCfm(require(p8), path.join(ROOT, 'cfm-ctl8'));
+  const d8 = mountDecs;
+  const k8 = await (async () => { try { await e8.startOAuth({ kind: 'gmail', fromMount: BAD }); return null; } catch (err) { return err; } })();
+  ok(k8 && k8.code === 'invalid-client' && mountDecs - d8 === 1, `CONTROL: an engine copy without the head's id rule still refuses (the seal's belt) but only AFTER 1 decrypt — the r2 table would be red (${k8 && k8.code}, ${mountDecs - d8})`);
+  // (9) a routes copy without the config refusal / (10) without the malformed-fromMount refusal
+  const CFG = "  try { forHost(req); if (refuseAgentBearer(req, res)) return; res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }";
+  const MAL = "    if (refuseMalformedMount(req, res)) return;\n    const b = req.body || {};\n    res.json({ ok: true, ...(await engine().startOAuth(";
+  ok(rsrc.split(CFG).length === 2 && rsrc.split(MAL).length === 2, 'CONTROL setup: the config refusal and start\'s malformed-fromMount refusal are present once');
+  const p9 = patchPath('src/routes', 'channels');
+  writeCopy(p9, rsrc.replace(CFG, "  try { forHost(req); res.json({ config: engine().adapterConfig(req.params.id) }); } catch (e) { fail(res, e); }").replace(MAL, "    const b = req.body || {};\n    res.json({ ok: true, ...(await engine().startOAuth("));
+  const R9 = await serveWith(require(p9), eng);
+  const cfg9 = await R9.call('GET', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/config`, undefined, AG);
+  const num9 = await R9.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: 123 });
+  ok(cfg9.status === 200 && !(num9.status === 400 && num9.body && num9.body.code === 'bad-request'), `CONTROL: a routes copy without the two refusals answers an agent bearer's config read 200 and a numeric fromMount ${num9.status} ${num9.body && num9.body.code} — the r2 checks above would be red`);
+  R9.bodies.length = 0;
+  await R9.close();
+
+  // ── verify r3: WHAT WAS COPIED IS SAID BACK; the list's prefix is a hint, the copy is the mount's client at START; the bounds ──
+  const s10 = await eng.startOAuth({ kind: 'gmail', fromMount: P });
+  ok(s10.fromMount && s10.fromMount.mountId === P && s10.fromMount.name === 'mail archive' && s10.fromMount.clientIdPrefix === CID.slice(0, 12) && JSON.stringify(Object.keys(s10.fromMount).sort()) === JSON.stringify(['clientIdPrefix', 'mountId', 'name']) && !JSON.stringify(s10).includes(CSEC), 'verify r3: the start answer names the client copied — fromMount {mountId, name, clientIdPrefix}, never a secret');
+  await land(s10.flow, 'code-p10');
+  const c10 = await eng.connect('gmail', { flowId: s10.flowId, fromMount: P, name: 'said back' });
+  ok(c10.fromMount && c10.fromMount.mountId === P && c10.fromMount.clientIdPrefix === CID.slice(0, 12), 'Connect from the flow says which mount the account was minted under');
+  const ra10 = await eng.reauthorize(c10.adapter.id, { fromMount: D });
+  ok(ra10.rebind === true && ra10.fromMount && ra10.fromMount.mountId === D && ra10.fromMount.clientIdPrefix === DID.slice(0, 12), 'a rebind re-authorize names the mount it will sign in under');
+  await eng.cancelAuth(c10.adapter.id).catch(() => {});
+  // TOCTOU: the Drive mount's client is EDITED between the list and the pick — the consent runs under the CURRENT
+  // client, the answer + the audit line name THAT prefix (not the list's); Connect naming the same mount lands the flow's copy
+  const listed = eng.mountClientsFor('gmail').clients.find((x) => x.mountId === D).clientIdPrefix;
+  const NEWID = '999900001111-edited.apps.googleusercontent.com';
+  await mm.update(D, { clientId: NEWID, clientSecret: 'GOCSPX-edited-MOUNT-s3cret-9', token: tok });
+  const R10 = await serveWith(routes, eng);
+  const s11 = await R10.call('POST', '/api/channels/oauth/start', { kind: 'gmail', fromMount: D });
+  const auLast = eng.store.auditTail().filter((l) => l.op === 'client-from-mount').pop();
+  ok(s11.status === 200 && new URL(s11.body.url).searchParams.get('client_id') === NEWID && s11.body.fromMount && s11.body.fromMount.clientIdPrefix === NEWID.slice(0, 12) && listed === DID.slice(0, 12) && auLast && auLast.clientIdPrefix === NEWID.slice(0, 12), `verify r3 (list freshness): a mount edited between the list (${listed}…) and the pick signs in under its CURRENT client — the answer and the audit line say ${NEWID.slice(0, 12)}…`);
+  await mm.update(D, { clientId: '888800001111-third.apps.googleusercontent.com', clientSecret: 'GOCSPX-third-MOUNT-s3cret-8', token: tok });
+  await land(s11.body.flow, 'code-p11');
+  const c11 = await R10.call('POST', '/api/channels/adapters/gmail/connect', { flowId: s11.body.flowId, fromMount: D, name: 'toctou' });
+  ok(c11.status === 200 && c11.body.adapter.customClient.appId === NEWID && c11.body.fromMount.clientIdPrefix === NEWID.slice(0, 12), 'Connect naming the same mount lands the flow\'s copy (the id the consent ran under), never the mount\'s newer one — and says so');
+  ok(!R10.bodies.some((b) => b.includes(CSEC) || b.includes('GOCSPX-edited') || b.includes('GOCSPX-third')), 'verify r3: no route body carried a secret');
+  await R10.close();
+  // THE BOUND: the (MAX_RUNNING_FLOWS + 1)th pending begin supersedes the OLDEST running flow by name — a caller
+  // cannot pin more listeners or held clients than that (the loopback's own rule; its suite pins the closure release)
+  const OLMOD = require(path.join(REPO, 'src/oauth-loopback.js'));
+  const eCap = mkCfm(ENG, path.join(ROOT, 'cfm-cap'));
+  const capFlows = [];
+  for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS + 1; i++) capFlows.push(await eCap.startOAuth({ kind: 'gmail', fromMount: P }));
+  const capFirst = eCap.oauthStatus(capFlows[0].flowId), capLast = eCap.oauthStatus(capFlows[capFlows.length - 1].flowId);
+  const capRunning = capFlows.filter((f) => eCap.oauthStatus(f.flowId).running).length;
+  ok(capFirst.running === false && /ended to keep the number of open sign-ins at 32/.test(capFirst.error || '') && capLast.running === true && capRunning === OLMOD.MAX_RUNNING_FLOWS, `verify r3 (bounds): ${OLMOD.MAX_RUNNING_FLOWS + 1} pending fromMount begins ⇒ the first is ended by name (r4: the cap's own words — "${capFirst.error}"), ${capRunning} running`);
+  // (11) CONTROL: an engine copy whose answers omit the copied client (the pre-r3 shape)
+  const SAID = '  const withMount = (answer, choice) => { const m = mountNamed(choice); return m ? { ...answer, fromMount: m } : answer; };';
+  ok(esrc.split(SAID).length === 2, 'CONTROL setup: the said-back helper is present once');
+  const p11 = patchPath('src/server', 'channels-engine');
+  writeCopy(p11, esrc.replace(SAID, '  const withMount = (answer) => answer;'));
+  const e11 = mkCfm(require(p11), path.join(ROOT, 'cfm-ctl11'));
+  const s11c = await e11.startOAuth({ kind: 'gmail', fromMount: P });
+  ok(!('fromMount' in s11c), 'CONTROL: an engine copy that does not say the copied client back answers without fromMount — the r3 checks above would be red');
+
+  // ── verify r4: THE CAP'S END IS SAID ON THE ACCOUNT; A VENDOR ECHO OF THE SECRET REACHES NO FRAME, FILE OR ITEM; A SIGN-IN IS THE OWNER'S ──
+  // (12) a RECORD-LEVEL re-authorize (the account's own flow, watched through the broadcast) ended by the cap: the
+  // record says so (lastAuthError + lastAuthAt move, a frame goes out) — r3 ended it by name in the machine and told
+  // nobody: the Re-authorize dialog's watcher waited its whole 10 min, the card just stopped saying "Signing in…"
+  const landOn = async (e, flow, code) => {   // `land` above polls the main engine; these legs have their own
+    const cu = new URL(flow.consentUrl);
+    await new Promise((resolve) => http.get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve));
+    for (let i = 0; i < 60; i++) { let st_ = null; try { st_ = e.oauthStatus(flow.flowId); } catch { return null; } if (st_.done) return st_; await sleep(10); }
+    return null;
+  };
+  const eSaid = mkCfm(ENG, path.join(ROOT, 'cfm-said'));
+  const sS = await eSaid.startOAuth({ kind: 'gmail', fromMount: P }); await landOn(eSaid, sS.flow, 'code-said');
+  const kS = (await eSaid.connect('gmail', { flowId: sS.flowId, fromMount: P, name: 'said' })).adapter.id;
+  await sleep(40);
+  const raS = await eSaid.reauthorize(kS, {});
+  const baseAt = recOf(path.join(ROOT, 'cfm-said'), kS).lastAuthAt; const fr0 = frames.length;
+  for (let i = 0; i < OLMOD.MAX_RUNNING_FLOWS; i++) await eSaid.startOAuth({ kind: 'gmail', fromMount: D });
+  await sleep(40);
+  const recS = recOf(path.join(ROOT, 'cfm-said'), kS); const cardS = eSaid.digest().adapters.find((a) => a.id === kS);
+  ok(eSaid.oauth.status(raS.flow.flowId).cancelled === OLMOD.CAUSE_OVER_LIMIT && /ended to keep the number of open sign-ins/.test(recS.lastAuthError || '') && recS.lastAuthAt !== baseAt && cardS.flow === null && frames.length > fr0 && !!(recS.auth && recS.auth.tokenEnc), `verify r4: a re-authorize ended by the cap is SAID on the account (lastAuthError "${recS.lastAuthError}", lastAuthAt moved, ${frames.length - fr0} frame(s)), its token kept`);
+  // (13) a vendor error that ECHOES the secret we sent — through the rebind (pending) path, the record's own flow and the
+  // token refresh: the string reaches no broadcast frame, no file under the engine dir, no For-you item, no log line;
+  // the vendor's other words are kept
+  const todosR4 = []; const inboxR4 = { add: (k, it) => { const x = { id: `ut-${todosR4.length + 1}`, sessionKey: k, status: 'open', ...it }; todosR4.push(x); return x; }, get: (id) => todosR4.find((x) => x.id === id) || null, setStatus: (id, st_) => { const x = todosR4.find((y) => y.id === id); if (x) x.status = st_; } };
+  const eEcho = ENG.create({ dataDir: path.join(ROOT, 'cfm-echo'), env: {}, broadcast: (m) => frames.push(m), fetch: fetchG, log: capLog, mountClients, userTodos: inboxR4 }); engines.push(eEcho);
+  const sE = await eEcho.startOAuth({ kind: 'gmail', fromMount: P }); await landOn(eEcho, sE.flow, 'code-echo');
+  const kE = (await eEcho.connect('gmail', { flowId: sE.flowId, fromMount: P, name: 'echo' })).adapter.id;
+  await sleep(40);
+  const whereIs = (sec) => ({ frames: frames.filter((f) => JSON.stringify(f).includes(sec)).length, disk: (() => { const hits = []; const walk = (d) => { for (const f of fs.readdirSync(d, { withFileTypes: true })) { const q = path.join(d, f.name); if (f.isDirectory()) walk(q); else if (fs.readFileSync(q, 'latin1').includes(sec)) hits.push(path.relative(ROOT, q)); } }; walk(path.join(ROOT, 'cfm-echo')); return hits; })(), logs: logs.filter((l) => l.includes(sec)).length, inbox: todosR4.filter((x) => JSON.stringify(x).includes(sec)).length });
+  frames.length = 0; logs.length = 0; echoSecret = true;
+  const rbE = await eEcho.reauthorize(kE, { fromMount: D });   // the rebind: its consent under D's client, refused with an echo of D's secret
+  await landOn(eEcho, rbE.flow, 'code-echo-d'); await sleep(60);
+  const wD = whereIs(DSEC); const recE1 = recOf(path.join(ROOT, 'cfm-echo'), kE);
+  ok(wD.frames === 0 && wD.disk.length === 0 && wD.logs === 0 && wD.inbox === 0 && /\[client_secret withheld\] was rejected \(fake vendor echo\)/.test(recE1.lastAuthError || ''), `verify r4 (rebind): the vendor's echo of the borrowed secret is WITHHELD by value — no frame, no file, no log line carries it; the vendor's other words stay ("${recE1.lastAuthError}")`, JSON.stringify(wD));
+  const rsE = await eEcho.reauthorize(kE, { fromMount: P });   // the record's own flow (same id: the secret re-copied in place)
+  await landOn(eEcho, rsE.flow, 'code-echo-p'); await sleep(60);
+  const wP = whereIs(CSEC);
+  ok(wP.frames === 0 && wP.disk.length === 0 && wP.logs === 0 && /\[client_secret withheld\]/.test(recOf(path.join(ROOT, 'cfm-echo'), kE).lastAuthError || ''), 'verify r4 (the record\'s own flow): the same — withheld everywhere', JSON.stringify(wP));
+  echoSecret = false;
+  ok(!frames.some((f) => JSON.stringify(f).includes(CSEC) || JSON.stringify(f).includes(DSEC)), 'verify r4: no broadcast frame of this leg carried either secret');
+  // (14) a SIGN-IN IS THE OWNER'S: a self-identifying agent bearer is 403 on every verb that begins or completes a consent,
+  // whatever the body names (r2 refused only a body naming a mount — a bearer that could begin 33 sign-ins could end the
+  // owner's through the cap); the config route's refusal is r2's
+  const Ra = await serveWith(routes, eng);
+  const agentRows = [
+    ['start, own client', 'POST', '/api/channels/oauth/start', { kind: 'gmail', clientId: '777788889999-agent.apps.googleusercontent.com', clientSecret: 'GOCSPX-agent-own-secret-x' }],
+    ['start, preset', 'POST', '/api/channels/oauth/start', { kind: 'gmail', clientPreset: 'org1' }],
+    ['connect, new account', 'POST', '/api/channels/adapters/gmail/connect', { newAccount: true, clientPreset: 'org1' }],
+    ['re-authorize, no client', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/reauthorize`, {}],
+    ['paste-back (pending)', 'POST', '/api/channels/oauth/callback', { url: 'http://127.0.0.1:1/?state=x&code=y' }],
+    ['paste-back (account)', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/auth/finish`, { url: 'http://127.0.0.1:1/?state=x&code=y' }],
+    // verify r5: the verbs that FOLLOW or END a sign-in or touch an account's credential / standing (the status poll carries
+    // the running consent URL — its state — a forged landing ends the owner's sign-in; cancel; the Edit dialog's PUT = a
+    // secret rewrite or a policy flip; duplicate; disconnect; remove) — the same courtesy, refused before anything is read
+    ['status (r5)', 'GET', '/api/channels/oauth/status'],
+    ['cancel (r5)', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/auth/cancel`, {}],
+    ['PUT {credential} (r5)', 'PUT', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}`, { credential: { appId: CID, appSecret: 'GOCSPX-agent-rewrote-it-000' } }],
+    ['PUT {policy} (r5)', 'PUT', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}`, { policy: 'direct' }],
+    ['duplicate (r5)', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/duplicate`, { name: 'dup' }],
+    ['disconnect (r5)', 'POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/disconnect`, {}],
+    ['DELETE (r5)', 'DELETE', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}`],
+  ];
+  const agentGot = [];
+  for (const [what, m, p_, body] of agentRows) { const r = await Ra.call(m, p_, body, AG); agentGot.push([what, r.status, r.body && r.body.code]); }
+  ok(agentGot.every((r) => r[1] === 403 && r[2] === 'agent-forbidden'), `verify r4 + r5: an agent bearer is 403 agent-forbidden on every consent verb and every account verb, whatever the body names (${agentGot.map((r) => r[0]).join('; ')})`, JSON.stringify(agentGot));
+  ok(!!recOf(path.join(ROOT, 'cfm-eng'), c1.adapter.id) && !!recOf(path.join(ROOT, 'cfm-eng'), c1.adapter.id).auth.tokenEnc && !JSON.parse(disk(path.join(ROOT, 'cfm-eng'))).adapters.some((r) => r.label === 'dup'), 'verify r5: the refused verbs changed nothing — the account still holds its token, no duplicate was minted');
+  const ownerStart = await Ra.call('POST', '/api/channels/oauth/start', { kind: 'gmail', clientId: '777788889999-agent.apps.googleusercontent.com', clientSecret: 'GOCSPX-agent-own-secret-x' });
+  ok(ownerStart.status === 200 && ownerStart.body.flowId, 'the same body without a bearer (the owner\'s cookie) begins');
+  ok(!Ra.bodies.some((b) => b.includes(CSEC) || b.includes(DSEC) || b.includes('GOCSPX-agent-own-secret-x')), 'no route body of this leg carried a secret');
+  await Ra.close();
+  // CONTROL: a routes copy without r4's line on start answers the agent's own-client begin 200
+  const SIGN = "    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r4\n";
+  ok(rsrc.split(SIGN).length === 6, 'CONTROL setup: the r4 refusal is present on the five consent verbs');
+  const p14 = patchPath('src/routes', 'channels');
+  writeCopy(p14, rsrc.split(SIGN).join(''));
+  const R14 = await serveWith(require(p14), eng);
+  const a14 = await R14.call('POST', '/api/channels/oauth/start', { kind: 'gmail', clientId: '777788889999-agent.apps.googleusercontent.com', clientSecret: 'GOCSPX-agent-own-secret-x' }, AG);
+  ok(a14.status === 200 && !!a14.body.flowId, `CONTROL: a routes copy without the r4 refusal begins a consent for an agent bearer (${a14.status}) — the check above would be red`);
+  R14.bodies.length = 0;
+  await R14.close();
+  // CONTROL (r5): a routes copy without the account-verb courtesy answers the agent's cancel 200 (and its status poll)
+  const ACCT = "if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;";
+  const CANCEL = "if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return; res.json(await engine().cancelAuth(req.params.id));";
+  const STATUS = "    if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;   // verify r5: the consent URL (its state) is the owner's\n";
+  ok(rsrc.split(ACCT).length === 5 && rsrc.split(CANCEL).length === 2 && rsrc.split(STATUS).length === 2, 'CONTROL setup: the r5 courtesy is present on the four account verbs, cancel and status');
+  const p15 = patchPath('src/routes', 'channels');
+  writeCopy(p15, rsrc.split(ACCT).join('').replace(CANCEL, 'res.json(await engine().cancelAuth(req.params.id));').replace(STATUS, ''));
+  const R15 = await serveWith(require(p15), eng);
+  const a15 = await R15.call('POST', `/api/channels/adapters/${encodeURIComponent(c1.adapter.id)}/auth/cancel`, {}, AG);
+  const a15s = await R15.call('GET', '/api/channels/oauth/status', undefined, AG);
+  ok(a15.status === 200 && a15.body && a15.body.ok === true && a15s.status !== 403, `CONTROL (r5): a routes copy without the courtesy lets an agent bearer cancel (${a15.status}) and poll the status (${a15s.status}) — the check above would be red`);
+  R15.bodies.length = 0;
+  await R15.close();
+  // (15) THE STORAGE SIDE THAT LENDS THE CLIENT (verify r5): its own consent routes (gdrive-auth/*, gmail-auth/*), the
+  // token write and the config read that prefills the client secret in the clear carry the same courtesy — the r2 essay
+  // said "the mount routes refuse it" and they did not: the secret the channels side refused on mount-clients was one
+  // GET away on the storage side. A source census (the wiring is a whole-server composition, not a router) + a control.
+  const LENDING = ['/api/mounts/:id/config', '/api/mounts/gdrive-auth/start', '/api/mounts/gdrive-auth/status', '/api/mounts/gdrive-auth/callback', '/api/mounts/gdrive-auth/cancel', '/api/mounts/gmail-auth/start', '/api/mounts/gmail-auth/status', '/api/mounts/gmail-auth/callback', '/api/mounts/gmail-auth/cancel', '/api/mounts/:id/drive-token'];
+  const lendingCensus = (src) => LENDING.map((route) => { const i = src.indexOf(`'${route}'`); const head = i < 0 ? '' : src.slice(i, src.indexOf('\n', src.indexOf('\n', i) + 1) + 1); return [route, i >= 0 && /refuseAgentBearer\(req, res\)\) return;/.test(head)]; });
+  const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
+  const lc = lendingCensus(wsrc);
+  ok(lc.every((r) => r[1]) && /code: 'agent-forbidden'/.test(wsrc), `verify r5: every storage route that lends or reveals the client refuses an agent bearer by name in its first line (${lc.map((r) => r[0].replace('/api/mounts/', '')).join(', ')})`, JSON.stringify(lc.filter((r) => !r[1])));
+  const lcm = lendingCensus(wsrc.replace(/^\s*if \(refuseAgentBearer\(req, res\)\) return;.*\n/gm, '').split('{ if (refuseAgentBearer(req, res)) return; ').join('{ '));
+  ok(lcm.filter((r) => !r[1]).length === LENDING.length, `CONTROL: the wiring's text without the guards fails the census on all ${lcm.filter((r) => !r[1]).length} routes — the check above would be red`);
+  // (16) THE HEAP AT EVERY STAGE (verify r5): over the REAL engine + machine + Gmail adapter and a fake Google that
+  // RETAINS NOTHING (its tokens are minted by shape at answer time and dropped), the borrowed client secret — minted by
+  // a CHILD process, only ever reaching the engine's process through the mounts key — and the refresh token are searched
+  // for by SHAPE in a heap snapshot after each end: the exchange returned, Connect, a refresh, a refresh the vendor
+  // refused with an echo, a cancelled re-borrow, disconnect, remove. r4 gated the cancel; these are the stages it did not
+  // reach. The stages run in a SMALL child process (a snapshot of this suite's process costs 0.5 s; of the child 0.1 s).
+  // Positive control: the secret IS in the heap while a sign-in runs. Negative controls, one per holder class: an
+  // adapter that keeps the resolved client (a gmail copy — the copy an engine copy loads) and an engine that memoizes
+  // the decrypted client per record — each holds the secret at every later stage, the removed record's included.
+  {
+    const { execFileSync } = require('node:child_process');
+    const CHILD = String.raw`
+import fs from 'node:fs'; import path from 'node:path'; import v8 from 'node:v8'; import http from 'node:http'; import crypto from 'node:crypto';
+import { createRequire } from 'node:module';
+const [REPO, ENGINE, MDIR, ONLY] = process.argv.slice(2);
+const require = createRequire(path.join(REPO, 'package.json'));
+const { MountManager } = require(path.join(REPO, 'src/mounts.js'));
+const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
+const gmailMod = require(path.join(REPO, 'src/channels/gmail.js'));
+const ENG = require(ENGINE);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SHAPES = { secret: /GOCSPX-R5HEAP-[0-9a-f]{24}/g, rt: /1\/\/R5RT-[0-9a-f]{24}/g, rtEnc: /1%2F%2FR5RT-[0-9a-f]{24}/g };
+const only = ONLY ? new Set(ONLY.split(',')) : null;
+let n = 0;
+async function snap(tag) {
+  if (only && !only.has(tag)) return null;
+  for (let i = 0; i < 4; i++) { global.gc(); await sleep(10); }
+  const f = path.join(MDIR, 'snap-' + (++n) + '.heapsnapshot'); v8.writeHeapSnapshot(f);
+  const txt = fs.readFileSync(f, 'latin1'); fs.rmSync(f);
+  const out = {}; for (const [k, re] of Object.entries(SHAPES)) out[k] = (txt.match(re) || []).length; return out;
+}
+const mm = new MountManager({ dataDir: MDIR });
+const MID = mm.add({ type: 'drive', name: 'heap drive', token: '{"access_token":"x","refresh_token":"y"}', clientId: '123412341234-heapprobe.apps.googleusercontent.com', clientSecret: 'GOCSPX-R5HEAP-' + crypto.randomBytes(12).toString('hex') });
+const mountClients = { list: (v) => mm.oauthClientsFor(v), head: (id, o) => mm.oauthClientIdOf(id, o), of: (id, o) => mm.oauthClientOf(id, o) };
+const mintAt = () => 'ya29.R5AT-' + crypto.randomBytes(12).toString('hex');
+const mintRt = () => '1//R5RT-' + crypto.randomBytes(12).toString('hex');
+const J = (body, status = 200) => ({ ok: status < 300, status, json: async () => body, text: async () => JSON.stringify(body), headers: { get: () => null } });
+let echo = false;
+const fetchH = async (url, init = {}) => {   // keeps nothing: no call log, no token map, no regex over the bearer
+  const u = new URL(String(url));
+  if (u.hostname === 'oauth2.googleapis.com') {
+    const form = Object.fromEntries(new URLSearchParams(String(init.body || '')));
+    if (echo) return J({ error: 'invalid_client', error_description: 'secret ' + form.client_secret + ' rt ' + (form.refresh_token || '-') + ' refused (echo)' }, 401);
+    if (form.grant_type === 'refresh_token') return J({ access_token: mintAt(), expires_in: 3600, token_type: 'Bearer' });
+    return J({ access_token: mintAt(), expires_in: 3600, refresh_token: mintRt(), scope: gmailMod.SCOPE, token_type: 'Bearer' });
+  }
+  const auth = String((init.headers || {}).Authorization || '');
+  if (!(auth.startsWith('Bearer ya29.R5AT-') && auth.length === 41)) return J({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
+  const p = u.pathname.replace('/gmail/v1/users/me', '');
+  if (p === '/profile') return J({ emailAddress: 'heap@example.test', historyId: '100' });
+  if (p === '/threads') return J({ threads: [] });
+  return J({ historyId: '100' });
+};
+const quiet = { log() {}, warn() {}, error() {} };
+let T = Date.now(); const now = () => T;
+const ol = OL.createOAuthLoopback({ log: quiet, now });
+const eng = ENG.create({ dataDir: path.join(MDIR, 'eng'), env: {}, now, broadcast: () => {}, fetch: fetchH, log: quiet, mountClients, oauth: ol, paceClock: () => performance.now(), sleep: async () => {} });
+const get = (url) => new Promise((resolve) => { http.get(url, { agent: false }, (res) => { res.resume(); res.on('end', resolve); }).on('error', resolve); });
+const land = async (flow, code) => { const cu = new URL(flow.consentUrl); await get(flow.redirectUri + '/?state=' + cu.searchParams.get('state') + '&code=' + code); for (let i = 0; i < 100; i++) { const st = ol.status(flow.flowId); if (!st || st.done || st.cancelled) break; await sleep(10); } await sleep(30); };
+const out = {};
+const s0 = await eng.startOAuth({ kind: 'gmail', fromMount: MID });
+out.running = await snap('running');
+await land(s0.flow, 'c1');
+out.exchanged = await snap('exchanged');
+const A = (await eng.connect('gmail', { flowId: s0.flowId, fromMount: MID, name: 'heap' })).adapter.id; await sleep(80);
+out.connected = await snap('connected');
+T += 2 * 3600 * 1000; await eng.pass(A, { force: true }).catch(() => {}); await sleep(40);
+out.refreshed = await snap('refreshed');
+echo = true; T += 2 * 3600 * 1000; await eng.pass(A, { force: true }).catch(() => {}); await sleep(40); echo = false;
+out.echoed = await snap('echoed');
+await eng.reauthorize(A, { fromMount: MID }); await eng.cancelAuth(A); await sleep(20);
+out.reborrowCancelled = await snap('reborrowCancelled');
+await eng.disconnect(A); await sleep(20);
+out.disconnected = await snap('disconnected');
+await eng.remove(A); await sleep(20);
+out.removed = await snap('removed');
+ol.stopAll(); eng.stop();
+process.stdout.write(JSON.stringify(out));
+process.exit(0);
+`;
+    const childPath = path.join(MUTE.dir, 'heap-stages-child.mjs');
+    fs.writeFileSync(childPath, CHILD);
+    const runStages = (enginePath, tag, only = null) => {
+      const mdir16 = path.join(ROOT, `cfm-heap-${tag}`); fs.mkdirSync(mdir16, { recursive: true });
+      const raw = execFileSync(process.execPath, ['--expose-gc', childPath, REPO, enginePath, mdir16, only ? only.join(',') : ''], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 60000 });
+      return JSON.parse(raw);
+    };
+    const held = (o) => !!o && Object.values(o).some((n) => n > 0);
+    const after = ['exchanged', 'connected', 'refreshed', 'echoed', 'reborrowCancelled', 'disconnected', 'removed'];
+    const real = runStages(path.join(REPO, 'src/server/channels-engine.js'), 'real');
+    ok(real.running.secret >= 1 && after.every((k) => !held(real[k])), `verify r5 (16): the borrowed secret is in the heap while the sign-in runs (${real.running.secret}) and neither it nor the refresh token is held after ANY later stage — ${after.map((k) => `${k}=${JSON.stringify(real[k])}`).join(' ')}`);
+    // CONTROL 1 (adapter-held): a gmail copy that keeps every client it resolved, loaded by an engine copy
+    const srcG16 = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+    const RES = "    return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };";
+    ok(srcG16.split(RES).length === 2 && esrc.split("const gmail = require('../channels/gmail.js');").length === 2, 'CONTROL setup (16): the resolver\'s return and the engine\'s gmail require are present once');
+    const gKeep = MUTE.write('src/channels/gmail.js', srcG16.replace(RES, "    HELD16.push(r.values); return { values: r.values, why: null, missing: [], source: r.source, clusterLabel: r.clusterLabel || null, clusterKey: r.clusterKey || null, credentialKey };").replace("'use strict';", "'use strict'; const HELD16 = [];"), 'keeps-client', { esm: false });
+    const p16a = patchPath('src/server', 'channels-engine');
+    writeCopy(p16a, esrc.replace("const gmail = require('../channels/gmail.js');", `const gmail = require(${JSON.stringify(gKeep)});`));
+    const c1h = runStages(p16a, 'ctl1', ['refreshed', 'removed']);
+    ok(c1h.refreshed.secret >= 1 && c1h.removed.secret >= 1, `CONTROL 1 (16): an adapter that keeps the client it resolved holds the secret after a refresh (${c1h.refreshed.secret}) and after the account is removed (${c1h.removed.secret}) — the check above would be red`);
+    // CONTROL 2 (engine-held): an engine copy that memoizes the decrypted client per record
+    const CC = "    return { ...base, source: 'custom', values, missing: [], why: null, whyCode: null, whyParams: null };";
+    ok(esrc.split(CC).length === 2, 'CONTROL setup (16): customClientOf\'s return is present once');
+    const p16b = patchPath('src/server', 'channels-engine');
+    writeCopy(p16b, esrc.replace(CC, "    { const memo16 = { ...base, source: 'custom', values, missing: [], why: null, whyCode: null, whyParams: null }; MEMO16.set(rec, memo16); return memo16; }").replace("'use strict';", "'use strict'; const MEMO16 = new Map();"));
+    const c2h = runStages(p16b, 'ctl2', ['exchanged', 'removed']);
+    ok(c2h.exchanged.secret >= 1 && c2h.removed.secret >= 1, `CONTROL 2 (16): an engine that memoizes the decrypted client holds the secret once the exchange returned (${c2h.exchanged.secret}) and after the record is removed (${c2h.removed.secret}) — the check above would be red`);
+  }
+  routes.setup({ getEngine: () => null });
+  for (const e of [eng, e1, e2, e5, e6, e7, e8, e11, eCap, eSaid, eEcho, bare]) { try { e.oauth.stopAll(); } catch {} }
 }
 
 for (const e of engines) { try { e.stop(); } catch {} }
@@ -1936,8 +2696,335 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
 // a plain `git status` never saw them) and any suite scanning src/ beside this
 // one counted them as product code; they are written to this process's scratch
 // dir now (scripts/mutant-copy.mjs).
+// ── ⑯ A RE-AUTHORIZATION RE-JUDGES EVERY CONVERSATION (inc-muk9jj0j-rel3, 2026-09-27) ──
+// The owner: "已经重新授权过 但还是有个邮件提示没有发送权限". convCaps is cached PER
+// conversation with its `at`; the re-authorization wrote the new scopes and
+// invalidated NONE of them — only the threads the next pass visited got a
+// fresh verdict, an untouched thread kept "sending needs the send permission"
+// indefinitely. A scoped fake whose send verdict is a PURE function of the
+// held scopes (like Gmail's / Lark's `sendCapsOf`), a DISABLED account (no pass
+// ever touches its conversations), two conversations judged read-only BEFORE
+// the consent: after it — with no pass — both are writable, on read AND on
+// disk, carried by ONE whole digest. Control: the engine copy that skips the
+// invalidation keeps both read-only (the incident).
+console.log('\n⑯ a re-authorization re-judges every conversation of the account (inc-muk9jj0j-rel3)');
+async function reauthLeg(E, name, { pure = true } = {}) {
+  let clock = Date.UTC(2026, 8, 27, 18, 0, 0);
+  const cap = {};
+  const kind = pure ? 'fake-scoped' : 'fake-unscoped';
+  const mod = {
+    kind, caps: { ...fake.fakePoll.caps, compose: false },
+    ...(pure ? { sendCapsOf: (scopes) => (scopes.includes('send') ? { sendAs: ['user'], why: null } : { sendAs: [], why: 'send-scope-not-granted' }) } : {}),
+    create(record, deps) {
+      cap.deps = deps;
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: [], why: null }; } },
+        async listConversations() { return { conversations: [], cursor: null, complete: true }; },
+        async convCaps() { cap.vendorAsked = (cap.vendorAsked || 0) + 1; return { read: 'yes', sendAs: [], why: 'send-scope-not-granted', at: clock }; },
+        async history() { return { records: [], anchor: null, reachedAnchor: true, complete: true }; },
+        async older() { return { records: [], exhausted: true }; },
+        async fetchAttachment() { throw new CH.ChannelError('not-found', 'x'); },
+        async send() { return { ok: true, vendorMessageId: 'v', at: clock, sentAs: 'user' }; },
+        async reconcile() { return { unknown: true }; },
+      };
+    },
+  };
+  const registry = CH.createChannelRegistry();
+  registry.register(mod);
+  const dataDir = path.join(ROOT, name);
+  fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+  const T0 = clock - 3600e3;
+  fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'sc', kind, label: 'Scoped', enabled: false, auth: { tokenEnc: null, expiresAt: null, scopes: ['read'], user: null, updatedAt: T0, scopesAt: T0 }, lastAuthAt: T0, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] }));
+  const events = [];
+  const eng = E.create({ dataDir, registry, env: {}, now: () => clock, broadcast: (m) => events.push(m), log: { log() {}, warn() {}, error() {} } });
+  engines.push(eng);
+  await eng.store.index.update(() => {
+    for (const c of ['c1', 'c2']) { const en = eng.store.index.entry('sc', c); en.title = c; en.convCaps = { read: 'yes', sendAs: [], why: 'send-scope-not-granted', at: clock - 1800e3 }; }
+  });
+  const offered = (c) => { const v = eng.conversationView('sc', c); return { offered: v.offers.sendAsUser.offered, why: v.offers.sendAsUser.why }; };
+  const before = [offered('c1'), offered('c2')];
+  eng.kick('sc');   // the adapter instance (its deps = the engine's own token door + consent hook); a disabled account never passes
+  clock += 60e3;
+  const w = await cap.deps.tokens.write({ access_token: 'a1', refresh_token: 'r1', email: 'owner@example.com' }, { scopes: ['read', 'send'], user: 'owner@example.com', consent: { cancelled: () => null } });
+  const onRead = [offered('c1'), offered('c2')];
+  events.length = 0;
+  await cap.deps.onAuthDone('sc', { ok: true });
+  const whole = events.filter((m) => m.type === 'channels-updated' && m.partial === false);
+  const rows = whole.length ? (whole[whole.length - 1].digest.conversations || []).filter((r) => r.adapterId === 'sc') : [];
+  const disk = ['c1', 'c2'].map((c) => eng.store.index.peek(`sc/${c}`).convCaps);
+  // a REFRESH re-writing the SAME scopes is not a credential change
+  const stampBefore = eng.adapterRecords().adapters.find((a) => a.id === 'sc').auth.scopesAt;
+  clock += 60e3;
+  await cap.deps.tokens.write({ access_token: 'a2', refresh_token: 'r2', email: 'owner@example.com' }, { scopes: ['send', 'read'], supersedes: 'r1' });
+  const stampAfter = eng.adapterRecords().adapters.find((a) => a.id === 'sc').auth.scopesAt;
+  return { before, w, onRead, whole: whole.length, rows: rows.map((r) => [r.id, r.offers && r.offers.sendAsUser && r.offers.sendAsUser.offered]), disk, stampBefore, stampAfter, vendorAsked: cap.vendorAsked || 0 };
+}
+{
+  const r = await reauthLeg(ENG, 'reauth');
+  ok(r.before.every((x) => !x.offered && x.why === 'send-scope-not-granted'), 'FIXTURE: both conversations were judged read-only (send-scope-not-granted) BEFORE the re-authorization', JSON.stringify(r.before));
+  ok(r.w && r.w.written === true, 'FIXTURE: the consent landed through the engine\'s own token door (scopes read + send)', JSON.stringify(r.w));
+  ok(r.onRead.every((x) => x.offered), 'STALE-ON-READ: right after the write — no pass, no consent hook yet — the conversation READ is writable for BOTH threads (a verdict older than the credential is re-judged on the way out)', JSON.stringify(r.onRead));
+  ok(r.whole === 1 && r.rows.length === 2 && r.rows.every(([, o]) => o === true), 'the consent hook broadcasts ONE whole digest, and its rows already carry the fresh verdicts', JSON.stringify([r.whole, r.rows]));
+  ok(r.disk.every((cc) => cc && cc.read === 'yes' && JSON.stringify(cc.sendAs) === '["user"]' && cc.why === null && cc.rejudged === 'scopes'), 'AT THE WRITE: both verdicts are re-judged and PERSISTED from the held scopes — the untouched thread too', JSON.stringify(r.disk));
+  ok(r.vendorAsked === 0, `zero vendor calls — the send verdict is a pure function of the held scopes (${r.vendorAsked})`);
+  ok(r.stampAfter === r.stampBefore, 'a refresh re-writing the SAME scopes does not move `scopesAt` (no re-judge churn every hour)', JSON.stringify([r.stampBefore, r.stampAfter]));
+  const u = await reauthLeg(ENG, 'reauth-unscoped', { pure: false });
+  ok(u.onRead.every((x) => !x.offered && x.why === 'stale') && u.disk.every((cc) => cc && cc.rejudged === 'stale'), 'an adapter with NO pure rule: the old verdict is marked STALE (the next open / pass re-asks the vendor) — never the pre-consent "read-only" kept', JSON.stringify([u.onRead, u.disk]));
+  // CONTROL: the engine that skips the invalidation — the incident, reproduced
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const GATE = '    const cc = en && en.convCaps;\n    if (!cc || !rec) return cc || null;\n';
+  ok(esrc.includes(GATE), 'CONTROL setup: the re-judge gate is spelled once');
+  const engCopy = patchPath('src/server', 'channels-engine');
+  writeCopy(engCopy, esrc.replace(GATE, GATE + '    return cc;   // CONTROL: the pre-fix cache — nothing re-judges\n'));
+  const c = await reauthLeg(require(engCopy), 'reauth-control');
+  ok(c.onRead.every((x) => !x.offered) && c.rows.every(([, o]) => o === false) && c.disk.every((cc) => cc.why === 'send-scope-not-granted'), 'CONTROL: the engine without the invalidation keeps BOTH threads read-only after the re-authorization — on read, in the digest and on disk (the owner\'s incident); the legs above would redden on it', JSON.stringify([c.onRead, c.rows]));
+  // wiring pins
+  ok(/if \(r && r\.ok\) await rejudgeConvCaps\(rec, 'connected'\);\s*\n\s*if \(!stopped\) notify\(\[\]\);/.test(esrc) && /await rejudgeConvCaps\(rec, 're-authorized'\);/.test(esrc) && /await rejudgeConvCaps\(rec, 'disconnected'\);/.test(esrc) && /rejudgeConvCaps\(rec, 'boot'\)/.test(esrc), 'PIN: the consent hook, the switched-client rebind, the disconnect and the boot all re-judge BEFORE their one whole digest');
+  ok(!/caps\.offers\(c, en(?: && en)?\.convCaps/.test(esrc) && !/convCapsState\(en\.convCaps/.test(esrc), 'PIN: no reader of a cached verdict bypasses `effectiveConvCaps` (views AND send decisions)');
+  // THE CONVERSE (verify round, 2026-09-27): a DISCONNECT drops the credential — every conversation of the account flips to
+  // read-only on read AND on disk, and a send the composer would have offered a moment earlier is REFUSED BY NAME
+  {
+    let clock = Date.UTC(2026, 8, 27, 19, 0, 0);
+    const kind = 'fake-scoped-2';
+    const registry = CH.createChannelRegistry();
+    registry.register({
+      kind, caps: { ...fake.fakePoll.caps, compose: false },
+      sendCapsOf: (scopes) => (scopes.includes('send') ? { sendAs: ['user'], why: null } : { sendAs: [], why: 'send-scope-not-granted' }),
+      create() {
+        return {
+          auth: { async state() { return { state: 'connected', expiresAt: null, scopes: [], why: null }; } },
+          async listConversations() { return { conversations: [], cursor: null, complete: true }; },
+          async convCaps() { return { read: 'yes', sendAs: ['user'], why: null, at: clock }; },
+          async history() { return { records: [], anchor: null, reachedAnchor: true, complete: true }; },
+          async older() { return { records: [], exhausted: true }; },
+          async fetchAttachment() { throw new CH.ChannelError('not-found', 'x'); },
+          async send() { return { ok: true, vendorMessageId: 'v', at: clock, sentAs: 'user' }; },
+          async reconcile() { return { unknown: true }; },
+        };
+      },
+    });
+    const dataDir = path.join(ROOT, 'disconnect-refuses');
+    fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true });
+    const T0 = clock - 3600e3;
+    fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'sd', kind, label: 'Scoped', enabled: true, auth: { tokenEnc: 'x', expiresAt: null, scopes: ['read', 'send'], user: null, updatedAt: T0, scopesAt: T0 }, lastAuthAt: T0, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] }));
+    const events = [];
+    const eng = ENG.create({ dataDir, registry, env: {}, now: () => clock, broadcast: (m) => events.push(m), log: { log() {}, warn() {}, error() {} } });
+    engines.push(eng);
+    await eng.store.index.update(() => { for (const c of ['d1', 'd2']) { const en = eng.store.index.entry('sd', c); en.title = c; en.convCaps = { read: 'yes', sendAs: ['user'], why: null, at: clock - 60e3 }; } });
+    const offered = (c) => { const v = eng.conversationView('sd', c); return { offered: v.offers.sendAsUser.offered, why: v.offers.sendAsUser.why }; };
+    const before = [offered('d1'), offered('d2')];
+    clock += 60e3;
+    events.length = 0;
+    const dis = await eng.disconnect('sd');
+    const after = [offered('d1'), offered('d2')];
+    const disk = ['d1', 'd2'].map((c) => eng.store.index.peek(`sd/${c}`).convCaps);
+    const send = await eng.propose({ kind: 'user' }, 'sd', 'd1', { text: 'the reply typed before the disconnect', direct: true });
+    ok(before.every((x) => x.offered) && dis && dis.ok, 'FIXTURE: both conversations offered sending as you; the account is then DISCONNECTED', JSON.stringify([before, dis]));
+    ok(after.every((x) => !x.offered && x.why === 'send-scope-not-granted') && disk.every((cc) => cc && JSON.stringify(cc.sendAs) === '[]' && cc.why === 'send-scope-not-granted' && cc.rejudged === 'scopes'), 'THE CONVERSE: after the disconnect every conversation of the account is read-only — on read AND persisted — with the reason by name', JSON.stringify([after, disk]));
+    ok(send && send.ok === false && send.code === 'send-not-available' && send.why === 'send-scope-not-granted', 'a send of the reply typed a moment earlier is REFUSED BY NAME (send-not-available · send-scope-not-granted) — never sent on the old verdict', JSON.stringify(send));
+    ok(events.some((m) => m.type === 'channels-updated' && m.partial === false), 'the disconnect broadcasts ONE whole digest (the open windows flip their footer on it)');
+  }
+}
+
+// ═══ ⑭ THE SERVER BELT UNDER /older (lane channel-render verify r6, 2026-09-27; drain rule 19) ═══════════
+// Reproduced on this engine before the belt: 20 concurrent /older for ONE conversation reached the adapter 20
+// times (the same page fetched 20 times); 20 in 2 s after the vendor said `exhausted` reached it 16 more times
+// answering nothing; the account's minute budget was the only bound (546 calls before the first refusal). The
+// window's five verify rounds each found one more way a client asks without a person paging — the belt bounds
+// the METERED call whatever the client does: one flight per conversation (joiners read the log it filled), the
+// floor (OLDER_FLOOR_MS, refused by name with the wait, the local page still answered), the remembered end (no
+// call until a record is appended / the owner's Refresh / the entry is rebuilt). Through the REAL route. CONTROLS
+// = the engine over a patched copy of the PURE drain, each clause reverted (a closed world, like the aggregate suite).
+console.log('\n⑭ the server belt under /older: one flight, the floor, the remembered end; controls');
+{
+  const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
+  const DRAIN_SRC = fs.readFileSync(path.join(REPO, 'src/channel-drain.js'), 'utf-8');
+  const ENGINE_SRC = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
+  const DRAIN_REQUIRE = "const Drain = require('../channel-drain.js');";
+  const worldOf = () => { const convs = new Map(); const at0 = Date.now() - 3600e3; const add = (id, count) => { const recs = []; for (let i = 0; i < count; i++) recs.push({ vendorId: `${id}-m${String(i).padStart(4, '0')}`, at: at0 - (count - 1 - i) * 60e3, author: { id: `u-${i % 3}`, name: ['Ada', 'Brook', 'Cass'][i % 3] }, text: `message ${i} in ${id}` }); convs.set(id, { id, recs }); }; add('deep', 260); add('flat', 3); return { convs, older: 0, log: [], delayMs: 0, failNext: null }; };
+  const modFor = (world, receive = 'poll') => ({
+    kind: 'belt',
+    caps: { ...(receive === 'push' ? fake.fakePush.caps : fake.fakePoll.caps), receive, attachments: 'fetch', olderHistory: 'page', budget: { unit: 'request', default: 600, settingKey: null, metered: true } },
+    create(record, deps) {
+      const adapterId = record.id; const meter = deps.meter || (() => {});
+      const rec = (id, m) => makeRecord({ adapterId, convId: id, vendorId: m.vendorId, at: m.at, author: { ...m.author, isSelf: false, isBot: false }, text: m.text, mentions: [], attachments: [], replyTo: null, threadKey: id, raw: {} });
+      return {
+        auth: { async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; } },
+        async listConversations() { meter(1); return { conversations: [...world.convs.values()].map((x) => makeConversation({ id: x.id, vendorId: x.id, title: x.id, kind: 'group', participants: 'Ada', lastAt: x.recs[x.recs.length - 1].at })), cursor: null, complete: true }; },
+        async convCaps() { meter(1); return { read: 'yes', sendAs: [], why: 'read-only-mailbox', at: Date.now() }; },
+        async history(id, { anchor = null, limit = 50, initialMax = null } = {}) {
+          meter(1);
+          const x = world.convs.get(id); if (!x) return { records: [], anchor, reachedAnchor: true, complete: true };
+          let idx = 0;
+          if (anchor) { const at = x.recs.findIndex((m) => m.vendorId === anchor); idx = at >= 0 ? at + 1 : 0; } else if (Number(initialMax) > 0) idx = Math.max(0, x.recs.length - Number(initialMax));
+          const pending = x.recs.slice(idx); const page = pending.slice(0, limit); const drained = page.length === pending.length;
+          return { records: page.map((m) => rec(id, m)), anchor: page.length ? page[page.length - 1].vendorId : anchor, reachedAnchor: drained, complete: drained };
+        },
+        async older(id, { before = null, limit = 50 } = {}) {
+          meter(1); world.older++; world.log.push({ id, before: before && before.vendorId });
+          if (world.delayMs) await sleep(world.delayMs);
+          if (world.failNext) { const code = world.failNext; world.failNext = null; throw new CH.ChannelError(code, 'HTTP 503 Service Unavailable', { retryable: true }); }
+          const x = world.convs.get(id); const all = x ? x.recs : [];
+          const olderOnes = before ? all.filter((m) => m.at < before.at || (m.at === before.at && m.vendorId < before.vendorId)) : all;
+          const page = olderOnes.slice(-limit);
+          return { records: page.map((m) => rec(id, m)), exhausted: page.length === olderOnes.length };
+        },
+        async fetchAttachment() { throw new CH.ChannelError('not-found', 'none'); },
+        // r7: a push adapter — the lane's callbacks are the WORLD's (a vendor push is `world.onEvent({kind:'record', …})`)
+        live: receive === 'push' ? { start({ onEvent, onState } = {}) { world.onEvent = onEvent; world.onState = onState; onState && onState({ state: 'live', at: Date.now() }); return { stop() {} }; } } : undefined,
+      };
+    },
+  });
+  const seed = (dataDir) => { fs.mkdirSync(path.join(dataDir, 'channels'), { recursive: true }); fs.writeFileSync(path.join(dataDir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: 'sc', kind: 'belt', label: 'sc', enabled: true, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null, samples: [] }, scan: null }] })); };
+  /** An engine (the shipped one, or one over a patched drain) + the real routes on a port; `clock` is the engine's clock (advanced by hand). */
+  async function belt(name, { drainEdits = null, engineEdits = null, receive = 'poll' } = {}) {
+    const world = worldOf();
+    const registry = CH.createChannelRegistry(); registry.register(modFor(world, receive));
+    const dataDir = path.join(ROOT, name); seed(dataDir);
+    let mod = ENG, setup = true;
+    if (drainEdits || engineEdits) {
+      let e = ENGINE_SRC;
+      if (drainEdits) {
+        let d = DRAIN_SRC;
+        for (const [a, b] of drainEdits) { if (!d.includes(a)) setup = false; d = d.replace(a, b); }
+        const dPath = MUTE.write('src/channel-drain.js', d, null, { esm: false, name: `drain-${name}` });
+        e = e.replace(DRAIN_REQUIRE, `const Drain = require(${JSON.stringify(dPath)});`);
+        if (!ENGINE_SRC.includes(DRAIN_REQUIRE)) setup = false;
+      }
+      // r7: an ENGINE edit (a copy of the engine with one named line changed — the drain untouched)
+      for (const [a, b] of engineEdits || []) { if (!e.includes(a)) setup = false; e = e.replace(a, b); }
+      mod = MUTE.load('src/server/channels-engine.js', e, `belt-${name}`);
+    }
+    let clock = Date.now();
+    const events = [];
+    const eng = mod.create({ dataDir, registry, env: {}, now: () => clock, broadcast: (m) => events.push(m), serverSetting: () => undefined, liveSessions: () => [], deliver: { async deliverToConversation() { return { ok: true, lane: 'message' }; }, stashFor() {} }, log: { log() {}, warn() {}, error() {} } });
+    engines.push(eng);
+    for (let i = 0; i < 5; i++) { await eng.pass('sc', { force: true }); if (Object.values(eng.store.index.live()).filter((e) => e.adapterId === 'sc').every((e) => e.anchor)) break; }
+    const express = require(path.join(REPO, 'node_modules/express'));
+    const app = express(); app.use(express.json()); routes.setup({ getEngine: () => eng }); app.use(routes.router);
+    const server = await new Promise((resolve) => { const s0 = app.listen(0, '127.0.0.1', () => resolve(s0)); });
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const post = async (conv, body) => { const r = await fetch(`${base}/api/channels/sc/${conv}/older`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+    const boundary = (conv) => { const l = eng.store.readTail('sc', conv, { limit: 1000 }); return { before: l[0].at, beforeId: l[0].vendorId, limit: 50 }; };
+    const localCount = (conv) => eng.store.readTail('sc', conv, { limit: 1000 }).length;
+    return { eng, world, post, boundary, localCount, tick: (ms) => { clock += ms; }, close: () => server.close(), setup, events };
+  }
+  const B = await belt('belt');
+  ok(B.localCount('deep') === 50 && B.world.older === 0, 'FIXTURE: the first ingest took the newest 50 of 260; the vendor\'s older() untouched');
+  // ① ONE FLIGHT: 20 concurrent /older at one boundary — one vendor call, nineteen joiners carrying the page it landed
+  B.world.delayMs = 30;
+  const b1 = B.boundary('deep');
+  const rs = await Promise.all(Array.from({ length: 20 }, () => B.post('deep', b1)));
+  const srcs = rs.map((r) => r.json.source);
+  ok(B.world.older === 1 && rs.every((r) => r.status === 200 && r.json.ok && (r.json.records || []).length === 50 && !r.json.refused) && srcs.filter((x) => x === 'vendor').length === 1 && srcs.filter((x) => x === 'joined').length === 19 && B.localCount('deep') === 100, `① 20 concurrent /older at one boundary: the vendor asked ONCE (${B.world.older}), one answer \`vendor\`, nineteen \`joined\` — every one carries the 50-row page (100 local)`, JSON.stringify({ older: B.world.older, srcs, n: rs.map((r) => (r.json.records || []).length) }));
+  // ② THE FLOOR: the next ask inside OLDER_FLOOR_MS is refused by name with the wait, the local page still answered; past it the vendor is asked
+  B.world.delayMs = 0;
+  B.tick(300);
+  const f1 = await B.post('deep', B.boundary('deep'));
+  ok(f1.status === 200 && f1.json.ok && f1.json.refused === 'older-floor' && f1.json.code === 'older-floor' && f1.json.retryAfterMs > 0 && f1.json.retryAfterMs <= 1500 && f1.json.exhausted === false && Array.isArray(f1.json.records) && B.world.older === 1, `② an ask 300 ms after the flight is refused \`older-floor\` with the wait (${f1.json.retryAfterMs} ms), no vendor call, exhausted:false`, JSON.stringify(f1.json).slice(0, 300));
+  B.tick(1300);
+  const f2 = await B.post('deep', B.boundary('deep'));
+  ok(f2.json.source === 'vendor' && !f2.json.refused && B.world.older === 2 && B.localCount('deep') === 150, `② …and past the floor the vendor is asked again (${B.world.older} calls, 150 local)`, JSON.stringify(f2.json).slice(0, 200));
+  // ③ A HELD WHEEL: 20 serial asks over 2 s of engine time (100 ms apart) = at most 2 vendor calls (the floor), each a page
+  { let calls0 = B.world.older; const seen = []; for (let i = 0; i < 20; i++) { B.tick(100); const r = await B.post('deep', B.boundary('deep')); seen.push(r.json.refused || r.json.source); } const made = B.world.older - calls0;
+    ok(made <= 2 && made >= 1 && seen.filter((x) => x === 'older-floor').length >= 18, `③ 20 serial asks over 2 s of engine time: ${made} vendor call(s), the rest \`older-floor\` (${seen.join(' ')})`); }
+  // ④ THE REMEMBERED END: page to the dawn, then every further ask answers `exhausted` from memory — no vendor call, no floor wait
+  { for (let i = 0; i < 6; i++) { B.tick(1600); const r = await B.post('deep', B.boundary('deep')); if (r.json.exhausted) break; }
+    ok(B.localCount('deep') === 260, `④ FIXTURE: paged to the dawn (${B.localCount('deep')} local)`);
+    const calls0 = B.world.older; const rs2 = [];
+    for (let i = 0; i < 5; i++) { B.tick(i % 2 ? 50 : 2000); rs2.push(await B.post('deep', B.boundary('deep'))); }
+    ok(B.world.older === calls0 && rs2.every((r) => r.json.ok && r.json.exhausted === true && r.json.source === 'memory' && !r.json.refused && r.json.vendorHasNoOlder === false), `④ five more asks at the dawn (inside and past the floor): ZERO vendor calls, each \`exhausted\` from memory (before the belt: 5 vendor calls answering nothing)`, JSON.stringify(rs2.map((r) => [r.json.source, r.json.exhausted, r.json.refused]))); }
+  // ⑤ THE MEMORY IS FORGOTTEN by a record appended (an ingest), by the owner's Refresh, and by a rebuilt entry — the vendor asked once again each time
+  { const calls0 = B.world.older;
+    B.world.convs.get('deep').recs.push({ vendorId: 'deep-new-1', at: Date.now() + 1000, author: { id: 'u-0', name: 'Ada' }, text: 'a new record' });
+    B.tick(2000); await B.eng.pass('sc', { force: true });
+    B.tick(2000); const a1 = await B.post('deep', B.boundary('deep'));
+    ok(a1.json.source === 'vendor' && a1.json.exhausted === true && B.world.older === calls0 + 1, `⑤ a record APPENDED by an ingest forgets the end: the next ask reaches the vendor once (${B.world.older - calls0}), which says exhausted again`, JSON.stringify(a1.json).slice(0, 200));
+    B.tick(2000); const a2 = await B.post('deep', B.boundary('deep'));
+    ok(a2.json.source === 'memory' && B.world.older === calls0 + 1, '⑤ …and it is remembered again');
+    B.tick(2000); const rf = await B.eng.refresh('sc', 'deep', { origin: 'refresh' }); await B.eng.settleWakes?.();
+    B.tick(2000); const a3 = await B.post('deep', B.boundary('deep'));
+    ok(rf && rf.ok !== undefined && a3.json.source === 'vendor' && B.world.older === calls0 + 2, `⑤ the owner\'s Refresh forgets it: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([rf, a3.json.source]));
+    B.tick(2000); const dis = await B.eng.setEnabled?.('sc', false); const en = await B.eng.setEnabled?.('sc', true);
+    B.tick(2000); const a4 = await B.post('deep', B.boundary('deep'));
+    ok((dis === undefined || dis) && a4.json.source === 'vendor' && B.world.older === calls0 + 3, `⑤ a REBUILT entry (disable + enable) starts with no memory: one vendor call (${B.world.older - calls0} in all)`, JSON.stringify([dis, en, a4.json.source])); }
+  // ⑥ A FAILED FLIGHT remembers nothing: the joiners get the local page, the next ask past the floor reaches the vendor
+  { const calls0 = B.world.older; B.world.failNext = 'vendor-error'; B.tick(2000); B.world.delayMs = 20;
+    const b = B.boundary('flat');
+    const [x1, x2] = await Promise.all([B.post('flat', b), B.post('flat', b)]);
+    B.world.delayMs = 0;
+    ok(x1.status === 502 && x1.json.ok === false && x1.json.code === 'vendor-error' && x2.json.ok && x2.json.refused === 'older-floor' && Array.isArray(x2.json.records) && B.world.older === calls0 + 1, `⑥ a flight that failed: the asker gets the error, the joiner (whose local page is still short) the floor's refusal — no second call (${B.world.older - calls0})`, JSON.stringify({ x1: x1.json, x2: { ok: x2.json.ok, refused: x2.json.refused, recs: Array.isArray(x2.json.records) ? x2.json.records.length : x2.json.records }, calls: B.world.older - calls0 }));
+    B.tick(2000); const x3 = await B.post('flat', b);
+    ok(x3.json.source === 'vendor' && x3.json.exhausted === true && B.world.older === calls0 + 2, '⑥ …nothing was remembered: the next ask past the floor reaches the vendor'); }
+  // ⑦ RULE 9 STAYS THE OUTER CAP: the budget is judged after the belt — a joined / remembered answer costs no unit
+  { const view = B.eng.accountView ? null : null; const cardBefore = (B.eng.status?.() || {}); ok(true, `⑦ (the budget leg is test-channels-aggregate ⑦: rule 9 after rule 19 — a remembered answer is metered nothing: ${B.world.older} vendor calls in all, every one a page or the dawn)`); void view; void cardBefore; }
+  B.close();
+  // ⑧ (verify r7) A RECORD THE PUSH LANE APPENDED forgets the end too — the poll ingest and the push lane are the two
+  //    writers of one log (a twin-set): r6 wired the poll's append and not the push's, so on a Lark account (the push
+  //    lane IS its live lane) a pushed message left "nothing older" remembered until the owner's Refresh / a rebuilt
+  //    entry / 6 h. The memory was money-safe in that direction (no call) and wrong in the other (the essay said a
+  //    record appended forgets it); one line, one census, one control.
+  {
+    const P = await belt('belt-push', { receive: 'push' });
+    await P.eng.setPush('sc', { claimedExclusive: 'exclusive', enabled: true });
+    ok(typeof P.world.onEvent === 'function', 'FIXTURE (⑧): the push lane is armed — the vendor\'s onEvent is in hand');
+    for (let i = 0; i < 4; i++) { P.tick(2000); const r = await P.post('flat', P.boundary('flat')); if (r.json.exhausted) break; }
+    P.tick(2000); const m0 = await P.post('flat', P.boundary('flat'));
+    ok(m0.json.source === 'memory' && m0.json.exhausted === true, '⑧ FIXTURE: the flat conversation is at its remembered end', JSON.stringify(m0.json).slice(0, 160));
+    const c0 = P.world.older;
+    P.world.onState && P.world.onState({ state: 'live', at: Date.now() });   // the lane is live NOW (the injected clock moved past the heartbeat window)
+    const pushed = await P.world.onEvent({ kind: 'record', eventId: 'ev-r7-1', convId: 'flat', record: makeRecord({ adapterId: 'sc', convId: 'flat', vendorId: 'flat-pushed-1', at: Date.now() + 5, author: { id: 'u-1', name: 'Brook', isSelf: false, isBot: false }, text: 'pushed', mentions: [], attachments: [], replyTo: null, threadKey: 'flat', raw: {} }), at: Date.now() });
+    P.tick(2000); const m1 = await P.post('flat', P.boundary('flat'));
+    ok(pushed && pushed.persisted && pushed.appended === 1 && m1.json.source === 'vendor' && P.world.older === c0 + 1, `⑧ a record the PUSH lane appended (persisted, +1) forgets the end: the next ask reaches the vendor once (${P.world.older - c0}) — r6 answered it from memory`, JSON.stringify([pushed, m1.json.source, P.localCount('flat')]));
+    P.close();
+    const PC = await belt('belt-push-nochange', { receive: 'push', engineEdits: [["        if (w.appended) olderChanged(e, convId);   // rule 19 (verify r7): a record the PUSH lane appended forgets the \"nothing older\" memory, like the poll's\n", '']] });
+    ok(PC.setup, 'CONTROL setup · push-nochange: the push site\'s forget is spelled once');
+    if (PC.setup) {
+      await PC.eng.setPush('sc', { claimedExclusive: 'exclusive', enabled: true });
+      for (let i = 0; i < 4; i++) { PC.tick(2000); const r = await PC.post('flat', PC.boundary('flat')); if (r.json.exhausted) break; }
+      const c1 = PC.world.older;
+      PC.world.onState && PC.world.onState({ state: 'live', at: Date.now() });
+      const pushed2 = await PC.world.onEvent({ kind: 'record', eventId: 'ev-r7-2', convId: 'flat', record: makeRecord({ adapterId: 'sc', convId: 'flat', vendorId: 'flat-pushed-2', at: Date.now() + 5, author: { id: 'u-1', name: 'Brook', isSelf: false, isBot: false }, text: 'pushed', mentions: [], attachments: [], replyTo: null, threadKey: 'flat', raw: {} }), at: Date.now() });
+      PC.tick(2000); const m2 = await PC.post('flat', PC.boundary('flat'));
+      ok(pushed2 && pushed2.persisted && m2.json.source === 'memory' && PC.world.older === c1, 'CONTROL push-nochange: with the push site\'s forget removed the pushed record leaves the end remembered — ⑧ would redden', JSON.stringify([pushed2, m2.json.source]));
+    }
+    PC.close();
+  }
+  // ⑨ (verify r7) THE PRODUCER CENSUS: every vendor `older()` call in src/ is THE ONE in loadOlder, textually after the
+  //    verdict; a copy of the engine that bypasses the verdict (`{act:'vendor'}`) lets 20 concurrent asks reach the vendor 20 times
+  {
+    const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? walk(path.join(d, x.name)) : (/\.(c|m)?js$/.test(x.name) ? [path.join(d, x.name)] : [])));
+    const sites = [];
+    for (const f of walk(path.join(REPO, 'src'))) { const src = fs.readFileSync(f, 'utf-8'); let m; const re = /\.older\(/g; while ((m = re.exec(src))) sites.push(path.relative(REPO, f) + ':' + (src.slice(0, m.index).split('\n').length)); }
+    const at = ENGINE_SRC.indexOf('e.adapter.older(');
+    const verdictAt = ENGINE_SRC.indexOf('Drain.olderVerdict(olderMemOf(e, convId), now())');
+    const fnAt = ENGINE_SRC.indexOf('async function loadOlder(');
+    ok(sites.length === 1 && /^src\/server\/channels-engine\.js:/.test(sites[0]) && at > 0 && verdictAt > fnAt && at > verdictAt, `⑨ CENSUS: the vendor's older() has ONE caller in src/ (${sites.join(', ')}), inside loadOlder after the rule-19 verdict`, JSON.stringify({ sites, at, verdictAt, fnAt }));
+    const BY = await belt('belt-bypass', { engineEdits: [['      let v = Drain.olderVerdict(olderMemOf(e, convId), now());\n', "      let v = { act: 'vendor' }; olderMemOf(e, convId);\n"]] });   // (the memory still minted: the verdict alone is skipped)
+    ok(BY.setup, 'CONTROL setup · bypass: the verdict is asked on one line');
+    if (BY.setup) { BY.world.delayMs = 30; const rs = await Promise.all(Array.from({ length: 20 }, () => BY.post('deep', BY.boundary('deep')))); ok(BY.world.older >= 19 && rs.every((r) => r.status === 200), `CONTROL bypass: an engine that skips the verdict lets 20 concurrent asks reach the vendor ${BY.world.older} times — ① would redden`, JSON.stringify(rs.map((r) => [r.status, r.json.source || r.json.code, r.json.error]).slice(0, 3))); }
+    BY.close();
+  }
+  // CONTROLS: the engine over a patched drain, each clause reverted — the reproduction returns
+  const CTL = [
+    // (the join is the COURTESY: without it the floor still holds the money — one vendor call — but nineteen callers get a
+    //  refusal with an empty page instead of the page the flight landed; the floor and the memory are the money clauses)
+    { name: 'nojoin', edits: [["  if (m.inflight) return { act: 'join' };\n", '']], leg: async (C) => { C.world.delayMs = 30; const rs = await Promise.all(Array.from({ length: 20 }, () => C.post('deep', C.boundary('deep')))); return { calls: C.world.older, joined: rs.filter((r) => r.json.source === 'joined').length, refused: rs.filter((r) => r.json.refused === 'older-floor' && (r.json.records || []).length === 0).length }; }, red: (n) => n.calls === 1 && n.joined === 0 && n.refused === 19, say: (n) => `20 concurrent asks: ${n.calls} vendor call (the floor holds the money), but ${n.refused} callers refused with an EMPTY page and ${n.joined} joined (the shipped belt: 19 joined, each carrying the page)` },
+    { name: 'nomemory', edits: [["  if (ex > 0 && t - ex < OLDER_MEMORY_MS) return { act: 'exhausted' };\n", '']], leg: async (C) => { for (let i = 0; i < 8; i++) { C.tick(2000); const r = await C.post('deep', C.boundary('deep')); if (r.json.exhausted && r.json.source === 'vendor') break; } const c0 = C.world.older; for (let i = 0; i < 3; i++) { C.tick(2000); await C.post('deep', C.boundary('deep')); } return C.world.older - c0; }, red: (n) => n >= 3, say: (n) => `three asks at the dawn reached the vendor ${n} times` },
+    { name: 'nofloor', edits: [["  if (asked > 0 && t - asked < OLDER_FLOOR_MS) return { act: 'floor', retryAfterMs: Math.min(OLDER_FLOOR_MS, Math.max(1, OLDER_FLOOR_MS - (t - asked))) };   // never longer than the floor (a clock that went backwards)\n", '']], leg: async (C) => { const c0 = C.world.older; for (let i = 0; i < 4; i++) { C.tick(100); await C.post('deep', C.boundary('deep')); } return C.world.older - c0; }, red: (n) => n >= 4, say: (n) => `four asks 100 ms apart reached the vendor ${n} times` },
+  ];
+  for (const c of CTL) {
+    const C = await belt(`belt-${c.name}`, { drainEdits: c.edits });
+    ok(C.setup, `CONTROL setup · ${c.name}: the clause is spelled once in the shipped drain`);
+    if (!C.setup) { C.close(); continue; }
+    const n = await c.leg(C);
+    ok(c.red(n), `CONTROL ${c.name}: with that clause reverted the reproduction returns — ${c.say(n)}${c.name === 'nojoin' ? '' : ` (the shipped belt: ${c.name === 'nomemory' ? 0 : 1})`}`);
+    C.close();
+  }
+}
+
 console.log('\ntree: the patched copies never touch the tree');
-for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 14 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+for (const r of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 26 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

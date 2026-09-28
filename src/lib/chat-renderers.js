@@ -11,6 +11,7 @@ import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
 import { UI_ICONS } from './icons.js';
 import { commandDrivesBrowser, toolCommandText } from '../browser-trace.js'; // agent browser P5 (§4.5 / D35): which shell calls carry an action trace
+import { commandTouchesChannels } from '../channel-touch.js'; // §26 (B-099e): a shell call running vibespace-channels carries the witness's box
 import { describeAgentCommand, agentCommandText, alwaysAllowFor, rulesText } from '../agent-tool-rules.js'; // lane L: VibeSpace's own tools in plain words + the widened (or narrowed / withheld) Always Allow
 import { isAgentMemoryPath, backendFeatureCaps, initHealthIssues, initHealthLabel, initFrameOf } from './agent-meta.js';
 import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
@@ -93,6 +94,17 @@ export function browserTraceHolderHtml(block, msg) {
   if (!cmd || !commandDrivesBrowser(cmd)) return '';
   const ts = Number(msg && msg.ts) || 0;
   return `<div class="chat-browser-trace" data-trace-ts="${ts}"><button type="button" class="chat-browser-trace-btn" title="${escHtml(t('Every action the agent sent to its browser during this call — before / after frames and where it clicked'))}">${UI_ICONS.image} ${escHtml(t('Browser actions'))}</button><span class="chat-browser-trace-sum chat-status-dim">${escHtml(t('loading…'))}</span><div class="chat-browser-trace-strip" style="display:none"></div><div class="chat-browser-trace-list" style="display:none"></div></div>`;
+}
+
+/**
+ * §26 (B-099e): the CHANNEL WITNESS's box on a shell call that runs `vibespace-channels` — an EMPTY, hidden holder
+ * at the card's end (after the browser-actions row); ChatView's channel-touch view (src/lib/channel-touch-view.js)
+ * fills it with one keyed row per conversation the call read or drafted, and makes the same box on any other card a
+ * touch binds to (a helper's Agent card, a script). Never a string from the wire here — the rows are textContent.
+ */
+export function channelTouchHolderHtml(block) {
+  const cmd = toolCommandText(block && block.input);
+  return cmd && commandTouchesChannels(cmd) ? '<div class="chat-channel-touches" hidden></div>' : '';
 }
 
 /**
@@ -996,7 +1008,7 @@ class ChatRenderers {
         const statusHtml = isPending
           ? `<div class="chat-tool-output-pending"><span class="chat-spinner" aria-hidden="true"></span> ${t('running...')}</div>`
           : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Interrupted')}</summary></details>`;
-        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}${browserTraceHolderHtml(block, msg)}</div>`;
+        html = `<div class="chat-tool-use"><span class="chat-tool-label">${desc}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${statusHtml}${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
       }
     } else if (block.type === 'tool_result') {
       // Completed tool call — show full result
@@ -1126,7 +1138,7 @@ class ChatRenderers {
       return `<div class="chat-tool-use"><span class="chat-tool-label">${UI_ICONS.robot} Agent${desc ? ': ' + escHtml(desc) : ''}${agentModelChip(block.input?.model)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${body}</div>`;
     }
     if (block.status === 'error') {
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary><pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
@@ -1227,7 +1239,7 @@ class ChatRenderers {
     // declares itself internal metadata) is said as a sentence (lane S3); the
     // raw record stays behind the expander below
     const firstLine = this._resultSentence(block) || resultText.split('\n')[0].substring(0, 120) || t('(empty)');
-    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}</div>`;
+    return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}`}</span>${mediaHtml}<details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details><details class="chat-diff"><summary class="chat-diff-summary">\u2713 ${escHtml(firstLine)}</summary><pre>${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
   }
 
   /**

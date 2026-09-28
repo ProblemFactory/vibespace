@@ -227,11 +227,12 @@ const send = await p1.evaljs(`(async () => {
     if (w.content.querySelectorAll('[data-channel-send]').length && w.content.querySelectorAll('.chanmsg').length) break;
     await new Promise((r) => setTimeout(r, 250));
   }
-  return { composer: w.content.querySelectorAll('[data-channel-send]').length, msgs: w.content.querySelectorAll('.chanmsg').length, note: w.content.querySelector('.chanwin-note')?.textContent || null };
+  return { composer: w.content.querySelectorAll('[data-channel-send]').length, msgs: w.content.querySelectorAll('.chanmsg').length, note: w.content.querySelector('.chanwin-note')?.textContent || null, noteWhy: w.content.querySelector('.chanwin-note-info')?.title || null };
 })()`);
 ok(send.composer === 1, 'POSITIVE CONTROL: the SENDABLE conversation does draw one (the read-only zero is a decision, not an empty window)', JSON.stringify(send));
 ok(send.msgs > 0, 'the conversation renders its ingested messages (no track step)', JSON.stringify(send));
-ok(send.note && /sent at once, as you/i.test(send.note) && /outbox/i.test(send.note), 'the composer SAYS what a Send does here: out at once, as you — the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', send.note);
+// §25 (2026-09-27, the owner: the footer was "a long sentence"): ONE short line, the policy sentence behind its ⓘ
+ok(send.note === 'Sent at once, as you' && /outbox/i.test(send.noteWhy || ''), 'the composer SAYS what a Send does here in ONE short line — "Sent at once, as you" — and its ⓘ says the rest: the outbox holds only agent drafts (g3, §22.2 ①) — never a control that silently does nothing', JSON.stringify([send.note, send.noteWhy]));
 // a poll-lane row says how long its evidence may be — its OWN cadence
 const tracked1 = await p1.evaljs(OPEN_PANEL);
 const opsRow = tracked1.ok && tracked1.rows.find((r) => r.conv === 'fake-poll/fake-poll-ops');
@@ -925,13 +926,13 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     for (let i = 0; i < 40; i++) { if (w.content.querySelector('[data-channel-assign]')) break; await new Promise((r) => setTimeout(r, 250)); }
     w.content.querySelector('[data-channel-assign]').click();
     // R4: nobody has access yet ⇒ the chip opens GRANT ACCESS… (the first operation)
-    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-access-dialog .chan-access-row select')) break; await new Promise((r) => setTimeout(r, 250)); }
-    const sel = document.querySelector('#chan-access-dialog .chan-access-row select');
-    const opts = sel ? [...sel.options].map((o) => o.textContent) : [];
+    // channel-polish (2026-09-27): "who" is the ONE principal picker — its rows are the roster
+    for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-access-dialog .pp-row')) break; await new Promise((r) => setTimeout(r, 250)); }
+    const opts = [...document.querySelectorAll('#chan-access-dialog .pp-row')].map((o) => o.textContent);
     for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
     return opts;
   })()`);
-  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Grant access… "who" select names the group by its TITLE and never shows its id', JSON.stringify(assign));
+  ok(assign.some((o) => /Ops triage/.test(o)) && !assign.some((o) => o.includes(gid)), 'PIN: the Grant access… picker names the group by its TITLE and never shows its id', JSON.stringify(assign));
   // a grant that carries only {kind, id} (an assignment's shape) must be named from the roster
   const granted = await (await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: 'visible' }) })).json();
   ok(!!granted && !granted.error, 'FIXTURE: the group is granted reach with a name-less principal', JSON.stringify(granted));
@@ -944,12 +945,15 @@ const readView = async (id) => ((await (await fetch(`http://127.0.0.1:${PORT}/ap
     it.click();
     for (let i = 0; i < 40; i++) { if (document.querySelector('#chan-reach-dialog .chan-reach-row')) break; await new Promise((r) => setTimeout(r, 250)); }
     const rows = [...document.querySelectorAll('#chan-reach-dialog .chan-reach-row .chan-reach-who')].map((x) => x.textContent);
-    const roster = [...document.querySelectorAll('#chan-reach-dialog .chan-reach-add select option')].map((o) => o.textContent);
-    for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
+    // "Grant reach to…" is the compact picker: its trigger opens the list in a popover
+    const trig = document.querySelector('#chan-reach-dialog .chan-reach-add .pp-trigger'); if (trig) trig.click();
+    for (let i = 0; i < 20 && !document.querySelector('.pp-pop .pp-row'); i++) await new Promise((r) => setTimeout(r, 100));
+    const roster = [...document.querySelectorAll('.pp-pop .pp-row')].map((o) => o.textContent);
+    for (const o of document.querySelectorAll('.dialog-overlay, .pp-pop')) o.remove();
     return { rows, roster };
   })()`);
   ok(!reach.fail && reach.rows.some((x) => /Ops triage/.test(x)) && !reach.rows.some((x) => x.includes(gid)), 'PIN: the Reach dialog names the granted group by its TITLE (resolved from the roster — the grant carried no name) and never its id', JSON.stringify(reach));
-  ok(!reach.fail && reach.roster.some((x) => /Ops triage/.test(x)) && !reach.roster.some((x) => x.includes(gid)), 'PIN: the Reach roster select names the group by its TITLE and never its id', JSON.stringify(reach));
+  ok(!reach.fail && reach.roster.some((x) => /Ops triage/.test(x)) && !reach.roster.some((x) => x.includes(gid)), 'PIN: the Reach roster (the picker) names the group by its TITLE and never its id', JSON.stringify(reach));
   await fetch(`http://127.0.0.1:${PORT}/api/channels/fake-poll/fake-poll-ops/reach`, { method: 'PUT', headers: J, body: JSON.stringify({ principal: { kind: 'group', id: gid }, level: null }) });
   await p1.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); return 1; })()`);
 }

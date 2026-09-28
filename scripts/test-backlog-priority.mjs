@@ -200,7 +200,7 @@ const app = { get: (p, h) => { routes[`GET ${p}`] = h; }, post: (p, h) => { rout
 const session = { agentToken: 'vsst_test', backend: 'claude', cwd, name: 't' };
 setupAgentRoutes({
   app, activeSessions: new Map([['sess1', session]]), tasks,
-  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
+  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
   SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
   userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
   sessionStatusKey: (s, id) => `claude:${id}`,
@@ -242,7 +242,7 @@ const twoSessionRoutes = (mod) => {
   const app2 = { get: (p, h) => { r[`GET ${p}`] = h; }, post: (p, h) => { r[`POST ${p}`] = h; } };
   mod.setupAgentRoutes({
     app: app2, activeSessions: new Map([['sa', { agentToken: 'vsst_a', backend: 'claude', cwd, name: 'a' }], ['sb', { agentToken: 'vsst_b', backend: 'claude', cwd, name: 'b' }]]), tasks,
-    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
+    sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
     sessionStatusKey: (s, id) => `claude:${id}`, serverSetting: () => undefined, scheduleCtxSync: () => {}, remoteCtxBaseFor: () => null,

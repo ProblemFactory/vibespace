@@ -120,6 +120,10 @@ const Drain = require('../channel-drain.js');
 // joined, the back-off, the budget, then the fetch (PURE; the vendor-whitelist
 // census §7 pins that `fetchAttachment` is reached only through its `fetch`).
 const Att = require('../channel-attachments.js');
+// §25 (2026-09-27, the render layer): a record's typed render tree — served for
+// a record stored BEFORE its adapter wrote one (the module's `blocksOf`, read
+// time, the store never rewritten) — and a mail thread's title for the eye.
+const Blocks = require('../channel-blocks.js');
 
 /** THE REAL ADAPTERS (P1). Each module names its integration row
  *  (`integration`), its Test runner (`integrationTest`), its per-record
@@ -295,6 +299,16 @@ const COALESCE_DEFAULT_SECONDS = 60;
  *  a cache on the index entry beside `lastAt`, re-derivable from the log. */
 const LAST_TEXT_MAX = 160;
 const lastTextOf = (s) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, LAST_TEXT_MAX);
+/** §25: a row's one-line preview is the MESSAGE — a ticket banner, the quoted
+ *  history and a signature are not. Read off the newest appended record's
+ *  render tree (the store returns what it wrote); a record with no tree keeps
+ *  the store's own text. */
+/** A scope set's identity (order-free) — "did the credential's scopes change". */
+const scopeKey = (list) => (Array.isArray(list) ? list.map(String).sort().join(' ') : '');
+function previewText(w) {
+  const newest = Array.isArray(w && w.fresh) ? w.fresh.find((r) => r && Number(r.at) === Number(w.lastAt) && Array.isArray(r.blocks)) : null;
+  return (newest && Blocks.previewOf(newest.blocks, LAST_TEXT_MAX)) || w.lastText;
+}
 const COALESCE_MAX_SECONDS = 600;
 
 function create(deps = {}) {
@@ -345,6 +359,13 @@ function create(deps = {}) {
     // pace clock its `sleep` advances) so pacing is exact and instantaneous.
     paceClock = () => performance.now(),
     sleep: sleepImpl = null,
+    // 2.369.195: THE STORAGE MOUNTS' OWN OAUTH CLIENTS an account may borrow
+    // (`{ list(vendor), of(mountId) }` over src/mounts.js's
+    // `oauthClientsFor` / `oauthClientOf`). `of` hands back the DECRYPTED
+    // client; the engine re-seals the secret under `.channels-key` at once
+    // (`sealCustom`) and never answers it on a route. Optional: without it a
+    // `fromMount` choice is refused by name (`no-mounts`).
+    mountClients = null,
   } = deps;
   if (!dataDir) throw new Error('channels-engine: dataDir is required');
 
@@ -662,7 +683,12 @@ function create(deps = {}) {
               const cur = read().token; const curRt = cur ? String(cur.refresh_token || '') : '';
               if (!cur || curRt !== supersedes) { verdict = { written: false, superseded: true, held: cur ? curRt : null }; return; }
             }
-            rec.auth = { ...(rec.auth || {}), tokenEnc: enc, expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || (rec.auth && rec.auth.user) || null, updatedAt: now() };
+            const nextScopes = Array.isArray(meta.scopes) ? meta.scopes.slice() : [];
+            const scopesChanged = scopeKey(rec.auth && rec.auth.scopes) !== scopeKey(nextScopes);
+            rec.auth = { ...(rec.auth || {}), tokenEnc: enc, expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: nextScopes, user: meta.user || token.name || token.email || token.openId || (rec.auth && rec.auth.user) || null, updatedAt: now() };
+            // inc-muk9jj0j-rel3: WHEN THE CREDENTIAL'S SCOPES CHANGED — every conversation judged before it is re-judged
+            // (a refresh re-writing the same scopes is not a change: `updatedAt` moves on every refresh, this does not)
+            if (scopesChanged || consent) rec.auth.scopesAt = now();
             if (Object.keys(offered).length) rec.identity = { ...(rec.identity || {}), ...offered };
           });
         } catch (err) { speakUnsaved(rec, err); throw err; }
@@ -673,7 +699,7 @@ function create(deps = {}) {
         return verdict;
       },
       async clear() {
-        await store.adapters.update(() => { rec.auth = { tokenEnc: null, expiresAt: null, scopes: [], user: null, updatedAt: now() }; });
+        await store.adapters.update(() => { rec.auth = { tokenEnc: null, expiresAt: null, scopes: [], user: null, updatedAt: now(), scopesAt: now() }; });
       },
     };
   }
@@ -1423,10 +1449,11 @@ function create(deps = {}) {
       // 1. the LOG first — durable before anything claims progress
       const w = store.appendRecords(rec.id, convId, r.records);
       appended += w.appended; duplicates += w.duplicates;
+      if (w.appended > 0) olderChanged(e, convId);   // rule 19: a record arrived — the "nothing older" memory is forgotten
       if (Array.isArray(w.freshAt)) freshAt.push(...w.freshAt);
       if (Array.isArray(w.fresh) && w.fresh.length) freshRecs.push(...w.fresh);
       if (w.lastAt && (!lastAt || w.lastAt > lastAt)) lastAt = w.lastAt;
-      if (w.lastAt && w.lastAt >= lastTextAt && typeof w.lastText === 'string') { lastTextAt = w.lastAt; lastText = w.lastText; }
+      if (w.lastAt && w.lastAt >= lastTextAt && typeof w.lastText === 'string') { lastTextAt = w.lastAt; lastText = previewText(w); }
       anchor = r.anchor || anchor;
       if (r.reachedAnchor && r.complete) break;
       if (++pages >= MAX_PAGES || !r.records.length) { complete = false; break; }
@@ -1589,6 +1616,109 @@ function create(deps = {}) {
    * `GET /api/channels/:a/:c`). At 873 conversations the old row (~1.2 KB)
    * made every broadcast ~1 MB.
    */
+  /** THE TITLE A PERSON READS (§25): a mail thread's subject without the
+   *  ticket banner, the `======` rules or a `Re: RE: Fwd:` chain — gated on the
+   *  adapter's DECLARED `titleForm`, never its id; the index keeps the vendor's
+   *  own string (a filter matches that). */
+  /**
+   * A CAPABILITY DERIVED FROM A CREDENTIAL IS RE-JUDGED WHEN THE CREDENTIAL
+   * CHANGES (inc-muk9jj0j-rel3, 2026-09-27 — the owner: "已经重新授权过 但还是有个
+   * 邮件提示没有发送权限"). `convCaps` is cached PER CONVERSATION with its `at`,
+   * and a re-authorization used to invalidate none of them: only the threads
+   * the next pass happened to visit got a fresh verdict, every other thread of
+   * the account kept "sending needs the send permission" indefinitely.
+   * `credentialChangedAt(rec)` = the last instant the account's SCOPES changed
+   * (`auth.scopesAt`, stamped by the token door) or a consent landed
+   * (`lastAuthAt`) — never `auth.updatedAt`, which every hourly refresh moves.
+   */
+  function credentialChangedAt(rec) {
+    return Math.max(Number(rec && rec.auth && rec.auth.scopesAt) || 0, Number(rec && rec.lastAuthAt) || 0);
+  }
+  /** A conversation's convCaps AS OF THE ACCOUNT'S CURRENT CREDENTIAL: a verdict
+   *  judged after the last change is itself; an older one is RE-JUDGED — its send
+   *  half recomputed from the held scopes when the adapter declares the PURE rule
+   *  (`sendCapsOf`, no vendor request) and its read half was verified, else marked
+   *  STALE (`at: 0` ⇒ `convCapsState` says `stale`, the window's open re-asks the
+   *  vendor, the next pass recomputes). Every reader of `en.convCaps` goes through
+   *  here (the views AND the send decisions), so a verdict cannot be fresh on one
+   *  surface and stale on another. */
+  function effectiveConvCaps(rec, en) {
+    const cc = en && en.convCaps;
+    if (!cc || !rec) return cc || null;
+    const changed = credentialChangedAt(rec);
+    if (!changed || (Number(cc.at) || 0) >= changed) return cc;
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    if (mod && typeof mod.sendCapsOf === 'function' && cc.read === 'yes') {
+      let v = null;
+      try { v = mod.sendCapsOf(((rec.auth && rec.auth.scopes) || []).map(String)); } catch { v = null; }
+      if (v && Array.isArray(v.sendAs)) return { read: 'yes', sendAs: v.sendAs.slice(), why: v.why || null, at: changed, rejudged: 'scopes' };
+    }
+    return { ...cc, at: 0, rejudged: 'stale' };
+  }
+  /** THE WRITE-TIME HALF: every conversation of the account whose verdict predates
+   *  the credential change is re-judged and PERSISTED in one index write (the
+   *  caller then broadcasts ONE whole digest). Answers how many were touched. */
+  async function rejudgeConvCaps(rec, why = 'credential changed') {
+    if (!rec) return 0;
+    let n = 0;
+    try {
+      await store.index.update(() => {
+        for (const en of Object.values(store.index.live())) {
+          if (!en || en.adapterId !== rec.id || !en.convCaps) continue;
+          const next = effectiveConvCaps(rec, en);
+          if (next !== en.convCaps) { en.convCaps = next; n++; }
+        }
+      });
+    } catch (err) { log.warn(`[channels] ${rec.id}: re-judging the conversations after "${why}" failed: ${(err && err.message) || err} — each is re-judged as it is read`); return 0; }
+    if (n) log.log(`[channels] ${rec.id}: ${why} — ${n} conversation(s) re-judged against the new credential`);
+    return n;
+  }
+  /** §25: the agent-facing record — `text` is the agent's string; the render tree never reaches an agent. */
+  function withoutBlocks(r) { if (!r || !r.blocks) return r; const { blocks, ...rest } = r; return rest; }
+  function titleOf(c, title) {
+    if (!c || c.titleForm !== 'subject') return title;
+    return Blocks.cleanSubject(title) || title;
+  }
+  /** A record as the window reads it (§25): its own render tree, else — for a
+   *  record stored before its adapter wrote one — the module's `blocksOf` rung
+   *  (declared by `caps.render: 'blocks'`); an adapter that declares nothing is
+   *  drawn by the client's generic rung from `text`. A rung that throws or
+   *  answers an invalid tree leaves the record as it is.
+   *
+   *  A STORED TREE IS JUDGED AT READ TIME TOO (verify round, 2026-09-27): the
+   *  log is append-only and its writer is not always `makeRecord` — a tree that
+   *  fails the schema (an unknown kind, a live frame, a `javascript:` href) used
+   *  to be served to every client as stored, the renderer the only wall. Now
+   *  the read validates it and a refused tree is DROPPED (the record keeps its
+   *  `text`, the generic rung draws it); a valid one is served CLEANED. */
+  function withBlocks(rec, records) {
+    let mod = null;
+    try { mod = rec ? registry.get(rec.kind) : null; } catch { mod = null; }
+    const rung = mod && mod.caps && mod.caps.render === 'blocks' && typeof mod.blocksOf === 'function' ? mod.blocksOf : null;
+    return records.map((r) => {
+      if (!r) return r;
+      let b = null;
+      if (r.blocks !== undefined) {
+        try { const v = Blocks.validateBlocks(r.blocks); b = v.ok && v.blocks.length ? v.blocks : null; } catch { b = null; }
+        if (!b) { const { blocks, ...rest } = r; return rest; }
+        return { ...r, blocks: b };
+      }
+      if (!rung) return r;
+      try { const v = Blocks.validateBlocks(rung(r)); b = v.ok && v.blocks.length ? v.blocks : null; } catch { b = null; }
+      return b ? { ...r, blocks: b } : r;
+    });
+  }
+  /** What unlocks SENDING on this account (§25, the window's read-only line):
+   *  the module's declared `sendGrant` against the scopes the account HOLDS. */
+  function sendGrantView(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    const g = mod && mod.sendGrant;
+    if (!g) return null;
+    const held = new Set(((rec.auth && rec.auth.scopes) || []).map(String));
+    return { scopes: g.scopes.slice(), missing: g.scopes.filter((x) => !held.has(x)), console: !!g.console };
+  }
   function rowView(rec, en, ctx = viewCtx()) {
     const t = ctx.t;
     const c = registry.capsOf(rec.kind);
@@ -1598,15 +1728,15 @@ function create(deps = {}) {
     const ob = ctx.outbox.get(en.key) || { awaiting: 0, unknown: 0 };
     const lw = en.stats && Array.isArray(en.stats.wakes) && en.stats.wakes.length ? en.stats.wakes[en.stats.wakes.length - 1] : null;
     return {
-      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: en.title, kind: en.kind,
+      key: en.key, id: en.id, adapterId: en.adapterId, adapterLabel: rec.label || rec.id, title: titleOf(c, en.title), kind: en.kind,
       participants: en.participants, lastAt: en.lastAt, lastText: en.lastText || '', unread: en.unread || 0,
       unlisted: !!en.unlistedAt,
       refresh: en.refresh && typeof en.refresh === 'object' ? { every: en.refresh.every, by: en.refresh.by || null } : null,
       cadence: { seconds: cadence.seconds, tier: cadence.tier, source: cadence.source, paused: !!cadence.paused },
       freshness: caps.freshnessClaim(c, lane, en, t, { enabled: rec.enabled !== false, cadence }),
       offers: {
-        sendAsUser: caps.offers(c, en.convCaps, 'send-as-user', t),
-        sendAsBot: caps.offers(c, en.convCaps, 'send-as-bot', t),
+        sendAsUser: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t),
+        sendAsBot: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-bot', t),
       },
       assignment: eff ? effectiveView(rec, en, eff, t) : null,
       // R4: WHO HAS ACCESS and WHO IS WOKEN, each principal once (its finest grain)
@@ -1692,12 +1822,13 @@ function create(deps = {}) {
     const own = convGrainOf(en);
     return {
       ...row,
-      convCaps: caps.convCapsState(en.convCaps, t),
+      // inc-muk9jj0j-rel3: STALE-ON-READ — a verdict older than the account's credential is re-judged on the way out
+      convCaps: caps.convCapsState(effectiveConvCaps(rec, en), t),
       offers: {
-        read: caps.offers(c, en.convCaps, 'read', t),
-        sendAsUser: caps.offers(c, en.convCaps, 'send-as-user', t),
-        sendAsBot: caps.offers(c, en.convCaps, 'send-as-bot', t),
-        fetchAttachment: caps.offers(c, en.convCaps, 'fetch-attachment', t),
+        read: caps.offers(c, effectiveConvCaps(rec, en), 'read', t),
+        sendAsUser: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t),
+        sendAsBot: caps.offers(c, effectiveConvCaps(rec, en), 'send-as-bot', t),
+        fetchAttachment: caps.offers(c, effectiveConvCaps(rec, en), 'fetch-attachment', t),
       },
       attachments: c.attachments || 'metadata',
       olderHistory: c.olderHistory || 'none',
@@ -1819,6 +1950,11 @@ function create(deps = {}) {
       pace: paceView(rec, live.get(rec.id) || paceCarry.get(rec.id) || null),   // verify r5: a toggled account not yet rebuilt reads its ghost, not zero
       lane: { via: lane.via, why: lane.why, live: !!lane.live, carryContent: !!lane.carryContent },
       sendAs: c.sendAs, receive: c.receive, identityMarking: c.identityMarking,
+      // §25: how a send READS in the composer's one line — `draft` = a
+      // two-phase adapter drafts in the thread and sends that draft (mail),
+      // `direct` = one request; and what would unlock sending here
+      sendForm: c.idempotency === 'two-phase' ? 'draft' : 'direct',
+      sendGrant: sendGrantView(rec),
       // P1: what the panel's connect / re-authorize / options controls read.
       connectable: !!mod,
       integration: mod ? mod.integration || null : null,
@@ -2060,6 +2196,7 @@ function create(deps = {}) {
           await store.index.update(() => { const en = store.index.entry(rec.id, convId); if (!(Number(en.readAt) > 0)) en.readAt = Number(rec.linkedAt) || 0; if (!en.title) en.title = convId; });
         }
         const w = store.appendRecords(rec.id, convId, [ev.record]);   // DURABLE — the ack is this function's return
+        if (w.appended) olderChanged(e, convId);   // rule 19 (verify r7): a record the PUSH lane appended forgets the "nothing older" memory, like the poll's
         if (w.appended) { p.samples = caps.pushSamplesAdd(p.samples, { at: t, n: w.appended, p: 0 }); p.missRate = caps.pushMissRate(p.samples, t).rate; }
         afterPush(rec, e, convId, w);
         // P2: the SAME funnel as a poll pass (fence 12) — and because this
@@ -2087,7 +2224,7 @@ function create(deps = {}) {
     b.appended += w.appended;
     if (Array.isArray(w.fresh)) { const sa = selfAtOf(w.fresh); if (sa > (b.selfAt || 0)) b.selfAt = sa; }
     if (w.lastAt && (!b.lastAt || w.lastAt > b.lastAt)) b.lastAt = w.lastAt;
-    if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = w.lastText; }
+    if (w.lastAt && w.lastAt >= b.lastTextAt && typeof w.lastText === 'string') { b.lastTextAt = w.lastAt; b.lastText = previewText(w); }
     e.pushBatch.set(convId, b);
     if (e.pushTimer) return;
     e.pushTimer = setTimeout(() => { e.pushTimer = null; flushPushBatch(rec, e).catch((err) => log.warn(`[channels] ${rec.id}: push batch failed: ${(err && err.message) || err}`)); }, PUSH_NOTIFY_DEBOUNCE_MS);
@@ -2240,6 +2377,7 @@ function create(deps = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     if (rec.enabled === false) return { ok: false, code: 'disabled', error: `${rec.label || rec.id} is disabled` };
+    olderChanged(adapterFor(rec), convId);   // rule 19: the owner's Refresh forgets the "nothing older" memory
     return requestRefresh(rec, adapterFor(rec), `${adapterId}/${convId}`, { origin });
   }
   /** Is the account inside the back-off a failed pass set (`e.nextAt`)? */
@@ -2438,7 +2576,7 @@ function create(deps = {}) {
       refresh(adapterId, convId, { origin: 'open' }).catch((err) => log.warn(`[channels] ${key}: refresh on open failed: ${(err && err.message) || err}`));
     }
     if (!was) {
-      const cc = caps.convCapsState(en.convCaps, t);
+      const cc = caps.convCapsState(effectiveConvCaps(rec, en), t);
       if (rec.enabled !== false && (cc.why === 'stale' || cc.why === 'unknown' || cc.read === 'unknown')) refreshConvCaps(adapterId, convId).then(() => notify([key])).catch(() => {});
       notify([key]);   // the chip says hot now
     }
@@ -2453,26 +2591,83 @@ function create(deps = {}) {
    * backfill is not news. Honest: `exhausted` = the vendor has nothing older;
    * `vendorHasNoOlder` = this adapter cannot page back (Gmail: a thread's
    * first walk is the whole thread).
+   *
+   * THE SERVER BELT (lane channel-render verify r6, 2026-09-27 — drain rule
+   * 19): whatever a client does, per conversation the vendor is asked ONCE at
+   * a time (a second ask JOINS the flight and reads the log it filled), at
+   * most once per OLDER_FLOOR_MS (`refused: 'older-floor'` with the wait,
+   * the local page still answered), and never again for what it answered
+   * `exhausted` (remembered on the live entry until a record is appended — by
+   * the poll ingest OR the push lane, the two writers of one log (verify r7:
+   * r6 wired the poll's append alone; test-channels-engine ⑭ ⑧ + its control) —
+   * the owner's Refresh, a re-authorization — `olderChanged` — or the memory's
+   * TTL). Reproduced before it: 20 concurrent /older = 20 vendor calls for
+   * one page; 16 wasted calls in 2 s after `exhausted`; the minute budget the
+   * only bound. Judged BEFORE the budget — a joined or remembered answer
+   * costs no unit; rule 9 (the minute) and rule 18 (the adapter's pace) stay
+   * the outer caps.
    */
+  /** Rule 19's memory for one conversation, on the account's live entry (dies with it). */
+  function olderMemOf(e, convId) {
+    if (!e.older) e.older = new Map();
+    let m = e.older.get(convId);
+    if (!m) { m = Drain.olderEmpty(); e.older.set(convId, m); }
+    return m;
+  }
+  const olderFlights = new Map();   // `${adapterId}/${convId}` → the vendor ask in flight (the promise a joiner awaits)
+  /** The conversation CHANGED (a record appended, a refresh, a re-authorization): its `exhausted` memory is forgotten. */
+  function olderChanged(e, convId) {
+    if (!e || !e.older || !e.older.has(convId)) return;
+    e.older.set(convId, Drain.olderApply(e.older.get(convId), 'changed', now()));
+  }
   async function loadOlder(adapterId, convId, { before = null, beforeId = null, limit = null } = {}) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     if (!rec || !known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
     const n = Math.min(200, Math.max(1, Number(limit) || historyPageSize()));
-    const local = store.readTail(adapterId, convId, { before, beforeId, limit: n });
-    if (local.length >= n) return { ok: true, records: local, source: 'local', fetched: 0, exhausted: false };
-    const c = registry.capsOf(rec.kind);
-    if (c.olderHistory !== 'page' || rec.enabled === false) return { ok: true, records: local, source: 'local', fetched: 0, exhausted: true, vendorHasNoOlder: c.olderHistory !== 'page' };
-    const e = adapterFor(rec);
-    if (!affordable(rec, e)) return { ...budgetRefusal(rec, e), ok: true, refused: 'vendor-budget', records: local, source: 'local', fetched: 0, exhausted: false };
-    const oldest = local.length ? local[0] : (before !== null && before !== undefined ? { at: Number(before), vendorId: beforeId || null } : store.oldestRecord(adapterId, convId));
-    let r;
-    try { r = await vendor(rec, e, () => e.adapter.older(convId, { before: oldest ? { at: Number(oldest.at), vendorId: oldest.vendorId || null } : null, limit: n - local.length })); }
-    catch (err) { return { ok: false, code: err instanceof ChannelError ? err.code : 'vendor-error', error: String((err && err.message) || err), records: local }; }
-    if (outlived(rec, e)) return { ok: false, code: 'account-changed', error: 'the account changed while the page was fetched — nothing was kept', records: local };
-    const w = store.prependRecords(adapterId, convId, r.records || []);
-    const again = store.readTail(adapterId, convId, { before, beforeId, limit: n });
-    const cutoff = now() - 90 * 86400e3;
-    return { ok: true, records: again, source: 'vendor', fetched: (r.records || []).length, appended: w.appended, exhausted: !!r.exhausted, truncated: (r.records || []).some((x) => Number(x.at) < cutoff) };
+    const key = `${adapterId}/${convId}`;
+    let joined = false;
+    for (;;) {
+      const local = store.readTail(adapterId, convId, { before, beforeId, limit: n });
+      if (local.length >= n) return { ok: true, records: withBlocks(rec, local), source: joined ? 'joined' : 'local', fetched: 0, exhausted: false };
+      const c = registry.capsOf(rec.kind);
+      if (c.olderHistory !== 'page' || rec.enabled === false) return { ok: true, records: withBlocks(rec, local), source: 'local', fetched: 0, exhausted: true, vendorHasNoOlder: c.olderHistory !== 'page' };
+      const e = adapterFor(rec);
+      let v = Drain.olderVerdict(olderMemOf(e, convId), now());
+      if (v.act === 'join') {
+        // ONE FLIGHT PER CONVERSATION: wait for it, then read the log it filled (never wait twice — an ask that
+        // started after our join is refused by the floor like any second ask)
+        if (!joined) { joined = true; const f = olderFlights.get(key); if (f) { try { await f; } catch {} } continue; }
+        v = { act: 'floor', retryAfterMs: Drain.OLDER_FLOOR_MS };
+      }
+      if (v.act === 'exhausted') return { ok: true, records: withBlocks(rec, local), source: 'memory', fetched: 0, exhausted: true, vendorHasNoOlder: false };
+      if (v.act === 'floor') {
+        const s = Math.max(1, Math.ceil(v.retryAfterMs / 1000));
+        return { ok: true, refused: 'older-floor', code: 'older-floor', error: `older history of this conversation was asked from the vendor less than ${Math.ceil(Drain.OLDER_FLOOR_MS / 1000)} s ago — try again in ${s} s`, retryAfterMs: v.retryAfterMs, retryAfterSec: s, records: withBlocks(rec, local), source: 'local', fetched: 0, exhausted: false };
+      }
+      if (!affordable(rec, e)) return { ...budgetRefusal(rec, e), ok: true, refused: 'vendor-budget', records: withBlocks(rec, local), source: 'local', fetched: 0, exhausted: false };
+      const oldest = local.length ? local[0] : (before !== null && before !== undefined ? { at: Number(before), vendorId: beforeId || null } : store.oldestRecord(adapterId, convId));
+      // THE FLIGHT: the memory says `ask` in the same synchronous step the promise is filed — a second caller in
+      // this instant sees `inflight` and joins
+      e.older.set(convId, Drain.olderApply(olderMemOf(e, convId), 'ask', now()));
+      const flight = (async () => {
+        try {
+          const r = await vendor(rec, e, () => e.adapter.older(convId, { before: oldest ? { at: Number(oldest.at), vendorId: oldest.vendorId || null } : null, limit: n - local.length }));
+          if (outlived(rec, e)) throw new ChannelError('account-changed', 'the account changed while the page was fetched — nothing was kept', { retryable: true });
+          const w = store.prependRecords(adapterId, convId, r.records || []);
+          e.older.set(convId, Drain.olderApply(olderMemOf(e, convId), { type: 'landed', exhausted: !!r.exhausted }, now()));
+          return { r, w };
+        } catch (err) { e.older.set(convId, Drain.olderApply(olderMemOf(e, convId), 'failed', now())); throw err; }   // the flight ended without an answer: nothing remembered, the floor's clock kept
+      })();
+      olderFlights.set(key, flight);
+      let landed;
+      try { landed = await flight; }
+      catch (err) { return { ok: false, code: err instanceof ChannelError ? err.code : 'vendor-error', error: String((err && err.message) || err), records: local }; }
+      finally { if (olderFlights.get(key) === flight) olderFlights.delete(key); }
+      const { r, w } = landed;
+      const again = store.readTail(adapterId, convId, { before, beforeId, limit: n });
+      const cutoff = now() - 90 * 86400e3;
+      return { ok: true, records: withBlocks(rec, again), source: 'vendor', fetched: (r.records || []).length, appended: w.appended, exhausted: !!r.exhausted, truncated: (r.records || []).some((x) => Number(x.at) < cutoff) };
+    }
   }
 
   /**
@@ -2586,7 +2781,8 @@ function create(deps = {}) {
     if (query.length < 2) return { ok: false, code: 'bad-request', error: 'a search needs at least 2 characters' };
     const r = await store.search(adapterId, query, { limit: Math.min(200, Math.max(1, Number(limit) || 100)) });
     const liveIx = store.index.live();
-    const results = r.results.map((x) => ({ key: `${adapterId}/${x.convId}`, convId: x.convId, title: (liveIx[`${adapterId}/${x.convId}`] || {}).title || x.convId, record: x }));
+    const sc = registry.capsOf(rec.kind);
+    const results = r.results.map((x) => ({ key: `${adapterId}/${x.convId}`, convId: x.convId, title: titleOf(sc, (liveIx[`${adapterId}/${x.convId}`] || {}).title) || x.convId, record: x }));
     return { ok: true, results, truncated: r.truncated, scannedBytes: r.scannedBytes, files: r.files };
   }
 
@@ -2658,7 +2854,8 @@ function create(deps = {}) {
   /** `beforeId` is the OTHER half of the page boundary — see the store's
    *  `(at, vendorId)` total order. Dropping it here would put the loss back. */
   function messages(adapterId, convId, { before = null, beforeId = null, limit = 50 } = {}) {
-    return store.readTail(adapterId, convId, { before, beforeId, limit });
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    return withBlocks(rec, store.readTail(adapterId, convId, { before, beforeId, limit }));
   }
 
   // ── failures SPOKEN and RETRACTED by the same producer (fence 8) ─────────
@@ -2812,6 +3009,11 @@ function create(deps = {}) {
    *  `allowDefault` is off (re-authorize keeps the account's own). */
   function clientChoice(mod, input = {}, { allowDefault = true } = {}) {
     const b = input && typeof input === 'object' ? input : {};
+    // 2.369.195: `fromMount` = a storage mount's own client, copied server-side.
+    // ONE client per request: beside a preset / custom id / credential it is
+    // refused by name (the dialog never sends both — a stale hidden custom
+    // input must not decide which client an account signs in under).
+    if (namesMount(b)) return clientFromMount(mod, b.fromMount);
     let key = typeof b.credentialKey === 'string' && b.credentialKey ? b.credentialKey : null;
     let cred = b.credential && typeof b.credential === 'object' ? b.credential : null;
     if (!key && typeof b.clientPreset === 'string' && b.clientPreset) key = b.clientPreset === CUSTOM_KEY ? CUSTOM_KEY : CLUSTER_PREFIX + b.clientPreset;
@@ -2821,6 +3023,93 @@ function create(deps = {}) {
     if (key) { assertOffered(mod, key); return { credentialKey: key, credential: null }; }
     if (!allowDefault) return null;
     return { credentialKey: defaultCredentialKey(mod.integration), credential: null };
+  }
+  // ── A STORAGE MOUNT'S CLIENT, BORROWED (2.369.195: "use the OAuth client
+  // of a storage mount") ───────────────────────────────────────────────────
+  // The mount → channel door the per-account design lacked (the account's
+  // client is chosen in the storage dialog's grammar; a custom client typed
+  // once for Drive / Gmail-as-a-folder is the SAME Google client). The secret
+  // travels ONLY server-side: `mountClients.of` decrypts it with `.mounts-key`
+  // (the mounts module owns its key), `sealCustom` validates it against the
+  // row's two fields and SEALS it under `.channels-key` in the same call — the
+  // account then holds an ordinary `custom` credential {appId, appSecretEnc}.
+  // Nothing about it reaches a response body, a frame or a log line; the
+  // copy is an audit line naming the mount (never a value).
+  /** The mount's client as a `custom` choice — refused BY NAME: the row
+   *  borrows no storage client (Lark) / no mounts here / the mount is gone /
+   *  holds no custom client / holds another vendor's / cannot be decrypted. */
+  /** ONE client per request (verify r1: asked by EVERY verb that reads a
+   *  `fromMount` — start / connect / re-authorize AND Connect's own body):
+   *  a storage mount named beside a preset / custom id / credential is
+   *  refused by name BEFORE anything is read — the dialog never sends both;
+   *  a stale hidden custom input must not decide which client an account
+   *  signs in under. Returns whether the body names a mount at all. */
+  function namesMount(b) {
+    if (!(typeof b.fromMount === 'string' && b.fromMount)) return false;
+    if (b.credentialKey || b.clientPreset || b.credential || b.clientId != null || b.clientSecret != null) throw httpErr(400, 'ambiguous-client', 'the request names a storage mount\'s client AND another client — name one');
+    return true;
+  }
+  const mountRefusal = (e) => { const code = (e && e.code) || 'mount-no-client'; return httpErr(code === 'mount-gone' ? 404 : code === 'no-mounts' ? 503 : code === 'mount-client-vendor' ? 400 : 409, code, String((e && e.message) || e)); };
+  /** THE KEY-LESS HALF of a borrow (verify r2): the row's vendor, the mounts
+   *  door, the mount's ID and every refusal that needs no key — gone / no
+   *  client / another vendor's (`mountClients.head`, nothing decrypted) —
+   *  and the registry's ID RULE (a storage record never validated its id;
+   *  an id the row refuses is refused HERE, before the secret is opened).
+   *  Returns `{mountId, name, vendor, clientId}`. */
+  function mountHead(mod, mountId) {
+    const vendor = R.oauthClientVendorOf(rowOf(mod));
+    if (!vendor) throw httpErr(400, 'mount-client-unsupported', `${mod.label || mod.kind} signs in with its own app's client — no storage mount holds one`);
+    if (!mountClients || typeof mountClients.of !== 'function' || typeof mountClients.head !== 'function') throw httpErr(503, 'no-mounts', 'storage mounts are not available on this instance');
+    let h;
+    // the vendor rides DOWN (verify r1): the mounts module refuses another vendor's mount BEFORE it
+    // opens the secret — nothing is decrypted for a body that is refused, and the refusal names the
+    // vendor (an undecryptable OneDrive mount in a Gmail body used to answer `mount-secret-undecryptable`)
+    try { h = mountClients.head(String(mountId), { vendor }); }
+    catch (e) { throw mountRefusal(e); }
+    if (!h || h.vendor !== vendor) throw httpErr(400, 'mount-client-vendor', `the storage mount "${(h && h.name) || mountId}" holds a ${(h && h.vendor) || 'different'} client — ${mod.label || mod.kind} signs in with a ${vendor} one`);
+    const row = rowOf(mod);
+    const cf = R.clientFieldsOf(row);
+    const v = R.validateValues(row, { [cf.idKey]: String(h.clientId || '') });
+    if (!v.ok) throw httpErr(400, 'invalid-client', `the storage mount "${h.name}"'s client is not one ${row.label} can use — ${Object.entries(v.errors).map(([k, why]) => `${k}: ${why}`).join('; ')}`, { errors: v.errors });
+    return { mountId: h.mountId, name: cleanLabel(h.name), vendor: h.vendor, clientId: String(h.clientId) };
+  }
+  function clientFromMount(mod, mountId) {
+    const h = mountHead(mod, mountId);   // every key-free refusal, before the key is used
+    let c;
+    try { c = mountClients.of(String(mountId), { vendor: h.vendor }); }
+    catch (e) { throw mountRefusal(e); }
+    const credential = sealCustom(mod, { appId: c.clientId, appSecret: c.clientSecret });   // the secret's own rule (needs the secret) + the seal
+    return { credentialKey: CUSTOM_KEY, credential, fromMount: { mountId: h.mountId, name: h.name } };
+  }
+  /** The dialog's list (`GET /api/channels/oauth/mount-clients?kind=`): the
+   *  mounts whose own client this TYPE can borrow — re-whitelisted here, so
+   *  nothing but the five named fields can ever ride the answer. */
+  function mountClientsFor(kind) {
+    const mod = connectableFor(String(kind || ''));
+    const vendor = R.oauthClientVendorOf(rowOf(mod));
+    if (!vendor || !mountClients || typeof mountClients.list !== 'function') return { kind: mod.kind, vendor: vendor || null, clients: [] };
+    // verify r2: the name and the mailbox are BOUNDED here too (the store caps add()/update() at 60; a hand-edited record is not the dialog's problem)
+    const clients = (mountClients.list(vendor) || []).map((x) => ({ mountId: String(x.mountId), name: cleanLabel(x.name), type: x.type ? String(x.type) : null, email: x.email ? cleanLabel(x.email) : null, clientIdPrefix: String(x.clientIdPrefix || '').slice(0, 12) }));
+    return { kind: mod.kind, vendor, clients };
+  }
+  /** verify r3: WHAT WAS COPIED, said back — the answer of every verb that
+   *  borrowed a mount's client names the mount and the id's prefix actually
+   *  copied (bounded, never a secret). The list's prefix is a hint at list
+   *  time; the choice is BY MOUNT and the copy is the mount's client at the
+   *  sign-in's START — a mount edited between the list and the pick signs in
+   *  under its CURRENT client, and this field (with the audit line) is where
+   *  that is told; Connect naming the same mount lands THIS copy (never re-read). */
+  function mountNamed(choice) {
+    if (!choice || !choice.fromMount) return null;
+    return { mountId: String(choice.fromMount.mountId), name: cleanLabel(choice.fromMount.name), clientIdPrefix: String((choice.credential && choice.credential.appId) || '').slice(0, 12) };
+  }
+  const withMount = (answer, choice) => { const m = mountNamed(choice); return m ? { ...answer, fromMount: m } : answer; };
+  /** ONE audit line per copy a verb BEGINS a consent with (start / connect /
+   *  re-authorize — Connect's re-check of the same client is not a copy). */
+  function auditMountCopy(choice, mod, adapterId = null) {
+    if (!choice || !choice.fromMount) return;
+    try { store.audit({ kind: 'auth', op: 'client-from-mount', mountId: choice.fromMount.mountId, adapterKind: mod.kind, adapterId, clientIdPrefix: String(choice.credential.appId || '').slice(0, 12), at: now(), by: 'user' }); } catch {}
+    log.log(`[channels] ${adapterId || mod.kind}: the OAuth client of storage mount "${cleanLabel(choice.fromMount.name)}" (${choice.fromMount.mountId}) copied onto the ${mod.label || mod.kind} sign-in`);   // verify r2: one line, the name bounded (a newline in a name forged a journal line)
   }
   /** Does the account already hold THIS client? (a same-id custom client
    *  with a new secret is the same client — its secret is replaced in place) */
@@ -2964,7 +3253,7 @@ function create(deps = {}) {
     await store.adapters.update(() => {
       rec.credentialKey = p.choice.credentialKey;
       if (p.choice.credential) rec.credential = p.choice.credential; else delete rec.credential;
-      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now() };
+      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now() };
       if (p.identity && Object.keys(p.identity).length) rec.identity = { ...(rec.identity || {}), ...p.identity };
       rec.lastAuthError = null; rec.lastAuthAt = now();
     });
@@ -2974,6 +3263,7 @@ function create(deps = {}) {
     await refreshAuth(e);
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null;
     await retractFailure(rec);
+    await rejudgeConvCaps(rec, 're-authorized');   // inc-muk9jj0j-rel3: every conversation, BEFORE the one whole digest
     if (!stopped) notify([]);
     if (!stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
     if (!stopped && timer) syncPushLanes().catch(() => {});
@@ -2983,9 +3273,11 @@ function create(deps = {}) {
    *  credential, options?}` → `{flowId, url, flow}`. */
   async function startOAuth(input = {}) {
     const mod = connectableFor(String(input.kind || input.backend || ''));
+    normalizeOptions(mod, input.options, {});   // verify r2: a body refused on its options never opens a mount's secret (judged again, on the record, in beginPending)
     const choice = clientChoice(mod, input);
     const r = await beginPending(mod, choice, { options: input.options });
-    return { ...r, url: r.flow && r.flow.consentUrl };
+    auditMountCopy(choice, mod);
+    return withMount({ ...r, url: r.flow && r.flow.consentUrl }, choice);   // verify r3: the answer names the client copied
   }
   function pendingOrThrow(flowId) {
     sweepPending();
@@ -3003,7 +3295,9 @@ function create(deps = {}) {
     return {
       flowId: p.flowId, kind: p.kind, credentialKey: p.choice.credentialKey,
       running: !p.done && !!(st && st.running), done: p.done, ok: p.done ? p.ok : null,
-      error: p.error || (cancelled && !p.done ? `the sign-in was ${cancelled === 'timeout' ? 'not finished in time' : cancelled}` : null),
+      // verify r4: an end that is the consent machine's own act (the timeout, the cap) carries ITS sentence on the flow;
+      // a flow the machine no longer knows (retired under this record) is SAID too, never a wordless stop
+      error: p.error || (cancelled && !p.done ? ((st && st.error) || `the sign-in was ${cancelled === 'timeout' ? 'not finished in time' : cancelled}`) : (!p.done && !st ? 'the sign-in is no longer running — sign in again' : null)),
       user: p.user, flow: safeFlow(st), token: p.done && p.ok ? p.flowId : null,
     };
   }
@@ -3036,6 +3330,7 @@ function create(deps = {}) {
     if (!b.newAccount && existing.length) return reauthorize((existing.find((r) => r.id === kind) || existing[0]).id, b);
     // THE CREDENTIAL QUESTION IS ASKED BEFORE A RECORD EXISTS (the r2 ④
     // rule): a record nobody can connect is never minted.
+    normalizeOptions(mod, b.options, {});   // verify r2: the options first — a body refused on them never opens a mount's secret
     const choice = clientChoice(mod, b);
     const rec = newRecord(mod, { id: mintAdapterId(kind, recs), credentialKey: choice.credentialKey });
     if (choice.credential) rec.credential = choice.credential;
@@ -3047,25 +3342,48 @@ function create(deps = {}) {
     try { flow = await e.adapter.auth.begin(); }
     catch (err) { dropLive(rec.id, 'connect refused'); paceCarry.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind (not even its ghost bucket)
     await store.adapters.update((a) => { a.adapters.push(rec); });
+    auditMountCopy(choice, mod, rec.id);
     notify([]);
-    return { adapter: adapterView(rec), flow: safeFlow(flow) };
+    return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
   }
   async function connectFromFlow(mod, b) {
     sweepPending();
     const p = pendingFlows.get(String(b.flowId));
     if (!p || p.targetId) throw httpErr(404, 'no-flow', 'no finished sign-in with that id — sign in again from the account dialog');
     if (p.kind !== mod.kind) throw httpErr(400, 'flow-kind-mismatch', `that sign-in was for ${p.kind}, not ${mod.kind}`);
+    // verify r4: a sign-in that is neither finished nor running any more (ended under this record, or retired by the
+    // machine) is refused as ENDED, by its own sentence — not as "not finished yet"
+    const live = flows.status(p.flowId);
+    if (!p.done && !(live && live.running)) throw httpErr(409, 'flow-failed', `the sign-in ended before it finished: ${(live && (live.error || live.cancelled)) || 'it is no longer running'} — sign in again`);
     if (!p.done) throw httpErr(409, 'flow-not-done', 'the sign-in has not finished yet — approve access on the sign-in page (or paste the redirect URL back) first');
     if (!p.ok) throw httpErr(409, 'flow-failed', `the sign-in failed: ${p.error || 'unknown'} — sign in again`);
-    const named = clientChoice(mod, b, { allowDefault: false });
+    // verify r2: EVERY refusal that needs neither a key nor the flow comes first — the options are
+    // judged before the flow is taken (a Connect refused for a bad option used to CONSUME the finished
+    // sign-in: the next Connect answered no-flow and the consent had to be run again)
+    const options = normalizeOptions(mod, b.options, p.rec.options);
+    // 2.369.195: Connect naming the SAME storage mount the sign-in began with IS the flow's client
+    // (the copy the consent ran under) — never re-read, so a mount edited or removed meanwhile cannot
+    // turn a finished sign-in into a refusal; another mount is resolved and compared like any client
+    // (verify r1: the ONE-client rule is asked here too — a stale preset / custom field beside the mount is refused, never ignored)
+    const sameMount = namesMount(b) && !!p.choice.fromMount && p.choice.fromMount.mountId === b.fromMount;
+    const mismatch = (now_) => httpErr(400, 'flow-client-mismatch', `that sign-in ran under ${p.choice.fromMount ? `the client of storage mount "${p.choice.fromMount.name}"` : p.choice.credentialKey}; the dialog now names ${now_} — a token is bound to the client it was issued under, so sign in again under the new client`);
+    let named = null;
+    if (!sameMount && namesMount(b)) {
+      // verify r2: ANOTHER mount is compared BY ID first (the key-less read) — a mount whose id is not the
+      // flow's client is refused with nothing decrypted, and the refusal names the mismatch, never the
+      // other mount's key state (an undecryptable other mount used to answer `mount-secret-undecryptable`)
+      const h = mountHead(mod, b.fromMount);
+      if (p.choice.credentialKey !== CUSTOM_KEY || String(h.clientId) !== String(p.choice.credential.appId)) throw mismatch(`the client of storage mount "${h.name}"`);
+      named = clientFromMount(mod, b.fromMount);   // the same id: the secrets are compared (needs the key)
+    } else if (!sameMount) named = clientChoice(mod, b, { allowDefault: false });
     if (named && (named.credentialKey !== p.choice.credentialKey || (named.credentialKey === CUSTOM_KEY && (String(named.credential.appId) !== String(p.choice.credential.appId) || box.dec(named.credential.appSecretEnc) !== box.dec(p.choice.credential.appSecretEnc))))) {
-      throw httpErr(400, 'flow-client-mismatch', `that sign-in ran under ${p.choice.credentialKey}; the dialog now names ${named.credentialKey} — a token is bound to the client it was issued under, so sign in again under the new client`);
+      throw mismatch(named.fromMount ? `the client of storage mount "${named.fromMount.name}"` : named.credentialKey);
     }
-    pendingFlows.delete(p.flowId);   // taken ONCE
+    pendingFlows.delete(p.flowId);   // taken ONCE — after every refusal above
     const recs = adapterRecords();
     const rec = newRecord(mod, { id: mintAdapterId(mod.kind, recs), credentialKey: p.choice.credentialKey });
     if (p.choice.credential) rec.credential = p.choice.credential;
-    rec.options = normalizeOptions(mod, b.options, p.rec.options);
+    rec.options = options;
     if (b.name) rec.label = cleanLabel(b.name) || rec.label;
     rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now() };
     if (p.identity && Object.keys(p.identity).length) rec.identity = { ...p.identity };   // verify r5: whose account this record is, from its first consent
@@ -3077,7 +3395,7 @@ function create(deps = {}) {
     notify([]);
     if (!stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (!stopped && timer) syncPushLanes().catch(() => {});
-    return { adapter: adapterView(rec), flow: null };
+    return withMount({ adapter: adapterView(rec), flow: null }, p.choice);   // verify r3: which mount's client this account was minted under
   }
   /** RE-AUTHORIZE one ACCOUNT by its adapter id (the mount semantics, r4
    *  §2.4): the SAME client ⇒ its consent begins under it (a custom client
@@ -3098,18 +3416,20 @@ function create(deps = {}) {
     if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
     if (choice && !sameClient(rec, choice)) {
       const r = await beginPending(mod, choice, { target: rec });
+      auditMountCopy(choice, mod, rec.id);
       await store.adapters.update(() => { rec.lastAuthError = null; });
       notify([]);
-      return { adapter: adapterView(rec), flow: r.flow, rebind: true, credentialKey: choice.credentialKey };
+      return withMount({ adapter: adapterView(rec), flow: r.flow, rebind: true, credentialKey: choice.credentialKey }, choice);
     }
     if (choice && choice.credentialKey === CUSTOM_KEY) await store.adapters.update(() => { rec.credential = choice.credential; });   // same id, the secret replaced in place
+    auditMountCopy(choice, mod, rec.id);
     if (rec.credentialKey === OWN_KEY) await inlineLegacyClient(rec);
     const e = adapterFor(rec);
     assertResolvable(mod, rec);
     const flow = await e.adapter.auth.begin();
     await store.adapters.update(() => { rec.lastAuthError = null; });
     notify([]);
-    return { adapter: adapterView(rec), flow: safeFlow(flow) };
+    return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
   }
   function recordOrThrow(adapterId) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
@@ -3165,6 +3485,9 @@ function create(deps = {}) {
     if (r && r.ok) { e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; }
     if (r && r.ok) log.log(`[channels] ${rec.id}: connected${rec.auth && rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     else log.warn(`[channels] ${rec.id}: consent flow failed: ${(r && r.error) || 'unknown'}`);
+    // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
+    // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
+    if (r && r.ok) await rejudgeConvCaps(rec, 'connected');
     if (!stopped) notify([]);
     if (r && r.ok && !stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (r && r.ok && !stopped && timer) syncPushLanes().catch(() => {});   // a fresh consent may be what the lane was waiting for
@@ -3186,6 +3509,7 @@ function create(deps = {}) {
     await retractFailure(rec);
     const e = adapterFor(rec);   // rebuilt at once (its buckets carried) so the card answers the adapter's own `unknown`
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; await refreshAuth(e);
+    await rejudgeConvCaps(rec, 'disconnected');   // inc-muk9jj0j-rel3: no credential ⇒ nothing sends, said everywhere at once
     notify([]);
     return { ok: true };
   }
@@ -3596,8 +3920,8 @@ function create(deps = {}) {
   /** The two READ-TIME facts `authority:'send'` is capped by (§7.3). */
   function authorityCapsFor(rec, en, t) {
     const c = registry.capsOf(rec.kind);
-    const u = caps.offers(c, en && en.convCaps, 'send-as-user', t);
-    const b = caps.offers(c, en && en.convCaps, 'send-as-bot', t);
+    const u = caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t);
+    const b = caps.offers(c, effectiveConvCaps(rec, en), 'send-as-bot', t);
     const offersSend = !!(u.offered || b.offered);
     return { offersSend, sendWhy: offersSend ? null : (u.why || b.why || 'unknown'), policyRequiresReview: policyRequiresReview(rec, en) };
   }
@@ -4019,7 +4343,7 @@ function create(deps = {}) {
       const targetGone = !ok && still.watched && still.targetGone;   // r3: the member died — the hits stay pending for the group's next digest
       if (!ok && !stillWatched) log.log(`[channels] scope digest ${sKey}: ${pk} lost its notification while the digest was in flight — the refused block is not stashed`);
       if (targetGone) log.log(`[channels] scope digest ${sKey}: ${target.cid} left group ${pk} while the digest was in flight — ${n} hit(s) held for the group's next digest`);
-      if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') { try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
+      if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') { try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
       const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'digest');
       const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
       try { await store.index.update((ix) => {
@@ -4336,7 +4660,7 @@ function create(deps = {}) {
     if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') {
       // The ladder's own durable stash: drained into the agent's next
       // context injection (renderMsgStash), so a refusal loses nothing.
-      try { deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
+      try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
     if ((ok || stashed) && batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of hits) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
     const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'wake');
@@ -4452,9 +4776,9 @@ function create(deps = {}) {
    *  offered — and then NO proposal is created. */
   function sendIdentityFor(rec, en, t) {
     const c = registry.capsOf(rec.kind);
-    const u = caps.offers(c, en && en.convCaps, 'send-as-user', t);
+    const u = caps.offers(c, effectiveConvCaps(rec, en), 'send-as-user', t);
     if (u.offered) return { as: 'user', why: null, userWhy: null };
-    const b = caps.offers(c, en && en.convCaps, 'send-as-bot', t);
+    const b = caps.offers(c, effectiveConvCaps(rec, en), 'send-as-bot', t);
     if (b.offered) return { as: 'bot', why: null, userWhy: u.why || 'unknown' };
     return { as: null, why: u.why || b.why || 'unknown', userWhy: u.why || 'unknown' };
   }
@@ -4540,11 +4864,22 @@ function create(deps = {}) {
   /** ONE state change, through the PURE table. Mutates the LIVE proposal
    *  inside the outbox's serialized door; refuses (never throws) with the
    *  table's own reason. */
-  async function transition(id, to, by, patch = null) {
+  /** `unless(p)` (2026-09-27 verify): a guard asked INSIDE the store's
+   *  serialized write, at apply time — the TTL sweep's "is a replace holding
+   *  this id" question. Asked before the write it raced the hold: the sweep
+   *  took its due list, a replace of one of them passed its own check and
+   *  made the new draft while the sweep was busy with an earlier proposal,
+   *  and the sweep's write then landed BETWEEN the replace's check and its
+   *  withdrawal — an "EXPIRED unapproved" receipt for a draft the agent had
+   *  just replaced. The hold is set synchronously when the replace is called,
+   *  so at apply time it is either visible (skip) or the replace's check will
+   *  read this write (refused before anything is made). */
+  async function transition(id, to, by, patch = null, { unless = null } = {}) {
     let verdict = { ok: false, why: 'no such proposal' };
     await store.outbox.update((ob) => {
       const p = ob.proposals[id];
       if (!p) return;
+      if (typeof unless === 'function' && unless(p)) { verdict = { ok: false, why: 'held: a replace of this proposal is in flight', held: true }; return; }
       verdict = P.canTransition(p.state, to, by);
       if (!verdict.ok) return;
       const t = now();
@@ -4876,15 +5211,18 @@ function create(deps = {}) {
    * typed `send-not-available` plus the adapter's own reason, the proposal
    * lands in `failed`, and the receipt carries that reason verbatim.
    */
-  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null } = {}) {
+  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
     if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal' };
-    if (p0.state !== 'awaiting-approval') return { ok: false, code: 'bad-state', error: `proposal is ${p0.state}, not awaiting approval` };
+    if (p0.state !== 'awaiting-approval') return { ok: false, code: 'bad-state', error: `proposal is ${p0.state}, not awaiting approval`, state: p0.state };
     // r3: approving a send that starts a turn is a wake — the echo first
-    // (nothing moves on a refusal: the proposal still awaits)
+    // (nothing moves on a refusal: the proposal still awaits). 2026-09-27: a
+    // receipt the decider chose to deliver NOW is a wake too — in the same echo
     const wakeN = sendStartsTurn(adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null) ? 1 : 0;
-    const echo = wakeGate(p0.convId, wakeN, { consent });
+    const rch = receiptChoiceFor(p0, deliver);
+    const echo = wakeGate(p0.convId, wakeN + rch.n, { consent });
     if (!echo.ok) return { ...echo, proposal: proposalView(p0) };
+    const receiptChoice = receiptPaceFor(p0, rch, mayWake);
     const edited = typeof text === 'string' && text.trim() && text !== p0.text;
     if (edited) {
       const v = P.validateProposal({ ...p0, text });
@@ -4905,6 +5243,7 @@ function create(deps = {}) {
       const why = !rec ? 'adapter no longer exists' : ccErr ? `convCaps could not be resolved (${ccErr})` : (cc && cc.why) || 'not-offered';
       await transition(id, 'failed', 'recheck', (p) => {
         p.approvedBy = by; if (edited) { p.text = text; p.edited = true; }
+        stampReceiptChoice(p, receiptChoice);
         p.reason = `send-not-available: ${why}`; p.failure = { code: 'send-not-available', why, at: now() };
       });
       const p1 = store.outbox.snapshot().proposals[id];
@@ -4922,7 +5261,7 @@ function create(deps = {}) {
     // r4: a THROW after the grant (the transition's or the send's store
     // write refused) gives the slot back unless the request may have left
     try {
-      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } });
+      const tr = await transition(id, 'sending', by, (p) => { p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } stampReceiptChoice(p, receiptChoice); });
       if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
       await sendNow(id);
@@ -4935,9 +5274,41 @@ function create(deps = {}) {
     return { ok: fresh.state === 'sent', code: fresh.state === 'sent' ? null : fresh.state, error: fresh.state === 'sent' ? null : (fresh.reason || fresh.state), proposal: proposalView(fresh) };
   }
 
-  async function reject(id, { reason = null, by = 'user' } = {}) {
-    const tr = await transition(id, 'rejected', by, (p) => { p.reason = reason ? String(reason).slice(0, 500) : P.REJECTED_DEFAULT_REASON; p.approvedBy = null; });
-    if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why };
+  // ── HOW THE DRAFTER HEARS OF A DECISION IS CHOSEN AT THE DECISION (2026-09-27, owner ruling) ──
+  /** The decider's delivery choice, normalized (`next-turn` unless `wake-now`
+   *  was asked), and how many wakes it would cause (0 | 1 — only an agent's
+   *  draft has somebody to wake). */
+  function receiptChoiceFor(p0, deliver) {
+    const choice = deliver === 'wake-now' ? 'wake-now' : 'next-turn';
+    return { choice, n: choice === 'wake-now' && p0 && p0.draftedBy && p0.draftedBy.kind === 'agent' && p0.draftedBy.id ? 1 : 0 };
+  }
+  /** With sign-in OFF the owner's routes are paced like an agent (`mayWake`,
+   *  the groups engine's persisted ledger, keyed by the drafter): a floored
+   *  wake-now is DOWNGRADED to the next message and says so — the decision
+   *  itself is never refused for it. `{choice, paced}`. */
+  function receiptPaceFor(p0, rch, mayWake) {
+    if (!rch.n || typeof mayWake !== 'function') return { choice: rch.choice, paced: null };
+    let pace = null;
+    try { pace = mayWake(p0.draftedBy.id); } catch (err) { pace = { reason: `the wake pace failed (${(err && err.message) || err})` }; }
+    if (pace === true) return { choice: rch.choice, paced: null };
+    return { choice: 'next-turn', paced: String((pace && pace.reason) || 'rate floor').slice(0, 200) };
+  }
+  function stampReceiptChoice(p, rc) {
+    p.receiptChoice = rc.choice;
+    if (rc.paced) p.receiptChoicePaced = rc.paced;
+  }
+
+  async function reject(id, { reason = null, by = 'user', deliver = null, consent = null, mayWake = null } = {}) {
+    const p00 = store.outbox.snapshot().proposals[id];
+    const rch = receiptChoiceFor(p00, deliver);
+    // a rejection the decider wants the agent to hear NOW is a wake — its echo first (nothing moves on a refusal)
+    if (p00 && p00.state === 'awaiting-approval') {
+      const echo = wakeGate(p00.convId, rch.n, { consent });
+      if (!echo.ok) return { ...echo, proposal: proposalView(p00) };
+    }
+    const receiptChoice = p00 && p00.state === 'awaiting-approval' ? receiptPaceFor(p00, rch, mayWake) : { choice: rch.choice, paced: null };
+    const tr = await transition(id, 'rejected', by, (p) => { p.reason = reason ? String(reason).slice(0, 500) : P.REJECTED_DEFAULT_REASON; p.approvedBy = null; stampReceiptChoice(p, receiptChoice); });
+    if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why, state: (store.outbox.snapshot().proposals[id] || {}).state || null };
     const p = store.outbox.snapshot().proposals[id];
     auditOutbox(p, 'reject', { reason: p.reason });
     await receipt(id);
@@ -4945,6 +5316,179 @@ function create(deps = {}) {
     notifyOutbox([id]); notify(p.convId ? [p.convId] : []);
     return { ok: true, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
   }
+
+  // ── THE AGENT TAKES ITS OWN PROPOSAL BACK (2026-09-27, the owner: "agent
+  // 似乎没有撤回之前制作的 draft 的能力，必须要我手动 reject 是吗？") ──────────
+  // `withdrawn` is a terminal state the PURE table lets ONLY `agent` enter,
+  // ONLY from `proposed` / `awaiting-approval` (never from `sending`, never
+  // from a lost outcome). The drafter is the proposal's own conversation id —
+  // a Task-Group sibling is `not-yours`, never a silent no-op. Withdrawing
+  // retracts the conversation's For-you pointer through the SAME producer
+  // (`pointerSync`) the moment no proposal awaits there, audits one line and
+  // broadcasts ONCE. The receipt is recorded (`status` shows it) and never
+  // handed back to the agent that did it.
+  //
+  // REPLACE = withdraw + a new proposal, ATOMIC: the old one is checked
+  // (yours, still withdrawable) BEFORE anything is created; the new one is
+  // proposed; the old one is withdrawn ONLY if the policy accepted the new one
+  // (created — awaiting approval or sent). A refusal of the new one leaves the
+  // old one standing. While a replace runs, the old id is HELD: an approve /
+  // reject of it waits for the replace to settle (and then finds it withdrawn),
+  // the TTL sweep skips it — no decision can land between the check and the
+  // withdrawal.
+  const proposalHolds = new Map();   // proposal id → the tail of the work queued on it
+  function onProposal(id, fn) {
+    const prev = proposalHolds.get(id) || Promise.resolve();
+    const run = prev.then(() => fn(), () => fn());
+    const tail = run.then(() => {}, () => {}).then(() => { if (proposalHolds.get(id) === tail) proposalHolds.delete(id); });
+    proposalHolds.set(id, tail);
+    return run;
+  }
+  /** Who is asking, and may they see this proposal at all? A caller that
+   *  cannot see its conversation (or its account, for a composed one) and
+   *  shares no Task Group with its drafter gets the uniform not-found (no
+   *  existence oracle); one that can is told `not-yours`. */
+  function withdrawRefusal(p, by, verdict) {
+    if (verdict.code !== 'not-yours') return { ok: false, code: verdict.code, error: verdict.why, state: p.state };
+    const ctx = by || {};
+    const d = p.draftedBy || {};
+    let visible = false;
+    try {
+      if (p.convId) { const { en, rec } = convFor(p.adapterId, p.convId); visible = !!(en && rec && ACL.canSee(reachFor(ctx, rec, en).level)); }
+      else visible = ACL.canSee(ACL.effective(ctx, { key: '', adapterId: p.adapterId }, accountScopeGrants(p.adapterId)).level);
+    } catch { visible = false; }
+    const mine = Array.isArray(ctx.groups) ? ctx.groups : [];
+    const sibling = d.kind === 'agent' && d.id ? groupsOfSession(d.id).some((g) => mine.includes(g)) : false;
+    if (!visible && !sibling) return { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' };
+    return { ok: false, code: 'not-yours', error: verdict.why, state: p.state };
+  }
+  async function withdrawNow(id, by, why, { replacedBy = null, notifyNow = true } = {}) {
+    const p0 = store.outbox.snapshot().proposals[id];
+    if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)' };
+    const v = P.withdrawVerdict(p0, by);
+    if (!v.ok) return withdrawRefusal(p0, by, v);
+    const w = P.withdrawWhy(why);
+    const tr = await transition(id, 'withdrawn', 'agent', (p, t) => {
+      p.reason = P.withdrawReason(w);
+      p.withdrawal = { by: { kind: 'agent', id: by.id, name: by.name || (p.draftedBy && p.draftedBy.name) || null }, why: w, at: t };
+      if (replacedBy) p.replacedBy = replacedBy;
+      p.approvedBy = null;
+    });
+    if (!tr.ok) {
+      // the table refused between the read and the write (a decision landed first)
+      const p1 = store.outbox.snapshot().proposals[id] || p0;
+      return { ok: false, code: 'not-withdrawable', error: `proposal ${id} cannot be withdrawn: ${tr.why}`, state: p1.state };
+    }
+    const p = store.outbox.snapshot().proposals[id];
+    auditOutbox(p, 'withdraw', { why: w, by: by.id, ...(replacedBy ? { replacedBy } : {}) });
+    // the receipt is RECORDED (`status` shows it) — never handed back to the agent that did it
+    const rc = P.receiptFor(p);
+    if (rc) await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receipt = rc; });
+    await pointerSync(p.key);
+    if (notifyNow) { notifyOutbox([id]); notify(p.convId ? [p.convId] : []); }
+    log.log(`[channels] outbox ${id}: withdrawn by its drafter ${by.id}${replacedBy ? ` (replaced by ${replacedBy})` : ''}`);
+    return { ok: true, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
+  }
+  /** WITHDRAW (the agent's own verb). `by` = the caller's principal as the
+   *  route resolved it (`{kind:'agent', id, name, groups}`). */
+  function withdrawProposal({ proposalId, why = null, by = null } = {}) {
+    const id = String(proposalId || '');
+    if (!id) return Promise.resolve({ ok: false, code: 'bad-request', error: 'a proposal id is required' });
+    if (!by || by.kind !== 'agent' || !by.id) return Promise.resolve({ ok: false, code: 'not-yours', error: 'only the agent that proposed it can withdraw a proposal (the user rejects it)' });
+    return onProposal(id, () => withdrawNow(id, by, why));
+  }
+  /**
+   * REPLACE: `make()` proposes the new one (the route's own `propose` /
+   * `compose` call, with its guards); the old one is withdrawn only if that
+   * was accepted. `{ok, proposal, decision, replaced}` — the NEW proposal's
+   * answer, plus the old one's withdrawn view; a refusal of either names it
+   * and leaves the old one as it was.
+   */
+  function replaceProposal({ replaces, why = null, by = null, make } = {}) {
+    const oldId = String(replaces || '');
+    if (!oldId) return Promise.resolve({ ok: false, code: 'bad-request', error: 'replaces needs a proposal id' });
+    if (typeof make !== 'function') return Promise.resolve({ ok: false, code: 'bad-request', error: 'nothing to replace it with' });
+    if (!by || by.kind !== 'agent' || !by.id) return Promise.resolve({ ok: false, code: 'not-yours', error: 'only the agent that proposed it can replace a proposal' });
+    return onProposal(oldId, async () => {
+      const p0 = store.outbox.snapshot().proposals[oldId];
+      // verify r3: the SAME sentence `withdrawRefusal` gives a stranger for an existing draft — a different one told an outsider whether the id exists
+      if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal (not found, or not yours)', replaces: oldId };
+      const v = P.withdrawVerdict(p0, by);
+      if (!v.ok) return { ...withdrawRefusal(p0, by, v), replaces: oldId };
+      const r = await make();
+      if (!r || !r.ok || !r.proposal) return { ...(r || { ok: false, code: 'error', error: 'the new proposal was not created' }), replaces: oldId, replaced: null, note: `proposal ${oldId} was left as it was` };
+      const newId = r.proposal.id;
+      await store.outbox.update((ob) => { if (ob.proposals[newId]) ob.proposals[newId].replaces = oldId; });
+      const w = await withdrawNow(oldId, by, why || `replaced by ${newId}`, { replacedBy: newId, notifyNow: false });
+      notifyOutbox([newId, oldId]);
+      notify([...new Set([p0.convId, r.proposal.convId].filter(Boolean))]);
+      const fresh = store.outbox.snapshot().proposals[newId];
+      return { ...r, proposal: proposalView(fresh), replaces: oldId, replaced: w.ok ? w.proposal : null, ...(w.ok ? {} : { replaceError: w.error, replaceCode: w.code }) };
+    });
+  }
+
+  // THE RECEIPT'S FATE (2026-09-27, the owner: "我在界面里完全看不到有消息在
+  // queue"): a receipt the ladder STASHED rides the drafting agent's next
+  // message; the ladder tells us when that stash drains (or hands an entry
+  // back), and the card says "Handed to <agent> at …" instead of "Waiting".
+  // Verify r2 (2026-09-27): THREE events, the latest wins — `drained` (read
+  // with the next message: `receiptDrainedAt`, `receiptDrainedHow:'drained'` —
+  // a real drain after a boot reconcile's guess records its time), `stashed`
+  // (held again: both cleared), `evicted` (the cap dropped it UNREAD:
+  // `receiptEvictedAt` + `receiptEvictedHeld`; the card says "not delivered —
+  // the queue was full", never "waiting", never "handed").
+  async function noteReceiptStash(ev, cid, entries, extra = {}) {
+    const ids = (entries || []).filter((e) => e && e.source === 'channel-receipt' && e.ref).map((e) => String(e.ref));
+    if (!ids.length || stopped) return;
+    const t = now();
+    const changed = [];
+    await store.outbox.update((ob) => {
+      for (const id of ids) {
+        const q = ob.proposals[id];
+        if (!q || !q.draftedBy || String(q.draftedBy.id) !== String(cid)) continue;
+        if (ev === 'drained') { q.receiptDrainedAt = t; q.receiptDrainedHow = 'drained'; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; changed.push(id); }
+        else if (ev === 'stashed' && (q.receiptDrainedAt || q.receiptEvictedAt)) { q.receiptDrainedAt = null; q.receiptDrainedHow = null; q.receiptEvictedAt = null; q.receiptEvictedHeld = null; changed.push(id); }
+        else if (ev === 'evicted') { q.receiptEvictedAt = t; q.receiptEvictedHeld = Number(extra && extra.held) || null; q.receiptDrainedAt = null; q.receiptDrainedHow = null; changed.push(id); }
+      }
+    });
+    if (changed.length) notifyOutbox(changed);
+    if (ev === 'evicted' && changed.length) log.warn(`[channels] receipt(s) for ${changed.join(', ').slice(0, 300)} fell off ${cid}'s stash cap UNREAD (${Number(extra && extra.held) || '?'} held) — the card says so; the receipt stays on the proposal`);
+  }
+  /**
+   * A STASHED RECEIPT WHOSE ENTRY IS GONE WAS HANDED (2026-09-27 verify, the
+   * owner's three receipts of that day): a receipt stashed BEFORE the stash
+   * carried a `ref` (or drained while nobody listened) has no `drained`
+   * event to flip its fate — its card said "Waiting for <agent>'s next
+   * message" for good, though the agent read it with its next prompt. At
+   * boot, every stashed-and-not-drained receipt is looked for in its
+   * drafter's stash (by `ref`, or — a legacy entry — by the proposal id its
+   * text names); one that is no longer there was drained by an earlier
+   * message, at a time nobody recorded (`receiptDrainedHow: 'reconciled'`,
+   * the card says "with an earlier message"). Read-only on the stash; the
+   * ladder's `stashPeek` is optional (a ladder without it: nothing changes).
+   */
+  async function reconcileReceiptFates() {
+    if (!deliver || typeof deliver.stashPeek !== 'function' || stopped) return [];
+    const ob = store.outbox.snapshot();
+    const gone = [];
+    for (const q of Object.values(ob.proposals || {})) {
+      const d = q.receiptDelivery;
+      if (!d || !d.stashed || q.receiptDrainedAt || q.receiptEvictedAt || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;   // an eviction was recorded when it happened: never "handed"
+      let held = null;
+      try { held = deliver.stashPeek(q.draftedBy.id) || []; } catch { continue; }   // an unreadable stash decides nothing
+      const still = held.some((e) => e && (String(e.ref || '') === String(q.id) || (!e.ref && e.source === 'channel-receipt' && String(e.text || '').includes(`proposal ${q.id}:`))));
+      if (!still) gone.push(q.id);
+    }
+    if (!gone.length) return [];
+    const t = now();
+    await store.outbox.update((ob2) => { for (const id of gone) { const q = ob2.proposals[id]; if (q && !q.receiptDrainedAt) { q.receiptDrainedAt = t; q.receiptDrainedHow = 'reconciled'; } } });
+    notifyOutbox(gone);
+    log.log(`[channels] ${gone.length} stashed receipt(s) no longer in their drafter's stash — read as handed with an earlier message: ${gone.join(', ').slice(0, 400)}`);
+    return gone;
+  }
+  let offStash = deliver && typeof deliver.onStash === 'function'
+    ? deliver.onStash((ev, cid, entries, extra) => { noteReceiptStash(ev, cid, entries, extra).catch((err) => log.warn(`[channels] receipt fate update failed: ${(err && err.message) || err}`)); })
+    : null;
 
   /**
    * THE SEND (§9.4). An attempt line goes to the audit log BEFORE the request,
@@ -5144,10 +5688,56 @@ function create(deps = {}) {
   }
 
   /**
+   * THE BOOT SWEEP OF A REPLACE CUT IN HALF (verify r2, 2026-09-27): a
+   * replace stamps `replaces` on the NEW draft and then withdraws the old one
+   * in a second write — a process that dies between the two leaves TWO
+   * approvable copies of one message (the design's named worst case: a
+   * duplicate in somebody else's room). At boot, every draft whose `replaces`
+   * names a proposal its own drafter may still withdraw is finished: the old
+   * one goes `withdrawn` (`replacedBy` the new), its pointer retracted, the
+   * agent's receipt recorded and never handed back. A decision that landed
+   * on the old one meanwhile (the table refuses) leaves it as it is.
+   */
+  async function sweepReplaces() {
+    const ob = store.outbox.snapshot();
+    // verify r3: EVERY hold is taken SYNCHRONOUSLY, before the first await — a half replace whose old draft is
+    // also due (24 h old at the boot) was expired by the TTL sweep while this loop awaited an earlier one, and
+    // the agent got an "EXPIRED unapproved" receipt for a draft it had replaced (2 of 4 in the construction)
+    const runs = [];
+    for (const q of Object.values(ob.proposals || {})) {
+      if (!q || !q.replaces || !q.draftedBy || q.draftedBy.kind !== 'agent' || !q.draftedBy.id) continue;
+      const old = ob.proposals[q.replaces];
+      if (!old || old.state === 'withdrawn') continue;
+      const by = { kind: 'agent', id: q.draftedBy.id, name: q.draftedBy.name || null };
+      if (!P.withdrawVerdict(old, by).ok) continue;
+      runs.push(onProposal(old.id, () => withdrawNow(old.id, by, `replaced by ${q.id}`, { replacedBy: q.id })).then((w) => {
+        if (w && w.ok) { log.warn(`[channels] outbox ${old.id}: a replace by ${q.id} was cut in half by the previous process — finished at boot (withdrawn)`); return 1; }
+        return 0;
+      }, (err) => { log.warn(`[channels] outbox ${old.id}: the boot replace sweep could not finish it: ${(err && err.message) || err}`); return 0; }));
+    }
+    let n = 0;
+    for (const r of await Promise.all(runs)) n += r;
+    return n;
+  }
+
+  /**
    * THE RECEIPT (§9.3). Built by the PURE module, stored on the proposal,
-   * and handed to the drafting AGENT through the ladder with `noWake` (it
-   * rides the next turn) unless the assignment opted in to a wake (decision
-   * 8). A refusal is stashed through the ladder's own durable stash.
+   * and handed to the drafting AGENT through the ladder. A refusal is stashed
+   * through the ladder's own durable stash (with the proposal id as its
+   * `ref`, so the card learns when the agent's next message drained it).
+   *
+   * HOW IT IS DELIVERED IS THE DECIDER'S CHOICE, AT THE ACTION (2026-09-27,
+   * the owner: "收件箱里的 approve 动作需要在账号-level 的通知配置里控制行为有点
+   * 反直觉"): the Approve / Reject split button records `receiptChoice` on the
+   * proposal — `next-turn` (free: it rides the agent's next message, the
+   * default) or `wake-now` (a billed turn through THE ONE DOOR, spendReason
+   * `channel-receipt`, the spend ceiling inside the ladder). PURE
+   * `receiptDeliveryVerdict` decides: ONE wake per proposal (the row lives on
+   * the proposal, reserved atomically before the ladder), never for a session
+   * that is not live (the stash keeps it — "gone"), never for a proposal the
+   * agent withdrew itself. The per-watcher `receiptWake` opt-in (decision 8)
+   * is DEPRECATED: the engine no longer reads it (a stored `true` is ignored;
+   * `start()` logs how many watchers still carry it).
    */
   async function receipt(id) {
     const p = store.outbox.snapshot().proposals[id];
@@ -5158,78 +5748,62 @@ function create(deps = {}) {
     if (!p.draftedBy || p.draftedBy.kind !== 'agent' || !p.draftedBy.id) return rc;
     const cid = p.draftedBy.id;
     const cf = p.convId ? convFor(p.adapterId, p.convId) : { en: null, rec: null };
-    const en = cf.en;
     const rec = cf.rec || adapterRecords().adapters.find((r) => r.id === p.adapterId) || null;
-    // R4: the drafter's OWN watcher in effect here opted in — the drafter
-    // itself or a group it belongs to (the drafter's groups are the live
-    // session's; the pre-R4 path passed none, so a group's opt-in never fired)
-    const drafterCtx = { kind: 'agent', id: cid, groups: groupsOfSession(cid) };
-    const optInOf = (eff) => (eff ? eff.watchers.find((x) => x.watcher.receiptWake === true && F.rowNames(x.watcher, drafterCtx)) || null : null);
-    // R4 verify r2 (2026-09-27, money): A RECEIPT WAKE IS A BILLED TURN AND
-    // COUNTS AGAINST THE WATCHER'S DAILY CAP LIKE ANY OTHER. An agent that
-    // drafted five proposals (free) and had them rejected / expired got five
-    // billed receipt wakes under a cap of 2, none on its ledger, and the next
-    // fresh record made a sixth. Over the cap the receipt still reaches the
-    // drafter — with `noWake` (it rides the next turn), refused by name on the
-    // watcher's ledger — and a delivered receipt wake is written to the ledger.
-    // R4 verify r3 (money): THE RECEIPT QUEUES ON THE WATCHER'S OWN CHAINS
-    // (the conversation's, then its scope's — the order every wake takes), and
-    // reads the ledger INSIDE that section. Read before the ladder's await and
-    // written after it, five CONCURRENT rejects (five HTTP requests, the
-    // owner clearing an outbox) each passed the same stale ledger: five billed
-    // receipt wakes under a cap of 2, and a wake in flight beside a receipt
-    // made two billed turns under a cap of 1 — the class r2 closed for wakes.
-    // R4 verify r4: the opt-in that names the chain is READ INSIDE the
-    // conversation's section (a watcher opting in between an outside read and
-    // the section ran the receipt's cap read outside every chain); a receipt
-    // nobody opted in to runs inside the conversation's section alone.
+    // the conversation's chain (a composed message has none yet: its own)
     const key = p.convId ? `${p.adapterId}/${p.convId}` : null;
-    const scopeOf = () => { const en2 = key ? store.index.peek(key) : null; const eff2 = en2 ? effectiveFor(en2) : (p.compose && rec ? effectiveForAccount(rec.id) : null); const o = optInOf(eff2); return o && rec ? scopeKeyOf(o, rec) : null; };
-    return billedWake({ conv: key, scopeOf }, () => receiptNow(id, p, rc, cid, rec, key, optInOf));
+    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key));
   }
-  /** The receipt's delivery — paced by the opted-in watcher's ledger read
-   *  HERE (inside its serial section), the ledger written after the ladder. */
-  async function receiptNow(id, p, rc, cid, rec, key, optInOf) {
+  /** The receipt's delivery, inside its serial section: the verdict, the ONE
+   *  wake row reserved on the proposal before the ladder, the outcome after. */
+  async function receiptNow(id, p, rc, cid, rec, key) {
     const en = key ? store.index.peek(key) : null;
-    const effR = en ? effectiveFor(en) : (p.compose && rec ? effectiveForAccount(rec.id) : null);
-    const optIn = optInOf(effR);
     const tR = now();
-    const pace = optIn ? F.paceVerdict((optIn.watcher.stats && optIn.watcher.stats.wakes) || [], tR, F.digestCap(optIn.watcher)) : { ok: true };
-    let wake = !!optIn && pace.ok && !stopped;
-    // THE ROW BEFORE THE BILL (see reserveWake): a receipt wake whose row cannot be written rides the next turn instead
-    const wk0 = wake ? { at: tR, n: 1, cid, ok: true, lane: 'reserved', why: null, refused: null, whys: [], digest: false, grain: optIn.source, p: pkOf(optIn.watcher.principal), receipt: id } : null;
-    const resId = wake ? await reserveWake(rec, en ? p.convId : null, optIn, wk0) : null;
-    if (wake && !resId) { wake = false; log.log(`[channels] receipt ${id} → ${cid}: the ledger could not take the wake's row — delivered without a wake`); }
-    if (optIn && !pace.ok) {
-      await store.index.update((ix) => { const own = watcherRef(ix, rec, en ? store.index.entry(p.adapterId, p.convId, { create: false }) : null, optIn); if (own) own.stats.lastRefusal = { at: tR, why: `receipt: ${String(pace.why || '').slice(0, 180)}` }; });
-      log.log(`[channels] receipt ${id} → ${cid}: the watcher's cap holds — ${pace.why}; delivered without a wake`);
+    let live = null;
+    if (agentsWanted) { try { live = (liveSessions() || []).some((x) => x && x.cid === cid); } catch { live = null; } }
+    const cur = store.outbox.snapshot().proposals[id] || p;
+    let verdict = P.receiptDeliveryVerdict(cur.receiptChoice, cur, { live });
+    let wake = verdict.deliver === 'wake-now' && !stopped;
+    // THE ROW BEFORE THE BILL: the proposal takes its ONE wake row inside the
+    // outbox's serialized door — a second receipt of it finds the row and rides
+    // the next turn; a row that cannot be written is no wake
+    if (wake) {
+      // verify r3: `got` is the WRITE's answer, not the callback's — the callback ran on the live store and then
+      // the file write threw (ENOSPC), and the wake went out under a log line saying "delivered without a wake"
+      let took = false, got = false;
+      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; } }); got = took; } catch (err) { log.warn(`[channels] receipt ${id}: the proposal could not take its wake row (${took ? 'the write failed after the row was taken in memory' : 'the store refused'}) — delivered without a wake: ${(err && err.message) || err}`); }
+      if (!got) { wake = false; verdict = { deliver: 'next-turn', why: took ? 'row-unwritten' : 'already-woken' }; }
     }
-    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text });
+    const text = P.renderReceiptBlock(rc, { adapterLabel: rec ? (rec.label || rec.id) : p.adapterId, title: p.title, text: p.text, proposed: p.originalText });
     const fromName = 'Channels · Outbox';
     const cardText = `Receipt: proposal ${p.id} ${rc.status}${rc.reason ? ` — ${String(rc.reason).slice(0, 160)}` : ''}`;
-    let r = null, stashed = false;
+    let r = null, stashed = false, stashErr = null;
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     else {
       try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
-        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text }); stashed = true; } catch (err) { log.warn(`[channels] receipt stash failed: ${(err && err.message) || err}`); }
+        // verify r4: a stash whose disk write failed THROWS (the entry is not stored) — the card says that, never "waiting"
+        try { deliver.stashFor(cid, { source: 'channel-receipt', kind: 'notification', fromName, text, ref: id }); stashed = true; } catch (err) { stashErr = String((err && err.message) || err).slice(0, 200); log.warn(`[channels] receipt ${id} stash failed — the receipt stays on the proposal, not stored for the next turn: ${stashErr}`); }
       }
     }
-    const delivery = { at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String((r && r.reason) || 'refused').slice(0, 200) };
-    await store.outbox.update((ob) => { if (ob.proposals[id]) ob.proposals[id].receiptDelivery = delivery; });
-    if (wake) {
-      // the receipt WOKE the drafter (or was refused): the reserved row on the opted-in watcher's ledger becomes the outcome (and the conversation's history takes it when it woke), like every wake
-      const wk = { ...wk0, ok: !!delivery.ok, lane: delivery.lane, why: delivery.why, refused: delivery.refused };
-      try { await store.index.update((ix) => {
-        const e2 = en ? store.index.entry(p.adapterId, p.convId, { create: false }) : null;
-        if (e2 && delivery.ok) { healP2(e2); e2.stats.wakes = F.pruneLedger([...e2.stats.wakes, { ...wk, id: resId }], tR); }
-        const own = watcherRef(ix, rec, e2, optIn);
-        if (own) finalizeRow(own, resId, wk, tR);
-      }); } catch (err) { log.warn(`[channels] receipt ${id}: the ledger could not take the wake's outcome — the reservation stays counted: ${(err && err.message) || err}`); }
-      if (en) notify([p.convId]);
+    // a stashed receipt for a drafter whose session is not live is KEPT for when it comes back — the card says so
+    const gone = stashed && live === false;
+    const delivery = {
+      at: now(), ok: !!(r && r.ok), lane: r && r.ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), stashed, refused: stashErr ? 'stash-failed' : (r && r.refused) || null, woke: wake, why: r && r.ok ? null : String(stashErr ? `the receipt could not be stored: ${stashErr}` : (r && r.reason) || 'refused').slice(0, 200),
+      choice: cur.receiptChoice || 'next-turn', verdict: verdict.why || null, ...(gone ? { gone: true } : {}),
+    };
+    await store.outbox.update((ob) => {
+      const q = ob.proposals[id];
+      if (!q) return;
+      q.receiptDelivery = delivery;
+      if (wake && q.receiptWake) q.receiptWake = { ...q.receiptWake, reserved: false, ok: delivery.ok, lane: delivery.lane, refused: delivery.refused, why: delivery.why };
+    });
+    if (wake && delivery.ok && en) {
+      // the conversation's wake history takes the receipt wake (the panel's count), like every wake
+      try { await store.index.update(() => { const e2 = store.index.entry(p.adapterId, p.convId, { create: false }); if (e2) { healP2(e2); e2.stats.wakes = F.pruneLedger([...e2.stats.wakes, { at: tR, n: 1, cid, ok: true, lane: delivery.lane, why: null, refused: null, whys: [], digest: false, grain: 'receipt', receipt: id, id: `${tR}-receipt-${id}` }], tR); } }); } catch (err) { log.warn(`[channels] receipt ${id}: the conversation's wake history could not take the row: ${(err && err.message) || err}`); }
+      notify([p.convId]);
     }
-    log.log(`[channels] receipt ${id} → ${cid}: ${delivery.ok ? `delivered via ${delivery.lane}` : (stashed ? 'stashed for the next turn' : 'not delivered')}${delivery.why ? ` (${delivery.why})` : ''}`);
+    log.log(`[channels] receipt ${id} → ${cid}: ${delivery.ok ? `delivered via ${delivery.lane}${wake ? ' (woke it, the decider\'s choice)' : ''}` : (stashed ? `stashed for the next turn${gone ? ' (its session is not live)' : ''}` : 'not delivered')}${delivery.why ? ` (${delivery.why})` : ''}`);
     return rc;
   }
 
@@ -5237,9 +5811,10 @@ function create(deps = {}) {
    *  TTL expires, with a receipt. Cheap; runs from the tick once a minute. */
   async function expireSweep() {
     const t = now();
-    const due = proposalsFor().filter((p) => P.expiryVerdict(p, t).expired);
+    const due = proposalsFor().filter((p) => P.expiryVerdict(p, t).expired && !proposalHolds.has(p.id));   // a proposal a replace holds is judged next minute
     for (const p of due) {
-      const tr = await transition(p.id, 'expired', 'ttl', (q) => { q.reason = 'expired: not approved within 24 h'; });
+      // …and asked AGAIN at apply time (verify: a hold taken after this list was made)
+      const tr = await transition(p.id, 'expired', 'ttl', (q) => { q.reason = 'expired: not approved within 24 h'; }, { unless: () => proposalHolds.has(p.id) });
       if (!tr.ok) continue;
       auditOutbox(store.outbox.snapshot().proposals[p.id], 'expire');
       await receipt(p.id);
@@ -5459,7 +6034,8 @@ function create(deps = {}) {
     // R3 (§23): the first screen lists a conversation an agent just read — stamped AFTER the reach check
     // (a hidden read never stamps: the same uniform not-found, no trace), off the answer's path
     stampAgentRead(en.key, ctx, upTo);
-    return { ok: true, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId, polledAt: (en.lane && en.lane.lastPollAt) || null }, records };
+    // §25: an agent reads `text` — the render tree is for the eye only (never a second copy of the body in its context)
+    return { ok: true, conversation: { key: en.key, adapterId, id: convId, title: en.title || convId, polledAt: (en.lane && en.lane.lastPollAt) || null }, records: records.map(withoutBlocks) };
   }
   /**
    * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
@@ -6165,22 +6741,42 @@ function create(deps = {}) {
     for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, legacyConvAssignment(en));
     return out;
   }
+  /** 2026-09-27: the per-watcher `receiptWake` opt-in is DEPRECATED (the
+   *  delivery of a receipt is chosen at the Approve / Reject action) — the
+   *  watchers still carrying `true`, counted for the ONE boot line. */
+  function deprecatedReceiptWakes() {
+    const out = [];
+    const check = (grain, id, holder, legacy) => {
+      for (const w of F.grainOf({ access: holder && holder.access, watchers: holder && holder.watchers }, legacy).watchers) if (w && w.receiptWake === true) out.push({ grain, id, principal: pkOf(w.principal) });
+    };
+    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
+    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
+    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, legacyConvAssignment(en));
+    return out;
+  }
   function start() {
     if (timer || stopped) return;
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
     healSelfAt().catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
+    try { const d = deprecatedReceiptWakes(); if (d.length) log.log(`[channels] ${d.length} watcher(s) still carry receiptWake:true — IGNORED since 2026-09-27 (a receipt's delivery is chosen at the Approve / Reject action: "tell it with its next message" or "wake it now"): ${d.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot receiptWake census failed: ${(err && err.message) || err}`); }
     try { const orphans = orphanWatchers(); if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain — inert until access is granted there: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
     try { const z = capZeroDigests(); if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
+    reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
+    // inc-muk9jj0j-rel3: a verdict judged before the account's LAST credential change (a re-authorization that landed
+    // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it
+    for (const rec of adapterRecords().adapters) rejudgeConvCaps(rec, 'boot').catch(() => {});
     // P4: a proposal the previous process died on mid-send is `unknown`, not
     // "not sent" — and never re-sent.
     sweepSending().catch((err) => log.warn(`[channels] boot outbox sweep failed: ${(err && err.message) || err}`));
+    sweepReplaces().catch((err) => log.warn(`[channels] boot replace sweep failed: ${(err && err.message) || err}`));   // verify r2: a replace the previous process died inside
   }
   function stop() {
     stopped = true;
     if (offIntegrations) { try { offIntegrations(); } catch {} offIntegrations = null; }
+    if (offStash) { try { offStash(); } catch {} offStash = null; }   // 2026-09-27: the receipt-fate listener
     if (timer) { clearInterval(timer); timer = null; }
     // P2: a window that never fired keeps its hits PENDING on the index (they
     // were persisted before the timer existed), so the next boot delivers them.
@@ -6223,7 +6819,7 @@ function create(deps = {}) {
     // r4 (design-integrations-per-account): the account's own client, the
     // transient consent, duplicate / remove with its reference check, the
     // owner-only config (D3), the in-place edits and the legacy own → custom copy
-    clientFor, startOAuth, oauthStatus, oauthCallback, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig,
+    clientFor, startOAuth, oauthStatus, oauthCallback, duplicate, referencesOf, remove, setLabel, setCustomSecret, adapterConfig, mountClientsFor,
     inlineLegacyClient, inlineLegacyClients, DUPLICATE_FIELDS, DUPLICATE_NEVER,
     // a fresh record of a connectable type, never stored — the suites' baseline for "a copy differs only where DUPLICATE_FIELDS says"
     blankRecord: (kind) => newRecord(connectableFor(kind), { id: kind }),
@@ -6235,9 +6831,11 @@ function create(deps = {}) {
     // P2: assign / filter / wake
     setAssignment, setFilter, estimateFilter, settleWakes, coalesceSeconds,
     // P3: outbox / policy / reach + the agent-facing reads (§9, §8, §11)
-    propose, approve, reject, outboxView, expireSweep, pointerSync, receipt,
+    propose, approve: (id, o) => onProposal(id, () => approve(id, o)), reject: (id, o) => onProposal(id, () => reject(id, o)), outboxView, expireSweep, pointerSync, receipt,
+    // 2026-09-27: the agent withdraws / replaces its OWN proposal (a decision of the user waits for a replace in flight)
+    withdrawProposal, replaceProposal, reconcileReceiptFates,
     // P4: reconcile / the boot sweep / the per-channel honesty switch
-    reconcile, sweepSending, setSenderHonesty, honestyLineFor,
+    reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     listFor, readFor, statusFor,
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
@@ -6254,4 +6852,4 @@ function create(deps = {}) {
   };
 }
 
-module.exports = { create, SETTING_BOUNDS, DUPLICATE_FIELDS, DUPLICATE_NEVER, CUSTOM_KEY, PENDING_FLOW_TTL_MS, REQUESTS_PER_MINUTE, DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS, ATTACHMENT_MAX_BYTES, RECONCILE_SECONDS, BACKOFF_MS, PAGE, MAX_PAGES, FAILURES_BEFORE_LOUD, REAL_ADAPTERS, KEY_FILE, INBOX_KEY, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PUSH_EVENT_DEDUP_MAX, PENDING_CAP, ESTIMATE_CAP, COALESCE_DEFAULT_SECONDS, COALESCE_MAX_SECONDS, BOOT_PENDING_DELAY_MS };
+module.exports = { create, previewText, SETTING_BOUNDS, DUPLICATE_FIELDS, DUPLICATE_NEVER, CUSTOM_KEY, PENDING_FLOW_TTL_MS, REQUESTS_PER_MINUTE, DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS, ATTACHMENT_MAX_BYTES, RECONCILE_SECONDS, BACKOFF_MS, PAGE, MAX_PAGES, FAILURES_BEFORE_LOUD, REAL_ADAPTERS, KEY_FILE, INBOX_KEY, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PUSH_EVENT_DEDUP_MAX, PENDING_CAP, ESTIMATE_CAP, COALESCE_DEFAULT_SECONDS, COALESCE_MAX_SECONDS, BOOT_PENDING_DELAY_MS };

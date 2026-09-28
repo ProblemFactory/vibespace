@@ -178,7 +178,8 @@ function originHeaderFor(port) { return `http://127.0.0.1:${Number(port) || 0}`;
  */
 function streamTargetFor({ browserKey, set = null, profileRef = '', envPairs = null, profiles = [], childPairs = null } = {}) {
   const bk = String(browserKey || '');
-  if (!bk) return { ok: false, code: 'no-key', error: 'this session has no browser key (browser isolation is off, or it predates the feature) — nothing to view', handles: [] };
+  // B-f7ab: a view never starts a browser (nor mints a key) — the agent's first browser command gets this session one
+  if (!bk) return { ok: false, code: 'no-key', error: 'this session has no browser yet — its first browser command gets one; nothing to view', handles: [] };
   // naive study 2 (finding 4): a sub-agent's ephemeral browser — only with ITS pairs (the keeper's, handed by the recorder's tap)
   if (String(profileRef || '').startsWith(CHILD_REF_PREFIX)) {
     const ck = childKeyOfRef(profileRef, bk);

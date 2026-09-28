@@ -140,8 +140,40 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
 
   function notify() {
     try { broadcast?.({ type: 'desktop-apps-updated', apps: listApps() }); } catch (e) { log.warn?.(`[desktop] broadcast failed: ${e.message}`); }
+    signalFileChanges();
     // x5: a session that ended takes its viewer set with it — the bridge's refresh closes the sockets it still holds open
     for (const id of [...viewerSets.keys()]) { const r = recOf(id); if (!r || !M.isLiveState(r.state)) { clearGrace(viewerSets.get(id)); viewerSets.delete(id); titleReads.delete(id); publishViewers(id); } }
+  }
+  /**
+   * §7.9 — THE AFTER-EDIT SIGNAL (docs/design-desktop-apps.zh.md §7.9): a document's app ENDED and the machine that
+   * holds the file recorded it changed (src/desktop-serve.js noteFileEnd: its mtime at the teardown vs at launch) ⇒
+   * ONE `file-changed {host, path, mtime}` to every client — `host` null for this machine, the paired machine's id
+   * otherwise (the file explorer's / the code editor's `host`); the code editor's freshness check honours it (a clean
+   * editor reloads, a dirty one shows its disk chip) and any viewer of that file may. Once per record: stamped
+   * `fileSignalledAt` on the local record (saved with the machine's next commit) or on the hub's row of a paired
+   * machine's record, so a restart or a re-broadcast never repeats it. An unchanged file says nothing.
+   */
+  function signalFileChanges() {
+    const out = [];
+    let local = false;
+    for (const rec of Object.values(store.apps)) {
+      if (!rec || !rec.file || rec.fileChanged !== true || rec.fileSignalledAt || M.isLiveState(rec.state)) continue;
+      rec.fileSignalledAt = now(); local = true; out.push({ host: null, rec });
+    }
+    for (const [hid, h] of Object.entries(remote.hosts || {})) {
+      for (const rec of Object.values((h && h.apps) || {})) {
+        if (!rec || !rec.file || rec.fileChanged !== true || M.isLiveState(rec.state)) continue;
+        const hub = hubRow(hid, rec.id);
+        if (hub.fileSignalledAt) continue;
+        hub.fileSignalledAt = now(); remoteDirty = true; out.push({ host: hid, rec });
+      }
+    }
+    for (const { host, rec } of out) {
+      try { broadcast?.({ type: 'file-changed', host, path: rec.file, mtime: Number.isFinite(rec.fileMtimeAtEnd) ? rec.fileMtimeAtEnd : null, by: 'desktop-app', appId: rec.id, label: rec.label || null }); }
+      catch (e) { log.warn?.(`[desktop] file-changed broadcast failed: ${e.message}`); }
+      log.log?.(`[desktop] ${rec.id}: ${rec.label || rec.file} changed on ${host || 'this machine'} while it was open — told every client (file-changed)`);
+    }
+    if (local) machine.markDirty();
   }
   /** The stored record of an id on ANY machine (the local store first) — the remote one as the hub last saw it. */
   function recOf(id) { return store.apps[id] || (remoteOf(id) || {}).rec || null; }
@@ -343,7 +375,13 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   async function launch(body, opts = {}) {
     const host = opts && opts.host;
     if (isLocalHost(host)) { const o = { ...opts }; delete o.host; return machine.launch(body, o); }
-    const r = await acc().call(host, 'launch', { body, settings: settingsForOp() });
+    let r;
+    try { r = await acc().call(host, 'launch', { body, settings: settingsForOp() }); }
+    catch (e) {
+      // §7.9: an agent that predates the LibreOffice rows answers a document's launch "unknown appId" — say what it IS
+      if (e && e.code === 'bad-request' && body && body.file != null && /unknown appId/.test(String(e.message))) throw namedError('host_needs_daemon', `the VibeSpace agent on ${labelOf(host)} predates opening files in LibreOffice — reconnect the machine to upgrade it`);
+      throw e;
+    }
     ingestOne(host, r.app);
     followUntilSettled(host, r.app.id);
     return remoteGet(r.app.id) || r.app;

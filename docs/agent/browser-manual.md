@@ -387,6 +387,12 @@ default with `*`.
   and your verbs drive the machine's one browser: `close --all` is refused
   `shared_browser` because it would close every agent's browser, and another
   agent may be in the tab you see.
+* **A session that started before per-session browsers** (or while the user had
+  them off) gets its browser at its FIRST command: stderr says
+  `[browser_key_minted]` once, and nothing needs restarting. When it cannot
+  (`no_browser_key`), the sentence names why and what the user does — usually
+  "restart this session (Terminate → Resume) to get a browser key"; relay it,
+  never retry in a loop, and never reach for another CLI name.
 * **There are two limits.** Your conversation's own (3 by default, your
   helpers included; the user changes it from the count in the Agent browser
   window or in Session Properties): past it `use` and your first page verb

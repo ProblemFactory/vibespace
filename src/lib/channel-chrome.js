@@ -6,7 +6,14 @@
 // only innerHTML this feature writes, and it is the library's own static
 // string — never a string from the wire), `el()` = a textContent element,
 // `btn()` = a house `mounts-btn` (`mounts-btn-primary` = the ONE primary).
+// channel-polish (2026-09-27): `avatar()` = the author's / conversation's
+// circle (initials on a theme hue — src/lib/channel-avatar.js decides the
+// text and the hue; the element is PAINT, aria-hidden, its name is in the
+// row's text) and `fileIcon()` = the file-type glyph for a name (the file
+// registry's own static SVG — the name only picks the key).
 import { UI_ICONS } from './icons.js';
+import { getFileIcon } from './file-types.js';
+import { avatarOf } from './channel-avatar.js';
 
 /** An icon from the library, sized in px (the SVG is 1em). */
 export function icon(name, px = 13, cls = '') {
@@ -15,6 +22,41 @@ export function icon(name, px = 13, cls = '') {
   s.style.fontSize = px + 'px';
   s.innerHTML = UI_ICONS[name] || '';
   return s;
+}
+
+/** The file-type glyph for a file NAME (pdf / sheet / archive / … — the
+ *  registry's static SVG, never a string from the wire), sized in px. */
+export function fileIcon(fileName, px = 16, cls = '') {
+  const s = document.createElement('span');
+  s.className = 'chan-ic' + (cls ? ' ' + cls : '');
+  s.style.fontSize = px + 'px';
+  s.innerHTML = getFileIcon(String(fileName || '')) || UI_ICONS.attachment || '';
+  return s;
+}
+
+/** AN AVATAR (paint — aria-hidden; the name it abbreviates is in the row's
+ *  own text): the initials of `name` on the hue of `key` (the accent for
+ *  `self`), or a library `glyph` on that hue (a mail thread, an agent group,
+ *  an account's kind). `px` = the diameter. */
+export function avatar({ name = '', key = '', self = false, glyph = null } = {}, px = null, cls = '') {
+  const a = avatarOf({ name, key, self });
+  const s = document.createElement('span');
+  s.className = 'chan-av' + (a.self ? ' chan-av-self' : '') + (glyph ? ' chan-av-glyph' : '') + (cls ? ' ' + cls : '');
+  if (a.hue !== null) s.dataset.hue = String(a.hue);
+  s.setAttribute('aria-hidden', 'true');
+  // the diameter: a fixed `px`, else the stylesheet's (`--av-size` by surface and width)
+  if (px) s.style.setProperty('--av-size', px + 'px');
+  if (glyph) { const g = icon(glyph, 13); g.style.fontSize = ''; s.appendChild(g); }
+  else s.textContent = a.text;
+  return s;
+}
+
+/** A CONVERSATION's avatar (the window's bar, the panel's first-screen row):
+ *  an agent group wears the people glyph, a mail thread / mailbox the mail
+ *  glyph, anything else the title's initials — on the hue of the key. */
+export function convAvatar({ key = '', title = '', kind = '', group = false } = {}, px = null, cls = '') {
+  const glyph = group ? 'users' : (kind === 'thread' || kind === 'mailbox') ? 'mail' : null;
+  return avatar({ name: title, key, glyph }, px, cls);
 }
 
 /** A textContent element (XSS law: every string on these surfaces is vendor-

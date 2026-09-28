@@ -78,7 +78,11 @@ console.log('— ① the notice slot is a QUEUE of typed notices (src/session-st
   for (let i = 0; i < 12; i++) st.pushNotice(KEY, { kind: 'browser-profile', was: 'p' + i, now: 'p' + (i + 1), by: 'user', handles: [] });
   const q = st.pendingNotices(KEY);
   ok(q.length === 8 && q[0].was === 'p4' && q[7].was === 'p11', 'the queue is BOUNDED at 8 — the oldest go first (the newest describe the present)');
-  st.consumeNotices(KEY);
+  // channel-jump verify r7: the injection consumes the PREFIX that fits — by count, oldest first; the rest stays queued
+  const two = st.consumeNotices(KEY, 2);
+  ok(two.length === 2 && two[0].was === 'p4' && two[1].was === 'p5' && st.pendingNotices(KEY).length === 6 && st.pendingNotices(KEY)[0].was === 'p6' && st.consumeNotices(KEY, 0).length === 0 && st.consumeNotices(KEY, 'x').length === 0 && st.pendingNotices(KEY).length === 6,
+    'consumeNotices(key, count) takes the OLDEST `count` and leaves the rest (0 / a non-number take nothing)');
+  ok(st.consumeNotices(KEY, 99).length === 6 && st.pendingNotices(KEY).length === 0 && st.get(KEY) && st.get(KEY).state === 'blocked', 'a count past the queue takes it all; the status record stays');
   // an agent's own clear keeps a queued notice
   st.setByAgent(KEY, { state: 'working', urgency: 'normal' });
   st.pushNotice(KEY, { kind: 'browser-pin', was: null, now: 'Work', by: 'user', handles: ['work'] });

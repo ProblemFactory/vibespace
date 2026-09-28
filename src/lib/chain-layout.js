@@ -465,6 +465,19 @@ function removeTab(chain, id) {
   return normalizeChain(chain);
 }
 
+/** A chain RECORD as it is once `ids` have left it (inc-mukeyzpt-lpou): a CLONE with each member removed by the
+ *  SAME verb a local close runs (removeTab — a shown pane replaced on its side, an emptied side ends the split, the
+ *  host promoted), in the order given; null when fewer than two tabs remain (no chain is left). Ids that are not
+ *  members change nothing. The record itself is never mutated. The consumer: a remote layout record that still
+ *  lists a window THIS client closed (a held close) is read as the record minus that window — the chain it arrives
+ *  at is the one the local close left (same key), never a rebuild that flattens the split. */
+function withoutMembers(rec, ids) {
+  if (!rec || !Array.isArray(rec.tabs)) return null;
+  const c = normalizeChain(cloneChain(rec));
+  for (const id of ids || []) removeTab(c, id);
+  return c.tabs.length >= 2 ? c : null;
+}
+
 /** "Swap left and right": the SIDE LISTS change places with the pair (the
  *  sync key carries the cut and the pair order — the other clients rebuild). */
 function swapSides(chain) {
@@ -649,6 +662,7 @@ module.exports = {
   RATIO_HOLD_MS, holdRatio, heldRatio, releaseRatio,
   clampRatio, splitValid, normalizeChain, cloneChain, chainSyncKey, ratioDiffers, displayedPanes, splitAnchor, pairFor, splitColumns, paneMinPx, visualTabOrder, sidesOf, sideOf, swappedPair, splitPartner,
   showTab, enterSplit, insertTab, moveTab, removeTab, swapSides,
+  withoutMembers, // inc-mukeyzpt-lpou: a record read without the windows this client closed
   // MULTIVIEW (design-browser-multiview §3 (b) / D3 / D5): the partner rule, the follow verdict, the new live view's place, the fold-back
   PANE_KINDS, partnerFor, isPartnered, followFor, livePlacement, foldBackTarget,
   // inc-muiq348r-jwb5: a NAMED window shows its own tab (the host included); a PRESS keeps the tab on show

@@ -574,7 +574,9 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   ok(r.status === 200 && r.json.lease.browserKey === KEY_A && !('cdpUrl' in r.json) && r.json.env.some((kv) => kv.startsWith('AGENT_BROWSER_NAMESPACE=vs-' + teamId2)), 'POST /attach: a live session\'s conversation leases the profile — the UI answer carries NO cdp url');
   ok(r.json.pinTab === true && kR._facts.lastVersion() === '0.38.0', 'the attach path probed the floor ITSELF, so pinTab is answered on the first attach (the wrapper form then passes --pin-tab)');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-nokey', profile: 'Squad' });
-  ok(r.status === 409 && r.json.code === 'bad-request', 'a session with no browser key cannot hold a profile (said, not silently)');
+  // B-f7ab: a keyless live session now gets its key on first use (routes → ctx.ensureBrowserKey, test-browser-share-model ③);
+  // this router is wired WITHOUT the engine, so the refusal is the named `unavailable` one — never the old dead end
+  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'unavailable' && r.json.error && r.json.remedy && !/predates/.test(r.json.error), 'a session with no browser key and no late-key engine is refused BY NAME (no_browser_key · unavailable), not silently');
   r = await j('POST', '/api/browser/attach', { sessionId: 'sess-none', profile: 'Squad' });
   ok(r.status === 404 && r.json.code === 'not-found', 'an unknown session ⇒ 404');
   r = await j('GET', '/api/browser/session/sess-1');
@@ -625,6 +627,10 @@ console.log('— ⑤ the routes (in-process express) and the shipped vibespace-b
   ok(c.status === 1 && /\[not-found\]/.test(c.stderr), 'an unknown profile ⇒ exit 1 with the server\'s code');
   c = await cli(['status']);
   ok(c.status === 0 && /Squad \(bp-/.test(c.stdout) && /pin: none/.test(c.stdout), '`status` shows my lease and my pin');
+  // B-f7ab verify r1: a NON-page verb's refusal prints the way out too (`status` on a session that could not get its
+  // browser key — this router has no late-key engine ⇒ no_browser_key · unavailable — says what happened AND what to do)
+  c = await cli(['status'], { ...cliEnv, VIBESPACE_SESSION_TOKEN: TOKEN_N });
+  ok(c.status === 1 && /\[no_browser_key\]/.test(c.stderr) && /^  remedy: /m.test(c.stderr) && !/predates/.test(c.stderr), '`status` on a session with no browser key: exit 1, the named refusal AND its remedy line (a non-page verb says the way out too)');
   c = await cli(['pin', 'Squad']);
   ok(c.status === 0 && /pinned this conversation to Squad/.test(c.stdout), '`pin <profile>` pins the conversation');
   c = await cli(['status']);

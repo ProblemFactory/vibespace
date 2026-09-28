@@ -29,7 +29,7 @@ activeSessions = new Map();
 freshSession();
 setupAgentRoutes({
   app, activeSessions, tasks,
-  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => ({ state: 'working' }), history: () => [] },
+  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => ({ state: 'working' }), history: () => [] },
   SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
   userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({ id: 'x', text: 'q' }) },
   sessionStatusKey: (s, id) => `claude:${id}`,

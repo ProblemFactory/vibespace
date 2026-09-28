@@ -18,8 +18,12 @@ import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
+import v8 from 'node:v8';
+import crypto from 'node:crypto';
+import vm from 'node:vm';
 import { createRequire } from 'node:module';
 import { freePorts } from './scratch.mjs';
+import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -202,6 +206,191 @@ const quiet = { warn() {}, log() {}, error() {} };
   await get(`${st2.redirectUri}/?state=${new URL(st2.consentUrl).searchParams.get('state')}&code=c2`); await sleep(30);
   ok(dones.length === 3 && dones[2].ok === true && dones[2].cancelled === null, 'a flow that was not cancelled reports cancelled: null');
   ol.stopAll();
+}
+
+// ── ⑦ A FLOW'S END IS THE END OF WHAT IT HELD (client-from-mount verify r3): the exchange closure an adapter hands in
+// captures the vendor client (gmail.js: the PLAINTEXT clientSecret — a storage mount's borrowed one) and this map kept
+// every flow for the process lifetime (take() had no caller; cancel() left the record) — 10 000 begins pinned 10 000
+// secrets. Pinned: the closure of a cancelled / timed-out / landed flow is COLLECTABLE at its end (a FinalizationRegistry
+// over an object the closure holds, gc forced), the record still answers status() until FLOW_RETIRE_MS then retires,
+// a cancelled flow never exchanges, and MAX_RUNNING_FLOWS bounds the live set (the oldest superseded by name). CONTROL:
+// a copy without the two release lines keeps every closure. ──
+console.log('\n⑦ a flow\'s end is the end of what it held (verify r3)');
+{
+  const gcNow = (() => { if (typeof global.gc === 'function') return global.gc; try { v8.setFlagsFromString('--expose-gc'); return vm.runInNewContext('gc'); } catch { return null; } })();
+  let T = Date.now();
+  const mkFlows = (mod) => mod.createOAuthLoopback({ log: quiet, now: () => T });
+  const drive = async (ol) => {
+    const collected = new Set();
+    const reg = new FinalizationRegistry((tag) => collected.add(tag));
+    let exchanges = 0;
+    const begin = async (id, tag, timeoutMs = 600000) => { const captured = { secret: `plain-${tag}` }; reg.register(captured, tag); return ol.begin({ id, mode: 'ephemeral', timeoutMs, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => { exchanges++; return { ok: true, held: captured.secret }; } }); };
+    const c1 = await begin('c1', 'cancelled-1'), c2 = await begin('c2', 'cancelled-2');
+    const t1 = await begin('t1', 'timeout', 30); await sleep(80);
+    const d1 = await begin('d1', 'done'); await get(`${d1.redirectUri}/?state=${new URL(d1.consentUrl).searchParams.get('state')}&code=c`); for (let i = 0; i < 40 && !ol.status(d1.flowId).done; i++) await sleep(5);
+    const live = await begin('live', 'running');
+    ol.cancel(c1.flowId); ol.cancel(c2.flowId);
+    for (let i = 0; i < 6; i++) { gcNow(); await sleep(15); }
+    return { collected, ids: { c1, c2, t1, d1, live }, exchanges: () => exchanges };
+  };
+  if (!gcNow) ok(false, 'SKIP: no gc handle (v8 --expose-gc refused at runtime) — the closure-release leg cannot be judged');
+  else {
+    const ol = mkFlows(OL);
+    const { collected, ids, exchanges } = await drive(ol);
+    ok(['cancelled-1', 'cancelled-2', 'timeout', 'done'].every((t) => collected.has(t)) && !collected.has('running'), `the exchange closure of a CANCELLED / TIMED-OUT / LANDED flow is released at its end (collected: ${[...collected].sort().join(', ')}); the running flow keeps its own`);
+    ok(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) !== null) && ol.status(ids.c1.flowId).cancelled === 'cancelled' && ol.status(ids.t1.flowId).cancelled === 'timeout' && ol.status(ids.d1.flowId).done === true, 'an ended flow still answers status() (the dialog polls it) …');
+    const pb = await (async () => { try { await ol.forwardCallback(ids.c1.flowId, `http://127.0.0.1/?state=${new URL(ids.c1.consentUrl).searchParams.get('state')}&code=late`); return null; } catch (e) { return e; } })();
+    ok(pb && pb.code === 'no-flow' && exchanges() === 1, `… a paste-back onto a cancelled flow is refused by name and nothing is exchanged (${exchanges()} exchange — the landed flow's)`);
+    T += OL.FLOW_RETIRE_MS + 1000;
+    ok(['c1', 'c2', 't1', 'd1'].every((k) => ol.status(ids[k].flowId) === null) && ol.status(ids.live.flowId) !== null && ol.status(ids.live.flowId).running === true, `… and is RETIRED from the map FLOW_RETIRE_MS (${OL.FLOW_RETIRE_MS / 60000} min) after its end; a running flow is not`);
+    ol.stopAll();
+    // the bound
+    const olc = mkFlows(OL); const many = [];
+    for (let i = 0; i <= OL.MAX_RUNNING_FLOWS; i++) many.push(await olc.begin({ id: `m${i}`, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) }));
+    ok(olc.status(many[0].flowId).cancelled === OL.CAUSE_OVER_LIMIT && olc.runningFor('m0') === null && many.slice(1).every((f) => olc.status(f.flowId).running === true), `begin() #${OL.MAX_RUNNING_FLOWS + 1} ends the OLDEST running flow by name (${OL.CAUSE_OVER_LIMIT} — verify r4: its own cause, never 'superseded') — ${OL.MAX_RUNNING_FLOWS} run at most`);
+    olc.stopAll();
+    // CONTROL: a copy without the release (the pre-r3 shape) keeps every closure
+    const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
+    const A = '    if (!st.exchanging) forget(st);\n', B = '      const cb = forget(st);   // verify r3: the exchange has returned — its closure (the client secret) is dropped here; r4: `onDone` with it\n';
+    ok(src.split(A).length === 2 && src.split(B).length === 2, 'CONTROL setup: the two release lines are present once');
+    const M = mutantCopies('oauth-loopback', REPO);
+    const olm = mkFlows(require(M.write('src/oauth-loopback.js', src.replace(A, '').replace(B, '      const cb = st.onDone;\n'), 'no-forget')));
+    const r = await drive(olm);
+    ok(r.collected.size === 0, `CONTROL: a copy without the release keeps every closure after gc (${r.collected.size} collected) — the release check above would be red`);
+    olm.stopAll();
+    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
+  }
+}
+
+
+// ── ⑧ THE END DROPS EVERY CLOSURE, THE MACHINE'S OWN ENDS ARE SAID, begin()'s EXITS (client-from-mount verify r4) ──
+// r3 dropped `exchange` and KEPT `onDone`. Both adapters create the two in ONE scope — `const {clientId, clientSecret} =
+// cred.values; … exchange: …, onDone: …` — and closures of one scope share one V8 context, so a kept onDone kept the
+// plaintext secret exchange captured: a heap snapshot of the REAL Gmail adapter after a cancel still held it (30 min).
+// Pinned here: (a) closures made the adapters' way are collectable after cancel / timeout / over-limit (a copy that keeps
+// onDone at cancel is the control); (b) the REAL Gmail and Lark adapters: the secret they resolved is GONE from a heap
+// snapshot after a cancel — searched by SHAPE (the secret is minted at runtime, never a string this file holds) — and
+// present while running; (c) the timeout and the cap REPORT ONCE {ok:false, cancelled, error} and a caller's cancel /
+// same-id supersede / stopAll report nothing; mid-exchange exactly one report (the exchange's); (d) a flow ended while
+// begin() awaits its listener keeps no listener (same-tick double begin, ephemeral + fixed: the fixed port is free for
+// the next begin), a `buildConsentUrl` that throws leaves no flow / listener / closure; a copy without the post-bind
+// check is the control.
+console.log('\n⑧ the end drops every closure; the machine\'s own ends are said; begin()\'s exits (verify r4)');
+{
+  const gcNow = (() => { if (typeof global.gc === 'function') return global.gc; try { v8.setFlagsFromString('--expose-gc'); return vm.runInNewContext('gc'); } catch { return null; } })();
+  const listeners = () => process._getActiveHandles().filter((h) => h instanceof net.Server && h.listening).length;
+  const src = fs.readFileSync(path.join(REPO, 'src/oauth-loopback.js'), 'utf-8');
+  const M = mutantCopies('oauth-loopback-r4', REPO);
+  // (a) closures the adapters' way: exchange AND onDone born in one scope that holds the captured object
+  const driveScoped = async (mod) => {
+    const ol = mod.createOAuthLoopback({ log: quiet });
+    const collected = new Set(); const reg = new FinalizationRegistry((tag) => collected.add(tag));
+    const reports = [];
+    const begin = async (id, tag, timeoutMs = 600000) => {
+      const captured = { secret: `plain-${tag}` }; reg.register(captured, tag);
+      return ol.begin({ id, mode: 'ephemeral', timeoutMs, buildConsentUrl: ({ state }) => `https://x/?state=${state}`,
+        exchange: async () => ({ ok: true, held: captured.secret }),
+        onDone: (r) => { reports.push({ tag, r }); } });   // the adapters' shape: onDone in the SAME scope as exchange
+    };
+    const c = await begin('c', 'cancelled'); const t = await begin('t', 'timeout', 30); await sleep(80);
+    for (let i = 0; i < mod.MAX_RUNNING_FLOWS; i++) await ol.begin({ id: `f${i}`, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
+    const o = await begin('o', 'over-limit');   // this one is the newest: the oldest filler goes — so make it the oldest instead:
+    ol.cancel(c.flowId);
+    for (let i = 0; i < 6; i++) { if (gcNow) gcNow(); await sleep(15); }
+    return { ol, collected, reports, ids: { c, t, o } };
+  };
+  const K = '    if (!st.exchanging) forget(st);\n';
+  ok(src.split(K).length === 2, '(a) CONTROL setup: the cancel-side release line is present once');
+  const keep = require(M.write('src/oauth-loopback.js', src.replace(K, '    if (!st.exchanging) { const kept = st.onDone; forget(st); st.onDone = kept; }\n'), 'keeps-ondone'));
+  if (!gcNow) ok(false, 'SKIP: no gc handle — the closure legs cannot be judged');
+  else {
+    const r = await driveScoped(OL);
+    ok(r.collected.has('cancelled') && r.collected.has('timeout') && !r.collected.has('over-limit'), `(a) exchange + onDone born in one scope: the object they share is collected after cancel and timeout (${[...r.collected].sort().join(', ')}); the running flow keeps its own`);
+    r.ol.stopAll();
+    // CONTROL: the r3 shape — cancel keeps onDone
+    const rk = await driveScoped(keep);
+    ok(!rk.collected.has('cancelled'), `(a) CONTROL: a copy whose cancel keeps onDone keeps the secret exchange captured (collected: ${[...rk.collected].sort().join(', ') || 'none'}) — the check above would be red`);
+    rk.ol.stopAll();
+  }
+  // (b) THE REAL ADAPTERS: the resolved secret is gone from the heap after a cancel — by shape, minted at runtime
+  {
+    const SHAPE = /GOCSPX-R4HEAP-[0-9a-f]{24}/g;
+    const snapHits = () => { const f = path.join(M.dir, `heap-${Date.now()}.heapsnapshot`); v8.writeHeapSnapshot(f); const n = (fs.readFileSync(f, 'latin1').match(SHAPE) || []).length; fs.rmSync(f); return n; };
+    const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
+    const lark = require(path.join(REPO, 'src/channels/lark.js'));
+    const [PL] = await freePorts(1);
+    const memTokens = () => ({ read: () => ({ token: null, why: 'never-authenticated' }), write: async () => {}, clear: async () => {} });
+    // a FLAT string (a `+` makes a cons string, which a snapshot names "(concatenated string)", its halves apart)
+    const mint = () => Buffer.from('GOCSPX-R4HEAP-' + crypto.randomBytes(12).toString('hex'), 'utf8').toString('utf8');
+    const cases = [
+      { kind: 'gmail', mod: gmail, mode: 'ephemeral', resolve: () => ({ id: 'gmail', source: 'custom', values: { clientId: '123412341234-heap.apps.googleusercontent.com', clientSecret: mint() }, missing: [], why: null, credentialKey: 'custom' }) },
+      { kind: 'lark', mod: lark, mode: 'fixed', resolve: () => ({ id: 'lark', source: 'custom', values: { appId: 'cli_heap', appSecret: mint() }, missing: [], why: null, credentialKey: 'custom' }) },
+    ];
+    const before = snapHits();
+    for (const c of [...cases, { ...cases[0], control: true }]) {
+      const ol = (c.control ? keep : OL).createOAuthLoopback({ log: quiet, fixedCallbackUrl: `http://127.0.0.1:${PL}/lark/cb` });
+      const a = c.mod.create({ id: c.kind, kind: c.kind, options: {}, credentialKey: 'custom' }, { now: () => Date.now(), fetch: async () => { throw new Error('no vendor call'); }, tokens: memTokens(), oauth: ol, resolveIntegration: () => c.resolve(), onAuthDone: () => {}, log: quiet });
+      const f = await a.auth.begin();
+      const running = snapHits();
+      ol.cancel(f.flowId, 'cancelled');
+      const after = snapHits();
+      if (c.control) ok(before === 0 && running >= 1 && after >= 1, `(b) CONTROL: the REAL ${c.kind} adapter over the copy that keeps onDone — the secret is STILL in the heap after a cancel (${after}); the checks above would be red`);
+      else ok(before === 0 && running >= 1 && after === 0, `(b) the REAL ${c.kind} adapter (${c.mode}): its resolved client secret is in the heap while the sign-in runs (${running}) and GONE after a cancel (${after}; ${before} before any begin)`);
+      ol.stopAll();
+    }
+  }
+  // (c) the machine's own ends REPORT ONCE; a caller's ends report nothing; mid-exchange exactly the exchange's report
+  {
+    const ol = OL.createOAuthLoopback({ log: quiet });
+    const mk = (id, extra = {}) => { const reports = []; return ol.begin({ id, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({ ok: true }), onDone: (r) => reports.push(r), ...extra }).then((f) => ({ f, reports })); };
+    const t = await mk('t', { timeoutMs: 30 }); await sleep(80);
+    ok(t.reports.length === 1 && t.reports[0].ok === false && t.reports[0].cancelled === OL.CAUSE_TIMEOUT && /not finished in time/.test(t.reports[0].error) && ol.status(t.f.flowId).error === t.reports[0].error, `(c) the TIMEOUT reports once {ok:false, cancelled:${OL.CAUSE_TIMEOUT}, error} and status() carries the same sentence ("${t.reports[0] && t.reports[0].error}")`);
+    const c = await mk('c'); ol.cancel(c.f.flowId, 'cancelled');
+    const s1 = await mk('s'); const s2 = await mk('s');
+    const sh = await mk('sh'); ol.stopAll();
+    await sleep(20);
+    ok(c.reports.length === 0 && s1.reports.length === 0 && s2.reports.length === 0 && sh.reports.length === 0 && ol.status(s1.f.flowId).cancelled === 'superseded', '(c) a caller\'s cancel, a same-id supersede and stopAll report nothing (the caller\'s own acts)');
+    const ol2 = OL.createOAuthLoopback({ log: quiet });
+    const o = await ol2.begin({ id: 'oldest', mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}), onDone: (r) => oRep.push(r) }); const oRep = [];
+    for (let i = 0; i < OL.MAX_RUNNING_FLOWS; i++) await ol2.begin({ id: `f${i}`, mode: 'ephemeral', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
+    await sleep(10);
+    ok(oRep.length === 1 && oRep[0].cancelled === OL.CAUSE_OVER_LIMIT && /open sign-ins at 32/.test(oRep[0].error) && ol2.status(o.flowId).cancelled === OL.CAUSE_OVER_LIMIT, `(c) the CAP reports the evicted flow once by its own cause ("${oRep[0] && oRep[0].error}")`);
+    // mid-exchange: the exchange's own return is the ONE report (the timeout's not a second)
+    let rel; const holdX = new Promise((r) => { rel = r; }); const mRep = [];
+    const m = await ol2.begin({ id: 'mid', mode: 'ephemeral', timeoutMs: 60, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async ({ cancelled }) => { await holdX; const c2 = cancelled(); if (c2) throw new Error(`refused: ${c2}`); return { ok: true }; }, onDone: (r) => mRep.push(r) });
+    const landing = get(`${m.redirectUri}/?state=${new URL(m.consentUrl).searchParams.get('state')}&code=c`);
+    await sleep(120); rel(); await landing; await sleep(20);
+    ok(mRep.length === 1 && mRep[0].ok === false && mRep[0].cancelled === OL.CAUSE_TIMEOUT && /refused: timeout/.test(mRep[0].error), `(c) the timeout landing MID-EXCHANGE: exactly one report, the exchange's own refusal (${mRep.length}: ${mRep[0] && mRep[0].error})`);
+    ol2.stopAll();
+  }
+  // (d) begin()'s own exits
+  {
+    const [PF] = await freePorts(1);
+    const mkOl = (mod) => mod.createOAuthLoopback({ log: quiet, fixedCallbackUrl: `http://127.0.0.1:${PF}/lark/cb` });
+    const twice = async (ol, mode) => { const base = listeners(); const [a, b] = await Promise.all([ol.begin({ id: 'same', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) }), ol.begin({ id: 'same', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) })]); await sleep(10); const held = listeners() - base; ol.stopAll(); await sleep(20); return { a, b, held, left: listeners() - base }; };
+    for (const mode of ['ephemeral', 'fixed']) {
+      const ol = mkOl(OL);
+      const r = await twice(ol, mode);
+      const next = await ol.begin({ id: 'next', mode, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
+      // (in fixed mode the older bind may WIN the port and close it at once, leaving the newer flow on paste-back: 0 held — the port is free for the next begin either way)
+      ok(ol.status(r.a.flowId).cancelled === 'superseded' && ol.status(r.a.flowId).listening === false && r.held <= 1 && r.left === 0 && next.listening === true && !next.refusal, `(d) ${mode}: two same-tick begins of one id — the superseded flow never keeps the listener it was binding (${r.held} held, ${r.left} left after stopAll); the next begin binds${mode === 'fixed' ? ' the fixed port' : ''}`);
+      ol.stopAll();
+      const base = listeners();
+      let threw = null; try { await ol.begin({ id: 'boom', mode, buildConsentUrl: () => { throw new Error('consent url refused'); }, exchange: async () => ({}) }); } catch (e) { threw = e; }
+      ok(threw && /consent url refused/.test(threw.message) && listeners() - base === 0 && ol.runningFor('boom') === null, `(d) ${mode}: a buildConsentUrl that throws leaves no flow and no listener (${listeners() - base})`);
+    }
+    // CONTROL: a copy whose post-bind step ignores the flow's end (the r3 shape) keeps the listener — in fixed mode the port
+    const B = "    const bound = () => { if (st.cancelled || st.done) { try { srv.close(); } catch {} return; } st.server = srv; st.listening = true; };\n";
+    ok(src.split(B).length === 2, '(d) CONTROL setup: the post-bind check is present once');
+    const olm = mkOl(require(M.write('src/oauth-loopback.js', src.replace(B, '    const bound = () => { st.server = srv; st.listening = true; };\n'), 'binds-after-end')));
+    const rm = await twice(olm, 'fixed');
+    const nextm = await olm.begin({ id: 'next', mode: 'fixed', buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async () => ({}) });
+    ok(rm.left === 1 && nextm.refusal && nextm.refusal.code === 'port-busy', `(d) CONTROL: a copy that binds after the end keeps ${rm.left} listener past stopAll and the next fixed begin is ${nextm.refusal && nextm.refusal.code} — the checks above would be red`);
+    olm.stopAll();
+    // the leaked control listener is closed by hand (it is nobody's flow now)
+    for (const h of process._getActiveHandles()) if (h instanceof net.Server && h.listening && h.address() && h.address().port === PF) { try { h.close(); } catch {} }
+  }
+  for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, 'tree: ' + c.name, c.pass ? undefined : c.detail);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

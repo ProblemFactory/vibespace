@@ -23,6 +23,10 @@
 //     session (`data/browser-env/bindings.json`, written at the ONE meta choke
 //     point), consulted first.
 //
+//   ⑤ (B-f7ab) a session spawned while per-session browsers were OFF has no key (r2: its record witnesses its pin ladder's pick); turned ON, its FIRST agent browser
+//     route mints one through the REAL wiring (browser-key.js → persistSessionMeta → the writeSessionMeta choke point),
+//     bound to THAT conversation, and its next Terminate → Resume spawns on the same key.
+//
 // HEAVY TIER since B-f4cb (it boots a server — THE TIER RULE in ci.mjs), and deterministic: a free port, a scratch worktree with its own
 // data/, a scratch HOME (a spawned server can only discover what lives under
 // its own home — 2026-09-09's 79,533-row lesson), a FAKE `agent-browser` on
@@ -430,6 +434,79 @@ console.log('\n③ a resume whose CLI announces a DIFFERENT conversation id (the
         ok(implicitLines() === 2 && !/refused to move the browser binding|refused to bind conversation/.test(journal), `the choke point said it once more for the new session (${implicitLines()} lines) and the belt was never reached`);
         await killAndWait(sC, Y);
       }
+    }
+  }
+  try { ws.close(); } catch { }
+}
+
+// ═══ ⑤ B-f7ab THE LATE KEY on a real server: a session spawned while per-session browsers were OFF has no key; the
+//    first agent route after they are turned ON mints one through the REAL wiring (server.js readSessionMetaOf →
+//    mounts-plugins-wiring → src/server/browser-key.js → persistSessionMeta → THE writeSessionMeta choke point), bound
+//    to THAT conversation — and the next Terminate → Resume of it spawns on the same key (the late key is a real one) ═══
+console.log('\n⑤ a session with no browser key gets one on its first browser use — through the real wiring, kept across Terminate → Resume (B-f7ab)');
+{
+  const Z = crypto.randomUUID();
+  const setIso = async (v) => (await fetch(`http://127.0.0.1:${PORT}/api/settings`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ 'browser.isolateSessions': v }) })).ok;
+  const { ws, msgs } = await connect();
+  const metaDir = path.join(wt, 'data', 'session-meta');
+  const metaOf = (webuiId) => { for (const f of (fs.existsSync(metaDir) ? fs.readdirSync(metaDir) : [])) { if (!f.endsWith('.json')) continue; try { const m = JSON.parse(fs.readFileSync(path.join(metaDir, f), 'utf8')); if (m.webuiSessionId === webuiId) return m; } catch { } } return null; };
+  const envOf = (webuiId) => {
+    for (const d of fs.readdirSync('/proc')) {
+      if (!/^\d+$/.test(d)) continue;
+      let e; try { e = fs.readFileSync(`/proc/${d}/environ`, 'utf8'); } catch { continue; }
+      if (!e.includes(`CLAUDE_WEBUI_SESSION_ID=${webuiId}`)) continue;
+      return Object.fromEntries(e.split('\0').filter(Boolean).map((kv) => { const i = kv.indexOf('='); return [kv.slice(0, i), kv.slice(i + 1)]; }));
+    }
+    return null;
+  };
+  const create = async (reqId) => {
+    const before = msgs.filter((m) => m.type === 'created').length;
+    ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'terminal', cwd: ROOT, cols: 80, rows: 24, reqId, resume: true, resumeId: Z, ignoreNoConvo: true }));
+    await until(() => msgs.filter((m) => m.type === 'created').length > before || msgs.some((m) => m.type === 'error' && m.reqId === reqId), 20000);
+    const made = msgs.filter((m) => m.type === 'created');
+    return made.length > before ? made[made.length - 1].sessionId : null;
+  };
+  const agent = async (token, method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, json: j }; };
+  const bindF = path.join(wt, 'data', 'browser-env', 'bindings.json');
+  const bindingOf = (conv) => { try { return JSON.parse(fs.readFileSync(bindF, 'utf8')).byConversation?.[conv]?.key || ''; } catch { return ''; } };
+  const mintLines = () => (journal.match(new RegExp(`had no browser key \\(it started before per-session browsers, or while they were off\\) — minted bk-[0-9a-f]{8} for conversation ${Z.slice(0, 8)}`, 'g')) || []).length;
+  ok(await setIso(false), 'setup: per-session browsers switched OFF (the pre-feature spawn shape)');
+  const s1 = await create('l1');
+  if (ok(!!s1, `a session spawned as a resume of ${Z.slice(0, 8)}… while they were off (${s1})`)) {
+    await until(() => metaOf(s1)?.claudeSessionId === Z, 8000);
+    await until(() => !!envOf(s1)?.VIBESPACE_SESSION_TOKEN, 8000);
+    const e1 = envOf(s1);
+    const tok = e1?.VIBESPACE_SESSION_TOKEN || '';
+    ok(metaOf(s1) && !metaOf(s1).browserKey && e1 && !e1.AGENT_BROWSER_SESSION && tok.startsWith('vsst_'), 'it has NO browser key: its record names none, its process carries no browser pairs (what the owner\'s 2026-09-17 chat had)');
+    // verify r2: a keyless spawn WITNESSES its pin ladder's pick at the start (no default is configured here ⇒ the empty
+    // witness, dated at the start, with the group cap in force) — the late key restores exactly this, never the default
+    // the user has by then (a default reaches a conversation only at its start)
+    { const w = metaOf(s1)?.browserPinAtStart; ok(w && typeof w === 'object' && w.origin === 'harness' && w.profileId === '' && Number.isFinite(w.at) && Math.abs(w.at - metaOf(s1).createdAt) < 5000 && 'cap' in w, `the keyless spawn's record carries its pin WITNESS (browserPinAtStart: ${JSON.stringify(w)}) — what its ladder picked at the start`); }
+    let r = await agent(tok, 'GET', '/api/agent/browser/status');
+    ok(r.status === 409 && r.json?.code === 'no_browser_key' && r.json?.why === 'isolation_off' && /Give each session its own agent browser/.test(r.json?.error || '') && !metaOf(s1).browserKey, `while they are still off its browser command is refused BY NAME — isolation_off, naming the setting (${r.status} ${r.json?.code}/${r.json?.why}); nothing minted`);
+    ok(await setIso(true), 'per-session browsers switched back ON');
+    r = await agent(tok, 'GET', '/api/agent/browser/status');
+    await until(() => !!metaOf(s1)?.browserKey, 5000);
+    const m1 = metaOf(s1);
+    const kL = m1?.browserKey || '';
+    ok(r.status === 200 && /^bk-[0-9a-f]{8}$/.test(kL) && m1.browserKeyFor === Z && m1.browserVariant === 'D' && fs.existsSync(path.join(wt, 'data', 'browser-env', kL + '.json')),
+      `THE FIX: its FIRST browser route after that mints ${kL} through the real wiring — the record (the SAME file, kept whole: webui ${m1?.webuiSessionId}) now carries it with browserKeyFor=${String(m1?.browserKeyFor).slice(0, 8)}…, rung D's config is on disk (${r.status})`);
+    await sleep(300);
+    ok(bindingOf(Z) === kL && mintLines() === 1, `bindings.json binds ${Z.slice(0, 8)}… → ${bindingOf(Z)} (THE choke point wrote it), and the server said so once (${mintLines()} line)`);
+    r = await agent(tok, 'GET', '/api/agent/browser/status');
+    ok(r.status === 200 && metaOf(s1)?.browserKey === kL && mintLines() === 1, 'a second route mints nothing — the same key, still one line');
+    ok(!envOf(s1)?.AGENT_BROWSER_SESSION, 'HONEST BOUNDARY: the running process\'s environment is unchanged (immutable) — the CLI builds its child env from /resolve\'s answer, which is why no restart is needed');
+    ws.send(JSON.stringify({ type: 'kill', sessionId: s1 }));
+    await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s1), 10000);
+    await until(() => !metaOf(s1), 5000);
+    await until(() => !envOf(s1), 5000);
+    const s2 = await create('l2');
+    if (ok(!!s2, `Terminate → Resume of ${Z.slice(0, 8)}… (${s2})`)) {
+      await until(() => !!envOf(s2)?.AGENT_BROWSER_SESSION, 8000);
+      ok(envOf(s2)?.AGENT_BROWSER_SESSION === 'vs-' + kL && metaOf(s2)?.browserKey === kL, `the resumed conversation spawns on the late key (${envOf(s2)?.AGENT_BROWSER_SESSION || 'none'}) — the key minted on first use is the conversation's for good, never a second one`);
+      ws.send(JSON.stringify({ type: 'kill', sessionId: s2 }));
+      await until(() => msgs.some((m) => m.type === 'killed' && m.sessionId === s2), 10000);
+      await until(() => !envOf(s2), 5000);
     }
   }
   try { ws.close(); } catch { }

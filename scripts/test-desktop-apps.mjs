@@ -44,7 +44,7 @@ ok(Number.isInteger(L.CONCURRENT_CAP) && L.CONCURRENT_CAP >= 1, `CONCURRENT_CAP 
   ok(!/require\(/.test(kl), 'keeper-limits imports nothing');
   const da = read('src/desktop-apps.js');
   const reqs = [...da.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(same(reqs, ['./keeper-limits']), 'desktop-apps.js imports nothing but the constants home', reqs);
+  ok(same(reqs, ['./keeper-limits', './office-open']), 'desktop-apps.js imports nothing but the constants home and the PURE office table (§7.9 — itself imports nothing)', reqs);
   // P8-2 x3 (2026-09-22): the guard numbers are IMPORTED, never copied — every consumer of the keeper's
   // ceiling names a guard number ONLY through the home (`limits.X` / `LIMITS.X`) and none re-spells a
   // guard literal. A grep census over the code with comments stripped (a comment may quote "150 %").
@@ -868,11 +868,11 @@ console.log('§11 B-bfe6 — a BROWSER as a desktop app: the rows, the binary pi
   ok(uj.split('\n').filter(Boolean).every((l) => /^user_pref\("[a-z.A-Z_]+", (false|true|"[^"]*")\);$/.test(l)) && /"browser\.shell\.checkDefaultBrowser", false/.test(uj) && /"browser\.aboutwelcome\.enabled", false/.test(uj), 'firefox\'s first-run switch is its profile\'s user.js (user_pref lines only; no default-browser check, no welcome page)');
   // WIRING PINS — the keeper / the launcher / the display name the PURE functions (never a re-spelled rule)
   const keeper = keeperSrc(), launcher = read('src/lib/desktop-app-launcher.js'), disp = read('src/desktop-display.js');
-  ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
+  ok(/const av = M\.browserArgv\(row, \{ profileDir: pv\.dir, url: v\.launch\.url \}\);/.test(keeper) && /args: browser \? browser\.argv : office \? office\.argv : \(row\.args \|\| \[\]\)/.test(keeper), 'WIRING PIN: the keeper launches a browser row with browserArgv\'s argv (the profile flags, then the URL)');
   ok(/const pv = M\.profileDirVerdict\(profileDirOf\(id\), \{ home: homeOf\(\), ownedRoot: logRoot, confinement, exec: row\.exec \}\);/.test(keeper) && /const profileDirOf = \(id\) => path\.join\(logRoot, id, 'profile'\);/.test(keeper), 'WIRING PIN: the profile dir is the session\'s own (data/desktop-apps/<id>/profile), judged by profileDirVerdict before anything starts');
   ok(/mkdir\(browser\.profileDir, \{ recursive: true, mode: 0o700 \}\)/.test(keeper) && /fs\.promises\.rm\(pv\.dir, \{ recursive: true, force: true \}\)/.test(keeper) && !/rmSync\(/.test(keeper), 'WIRING PIN: created 0700, removed ASYNC (never a sync walk on the event loop — a Chrome profile is thousands of files, data/ may be NFS)');
   ok(/import \{ validateBrowserUrl \} from '\.\.\/desktop-apps\.js';/.test(launcher) && /browserLaunchBody\(row, \{ url: urlIn\.value, keepProfile: keepIn\.checked \}\)/.test(launcher), 'WIRING PIN: the launcher checks the typed URL with the SAME pure function the server runs');
-  ok(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp) && /for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS\]\)/.test(disp), 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
+  ok(/const \{ BROWSER_BINS \} = require\('\.\/desktop-apps'\);/.test(disp) && /for \(const b of \[\.\.\.bins, \.\.\.BROWSER_BINS, \.\.\.OFFICE\.OFFICE_EXECS\]\)/.test(disp), 'WIRING PIN: hostFacts probes the families\' binaries from the PURE list');
 }
 
 console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app exiting closes the window, the outer ✕ is the app\'s own close');
@@ -937,7 +937,7 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
   ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up) and before the commit that broadcasts it');
   ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-apps\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
   ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(winInfo\.id\); \}/.test(wm), 'WIRING PIN: the title bar ✕ asks WindowManager.requestClose (the veto point), never closeWindow directly');
-  const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => c\.app\.wm\.requestClose\(c\.id\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /if \(tabWin\.onCloseRequest && tabWin\.onCloseRequest\(\) === false\) return;/ };
+  const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => c\.app\.wm\.requestClose\(c\.id\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/ };
   const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);
   ok(missing.length === 0, 'WIRING PIN: every USER close (taskbar menu, Ctrl+\\ x, the phone nav ✕, a tab ✕) passes the same veto point', missing);
 }

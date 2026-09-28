@@ -191,7 +191,9 @@ const TABLES = {
     const b = m.toolbarModel({ mode: 'scale', scale: 1, page: 1, pages: 4 }, tt);
     const c = m.toolbarModel({ mode: 'scale', scale: m.ZOOM_MIN, page: 0, pages: 0, rendering: true }, tt);
     const d = m.toolbarModel({ mode: 'scale', scale: m.ZOOM_MAX, page: 2, pages: 2 }, tt);
+    const e = m.toolbarModel({ mode: 'fit', scale: 1, page: 0, pages: 0, rendering: true }, tt, { office: 'report.docx' });
     const by = (arr, id) => arr.find((x) => x.id === id);
+    const off = by(e, 'office') || {};
     return [
       [a.map((x) => x.id), ['fit', 'actual', 'out', 'zoom', 'in', 'spacer', 'pages'], 'Fit width · 100% · − · zoom · + · (spacer) · page count'],
       [[by(a, 'fit').label, by(a, 'fit').title, by(a, 'actual').title, by(a, 'out').title, by(a, 'in').title], ['⟦Fit width⟧', '⟦Fit the page to the window width⟧', '⟦Actual size (100%)⟧', '⟦Zoom out⟧', '⟦Zoom in⟧'], 'every human string goes through the injected t()'],
@@ -202,6 +204,10 @@ const TABLES = {
       [[by(c, 'pages').text, by(c, 'pages').title], ['', ''], 'while rendering the count slot is empty (the pane says Rendering…)'],
       [[by(c, 'out').disabled, by(c, 'in').disabled, by(d, 'out').disabled, by(d, 'in').disabled], [true, false, false, true], '− disabled at the floor, + at the ceiling'],
       [by(b, 'actual').label, '100%', 'the 100% button is a number, not a phrase'],
+      [e.map((x) => x.id), ['fit', 'actual', 'out', 'zoom', 'in', 'spacer', 'office', 'pages'], '§7.9 with a file to hand to LibreOffice: "Open in LibreOffice" at the right end, before the page count (none without one — the first row)'],
+      [[off.kind, off.icon, off.withLabel, off.label, off.aria], ['button', 'external', true, '⟦Open in LibreOffice⟧', '⟦Open in LibreOffice⟧'], '…an SVG icon WITH its words, named through t() (aria-label = the name)'],
+      [off.title, '⟦Opens report.docx in LibreOffice in a VibeSpace window, on the machine that holds it — you edit it there, and Save writes it back in place.⟧', '…its title says what happens, with the file (params through t)'],
+      [[off.live, !!off.disabled, 'pressed' in off], [true, false, false], '…usable while the page still renders (live), never disabled (a machine without LibreOffice is answered by the click, never a greyed button), not a toggle'],
     ];
   },
 };
@@ -278,7 +284,9 @@ const DV = fs.readFileSync(path.join(REPO, 'src/lib/docx-viewer.js'), 'utf8');
   ok(!/color:\s*var\(--text\)/.test(paperCss + block), 'no rule paints the theme text colour onto the page');
   const icons = fs.readFileSync(path.join(REPO, 'src/lib/icons.js'), 'utf8');
   ok(/\bzoomOut:\s*_s\(/.test(icons) && /\bzoomIn:\s*_s\(/.test(icons), 'UI_ICONS carries zoomOut / zoomIn (SVG)');
-  ok(/node\.setAttribute\('aria-label', it\.title\)/.test(DV) && /node\.title = it\.title/.test(DV), 'every toolbar button gets title + aria-label (icon-only buttons are named)');
+  ok(/node\.setAttribute\('aria-label', it\.aria \|\| it\.title\)/.test(DV) && /node\.title = it\.title/.test(DV), 'every toolbar button gets title + aria-label (icon-only buttons are named; "Open in LibreOffice" by its own name)');
+  ok(/node\.disabled = !!it\.disabled \|\| \(state\.rendering && !it\.live\);/.test(DV) && /toolbarModel\(state, t, \{ office: office \? office\.file : null \}\)/.test(DV), '§7.9 the office button is drawn from the model and stays enabled while rendering (`live`)');
+  ok(/office: FileViewer\._officeOpener\(app, filePath, host\)/.test(branch), '§7.9 the docx branch hands the viewer its "Open in LibreOffice" (file-viewer.js decides what a click does — test-office-open pins the door)');
 }
 
 console.log('⑬ the model is PURE');

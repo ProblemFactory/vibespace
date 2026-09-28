@@ -783,6 +783,8 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
 
   return {
     envFor, checkFloor, floorState, repointPin, resolvedProfileDir, sweep, priorKeyFor, liveKeysFromMeta, bindings, childConfigFor,
+    // B-f7ab: the late key (src/server/browser-key.js) names WHY `envFor` gave nothing — this switch off, before it asks
+    isolationOn: () => enabled(),
     // paths, so the suite asserts the real ones rather than its own guess
     ENV_DIR, PROFILE_DIR, configPathFor, linkPathFor, cwdPathFor, scratchDirFor, effectiveConfig, ensureSocketDir,
     // takeover r2: the base the remote prelude's short socket dir is built on — `/resolve` names it to a

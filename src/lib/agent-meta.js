@@ -684,6 +684,9 @@ if (typeof window !== 'undefined') {
   });
 
   const observeBackendIcons = () => {
+    // a module-load side effect must not break an importer without the DOM's observer (a node suite's DOM shim
+    // imports this through the principal picker — channel-polish, 2026-09-27)
+    if (typeof MutationObserver === 'undefined') return;
     if (!document.body || window.__backendIconObserverInstalled) return;
     window.__backendIconObserverInstalled = true;
     const observer = new MutationObserver((mutations) => {

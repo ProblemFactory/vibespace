@@ -14,6 +14,7 @@
 // Clock hygiene: every instant is relative to `Date.now()` at start; nothing
 // pins a calendar date or a time of day (time-window legs build instants
 // from the day boundary of the SAME clock they test against).
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -398,6 +399,171 @@ console.log('⑪ mirror-193: the grain stamp — what a dialog read, so its whol
   ok(!vFails.length, `grainBaseVerdict: unconditional without a base, ok on the current stamp, refused BY NAME otherwise (${V.length} rows)`, JSON.stringify(vFails));
   const mv = F.grainBaseVerdict({ access: [row(ag('agent-xi', 'Xi')), row(ag('B'))], watchers: [] }, F.grainStamp({ access: [row(ag('A')), row(ag('B'))], watchers: [] }));
   ok(mv.added.join() === 'agent:agent-xi' && mv.removed.join() === 'agent:A' && /nothing was written/.test(mv.error), 'the refusal names who arrived (agent:agent-xi) and who left (agent:A) since the read, and says nothing was written', JSON.stringify(mv));
+}
+// ── ⑫ channel-polish (2026-09-27, the owner: "那个通知配置项目本身就有点 confusing"): THE NOTIFY DIALOG
+//    SAYS BACK WHAT IT WILL DO — PURE `notifySentence(watcher, t, {scope})` (src/lib/channel-words.js) over the
+//    wire's own watcher fields, worded in en / zh / ja by an injected t over the shipped dictionaries ──
+console.log('⑫ the Notify preview sentence: one sentence per watcher, every language');
+{
+  const { pathToFileURL } = await import('node:url');
+  const W = await import(pathToFileURL(path.join(REPO, 'src/lib/channel-words.js')).href);
+  const dicts = { en: {} };
+  for (const l of ['zh', 'ja']) dicts[l] = (await import(pathToFileURL(path.join(REPO, `src/lib/i18n-${l}.js`)).href)).default;
+  const tFor = (lang) => (str, params) => { let x = (dicts[lang] && dicts[lang][str]) || str; if (params) x = x.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m)); return x; };
+  const G = { kind: 'group', id: 't-1', name: '工作' };
+  const A = { kind: 'agent', id: 'cid-scout', name: 'Scout' };
+  const TABLE = [
+    [{ principal: G, mode: 'all', notify: 'wake', dailyWakeCap: 20 }, 'account', {
+      en: '工作 will be woken right away for every message in this account, at most 20 times a day.',
+      zh: '这个账号里的每一条消息会立即唤醒 工作，每天最多 20 次。',
+      ja: 'このアカウントのすべてのメッセージで 工作 をすぐに起こします（1 日最大 20 回）。' }],
+    [{ principal: A, mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'mention', value: '@Member A' }] }, notify: 'wake', dailyWakeCap: 40 }, 'conversation', {
+      en: 'Scout will be woken right away for the messages mentioning Member A in this conversation, at most 40 times a day.',
+      zh: '这个会话里的提到 Member A 的消息会立即唤醒 Scout，每天最多 40 次。',
+      ja: 'この会話のMember A へのメンションを含むメッセージで Scout をすぐに起こします（1 日最大 40 回）。' }],
+    [{ principal: A, mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'keyword', value: 'deploy' }] }, notify: 'digest', digestMinutes: 60, dailyWakeCap: 40 }, 'pattern', {
+      en: 'Scout will get one digest every 60 minutes of the messages matching its rule in the conversations matching the rule, woken at most 40 times a day.',
+      zh: '符合规则的会话里的符合规则的消息每 60 分钟汇总成一份摘要发给 Scout，每天最多唤醒 40 次。',
+      ja: 'ルールに合う会話のルールに合うメッセージを 60 分ごとに 1 通のまとめにして Scout に送ります（1 日最大 40 回起こします）。' }],
+    [{ principal: G, mode: 'all', notify: 'wake', dailyWakeCap: 0 }, 'conversation', {
+      en: '工作 will not be woken here — at most 0 times a day.',
+      zh: '工作 在这里不会被唤醒 —— 每天最多 0 次。',
+      ja: '工作 はここでは起こされません — 1 日最大 0 回。' }],
+    [{ principal: null, mode: 'all', notify: 'wake', dailyWakeCap: 40 }, 'conversation', {
+      en: 'Pick who gets woken.', zh: '请选择唤醒谁。', ja: '起こす相手を選んでください。' }],
+  ];
+  const bad = [];
+  for (const [w, scope, want] of TABLE) for (const lang of ['en', 'zh', 'ja']) { const got = W.notifySentence(w, tFor(lang), { scope }); if (got !== want[lang]) bad.push({ lang, want: want[lang], got }); }
+  ok(!bad.length, `notifySentence says the whole notification back — who, on which messages, where, how often — in en / zh / ja (${TABLE.length} watchers × 3 languages)`, JSON.stringify(bad));
+  ok(W.mentionOnlyName({ rules: [{ kind: 'mention', value: '@Ada' }] }) === 'Ada' && W.mentionOnlyName({ rules: [{ kind: 'mention', value: 'Ada' }, { kind: 'keyword', value: 'x' }] }) === null && W.mentionOnlyName(null) === null, 'a filter of ONE mention rule is "only when … is mentioned"; anything else is a rule');
+  // the default cap is said when the watcher carries none (never "at most undefined")
+  ok(/at most 40 times a day/.test(W.notifySentence({ principal: A, mode: 'all', notify: 'wake' }, tFor('en'))), 'a watcher without a cap says the default cap (40)');
+  // every key the sentence uses is in BOTH dictionaries (an untranslated fragment would read English inside a zh sentence)
+  const KEYS = ['Pick who gets woken.', 'every message', 'the messages mentioning {name}', 'the messages matching its rule', 'in this account', 'in this conversation', 'in the conversations matching the rule', '{who} will not be woken here — at most 0 times a day.', '{who} will get one digest every {n} minutes of {what} {where}, woken at most {cap} times a day.', '{who} will be woken right away for {what} {where}, at most {cap} times a day.'];
+  ok(KEYS.every((k) => dicts.zh[k] && dicts.ja[k]), 'every fragment of the sentence is in the zh AND ja dictionaries', JSON.stringify(KEYS.filter((k) => !dicts.zh[k] || !dicts.ja[k])));
+  // the dialog's pins: the receipt switch is gone, the three questions + the preview are drawn
+  const ED = fs.readFileSync(path.join(REPO, 'src/lib/channel-filter-editor.js'), 'utf-8');
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+  ok(!/receipt/i.test(ED.replace(/receiptWake/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')) && /receiptWake: !!\(same && stored\.receiptWake\)/.test(WSRC) && /stored: w \}/.test(ED), 'PIN: no receipt control or words in the Notify dialog — a stored receiptWake rides through untouched for the SAME principal (the wire unchanged)');
+  ok(/t\('Who gets woken\?'\)/.test(ED) && /t\('On which messages\?'\)/.test(ED) && /t\('How often at most\?'\)/.test(ED) && /preview\.textContent = notifySentence\(current\(\), t, \{ scope: st\.kind \}\);/.test(ED), 'PIN: the three questions are asked and the preview is the PURE sentence, rebuilt on every change');
+
+  // ── verify round 2 (2026-09-27): THE ANSWERS ⇄ THE WATCHER, ONE TO ONE ──
+  // The dialog opens on PURE `notifyAnswers(stored)` and saves PURE `watcherOfAnswers(answers)`. Walked over
+  // the whole space the wire can hold — notify × cap × digest window × (every message | a rule | a mention) ×
+  // receiptWake — every stored watcher comes back as itself: nothing the wire holds is out of the dialog's
+  // reach. The cap was a THIRD exclusive answer beside "right away" and "a digest", so a digest's cap had no
+  // answer of its own (its field was disabled: test-channels-aggregate-ui ⑦b is the same fact in chrome).
+  const canon = (x) => (Array.isArray(x) ? x.map(canon) : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, canon(x[k])])) : x);
+  const same = (x, y) => JSON.stringify(canon(x)) === JSON.stringify(canon(y));
+  const RULE = { match: 'every', rules: [{ kind: 'keyword', value: 'deploy' }, { kind: 'has-attachment' }] };
+  const MEN = { match: 'any', rules: [{ kind: 'mention', value: 'Ada' }] };
+  const SPACE = [];
+  for (const notify of F.NOTIFY_MODES) for (const cap of [F.DEFAULT_DAILY_WAKE_CAP, 0, 5, F.MAX_DAILY_WAKE_CAP]) for (const dm of [F.DEFAULT_DIGEST_MINUTES, F.MIN_DIGEST_MINUTES, F.MAX_DIGEST_MINUTES]) for (const [mode, filter] of [['all', null], ['filtered', RULE], ['filtered', MEN]]) for (const receiptWake of [false, true]) {
+    if (notify === 'digest' && cap === 0) continue;   // not a watcher: the wire refuses it by name (asserted below)
+    SPACE.push({ principal: A, mode, notify, digestMinutes: dm, dailyWakeCap: cap, receiptWake, ...(filter ? { filter } : {}) });
+  }
+  const backOf = (Wm) => (w) => Wm.watcherOfAnswers(Wm.notifyAnswers(w), { principal: w.principal, ruleFilter: w.filter || null, stored: w });
+  const valid = SPACE.filter((w) => F.validateWatcher({ ...w, ...(w.filter ? { filterId: 'inline' } : {}) }).ok && (!w.filter || F.validateFilter(w.filter).ok));
+  const zero = F.validateWatcher({ principal: A, mode: 'all', notify: 'digest', digestMinutes: 30, dailyWakeCap: 0 });
+  ok(!zero.ok && zero.why === 'digest-cap-zero', 'a digest capped at 0 is no watcher — the wire refuses it by name (`digest-cap-zero`), so the save SAYS so; it is the one cell left out of the space', JSON.stringify(zero));
+  ok(SPACE.length === 2 * 4 * 3 * 3 * 2 - 18 && valid.length === SPACE.length, `FIXTURE: the watcher space — ${SPACE.length} watchers (notify × cap × window × what × receipt), every one a watcher the wire accepts`, JSON.stringify(SPACE.filter((w) => !valid.includes(w)).slice(0, 2)));
+  const lost = SPACE.filter((w) => !same(backOf(W)(w), w));
+  ok(!lost.length, `ONE TO ONE: every stored watcher opens as answers and saves back as ITSELF (${SPACE.length} of ${SPACE.length}) — a digest keeps its own cap, a wake its stored window`, JSON.stringify(lost.slice(0, 2).map((w) => [w, W.notifyAnswers(w), backOf(W)(w)])));
+  const HOWS = [...new Set(SPACE.map((w) => W.notifyAnswers(w).how))].sort();
+  ok(JSON.stringify(HOWS) === JSON.stringify(['digest', 'now']) && SPACE.every((w) => W.notifyAnswers(w).cap === w.dailyWakeCap), 'question ③ has TWO answers (right away | a digest); the daily cap is its OWN answer under both, whatever the first one is', JSON.stringify(HOWS));
+  const answersOf = (w) => JSON.stringify([canon(W.notifyAnswers(w)), canon(w.filter || null), w.receiptWake, w.notify === 'digest' ? null : w.digestMinutes]);
+  ok(new Set(SPACE.map(answersOf)).size === SPACE.length, 'two different watchers never open as the same answers');
+  // a NEW notification (nothing stored): the defaults, and each answer lands in its own field of the wire
+  ok(same(W.notifyAnswers(null), { what: 'all', mention: '', how: 'now', digestMinutes: F.DEFAULT_DIGEST_MINUTES, cap: F.DEFAULT_DAILY_WAKE_CAP }), 'a new notification opens on the defaults (every message, right away, the default cap)', JSON.stringify(W.notifyAnswers(null)));
+  ok(same(W.watcherOfAnswers({ what: 'mention', mention: ' @Ada ', how: 'digest', digestMinutes: 45, cap: 3 }, { principal: A }), { principal: A, mode: 'filtered', notify: 'digest', digestMinutes: 45, dailyWakeCap: 3, receiptWake: false, filter: MEN }), 'a NEW digest with its own cap is one save: "only when Ada is mentioned", every 45 minutes, at most 3 a day', JSON.stringify(W.watcherOfAnswers({ what: 'mention', mention: ' @Ada ', how: 'digest', digestMinutes: 45, cap: 3 }, { principal: A })));
+  ok(same(W.watcherOfAnswers({ what: 'all', how: 'now', digestMinutes: null, cap: null }, { principal: A }), { principal: A, mode: 'all', notify: 'wake', digestMinutes: F.DEFAULT_DIGEST_MINUTES, dailyWakeCap: F.DEFAULT_DAILY_WAKE_CAP, receiptWake: false }) && W.watcherOfAnswers({ what: 'all', how: 'now', cap: 0 }, { principal: A }).dailyWakeCap === 0, 'an EMPTY number field is the default; a typed 0 is 0 (a choice, never the default)');
+  // a stored mention filter in a spelling the dialog does not write (match every, "@Ada") opens as "mention" and
+  // saves in the dialog's spelling — the SAME filter for every record (one rule: any ≡ every; the @ is not the name)
+  {
+    const stored = { principal: A, mode: 'filtered', notify: 'wake', digestMinutes: 30, dailyWakeCap: 5, receiptWake: false, filter: { match: 'every', rules: [{ kind: 'mention', value: '@Ada' }] } };
+    const b = backOf(W)(stored);
+    const RECS = [{ text: 'hi', mentions: [{ id: 'u1', name: 'Ada' }] }, { text: 'hi', mentions: [{ id: 'ada', name: 'Someone' }] }, { text: 'hi @Ada', mentions: [] }, { text: 'hi', mentions: [{ id: 'u2', name: 'Bo' }] }, { text: '', mentions: [] }];
+    const norm = (f) => { const v = F.validateFilter(f); return v.ok ? v.filter : null; };
+    ok(W.notifyAnswers(stored).what === 'mention' && W.notifyAnswers(stored).mention === 'Ada' && same(b.filter, MEN) && norm(stored.filter) && RECS.every((r) => F.matchRecord(norm(stored.filter), r, {}).hit === F.matchRecord(norm(b.filter), r, {}).hit) && RECS.some((r) => F.matchRecord(norm(b.filter), r, {}).hit), 'a stored one-mention filter spelled otherwise (match every, "@Ada") saves in the dialog\'s spelling and matches the SAME records', JSON.stringify([b.filter, RECS.map((r) => F.matchRecord(norm(b.filter), r, {}).hit)]));
+  }
+  // WIRING PINS: the dialog opens and saves through the PURE mapping, and the cap's field is never disabled
+  ok(/const a0 = notifyAnswers\(w \? \{ \.\.\.w, filter: f \} : null\);/.test(ED) && /return watcherOfAnswers\(/.test(ED) && /const filter = cur\.filter \|\| null;/.test(ED), 'PIN: the dialog OPENS on notifyAnswers(stored) and its wire IS watcherOfAnswers(answers) — filter included');
+  ok(!/capInp\.disabled/.test(ED) && !/hCap\b/.test(ED) && !/'cap'\s*,\s*\(x\)/.test(ED) && /box\.append\(q\(t\('How often at most\?'\)\), hNow\.lab, hDig\.lab, digestClamp, capRow, capClamp\);/.test(ED), 'PIN: the cap is its own line under the two answers — no third radio, its field never disabled');
+  // CONTROL: the mapping with the cap as a THIRD exclusive answer (a digest carries the default cap)
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M = mutantCopies('chan-filter-notify', REPO);
+    const FROM = '    dailyWakeCap: num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),\n';
+    ok(WSRC.split(FROM).length === 2, 'CONTROL setup: the cap\'s line of the mapping is spelled once');
+    const W2 = await import(pathToFileURL(M.write('src/lib/channel-words.js', WSRC.replace(FROM, '    dailyWakeCap: digest ? F.DEFAULT_DAILY_WAKE_CAP : num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),\n'), 'cap-third-answer', { esm: true })).href);
+    const lost2 = SPACE.filter((w) => !same(backOf(W2)(w), w));
+    ok(lost2.length > 0 && lost2.every((w) => w.notify === 'digest' && w.dailyWakeCap !== F.DEFAULT_DAILY_WAKE_CAP) && lost2.length === SPACE.filter((w) => w.notify === 'digest' && w.dailyWakeCap !== F.DEFAULT_DAILY_WAKE_CAP).length, `CONTROL: with the cap as a third exclusive answer every digest with its own cap is LOST (${lost2.length} of ${SPACE.length}, every one a digest) — the one-to-one leg would redden`, JSON.stringify(lost2.slice(0, 1)));
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+  }
+
+  // ── verify round 3 (2026-09-27): what the 126-space skipped ──
+  // (a) A ROW RE-POINTED FROM A TO B carried A's receiptWake (an older UI's flag no control shows — billed receipt
+  //     wakes B never opted into) and A's stored digest window; what no question asks rides through for the SAME
+  //     principal only.
+  {
+    const Bp = { kind: 'agent', id: 'cid-other', name: 'Other' };
+    const storedA = { principal: A, mode: 'all', notify: 'wake', digestMinutes: 90, dailyWakeCap: 7, receiptWake: true };
+    const keep = W.watcherOfAnswers(W.notifyAnswers(storedA), { principal: A, stored: storedA });
+    const moved = W.watcherOfAnswers(W.notifyAnswers(storedA), { principal: Bp, stored: storedA });
+    ok(same(keep, storedA), 'an unchanged save keeps the same principal\'s receiptWake and its stored window', JSON.stringify(keep));
+    ok(moved.principal === Bp && moved.receiptWake === false && moved.digestMinutes === F.DEFAULT_DIGEST_MINUTES && moved.dailyWakeCap === 7 && moved.notify === 'wake', 'a row re-pointed to ANOTHER principal carries no receiptWake and no stored window with it — the answers only', JSON.stringify(moved));
+    ok(W.samePrincipal(A, { kind: 'agent', id: 'cid-scout', name: 'renamed' }) && !W.samePrincipal(A, Bp) && !W.samePrincipal(A, { kind: 'group', id: 'cid-scout' }) && !W.samePrincipal(A, null) && !W.samePrincipal({ kind: 'agent', id: '' }, { kind: 'agent', id: '' }), 'samePrincipal = the same kind and id (a name is a label; an empty id is nobody)');
+  }
+  // (b) EVERY LEADING @: one strip stored `@@x` as `@x` (a filter matching nothing), and an unchanged save then wrote
+  //     `x` — a widening nobody asked for. The wire strips them all; the dialog's spelling is the wire's.
+  {
+    const v = F.validateRule({ kind: 'mention', value: ' @@x ' });
+    ok(v.ok && v.rule.value === 'x' && F.validateRule({ kind: 'mention', value: '@' }).ok === false && F.validateRule({ kind: 'mention', value: '@@@' }).ok === false, 'the wire stores a mention name with NO leading @ (`@@x` → `x`; only @s is no name)', JSON.stringify(v));
+    const stored = { principal: A, mode: 'filtered', notify: 'wake', digestMinutes: 30, dailyWakeCap: 5, receiptWake: false, filter: { match: 'any', rules: [{ kind: 'mention', value: 'x' }] } };
+    ok(same(backOf(W)(stored), stored) && W.mentionOnlyName({ rules: [{ kind: 'mention', value: '@@x' }] }) === 'x', 'a stored mention round-trips as itself; a legacy `@x` / `@@x` opens as the name it meant');
+    const at = F.validateRule({ kind: 'mention', value: 'a@b' });
+    ok(at.ok && at.rule.value === 'a@b', 'an @ INSIDE a name is the name (only leading @s are the mention mark)');
+  }
+  // (c) A CUT AT THE BOUND LEAVES NO TRAILING SPACE (trim-then-slice kept one; the dialog's unchanged save trimmed it —
+  //     the exact-match value changed under the person)
+  {
+    const k = F.validateRule({ kind: 'keyword', value: 'a'.repeat(499) + ' bbb' });
+    const m = F.validateRule({ kind: 'mention', value: 'a'.repeat(199) + ' bbb' });
+    ok(k.ok && k.rule.value === 'a'.repeat(499) && m.ok && m.rule.value === 'a'.repeat(199), 'a value cut at its bound is trimmed AFTER the cut — what is stored is what an unchanged save writes back', JSON.stringify([k.rule.value.length, m.rule.value.length]));
+  }
+  // (d) THE PREVIEW READS THE CAP THE ENGINE READS: a digest stored with cap 0 (an older build) is read as 1 by
+  //     `F.digestCap` and delivers once per window — the sentence said "will not be woken" while it billed
+  {
+    const w0 = { principal: A, mode: 'all', notify: 'digest', digestMinutes: 30, dailyWakeCap: 0 };
+    const en = W.notifySentence(w0, tFor('en'));
+    ok(F.digestCap(w0) === 1 && /woken at most 1 times a day\./.test(en) && /cannot be capped at 0 — it is read as 1\. Set at least 1 to save\./.test(en) && !/will not be woken/.test(en), 'a cap-0 digest\'s preview says the engine\'s truth (once per window, at most 1 a day) and why the save will refuse it', en);
+    ok(/will not be woken here/.test(W.notifySentence({ principal: A, mode: 'all', notify: 'wake', dailyWakeCap: 0 }, tFor('en'))), 'a cap-0 WAKE still says "will not be woken" (the engine reads 0 there)');
+    const note = '(A digest cannot be capped at 0 — it is read as 1. Set at least 1 to save.)';
+    ok(dicts.zh[note] && dicts.ja[note] && dicts.zh['This notification\'s rule is missing from the store — nobody is woken by it until you pick the messages again.'] && dicts.ja['This notification\'s rule is missing from the store — nobody is woken by it until you pick the messages again.'], 'the new sentences are in the zh AND ja dictionaries');
+    // the refusal names the dialog's own field (it said "Wakes per day", a label the dialog no longer has)
+    const cap0 = W.assignmentRefusalText('digest-cap-zero'), capBad = W.assignmentRefusalText('wake-cap');
+    ok(/At most … times a day/.test(cap0) && !/Wakes per day/.test(cap0) && /At most … times a day/.test(capBad) && /t\('At most \{n\} times a day'/.test(ED) && dicts.zh[cap0] && dicts.ja[cap0] && dicts.zh[capBad] && dicts.ja[capBad], 'a refused cap is worded by the field the dialog draws ("At most … times a day"), in every language', JSON.stringify([cap0, capBad]));
+  }
+  // (e) PINS: the stored filter's name rides through a save (every save wrote `name: null` over it); a filtered watcher
+  //     whose rule the store lost is SAID under question ②, never blamed on the person's input
+  ok(/if \(wn === 'rule'\) return \{ \.\.\.\(f && f\.name \? \{ name: f\.name \} : \{\}\), match: matchSel\.value, rules: rules\.map/.test(ED), 'PIN: the rule editor\'s filter carries the stored NAME');
+  ok(/const lostRule = !!\(w && w\.mode === 'filtered' && w\.filterId && !f\);/.test(ED) && /if \(lostRule\) box\.appendChild\(noteEl\(t\('This notification\\'s rule is missing from the store/.test(ED), 'PIN: a missing rule is said on the row');
+  // verify round 5: a REFUSED save keeps the keyboard — the disabled Save (and the picker's box) dropped the focus to body and the
+  // overlay-bound Esc went deaf; both dialogs' `finally` hand it back to the button (a no-op once the dialog closed on success)
+  ok((ED.match(/\} finally \{ save\.disabled = false;[^\n]*refocus\(save\); \}/g) || []).length === 2 && /function refocus\(btn\) \{\n\s*try \{ if \(btn && btn\.isConnected && \(document\.activeElement === document\.body \|\| !btn\.closest\('\.dialog-overlay'\)\?\.contains\(document\.activeElement\)\)\) btn\.focus\(\{ preventScroll: true \}\); \} catch \{\}/.test(ED), 'PIN (round 5): both dialogs\' save handlers restore the focus to the Save button when a refused save dropped it out of the dialog (Esc stays reachable by keyboard)');
+  // CONTROL: the mapping that carries the stored baggage to ANY principal — the re-pointed row keeps A's receiptWake
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M = mutantCopies('chan-filter-notify-r3', REPO);
+    const FROM = '  const same = samePrincipal(principal, stored && stored.principal);\n';
+    const SRC3 = fs.readFileSync(path.join(REPO, 'src/lib/channel-words.js'), 'utf-8');
+    ok(SRC3.split(FROM).length === 2, 'CONTROL setup: the same-principal test is spelled once');
+    const W3 = await import(pathToFileURL(M.write('src/lib/channel-words.js', SRC3.replace(FROM, '  const same = !!stored;\n'), 'any-principal', { esm: true })).href);
+    const storedA = { principal: A, mode: 'all', notify: 'wake', digestMinutes: 90, dailyWakeCap: 7, receiptWake: true };
+    const moved3 = W3.watcherOfAnswers(W3.notifyAnswers(storedA), { principal: { kind: 'agent', id: 'cid-other', name: 'Other' }, stored: storedA });
+    ok(moved3.receiptWake === true && moved3.digestMinutes === 90, 'CONTROL: carrying the baggage to any principal hands B a receiptWake it never opted into — the re-pointed leg would redden', JSON.stringify(moved3));
+    for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

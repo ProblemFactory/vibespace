@@ -774,6 +774,14 @@ function wakeRefusalText(refused, { t = defaultT } = {}) {
     case 'unwired': return t('no delivery ladder is wired');
     case 'error': return t('the delivery ladder threw');
     case 'spend': return t('the spend budget refused it');
+    case 'row-unwritten': return t('its wake could not be recorded (the store write failed) — kept for its next turn');   // verify r4
+    case 'stash-failed': return t('it could not be stored for the next turn (the disk write failed) — the receipt stays on this card');   // verify r4
+    // verify r5: the ladder's other closed codes were shown RAW ("wrapper-no-steer") on the card and the chip
+    case 'wrapper-no-steer': return t("this session's agent predates notification steering — delivering mid-turn would open a billed turn; kept for its next turn (restart the session to receive them mid-turn)");
+    case 'no-wake': return t('no turn was running to join — delivering now would open a billed turn; kept for its next turn');
+    case 'access-removed': return t('the notification was removed while it was on its way');
+    case 'member-gone': return t('the member left the group while it was on its way — kept for the next one');
+    case 'refused': return t('refused');
     case '': return '';
     default: return String(refused);
   }

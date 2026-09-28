@@ -80,7 +80,8 @@ function stateOf(rec) {
  *   { profiles: [{id, label}], pin: {profileId, origin, at, cleared?} | null, attachments: [{profileId, alias, label,
  *     isDefault}], browsers: {id: record}, own: {profileId, state, lastError, startedAt, lastVerbAt} | null,
  *     input: 'user'|'agent'|null, live: '' | 'ephemeral' | profileId, now }
- * null when the session has no browser key (browser isolation off / predates the feature — no browser to name).
+ * null when the session has no browser key (no browser to name) — a live local session whose first browser command WILL
+ * get one is published as `keylessFact()` instead (B-f7ab: "no browser yet").
  */
 function browserFactFor(session, view) {
   const s = session || {};
@@ -152,6 +153,21 @@ function browserFactFor(session, view) {
   return fact;
 }
 
+/**
+ * B-f7ab: THE FACT OF A LIVE LOCAL SESSION WITH NO BROWSER KEY YET — one that started before per-session browsers (or
+ * while they were off). Its first browser command gets a key (src/server/browser-key.js `ensureBrowserKey`), so every
+ * surface says "no browser yet", never "predates the feature" / nothing at all. The ORCH publishes it only where that
+ * first command WOULD get one (`keylessFactOf`); `using.kind` = 'none', `key` = '' (a surface that needs a key — the
+ * status-bar chip — keeps itself hidden, as `show` is false).
+ */
+function keylessFact() {
+  const fact = { v: 1, key: '', keyless: true, pinned: null, pinGone: null, pinCleared: null,
+    using: { kind: 'none', id: null, label: null, temporary: false, state: 'not-started', error: null, locked: false },
+    own: null, lastUsed: null, differs: null, input: null, live: false, liveRef: null };
+  fact.digest = factDigest(fact);
+  return fact;
+}
+
 /** The render-gate projection: every field a surface prints, and nothing that churns (no clocks). */
 function factDigest(f) {
   if (!f) return '';
@@ -183,6 +199,12 @@ function browserFactWords(fact, tIn) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   const u = fact.using || {};
   const TEMP = t('no profile (temporary browser)');
+  if (fact.keyless || u.kind === 'none') {
+    // B-f7ab: no key yet — the first browser command gets one (no restart); nothing runs, nothing is pinned
+    const none = t('no browser yet');
+    return { name: none, line: none, state: t('not started yet'), pinned: t('none'), why: '', running: t('nothing'), amber: false,
+      tooltip: t('This session has no browser yet — the agent’s first browser command gets one, no restart needed'), show: false, temporary: false, ownName: TEMP, ownShort: t('Temp browser') };
+  }
   const name = u.kind === 'profile' ? (u.label || t('a profile'))
     : u.kind === 'own' ? (u.label || TEMP)
     : u.kind === 'several' ? t('{n} browsers — the agent names one', { n: u.count || 2 })
@@ -283,5 +305,5 @@ function deletePinnedVerdict({ label = '', pinnedBy = [], unpin = false } = {}) 
 
 module.exports = {
   EPHEMERAL_REF, PIN_RUNGS, MANAGED_RUNGS, PIN_CLEARED_MS, DIFFERS, USING_STATES, STALE_CODES,
-  sessionFactsOf, stateOf, browserFactFor, factDigest, browserFactWords, refOfUsing, liveFollowPlan, deletePinnedVerdict,
+  sessionFactsOf, stateOf, browserFactFor, keylessFact, factDigest, browserFactWords, refOfUsing, liveFollowPlan, deletePinnedVerdict,
 };

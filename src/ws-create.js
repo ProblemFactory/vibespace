@@ -24,6 +24,7 @@ const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
 const browserProfiles = require('./browser-profiles'); // agent-browser P0: the browser key's continuity ladder + the env composition (PURE)
+const browserKeyMod = require('./server/browser-key'); // B-f7ab: THE mint + THE key's session fields (the spawn and a live session's first use)
 
 /**
  * Is a `WorktreeCreate` hook configured for a claude run in `cwd`? — the
@@ -1049,13 +1050,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // named `browser` slot — the names alone were measured to make two
           // browsers collide on a host whose config names a profile.
           let spawnBrowserPre = '';
+          // B-f7ab verify r2: a KEYLESS spawn (per-session browsers off) still runs the pin ladder — its pick is recorded
+          // in the session's record (`browserPinAtStart`) as the WITNESS the late key restores, so a default the user
+          // changes AFTER this session started never reaches it (a default reaches a conversation only at its start)
+          let spawnPinWitness = null;
           {
             const be0 = browserEnvOf();
             const prior = (be0 && data.resume && data.resumeId && !data.fork)
               ? be0.priorKeyFor(data.resumeId) : '';
             const bk = browserProfiles.browserKeyFor({
               prior, resume: !!(data.resume && data.resumeId), fork: !!data.fork,
-              mint: () => browserProfiles.mintBrowserKey(crypto.randomBytes(4).toString('hex')),
+              mint: browserKeyMod.mintKey, // THE mint (src/server/browser-key.js — a live session's first use mints through it too, B-f7ab)
             });
             // `cwd` is the session's own directory — the one the CLI reads
             // `./agent-browser.json` from (finding ① r3: a project-level fence
@@ -1097,19 +1102,30 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             const be = be0 ? be0.envFor({
               browserKey: bk.key, integrationOn, remote: !!data.hostId, cwd, pinnedDir: null,
             }) : { pairs: [], remotePrelude: '', variant: null };
+            if (!be.variant && pin.profileId && pin.origin !== 'conversation') {
+              // no key today (the switch is off): the ladder's pick at THIS instant is the witness (its date = the start)
+              spawnPinWitness = { profileId: pin.profileId, origin: pin.origin, at: Date.now(), by: 'user' };
+            } else if (!be.variant && pin.profileId && data.fork && forkParentKey) {
+              // a keyless FORK: the copy the spawn would have made (the parent's row verbatim — never laundered)
+              try { const pp = require('./server/browser-keeper.js').keeper()?.pinFor(forkParentKey); if (pp && pp.profileId) spawnPinWitness = { profileId: pp.profileId, origin: 'conversation', at: Number(pp.at) || 0, by: pp.by === 'agent' ? 'agent' : 'user' }; } catch { spawnPinWitness = null; }
+            }
+            if (!be.variant && spawnPinWitness) {
+              // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
+              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null }) : null; } catch { spawnPinWitness.cap = null; }
+            } else if (!be.variant && be0 && integrationOn) {
+              // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
+              // start had no default rather than guessing from the default the user has by then
+              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null }) : null; } catch { c = null; }
+              spawnPinWitness = { profileId: '', origin: 'harness', at: Date.now(), by: 'user', cap: c };
+            }
             if (be.variant) {
               // The key and the rung are recorded even for `none` (nothing
               // emitted): a later resume of this conversation reuses the key,
               // and a properties row can say WHICH rung decided.
-              session._browserKey = bk.key;
-              session._browserVariant = be.variant;
-              session._browserProfileId = pin.profileId || null;
-              session._browserPinOrigin = pin.origin || 'harness';
-              // P2 (§4.2): the very pairs this process browses with — the live
-              // view of an EPHEMERAL browser (no attachment) asks its stream
-              // port under exactly these, never a re-run of the ladder (which
-              // would rebuild the generated config the r3 finding said not to)
-              session._browserEnv = Array.isArray(be.pairs) && be.pairs.length ? be.pairs.slice() : null;
+              // THE session fields a key brings (key, rung, pin + origin, and — P2 §4.2 — the very pairs this process
+              // browses with, so the live view of an EPHEMERAL browser asks its stream port under exactly these, never
+              // a re-run of the ladder): ONE writer shared with a live session's late key (B-f7ab)
+              browserKeyMod.applyKey(session, { key: bk.key, env: be, pin });
               // A pin that came from anywhere but this conversation's own record
               // becomes its record now, ORIGIN kept — that is what makes the
               // `conversation` rung answer on the next resume (and a fork's copy
@@ -2192,6 +2208,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // guards the parent) and a new session states nothing (its first
             // announced id is the one). Spread forward by every later write.
             browserKeyFor: (session._browserKey && data.resume && data.resumeId && !data.fork) ? String(data.resumeId) : undefined,
+            // B-f7ab verify r2: a keyless spawn's WITNESS of its pin ladder's pick (+ the group cap) at the start — the late
+            // key restores exactly this, never the default the user has by then (browser-key.js; PURE lateDefaultPin)
+            browserPinAtStart: (!session._browserKey && spawnPinWitness) ? spawnPinWitness : undefined,
             // implicit-fork adoption (2.218.0) is armed by _resumeSpawn and
             // disarmed by _sawFirstId — neither survived a restart, so a
             // restored resume whose claude implicitly forked could never be

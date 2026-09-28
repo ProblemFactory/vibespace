@@ -208,7 +208,7 @@ console.log('§2 the owner\'s own send, the digest\'s last line, the owner\'s re
 
 // ── §3 SOURCE CENSUSES ────────────────────────────────────────────────────
 console.log('§3 censuses: XSS, the composer split, no adapter id, the fold, the i18n data paths');
-const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/lib/channel-group-dialogs.js', 'src/lib/channel-groups-view.js', 'src/lib/channel-words.js', 'src/lib/channel-focus.js'];
+const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/lib/channel-group-dialogs.js', 'src/lib/channel-groups-view.js', 'src/lib/channel-words.js', 'src/lib/channel-focus.js', 'src/lib/principal-picker.js'];
 {
   const strip = (s) => s.replace(/^\s*(\*|\/\/).*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   /** the judge: an innerHTML / insertAdjacentHTML / outerHTML write whose right-hand side is not the icon library or an escHtml'd template */
@@ -229,7 +229,9 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   const P = read('src/lib/channels-panel.js'), W = read('src/lib/channel-window.js'), D = read('src/lib/channel-group-dialogs.js');
   ok(/title\.textContent = r\.title;/.test(P) && /last\.textContent = r\.lastText \|\| '';/.test(P) && /src\.textContent = r\.kind === 'group'/.test(P), 'the group row: name, last line and source chip through textContent');
   ok(/el\('div', 'chanmsg-ctx', raw\.context\)/.test(W) && /el\('div', 'chanmsg-body', rec\.text \|\| ''\)/.test(W) && /titleRow\.appendChild\(el\('b', '', group\.name \|\| groupId\)\)/.test(W), 'the group window: invite context, message body and the group name through el() (textContent)');
-  ok(/el\('span', 'chan-gm-name', m\.owner \? t\('You \(observer\)'\) : m\.name\)/.test(D) && /el\('span', 'chan-gpick-name', s\.name\)/.test(D) && /t\('Group — \{name\}', \{ name: group\.name \}\)/.test(D), 'the dialogs: member names, picker names and the title (createModalShell textContent) never innerHTML');
+  // channel-polish (2026-09-27): the member picker is the ONE principal picker — its names through el() (textContent)
+  const PP = read('src/lib/principal-picker.js');
+  ok(/el\('span', 'chan-gm-name', m\.owner \? t\('You \(observer\)'\) : m\.name\)/.test(D) && /n\.appendChild\(el\('span', 'pp-name', r\.name\)\)/.test(PP) && /c\.appendChild\(el\('span', 'pp-chip-name', r\.name\)\)/.test(PP) && /principalPicker\(\{ items, multi: true,/.test(D) && /t\('Group — \{name\}', \{ name: group\.name \}\)/.test(D), 'the dialogs: member names, the picker\'s row and chip names and the title (createModalShell textContent) never innerHTML');
   ok(!/showContextMenu\([^)]*labelHtml/.test(P + W + D) && !/labelHtml/.test(W + D), 'the group menus use plain `label` (textContent) — never `labelHtml`');
 
   // the composer split
@@ -246,10 +248,49 @@ const CLIENT = ['src/lib/channels-panel.js', 'src/lib/channel-window.js', 'src/l
   ok(/body: JSON\.stringify\(\{ channelsPanelFolds: FOLDS \}\)/.test(P) && /method: 'PATCH'/.test(P) && /FOLDS = foldsFrom\(/.test(P) && /msg\.type === 'user-state-updated' && msg\.state && msg\.state\.channelsPanelFolds/.test(P), 'the secondary sections\' fold is PATCHed to user state (`channelsPanelFolds`, merge-only), read through foldsFrom, and followed from other clients');
   // the i18n census knows the new data paths
   const I = await import(path.join(REPO, 'scripts/test-channels-i18n.mjs'));
-  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'chan-gpick-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item', 'chan-tag-who'];
+  const need = ['chan-grow-title', 'chan-grow-last', 'chan-src-chip', 'chan-gm-name', 'pp-name', 'pp-chip-name', 'chanmsg-ctx', 'chanmsg-sys-line', 'chan-mention-item', 'chan-tag-who'];
   ok(need.every((c) => I.DATA_PATH_CLASSES.includes(c)), 'the i18n census excuses the NEW data paths (group name / last line / source label / member + picker names / context / system line / mention item) BY PATH', need.filter((c) => !I.DATA_PATH_CLASSES.includes(c)).join(', '));
   const leak = I.census([{ text: 'Members & notifications', paths: ['div.chan-gm-list < div.dialog-body'], surfaces: ['panel-02-tracked'] }]);
   ok(leak.violations.length === 1, 'NEGATIVE CONTROL: a CHROME string on a group surface (not a data path) is still a violation');
+
+  // ── verify round 5 (2026-09-27): THE MEMO SIGNATURE NAMES EVERY FACT THE ROW PRINTS ──
+  // Round 4 memoised the panel's rows by key + signature, and the signature missed `access` / `watchers` — line 3
+  // (assignmentSummary: the WHOLE access and watcher lists) stayed "Access: Alpha" after "[Alpha, Beta]" was saved
+  // (reproduced in chrome). The census below reads every `conv.<field>` the builder and the helpers it hands `conv`
+  // to touch, and every `r.<field>` the group-row builder touches, against the two signature lists — grep-derived, so
+  // a field the builder gains tomorrow without its signature entry is red here, not stale in the panel.
+  const sigCensus = (src, fe) => {
+    const blockAfter = (text, from) => { let d = 0, j = text.indexOf('{', from); for (let k = j; k < text.length; k++) { if (text[k] === '{') d++; else if (text[k] === '}' && --d === 0) return text.slice(j, k + 1); } return ''; };
+    const body = (name) => { const i = src.indexOf(`function ${name}(`); if (i < 0) return ''; let d = 0, k = i + name.length + 9; for (; k < src.length; k++) { if (src[k] === '(') d++; else if (src[k] === ')' && --d === 0) break; } return blockAfter(src, k); };   // the block after the PARAMETER list (a destructured parameter has braces of its own)
+    const sigOf = (name) => { const b = body(name); const m = /const sig = JSON\.stringify\(\[([\s\S]*?)\]\);/.exec(b); return m ? m[1] : null; };
+    const reads = (text, v) => [...new Set([...strip(text).matchAll(new RegExp(`\\b${v}\\.(\\w+)`, 'g'))].map((m) => m[1]))];
+    // the conversation row: rowBuild reads `conv.*`; assignmentSummary(conv) (channel-filter-editor) reads more
+    const helperReads = reads(blockAfter(fe, fe.indexOf('export function assignmentSummary(conv)')), 'conv');
+    const rowReads = [...new Set([...reads(body('rowBuild'), 'conv'), ...helperReads])];
+    const rowSig = sigOf('row');
+    const groupReads = reads(body('groupRowBuild'), 'r').filter((f) => f !== 'key');   // `r.key` IS the memo key
+    const groupSig = sigOf('groupRow');
+    const missing = (fields, sig, v) => fields.filter((f) => !new RegExp(`\\b${v}\\.${f}\\b`).test(sig || ''));
+    return { rowReads, rowSig, rowMissing: missing(rowReads, rowSig, 'conv'), groupReads, groupSig, groupMissing: missing(groupReads, groupSig, 'r') };
+  };
+  const FE = read('src/lib/channel-filter-editor.js');
+  const J = (x) => JSON.stringify(x), eq = (a, b) => J(a) === J(b);
+  const SC = sigCensus(P, FE);
+  ok(SC.rowSig && SC.rowReads.length >= 9 && SC.rowMissing.length === 0, `SIGNATURE CENSUS: every field the conversation row prints (${SC.rowReads.join(', ')}) is in its memo signature — incl. the WHOLE access + watchers lists line 3 says (round 5)`, J(SC.rowMissing));
+  ok(SC.groupSig && SC.groupReads.length >= 8 && SC.groupMissing.length === 0, `SIGNATURE CENSUS: every field the first-screen row prints (${SC.groupReads.join(', ')}) is in its memo signature`, J(SC.groupMissing));
+  const plantedSig = P.replace('conv.assignment, conv.access, conv.watchers, conv.held]);', 'conv.assignment, conv.watchers, conv.held]);');
+  ok(plantedSig !== P && eq(sigCensus(plantedSig, FE).rowMissing, ['access']), 'NEGATIVE CONTROL: the round-4 signature (no `conv.access`) is flagged by the census, naming the field');
+  // the handler census: reconcile KEEPS a node rebuilt the same and refreshes its handler PROPERTIES — so every handler
+  // the panel's draw region wires must be one of those properties, never addEventListener (a kept node would keep a
+  // stale closure)
+  const drawRegion = P.slice(P.indexOf('  function draw() {'), P.indexOf('  async function refresh() {'));
+  const propsUsed = [...new Set([...(drawRegion + read('src/lib/channel-chrome.js')).matchAll(/\.(on[a-z]+) = /g)].map((m) => m[1]))];
+  const hp = /const HANDLER_PROPS = Object\.freeze\(\[([^\]]*)\]\);/.exec(P);
+  const declared = hp ? [...hp[1].matchAll(/'(\w+)'/g)].map((m) => m[1]) : [];
+  ok(drawRegion.length > 5000 && !/addEventListener\(/.test(strip(drawRegion)) && propsUsed.length >= 2 && propsUsed.every((k) => declared.includes(k)), `HANDLER CENSUS: the draw region wires handlers only as properties (${propsUsed.join(', ')}) and every one is in reconcile's HANDLER_PROPS (${declared.join(', ')}) — never addEventListener`, J({ propsUsed, declared }));
+  ok(/if \(old\.isEqualNode\(fresh\)\) \{ adoptHandlers\(old, fresh\); out\[i\] = old; want\.add\(old\); want\.delete\(fresh\); \}/.test(P) && /for \(const k of \[\.\.\.kids\]\) if \(!want\.has\(k\)\) k\.remove\(\);/.test(P), 'PIN (round 5): reconcile keeps a fresh node structurally EQUAL to the one at its place (isEqualNode) with its handlers refreshed — the account head / grain lines / "Show all" survive a broadcast like the rows');
+  // an adopted handler runs on the KEPT node: it may anchor nothing on the variable of the fresh one (detached ⇒ a 0×0 rect at the corner)
+  ok(!/const r = more\.getBoundingClientRect\(\)/.test(P) && (P.match(/ev\.currentTarget\.getBoundingClientRect\(\)/g) || []).length === 2 && !/\bon(?:click|contextmenu) = \([^)]*\) => \{[^\n]*\b(?:more|edit|h|tog|b|l|cb)\.getBoundingClientRect/.test(drawRegion), 'PIN (round 5): the ⋯ menus anchor on `ev.currentTarget` — a handler the reconcile adopts onto the kept button never reads the fresh (detached) button\'s rect');
 }
 
 // ── §4 WIRING PINS ────────────────────────────────────────────────────────

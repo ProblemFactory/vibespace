@@ -66,7 +66,7 @@ const session = { agentToken: 'vsst_test', backend: 'claude', cwd, name: 't' };
 const activeSessions = new Map([['sess1', session]]);
 setupAgentRoutes({
   app, activeSessions, tasks,
-  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
+  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} },
   SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
   userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
   sessionStatusKey: (s, id) => `claude:${id}`,

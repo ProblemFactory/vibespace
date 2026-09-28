@@ -66,6 +66,14 @@
 //      (o) a second client repaints the accounts IN PLACE (no reload, no
 //          /api/channels fetch);
 //      (p) 375 px: no horizontal overflow on the panel or any dialog;
+//      (r) 2.369.195 FROM STORAGE (design §2.7): a Gmail STORAGE mount holding
+//          its own custom Google client (seeded into the scratch data/ before
+//          boot, sealed under its .mounts-key) is offered in the Connect
+//          select as `From storage: mail archive (custom client …)`; chosen, the
+//          custom inputs fold away and the copy note shows; the consent URL's
+//          client_id IS the mount's; Connect creates a `Custom client`
+//          account holding that id; its Re-authorize select offers the same
+//          storage option; the mount's secret never reaches the page;
 //      (q) PIXELS: each structural probe the mockups name (the type-first
 //          dialog, the client select, the custom fields, the consent block,
 //          the card head / health / error line / button, the ↳ rows, the
@@ -122,6 +130,18 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${JSON.stringify(require(path.join(repo, 'package.json')).version)};\n`);
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
+
+// (r) FROM STORAGE: a Gmail storage mount holding its OWN custom Google client, written into the
+// scratch server's data/ BEFORE it boots (sealed under that data dir's .mounts-key by the real MountManager)
+const MOUNT_CID = '111122223333-mailfake.apps.googleusercontent.com';
+const MOUNT_CSEC = 'GOCSPX-mail-MOUNT-s3cret-ui-7Q';   // fake, unmistakable in any byte stream
+const MOUNT_EMAIL = 'archive.owner@example.test';
+const MOUNT_ID = (() => {
+  const { MountManager } = require(path.join(wt, 'src/mounts.js'));
+  const mm = new MountManager({ dataDir: path.join(wt, 'data') });
+  return mm.add({ type: 'gmail', name: 'mail archive', token: '{"access_token":"fake-at","refresh_token":"fake-rt"}', clientId: MOUNT_CID, clientSecret: MOUNT_CSEC, email: MOUNT_EMAIL });
+})();
+const MOUNT_OPTION = `From storage: mail archive (custom client ${MOUNT_CID.slice(0, 12)}…, ${MOUNT_EMAIL})`;
 
 let srv = null;
 const STUB = path.join(repo, 'scripts/fixtures/channels-vendor-stub.cjs');
@@ -465,7 +485,7 @@ const p2 = await newPage();
     return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], hint: hint && hint.className === 'mounts-field-hint' ? hint.textContent : null, block: block ? block.querySelector('button').textContent : null, blocks: d.querySelectorAll('.mounts-drive-connect').length, query: (inputs.find((i) => i.value === 'label:INBOX') || {}).value || null, scope: ([...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'inbox')) || {}).value || null, submit: d.querySelector('.dialog-actions .btn-create').textContent };
   })()`);
   ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) (${JSON.stringify(gm.labels)})`);
-  ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + Custom, no Built-in (${JSON.stringify(gm)})`);
+  ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', MOUNT_OPTION, 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + the storage mount's own client (r) + Custom, no Built-in (${JSON.stringify(gm)})`);
   ok(gm.hint === R.rowById('gmail').clientHint, 'the registry\'s clientHint is the .mounts-field-hint line under the select');
   ok(gm.block === 'Connect Google' && gm.scope === 'inbox' && gm.query === null && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the Mailbox scope on Inbox (the query field hidden), and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, scope: gm.scope, query: gm.query, submit: gm.submit })})`);
   await p1.probe('connect dialog (Gmail, preset)', '#mounts-dialog-overlay .dialog');
@@ -653,6 +673,47 @@ const p2 = await newPage();
   for (let i = 0; i < 60 && !goneB; i++) { goneB = !(await accounts()).some((a) => a.id === B.id); if (!goneB) await sleep(100); }
   ok(goneB && await p1.evaljs(panelWait(`() => !${card(B.id)}`)), 'an unreferenced account is removed — its card goes');
   ok(await p2.evaljs(panelWait(`() => !${card(B.id)}`)), 'and page 2 dropped it too');
+
+  // (r) FROM STORAGE (design §2.7): the storage mount's own client, borrowed without anyone seeing its secret
+  console.log('  (r) from storage');
+  const beforeR = (await accounts()).map((a) => a.id);
+  await p1.evaljs(`document.querySelector('.rail-panel-channels [data-connect-account]').click(); 1`);
+  ok(await p1.evaljs(WAIT_DLG('connect')), '(r) Connect an account opens');
+  await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'gmail'; s.dispatchEvent(new Event('change')); return 1; })()`);
+  const clientSel = `[...${DLG('connect')}.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom'))`;
+  const pick = await p1.evaljs(`(() => { const c = ${clientSel}; const o = [...c.options].find((x) => x.textContent === ${JSON.stringify(MOUNT_OPTION)}); if (!o) return null; c.value = o.value; c.dispatchEvent(new Event('change')); return o.value; })()`);
+  ok(pick === `mount:${MOUNT_ID}`, `(r) the select offers "${MOUNT_OPTION}" (value mount:<the mount's id>) and it is chosen (${pick})`);
+  const rs = await p1.evaljs(`(() => {
+    const d = ${DLG('connect')};
+    const note = [...d.querySelectorAll(':scope > .mounts-note')].find((e) => e.style.display !== 'none');
+    return { labels: ${visibleLabels('connect')}, note: note ? note.textContent : null, block: ([...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none') || { querySelector: () => ({}) }).querySelector('button').textContent };
+  })()`);
+  ok(JSON.stringify(rs.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']) && /^The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page\./.test(rs.note || '') && rs.block === 'Connect Google',
+    `(r) chosen: no custom id / secret inputs, the note says the server copies the secret, the Google authorization block stays (${JSON.stringify(rs)})`);
+  stubMode({ email: MOUNT_EMAIL, refresh: 'ok', expiresIn: 3600 });
+  await p1.evaljs(`(() => { const d = ${DLG('connect')}; d.querySelector('.mounts-drive-connect .mounts-oauth-link')?.remove(); [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
+  const urlR = await p1.evaljs(consentUrlIn('#mounts-dialog-overlay .mounts-drive-connect .mounts-oauth-link input'));
+  ok(!!urlR && new URL(urlR).searchParams.get('client_id') === MOUNT_CID, `(r) THE consent URL's client_id is the storage mount's own client (${urlR ? new URL(urlR).searchParams.get('client_id') : null})`);
+  ok(!(await p1.evaljs(`document.documentElement.outerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) the mount\'s secret is nowhere in the page');
+  ok((await followConsent(urlR)) === 200, '(r) the redirect lands on the loopback');
+  const signedR = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(/Connected/.test(signedR || ''), `(r) signed in under the storage client (${JSON.stringify(signedR)})`);
+  await p1.evaljs(`${DLG('connect')}.querySelector('.dialog-actions .btn-create').click(); 1`);
+  let C = null;
+  for (let i = 0; i < 60 && !C; i++) { C = (await accounts()).find((a) => !beforeR.includes(a.id)) || null; if (!C) await sleep(100); }
+  ok(!!C && C.credentialKey === 'custom' && C.customClient && C.customClient.appId === MOUNT_CID && C.auth.tokenHeld && C.auth.user === MOUNT_EMAIL, `(r) Connect created a Custom-client account holding the MOUNT's client id, signed in (${JSON.stringify(C && { key: C.credentialKey, appId: C.customClient && C.customClient.appId, user: C.auth.user })})`);
+  ok(!!C && await p1.evaljs(panelWait(`() => { const c = ${card(C ? C.id : '')}; return !!(c && c.querySelector('.chan-cred-chip') && c.querySelector('.chan-cred-chip').textContent === 'Custom client'); }`)), '(r) its card wears the Custom client chip');
+  // its Re-authorize offers the same storage option
+  await p1.evaljs(`(async () => { ${card(C.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => /^(Re-authorize|Connect)$/.test(e.textContent.trim())); if (it) it.click(); return !!it; })()`);
+  ok(await p1.evaljs(WAIT_DLG('reauth')), '(r) Re-authorize on the new account opens');
+  const reR = await p1.evaljs(`(() => { const s = ${DLG('reauth')}.querySelector(':scope > select'); return { value: s.value, options: [...s.options].map((o) => o.textContent) }; })()`);
+  ok(reR.value === 'custom' && reR.options.includes(MOUNT_OPTION) && reR.options[reR.options.length - 1] === 'Custom (own client id/secret)', `(r) the Re-authorize select offers the storage option too (the account's own custom client selected) (${JSON.stringify(reR)})`);
+  await p1.evaljs(`document.querySelector('#chan-reauth-dialog .dialog-close').click(); 1`);
+  const cfgR = await api('GET', '/api/channels/oauth/mount-clients?kind=gmail');
+  ok(cfgR.status === 200 && cfgR.json.clients.some((x) => x.mountId === MOUNT_ID) && !cfgR.text.includes(MOUNT_CSEC) && !cfgR.text.includes(MOUNT_CID), '(r) the list route answers the mount without its secret or its whole id');
+  ok(!(await api('GET', '/api/channels')).text.includes(MOUNT_CSEC) && !(await p2.evaljs(`document.body.innerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) nor does the digest or the other client');
+  await api('DELETE', `/api/channels/adapters/${encodeURIComponent(C.id)}`);
+  ok(await p1.evaljs(panelWait(`() => !${card(C.id)}`)), '(r) FIXTURE: the borrowed-client account is removed again (the later legs see the accounts they made)');
 
   // (p) 375 px: no horizontal overflow on the panel and the dialogs
   const over = async (label) => {

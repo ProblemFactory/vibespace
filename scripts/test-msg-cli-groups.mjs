@@ -224,7 +224,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   AR.setupAgentRoutes({
     app, activeSessions: sessions,
     tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null },
-    sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: () => undefined,
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, deliver,
     getGroups: () => eng,
@@ -390,7 +390,7 @@ console.log('§2 the routes over the REAL engine + store + ladder');
   AR2.setupAgentRoutes({
     app: app2, activeSessions: sessions,
     tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null },
-    sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+    sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: () => undefined,
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, deliver,
     getGroups: () => eng2,
@@ -401,6 +401,376 @@ console.log('§2 the routes over the REAL engine + store + ladder');
     'after a RESTART (fresh routes module + engine over the same store) the same sender → phi --wake is STILL floored — the floor is persisted, not an in-memory Map', JSON.stringify(r.body));
   try { deliver.flush(); } catch {}
   store2.close();
+
+  // ── channel-withdraw verify r4 (2026-09-27): A PENDING FORK IS NOT ITS PARENT — a fork still carrying its
+  // parent's conversation id (`_forkRequested`, nothing adopted yet) sent as the parent: the pair group held the
+  // PARENT's id, the target's reply woke the PARENT (a billed turn on the wrong conversation, the pair bound for
+  // good). Refused by name before the groups engine; the control (a patched copy whose msgCaller answers the raw
+  // id) makes the pair under the parent's id.
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M = mutantCopies('msg-cli-fork', REPO);
+    const P = 'dddddddd-4444-4000-8000-000000000009', T = 'eeeeeeee-5555-4000-8000-000000000010';
+    async function forkLeg(ARmod, name) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+      const st = createChannelStore({ dir: path.join(dir, 'channels') });
+      const ros = [{ cid: P, name: 'parent', groups: ['tg1'], reachability: null }, { cid: T, name: 'target', groups: ['tg1'], reachability: null }];
+      const ss = new Map([
+        ['w-P', { claudeSessionId: P, name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P' }],
+        ['w-F', { claudeSessionId: P, name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true }],   // the pending fork: the parent's id
+        ['w-T', { claudeSessionId: T, name: 'target', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_T' }],
+      ]);
+      const posted = [], asked = [];
+      const dl = DELIVER.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined,
+        peerMsg: { findPeer: (cid) => ({ name: cid, socketPath: '/dev/null' }), postToPeer: async (peer) => { posted.push(peer.name); return { ok: true }; }, postChannelEvent: async () => ({ ok: false }) },
+        emitPeerCard: () => {}, authorizeSpend: (req) => { asked.push(req.cid); return { ok: true, identity: { key: 'slot-1' } }; }, noteSpend: () => {}, releaseSpend: () => {} });
+      let tt = Date.UTC(2026, 8, 27, 10, 0, 0);
+      const ge = GE.create({ store: st, deliver: dl, broadcast: () => {}, now: () => (tt += 1000), roster: () => ros, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null },
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x) => 'claude:' + x.claudeSessionId, serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: dl, getGroups: () => ge });
+      const c = (p, token, body) => new Promise((resolve) => { let status = 200; rts[p]({ headers: { authorization: 'Bearer ' + token }, body, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } }); });
+      const s1 = await c('POST /api/agent/msg/send', 'vsst_F', { to: 'target', text: 'hello from the fork', wake: true, yes: true });
+      const groups = Object.values(st.groups.live().groups);
+      const wokeBySend = posted.length, askedBySend = asked.length;
+      const s2 = await c('POST /api/agent/msg/send', 'vsst_T', { to: P, text: 'reply', wake: true, yes: true });
+      const lst = await c('GET /api/agent/msg/groups', 'vsst_F', {});
+      try { dl.flush(); } catch {}
+      st.close();
+      return { send: `${s1.status}:${s1.body.code || 'ok'}`, sentence: s1.body.error || '', pairHoldsParent: groups.some((g) => g.pair && (g.members || []).some((m) => (m.member || m.cid) === P)), groups: groups.length, wokeBySend, askedBySend, reply: `${s2.status}:${s2.body.code || 'ok'}`, woke: posted.slice(), list: `${lst.status}:${lst.body.code || 'ok'}` };
+    }
+    const fk = await forkLeg(AR, 'fork');
+    ok(fk.send === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(fk.sentence) && fk.groups === 0 && fk.wokeBySend === 0 && fk.askedBySend === 0 && fk.list === '409:bad-member',
+      `a PENDING fork's \`send --wake\` ⇒ 409 bad-member by name; no pair, nobody woken, the authorizer never asked; its \`groups\` list is refused the same way (${fk.send}; the target's own later message to the parent by id is its own act: ${fk.reply})`, JSON.stringify(fk));
+    const arsrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const LINE = "  const own = ownConversationIdOf(s);\n  return { job: null, cid: own.cid, cidWhy: own.why, s, id, myGroups: _myGroupIds(s, id) };";
+    ok(arsrc.split(LINE).length === 2, 'the own-id line of msgCaller is present once (the control answers the raw, possibly borrowed, id)');
+    const ARc = M.load('src/agent-routes.js', arsrc.replace(LINE, "  return { job: null, cid: s.claudeSessionId || s.backendSessionId || null, s, id, myGroups: _myGroupIds(s, id) };"), 'msgcaller-raw-id');
+    const fkc = await forkLeg(ARc, 'fork-ctl');
+    ok(fkc.send === '200:ok' && fkc.pairHoldsParent && fkc.reply === '200:ok' && fkc.woke.includes(P),
+      `CONTROL: the routes whose msgCaller answers the raw id let the pending fork make the pair under the PARENT's id and the target's reply WAKES THE PARENT (${JSON.stringify(fkc.woke)}) — the leg would go red`, JSON.stringify(fkc));
+    for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'r4 fork control: ' })) ok(c.pass, c.name, c.detail);
+  }
+
+  // ── channel-withdraw verify r5 (2026-09-27): THE OTHER SIDE OF THE FORK RULE — a pending fork as a TARGET, as a
+  // JOB OWNER, as a WINDOW-SHARE target. r4 guarded the fork as a SENDER; the roster (server.js `liveSessions`,
+  // agent-routes `_msgEndpoints`) still listed it under its PARENT's id with its own name: with the parent not
+  // live, a third session's `send --wake "<fork>"` minted the pair under the PARENT's id and authorized a billed
+  // turn on the parent (reproduced over the real engine); with the parent live, every message to the parent was
+  // refused `ambiguous`. `jobsCaller` read the raw status key: a job the fork made was OWNED by the parent, every
+  // notification a billed turn on the parent, for good. ONE predicate now — claude-lock-capture's `addressableId`.
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M5 = mutantCopies('msg-cli-fork-r5', REPO);
+    const LC = require(path.join(REPO, 'src/claude-lock-capture.js'));
+    const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+    const P = 'aaaaaaaa-1111-4000-8000-000000000021', T = 'bbbbbbbb-2222-4000-8000-000000000022';
+    const rosterOf = (LCmod, ss) => () => { const out = []; for (const [id, s] of ss) { const cid = LCmod.addressableId(s); if (!cid) continue; out.push({ cid, name: s.name || null, groups: ['tg1'], webuiId: id, reachability: null }); } return out; };   // server.js's liveSessions shape, through the SAME predicate
+    async function targetLeg(ARmod, LCmod, name, { parentLive }) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+      const st = createChannelStore({ dir: path.join(dir, 'channels') });
+      const ss = new Map([
+        ...(parentLive ? [['w-P', { claudeSessionId: P, backend: 'claude', name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P', _initialGroupId: 'tg1' }]] : []),
+        ['w-F', { claudeSessionId: P, backend: 'claude', name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true, _initialGroupId: 'tg1' }],
+        ['w-T', { claudeSessionId: T, backend: 'claude', name: 'target', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_T', _initialGroupId: 'tg1' }],
+      ]);
+      const asked = [];
+      const dl = DELIVER.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined,
+        peerMsg: { findPeer: (cid) => (cid === P && !parentLive ? null : { name: cid, socketPath: '/dev/null' }), postToPeer: async () => ({ ok: true }), postChannelEvent: async () => ({ ok: false }) },
+        emitPeerCard: () => {}, authorizeSpend: (req) => { asked.push(req.cid); return { ok: true, identity: { key: 'slot-1' } }; }, noteSpend: () => {}, releaseSpend: () => {} });
+      let tt = Date.UTC(2026, 8, 27, 10, 0, 0);
+      const ge = GE.create({ store: st, deliver: dl, broadcast: () => {}, now: () => (tt += 1000), roster: rosterOf(LCmod, ss), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+      const tasks = { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => ({ externalVisibility: 'none' }) };
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks,
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id), serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: dl, getGroups: () => ge });
+      const c = (p, token, body) => new Promise((resolve) => { let status = 200; Promise.resolve(rts[p]({ headers: { authorization: 'Bearer ' + token }, body, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } })).catch((e) => resolve({ status: 500, body: { error: e.message } })); });
+      const peers = await c('GET /api/agent/msg/peers', 'vsst_T', {});
+      const forkListed = (peers.body.peers || []).some((x) => x.name === 'parent (fork)');
+      const s1 = await c('POST /api/agent/msg/send', 'vsst_T', { to: 'parent (fork)', text: 'for the fork', wake: true, yes: true });
+      const s2 = parentLive ? await c('POST /api/agent/msg/send', 'vsst_T', { to: P, text: 'for the parent by id', wake: true, yes: true }) : { status: 0, body: {} };
+      const groups = Object.values(st.groups.live().groups);
+      try { dl.flush(); } catch {}
+      st.close();
+      return { forkListed, toFork: `${s1.status}:${s1.body.code || 'ok'}`, toParent: `${s2.status}:${s2.body.code || 'ok'}`, pairHoldsParent: groups.some((g) => g.pair && (g.members || []).some((m) => m.member === P)), askedOnParent: asked.filter((x) => x === P).length };
+    }
+    const dead = await targetLeg(AR, LC, 'r5-target-dead', { parentLive: false });
+    ok(!dead.forkListed && dead.toFork === '404:unreachable' && !dead.pairHoldsParent && dead.askedOnParent === 0,
+      `the parent NOT live: a pending fork is not a peer, a wake to it by name is \`unreachable\`, no pair under the parent's id, the authorizer never asked for the parent (${JSON.stringify(dead)})`);
+    const live = await targetLeg(AR, LC, 'r5-target-live', { parentLive: true });
+    ok(!live.forkListed && live.toFork === '404:unreachable' && live.toParent === '200:ok' && live.askedOnParent === 1,
+      `the parent live: the fork is not a peer and the PARENT is reachable by id (it was \`ambiguous\` beside its pending fork) — its own wake is its own (${JSON.stringify(live)})`);
+    const lcsrc = fs.readFileSync(path.join(REPO, 'src/claude-lock-capture.js'), 'utf-8');
+    const PRED = "  return cid && !liveForkPending(session) ? cid : null;";
+    ok(lcsrc.split(PRED).length === 2, 'addressableId\'s own-id line is present once (the control answers the raw, possibly borrowed, id)');
+    const LCc = M5.load('src/claude-lock-capture.js', lcsrc.replace(PRED, "  return cid;"), 'addressable-raw');
+    const arsrc5 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const EP = "    const cid = addressableId(t);\n    if (!cid) continue;";
+    ok(arsrc5.split(EP).length === 2, '_msgEndpoints reads the endpoint id through addressableId, once');
+    const ARc5 = M5.load('src/agent-routes.js', arsrc5.replace(EP, "    const cid = t.claudeSessionId || t.backendSessionId;\n    if (!cid) continue;"), 'endpoints-raw');
+    const deadC = await targetLeg(ARc5, LCc, 'r5-target-dead-ctl', { parentLive: false });
+    ok(deadC.forkListed && deadC.toFork === '200:ok' && deadC.pairHoldsParent && deadC.askedOnParent === 1,
+      `CONTROL: the raw-id roster + endpoints list the fork under the parent's id, mint the pair under the PARENT and authorize a billed turn on it (${JSON.stringify(deadC)}) — the leg would go red`);
+    const liveC = await targetLeg(ARc5, LCc, 'r5-target-live-ctl', { parentLive: true });
+    ok(liveC.toParent === '400:ambiguous', `CONTROL: with the raw roster the parent itself is \`ambiguous\` beside its pending fork (${liveC.toParent})`);
+    // server.js's roster reads the SAME predicate (the suite cannot boot server.js: the line is pinned by name)
+    const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
+    ok(/liveSessions: \(\) => \{ const out = \[\]; for \(const \[id, s\] of activeSessions\) \{ const cid = addressableId\(s\);/.test(srv) && /const \{ addressableId \} = require\('\.\/src\/claude-lock-capture'\)/.test(srv), 'PIN: server.js\'s liveSessions roster (the groups engine\'s + the channels engine\'s) reads each row\'s id through addressableId');
+
+    // THE JOB OWNER: a pending fork's `vibespace-job run` — refused by name; the control records the parent as the owner
+    async function jobLeg(ARmod, name) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
+      const ss = new Map([
+        ['w-P', { claudeSessionId: P, backend: 'claude', name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P', _initialGroupId: 'tg1', createdAt: 1 }],
+        ['w-F', { claudeSessionId: P, backend: 'claude', name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true, _initialGroupId: 'tg1', createdAt: 2 }],
+      ]);
+      const posted = [];
+      const dl = DELIVER.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined,
+        peerMsg: { findPeer: (cid) => ({ name: cid, socketPath: '/dev/null' }), postToPeer: async (peer) => { posted.push(peer.name); return { ok: true }; }, postChannelEvent: async () => ({ ok: false }) },
+        emitPeerCard: () => {}, authorizeSpend: () => ({ ok: true, identity: { key: 'slot-1' } }), noteSpend: () => {}, releaseSpend: () => {} });
+      const jm = new JobManager({ dataDir: dir, broadcast() {}, notifyUser() {}, log() {}, deliverToConversation: (cid, text, o) => dl.deliverToConversation(cid, text, o), groupNotifyFor: () => null, notifyGlobal: () => true });
+      jm.init();
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks: { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null },
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id), serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => jm, deliver: dl, getGroups: () => null });
+      const c = (p, token, body) => new Promise((resolve) => { let status = 200; Promise.resolve(rts[p]({ headers: { authorization: 'Bearer ' + token }, body, query: {}, params: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } })).catch((e) => resolve({ status: 500, body: { error: e.message } })); });
+      const r = await c('POST /api/agent/jobs', 'vsst_F', { kind: 'cron', name: 'fork-job', schedule: { everyMs: 3600000 }, action: { type: 'notify', text: 'tick' } });
+      const job = r.body && r.body.job ? jm.jobs.get(r.body.job.id) : null;
+      if (job) { jm._notifyOwner(job, { what: 'an event' }); await new Promise((z) => setTimeout(z, 30)); }
+      const rP = await c('POST /api/agent/jobs', 'vsst_P', { kind: 'cron', name: 'parent-job', schedule: { everyMs: 3600000 }, action: { type: 'notify', text: 'tick' } });
+      jm.shutdown(); for (const t of jm._timers) clearInterval(t);
+      try { dl.flush(); } catch {}
+      return { create: `${r.status}:${r.body.code || (r.body.success ? 'ok' : r.body.error)}`, sentence: r.body.error || '', ownerIsParent: !!(job && job.owner && job.owner.conversation && job.owner.conversation.id === P), postedOnParent: posted.filter((x) => x === P).length, parentCreates: `${rP.status}:${rP.body.success ? 'ok' : rP.body.error}`, parentOwner: rP.body && rP.body.job && rP.body.job.owner ? rP.body.job.owner.conversation : null };
+    }
+    const jb = await jobLeg(AR, 'r5-job');
+    ok(jb.create === '409:bad-member' && /a fork that has not announced its own conversation id yet/.test(jb.sentence) && !jb.ownerIsParent && jb.postedOnParent === 0 && jb.parentCreates === '200:ok',
+      `a PENDING fork's job creation ⇒ 409 bad-member by name — no job owned by the parent, no billed notification on the parent; the parent's own creation stands (${JSON.stringify(jb)})`);
+    const JC = "  const own = ownConversationIdOf(s);\n  return {\n    conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),";
+    ok(arsrc5.split(JC).length === 2, 'jobsCaller reads the caller\'s conversation through ownConversationIdOf, once (the control reads the raw status key)');
+    const ARj = M5.load('src/agent-routes.js', arsrc5.replace(JC, "  return {\n    conversationId: key.startsWith('webui:') ? null : key.slice(key.indexOf(':') + 1), borrowed: null,"), 'jobscaller-raw');
+    const jbc = await jobLeg(ARj, 'r5-job-ctl');
+    ok(jbc.create === '200:ok' && jbc.ownerIsParent && jbc.postedOnParent === 1, `CONTROL: the raw-key jobsCaller records the PARENT as the fork's job owner and its first notification is a billed post on the parent (${JSON.stringify(jbc)}) — the leg would go red`);
+
+    // THE WINDOW-SHARE REQUEST (the owner's "ask <agent> to take control"): a pending fork is refused by name — the wake and the stash landed on the parent
+    {
+      const WR = require(path.join(REPO, 'src/server/window-request.js'));
+      const ss = new Map([['w-F', { claudeSessionId: P, backend: 'claude', name: 'parent (fork)', _forkRequested: true }], ['w-P', { claudeSessionId: P, backend: 'claude', name: 'parent' }]]);
+      const stashed = [];
+      const engine = { reachOf: () => ({ handle: 'h1', label: 'Calc' }), grantReach: () => ({ granted: { changed: true }, modeInfo: {} }), endHold: () => false };
+      const dlv = { stashFor: (cid) => { stashed.push(cid); return { stored: true }; }, deliverToConversation: async () => ({ ok: true }) };
+      const wr = WR.create({ engine, deliver: dlv, activeSessions: ss, log: { log() {}, warn() {} } });
+      let err = null; try { await wr.request({ handle: 'h1', sessionId: 'w-F', wake: true }); } catch (e) { err = e; }
+      const rp = await wr.request({ handle: 'h1', sessionId: 'w-P', wake: false });
+      ok(err && err.code === 'fork_pending' && /fork that has not announced/.test(err.message) && stashed.length === 1 && rp.ok && rp.delivered === 'next-turn', `a window-share request to a pending fork is refused by its OWN code (verify r6: the client worded no_conversation as "say something to it first"); the parent's own is served (${err && err.code}: ${err && err.message.slice(0, 60)})`);
+      const wsrc = fs.readFileSync(path.join(REPO, 'src/server/window-request.js'), 'utf-8');
+      const WL = "    if (liveForkPending(s)) throw namedError('fork_pending',";
+      ok(wsrc.split(WL).length === 2, 'the window-request guard is present once');
+      const WRc = M5.load('src/server/window-request.js', wsrc.replace(WL, "    if (false) throw namedError('fork_pending',"), 'winreq-raw');
+      const stashed2 = [];
+      const wr2 = WRc.create({ engine, deliver: { stashFor: (cid) => { stashed2.push(cid); return { stored: true }; }, deliverToConversation: async () => ({ ok: true }) }, activeSessions: ss, log: { log() {}, warn() {} } });
+      const r2 = await wr2.request({ handle: 'h1', sessionId: 'w-F', wake: false });
+      ok(r2.ok && stashed2[0] === P, 'CONTROL: without the guard the fork\'s request is stashed for the PARENT\'s conversation — the leg would go red');
+    }
+    // THE FOR-YOU ITEM (`vibespace-ask`): a pending fork's item was keyed under the PARENT's status key for good — the
+    // owner's reply (typed by the item's key) went into the parent. Keyed under the fork's own placeholder now.
+    {
+      const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+      async function askLeg(ARmod, name) {
+        const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
+        const ut = new UserTodoManager({ dataDir: dir });
+        const ss = new Map([
+          ['w-P', { claudeSessionId: P, backend: 'claude', name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P', pty: {} }],
+          ['w-F', { claudeSessionId: P, backend: 'claude', name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true, pty: {} }],
+        ]);
+        const key = (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id);
+        const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+        ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks: { groupsForSession: () => [], _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => null },
+          sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: ut, sessionStatusKey: key, serverSetting: () => undefined,
+          integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null, getGroups: () => null });
+        const c = (token, body) => new Promise((resolve) => { let status = 200; Promise.resolve(rts['POST /api/agent/user-todo']({ headers: { authorization: 'Bearer ' + token }, body, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } })).catch((e) => resolve({ status: 500, body: { error: e.message } })); });
+        const r = await c('vsst_F', { add: { text: 'which branch?', kind: 'action' } });
+        const item = r.body && r.body.item;
+        if (!item) return { status: r.status, error: r.body && r.body.error };
+        // the reply route's own resolver (routes/user-todos-reply.js sessionForItem): which live session the item names
+        const UTR = require(path.join(REPO, 'src/routes/user-todos-reply.js'));
+        const hit = item ? UTR.sessionForItem(item, ss, key) : null;
+        return { status: r.status, key: item && item.sessionKey, repliesTo: hit ? hit[0] : null };
+      }
+      const a = await askLeg(AR, 'r5-ask');
+      ok(a.status === 200 && a.key === 'webui:w-F' && a.repliesTo === 'w-F', `a pending fork's For-you item is keyed under its own placeholder and the owner's reply reaches the FORK (${JSON.stringify(a)})`);
+      const AL = "  const key = liveForkPending(s) ? `webui:${id}` : sessionStatusKey(s, id);";
+      ok(arsrc5.split(AL).length === 2, 'the user-todo key line is present once (the control keys by the raw status key)');
+      const ARa = M5.load('src/agent-routes.js', arsrc5.replace(AL, "  const key = sessionStatusKey(s, id);"), 'ask-raw-key');
+      const ac = await askLeg(ARa, 'r5-ask-ctl');
+      ok(ac.key === 'claude:' + P && ac.repliesTo === 'w-P', `CONTROL: keyed by the raw status key the item is the PARENT's and the reply is typed into the parent (${JSON.stringify(ac)}) — the leg would go red`);
+    }
+    for (const c of copiesCensus(M5.files, M5.dir, REPO, { minCopies: 1, label: 'r5 fork control: ' })) ok(c.pass, c.name, c.detail);
+  }
+
+  // ── channel-withdraw verify r6 (2026-09-27): THE LADDER'S OWN LOOKUPS and THE GROUP-REPORT DRAIN. r5 put the one
+  // predicate behind the rosters and the caller resolvers; the delivery ladder still found "the live local session
+  // carrying this conversation" by the RAW id at three sites (rung 0's channel socket, rung 1.5's codex wrapper, the
+  // identity a turn is CHARGED to + the machine-turn stamp) — a frame addressed to the PARENT was written into the
+  // PENDING FORK's wrapper (a billed turn on the fork; reproduced with the parent stopped, the sidecar written the
+  // way codex-chat-wrapper writes it at boot, before thread/fork answers) and, with the fork restored first, the
+  // parent's turn was charged to the fork's credential slot. And prompt-context's next-turn GROUP REPORTS read the
+  // raw id: a pending fork's user turn rendered the PARENT's pending group messages into its own prompt and moved
+  // the parent's markers — the parent never saw them.
+  {
+    const { mutantCopies, copiesCensus } = await import('./mutant-copy.mjs');
+    const M6 = mutantCopies('msg-cli-fork-r6', REPO);
+    const P = 'aaaaaaaa-1111-4000-8000-000000000031', T = 'bbbbbbbb-2222-4000-8000-000000000032', FOWN = 'cccccccc-3333-4000-8000-000000000033';
+    const LC = require(path.join(REPO, 'src/claude-lock-capture.js'));
+    const rosterOf = (LCmod, ss) => () => { const out = []; for (const [id, s] of ss) { const cid = LCmod.addressableId(s); if (!cid) continue; out.push({ cid, name: s.name || null, groups: ['tg1'], webuiId: id, reachability: null }); } return out; };
+    const fakePty = () => { const writes = []; return { writes, write: (x) => writes.push(x) }; };
+    const sidecar = (dir, wid) => { fs.mkdirSync(path.join(dir, 'session-buffers'), { recursive: true }); fs.writeFileSync(path.join(dir, 'session-buffers', wid + '.json'), JSON.stringify({ pid: process.pid, startedAt: Date.now(), caps: { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, queueVerbs: ['steer', 'queue-add'], responseStyle: true, permissionRules: true, queueResync: true } })); };
+    // THE LADDER: (a) codex, the parent stopped, the fork pending — where does a frame for the parent go, who is charged
+    async function ladderLeg(DLmod, name, { shape }) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
+      const F = { backendSessionId: P, claudeSessionId: shape === 'codex' ? null : P, backend: shape, name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true, _forkSourceId: P, createdAt: 2, _acct: 'slot-FORK', _registry: FOWN, pty: fakePty(), socketPath: null };
+      const Ps = { backendSessionId: P, claudeSessionId: shape === 'codex' ? null : P, backend: shape, name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P', createdAt: 1, _acct: 'slot-PARENT', _registry: P, pty: fakePty(), socketPath: null };
+      // codex: the parent STOPPED (only the fork carries P); claude: BOTH live, the FORK FIRST (a boot restore's listing order)
+      const ss = shape === 'codex' ? new Map([['w-F', F]]) : new Map([['w-F', F], ['w-P', Ps]]);
+      if (shape === 'codex') sidecar(dir, 'w-F');
+      const auths = [], posts = [];
+      const dl = DLmod.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined,
+        peerMsg: { findPeer: (cid) => { for (const [, x] of ss) if (x._registry === cid) return { name: cid, socketPath: '/dev/null' }; return null; }, postToPeer: async (peer) => { posts.push(peer.name); return { ok: true }; }, postChannelEvent: async () => ({ ok: false }) },   // the CLI registry names the process's OWN id
+        emitPeerCard: () => {}, authorizeSpend: (req) => { const x = ss.get('w-P'); const id = (() => { for (const [, y] of ss) if (y === req.session) return y._acct; return null; })(); auths.push({ cid: req.cid, identity: id }); void x; return { ok: true, identity: { key: id || 'none' } }; }, noteSpend: () => {}, releaseSpend: () => {} });
+      const r = await dl.deliverToConversation(P, 'for the parent', { kind: 'notification', spendReason: 'job-notification', fromName: 'Background Work · j' });
+      try { dl.flush(); } catch {}
+      return { ok: !!r.ok, lane: r.lane || null, forkFrames: F.pty.writes.filter((w) => /"peer-message"/.test(w)).length, parentFrames: Ps.pty.writes.length, posts: posts.map((x) => x.slice(0, 8)), charged: auths.map((a) => a.identity), stashedForParent: dl.stashCount(P), forkStamped: !!F._machineInputAt, parentStamped: !!Ps._machineInputAt };
+    }
+    const lc = await ladderLeg(DELIVER, 'r6-ladder-codex', { shape: 'codex' });
+    ok(!lc.ok && lc.forkFrames === 0 && !lc.charged.includes('slot-FORK'), `codex, the parent stopped: a frame for the PARENT is never written into the pending FORK's wrapper and never charged to the fork's slot — it falls to the stash (${JSON.stringify(lc)})`);
+    const lk = await ladderLeg(DELIVER, 'r6-ladder-claude', { shape: 'claude' });
+    ok(lk.ok && lk.posts.join() === P.slice(0, 8) && lk.charged.every((x) => x === 'slot-PARENT') && lk.parentStamped && !lk.forkStamped, `claude, both live, the fork first: the frame reaches the PARENT's inbox, is charged to the PARENT's slot and stamps the parent's machine turn (${JSON.stringify(lk)})`);
+    const dlsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
+    const RPC = "        if (addressableId(s) !== cid) continue;   // verify r6: a pending fork (its parent's id) is never the wrapper this frame is written into";
+    const LOC = "      for (const [, s] of activeSessions) if (addressableId(s) === cid) return s;";
+    const CH0 = "            if (addressableId(s) !== cid) continue;   // verify r6: the same rule as every rung";
+    ok(dlsrc.split(RPC).length === 2 && dlsrc.split(LOC).length === 2 && dlsrc.split(CH0).length === 2 && !/\(s\.backendSessionId \|\| s\.claudeSessionId\) (!==|===) cid/.test(dlsrc), 'the ladder reads every "which session carries this conversation" through addressableId (rung 0, rung 1.5, the charged identity) — no raw read remains');
+    const DLc = M6.load('src/server/conversation-deliver.js', dlsrc.replace(RPC, "        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;").replace(LOC, "      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;").replace(CH0, "            if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;"), 'ladder-raw');
+    const lcC = await ladderLeg(DLc, 'r6-ladder-codex-ctl', { shape: 'codex' });
+    ok(lcC.ok && lcC.lane === 'rpc-queue' && lcC.forkFrames === 1 && lcC.charged.includes('slot-FORK'), `CONTROL: with the raw lookups the parent's frame is written into the FORK's wrapper and charged to the fork's slot (${JSON.stringify(lcC)}) — the leg would go red`);
+    const lkC = await ladderLeg(DLc, 'r6-ladder-claude-ctl', { shape: 'claude' });
+    ok(lkC.charged.includes('slot-FORK') && lkC.forkStamped, `CONTROL: with the raw lookups the parent's turn is charged to the FORK's slot and the fork is stamped (${JSON.stringify(lkC)})`);
+    // server.js's peer-card site reads the same predicate (pinned by name — the suite cannot boot server.js)
+    const srv6 = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
+    ok(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv6), 'PIN: server.js\'s emitPeerCard draws the card in the window that OWNS the conversation (addressableId), never a pending fork\'s');
+
+    // THE GROUP REPORTS on a pending fork's prompt: the parent's pending report stays the parent's
+    async function reportLeg(ARmod, name) {
+      const dir = path.join(ROOT, name); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+      const st = createChannelStore({ dir: path.join(dir, 'channels') });
+      const F = { claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'parent (fork)', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_F', _forkRequested: true, _forkSourceId: P, _initialGroupId: 'tg1', createdAt: 2, _toolsIntroSeen: true, _mgrIntroSeen: true };
+      const ss = new Map([
+        ['w-P', { claudeSessionId: P, backendSessionId: P, backend: 'claude', name: 'parent', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_P', _initialGroupId: 'tg1', createdAt: 1, _toolsIntroSeen: true, _mgrIntroSeen: true }],
+        ['w-F', F],
+        ['w-T', { claudeSessionId: T, backendSessionId: T, backend: 'claude', name: 'target', mode: 'chat', cwd: '/tmp', agentToken: 'vsst_T', _initialGroupId: 'tg1', createdAt: 3, _toolsIntroSeen: true, _mgrIntroSeen: true }],
+      ]);
+      const dl = DELIVER.create({ dataDir: dir, activeSessions: ss, serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => {}, authorizeSpend: () => ({ ok: true, identity: { key: 'slot-1' } }), noteSpend: () => {}, releaseSpend: () => {} });
+      let tt = Date.UTC(2026, 8, 27, 10, 0, 0);
+      const ge = GE.create({ store: st, deliver: dl, broadcast: () => {}, now: () => (tt += 1000), roster: rosterOf(LC, ss), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
+      const tasks = { groupsForSession: ({ initialGroupId }) => (initialGroupId ? [{ id: initialGroupId, injectContext: false }] : []), _persistRescueLine: () => '', backlogNudgeFor: () => '', get: () => ({ externalVisibility: 'none' }) };
+      const rts = {}; const ap = { get: (p, h) => { rts['GET ' + p] = h; }, post: (p, h) => { rts['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+      ARmod.setupAgentRoutes({ app: ap, activeSessions: ss, tasks,
+        sessionStatus: { consumeNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' }, userTodos: {}, sessionStatusKey: (x, id) => (x.claudeSessionId ? 'claude:' + x.claudeSessionId : 'webui:' + id), serverSetting: () => undefined,
+        integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: dl, getGroups: () => ge });
+      const c = (p, token, body) => new Promise((resolve) => { let status = 200; Promise.resolve(rts[p]({ headers: { authorization: 'Bearer ' + token }, body, query: {} }, { status(x) { status = x; return this; }, json(o) { resolve({ status, body: o }); } })).catch((e) => resolve({ status: 500, body: { error: e.message } })); });
+      const s1 = await c('POST /api/agent/msg/send', 'vsst_T', { to: 'parent', text: 'a message for the parent only' });
+      const fc = await c('GET /api/agent/prompt-context', 'vsst_F', {});
+      const pc = await c('GET /api/agent/prompt-context', 'vsst_P', {});
+      const gid = s1.body.group && s1.body.group.id;
+      const mP = gid && st.groups.live().groups[gid].members.find((m) => m.member === P);
+      // after adoption: nothing of the parent's
+      F.claudeSessionId = FOWN; F.backendSessionId = FOWN; F.forkedFrom = [P]; F._forkRequested = false;
+      const s2 = await c('POST /api/agent/msg/send', 'vsst_T', { to: 'parent', text: 'a second message for the parent' });
+      const fc2 = await c('GET /api/agent/prompt-context', 'vsst_F', {});
+      try { dl.flush(); } catch {}
+      st.close();
+      return { posted: s1.status, forkGot: /Group messages since your last turn/.test(fc.body.context || ''), parentGot: /Group messages since your last turn/.test(pc.body.context || ''), markerMovedBeforeParent: !!(mP && mP.reportedUpTo), afterAdoption: s2.status === 200 && /second message/.test(fc2.body.context || '') };
+    }
+    const rp = await reportLeg(AR, 'r6-report');
+    ok(rp.posted === 200 && !rp.forkGot && rp.parentGot && !rp.afterAdoption, `a pending fork's prompt never carries the PARENT's group report; the parent's own next prompt does; an adopted fork hears nothing of the parent's (${JSON.stringify(rp)})`);
+    const arsrc6 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+    const GR = "      const myCid = ownConversationIdOf(s).cid;\n      if (ge && myCid && turnIsUserInitiated(s)) {";
+    ok(arsrc6.split(GR).length === 2, 'the next-turn group-report block reads the caller through ownConversationIdOf, once (the control reads the raw id)');
+    const ARr = M6.load('src/agent-routes.js', arsrc6.replace(GR, "      const myCid = s.claudeSessionId || s.backendSessionId || null;\n      if (ge && myCid && turnIsUserInitiated(s)) {"), 'reports-raw');
+    const rpC = await reportLeg(ARr, 'r6-report-ctl');
+    ok(rpC.forkGot && !rpC.parentGot, `CONTROL: with the raw id the FORK's prompt carries the parent's report and the parent's own prompt is empty (${JSON.stringify(rpC)}) — the leg would go red`);
+    for (const c of copiesCensus(M6.files, M6.dir, REPO, { minCopies: 1, label: 'r6 fork control: ' })) ok(c.pass, c.name, c.detail);
+  }
+}
+
+// ── channel-withdraw verify r7 (2026-09-27): THE ADDRESSING-READ CENSUS AS A GATE. Six rounds each found ONE more
+// reader that named / billed / granted / recorded a conversation by the RAW `(x.claudeSessionId||x.backendSessionId)`
+// while a fork still carried its parent's id. r7 decides the class is CLOSED by census, not by another example: every
+// occurrence of the "which live session carries this conversation id" IDIOM — `(x.claudeSessionId||x.backendSessionId)
+// === <cid>` (either field order, === or !==) — across src/ + server.js + data/bin (never src/lib, never the generated
+// agentd bundle) is classified in a CHECKED-IN table. An unlisted occurrence FAILS; a patched copy that adds a raw
+// addressing read on a fresh site fails. The CORRECT sites (the ladder's three lookups, emitPeerCard) read
+// `addressableId(s) === cid` — no `||`, so the idiom regex never matches them; reverting one to the raw form re-adds
+// an unlisted idiom hit and the census goes red.
+console.log('§2c the addressing-read census (r7): every raw "which session carries this cid" idiom is classified');
+{
+  // THE IDIOM: (x.claudeSessionId || x.backendSessionId) === <cid>   /   (x.backendSessionId || x.claudeSessionId) !== <cid>
+  const IDIOM = /\(\s*\w+\.(?:claudeSessionId|backendSessionId)\s*\|\|\s*\w+\.(?:backendSessionId|claudeSessionId)\s*\)\s*(?:===|!==)/;
+  const censusOf = (root) => {
+    const files = [];
+    const walk = (d) => {
+      let ents; try { ents = fs.readdirSync(path.join(root, d), { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const p = d ? d + '/' + e.name : e.name;
+        if (e.isDirectory()) { if (['node_modules', '.git', 'src/lib'].includes(p) || p.startsWith('src/lib/')) continue; walk(p); }
+        else if (/\.(js|mjs|cjs)$/.test(e.name) && !/vibespace-agentd(-attach)?\.js$/.test(e.name)) files.push(p);
+      }
+    };
+    walk('src'); walk('data/bin');
+    if (fs.existsSync(path.join(root, 'server.js'))) files.push('server.js');
+    const hits = [];
+    for (const f of files) { let s; try { s = fs.readFileSync(path.join(root, f), 'utf-8'); } catch { continue; } s.split('\n').forEach((ln, i) => { if (IDIOM.test(ln)) hits.push({ file: f, line: i + 1, text: ln.trim() }); }); }
+    return hits;
+  };
+  // THE CLASSIFICATION TABLE — {file, needle (a stable substring of the matched line), verdict, why}.
+  // verdict 'predicate' = the addressing decision is fenced by the fork predicate on the SAME line/context;
+  // 'harmless' = it does not name/bill/grant/record on the parent (display, a shared read, a user-explicit
+  // stale-id fallback, or the real-usage odometer which keys the pool MEMBER by webuiId, not by the cid).
+  const TABLE = [
+    { file: 'src/agent-routes.js', needle: '=== cid && !liveForkPending(t)', verdict: 'predicate', why: '_msgEndpoints finder — a pending fork is excluded by !liveForkPending on the same line (r4)' },
+    { file: 'src/server/jobs-wiring.js', needle: '=== ownerCid', verdict: 'harmless', why: 'display name only; ownerCid is the job\'s OWN owner conversation, recorded fork-aware at create via jobsCaller (r5)' },
+    { file: 'src/transcript-service.js', needle: '=== r.sessionId) return s', verdict: 'harmless', why: 'serves the transcript; a pending fork SHARES the parent\'s file until adoption, so either session returns the same bytes (read)' },
+    { file: 'src/ws-handler.js', needle: 'data.backendSessionId && (session.backendSessionId', verdict: 'harmless', why: 'rename-session fallback, reached only when the client\'s own webui id is stale (missing from activeSessions); user-explicit, renames a display name, self-heals at adoption' },
+    { file: 'src/ws-handler.js', needle: 'data.sessionId = eid; break', verdict: 'harmless', why: 'kill fallback on a stale webui id; user-explicit, no bill/grant/record; a fork/parent id ambiguity here is the same transient class as any two sessions momentarily sharing an id' },
+    { file: 'server.js', needle: '=== sid && s2._accountId === acct', verdict: 'harmless', why: 'recordUsageAttribution — the REAL inference odometer (reading-attribution campaign, slot-transitions/reading-repair), NOT the addressing lane; the pool MEMBER is chosen by poolMemberOfSession keyed on the found session\'s webuiId, and requests share the parent\'s transcript rid pre-adoption' },
+  ];
+  const hits = censusOf(REPO);
+  ok(hits.length === 6, `the tree holds exactly the 6 known addressing-idiom sites (found ${hits.length}: ${hits.map((h) => h.file + ':' + h.line).join(', ')})`);
+  let classified = 0, unlisted = [];
+  for (const h of hits) {
+    const row = TABLE.find((r) => r.file === h.file && h.text.includes(r.needle));
+    if (row) classified++; else unlisted.push(`${h.file}:${h.line}: ${h.text.slice(0, 90)}`);
+  }
+  ok(unlisted.length === 0, `every addressing-idiom site is classified (unlisted: ${unlisted.join(' | ') || 'none'})`);
+  ok(classified === hits.length && TABLE.every((r) => hits.some((h) => h.file === r.file && h.text.includes(r.needle))), 'the classification table has no dead rows (every needle matches a live site)');
+  // the ONE guarded (addressing) site really carries the predicate; the rest are non-addressing
+  const guarded = TABLE.filter((r) => r.verdict === 'predicate');
+  ok(guarded.length === 1 && guarded[0].file === 'src/agent-routes.js', 'exactly one raw idiom is an ADDRESSING decision, and it is fenced by liveForkPending; every other is harmless with a stated reason');
+  // the CORRECT ladder sites read the predicate, not the idiom (a revert to raw would re-add unlisted idiom hits)
+  const dl = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
+  ok(!IDIOM.test(dl) && (dl.match(/addressableId\(s\) (?:===|!==) cid/g) || []).length === 3, 'the delivery ladder\'s three cid→session lookups read addressableId(s), never the raw idiom (a revert re-reddens §2c)');
+  const srv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8');
+  ok(/if \(addressableId\(s\) !== cid \|\| !s\._normalizer\) continue;/.test(srv), 'emitPeerCard reads addressableId(s), never the raw idiom');
+  // NEGATIVE CONTROL: a fresh raw addressing read on a NEW site is caught (a synthetic src file under a scratch root)
+  const ctlRoot = scratch('msg-cli-census-ctl');
+  fs.mkdirSync(path.join(ctlRoot, 'src', 'server'), { recursive: true });
+  fs.writeFileSync(path.join(ctlRoot, 'src', 'server', 'new-feature.js'), 'function f(cid){ for (const [,s] of activeSessions) if ((s.claudeSessionId || s.backendSessionId) === cid) return s; }\n');
+  const ctlHits = censusOf(ctlRoot);
+  const ctlUnlisted = ctlHits.filter((h) => !TABLE.find((r) => r.file === h.file && h.text.includes(r.needle)));
+  ok(ctlHits.length === 1 && ctlUnlisted.length === 1 && ctlUnlisted[0].file === 'src/server/new-feature.js', `NEGATIVE CONTROL: a new module's raw addressing read is an UNLISTED census hit (${ctlUnlisted.map((h) => h.file).join(',') || 'MISSED'}) — the gate would go red`);
+  try { fs.rmSync(ctlRoot, { recursive: true }); } catch {}
 }
 
 console.log('§3 the words');

@@ -72,6 +72,7 @@ const MODES = Object.freeze(['auto', 'tree', 'pixels']);
 const RESOLVED_MODES = Object.freeze(['tree', 'pixels']);
 /** Every code this model (and the lane-E routes / engine on its behalf) answers with — CLOSED. */
 const REFUSALS = Object.freeze(['not_exposed', 'mode_pixels', 'window_not_visible', 'outside_window', 'bad_principal', 'bad_mode', 'wake_paced', 'share_local_only', 'no_conversation', 'not_live', 'agent_forbidden',
+  'fork_pending',   // lane channel-withdraw verify r6: "ask <agent> to take control" on a fork that still carries its parent's conversation id — ask again in a moment
   // lane E verify r2 (L4): the Task Group store could not be READ while a group row could have decided — the verb is
   // refused, the lease is KEPT (an unreadable store is not the user taking the window away)
   'reach_unreadable']);

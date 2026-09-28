@@ -4,6 +4,7 @@ import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
 import { isNotificationQueueItem } from '../notification-senders.js';
 import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
+import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -394,13 +395,19 @@ export class ChatInput {
     this._queueStrip = document.createElement('div');
     this._queueStrip.className = 'chat-queue-strip hidden';
 
+    // THE STASH STRIP (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the notices held for
+    // this agent's NEXT turn (channel receipts, job results, messages, the browser handback — both stashes), with
+    // "Hand over now". Above the queue strip: those were sent by YOU; these wait FOR the agent. Keyed, patched in
+    // place from the session's `stash` fact (ChatView _onActiveSessions → setStash); hidden when nothing waits.
+    this._stashStrip = createStashStrip({ sessionId });
+
     // SEND-MODE HINT: one line UNDER the textarea while a turn runs, saying
     // what the two send keys do on THIS harness. Last child + width:100% ⇒ the
     // input area's flex-wrap puts it on its own row below the box.
     this._sendHint = document.createElement('div');
     this._sendHint.className = 'chat-send-hint hidden';
 
-    inputArea.append(this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, inputWrap, this._steerBtn, sendCol, this._sendHint);
+    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, inputWrap, this._steerBtn, sendCol, this._sendHint);
   }
 
   /** The .chat-input-area wrapper element */
@@ -1332,6 +1339,9 @@ export class ChatInput {
   /** The input queue + what this harness lets the user DO with it.
    *  caps = backend-caps `inputModes` projected onto the client (agent-meta):
    *  `queueVerbs` is the table, `steer`/`queueOps` its derived view. */
+  /** 2026-09-27: the session's `stash` fact ({count, items} | null) + its turn — the strip patches in place. */
+  setStash(summary, opts = {}) { this._stashStrip?.set(summary || null, opts); }
+
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];
     if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing };

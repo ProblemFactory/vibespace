@@ -55,9 +55,11 @@ const SPEND_REASONS = Object.freeze({
   'channel-message': { turn: true, what: 'a message from a connected channel' },
   // Channels P3 (design §9.3, decision 8): the RECEIPT for a proposal an
   // agent drafted. Delivered `noWake` by default — only into a turn already
-  // running, else stashed — so it opens a turn only when the assignment
-  // opted in (`receiptWake`) or the free-lane prediction failed and the
-  // wrapper's own verdict charged it. Producer: src/server/channels-engine.js.
+  // running, else stashed — so it opens a turn only when the DECIDER chose
+  // "wake the agent now" on that Approve / Reject (2026-09-27; ONE per
+  // proposal — the per-watcher `receiptWake` opt-in is retired) or the
+  // free-lane prediction failed and the wrapper's own verdict charged it.
+  // Producer: src/server/channels-engine.js.
   'channel-receipt': { turn: true, what: 'an outbox receipt handed back to the drafting agent' },
   // agent browser P3 (design-agent-browser-v2 §4.3.1): the browser control
   // handback — an explicit handback (the click) and, only when
@@ -68,6 +70,10 @@ const SPEND_REASONS = Object.freeze({
   // tick "wake it now" — the default rides the agent's next turn for free (the stash). The producer is
   // src/server/window-request.js, through the delivery ladder.
   'window-share-request': { turn: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
+  // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the chat's strip above the composer shows
+  // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
+  // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
+  'stash-handover': { turn: true, what: 'the user handed a conversation its waiting notices now' },
 });
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see

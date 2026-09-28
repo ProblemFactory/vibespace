@@ -42,6 +42,12 @@
 //      exactly those 9 join, one tag each ("→ alpha" / "beta read …" / "1 to approve"), the header's two
 //      counts, "All" = the whole list, the filter in both views ("{n} more in All" + the message search),
 //      and at 375 px one column with the tag under the title (⑥ reads the list through "All")
+//   ⑩ 2026-09-27 (lane channel-withdraw): beta proposes, then WITHDRAWS through its own route ⇒ the card
+//      reads "Withdrawn by beta · wrong thread" with no buttons and the For-you row resolves, no reload;
+//      "Approve ▾" offers the two deliveries + "Approve with edits…", the choice is remembered as the next
+//      primary, "wake the agent now" reaches beta's stub ONCE ("Handed to beta at HH:MM — it was woken for
+//      it"), "tell it with its next message" reads "Waiting for beta's next message" until beta's next
+//      prompt drains the stash — the same card's fate line patched in place
 //
 // Everything is per-pid (scripts/scratch.mjs), the server runs under a NAMED
 // scratch HOME, every process this suite starts is ended by it. AUTH IS ON
@@ -194,13 +200,15 @@ const HOSTILE = '<img src=x onerror="window.__pwned=1">lane & co';
 const CONTEXT = 'you two split the migration: alpha schema, beta data';
 const dlg = await p1.evaljs(`(async () => {
   document.querySelector('.rail-panel-channels [data-new-group]').click();
-  for (let i = 0; i < 80; i++) { if (document.querySelectorAll('#chan-group-new-dialog .chan-gpick-item input').length >= 2) break; await new Promise((r) => setTimeout(r, 250)); }
+  // channel-polish (2026-09-27): the members are picked with the ONE principal picker (rows, chips)
+  for (let i = 0; i < 80; i++) { if (document.querySelectorAll('#chan-group-new-dialog .chan-gpick .pp-row').length >= 2) break; await new Promise((r) => setTimeout(r, 250)); }
   const d = document.getElementById('chan-group-new-dialog');
   if (!d) return { fail: 'no dialog' };
-  const boxes = [...d.querySelectorAll('.chan-gpick-item input')];
-  const out = { names: [...d.querySelectorAll('.chan-gpick-name')].map((n) => n.textContent), secs: [...d.querySelectorAll('.chan-gpick-sec')].map((n) => n.textContent), preChecked: boxes.filter((b) => b.checked).length, wakeOn: d.querySelector('.chan-group-wake input').checked, disabledBefore: d.querySelector('[data-group-submit]').disabled };
+  const rows = [...d.querySelectorAll('.chan-gpick .pp-row')];
+  const out = { names: [...d.querySelectorAll('.chan-gpick .pp-row .pp-name')].map((n) => n.textContent), secs: [...d.querySelectorAll('.chan-gpick .pp-sec')].map((n) => n.textContent), preChecked: rows.filter((b) => b.getAttribute('aria-selected') === 'true').length, wakeOn: d.querySelector('.chan-group-wake input').checked, disabledBefore: d.querySelector('[data-group-submit]').disabled };
   const name = d.querySelector('.chan-group-name'); name.value = ${JSON.stringify(HOSTILE)}; name.dispatchEvent(new Event('input'));
-  for (const b of boxes) { b.checked = true; b.dispatchEvent(new Event('change')); }
+  for (const b of rows) b.click();
+  out.chips = [...d.querySelectorAll('.chan-gpick .pp-chip-name')].map((n) => n.textContent);
   const ctx = d.querySelector('.chan-group-context'); ctx.value = ${JSON.stringify(CONTEXT)};
   out.echo = d.querySelector('.chan-group-echo').textContent;
   out.disabledAfter = d.querySelector('[data-group-submit]').disabled;
@@ -400,6 +408,170 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   })()`, 20000);
   ok(Array.isArray(phone) && phone.length === 9 && phone.every((x) => x.under && x.wordsWhole && x.whoWhole && Math.abs(x.rowW - x.listW) <= 2), `at 375 px every tagged row is ONE column with its tag UNDER the title, its words AND the agent's name whole (tags ${Array.isArray(phone) ? phone.map((x) => x.tagW).join(',') : phone} px)`, JSON.stringify(phone));
   await p1.cdp('Emulation.clearDeviceMetricsOverride');
+
+  // ── ⑩ 2026-09-27 (lane channel-withdraw): THE AGENT TAKES A DRAFT BACK; HOW IT HEARS OF A DECISION IS
+  // CHOSEN ON THE BUTTON; THE CARD SAYS WHETHER IT KNOWS YET. beta proposes through its own agent route,
+  // the Outbox window and the For-you popup show it; beta WITHDRAWS it (its route) ⇒ without a reload the
+  // card reads "Withdrawn by beta · wrong thread" with no buttons and the For-you row resolves. Then the
+  // split button: "Approve ▾" offers the two deliveries + "Approve with edits…"; "wake the agent now" is
+  // REMEMBERED as the primary of the next card; the woken receipt reaches beta's stub and the fate line says
+  // "Handed to beta at HH:MM — it was woken for it"; a next-message approve reads "Waiting for beta's next
+  // message" until beta's next prompt drains the stash — the SAME card's fate line is patched in place.
+  ok(await p1.load(), '⑩ page reloaded at desktop size');
+  await p1.evaljs(`(() => { localStorage.removeItem('vibespace.channels.receiptDeliver'); return 1; })()`);
+  const BETA = AGENTS[1];
+  const asBeta = (method, p, body) => api(method, p, body, { Authorization: 'Bearer ' + BETA.token });
+  const [wId, aId, nId] = readByBeta;
+  const wTitle = convs.find((c) => c.id === wId).title;
+  const pw = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${wId}`, text: 'a draft beta will take back' });
+  ok(pw.status === 200 && pw.body.proposal && pw.body.proposal.state === 'awaiting-approval', '⑩ FIXTURE: beta proposes through its own agent route (vibespace-channels reply) — awaiting approval', JSON.stringify(pw.body).slice(0, 200));
+  const pid = pw.body.proposal.id;
+  const ptr = ((await api('GET', '/api/user-todos')).body.todos.open || []).find((x) => x.sessionKey === 'channels' && x.text === `Proposals awaiting approval in ${wTitle}`);
+  ok(!!ptr, `⑩ FIXTURE: its For-you pointer is open ("Proposals awaiting approval in ${wTitle}")`);
+  const shown = await p1.evaljs(`(async () => {
+    window.app.openChannelOutbox();
+    const b = document.getElementById('taskbar-user-todos'); const pop = document.getElementById('user-todos-popup');
+    if (b && pop && pop.classList.contains('hidden')) b.click();
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]');
+      const row = document.querySelector('#user-todos-popup .ut-item[data-id="${ptr && ptr.id}"]');
+      if (card && row) return { card: card.className, approve: card.querySelector('button[data-approve]')?.textContent || null, deliver: card.querySelector('button[data-approve]')?.dataset.deliver || null, splitA: !!card.querySelector('.chan-split button[data-more="approve"]'), splitR: !!card.querySelector('.chan-split button[data-more="reject"]'), row: row.className };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'no outbox card / for-you row', card: !!document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]') };
+  })()`);
+  ok(!shown.fail && /chan-prop-awaiting-approval/.test(shown.card) && shown.splitA && shown.splitR && shown.approve === 'Approve — tell the agent with your next message' && shown.deliver === 'next-turn' && !/ut-item-resolved/.test(shown.row), `⑩ the Outbox card awaits with the SPLIT buttons (Approve ▾ / Reject ▾), the primary says the free choice ("${shown.approve}"), and the For-you row is open`, JSON.stringify(shown));
+  // the Outbox shows ALL (another draft from ⑨ still awaits, so it opened on the Awaiting queue)
+  await p1.evaljs(`(() => { const b = document.querySelector('.chan-outbox .chan-seg button[data-view="all"]'); if (b) b.click(); return !!b; })()`);
+  const wd = await asBeta('POST', `/api/agent/channels/proposals/${pid}/withdraw`, { why: 'wrong thread' });
+  ok(wd.status === 200 && wd.body.proposal.state === 'withdrawn', '⑩ beta WITHDRAWS it through its own agent route (vibespace-channels withdraw)', JSON.stringify(wd.body).slice(0, 200));
+  const gone = await p1.evaljs(`(async () => {
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]');
+      const row = document.querySelector('#user-todos-popup .ut-item[data-id="${ptr && ptr.id}"]');
+      if (card && /chan-prop-withdrawn/.test(card.className) && (!row || /ut-item-resolved/.test(row.className))) return { reason: card.querySelector('.chan-prop-reason')?.textContent || null, state: card.querySelector('.chan-prop-state')?.textContent || null, buttons: card.querySelectorAll('button').length, row: row ? row.className : null, head: [...document.querySelectorAll('.chan-outbox-list .chan-outbox-sec')].map((h) => h.textContent) };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never withdrawn on the page', cls: document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pid}"]')?.className || null };
+  })()`);
+  ok(!gone.fail && gone.reason === 'Withdrawn by beta · wrong thread' && gone.state === 'withdrawn' && gone.buttons === 0 && gone.head.some((h) => /^withdrawn · \d+$/.test(h)), `⑩ WITHOUT A RELOAD the card reads "${gone.reason}", settled under "withdrawn", with NO buttons`, JSON.stringify(gone));
+  ok(!gone.fail && (gone.row === null || /ut-item-resolved/.test(gone.row)), '⑩ …and the For-you row resolved live (retracted by the engine, never by a reload)', JSON.stringify(gone.row));
+  const reopened = await p1.evaljs(`(async () => {
+    const b = document.getElementById('taskbar-user-todos'); const pop = document.getElementById('user-todos-popup');
+    if (!pop.classList.contains('hidden')) b.click();
+    await new Promise((r) => setTimeout(r, 150)); b.click(); await new Promise((r) => setTimeout(r, 300));
+    const row = pop.querySelector('.ut-groups .ut-item[data-id="${ptr && ptr.id}"]');
+    const open = !!row && !row.classList.contains('ut-item-resolved');
+    b.click();
+    return { open };
+  })()`);
+  const todosW = (await api('GET', '/api/user-todos')).body.todos;
+  ok(!reopened.open && !(todosW.open || []).some((x) => ptr && x.id === ptr.id), '⑩ reopened, the For-you popup lists no open row for it; the store has it resolved', JSON.stringify(reopened));
+
+  // the split button: the menu, "wake the agent now", the fate line
+  const pa = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${aId}`, text: 'approve me and wake me' });
+  const paId = pa.body && pa.body.proposal && pa.body.proposal.id;
+  const fr0 = frames(BETA).length;
+  const menu = await p1.evaljs(`(async () => {
+    let more = null;
+    for (let i = 0; i < 80 && !(more = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${paId}"] button[data-more="approve"]')); i++) await new Promise((r) => setTimeout(r, 250));
+    if (!more) return { fail: 'no split button' };
+    const primary = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${paId}"] button[data-approve]');
+    const before = { text: primary.textContent, deliver: primary.dataset.deliver };
+    more.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const items = [...document.querySelectorAll('.chan-split-menu .context-menu-item')];
+    const texts = items.map((x) => x.textContent);
+    const wake = items.find((x) => /wake the agent now/.test(x.textContent));
+    if (!wake) return { fail: 'no wake item', texts };
+    wake.click();
+    return { before, texts, remembered: localStorage.getItem('vibespace.channels.receiptDeliver') };
+  })()`);
+  ok(!menu.fail && JSON.stringify(menu.texts) === JSON.stringify(['Approve — tell the agent with your next message', 'Approve and wake the agent now (starts a turn)', 'Approve with edits…']), `⑩ "Approve ▾" offers the two deliveries in plain words (the cost named) + "Approve with edits…": ${JSON.stringify(menu.texts)}`, JSON.stringify(menu));
+  ok(!menu.fail && menu.remembered === 'wake-now', '⑩ the choice is remembered on this device (the next primary)');
+  const woke = await p1.evaljs(`(async () => {
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${paId}"]');
+      const f = card && card.querySelector('.chan-prop-fate');
+      if (card && /chan-prop-sent/.test(card.className) && f) return { fate: f.textContent, kind: f.dataset.fate };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never sent with a fate line' };
+  })()`);
+  ok(!woke.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(woke.fate), `⑩ "wake the agent now" ⇒ sent, and the fate line: "${woke.fate}"`, JSON.stringify(woke));
+  let rcFrames = [];
+  for (let i = 0; i < 40 && !(rcFrames = frames(BETA).slice(fr0).filter((f) => /Channel receipt/.test(JSON.stringify(f)))).length; i++) await sleep(250);
+  ok(rcFrames.length === 1, `⑩ the woken receipt reached beta's stub through the REAL ladder, ONCE (${rcFrames.length})`);
+  // the remembered primary, then a next-message approve: "Waiting…" until beta's next prompt drains it
+  const pn = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${nId}`, text: 'tell me with my next message' });
+  const pnId = pn.body && pn.body.proposal && pn.body.proposal.id;
+  const later = await p1.evaljs(`(async () => {
+    let primary = null;
+    for (let i = 0; i < 80 && !(primary = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pnId}"] button[data-approve]')); i++) await new Promise((r) => setTimeout(r, 250));
+    if (!primary) return { fail: 'no card' };
+    const before = { text: primary.textContent, deliver: primary.dataset.deliver };
+    document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pnId}"] button[data-more="approve"]').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const next = [...document.querySelectorAll('.chan-split-menu .context-menu-item')].find((x) => /tell the agent with your next message/.test(x.textContent));
+    if (!next) return { fail: 'no next-message item', before };
+    next.click();
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pnId}"]');
+      const f = card && card.querySelector('.chan-prop-fate');
+      if (card && /chan-prop-sent/.test(card.className) && f) { card.__vsMark = 'card'; f.__vsMark = 'fate'; return { before, fate: f.textContent, kind: f.dataset.fate, remembered: localStorage.getItem('vibespace.channels.receiptDeliver') }; }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'never sent', before };
+  })()`);
+  ok(!later.fail && later.before.deliver === 'wake-now' && later.before.text === 'Approve and wake the agent now (starts a turn)', `⑩ the NEXT card's primary is the remembered choice ("${later.before && later.before.text}")`, JSON.stringify(later));
+  ok(!later.fail && later.fate === "Waiting for beta's next message" && later.remembered === 'next-turn', `⑩ "tell the agent with your next message" ⇒ sent, the fate line: "${later.fate}" (the receipt waits in the stash)`, JSON.stringify(later));
+  const drained = await api('GET', '/api/agent/prompt-context', undefined, { Authorization: 'Bearer ' + BETA.token });
+  ok(drained.status === 200, '⑩ beta\'s next prompt (its UserPromptSubmit hook route) drains the stash');
+  const handed = await p1.evaljs(`(async () => {
+    for (let i = 0; i < 80; i++) {
+      const card = document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pnId}"]');
+      const f = card && card.querySelector('.chan-prop-fate');
+      if (f && /^Handed to beta at/.test(f.textContent)) return { fate: f.textContent, sameCard: card.__vsMark === 'card', sameLine: f.__vsMark === 'fate' };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'the fate never moved' };
+  })()`);
+  ok(!handed.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d$/.test(handed.fate) && handed.sameCard && handed.sameLine, `⑩ WITHOUT A RELOAD the fate line reads "${handed.fate}" — the SAME card and the SAME line, patched in place`, JSON.stringify(handed));
+  // verify r3 (2026-09-27): THE PRESS DOES WHAT THE BUTTON SAYS. Two drafts await; on card X the owner picks
+  // "Reject with a reason and wake now" (the box opens, nothing is posted, no broadcast) — card Y's primary
+  // must now READ the wake words, and its press must post exactly what it reads (a billed turn the words said
+  // was free was the reproduced defect: the label came from render time, the click from the remembered choice)
+  const px = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${aId}`, text: 'card X — its reject box stays open' });
+  const py = await asBeta('POST', '/api/agent/channels/reply', { conv: `fake-poll/${nId}`, text: 'card Y — pressed after the pick' });
+  const pxId = px.body && px.body.proposal && px.body.proposal.id, pyId = py.body && py.body.proposal && py.body.proposal.id;
+  const fr1 = frames(BETA).length;
+  const said = await p1.evaljs(`(async () => {
+    const X = () => document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pxId}"]'), Y = () => document.querySelector('.chan-outbox-list .chan-prop[data-proposal="${pyId}"]');
+    for (let i = 0; i < 80 && !(X() && Y() && Y().querySelector('button[data-approve]')); i++) await new Promise((r) => setTimeout(r, 250));
+    if (!X() || !Y()) return { fail: 'no cards' };
+    const before = { text: Y().querySelector('button[data-approve]').textContent, deliver: Y().querySelector('button[data-approve]').dataset.deliver };
+    X().querySelector('button[data-more="reject"]').click();
+    await new Promise((r) => setTimeout(r, 150));
+    const item = [...document.querySelectorAll('.chan-split-menu .context-menu-item')].find((x) => /wake now/.test(x.textContent));
+    if (!item) return { fail: 'no reject-and-wake item' };
+    item.click();
+    await new Promise((r) => setTimeout(r, 150));
+    const boxOpen = !!X().querySelector('.chan-prop-rejectbox');
+    const primary = Y().querySelector('button[data-approve]');
+    const after = { text: primary.textContent, deliver: primary.dataset.deliver };
+    primary.click();
+    for (let i = 0; i < 80; i++) {
+      const c = Y(); const f = c && c.querySelector('.chan-prop-fate');
+      if (c && /chan-prop-sent/.test(c.className) && f) return { before, boxOpen, after, fate: f.textContent, xState: X().querySelector('.chan-prop-state').textContent };
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return { fail: 'Y never sent', before, boxOpen, after };
+  })()`);
+  ok(!said.fail && said.before.deliver === 'next-turn' && said.boxOpen && said.after.deliver === 'wake-now' && said.after.text === 'Approve and wake the agent now (starts a turn)', `⑩ r3: after "Reject … and wake now" is picked on card X (box open, nothing posted), card Y's primary READS the wake words at once ("${said.after && said.after.text}")`, JSON.stringify(said));
+  ok(!said.fail && /^Handed to beta at (\d\d-\d\d )?\d\d:\d\d — it was woken for it$/.test(said.fate) && said.xState === 'awaiting your approval', `⑩ r3: …and its press does what it says: woken ("${said.fate}"); card X still awaits`, JSON.stringify(said));
+  let fr2 = [];
+  for (let i = 0; i < 40 && !(fr2 = frames(BETA).slice(fr1).filter((f) => /Channel receipt/.test(JSON.stringify(f)))).length; i++) await sleep(250);
+  ok(fr2.length === 1, `⑩ r3: ONE woken receipt reached beta's stub for the press (${fr2.length})`);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

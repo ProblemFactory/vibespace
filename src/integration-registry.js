@@ -527,6 +527,18 @@ function clientFieldsOf(row) {
   return { idKey: idF ? idF.key : null, secretKey: secF ? secF.key : null, id: idF ? { key: idF.key, label: idF.label, placeholder: idF.placeholder || '', help: idF.help || '', required: !!idF.required } : null, secret: secF ? { key: secF.key, label: secF.label, placeholder: secF.placeholder || '', help: secF.help || '', required: !!secF.required } : null };
 }
 const bindsPerAccount = (id) => { const r = rowById(id); return !!(r && r.bindsPerAccount === true); };
+/** WHOSE OAuth clients a `bindsPerAccount` row signs in with — the vendor a
+ *  storage mount's own client must belong to for an account of this row to
+ *  borrow it (2.369.195, "use the OAuth client of a storage mount"). DERIVED,
+ *  never a second declaration: a row that delegates to `drive-presets` signs
+ *  in with the SAME Google clients the storage mounts use (that is why it
+ *  delegates), so a Drive / Gmail mount's custom client serves it; a row with
+ *  its own cluster env (Lark) names clients no storage mount holds ⇒ null. */
+function oauthClientVendorOf(row) {
+  const r = typeof row === 'string' ? rowById(row) : row;
+  if (!r || r.bindsPerAccount !== true) return null;
+  return r.delegate && r.delegate.to === 'drive-presets' ? 'google' : null;
+}
 
 /** Registry-level self-checks the suite runs; kept here so the rules are one place. */
 function checkRow(row) {
@@ -556,5 +568,5 @@ function checkRow(row) {
 module.exports = {
   ROWS, TEST_KINDS, TEST_BUTTON_LABEL, LARK_CALLBACK_URL, MASK, MASK_TAIL_MIN,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
-  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount,
+  fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, oauthClientVendorOf,
 };

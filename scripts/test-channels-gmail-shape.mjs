@@ -787,6 +787,95 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   }
 }
 
+// ── ⑧ WHAT WE SENT NEVER COMES BACK IN OUR WORDS (client-from-mount verify r4) ──
+// A vendor (or a gateway in front of it) that echoes the request's client_secret / refresh_token / Bearer in its refusal
+// used to be worded VERBATIM into the account's lastAuthError (adapters.json in the clear + the digest broadcast to every
+// client), lastPass and the For-you item. The adapter's one round-trip function scrubs the vendor's body of the exact
+// values the request carried BEFORE the typed error is built (message, detail and stack are born clean); the vendor's
+// other words stay. CONTROL: a copy that hands typedFailure the body unscrubbed lets the echo through.
+console.log('\n⑧ what we sent never comes back in our words (verify r4)');
+{
+  const reg = CH.createChannelRegistry(); reg.register(gmail.adapter);
+  const mkTok = (t) => { const tok = { st: { token: t, writes: 0 }, read: () => ({ token: tok.st.token, why: tok.st.token ? null : 'never-authenticated' }), write: async (x) => { tok.st.writes++; tok.st.token = x; }, clear: async () => { tok.st.token = null; } }; return tok; };
+  const SECRET = 'channels-secret-0000';   // the `channels` preset's (PRESETS above): what the exchange and every refresh send
+  const echoing = (f0) => async (url, init) => {
+    const u = new URL(String(url)); const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+    if (u.hostname === 'oauth2.googleapis.com' && form && form.grant_type === 'authorization_code') return jsonRes({ error: 'invalid_client', error_description: `the secret ${form.client_secret} (sent as client_secret=${encodeURIComponent(form.client_secret)}) was rejected (fake vendor echo)` }, 401);
+    if (u.hostname === 'oauth2.googleapis.com' && form && form.grant_type === 'refresh_token') return jsonRes({ error: 'invalid_grant', error_description: `refresh_token ${form.refresh_token} under ${form.client_secret} was revoked (fake vendor echo)`, nested: { again: [form.client_secret] } }, 400);
+    if (u.hostname === 'gmail.googleapis.com') return jsonRes({ error: { code: 401, message: `Invalid Credentials: ${String((init.headers || {}).Authorization || '').replace(/^Bearer /, '')} (fake vendor echo)` } }, 401);
+    return f0(url, init);
+  };
+  const drive = async (mod, regOf) => {
+    const v = mkVendor(); const fetchFn = echoing(v.fetchFn);
+    const OL2 = require(path.join(REPO, 'src/oauth-loopback.js')); const oauth = OL2.createOAuthLoopback({ now, log: quiet }); const done = []; const tok = mkTok(null);
+    const a = regOf().create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, oauth, resolveIntegration: (id) => integrations.resolveIntegration(id), onAuthDone: (id, r) => done.push(r), log: quiet });
+    const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
+    const pb = await a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`);
+    oauth.stopAll();
+    // the refresh path + a Bearer'd API read: the thrown error's message, detail AND stack
+    const tok2 = mkTok({ access_token: 'ya29.echo-bearer-0001', expiresAt: now() - 1, refresh_token: '1//echo-refresh-0001', scopes: [gmail.SCOPE] });
+    const b = regOf().create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok2, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const e1 = await threw(() => b.listConversations({ limit: 1 }));
+    const tok3 = mkTok({ access_token: 'ya29.echo-bearer-0002', expiresAt: now() + 3600000, refresh_token: '1//echo-refresh-0002', scopes: [gmail.SCOPE] });
+    const c = regOf().create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok3, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
+    const e2 = await threw(() => c.listConversations({ limit: 1 }));
+    return { pb, done, e1, e2 };
+  };
+  const r = await drive(gmail, () => reg);
+  const all = (e) => `${e && e.message}|${e && e.stack}|${JSON.stringify(e && e.detail)}`;
+  ok(r.pb.ok === false && !String(r.pb.error).includes(SECRET) && /the secret \[client_secret withheld\] \(sent as client_secret=\[client_secret withheld\]\) was rejected \(fake vendor echo\)/.test(r.pb.error) && r.done.length === 1 && !String(r.done[0].error).includes(SECRET), `(a) the consent exchange refused with an echo of the client secret (plain AND url-encoded): withheld by value in the paste-back answer and the onAuthDone report, the vendor's other words kept ("${r.pb.error}")`);
+  ok(r.e1 && r.e1.code === 'auth-expired' && !all(r.e1).includes(SECRET) && !all(r.e1).includes('1//echo-refresh-0001') && /\[refresh_token withheld\] under \[client_secret withheld\] was revoked/.test(r.e1.message) && JSON.stringify(r.e1.detail).length > 2, `(b) the token refresh refused with an echo of the refresh token and the secret: message, detail (nested too) and stack are born clean (${r.e1 && r.e1.message})`);
+  ok(r.e2 && !all(r.e2).includes('ya29.echo-bearer-0002') && /Invalid Credentials: \[access_token withheld\]/.test(r.e2.message), `(c) an API refusal echoing the Bearer: the access token withheld (${r.e2 && r.e2.message})`);
+  // PURE: the two helpers
+  const sent = CH.sentSecrets({ fields: { client_secret: 'abcdefgh', refresh_token: 'short', code: 'c-1234567' }, headers: { Authorization: 'Bearer tok-123456' } });
+  ok(JSON.stringify(sent.map((x) => x.name)) === JSON.stringify(['client_secret', 'access_token']) && CH.withoutSent('x abcdefgh y tok-123456 z short', sent) === 'x [client_secret withheld] y [access_token withheld] z short' && CH.withoutSent({ a: ['abcdefgh'], b: { c: 'abcdefgh' } }, sent).b.c === '[client_secret withheld]' && CH.withoutSent('nothing', []) === 'nothing', 'PURE: sentSecrets reads the secret fields (≥ 6 chars; a code is not one) and the Bearer; withoutSent scrubs strings and nested JSON by exact value and leaves everything else');
+  // CONTROL: a copy that hands typedFailure the body unscrubbed (the pre-r4 line)
+  const M8 = mutantCopies('chan-gmail-scrub', REPO);
+  const srcG = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const SCRUB = '  if (!r.ok) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));';
+  ok(srcG.split(SCRUB).length === 2, 'CONTROL setup: the scrub line is present once');
+  const gm = M8.load('src/channels/gmail.js', srcG.replace(SCRUB, '  if (!r.ok) throw typedFailure(r.status, parsed, what, retryAfterSeconds(r.headers));'), 'unscrubbed');
+  const rc = await drive(gm, () => { const rg = CH.createChannelRegistry(); rg.register(gm.adapter); return rg; });
+  ok(String(rc.pb.error).includes(SECRET) && all(rc.e1).includes(SECRET), 'CONTROL: a copy that hands the body over unscrubbed words the echoed secret into the refusal — the checks above would be red');
+  // ── verify r5: EVERY SPELLING a sent value left in, and a Bearer read without a regex ──
+  // (a) the form body goes out as `new URLSearchParams(form).toString()`, which percent-encodes `!'()~` and writes a
+  // space as `+` where encodeURIComponent leaves them — a gateway that echoes the RAW body echoes THAT spelling;
+  // (b) V8 keeps the subject of the last regex match in the legacy RegExp statics (RegExp.input / lastMatch — the heap's
+  // regexp_last_match_info) until the next match anywhere: a regex over the Authorization header parked the live
+  // bearer there after every call (the r5 heap walk named it as the ONE holder of a bearer after a pass)
+  const odd = "sec!ret(with)quote's~tilde and a space";
+  const sentOdd = CH.sentSecrets({ fields: { client_secret: odd } });
+  const rawForm = new URLSearchParams({ client_secret: odd }).toString();
+  ok(rawForm !== `client_secret=${encodeURIComponent(odd)}` && CH.withoutSent(`echo: ${rawForm} / ${encodeURIComponent(odd)} / ${odd}`, sentOdd) === 'echo: client_secret=[client_secret withheld] / [client_secret withheld] / [client_secret withheld]', 'verify r5 (a): a value is withheld in the form body\'s OWN spelling (URLSearchParams) as well as plain and encodeURIComponent\'s');
+  const marker = 'ya29.r5-bearer-marker-' + Math.random().toString(16).slice(2);
+  const sentB = CH.sentSecrets({ headers: { Authorization: `Bearer ${marker}` } });
+  const statics = String(RegExp.input || '') + String(RegExp.lastMatch || '') + String(RegExp.$1 || '');
+  ok(sentB.length === 1 && sentB[0].value === marker && !statics.includes(marker) && CH.bearerOf('bearer  tok ') === 'tok' && CH.bearerOf('Bearer a b') === null && CH.bearerOf('Basic x') === null && CH.bearerOf('Bearer ') === null, 'verify r5 (b): the Bearer is read without a regex — the RegExp statics do not hold the header afterwards; the parse refuses a blank inside the token, another scheme, an empty token');
+  const srcI = fs.readFileSync(path.join(REPO, 'src/channels/index.js'), 'utf-8');
+  const SPELL = "const spellingsOf = (value) => new Set([value, encodeURIComponent(value), new URLSearchParams([['v', value]]).toString().slice(2)]);";
+  const BEAR = '  const bearer = bearerOf(a);   // verify r5: no regex — a regex would park the header in RegExp.input until the next match\n  if (bearer && bearer.length >= SENT_SECRET_MIN) out.push({ name: \'access_token\', value: bearer });\n';
+  ok(srcI.split(SPELL).length === 2 && srcI.split(BEAR).length === 2, 'CONTROL setup: the spellings set and the regex-free Bearer read are present once');
+  const ix2 = M8.load('src/channels/index.js', srcI.replace(SPELL, 'const spellingsOf = (value) => new Set([value, encodeURIComponent(value)]);'), 'two-spellings');
+  ok(CH.withoutSent(`echo: ${rawForm}`, sentOdd) !== ix2.withoutSent(`echo: ${rawForm}`, ix2.sentSecrets({ fields: { client_secret: odd } })) && ix2.withoutSent(`echo: ${rawForm}`, ix2.sentSecrets({ fields: { client_secret: odd } })).includes('sec%21ret'), 'CONTROL (a): a copy with the two r4 spellings lets the form body\'s own spelling through — the check above would be red');
+  const ix3 = M8.load('src/channels/index.js', srcI.replace(BEAR, "  const m = typeof a === 'string' ? /^Bearer\\s+(\\S+)$/i.exec(a) : null;\n  if (m && m[1].length >= SENT_SECRET_MIN) out.push({ name: 'access_token', value: m[1] });\n"), 'regex-bearer');
+  const marker3 = 'ya29.r5-bearer-marker3-' + Math.random().toString(16).slice(2);
+  ix3.sentSecrets({ headers: { Authorization: `Bearer ${marker3}` } });
+  ok(String(RegExp.input || '').includes(marker3), 'CONTROL (b): a copy that reads the Bearer with a regex leaves the whole header in RegExp.input — the check above would be red');
+  // (c) `invalid_client` NAMES THE CLIENT (measured: a borrowed storage-mount client whose secret was re-entered on the
+  // storage side — Google's 401 "Unauthorized" read as a token refusal, the owner re-authorized under the same held copy
+  // and hit the same 401); the vendor's own words stay in front of it
+  const ic = gmail.typedFailure(401, { error: 'invalid_client', error_description: 'Unauthorized' }, 'gmail token refresh');
+  ok(ic.code === 'auth-expired' && /^gmail token refresh: Unauthorized — Google refused the OAuth client itself \(invalid_client: .*pick that mount again in Re-authorize.*\) \(401\)$/.test(ic.message) && ic.detail.clientRefused === true && ic.detail.reason === 'invalid_client', `verify r5 (c): invalid_client names the CLIENT and what to do, the vendor's words first ("${ic.message.slice(0, 80)}…")`);
+  const ig = gmail.typedFailure(400, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 'gmail token refresh');
+  ok(ig.code === 'auth-expired' && ig.message === 'gmail token refresh: Token has been expired or revoked. (400)' && !ig.detail.clientRefused, '…and invalid_grant keeps the plain token-refusal sentence');
+  const IC = "  if (body && body.error === 'invalid_client') return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client:";
+  ok(srcG.split(IC).length === 2, 'CONTROL setup: the invalid_client branch is present once');
+  const gm3 = M8.load('src/channels/gmail.js', srcG.replace(IC, "  if (false) return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client:"), 'no-invalid-client');
+  const ic3 = gm3.typedFailure(401, { error: 'invalid_client', error_description: 'Unauthorized' }, 'gmail token refresh');
+  ok(ic3.message === 'gmail token refresh: Unauthorized (401)' && !(ic3.detail && ic3.detail.clientRefused), 'CONTROL (c): a copy without the branch says only "Unauthorized (401)" — the check above would be red');
+  for (const c of copiesCensus(M8.files, M8.dir, REPO, { minCopies: 4 })) ok(c.pass, c.name, c.detail);
+}
+
 // ── ⑦ pure helpers ──
 {
   ok(JSON.stringify(gmail.parseAddress('"Project News" <news@example.com>')) === JSON.stringify({ id: 'news@example.com', name: 'Project News' }) && gmail.parseAddress('billing@example.com').name === 'billing@example.com', 'From parsing: quoted names, bare addresses');

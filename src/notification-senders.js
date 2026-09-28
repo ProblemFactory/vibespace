@@ -16,6 +16,7 @@ const NOTIFICATION_SENDERS = Object.freeze([
   'Background Work · ',   // src/jobs.js (owner + subscriber notifications)
   'VibeSpace browser',    // src/server/browser-handback.js FROM_NAME
   'Channels · ',          // src/server/channels-engine.js (wakes + Outbox receipts)
+  'VibeSpace notices',    // src/server/stash-handover.js FROM_NAME (the user's "Hand over now" — the waiting stash as ONE message)
 ]);
 
 /** Is this queued row (the wrapper's queue_changed item: {kind, from, …}) a

@@ -220,12 +220,16 @@ class SessionStatusManager {
 
   // Pull (and clear) EVERY pending notice — called when the user sends their
   // next chat message; the caller renders each and appends them all.
-  consumeNotices(key) {
+  // `count` (channel-jump verify r7): consume only the OLDEST `count` — the injection takes the prefix that fits
+  // whole under its cap and leaves the rest queued, so a notice is consumed exactly when it rides.
+  consumeNotices(key, count = null) {
     const rec = this._state.statuses[key];
     if (!rec || !Array.isArray(rec.pendingNotices) || !rec.pendingNotices.length) return [];
-    const list = rec.pendingNotices;
-    rec.pendingNotices = [];
-    if (!rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
+    const n = count == null ? rec.pendingNotices.length : Math.max(0, Math.min(rec.pendingNotices.length, Math.floor(Number(count)) || 0));
+    if (!n) return [];
+    const list = rec.pendingNotices.slice(0, n);
+    rec.pendingNotices = rec.pendingNotices.slice(n);
+    if (!rec.pendingNotices.length && !rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
     this._save(); this._notify();
     return list;
   }

@@ -13,7 +13,21 @@
  *     mentions:    [{ id, name }], // RESOLVED names, never raw @_user_N placeholders
  *     attachments: [{ id, name, bytes, mime, placeholder? }],
  *     replyTo, threadKey,
- *     raw:         { bounded, adapter-specific, NEVER rendered } }
+ *     raw:         { bounded, adapter-specific, NEVER rendered },
+ *     blocks?:     [ the TYPED render tree — OPTIONAL, see below ] }
+ *
+ * THE RENDER TREE (design §25, 2026-09-27 — the owner: "设计一个不同 connector
+ * 的 raw message to HTML 的接口"): `blocks` is a CLOSED, typed tree an adapter
+ * produces at ingest (src/channel-blocks.js holds the rungs) and ONE client
+ * renderer turns into DOM with createElement/textContent — never HTML from an
+ * adapter. Its SCHEMA lives HERE, beside the record it belongs to, because
+ * this module imports nothing and the record's shape is fixed in one place:
+ * `validateBlocks()` enforces the closed kind sets, the bounds, runs
+ * `inertFrames` over EVERY string (link text, attribution, card lines,
+ * mention names — rule 3 again) and demotes a link whose href is not
+ * http(s):/mailto: to plain text. An invalid tree is REFUSED BY NAME (a
+ * `code`), and the record simply carries no `blocks` — `text` stays the
+ * agent-facing string on every path; blocks are for the eye only.
  *
  * THREE RULES THIS FILE EXISTS TO ENFORCE, each one somebody's incident:
  *
@@ -70,6 +84,8 @@
 
 /** Every field a ChannelRecord carries, in its declared order. */
 const RECORD_FIELDS = ['id', 'convId', 'adapterId', 'vendorId', 'at', 'author', 'text', 'mentions', 'attachments', 'replyTo', 'threadKey', 'raw'];
+/** The OPTIONAL fields, after the declared ones, present only when set (§25). */
+const OPTIONAL_FIELDS = ['blocks'];
 
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
@@ -88,7 +104,12 @@ const MAX_RAW_BYTES = 8 * 1024;
  */
 const FRAME_TAGS = ['system-reminder', 'persisted-output', 'task-notification',
   'local-command-stdout', 'command-name', 'command-message', 'command-args'];
-const FRAME_TAG_RE = new RegExp(`<\\/?\\s*(${FRAME_TAGS.join('|')}|vibespace-[a-z0-9-]+)(\\s[^<>]*)?\\s*>`, 'gi');
+// LINEAR (verify round 3, 2026-09-27): the tail used to be `(\s[^<>]*)?\s*>` — `[^<>]*` and `\s*` both eat a
+// whitespace run, so `<system-reminder` + 64 KiB of spaces cost 1.7 s (quadratic: every split of the run tried
+// before the `>` failed) — at INGEST and again at every READ of the page that holds it (the judge runs per page,
+// per broadcast, in every client: a page of 50 such records was ~90 s on the event loop). `[^<>]*` already
+// covers the whitespace, so the trailing `\s*` matched nothing the shorter form does not.
+const FRAME_TAG_RE = new RegExp(`<\\/?\\s*(${FRAME_TAGS.join('|')}|vibespace-[a-z0-9-]+)(\\s[^<>]*)?>`, 'gi');
 
 /** `<system-reminder>` becomes `[system-reminder]`. The words stay; the frame goes. */
 function inertFrames(text) {
@@ -103,6 +124,22 @@ function carriesFrame(text) {
   return new RegExp(FRAME_TAG_RE.source, 'i').test(text);
 }
 
+/** ONE LINE of a text that is neutered LINE BY LINE and joined again (lane
+ *  channel-withdraw verify r3, 2026-09-27: the receipt's line DIFF). A frame
+ *  opener left DANGLING at the end of a line — `<system-reminder` with no `>`
+ *  on its line — is inert alone, but the `>` of a LATER line completes it once
+ *  the lines are joined: FRAME_TAG_RE's attribute run `\s[^<>]*` crosses a
+ *  newline, so a tag split over two lines of one text, or assembled from the
+ *  `-` line of one text and the `+` line of another, was a LIVE frame by this
+ *  module's own predicate. The complete tags go first (`inertFrames`), then a
+ *  dangling opener loses its `<` (`[system-reminder`): no line can leave an
+ *  opener behind, so no join can complete one. */
+const FRAME_OPEN_RE = new RegExp(`<(\\/?\\s*(?:${FRAME_TAGS.join('|')}|vibespace-[a-z0-9-]+))(?=(?:\\s[^<>]*)?$)`, 'gi');
+function inertFrameLine(line) {
+  if (typeof line !== 'string' || !line) return '';
+  return inertFrames(line).replace(FRAME_OPEN_RE, (m, name) => '[' + name);
+}
+
 const str = (v, max) => {
   if (v === null || v === undefined) return '';
   const s = typeof v === 'string' ? v : String(v);
@@ -112,6 +149,127 @@ const str = (v, max) => {
 /** THE ONE DOOR for a peer-controlled string: bounded AND frame-inert (rule
  *  3). Every field a vendor or a stranger fills goes through this, not `str`. */
 const peerText = (v, max) => inertFrames(str(v, max));
+
+// ── THE BLOCK SCHEMA (design §25) ─────────────────────────────────────────
+/** Block kinds — CLOSED. p = a paragraph of inline runs; quote / sig = foldable
+ *  (their own inner blocks); banner = one dim system line from the sender's
+ *  tool ("Please reply above this line"); code = preformatted text; img / file
+ *  = an attachment BY ID (the bytes only ever through our route); card = a
+ *  vendor card (title + lines); sys = a system record's sentence. */
+const BLOCK_KINDS = Object.freeze(['p', 'quote', 'sig', 'banner', 'code', 'img', 'file', 'card', 'sys']);
+/** Inline run kinds — CLOSED. t = text, a = a link {href, text}, at = a
+ *  mention {id, name}, code = inline code, b = bold. */
+const RUN_KINDS = Object.freeze(['t', 'a', 'at', 'code', 'b']);
+/** What a `sys` block is ABOUT — a closed vocabulary the client words in the
+ *  device's language (the block's own `text` is the fallback). */
+const SYS_WHATS = Object.freeze(['system', 'sticker', 'share-chat', 'share-user', 'forward', 'deleted', 'location', 'call', 'calendar', 'todo', 'card', 'unknown']);
+/** The bounds: a tree is peer-derived and syncs to every client. `text` is
+ *  the sum of every visible string (hrefs are bounded one by one). */
+const BLOCK_LIMITS = Object.freeze({ blocks: 400, text: 64 * 1024, depth: 6, runs: 4000, cardLines: 60, href: 2048 });
+/** The ONLY schemes a link may carry. Anything else is plain text. */
+const LINK_SCHEMES = Object.freeze(['http:', 'https:', 'mailto:']);
+
+/**
+ * A link target, or null. Accepted ONLY when it parses as a URL whose scheme
+ * is http(s): (with a host, no user:password@ — the "trusted.com@evil.com"
+ * shape) or mailto: (ONE address and nothing else). `javascript:`, `data:`,
+ * `vbscript:`, `file:`, a relative path, a control character — all null, so
+ * the caller keeps the words as TEXT. Runs in the adapter AND again at render
+ * time.
+ *
+ * A MAILTO IS AN ADDRESS, NOT A COMPOSE FORM (verify round, 2026-09-27): RFC
+ * 6068 hfields (`?bcc=…&body=…`) are percent-DECODED by the mail client, so
+ * `mailto:you@x?bcc=evil%40y` passed the old "one @" regex and opened a
+ * compose window with a hidden recipient. The only accepted form is
+ * `mailto:<local>@<host>` with the e-mail rung's own alphabet — no `?`, no
+ * `#`, no percent-escapes.
+ */
+const MAILTO_RE = /^mailto:[A-Za-z0-9._+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63}){1,8}$/i;
+function safeHref(href) {
+  if (typeof href !== 'string') return null;
+  const s = href.trim();
+  if (!s || s.length > BLOCK_LIMITS.href) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f\s]/.test(s)) return null;
+  let u;
+  try { u = new URL(s); } catch { return null; }
+  if (!LINK_SCHEMES.includes(u.protocol)) return null;
+  if (u.protocol === 'mailto:') return MAILTO_RE.test(s) ? s : null;
+  if (!u.hostname || u.username || u.password) return null;
+  return u.href;
+}
+
+/**
+ * VALIDATE (and clean) a block tree. Answers `{ok:true, blocks}` — a NEW tree
+ * holding only the declared fields, every string through `inertFrames`, every
+ * unsafe link demoted to a text run — or `{ok:false, code, error}` naming the
+ * rule broken: `not-an-array`, `unknown-kind`, `unknown-run`, `bad-field`,
+ * `too-many-blocks`, `too-many-runs`, `too-deep`, `too-much-text`.
+ */
+function validateBlocks(blocks) {
+  if (!Array.isArray(blocks)) return { ok: false, code: 'not-an-array', error: 'blocks must be an array' };
+  let nBlocks = 0, nRuns = 0, text = 0;
+  const refuse = (code, error) => { const e = new Error(error); e.code = code; throw e; };
+  const s = (v, what) => {
+    if (v === undefined || v === null) return '';
+    if (typeof v !== 'string') refuse('bad-field', `${what} must be a string`);
+    text += v.length;
+    if (text > BLOCK_LIMITS.text) refuse('too-much-text', `the tree's text passes ${BLOCK_LIMITS.text} characters`);
+    return inertFrames(v);
+  };
+  const runs = (list) => {
+    if (!Array.isArray(list)) refuse('bad-field', 'p.runs must be an array');
+    const out = [];
+    for (const r of list) {
+      if (++nRuns > BLOCK_LIMITS.runs) refuse('too-many-runs', `more than ${BLOCK_LIMITS.runs} inline runs`);
+      if (!r || typeof r !== 'object' || !RUN_KINDS.includes(r.k)) refuse('unknown-run', `unknown inline run ${JSON.stringify(r && r.k)}`);
+      if (r.k === 'a') {
+        const txt = s(r.text, 'a.text');
+        const href = safeHref(r.href);
+        // a label-less link SHOWS its href, so the href is the text it counts (verify round 3: 4 000 empty-label
+        // links × 2 048-char hrefs passed the 64 KiB text bound as 0 characters — a 16 MB tree per record)
+        if (href && !txt) s(href, 'a.href');
+        // A link whose target is not http(s)/mailto is WORDS, never a link.
+        out.push(href ? { k: 'a', href, text: txt || href } : { k: 't', text: txt || s(typeof r.href === 'string' ? r.href : '', 'a.href') });
+      } else if (r.k === 'at') out.push({ k: 'at', id: s(r.id, 'at.id').slice(0, 256), name: s(r.name, 'at.name').slice(0, 200) });
+      else out.push({ k: r.k, text: s(r.text, `${r.k}.text`) });
+    }
+    return out;
+  };
+  const walk = (list, depth) => {
+    if (depth > BLOCK_LIMITS.depth) refuse('too-deep', `blocks nest deeper than ${BLOCK_LIMITS.depth}`);
+    if (!Array.isArray(list)) refuse('bad-field', 'inner blocks must be an array');
+    const out = [];
+    for (const b of list) {
+      if (++nBlocks > BLOCK_LIMITS.blocks) refuse('too-many-blocks', `more than ${BLOCK_LIMITS.blocks} blocks`);
+      if (!b || typeof b !== 'object' || !BLOCK_KINDS.includes(b.k)) refuse('unknown-kind', `unknown block kind ${JSON.stringify(b && b.k)}`);
+      switch (b.k) {
+        case 'p': out.push({ k: 'p', runs: runs(b.runs) }); break;
+        case 'quote': case 'sig': {
+          const o = { k: b.k, blocks: walk(b.blocks, depth + 1), lines: Math.max(0, Math.min(1e6, Math.floor(Number(b.lines) || 0))) };
+          if (b.k === 'quote' && b.attribution) o.attribution = s(b.attribution, 'quote.attribution').slice(0, 400);
+          if (b.k === 'quote' && b.forwarded === true) o.forwarded = true;
+          out.push(o); break;
+        }
+        case 'banner': out.push({ k: 'banner', text: s(b.text, 'banner.text').slice(0, 400) }); break;
+        case 'code': { const o = { k: 'code', text: s(b.text, 'code.text') }; if (b.lang) o.lang = s(b.lang, 'code.lang').slice(0, 40); out.push(o); break; }
+        case 'img': case 'file': {
+          if (typeof b.attachmentId !== 'string' || !b.attachmentId) refuse('bad-field', `${b.k}.attachmentId is required`);
+          out.push({ k: b.k, attachmentId: s(b.attachmentId, `${b.k}.attachmentId`).slice(0, 256) }); break;
+        }
+        case 'card': {
+          const lines = Array.isArray(b.lines) ? b.lines : [];
+          if (lines.length > BLOCK_LIMITS.cardLines) refuse('bad-field', `a card carries at most ${BLOCK_LIMITS.cardLines} lines`);
+          out.push({ k: 'card', title: s(b.title, 'card.title').slice(0, 400), lines: lines.map((x) => s(x, 'card.line')) }); break;
+        }
+        case 'sys': { const o = { k: 'sys', text: s(b.text, 'sys.text').slice(0, 2000) }; if (b.what) { if (!SYS_WHATS.includes(b.what)) refuse('bad-field', `unknown sys.what ${JSON.stringify(b.what)}`); o.what = b.what; } out.push(o); break; }
+        default: refuse('unknown-kind', `unknown block kind ${JSON.stringify(b.k)}`);
+      }
+    }
+    return out;
+  };
+  try { return { ok: true, blocks: walk(blocks, 1) }; } catch (e) { return { ok: false, code: e.code || 'bad-field', error: String(e.message || e) }; }
+}
 
 /**
  * Resolve `@_user_N` placeholders against THIS message's own mentions array.
@@ -199,7 +357,7 @@ function makeRecord(input, opts = {}) {
   const raw = boundRaw(r.raw);
   if ('synthetic' in raw && typeof raw.synthetic !== 'boolean') throw new Error('channel-record: raw.synthetic must be a boolean (declare a minted key, or omit it)');
 
-  return {
+  const out = {
     id: str(r.id, 256) || `${adapterId}:${convId}:${vendorId}`,
     convId, adapterId, vendorId, at,
     author, text, mentions, attachments,
@@ -207,6 +365,14 @@ function makeRecord(input, opts = {}) {
     threadKey: str(r.threadKey, 512) || null,
     raw,
   };
+  // THE RENDER TREE (§25) — optional, validated here; an invalid one is left
+  // off (the refusal's code is the rungs' suite's business) and the record
+  // renders through the generic rung from `text` like any older record.
+  if (r.blocks !== undefined && r.blocks !== null) {
+    const v = validateBlocks(r.blocks);
+    if (v.ok && v.blocks.length) out.blocks = v.blocks;
+  }
+  return out;
 }
 
 /** The conversation shape `listConversations()` returns (design §4). Its title
@@ -226,6 +392,8 @@ function makeConversation(input) {
 }
 
 module.exports = {
-  RECORD_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS,
-  makeRecord, makeConversation, resolveMentions, inertFrames, peerText, carriesFrame, recordKey, isSynthetic,
+  RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS,
+  BLOCK_KINDS, RUN_KINDS, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
+  makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, peerText, carriesFrame, recordKey, isSynthetic,
+  safeHref, validateBlocks,
 };

@@ -12,8 +12,9 @@
 const { create: createEngine } = require('./channels-engine.js');
 const { create: createGroups } = require('./groups-engine.js');
 const channelsRoutes = require('../routes/channels.js');
+const { create: createTouches } = require('./channel-touches.js');
 
-function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false } = {}) {
+function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env = process.env, integrations = null, userTodos = null, deliver = null, serverSetting = () => undefined, liveSessions = () => [], groupSetting = () => 'none', authEnabled = () => false, getMounts = () => null, sessions = () => null, sessionMeta = () => null } = {}) {
   if (!app) throw new Error('channels-wiring: app is required');
   if (!dataDir) throw new Error('channels-wiring: dataDir is required');
 
@@ -25,7 +26,18 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   // delivery ladder (P2, fence 2: the only door to an unattended turn, the
   // spend authorizer inside it), `serverSetting` reads the coalescing window
   // and `liveSessions` names the agent sessions an assignment can address.
-  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions });
+  // 2.369.195: the storage mounts' OWN OAuth clients an account may borrow —
+  // `list` = the read-only offer (no secret), `of` = the decrypted client the
+  // engine re-seals under `.channels-key` at once (src/mounts.js owns `.mounts-key`)
+  // verify r2: `head` = the KEY-LESS read (the id + every refusal that needs no
+  // key), asked before `of` wherever the engine can refuse on the id alone
+  const noMounts = () => { const e = new Error('storage mounts are not available on this instance'); e.code = 'no-mounts'; throw e; };
+  const mountClients = {
+    list: (vendor) => { const m = getMounts(); return m && typeof m.oauthClientsFor === 'function' ? m.oauthClientsFor(vendor) : []; },
+    head: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientIdOf !== 'function') noMounts(); return m.oauthClientIdOf(mountId, opts); },
+    of: (mountId, opts = {}) => { const m = getMounts(); if (!m || typeof m.oauthClientOf !== 'function') noMounts(); return m.oauthClientOf(mountId, opts); },
+  };
+  const channels = createEngine({ dataDir, broadcast: (msg) => bcastAll(msg), now, env, integrations, userTodos, deliver, serverSetting, liveSessions, mountClients });
   // AGENT GROUPS (design §22): the SAME store (groups.json + the group logs
   // behind its serialized doors), the SAME ladder (a wake is a billed turn —
   // spendReason peer-message, the authorizer inside it), reach = msg-acl over
@@ -33,10 +45,15 @@ function create({ app, dataDir, bcastAll = () => {}, now = () => Date.now(), env
   const groups = createGroups({ store: channels.store, deliver, broadcast: (msg) => bcastAll(msg), now, roster: liveSessions, groupSetting });
   // `authEnabled` (r2): with auth OFF the owner's group routes are reachable by any
   // local caller, so they are PACED like an agent's (src/routes/channels.js ownerPacer)
-  channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled });
+  // THE WITNESS (§26, B-099e): every agent read / search / reply / compose of a conversation, recorded by the agent
+  // routes on the SESSION (`sessions` = the live map, `sessionMeta` = its meta store — the ring survives a restart),
+  // broadcast as `channel-touch`, read back by the chat view and the conversation window (cookie routes)
+  const touches = createTouches({ sessions, broadcast: (msg) => bcastAll(msg), metaStore: sessionMeta, now,
+    accountOf: (id) => { const r = channels.adapterRecords().adapters.find((a) => a.id === id); return r ? { label: r.label || r.id, kind: r.kind || null } : null; } });
+  channelsRoutes.setup({ getEngine: () => channels, getGroups: () => groups, authEnabled, getTouches: () => touches });
   app.use(channelsRoutes.router);
   channels.start();
-  return { channels, groups, shutdown: () => { try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
+  return { channels, groups, touches, shutdown: () => { try { touches.flush(); } catch (e) { console.warn('[channel-touches] flush:', e && e.message); } try { channels.stop(); } catch (e) { console.warn('[channels] shutdown:', e && e.message); } } };
 }
 
 module.exports = { create };

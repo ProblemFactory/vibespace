@@ -139,6 +139,11 @@ async function call(method, p, body, { soft = false } = {}) {
   if (!res.ok || j.error) {
     if (soft) return { ...j, _status: res.status, _failed: true };
     console.error((j.error || `HTTP ${res.status}`) + (j.code ? ` [${j.code}]` : ''));
+    // B-f7ab verify r1: a refusal's WAY OUT is printed for every verb, not only the page verbs' (`status` on a session
+    // that could not get its browser key said what happened and never what to do — the 2026-09-17 chat parked on less)
+    if (j.remedy) console.error(`  remedy: ${j.remedy}`);
+    // B-f7ab verify r2 (LOW): the key minted by this very call is said even when the call was refused — the next command runs on it
+    if (j.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one on this command (${j.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
     process.exit(1);
   }
   return j;
@@ -483,8 +488,13 @@ async function runPage(c) {
     // verify S2 r3 (r2 F2): a verb that would CHANGE WHAT THE USER IS LOOKING AT (`tab t2`, `open <url>`, `back`…) is
     // refused like every page verb while they drive — and SAID so by name (the verb table's rule, never the server's guess)
     if (r.code === 'browser_paused' && typeof V.pausedSwitchNote === 'function') { const n = V.pausedSwitchNote(cls.verb, cls.sub); if (n) console.error(`  ${n}`); }
+    // B-f7ab verify r2 (LOW): the key minted by this very call is said even when the verb was refused — the next one runs on it
+    if (r.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one on this command (${r.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
     process.exit(1);
   }
+  // B-f7ab: this session had no browser key (it started before per-session browsers, or while they were off) and the
+  // server gave it one on THIS command — said once, so the agent knows nothing needs restarting
+  if (r.minted) console.error(`note: this session had no browser yet — VibeSpace gave it one now (${r.minted.origin === 'conversation' ? 'its conversation\'s own, kept from before' : 'new'}); nothing needs restarting [browser_key_minted]`);
   // r1: the child env is BUILT, never inherited — every AGENT_BROWSER_* key of
   // this shell is dropped (each refused flag has an env twin the browser CLI
   // honours), then the output keys, the session's OWN spawn pairs as the server

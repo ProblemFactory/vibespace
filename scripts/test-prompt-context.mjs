@@ -24,7 +24,7 @@ const activeSessions = new Map([['sess1', session]]);
 const settings = {};
 setupAgentRoutes({
   app, activeSessions, tasks,
-  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
+  sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => null, setByAgent: () => null, history: () => [] },
   SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
   userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) },
   sessionStatusKey: (s, id) => `claude:${id}`,

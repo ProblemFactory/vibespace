@@ -156,6 +156,23 @@ const FLUSH_INTERVAL_MS = 2000;
 // The outbox keeps at most this many proposals on disk (terminal ones fall
 // off oldest-first at write time; the audit log is the permanent record).
 const OUTBOX_KEEP = 500;
+// THE STATES THE BOUND MAY DROP (verify r3, 2026-09-27): every TERMINAL state of
+// the outbox table — the same set src/channel-policy.js declares as
+// TERMINAL_STATES (this store imports only fs/path, so the set is spelled here
+// and test-channel-outbox pins the two equal). `withdrawn` was missing: an
+// agent's withdrawals / replaces never left the file, and once they were all
+// it held the bound dropped the owner's DECIDED records instead (540 withdrawn
+// on disk, the ten rejections gone; the whole file rewritten on every write).
+const OUTBOX_PRUNABLE = Object.freeze(['sent', 'failed', 'rejected', 'expired', 'withdrawn']);
+// …AND THE ORDER THEY GO IN (verify r4, 2026-09-27): oldest-first ALONE let one
+// agent's replace loop (each `--replaces` = one `withdrawn` record) push every
+// OTHER drafter's decided records — the owner's own sent / rejected history —
+// out of the store before a single withdrawal left it (measured: 520 replaces,
+// the other drafter's 10 decided records all gone, 499 withdrawn kept). A
+// record nobody decided goes first: an agent's own retraction, then a TTL
+// expiry; what the owner decided (sent / failed / rejected) only after both
+// are exhausted. Oldest-first within a rank; the audit log keeps every one.
+const OUTBOX_PRUNE_RANK = Object.freeze({ withdrawn: 0, expired: 1, sent: 2, failed: 2, rejected: 2 });
 
 const EMPTY_INDEX = () => ({ v: 1, conversations: {}, updatedAt: 0 });
 
@@ -891,16 +908,25 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
   function outboxPrune() {
     const all = Object.values(ob.proposals);
     if (all.length <= OUTBOX_KEEP) return;
-    const done = all.filter((p) => p && ['sent', 'failed', 'rejected', 'expired'].includes(p.state)).sort((a, b) => (a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0));
+    const rank = (p) => (Number.isFinite(OUTBOX_PRUNE_RANK[p.state]) ? OUTBOX_PRUNE_RANK[p.state] : 2);
+    const done = all.filter((p) => p && OUTBOX_PRUNABLE.includes(p.state)).sort((a, b) => (rank(a) - rank(b)) || ((a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0)));
     for (const p of done.slice(0, all.length - OUTBOX_KEEP)) delete ob.proposals[p.id];
   }
   function outboxUpdate(fn) {
     if (obLoad.blocked) return Promise.reject(blockedError(obLoad.blocked));
-    const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); writeJsonAtomic(outboxFile, ob); return r; });
+    const run = obChain.then(() => fn(ob)).then((r) => { outboxPrune(); obSnap = null; writeJsonAtomic(outboxFile, ob); return r; }, (err) => { obSnap = null; throw err; });
     obChain = run.then(() => {}, () => {});
     return run;
   }
-  function outboxSnapshot() { return JSON.parse(JSON.stringify(ob)); }
+  // ONE COPY PER WRITE, NOT PER READ (verify r5, 2026-09-27): every reader took a deep copy of the WHOLE outbox to
+  // read one record (34 sites in the engine — an approve is ~8 of them), so at the bound with 16 KB texts (16.6 MB on
+  // disk) one agent's `--replaces` held the main thread ~836 ms (45 ms per copy; the write itself 58 ms). The copy
+  // is made once after a write and shared by every reader until the next write, DEEP-FROZEN so a reader that
+  // mutates it throws (strict mode) instead of poisoning the next reader — the live `ob` is written only inside
+  // `update(fn)`. A record read through it is the same object twice in a row (test-channel-outbox pins it).
+  let obSnap = null;
+  const deepFreeze = (v) => { if (v && typeof v === 'object' && !Object.isFrozen(v)) { Object.freeze(v); for (const k of Object.keys(v)) deepFreeze(v[k]); } return v; };
+  function outboxSnapshot() { if (!obSnap) obSnap = deepFreeze(JSON.parse(JSON.stringify(ob))); return obSnap; }
   /** A new proposal id — a sequence under the owner, so two proposals born
    *  in the same millisecond cannot share one. */
   function outboxNextId() { ob.seq = (Number(ob.seq) || 0) + 1; return `p-${now().toString(36)}-${ob.seq.toString(36)}`; }
@@ -992,5 +1018,5 @@ function createChannelStore({ dir, now = () => Date.now(), log = console } = {})
 
 module.exports = {
   createChannelStore, writeJsonAtomic, safeSeg,
-  RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP,
+  RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
 };

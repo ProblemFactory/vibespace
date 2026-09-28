@@ -1023,7 +1023,7 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   ok(!/Date\.now|new Date|setTimeout|setImmediate|setInterval|Math\.random|process\./.test(code), 'the model reads no clock, sets no timer, draws no randomness and touches no process — `now` is a fact the driver hands in');
   ok(/^'use strict';/.test(SRC) && /module\.exports = \{/.test(SRC), 'the model is CJS (the engine requires it, this suite and a patched copy load it the same way)');
   const rules = [...SRC.matchAll(/^ \* {1,2}(\d{1,2})\. [A-Z]/gm)].map((m) => Number(m[1]));
-  ok(J(rules) === J(Array.from({ length: 18 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–18 (${rules.join(',')})`);
+  ok(J(rules) === J(Array.from({ length: 19 }, (_, i) => i + 1)), `the doc comment states the rules as ONE numbered list 1–19 (${rules.join(',')})`);
   ok(J(D0.REFUSAL_CODES) === J(['backoff', 'vendor-budget', 'refresh-floor', 'refresh-queue-full']) && !D0.ANSWER_OUTCOMES.includes('wait') && D0.PACE_WAIT_MAX_MS === 1000, 'rule 18 adds NO refusal code and no settlement — a wait is neither (REFUSAL_CODES unchanged; PACE_WAIT_MAX_MS 1000)');
   const asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
   const line = asrc.split('\n').find((l) => l.includes('const status = code === \'not-found\' ? 404') && l.includes('refresh-queue-full')) || '';
@@ -1050,6 +1050,65 @@ console.log('⑤ THE CENSUS: a pure model, codes the routes and the CLI know, an
   ok(/\{ name: 'test-channel-drain', tier: 'fast'(?:,| \})/.test(ci), 'the gate is registered in the FAST tier (scripts/ci.mjs)');
   const arch = fs.readFileSync(path.join(REPO, 'scripts/test-architecture.mjs'), 'utf8');
   ok(arch.includes("'src/channel-drain.js'"), 'test-architecture classifies it PURE');
+}
+
+// ═══ ⑥ RULE 19 — HISTORY ON DEMAND (lane channel-render verify r6, 2026-09-27): the server belt under /older ═══
+// Reproduced on the real engine before it: 20 concurrent /older for one conversation = 20 vendor calls for the same
+// page; 20 in 2 s after the vendor said `exhausted` = 16 more vendor calls answering nothing; the minute budget the
+// only bound. The PURE memory: `olderVerdict` (join › exhausted › floor › vendor), `olderApply` (ask / landed /
+// failed / changed). The engine leg (20 concurrent → 1 call, the floor, the memory, the forget) is test-channels-engine ⑭.
+console.log('⑥ RULE 19: one conversation\'s older history — join, the remembered end, the floor; a mutant per clause');
+{
+  const F = D0.OLDER_FLOOR_MS, T = D0.OLDER_MEMORY_MS;
+  const e0 = D0.olderEmpty();
+  ok(J(e0) === J({ askedAt: 0, inflight: false, exhaustedAt: 0 }) && F === 1500 && T === 6 * 3600e3 && J(D0.OLDER_EVENTS) === J(['ask', 'landed', 'failed', 'changed']), `the empty memory, the floor (${F} ms), the memory's TTL (${T / 3600e3} h), the four events`);
+  const at = (m, ev, t) => D0.olderApply(m, ev, t);
+  const asked = at(e0, 'ask', 10_000);
+  const landedMore = at(asked, { type: 'landed', exhausted: false }, 10_100);
+  const landedEnd = at(asked, { type: 'landed', exhausted: true }, 10_100);
+  const failed = at(asked, 'failed', 10_100);
+  const changed = at(landedEnd, 'changed', 10_200);
+  const TABLE = [
+    // [memory, now, want]                                          — the row's meaning
+    [e0, 10_000, { act: 'vendor' }],                                 // never asked: the vendor
+    [asked, 10_050, { act: 'join' }],                                // an ask in flight: join it (whatever the clock)
+    [asked, 99_999, { act: 'join' }],
+    [landedMore, 10_150, { act: 'floor', retryAfterMs: F - 150 }],   // landed rows 150 ms after the ask: inside the floor, the wait named
+    [landedMore, 10_000 + F - 1, { act: 'floor', retryAfterMs: 1 }], // the floor's edge, inside
+    [landedMore, 10_000 + F, { act: 'vendor' }],                     // the floor's edge, over
+    [landedEnd, 10_150, { act: 'exhausted' }],                       // the vendor said "nothing older": remembered — no call, no floor wait
+    [landedEnd, 10_000 + F + 5, { act: 'exhausted' }],               // …past the floor too
+    [landedEnd, 10_100 + T - 1, { act: 'exhausted' }],               // …until the memory's TTL
+    [landedEnd, 10_100 + T, { act: 'vendor' }],                      // the TTL over: asked again (a belt against a false end)
+    [failed, 10_150, { act: 'floor', retryAfterMs: F - 150 }],       // a failed flight: nothing remembered, the floor's clock kept
+    [failed, 10_000 + F, { act: 'vendor' }],
+    [changed, 10_250, { act: 'floor', retryAfterMs: F - 250 }],      // a record arrived: the end forgotten, the floor's clock kept (a new record never makes an ask cheaper)
+    [changed, 10_000 + F, { act: 'vendor' }],
+    [at(changed, 'ask', 12_000), 12_010, { act: 'join' }],           // asked again after the change: a flight
+    [at(at(changed, 'ask', 12_000), { type: 'landed', exhausted: true }, 12_050), 20_000, { act: 'exhausted' }],   // …and its end remembered anew
+    [null, 10_000, { act: 'vendor' }], [undefined, 5, { act: 'vendor' }],   // no memory = empty
+    [{ askedAt: 10_000, inflight: false, exhaustedAt: 0 }, NaN, { act: 'floor', retryAfterMs: F }],   // a bad clock reads as 0: the floor, never a wait longer than it
+    [{ askedAt: 10_000, inflight: false, exhaustedAt: 0 }, 9_000, { act: 'floor', retryAfterMs: F }],  // a clock that went backwards: the same
+  ];
+  const bad = TABLE.filter(([m, t, want]) => J(D0.olderVerdict(m, t)) !== J(want)).map(([m, t, want]) => [m, t, want, D0.olderVerdict(m, t)]);
+  ok(!bad.length, `olderVerdict: ${TABLE.length} rows — join › exhausted › floor › vendor, each with the wait it names`, J(bad));
+  ok(J(asked) === J({ askedAt: 10_000, inflight: true, exhaustedAt: 0 }) && J(landedEnd) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 10_100 }) && J(landedMore) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }) && J(failed) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }) && J(changed) === J({ askedAt: 10_000, inflight: false, exhaustedAt: 0 }), 'olderApply: ask stamps the clock + the flight; landed ends the flight and remembers only an `exhausted` end; failed ends it remembering nothing; changed forgets the end and keeps the clock');
+  ok(J(e0) === J(D0.olderEmpty()) && J(asked) === J({ askedAt: 10_000, inflight: true, exhaustedAt: 0 }), 'olderApply never mutates the memory it was given');
+  let threw = null; try { D0.olderApply(e0, 'bogus', 1); } catch (e) { threw = e.message; }
+  ok(/no such older event bogus/.test(threw || ''), 'an unknown event throws by name');
+  // A MUTANT PER CLAUSE — each a patched copy whose own rows go red (and whose repro on the engine is test-channels-engine ⑭'s control)
+  const OLD_MUTANTS = [
+    { tag: 'older-no-join', why: '20 concurrent /older = 20 vendor calls for one page', edits: [["  if (m.inflight) return { act: 'join' };\n", '']], red: (D) => D.olderVerdict(asked, 10_050).act !== 'join' },
+    { tag: 'older-no-memory', why: 'an exhausted conversation costs a vendor call per /older', edits: [["  if (ex > 0 && t - ex < OLDER_MEMORY_MS) return { act: 'exhausted' };\n", '']], red: (D) => D.olderVerdict(landedEnd, 10_000 + F + 5).act !== 'exhausted' },
+    { tag: 'older-no-floor', why: 'a held wheel = a vendor call per round trip', edits: [["  if (asked > 0 && t - asked < OLDER_FLOOR_MS) return { act: 'floor', retryAfterMs: Math.min(OLDER_FLOOR_MS, Math.max(1, OLDER_FLOOR_MS - (t - asked))) };   // never longer than the floor (a clock that went backwards)\n", '']], red: (D) => D.olderVerdict(landedMore, 10_150).act !== 'floor' },
+    { tag: 'older-forget-nothing', why: 'a new record never lets the vendor be asked again', edits: [["    case 'changed': return { ...m, exhaustedAt: 0 };", "    case 'changed': return { ...m };"]], red: (D) => D.olderVerdict(D.olderApply(landedEnd, 'changed', 10_200), 10_000 + F).act !== 'vendor' },
+  ];
+  for (const m of OLD_MUTANTS) {
+    const mm = mutant(m.tag, m.edits);
+    if (!ok(mm.setup, `MUTANT setup · ${m.tag} (rule 19, ${m.why}) is reconstructed from the shipped bytes`, mm.why)) continue;
+    ok(m.red(mm.D) && !m.red(D0), `MUTANT ${m.tag}: its own row goes red on the copy and stays green on the shipped model`);
+  }
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: MUTANTS.length + OLD_MUTANTS.length })) ok(r.pass, 'rule 19 ' + r.name, r.detail);
 }
 
 console.log(`\n${failN ? 'FAILED' : 'ALL PASS'} (${passN} passed${failN ? `, ${failN} failed` : ''})`);

@@ -20,6 +20,10 @@ const path = require('path');
 const { capsOf, notificationDelivery } = require('../backend-caps.js');
 const { wrapperCaps } = require('./wrapper-files.js');
 const { vibespaceNoticeText } = require('../notification-senders.js'); // lane S3: every kind:'notification' delivery opens with the ONE head naming VibeSpace as the speaker
+// verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which live session carries this conversation" —
+// a pending fork carries its PARENT's id, and the three raw lookups below (rung 0, rung 1.5, the charged identity) handed
+// the parent's frame to the fork's wrapper / channel socket and the parent's turn to the fork's credential slot
+const { addressableId } = require('../claude-lock-capture.js');
 
 const STASH_CAP = 30; // per-conversation; oldest fall off
 // How long a written frame waits for the wrapper's own verdict before it stops
@@ -46,38 +50,213 @@ const SETTLE_TTL_MS = 120 * 1000;
 // cannot name. It is charged to a NAMED bucket (`host:<id>` / `unattributed`)
 // rather than guessed at or waved through — the instance/day ceiling still
 // applies to it, and the name says what we do not know.
-function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, log = () => { } }) {
+function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activeSessions, emitPeerCard, authorizeSpend = null, noteSpend = null, releaseSpend = null, onStashChange = () => { }, log = () => { } }) {
   const stashFile = path.join(dataDir, 'msg-stash.json');
   let stash = {};
   try { stash = JSON.parse(fs.readFileSync(stashFile, 'utf-8')) || {}; } catch { }
+  // A CLAIM THE PREVIOUS PROCESS DID NOT SETTLE (channel-jump verify r2, 2026-09-27): an entry stamped `ho:<id>` was
+  // being handed over when the server stopped. The shutdown path WAITS for a hand-over in flight (server.js
+  // `stashView.settle`), so a stamp here means the process died mid-post (SIGKILL / OOM) inside the socket
+  // round-trip — whether the CLI took the frame is unknown. RELEASED (they wait again), by name in the log: a lost
+  // notice is silent, a repeated one is visible and traceable by its hand-over id.
+  const releasedAtBoot = [];
+  for (const [cid, q] of Object.entries(stash)) {
+    if (!Array.isArray(q)) { delete stash[cid]; continue; }
+    const ids = new Set();
+    for (const e of q) if (e && e.ho) { ids.add(e.ho); delete e.ho; }
+    if (ids.size) releasedAtBoot.push({ cid, ids: [...ids], n: q.length });
+  }
+  if (releasedAtBoot.length) { try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); } catch { } }
+  for (const r of releasedAtBoot) log(`[deliver] ${r.cid}: a hand-over (${r.ids.join(', ')}) was in flight when the previous server stopped — its entries wait again (a duplicate is possible if the frame landed; check the conversation for "hand-over ${r.ids[0]}")`);
   let stashTimer = null;
+  // `true` when the file holds what memory holds; a failed write is logged AND answered (verify r4: a ref'd entry's
+  // producer must hear the truth — see stashFor)
+  // verify r5 (2026-09-27): the LAST failure is remembered (`stashHealth`) and a failed write is RETRIED on its own
+  // clock — a transient refusal (a full disk cleared a minute later) heals without waiting for the next mutation
+  let lastWriteError = null, retryTimer = null;
+  const STASH_RETRY_MS = 30 * 1000;
   const writeStashNow = () => {
-    try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); } catch (e) { log('[deliver] stash persist failed:', e.message); }
+    try { fs.writeFileSync(stashFile + '.tmp', JSON.stringify(stash)); fs.renameSync(stashFile + '.tmp', stashFile); lastWriteError = null; return true; }
+    catch (e) {
+      lastWriteError = { at: Date.now(), message: String(e && e.message || e) };
+      log('[deliver] stash persist failed:', e.message);
+      if (!retryTimer) { retryTimer = setTimeout(() => { retryTimer = null; writeStashNow(); }, STASH_RETRY_MS); retryTimer.unref?.(); }   // an empty queue is written too: a stale file would re-deliver at boot
+      return false;
+    }
   };
   const persistStash = () => {
     if (stashTimer) return;
     stashTimer = setTimeout(() => { stashTimer = null; writeStashNow(); }, 500);
   };
+  /** Is the file behind the queue current? `{durable, error}` — a producer's reply can say so. */
+  const stashHealth = () => ({ durable: !lastWriteError, error: lastWriteError ? lastWriteError.message : null, since: lastWriteError ? lastWriteError.at : null });
   // SIGTERM/SIGINT belt (review-caught): a debounced-only write loses a
   // just-stashed "queued" promise on the ROUTINE restart path — same law as
   // every other data/*.json store.
-  const flush = () => { if (stashTimer) { clearTimeout(stashTimer); stashTimer = null; } writeStashNow(); };
+  const flush = () => { if (stashTimer) { clearTimeout(stashTimer); stashTimer = null; } return writeStashNow(); };
 
+  // THE STASH'S OWN EVENTS (2026-09-27, the owner: "我在界面里完全看不到有消息
+  // 在 queue"): a producer that stashed an entry with a `ref` (the channels
+  // engine: a receipt's proposal id) is told when that entry is DRAINED into
+  // the conversation's next message and when it is stashed (again — the
+  // drain's budget handed it back), so its surface can say whether the agent
+  // knows yet. Listeners are synchronous and never break the stash.
+  const stashListeners = new Set();
+  function onStash(fn) { if (typeof fn !== 'function') return () => {}; stashListeners.add(fn); return () => stashListeners.delete(fn); }
+  // `('evicted', cid, entries, {held})` (verify r2, 2026-09-27): the cap
+  // dropped an entry with a ref — it was NEVER read; without this the producer
+  // would say "waiting" for good, and a boot reconcile that finds it gone would
+  // read it as drained. `held` = the queue's length after the drop.
+  function emitStash(ev, cid, entries, extra = {}) {
+    // `unwritten` (verify r5) is for EVERY entry — a listener that names the disk failure to the user hears it once per stash
+    const withRef = ev === 'unwritten' ? (entries || []).filter(Boolean) : (entries || []).filter((e) => e && e.ref);
+    if (!withRef.length) return;
+    for (const fn of stashListeners) { try { fn(ev, cid, withRef, extra); } catch (e) { log('[deliver] a stash listener threw:', e && e.message); } }
+  }
+  // THE CAP EVICTS THE OLDEST UNCLAIMED ENTRY, NEVER A CLAIMED ONE (channel-jump verify r4, 2026-09-27 — reproduced:
+  // 30 arrivals while a hand-over of 7 was on its way evicted all 7 CLAIMED entries; the press then answered
+  // "delivered: 0" for the 7 the agent received, the delivered record kept no originals, and the wrapper's later
+  // echo of that frame restored nothing — 7 entries became one 400-char stub). A claimed entry is being delivered:
+  // it leaves by the hand-over's own drain (or is released, unclaimed, and falls off with the next arrivals like
+  // any other). The store may exceed the cap by the claimed count while a hand-over is in flight (≤ the hand-over's
+  // own HANDOVER_MAX_ENTRIES). ONE helper — its RETURN (the entries it dropped, unclaimed by construction) is what
+  // stashFor's `evicted` event carries (the .195 merge, lane channel-withdraw verify r2 + channel-jump r4): the cap is
+  // the ONE place an entry leaves the queue undelivered, so it is the one place `evicted` is said — a fate never reads
+  // "evicted" for a receipt a hand-over delivered, and a restore never trims.
+  function capUnclaimed(q) {
+    // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
+    // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off
+    let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;
+    const dropped = [];
+    if (over <= 0) return dropped;
+    for (let i = 0; i < q.length && over > 0;) {
+      if (q[i] && q[i].ho) { i++; continue; }
+      dropped.push(...q.splice(i, 1)); over--;
+    }
+    return dropped;
+  }
   function stashFor(cid, envelope) {
     const q = stash[cid] || (stash[cid] = []);
     // a RE-STASHED entry (the drain's budget handed it back) keeps its own ts so the next drain shows it in order
     // `kind` = the PATH (S3 verify F3): the drain heads a notification and draws its card by it — never by the sender's NAME, which a peer chooses
     const kind = envelope.kind === 'notification' || envelope.kind === 'peer' ? envelope.kind : null;
-    q.push({ source: envelope.source || 'agent', ...(kind ? { kind } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() });
-    if (q.length > STASH_CAP) q.splice(0, q.length - STASH_CAP);
-    persistStash();
+    const entry = { source: envelope.source || 'agent', ...(kind ? { kind } : {}), ...(envelope.ref ? { ref: String(envelope.ref).slice(0, 200) } : {}), fromName: envelope.fromName || null, text: String(envelope.text || ''), ts: Number(envelope.ts) > 0 ? Number(envelope.ts) : Date.now() };
+    const before = q.slice();   // the take-back below restores the queue EXACTLY (the cap may drop from anywhere between claimed entries)
+    q.push(entry);
+    // THE CAP (channel-jump verify r4): the oldest UNCLAIMED entries fall off, a claimed (`ho`) one never does.
+    // an eviction is SAID (channel-jump verify r6): the injection walks newest-first, so under sustained arrivals the
+    // OLDEST entries are the ones held turn after turn — and the cap then drops exactly those, while the strip's count
+    // stays at the cap. A loss the log can trace, never a silence — and (withdraw verify r2) an `evicted` event below.
+    const evicted = capUnclaimed(q);
+    // AN ENTRY WHOSE PRODUCER TRACKS ITS FATE IS DURABLE BEFORE THE PRODUCER IS TOLD (verify r3, 2026-09-27):
+    // a `ref` means somebody records "stored for the next message" off the `stashed` event below — under the
+    // 500 ms debounce a SIGKILL / OOM inside that window left the outbox saying `stashed` over a file without
+    // the entry, and the next boot's reconcile read the missing entry as "handed with an earlier message"
+    // (constructed: the receipt gone, the card said Handed). One synchronous write per owner decision.
+    // verify r4: …and when that write FAILS the producer is told so (a throw), never "stashed" — the entry is taken
+    // back out (a stashed-in-memory-only receipt the outbox called stored was read as "handed with an earlier
+    // message" by the next boot's reconcile, exactly the r3 shape through a full disk instead of the debounce)
+    // verify r5: EVERY entry is written the moment it is stashed and its producer hears the verdict — a peer message
+    // (`msg send`, a window-share request, a handback) rode the debounce: under the same failed write its sender
+    // was told "queued", the entry lived in memory only and vanished at the next restart with one log line. ONE
+    // outcome for every producer: on disk, or `{stored:false, why}`. An entry WITHOUT a ref has no other home, so it
+    // STAYS in memory (delivered at the next turn while this process lives; the file is retried on its own clock)
+    // and the caller relays the truth; an entry WITH a ref has one (the card) and is taken back (r4).
+    const stored = flush();
+    if (!stored && entry.ref) {
+      q.splice(0, q.length, ...before);   // the take-back: the entry out, whatever the cap dropped back in its place
+      if (!q.length) delete stash[cid];
+      stashChanged(cid);
+      throw new Error(`the stash could not be written to disk (${path.basename(stashFile)}) — the entry was not stored`);
+    }
+    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}${e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}`).join('; ')}) — never delivered`);
+    emitStash('stashed', cid, [entry]);
+    if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
+    stashChanged(cid);
+    if (!stored) { const why = `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; emitStash('unwritten', cid, [entry], { why }); return { stored: false, why }; }
+    return { stored: true, why: null };
   }
-  function drainStash(cid) {
+  // THE STASH IS VISIBLE (2026-09-27, the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): every write and
+  // every drain says so — the hub re-publishes the conversation's `stash` session fact (src/stash-summary.js) and the
+  // chat's strip above the composer follows it. Never throws into the ladder.
+  const stashChanged = (cid) => { try { onStashChange(cid); } catch (e) { log('[deliver] stash change hook failed:', e.message); } };
+  // A CLAIM (channel-jump verify, 2026-09-27 — reproduced: the user's own message landed while a hand-over was
+  // awaiting the ladder's post; the injection's full drain took the same entries and the receipt reached the agent
+  // TWICE). The hand-over CLAIMS the entries it is about to deliver: a full drain (the injection routes) leaves a
+  // claimed entry in place — it is spoken for, not waiting for a turn — and the claim is released when the hand-over
+  // settles (delivered ⇒ taken by identity; refused ⇒ released, exactly as it was).
+  // verify r2: THE CLAIM IS THE ENTRY'S OWN `ho` STAMP, WRITTEN THROUGH TO DISK SYNCHRONOUSLY (was: an in-memory Set a
+  // restart forgot while the entries stayed on disk ⇒ the next boot's injection re-delivered what the post had
+  // carried). The stamp is the hand-over's id; the loader above releases what a dead process left stamped.
+  function claimStash(cid, entries, id = null) {
+    const mine = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object');
+    const tag = id ? String(id) : 'ho';
+    for (const e of mine) e.ho = tag;
+    // a claim write that FAILS (the .195 merge, withdraw's checklist ⑧) leaves the `ho` stamp in memory only: a crash
+    // before the retry re-delivers at the next boot — a duplicate, never a loss — and is named here, never silent
+    if (mine.length && !writeStashNow()) log(`[deliver] ${cid}: the claim of hand-over ${tag} (${mine.length} entr${mine.length === 1 ? 'y' : 'ies'}) could not be written — held in memory; a crash before the retry re-delivers them`);
+    let released = false;
+    return () => { if (released) return; released = true; let n = 0; for (const e of mine) if (e.ho === tag) { delete e.ho; n++; } if (n && !writeStashNow()) log(`[deliver] ${cid}: the release of hand-over ${tag} could not be written — held in memory`); };
+  }
+  function claimedCount(cid) { return (stash[cid] || []).filter((e) => e && e.ho).length; }
+  /** Drain a conversation's stash; `only` (a Set of entries read by `stashEntries`) takes exactly those — the
+   *  hand-over's "what I delivered" — and keeps whatever arrived meanwhile. A full drain keeps every CLAIMED entry
+   *  (a hand-over in flight owns it — see `claimStash`). EVERY drain persists SYNCHRONOUSLY (verify r2): a drain is
+   *  a delivery, and a debounced write after it left a 500 ms window in which a killed process re-delivered at its
+   *  next boot; a drain happens once per turn, the write is small. */
+  function drainStash(cid, only = null) {
     const q = stash[cid] || [];
-    if (q.length) { delete stash[cid]; persistStash(); }
+    if (!q.length) return q;
+    const byId = only instanceof Set;
+    if (byId || q.some((e) => e && e.ho)) {
+      const mine = byId ? (e) => only.has(e) : (e) => !(e && e.ho);
+      const took = q.filter(mine);
+      const keep = q.filter((e) => !mine(e));
+      if (keep.length) stash[cid] = keep; else delete stash[cid];
+      for (const e of took) if (e && e.ho) delete e.ho;   // what went out carries no claim into a restore
+      if (took.length) { writeStashNow(); stashChanged(cid); emitStash('drained', cid, took); }   // `drained` names what was TAKEN, never the whole queue (withdraw r4 + the .195 merge)
+      return took;
+    }
+    delete stash[cid]; writeStashNow(); stashChanged(cid);
+    emitStash('drained', cid, q);
     return q;
   }
+  /** Put drained entries BACK, each as itself (the hand-over's frame came back undelivered — verify r2: the codex
+   *  wrapper's `peer_message_result ok:false` used to re-stash the ONE combined text as ONE notice; 5 became 1 and the
+   *  job results left their own store for good). Order by ts, NO cap (verify r4, below), one change signal. */
+  function restoreStash(cid, entries) {
+    const mine = (Array.isArray(entries) ? entries : []).filter((e) => e && typeof e === 'object');
+    if (!cid || !mine.length) return 0;
+    const q = stash[cid] || (stash[cid] = []);
+    for (const e of mine) { delete e.ho; if (!q.includes(e)) q.push(e); }
+    q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
+    // NO cap here (verify r4): the restored entries are the OLDEST, so trimming would evict exactly what came back
+    // while answering "restored". They wait as if the hand-over had never happened; the next arrival's cap applies.
+    if (q.length > STASH_CAP) log(`[deliver] ${cid}: ${q.length} entries wait after a restore (cap ${STASH_CAP}) — the oldest fall off with the next arrivals`);
+    const stored = writeStashNow();   // a restore is a delivery's bookkeeping: on disk at once, like a drain
+    stashChanged(cid);
+    // a ref'd entry back in the queue is WAITING again (the .195 merge, withdraw's checklist ⑤): without `stashed` its
+    // producer's card kept "handed" over a receipt the agent never got; no `evicted` — a restore never trims (jump r4)
+    emitStash('stashed', cid, mine);
+    if (!stored) emitStash('unwritten', cid, mine, { why: `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn` });
+    return mine.length;
+  }
+  // A FRAME THAT CAME BACK (verify r2): the two stdout consumers re-stash a delivered frame the wrapper could not run.
+  // A frame that names a hand-over the hub still remembers is restored as its ORIGINAL entries (the restorer is the
+  // hand-over module's — it holds both stores' delivered sets); any other frame is stashed as itself by the caller.
+  const restorers = [];
+  function registerFrameRestorer(fn) { if (typeof fn === 'function') restorers.push(fn); }
+  function restoreFrame(cid, text, meta = {}) {
+    for (const fn of restorers) { try { const n = fn(cid, text, meta); if (n) return n; } catch (e) { log('[deliver] frame restore failed:', e.message); } }
+    return 0;
+  }
   function stashCount(cid) { return (stash[cid] || []).length; }
+  /** A READ of one conversation's held entries (2026-09-27 verify: the
+   *  channels engine's boot reconcile asks whether a receipt is still
+   *  waiting). Copies; never drains, never re-orders. */
+  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }
+  /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). */
+  function stashEntries(cid) { return (stash[cid] || []).slice(); }
 
   // rung 1.5 helper: a LIVE local chat session whose backend declares the
   // 'rpc-queue' peer-delivery lane AND whose wrapper adverts caps.peerMessage
@@ -88,7 +267,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!activeSessions) return null;
     try {
       for (const [wid, s] of activeSessions) {
-        if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
+        if (addressableId(s) !== cid) continue;   // verify r6: a pending fork (its parent's id) is never the wrapper this frame is written into
         if (s.mode !== 'chat' || !s.pty || s.host) continue;
         if (capsOf(s.backend).peerDelivery !== 'rpc-queue') continue;
         const wc = wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath);
@@ -195,7 +374,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function localSessionFor(cid) {
     if (!activeSessions) return null;
     try {
-      for (const [, s] of activeSessions) if ((s.backendSessionId || s.claudeSessionId) === cid) return s;
+      for (const [, s] of activeSessions) if (addressableId(s) === cid) return s;   // verify r6: never a pending fork — the parent's turn was charged to the fork's slot when the fork came first
     } catch { }
     return null;
   }
@@ -320,7 +499,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       try {
         if (!noWake && serverSetting?.('agents.vibespaceChannel') === true && activeSessions) {
           for (const [wid, s] of activeSessions) {
-            if ((s.backendSessionId || s.claudeSessionId) !== cid) continue;
+            if (addressableId(s) !== cid) continue;   // verify r6: the same rule as every rung
             const sock = path.join(dataDir, 'channel-socks', wid + '.sock');
             if (!fs.existsSync(sock)) continue;
             const rc = await peerMsg.postChannelEvent(sock, text, { kind: 'peer_message' });
@@ -437,7 +616,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
-    deliverToConversation, peerReachable, stashFor, drainStash, stashCount, flush,
+    deliverToConversation, peerReachable, stashFor, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
+    stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,
     // exposed for the stash-drain sites: a drained message enters the agent's

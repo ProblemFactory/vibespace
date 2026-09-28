@@ -44,6 +44,13 @@
 .chat-status-browser svg { width: 10px; height: 10px; flex-shrink: 0; }
 /* lane S2: the fact's line can name both the pin and the browser in use — one line, ellipsis, the whole sentence in the tooltip */
 .chat-status-browser-text { max-width: 52ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* §26 (B-099e): the channels chip — the conversation this turn read or drafted last */
+.chat-status-channels { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 3px; }
+.chat-status-channels svg { width: 10px; height: 10px; flex-shrink: 0; }
+.chat-status-channels-text { max-width: 40ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; unicode-bidi: isolate; } /* isolate: a vendor title's unpaired RTL override never re-orders the chip's neighbours */
+.chat-status-channel-row { display: flex; flex-direction: column; gap: 1px; }
+.chat-status-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-status-channel-words { font-size: 11px; }
 .chat-status-dropdown-item.chat-status-browser-nudge { color: var(--yellow, #e5c07b); }
 /* The row carries BOTH classes, and `.chat-status-dropdown-item` (declared
    further down this file, same 0,1,0 specificity) sets `white-space: nowrap`
@@ -575,6 +582,31 @@
   display: flex; align-items: center; gap: 6px;
 }
 .chat-stream-status.hidden { display: none; }
+
+/* ── THE STASH STRIP (2026-09-27): notices held for the agent's NEXT turn + "Hand over now" ──────────
+   One line on a desktop (the parts ellipsize; the whole sentence is the title); on the phone it folds to
+   the head + the button. Keyed and patched in place (src/lib/stash-strip.js). */
+.chat-stash-strip {
+  width: 100%; display: flex; align-items: center; gap: 6px; box-sizing: border-box;
+  padding: 4px 8px; margin-bottom: 6px; font-size: 11px; color: var(--text-secondary);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-input));
+}
+.chat-stash-strip[hidden] { display: none; }
+.chat-stash-icon { display: inline-flex; flex-shrink: 0; color: var(--accent); }
+.chat-stash-icon svg { width: 12px; height: 12px; }
+.chat-stash-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-stash-head { color: var(--text); }
+.chat-stash-go { flex-shrink: 0; display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px; font: inherit; font-size: 11px; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.chat-stash-go:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chat-stash-go:disabled { opacity: .55; cursor: default; }
+.chat-stash-cost { color: var(--text-dim); }
+.chat-stash-nobutton { flex-shrink: 0; color: var(--text-dim); white-space: nowrap; } /* verify r2: a harness with no live inbox — the sentence stands where the button would */
+.chat-stash-go[hidden], .chat-stash-nobutton[hidden], .chat-stash-held[hidden] { display: none; }
+.chat-stash-held { flex-shrink: 0; color: var(--text-dim); white-space: nowrap; } /* what one hand-over would leave — beside the button, never inside it */
+.chat-stash-parts { unicode-bidi: isolate; } /* a peer's name is its own — isolated so an RTL override in it never re-orders the head or the button */
+/* the phone folds the parts and the held count — NEVER the money word on the button (verify r4: a press that bills says so where it is pressed) */
+@media (max-width: 768px) { .chat-stash-parts, .chat-stash-held { display: none; } .chat-stash-go { min-height: 32px; } }
 
 /* ── INPUT QUEUE STRIP (messages sent during the running turn) ────────────
    Sits ABOVE everything in the input area: it is about what was already sent,

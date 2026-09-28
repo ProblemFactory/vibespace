@@ -245,7 +245,7 @@ console.log('§3 the daemon wiring (three-touch rule) and the SHARED tier');
   const meth = cl.slice(cl.indexOf('async desktopServe('), cl.indexOf('async desktopServe(') + 600);
   ok(/capabilities\?\.includes\?\.\('desktop-serve'\)/.test(meth) && /e\.code = 'host_needs_daemon'; throw e;/.test(meth) && meth.indexOf("includes?.('desktop-serve')") < meth.indexOf('_request('), 'client.desktopServe asks ONLY a daemon that advertises it — otherwise host_needs_daemon, before any request (an unknown op HANGS)');
   const reqs = [...serveSrc.matchAll(/require\('([^']+)'\)/g)].map((m) => m[1]);
-  ok(reqs.every((r) => ['fs', 'os', 'path', './desktop-apps', './keeper-limits', './desktop-display'].includes(r)), `the SHARED module requires only builtins + the PURE model + the machine facts (${reqs.join(' ')}) — never src/server`);
+  ok(reqs.every((r) => ['fs', 'os', 'path', './desktop-apps', './office-open' /* §7.9: PURE — the LibreOffice rows + the open-with verdict */, './keeper-limits', './desktop-display'].includes(r)), `the SHARED module requires only builtins + the PURE models + the machine facts (${reqs.join(' ')}) — never src/server`);
   const bundle = path.join(REPO, 'data/bin/vibespace-agentd.js');
   if (fs.existsSync(bundle)) { const b = read('data/bin/vibespace-agentd.js'); ok(/capabilities: \[[^\]]*["']desktop-serve["'][^\]]*\]/.test(b) && /function runDesktopServeOp/.test(b), 'the BUILT daemon bundle carries the capability and the runner (npm run build:agentd)'); }
 }

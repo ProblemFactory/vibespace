@@ -13,14 +13,18 @@
 // draft or send) and, separately, may NOTIFY you (wake / digest) — `status`
 // prints both; `compose` starts a NEW message on an account you have access
 // to (a proposal, like `reply`); `search` looks through what you can see.
+// 2026-09-27: `withdraw <proposalId>` takes back a proposal of YOURS the user
+// has not decided yet; `reply … --replaces <id>` / `compose … --replaces <id>`
+// withdraw it and propose the new one in one step (the old one goes only if
+// the new one is accepted). Inside a Background Work job (VIBESPACE_JOB_TOKEN)
+// only `withdraw` is offered — as the conversation that owns the job.
 // Full manual: vibespace-docs channels.
 'use strict';
 const API = process.env.VIBESPACE_API;
-const SESS = process.env.VIBESPACE_SESSION_TOKEN;
-if (!API || !SESS) { console.error('vibespace-channels: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
-
 const args = process.argv.slice(2);
 const verb = args[0];
+const SESS = process.env.VIBESPACE_SESSION_TOKEN || (verb === 'withdraw' ? process.env.VIBESPACE_JOB_TOKEN : null);
+if (!API || !SESS) { console.error('vibespace-channels: not inside a VibeSpace session (VIBESPACE_API / token missing)'); process.exit(2); }
 
 async function call(method, p, body) {
   const res = await fetch(API + p, {
@@ -41,16 +45,20 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels read <conv> [--limit N] [--since <ms>] [--fresh]
                                                    ← --fresh = refresh first (floor + budget apply)
   vibespace-channels refresh <conv>                ← fetch the newest messages NOW (not a loop: a floor, the budget, a vendor back-off and a per-account queue cap apply)
-  vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>]
+  vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <vendor msg id>] [--replaces <proposalId>]
                                                    ← PROPOSES; prints the policy verdict + proposal id
-  vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]
+  vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--replaces <proposalId>]
                                                    ← PROPOSES a NEW message (needs access to the whole account)
+  vibespace-channels withdraw <proposalId> [--why "…"]
+                                                   ← takes back YOUR proposal while the user has not decided it
+                                                     (--replaces on reply/compose = withdraw it + propose the new one, in one step)
   vibespace-channels search "words" [--account <id>] [--limit N]
                                                    ← messages you can see (the stored logs; no vendor call)
   vibespace-channels status [<proposalId>]         ← what you were given (access / notification) + your proposals
   vibespace-channels request <conv> "why"          ← ask the user for access (only on a 'requestable' row)
 <conv> is the key list prints: <adapter>/<conversation id>.
 A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
+Changed your mind? withdraw it (or --replaces it) — never leave the user a stale draft to reject.
 A conversation you cannot see and one that does not exist give the same answer.`;
 
 function printProposal(p, { full = false } = {}) {
@@ -64,7 +72,15 @@ function printProposal(p, { full = false } = {}) {
     if (rc.status === 'sent' || rc.status === 'edited') console.log(`    the recipient sees: ${rc.identityMarking === 'none' ? 'you, with no application marker' : (rc.identityMarkingText || (rc.identityMarking === 'unknown' ? 'NOT VERIFIED for this channel' : 'marked as sent by an application'))}`);
   }
   if (p.compose) console.log(`    a NEW message to ${(p.compose.to || []).join(', ')}${(p.compose.cc || []).length ? ` (cc ${p.compose.cc.join(', ')})` : ''} — subject: ${p.compose.subject}`);
+  if (p.replaces) console.log(`    it replaces ${p.replaces}`);
+  if (p.replacedBy) console.log(`    replaced by ${p.replacedBy}`);
   if (full) console.log(`    text: ${p.text}`);
+}
+/** The replace half of a reply / compose answer, said by name. */
+function printReplaced(r) {
+  if (!r || !r.replaces) return;
+  if (r.replaced) console.log(`replaced — your earlier proposal ${r.replaces} is WITHDRAWN (the user's approval card for it is gone)`);
+  else console.log(`note: your earlier proposal ${r.replaces} was NOT withdrawn: ${r.replaceError || 'it was decided first'}${r.replaceCode ? ' [' + r.replaceCode + ']' : ''}`);
 }
 
 (async () => {
@@ -140,16 +156,30 @@ function printProposal(p, { full = false } = {}) {
   if (verb === 'reply') {
     const conv = args[1];
     const text = args[2];
-    if (!conv || !text) { console.error('usage: vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <id>]'); process.exit(1); }
+    if (!conv || !text || ['--why', '--reply-to', '--replaces'].includes(text)) { console.error('usage: vibespace-channels reply <conv> "text" [--why "…"] [--reply-to <id>] [--replaces <proposalId>]'); process.exit(1); }
     const body = { conv, text };
     if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
     if (flag('--reply-to')) body.replyTo = flag('--reply-to');
+    if (flag('--replaces')) body.replaces = flag('--replaces');
     const r = await call('POST', '/api/agent/channels/reply', body);
     const p = r.proposal;
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    printReplaced(r);
     if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
+    return;
+  }
+  // 2026-09-27: the agent takes back its OWN proposal (never somebody else's,
+  // never one the user already decided, is sending, or whose outcome is lost)
+  if (verb === 'withdraw') {
+    const id = args[1];
+    if (!id || id.startsWith('--')) { console.error('usage: vibespace-channels withdraw <proposalId> [--why "…"]'); process.exit(1); }
+    const body = {};
+    if (flag('--why')) body.why = flag('--why');
+    const r = await call('POST', `/api/agent/channels/proposals/${encodeURIComponent(id)}/withdraw`, body);
+    const p = r.proposal || {};
+    console.log(`withdrawn — proposal ${p.id || id} is taken back; the user's approval card for it is gone${p.withdrawal && p.withdrawal.why ? ` (why: ${p.withdrawal.why})` : ''}`);
     return;
   }
   if (verb === 'status') {
@@ -166,7 +196,7 @@ function printProposal(p, { full = false } = {}) {
         const where = a.grain === 'account' ? `${a.adapterId} — the whole account (${a.adapter})` : a.grain === 'pattern' ? `${a.adapterId} — conversations matching: ${a.rule}` : `${a.key} — ${a.title}`;
         const as = a.via === 'group' ? ` (as a member of group ${a.as.name || a.as.id})` : '';
         const w = a.watched;
-        const note = w ? `notified: ${w.notify === 'digest' ? `a digest every ${w.digestMinutes} min` : 'woken per batch'}${w.mode === 'filtered' ? ' on a filter' : ''}, at most ${w.dailyWakeCap}/day (${w.wakes24h} in 24 h)${w.receiptWake ? ', receipts wake you' : ''}` : 'not notified — nothing wakes you; read when you choose';
+        const note = w ? `notified: ${w.notify === 'digest' ? `a digest every ${w.digestMinutes} min` : 'woken per batch'}${w.mode === 'filtered' ? ' on a filter' : ''}, at most ${w.dailyWakeCap}/day (${w.wakes24h} in 24 h)` : 'not notified — nothing wakes you; read when you choose';
         console.log(`  ${where}${as}\n      authority: ${a.authority === 'send' ? 'may send directly where the policy allows' : 'drafts (the user approves)'} · ${note}`);
       }
       if (acc.some((a) => a.grain === 'account')) console.log('  (an account you have whole: `compose <account> --to … --subject … "text"` proposes a NEW message)');
@@ -182,15 +212,17 @@ function printProposal(p, { full = false } = {}) {
     const text = args.slice(2).filter((x, i, all) => !x.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--'))).pop();
     const to = flag('--to');
     const subject = flag('--subject');
-    if (!account || account.startsWith('--') || !to || !subject || !text) { console.error('usage: vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"]'); process.exit(1); }
+    if (!account || account.startsWith('--') || !to || !subject || !text) { console.error('usage: vibespace-channels compose <account> --to <addr>[,<addr>] [--cc <addr>] --subject "…" "text" [--why "…"] [--replaces <proposalId>]'); process.exit(1); }
     const body = { account, to, subject, text };
     if (flag('--cc')) body.cc = flag('--cc');
     if (flag('--why')) body.why = { kind: 'text', label: flag('--why') };
+    if (flag('--replaces')) body.replaces = flag('--replaces');
     const r = await call('POST', '/api/agent/channels/compose', body);
     const p = r.proposal;
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, a NEW message to ${(p.compose && p.compose.to || []).join(', ')}`);
     else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} (a NEW message to ${(p.compose && p.compose.to || []).join(', ')}) is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
+    printReplaced(r);
     if (p.identity && p.identity.marking !== 'none') console.log(`note: on this channel the recipient sees ${p.identity.marking === 'unknown' ? 'an UNVERIFIED sender identity' : 'an application marker'}${p.identity.text ? ' — ' + p.identity.text : ''}`);
     return;
   }

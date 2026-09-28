@@ -66,7 +66,7 @@ const STATUS = {
   // a browser the USER shares is a target like any app
   browser_is_human: 403,
   // lane E (src/window-reach.js REFUSALS): reach, the share mode, the pixel road, the user's share routes
-  not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, not_live: 404,
+  not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
   reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
   outside_window: 400, bad_principal: 400, bad_mode: 400, share_local_only: 400,
   desktop_injection_refused: 409, no_live_view: 409, tier3_is_a_window_target: 409, no_lease: 409, held: 409, not_taken: 409,

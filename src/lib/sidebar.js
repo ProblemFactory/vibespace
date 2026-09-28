@@ -9,6 +9,7 @@ import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarRail, PANEL_TABS } from './sidebar-rail.js';
 import { installSidebarWorkbench } from './sidebar-workbench.js';
 import { installSidebarTasks } from './sidebar-tasks.js';
+import { patchStashHints } from './stash-strip.js'; // 2026-09-27: the card's "N waiting" hint (the stash fact), patched in place
 
 // Consecutive failed /api/sessions polls before the sidebar admits the list is
 // frozen. 3 × 5s ≈ 15s — long enough that one blip stays invisible, short
@@ -122,6 +123,11 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // published changes (PR chips) — both drawn on the card, so both GATE.
   vcs: { digest: (v) => (v ? `${v.kind}:${v.branch || ''}:${v.at || ''}` : '') },
   prLinks: { digest: (v) => (Array.isArray(v) ? v.map((r) => r.url + '@' + (r.action || '')).join('|') : '') },
+  // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): what waits for this agent's next turn
+  // ({count, oldestAt, items} — src/stash-summary.js). CARRIED-ONLY: it changes with every stash write and drain,
+  // so the card's "N waiting" hint and the chat's strip are PATCHED in place from the payload (patchStashHints
+  // below, ChatInput's strip) — a stash change never re-renders the list
+  stash: { digest: null },
 });
 const LIVE_SESSION_FACT_KEYS = Object.freeze(Object.keys(LIVE_SESSION_FACTS));
 /** Carry the live facts verbatim; an absent live row states nothing (null). */
@@ -338,7 +344,7 @@ class Sidebar {
 
     this._sessionDigest = '';
     app.ws.onGlobal((msg) => {
-      if (msg.type === 'active-sessions') { this._webuiSessions = msg.sessions; this._mergeAndRender(); }
+      if (msg.type === 'active-sessions') { this._webuiSessions = msg.sessions; this._mergeAndRender(); patchStashHints(this.listEl, msg.sessions); }   // the "N waiting" hint: patched in place, never a re-render
     });
     this._poll();
   }

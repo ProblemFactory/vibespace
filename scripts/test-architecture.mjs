@@ -148,6 +148,13 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   //     async-interleaved imperative scheduler each grew an ordering bug; a pure
   //     step function is pinned by a seeded invariant walk (test-channel-drain).
   'src/channel-drain.js',
+  //   channel-blocks — THE RENDER LAYER'S RUNGS (design §25, 2026-09-27): raw →
+  //     the typed block tree (the generic rung, the mail rung, the Lark rung,
+  //     the stored-record rung, cleanSubject, the preview). The adapters run it
+  //     at ingest, the engine at read time for a stored record, the browser
+  //     bundle for the fallback — one definition. Imports only channel-record
+  //     (PURE → PURE), where the block SCHEMA lives beside the record.
+  'src/channel-blocks.js',
   // INTEGRATIONS & KEYS (docs/design-communication-panel.zh.md §14.2, P0b): the
   // ONE table of integration rows — fields, cluster env names, setup blocks
   // (Lark's callback URL is defined HERE and only here), test declarations,
@@ -163,6 +170,10 @@ const PURE = new Set(['src/window-desktop.js', 'src/plugin-manifest.js', 'src/ac
   // process keeper bounds by (opencode-serve reads it too) + the registry/ladder/state-machine
   // model — decisions only, the machine facts are src/desktop-display.js (SHARED)
   'src/keeper-limits.js', 'src/desktop-apps.js',
+  // OPEN WITH LIBREOFFICE (docs/design-desktop-apps §7.9, the owner's ruling 2026-09-27 ②): the office table, the
+  // open-with verdict (the file rule, THE MACHINE RULE, the app), the argv and the closed install set — imports
+  // nothing; the machine keeper, the routes, the machine facts, the daemon bundle and the browser bundle share it
+  'src/office-open.js',
   // P8-2 x5 (docs/design-desktop-apps §7 P8-2): ONE active viewer per app window — the election, the
   // active/blocked/watch rule with the agent lease, the broadcast shape; bundled into the window too
   'src/desktop-viewers.js',
@@ -2395,6 +2406,52 @@ console.log('§62 every path where the user names a window goes through wm.revea
     `§62 NEGATIVE CONTROL: the pre-fix switcher row (${judge(preFix).length} findings), a bare focus planted in an unlisted file (${judge(planted).length}), a singleton door turned back into a raise (${judge(raised).length}) are caught; a commented-out call is not counted (${judge(commented).length})`);
   const fpBad = body(wj.replace('const target = pressTab(ch, paneWin ? paneWin.id : null);', 'const target = pressTab(ch, paneWin ? paneWin.id : null); this.revealWindow(win.id);'), '_focusFromPointer');
   ok(fpBad !== fp && !pointerPin(fpBad), '§62 NEGATIVE CONTROL: the pointer path patched to reveal (a press that would switch tabs) fails the pointer pin');
+}
+
+// §63 THE CHANNEL WITNESS CENSUS (docs/design-communication-panel.zh.md §26, backlog B-099e — the owner: "那就按照这个
+// 做吧", plan A, passive). The chat's "which conversation is the agent working on" rows exist ONLY because every agent
+// route that touches a channel conversation records it on the calling session (src/server/channel-touches.js through
+// agent-routes' `touchChannel`). A new verb added without the call would be a hole nobody sees: the agent reads, the
+// user's card stays empty. GREP-DERIVED over src/agent-routes.js (comments stripped): every
+// `app.<verb>('/api/agent/channels/…'` handler body (up to its closing `});` at column 0) calls `touchChannel(`, or
+// is on the CLOSED exemption list WITH its reason (an exemption nothing matches is red too). And the owner's two reads
+// (src/routes/channels.js) refuse an agent's bearer. Controls are string copies (nothing written).
+console.log('§63 every agent channel route that touches a conversation records it (the channel witness)');
+{
+  const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const EXEMPT = {
+    'GET /api/agent/channels/list': 'enumerates the conversations the agent may see — it reads none of them',
+    // the .195 merge (lane channel-withdraw beside this census): the drafter takes back its OWN undecided draft by proposal
+    // id — it reads no conversation and drafts nothing; the draft's card says it was withdrawn and by whom, and the draft
+    // itself was recorded as a `reply` / `compose` touch when it was made
+    'POST /api/agent/channels/proposals/:id/withdraw': 'takes back the caller\'s own undecided draft by id — no conversation is read or drafted (the draft was recorded when it was made)',
+  };
+  const handlers = (src) => [...src.matchAll(/^app\.(get|post|put|patch|delete)\('(\/api\/agent\/channels\/[^']*)'/gm)].map((m) => {
+    const end = src.indexOf('\n});', m.index);
+    return { route: `${m[1].toUpperCase()} ${m[2]}`, body: strip(src.slice(m.index, end < 0 ? src.length : end)) };
+  });
+  const judge = (src) => {
+    const hs = handlers(src);
+    const bad = hs.filter((h) => !EXEMPT[h.route] && !/\btouchChannel\(/.test(h.body)).map((h) => `${h.route} never calls touchChannel`);
+    for (const r of Object.keys(EXEMPT)) if (!hs.some((h) => h.route === r)) bad.push(`exemption '${r}' matches no handler (a dead exemption)`);
+    if (!/const touchChannel = \(id, touches\) => \{[^\n]*\.recordMany\(id, touches\)/.test(src)) bad.push('touchChannel is not the witness\'s recordMany');
+    return { n: hs.length, bad };
+  };
+  const ar = read('src/agent-routes.js');
+  const j = judge(ar);
+  ok(j.n >= 8, `§63 census scope is non-vacuous (${j.n} /api/agent/channels/ handlers)`);
+  ok(j.bad.length === 0, `§63 every /api/agent/channels/ handler records its touch or is exempt with a reason (${Object.keys(EXEMPT).length} exempt)${j.bad.length ? ' — ' + j.bad.join('; ') : ''}`);
+  const rc = read('src/routes/channels.js');
+  const route = (p) => { const i = rc.indexOf(`router.get('${p}'`); return i < 0 ? '' : rc.slice(i, rc.indexOf('\n});', i)); };
+  ok(['/api/channel-touches', '/api/channels/:adapterId/:convId/touches'].every((p) => /if \(isAgentBearer\(req\)\) return res\.status\(403\)/.test(route(p))),
+    '§63 the owner\'s two witness reads (the session ring, the conversation\'s touchers) refuse an agent\'s bearer 403 first');
+  // NEGATIVE CONTROLS: the read handler without its record, a new verb planted without one, a call that is only a comment
+  const noRead = ar.replace("  if (r && r.ok) touchChannel(id, [{ op: 'read',", "  if (r && r.ok) void (id, [{ op: 'read',");
+  const planted = ar + "\napp.get('/api/agent/channels/peek', (req, res) => {\n  res.json({ ok: true });\n});\n";
+  const commented = ar + "\napp.get('/api/agent/channels/peek', (req, res) => {\n  // touchChannel(id, [])\n  res.json({ ok: true });\n});\n";
+  const jr = judge(noRead), jp = judge(planted), jc = judge(commented);
+  ok(noRead !== ar && jr.bad.length === 1 && /GET \/api\/agent\/channels\/read/.test(jr.bad[0]) && jp.bad.length === 1 && /peek/.test(jp.bad[0]) && jc.bad.length === 1,
+    `§63 NEGATIVE CONTROL: the read handler without its record (${jr.bad.length}), a planted verb (${jp.bad.length}) and a verb whose only call is a comment (${jc.bad.length}) are each caught`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -209,9 +209,16 @@ export function serializeZoomPref(mode, scale) {
 }
 
 /** The toolbar as STRUCTURE (the DOM half only draws it). `t` injected.
- *  `icon` names a UI_ICONS entry; an icon-only item carries `title` (its name). */
-export function toolbarModel({ mode = 'fit', scale = 1, page = 0, pages = 0, rendering = false } = {}, t = (s) => s) {
+ *  `icon` names a UI_ICONS entry; an icon-only item carries `title` (its name).
+ *  `office` (§7.9 of docs/design-desktop-apps.zh.md — the file's basename, or null):
+ *  "Open in LibreOffice" at the bar's right end — icon + words (`withLabel`), named by
+ *  `aria`, its `title` the sentence of what happens; `live` = usable while the page
+ *  still renders (it never depends on the render). Never disabled: a machine without
+ *  LibreOffice is answered by the click, never by a greyed button. */
+export function toolbarModel({ mode = 'fit', scale = 1, page = 0, pages = 0, rendering = false } = {}, t = (s) => s, { office = null } = {}) {
   const s = clampScale(scale);
+  const officeItem = office ? [{ id: 'office', kind: 'button', icon: 'external', withLabel: true, live: true, label: t('Open in LibreOffice'), aria: t('Open in LibreOffice'),
+    title: t('Opens {file} in LibreOffice in a VibeSpace window, on the machine that holds it — you edit it there, and Save writes it back in place.', { file: String(office) }) }] : [];
   return [
     { id: 'fit', kind: 'button', label: t('Fit width'), title: t('Fit the page to the window width'), pressed: mode === 'fit' },
     { id: 'actual', kind: 'button', label: '100%', title: t('Actual size (100%)'), pressed: mode !== 'fit' && Math.abs(s - 1) < EPS },
@@ -219,6 +226,7 @@ export function toolbarModel({ mode = 'fit', scale = 1, page = 0, pages = 0, ren
     { id: 'zoom', kind: 'label', text: zoomLabel(s) },
     { id: 'in', kind: 'button', icon: 'zoomIn', title: t('Zoom in'), disabled: s >= ZOOM_MAX - EPS },
     { id: 'spacer', kind: 'spacer' },
+    ...officeItem,
     // while rendering the pane itself says "Rendering…"; the count appears when done
     { id: 'pages', kind: 'label', text: !rendering && pages > 0 ? `${Math.max(1, page)} / ${pages}` : '', title: !rendering && pages > 0 ? t('Page {n} of {total}', { n: Math.max(1, page), total: pages }) : '' },
   ];

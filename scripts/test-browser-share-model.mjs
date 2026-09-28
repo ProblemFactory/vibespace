@@ -16,6 +16,16 @@
 //      made after it gives it back), Rename, Delete… with two pins (warn + unpin +
 //      release), the strip's "who drives", the pre-ruling conversation's own browser holding the directory (named, never
 //      ended), the client's DOM-free helpers.
+//   ③ B-f7ab THE LATE KEY: a live session with no browser key (it started before per-session browsers) gets one on its
+//      FIRST browser use through ONE engine function (src/server/browser-key.js) — rung D's config, the pairs, bound to
+//      THAT conversation through the meta choke point; a second call returns the same key; a conversation's existing
+//      key comes back; a fork with a borrowed id / a remote session / an unknown conversation / a key another live
+//      session holds / the switches off / a session gone are refused BY NAME. CONTROLS: an engine copy that mints a
+//      second key on the second call, and one without the fork rule (the old terminal fork gets its PARENT's key).
+//      ③f (verify r3): a pin dated 0 (the landing) authorizes nothing, a narrowed profile without a scope date included; a
+//                       witness on a record with no start is dated 0 (PURE rows + the real keeper + a patched-copy control)
+//      ③f (verify r1): the late key's DEFAULT pin is dated when the session STARTED — a profile the user kept to another
+//      conversation since then stays closed to it (not_owner, by the button); CONTROL: the engine stamping the mint instant.
 // ~6 s, port 0, scratch dirs only, no real browser, no vendor call.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -425,6 +435,457 @@ try {
   ok(e && e.code === 'profile_locked' && /the conversation "Old chat"'s own browser \(a pin from before this version/.test(e.message) && /press Stop/.test(e.message) && !CMDLINE_RE.test(e.message) && holderAlive, 'a pre-ruling conversation\'s own browser on the directory (its mark names the conversation) ⇒ profile_locked naming that conversation and the Stop button — the keeper never ends it', e && e.message);
 } catch (err) { ok(false, 'the keeper/routes legs threw', err && (err.stack || err.message)); }
 
+// ═══ ③ THE LATE KEY (B-f7ab) ═══════════════════════════════════════════════
+// A session that started before per-session browsers (or while they were off) has no browser key; every browser route
+// answered it "it predates the feature — it cannot hold a profile" and the owner's chat parked itself. Now the routes
+// ask ONE engine function (src/server/browser-key.js `ensureBrowserKey`) — the spawn's own mint, env composition and
+// pin ladder — and the binding rides the meta choke point (mirrored here exactly as session-stdout.writeSessionMeta
+// runs it; its source line is pinned below). Refusals are BY NAME.
+console.log('— ③ the late key: a keyless live session\'s first browser use mints its key (once), bound to THAT conversation; the rest refused by name');
+{
+  const BK = require('../src/server/browser-key.js');
+  const BB = require('../src/server/browser-bindings.js');
+  const BFx = require('../src/browser-fact.js');
+  // (a) PURE: the verdict's order and its words
+  const V = (o) => B.lateKeyVerdict({ conversationId: 'conv-x', ...o });
+  const table = [
+    [{ live: false }, 'session-gone', 'session_gone'], [{ remote: true }, 'no_browser_key', 'remote'], [{ integrationOn: false }, 'no_browser_key', 'integration_off'],
+    [{ isolationOn: false }, 'no_browser_key', 'isolation_off'], [{ envAvailable: false }, 'no_browser_key', 'unavailable'], [{ conversationId: '' }, 'no_browser_key', 'conversation_unknown'],
+    [{ forkPending: true }, 'no_browser_key', 'fork_pending'], [{ priorKey: 'bk-0000e001', priorHolder: 'Other chat' }, 'no_browser_key', 'held_elsewhere'],
+    [{ remote: true, live: false }, 'session-gone', 'session_gone'], [{ forkPending: true, remote: true }, 'no_browser_key', 'remote'],
+  ];
+  const badRows = table.filter(([o, code, why]) => { const v = V(o); return v.ok || v.code !== code || v.why !== why || !v.error || !v.remedy; });
+  ok(!badRows.length && B.LATE_KEY_WHYS.length === 8, `③a lateKeyVerdict: ${table.length} rows, each refusal NAMED (code + why + error + remedy), in the rule order`, JSON.stringify(badRows.map((r) => r[0])));
+  const ok1 = V({}), ok2 = V({ priorKey: 'bk-0000e002' });
+  ok(ok1.ok && ok1.reuse === '' && ok2.ok && ok2.reuse === 'bk-0000e002', '③a a known conversation of its own mints; one that already has a key and no live holder gets THAT key back (never a second one)');
+  const words = B.LATE_KEY_WHYS.map((w) => B.lateKeyRefusal(w, { holderName: 'Other chat' }));
+  ok(words.every((w) => !CMDLINE_RE.test(w.error) && !CMDLINE_RE.test(w.remedy) && !/predates the feature/.test(w.error))
+    && ['remote', 'conversation_unknown', 'fork_pending'].every((w) => /^restart this session \(Terminate → Resume\) to get a browser key: /.test(B.lateKeyRefusal(w).error))
+    && /\("Other chat"\)/.test(B.lateKeyRefusal('held_elsewhere', { holderName: 'Other chat' }).error) && /no restart needed/.test(B.lateKeyRefusal('isolation_off').remedy),
+  '③a the words: never a command line, never "predates the feature"; the restart-remedied reasons say "restart this session (Terminate → Resume) to get a browser key: <reason>"; a setting names the setting; the holder is named', words.map((w) => w.error).join(' | '));
+
+  // (b) the REAL engine + routes + keeper + browser-env over the fake 0.38.1
+  const metas = new Map(); // sockName → the session's meta record (the file session-stdout writes)
+  const store = BB.create({ dataDir: DATA, log: { warn() { } } }); // session-stdout's OWN instance (browser-env reads through another)
+  const chokeLines = [];
+  const persist = (session, patch) => { // THE choke point, as session-stdout.writeSessionMeta runs it (source pinned below)
+    const meta = { ...(metas.get(session.sockName) || {}), ...patch };
+    metas.set(session.sockName, meta);
+    if (meta && meta.browserKey) { const sid = store.bindableIdOf(meta); if (sid) store.record(sid, meta.browserKey); else store.noteUnbound(meta, session.sockName); }
+  };
+  const logLines = [];
+  const cap = { log: (m) => logLines.push(String(m)), warn: (m) => logLines.push(String(m)) };
+  const mkEngine = (mod) => mod.create({ browserEnv: () => be, keeper: () => k, activeSessions: active, integrationEnabled: () => true,
+    readMeta: (s) => metas.get(s.sockName) || null, persistMeta: persist, onLiveFactsChanged: () => chokeLines.push('facts'), log: cap });
+  const eng = mkEngine(BK);
+  R.setup({ ...ctxFor(k), ensureBrowserKey: (s, o) => eng.ensureBrowserKey(s, o) });
+  let nTok = 0;
+  const keyless = (id, name, { conv = null, meta = {}, extra = {} } = {}) => {
+    const t = 'vsst_' + ('z' + String(++nTok)).repeat(12);
+    const s = { agentToken: t, name, webuiName: name, mode: 'chat', createdAt: clock, cwd: ROOT, sockName: 'cw-' + id, ...(conv ? { claudeSessionId: conv } : {}), ...extra };
+    metas.set(s.sockName, { webuiSessionId: id, name, cwd: ROOT, ...(conv ? { claudeSessionId: conv } : {}), ...meta });
+    active.set(id, s);
+    facts[id] = { turn: 'idle', name };
+    return s;
+  };
+  const CONV_L = 'c0f7ab00-late-4000-8000-000000000001';
+  const sL = keyless('sess-late', 'Late chat', { conv: CONV_L });
+  ok(!sL._browserKey && BFx.browserFactWords(eng.keylessFactOf(sL)).line === 'no browser yet' && eng.keylessFactOf(sL).key === '' && BFx.browserFactWords(eng.keylessFactOf(sL)).show === false,
+    '③b before its first use the session publishes the keyless fact — "no browser yet" (no chip: show false, no key)');
+  let r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/late'], wrapper: true }, as(sL));
+  const K1 = sL._browserKey;
+  const nsL = B.sessionNameFor(K1);
+  ok(r.status === 200 && r.json.kind === 'ephemeral' && B.isBrowserKey(K1) && r.json.minted && r.json.minted.key === K1 && r.json.minted.origin === 'new'
+    && sL._browserVariant === 'D' && Array.isArray(sL._browserEnv) && sL._browserEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`)
+    && r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`) && r.json.spawnEnv.includes(`AGENT_BROWSER_SESSION=${nsL}`) && fs.existsSync(be.configPathFor(K1)),
+  '③b its FIRST resolve mints a key (the spawn\'s rung D: the generated config written, the pairs recorded on the session) and answers kind ephemeral with `minted` — the CLI builds its child env from this answer, no respawn', r.json);
+  ok(BB.create({ dataDir: DATA }).lookup(CONV_L) === K1 && metas.get(sL.sockName).browserKey === K1 && metas.get(sL.sockName).browserKeyFor === CONV_L && metas.get(sL.sockName).webuiSessionId === 'sess-late',
+    '③b bindings.json holds the key for THAT conversation (a second store instance reads it), through the session\'s own record (browserKeyFor = its conversation id, the record kept whole)');
+  const rr = await runAs(r.json.env, ['open', 'https://example.test/late']);
+  ok(rr.status === 0 && logOf('cmds.log').some((x) => x.verb === 'open' && x.ns === nsL) && k.ephemeralFor(K1) && BFx.browserFactWords(k.factFor(BFx.sessionFactsOf(sL))).line === 'no profile (temporary browser)',
+    '③b a command under the answer\'s env lands in the conversation\'s own browser (its namespace), which the keeper manages; the fact now names it', rr.out);
+  const mintsBefore = logLines.filter((l) => /had no browser key/.test(l)).length;
+  r = await j('POST', '/api/agent/browser/resolve', { argv: ['get', 'title'], wrapper: true }, as(sL));
+  const r3 = await j('GET', '/api/agent/browser/status', undefined, as(sL));
+  ok(r.status === 200 && sL._browserKey === K1 && !r.json.minted && r.json.env.includes(`AGENT_BROWSER_SESSION=${nsL}`) && r3.status === 200 && BB.create({ dataDir: DATA }).lookup(CONV_L) === K1
+    && logLines.filter((l) => /had no browser key/.test(l)).length === mintsBefore && mintsBefore === 1,
+  '③b a second resolve (and the status route) returns the SAME key — nothing minted, the binding unchanged, ONE mint line in total', { json: r.json && r.json.minted, lines: logLines });
+  ok(/const sid = b\.bindableIdOf\(meta\); if \(sid\) b\.record\(sid, meta\.browserKey\); else b\.noteUnbound\(meta, sockName\);/.test(fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8')),
+    '③b WIRING PIN: the choke point this leg mirrors is session-stdout.writeSessionMeta\'s own binding line, unchanged');
+  // the cookie routes mint through the same function
+  const sU = keyless('sess-ui', 'UI chat', { conv: 'c0f7ab00-ui00-4000-8000-000000000002' });
+  r = await j('POST', '/api/browser/pin', { sessionId: 'sess-ui', profile: null });
+  ok(r.status === 200 && B.isBrowserKey(sU._browserKey) && BB.create({ dataDir: DATA }).lookup('c0f7ab00-ui00-4000-8000-000000000002') === sU._browserKey, '③b a cookie route (the user\'s pin from Session properties) mints the same way', r.json);
+  // a conversation that already has a key (and no live holder) gets it back; one another live session holds is refused
+  const CONV_B = 'c0f7ab00-back-4000-8000-000000000003', KBACK = 'bk-0000e0b1';
+  store.record(CONV_B, KBACK);
+  const sBk = keyless('sess-back', 'Back chat', { conv: CONV_B });
+  r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/b'], wrapper: true }, as(sBk));
+  ok(r.status === 200 && sBk._browserKey === KBACK && r.json.minted && r.json.minted.origin === 'conversation' && BB.create({ dataDir: DATA }).lookup(CONV_B) === KBACK, '③b a conversation that already had a key gets THAT key back (the resume rung) — never a second key', r.json && r.json.minted);
+  const sTwin = keyless('sess-twin', 'Twin window', { conv: CONV_B });
+  r = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/t'], wrapper: true }, as(sTwin));
+  ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'held_elsewhere' && /"Back chat"/.test(r.json.error) && !sTwin._browserKey, '③b …while another LIVE session holds it, a second session of the same conversation is refused held_elsewhere, naming it (one conversation, one browser)', r.json);
+  // a fork whose id is borrowed — both record shapes: stated (forkSourceId) and an older terminal fork's (forkRequested only)
+  const PARENT = 'c0f7ab00-prnt-4000-8000-000000000004', KPARENT = 'bk-0000e0a1';
+  store.record(PARENT, KPARENT);
+  const sFk = keyless('sess-fork', 'Fork chat', { conv: PARENT, meta: { forkRequested: true, forkSourceId: PARENT }, extra: { _forkRequested: true } });
+  const sFk2 = keyless('sess-fork2', 'Old terminal fork', { conv: PARENT, meta: { forkRequested: true } });
+  const rf = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/f'], wrapper: true }, as(sFk));
+  const rf2 = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://example.test/f'], wrapper: true }, as(sFk2));
+  ok(rf.status === 409 && rf.json.why === 'fork_pending' && rf2.status === 409 && rf2.json.why === 'fork_pending' && /^restart this session \(Terminate → Resume\) to get a browser key: /.test(rf.json.error)
+    && !sFk._browserKey && !sFk2._browserKey && BB.create({ dataDir: DATA }).lookup(PARENT) === KPARENT,
+  '③b a fork still carrying the id it was forked from (forkSourceId, and an older terminal fork\'s bare forkRequested) is refused fork_pending — it never gets the PARENT\'s key and never binds the parent', { rf: rf.json, rf2: rf2.json });
+  // remote, unknown conversation, the switches, a session gone
+  const sRm = keyless('sess-remote', 'Remote chat', { conv: 'c0f7ab00-rmte-4000-8000-000000000005', extra: { hostId: 'h-remote' } });
+  const sNo = keyless('sess-noid', 'No id yet', {});
+  const rRm = await j('POST', '/api/agent/browser/resolve', { argv: ['open', 'x'] }, as(sRm));
+  const rNo = await j('GET', '/api/browser/session/sess-noid');
+  ok(rRm.status === 409 && rRm.json.why === 'remote' && /^restart this session \(Terminate → Resume\) to get a browser key: it runs on another machine/.test(rRm.json.error) && rNo.status === 409 && rNo.json.why === 'conversation_unknown' && !sRm._browserKey && !sNo._browserKey
+    && eng.keylessFactOf(sRm) === null && eng.keylessFactOf(sNo) === null, '③b a remote session is refused `remote` (its rung is decided on its host at spawn — restart), a session whose conversation is not known yet `conversation_unknown` — and neither publishes "no browser yet"', { rRm: rRm.json, rNo: rNo.json });
+  const beOff = BE.create({ dataDir: DATA, homeDir: HOME, serverSetting: (key) => (key === 'browser.isolateSessions' ? false : undefined), log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: XDG } });
+  const sOff = keyless('sess-off', 'Off chat', { conv: 'c0f7ab00-off0-4000-8000-000000000006' });
+  const vOff = BK.create({ browserEnv: () => beOff, keeper: () => k, activeSessions: active, readMeta: (s) => metas.get(s.sockName), persistMeta: persist, log: cap }).ensureBrowserKey(sOff, { sessionId: 'sess-off' });
+  const vInt = BK.create({ browserEnv: () => be, keeper: () => k, activeSessions: active, integrationEnabled: () => false, readMeta: (s) => metas.get(s.sockName), persistMeta: persist, log: cap }).ensureBrowserKey(sOff, { sessionId: 'sess-off' });
+  const gone = { claudeSessionId: 'c0f7ab00-gone-4000-8000-000000000007', sockName: 'cw-gone' };
+  const vGone = eng.ensureBrowserKey(gone, { sessionId: 'sess-gone' });
+  ok(vOff.why === 'isolation_off' && vInt.why === 'integration_off' && vGone.code === 'session-gone' && R.router && !sOff._browserKey && !gone._browserKey,
+    '③b per-session browsers off ⇒ isolation_off, integration off ⇒ integration_off (each names its setting — a restart would not help), a session not running any more ⇒ session-gone', { vOff, vInt, vGone });
+
+  // (c) CONTROL: an engine that forgets the session's key and decides as a NEW spawn every call mints a SECOND key
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-key.js'), 'utf8');
+  const EARLY = "    if (session && B.isBrowserKey(session._browserKey)) return { ok: true, key: session._browserKey, minted: false };\n";
+  const LADDER = 'const bk = B.browserKeyFor({ prior: v.reuse, resume: true, fork: false, mint: mintKey });';
+  const twice = src.replace(EARLY, '').replace(LADDER, 'const bk = B.browserKeyFor({ prior: v.reuse, resume: false, fork: false, mint: mintKey });');
+  // ONE judge for both engines: two calls for one keyless session — the second must answer the first's key, minting nothing
+  const idempotent = (engX, id, conv) => {
+    const s = keyless(id, 'Twice ' + id, { conv });
+    const a = engX.ensureBrowserKey(s, { sessionId: id }), b = engX.ensureBrowserKey(s, { sessionId: id });
+    return { pass: !!(a.ok && b.ok && a.minted === true && b.minted === false && a.key === b.key && s._browserKey === a.key && BB.create({ dataDir: DATA }).lookup(conv) === a.key), a: a.key, b: b.key };
+  };
+  const real2 = idempotent(eng, 'sess-twice-real', 'c0f7ab00-twcr-4000-8000-000000000009');
+  ok(real2.pass, '③c the engine called twice for one session (two routes, two concurrent CLI commands — it is synchronous, so they cannot interleave) mints ONCE: the second answer is the first key, minted:false', real2);
+  if (ok(twice !== src && !twice.includes(EARLY) && !twice.includes(LADDER), 'CONTROL ③c: the patched copy (no early return, the ladder asked as a NEW spawn) carries both edits')) {
+    const engT = mkEngine(M.load('src/server/browser-key.js', twice, 'mints-twice'));
+    const t2 = idempotent(engT, 'sess-twice', 'c0f7ab00-twce-4000-8000-000000000008');
+    ok(!t2.pass && t2.a && t2.b && t2.a !== t2.b, 'CONTROL ③c: that copy mints a SECOND key on the second call — the same judge is RED on it (the session moves to another browser; the binding store refuses the move)', t2);
+  }
+  // (d) CONTROL: with the fork rule off, an older terminal fork (a bare forkRequested) gets the PARENT's key — two conversations on one browser
+  const FORK = '    const forkPending = !!conversationId && (restoredForkPending(view) || BB.bindableIdOf({ ...view, browserKeyFor: conversationId }) !== conversationId);\n';
+  const noFork = src.replace(FORK, '    const forkPending = false;\n');
+  if (ok(noFork !== src, 'CONTROL ③d: the patched copy without the fork rule')) {
+    const engF = mkEngine(M.load('src/server/browser-key.js', noFork, 'no-fork-rule'));
+    const vF = engF.ensureBrowserKey(sFk2, { sessionId: 'sess-fork2' });
+    ok(vF.ok && sFk2._browserKey === KPARENT, 'CONTROL ③d: that copy hands the old terminal fork its PARENT\'s key (the r6 incident — two conversations on one browser); the fork_pending assert above is what refuses it', vF);
+    delete sFk2._browserKey;
+  }
+  // (e) WIRING: ONE mint, ONE writer of the key's session fields (spawn + first use); every route asks the engine;
+  //     the server hands it the record reader + THE integration switch; the payload publishes the keyless fact
+  const wsc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
+  const rts = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
+  const wir = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const svr = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  ok(/mint: browserKeyMod\.mintKey,/.test(wsc) && /browserKeyMod\.applyKey\(session, \{ key: bk\.key, env: be, pin \}\);/.test(wsc) && !/mintBrowserKey\(/.test(wsc) && !/session\._browserKey = /.test(wsc),
+    '③e WIRING PIN: ws-create\'s spawn mints through THE mint and writes the key\'s fields through THE writer (browser-key.js) — the late key calls the same two');
+  ok(/r = typeof ctx\?\.ensureBrowserKey === 'function' \? ctx\.ensureBrowserKey\(f\.session, \{ sessionId: f\.sessionId \}\)/.test(rts) && !/— it cannot hold a profile'/.test(rts) && (rts.match(/needKey\(res, /g) || []).length >= 12,
+    '③e WIRING PIN: needKey (every cookie route + agentFacts) asks ensureBrowserKey for a keyless session; the old dead-end sentence is gone');
+  ok(/ensureBrowserKey: \(session, o\) => browserKeys\.ensureBrowserKey\(session, o\),/.test(wir) && /browserKeys = require\('\.\/browser-key'\)\.create\(\{/.test(wir) && /persistMeta: \(session, patch\) => \{ if \(persistSessionMeta && session\) persistSessionMeta\(session, patch\); \},/.test(wir)
+    && /readSessionMetaOf: \(session\) => \(session\?\.sockName \? readSessionMeta\(session\.sockName\) : null\), integrationEnabled: \(\) => integrationEnabled\(\),/.test(svr),
+    '③e WIRING PIN: the wiring builds the engine over the routes\' browser-env memo + the keeper, persists through persistSessionMeta (writeSessionMeta — THE choke point), and server.js hands it the record reader + THE integration switch');
+  // (f) VERIFY r1 (2026-09-27, reproduced before the fix): THE LATE KEY'S DEFAULT PIN IS DATED WHEN THE SESSION STARTED.
+  //     A pin is an authorization and the user's latest choice wins — a profile the user kept to ANOTHER conversation
+  //     after this session started stays closed to it. The engine stamped the pin with the mint instant, so the agent's
+  //     first browser command walked into the narrowed profile; the same session keyed at spawn was refused not_owner.
+  // (f, r2) VERIFY r2 (2026-09-27, reproduced before the fix): A DEFAULT REACHES A CONVERSATION ONLY AT ITS START.
+  //     The late key read the ladder at the MINT — so an instance / Task Group default the user set to a narrowed
+  //     profile AFTER a keyless session started reached it, dated at its start ⇒ admitted (its spawn-keyed twin had
+  //     landed on the default in force at ITS start). Now: a keyless spawn RECORDS its ladder's pick (`browserPinAtStart`,
+  //     the WITNESS) and the late key restores exactly that (PURE lateDefaultPin / keeper.restorePin); a record without
+  //     one gets the current default as a LANDING dated 0 — never an authorization on a narrowed profile; the group cap
+  //     is the witness's, never the group's live value.
+  {
+    const T = [[{ recordedAt: 50, liveAt: 90 }, 50], [{ recordedAt: 90, liveAt: 50 }, 50], [{ recordedAt: null, liveAt: 70 }, 70], [{ recordedAt: 70 }, 70], [{}, 0], [{ recordedAt: 'x', liveAt: NaN }, 0], [{ recordedAt: 0, liveAt: -5 }, 0], [{ recordedAt: '1900000000000', liveAt: 80 }, 80]];
+    const badT = T.filter(([a, want]) => B.latePinAt(a) !== want);
+    ok(!badT.length && B.userPinAuthorizes({ pin: { profileId: 'bp-0000f001', by: 'user', at: B.latePinAt({ recordedAt: 50, liveAt: 90 }) }, profile: { id: 'bp-0000f001', scopeAt: 60 } }) === false
+      && B.userPinAuthorizes({ pin: { profileId: 'bp-0000f001', by: 'user', at: B.latePinAt({ recordedAt: 70, liveAt: 90 }) }, profile: { id: 'bp-0000f001', scopeAt: 60 } }) === true
+      && B.userPinAuthorizes({ pin: { profileId: 'bp-0000f001', by: 'user', at: B.latePinAt({}) }, profile: { id: 'bp-0000f001', scopeAt: 60 } }) === false,
+    `③f latePinAt (${T.length} rows): the OLDEST of the record's and the live session's start, nothing finite ⇒ 0 — a session that started before a narrowing is not authorized by its default pin, one that started after it is, an unknown start never`, badT);
+    // (r2) PURE lateDefaultPin: the witness wins over the ladder; no witness ⇒ a landing dated 0; an empty witness ⇒ nothing; the conversation's own row untouched
+    const W = { profileId: 'bp-0000f002', origin: 'instance', at: 40, by: 'user' };
+    const L = { profileId: 'bp-0000f003', origin: 'instance' };
+    const rowsD = [
+      [{ witness: W, ladder: L, startedAt: 90 }, { profileId: 'bp-0000f002', origin: 'instance', at: 40, by: 'user', source: 'witness' }],
+      [{ witness: { ...W, at: 120 }, ladder: L, startedAt: 90 }, { profileId: 'bp-0000f002', origin: 'instance', at: 90, by: 'user', source: 'witness' }],
+      [{ witness: { ...W, origin: 'conversation', by: 'agent' }, ladder: L, startedAt: 90 }, { profileId: 'bp-0000f002', origin: 'conversation', at: 40, by: 'agent', source: 'witness' }],
+      [{ witness: { profileId: '', origin: 'harness', at: 40, by: 'user', cap: 2 }, ladder: L, startedAt: 90 }, { profileId: '', origin: 'harness', at: null, by: null, source: 'witness' }],
+      [{ witness: null, ladder: L, startedAt: 90 }, { profileId: 'bp-0000f003', origin: 'instance', at: 0, by: 'user', source: 'landing' }],
+      [{ witness: null, ladder: { profileId: 'bp-0000f003', origin: 'task-group' }, startedAt: 90 }, { profileId: 'bp-0000f003', origin: 'task-group', at: 0, by: 'user', source: 'landing' }],
+      [{ witness: null, ladder: { profileId: 'bp-0000f004', origin: 'conversation' }, startedAt: 90 }, { profileId: 'bp-0000f004', origin: 'conversation', at: null, by: null, source: 'conversation' }],
+      [{ witness: W, ladder: { profileId: 'bp-0000f004', origin: 'conversation' }, startedAt: 90 }, { profileId: 'bp-0000f004', origin: 'conversation', at: null, by: null, source: 'conversation' }],
+      [{ witness: { profileId: 'not-a-profile', origin: 'instance', at: 1, by: 'user' }, ladder: L, startedAt: 90 }, { profileId: '', origin: 'harness', at: null, by: null, source: 'none', refused: 'the start-time pin record is not a pin witness' }],
+      [{ witness: null, ladder: { profileId: '', origin: 'harness' }, startedAt: 90 }, { profileId: '', origin: 'harness', at: null, by: null, source: 'none' }],
+    ];
+    const badD = rowsD.filter(([a, want]) => JSON.stringify(B.lateDefaultPin(a)) !== JSON.stringify(want)).map(([a]) => a);
+    ok(!badD.length && B.witnessCap({ cap: 2 }) === 2 && B.witnessCap({ cap: 'x' }) === null && B.witnessCap(null) === null && B.userPinAuthorizes({ pin: { profileId: 'bp-0000f003', by: 'user', at: 0 }, profile: { id: 'bp-0000f003', scopeAt: 60 } }) === false,
+      `③f (r2) lateDefaultPin (${rowsD.length} rows): a witness is restored as the pick (dated no later than the start), an empty witness pins nothing, no witness ⇒ the current default as a LANDING dated 0 (never an authorization on a narrowed profile), the conversation's own row is never touched`, badD);
+    // (r3) VERIFY r3 (2026-09-27, both reproduced by construction — neither shape is written by the product): ① `0 ≥ scopeAt`
+    //      read TRUE on a NARROWED profile that carries no `scopeAt` (owner kind session / task with no scope date: a
+    //      hand-edited or restored-after-the-migration registry), so the landing dated 0 ADMITTED the legacy session;
+    //      ② a witness on a record that states NO start was dated by its own claim (a future `at` ⇒ the keeper's clock ⇒
+    //      admitted to a profile narrowed just before). Now a pin dated 0 authorizes NOTHING, and a witness without a
+    //      start is dated 0 like r1's unknown start.
+    const narrowedNoDate = [{ id: 'bp-0000f005', owner: { kind: 'session', id: 'bk-0000f0a0' } }, { id: 'bp-0000f005', owner: { kind: 'task', id: 'T-x' } }, { id: 'bp-0000f005', owner: { kind: 'session', id: 'bk-0000f0a0' }, scopeAt: 0 }, { id: 'bp-0000f005', owner: { kind: 'instance', id: null } }];
+    const rowsA = [
+      ...narrowedNoDate.map((profile) => [{ pin: { profileId: 'bp-0000f005', by: 'user', at: 0 }, profile }, false]),
+      ...narrowedNoDate.map((profile) => [{ pin: { profileId: 'bp-0000f005', by: 'user', at: 5 }, profile }, true]),
+      [{ pin: { profileId: 'bp-0000f005', by: 'user', at: 0 }, profile: { id: 'bp-0000f005', owner: { kind: 'session', id: 'bk-0000f0a0' }, scopeAt: 60 } }, false],
+      [{ pin: { profileId: 'bp-0000f005', by: 'user', at: '0' }, profile: { id: 'bp-0000f005', owner: { kind: 'task', id: 'T-x' } } }, false],
+      [{ pin: { profileId: 'bp-0000f005', by: 'user' }, profile: { id: 'bp-0000f005', owner: { kind: 'task', id: 'T-x' } } }, false],
+      [{ pin: { profileId: 'bp-0000f005', by: 'user', at: 60 }, profile: { id: 'bp-0000f005', owner: { kind: 'session', id: 'bk-0000f0a0' }, scopeAt: 60 } }, true],
+    ];
+    const badA = rowsA.filter(([a, want]) => B.userPinAuthorizes(a) !== want).map(([a]) => a);
+    const rowsN = [
+      [{ witness: { ...W, at: 120 }, ladder: L, startedAt: 0 }, { profileId: 'bp-0000f002', origin: 'instance', at: 0, by: 'user', source: 'witness' }],
+      [{ witness: { ...W, at: 120 }, ladder: L }, { profileId: 'bp-0000f002', origin: 'instance', at: 0, by: 'user', source: 'witness' }],
+      [{ witness: { ...W, at: 120 }, ladder: L, startedAt: NaN }, { profileId: 'bp-0000f002', origin: 'instance', at: 0, by: 'user', source: 'witness' }],
+      [{ witness: { ...W, at: 120 }, ladder: L, startedAt: 100 }, { profileId: 'bp-0000f002', origin: 'instance', at: 100, by: 'user', source: 'witness' }],
+    ];
+    const badN = rowsN.filter(([a, want]) => JSON.stringify(B.lateDefaultPin(a)) !== JSON.stringify(want)).map(([a]) => a);
+    ok(!badA.length && !badN.length, `③f (r3) userPinAuthorizes (${rowsA.length} rows): a pin dated 0 (the landing) authorizes NOTHING — not a narrowed profile without a scope date either; a dated pin answers by the date. lateDefaultPin (${rowsN.length} rows): a witness on a record with no known start is dated 0, never by its own claim`, { badA, badN });
+    // the REAL keeper + routes + browser-env on their OWN data dir (an instance default needs its own keeper's setting)
+    const DATA2 = path.join(ROOT, 'data-late-pin'), HOME2 = path.join(ROOT, 'home-late-pin');
+    for (const d of [DATA2, path.join(HOME2, '.agent-browser')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const T0 = clock, T1 = clock + 60_000, T2 = clock + 120_000, T3 = clock + 180_000, T4 = clock + 240_000;
+    const settings2 = { 'browser.defaultProfile': 'Bank' };
+    const groups2 = [{ id: 'T-late', browserProfileId: null, browserCap: null }];
+    const set2 = (key) => settings2[key];
+    const active2 = new Map();
+    const env2 = { ...env, HOME: HOME2 };
+    const groupsFor2 = ({ initialGroupId = null } = {}) => groups2.filter((g) => initialGroupId && g.id === initialGroupId);
+    const k2 = K.create({ dataDir: DATA2, homeDir: HOME2, env: () => env2, serverSetting: set2, liveKeys: () => new Set([...active2.values()].map((x) => x && x._browserKey).filter(Boolean)), runtime: F.createBrowserRuntime({ env: env2 }), facts: F.createBrowserFacts({ env: env2 }), log: { log() { }, warn() { }, error() { } }, install: false, now: () => clock, conversationFacts: () => ({ turn: 'idle', name: null }),
+      taskGroupDefault: (f) => { const g = groupsFor2(f).find((x) => x.browserProfileId); return g ? g.browserProfileId : ''; }, taskGroupCap: (f) => { const g = groupsFor2(f).find((x) => Number.isInteger(x.browserCap)); return g ? g.browserCap : null; } });
+    const be2 = BE.create({ dataDir: DATA2, homeDir: HOME2, serverSetting: set2, serverNotice: null, telemetry: null, log: { warn() { }, log() { } }, env: { XDG_RUNTIME_DIR: XDG } });
+    const metas2 = new Map();
+    const store2 = BB.create({ dataDir: DATA2, log: { warn() { } } });
+    const persist2 = (session, patch) => { const meta = { ...(metas2.get(session.sockName) || {}), ...patch }; metas2.set(session.sockName, meta); if (meta && meta.browserKey) { const sid = store2.bindableIdOf(meta); if (sid) store2.record(sid, meta.browserKey); else store2.noteUnbound(meta, session.sockName); } };
+    const mkEngine2 = (mod) => mod.create({ browserEnv: () => be2, keeper: () => k2, activeSessions: active2, integrationEnabled: () => true, readMeta: (x) => metas2.get(x.sockName) || null, persistMeta: persist2, log: cap });
+    const ctx2 = (engine) => ({ keeper: k2, activeSessions: active2, browserEnv: () => be2, adoptRoots: { homeDir: HOME2, dataDir: DATA2 }, notice: () => { }, persistPin: () => { }, tasksForSession: () => [], ensureBrowserKey: (x, o) => engine.ensureBrowserKey(x, o) });
+    let n2 = 0;
+    /** a keyless LIVE session started at `startedAt`; `witness` = what ws-create records for a keyless spawn since r2 (undefined = a record from before r2) */
+    const late2 = (id, name, conv, startedAt, { recorded = startedAt, witness = undefined, taskId = null, meta = {} } = {}) => {
+      const x = { agentToken: 'vsst_' + ('y' + String(++n2)).repeat(12), name, webuiName: name, mode: 'chat', createdAt: startedAt, cwd: ROOT, sockName: 'cw-' + id, claudeSessionId: conv, _initialGroupId: taskId };
+      metas2.set(x.sockName, { webuiSessionId: id, name, cwd: ROOT, claudeSessionId: conv, ...(recorded === null ? {} : { createdAt: recorded }), ...(witness === undefined ? {} : { browserPinAtStart: witness }), ...meta });
+      active2.set(id, x);
+      return x;
+    };
+    /** THE SPAWN PATH at the keeper's clock, verbatim in shape (ws-create: browserKeyFor → pinForCreate → envFor → applyKey → setPin / copyPin → stampGroupCap) */
+    const spawn2 = (id, name, conv, { resumeId = null, fork = false, forkedFromId = null, explicit = '', taskId = null } = {}) => {
+      const x = late2(id, name, conv, clock, { taskId });
+      const prior = (resumeId && !fork) ? be2.priorKeyFor(resumeId) : '';
+      const bk = B.browserKeyFor({ prior, resume: !!resumeId, fork, mint: BK.mintKey });
+      const forkParentKey = fork ? be2.priorKeyFor(forkedFromId || resumeId) : '';
+      const pin = k2.pinForCreate({ explicit, priorKey: prior, forkParentKey, taskGroupDefault: k2.taskGroupDefaultFor({ cwd: ROOT, initialGroupId: taskId }), resume: !!resumeId, fork });
+      const e = be2.envFor({ browserKey: bk.key, integrationOn: true, remote: false, cwd: ROOT, pinnedDir: null });
+      BK.applyKey(x, { key: bk.key, env: e, pin });
+      if (pin.profileId && pin.origin !== 'conversation') k2.setPin(bk.key, pin.profileId, { origin: pin.origin });
+      else if (pin.profileId && fork && forkParentKey && forkParentKey !== bk.key) k2.copyPin(forkParentKey, bk.key);
+      k2.stampGroupCap(bk.key, { cwd: ROOT, initialGroupId: taskId }); x._browserCap = k2.capOf(bk.key);
+      persist2(x, { browserKey: bk.key, browserVariant: e.variant, browserKeyFor: resumeId && !fork ? resumeId : undefined, forkSourceId: fork ? (forkedFromId || resumeId) : undefined, browserProfileId: x._browserProfileId || undefined, browserPinOrigin: x._browserPinOrigin || undefined });
+      return x;
+    };
+    /** the WITNESS ws-create writes for a keyless spawn at the keeper's clock (the same ladder read, unapplied) */
+    const witness2 = ({ taskId = null, explicit = '', forkParentKey = '' } = {}) => {
+      const pin = k2.pinForCreate({ explicit, priorKey: '', forkParentKey, taskGroupDefault: k2.taskGroupDefaultFor({ cwd: ROOT, initialGroupId: taskId }), resume: false, fork: !!forkParentKey });
+      const capv = k2.taskGroupCapFor({ cwd: ROOT, initialGroupId: taskId });
+      if (pin.profileId && pin.origin !== 'conversation') return { profileId: pin.profileId, origin: pin.origin, at: clock, by: 'user', cap: capv };
+      if (pin.profileId && forkParentKey) { const pp = k2.pinFor(forkParentKey); return pp ? { profileId: pp.profileId, origin: 'conversation', at: pp.at, by: pp.by, cap: capv } : null; }
+      return { profileId: '', origin: 'harness', at: clock, by: 'user', cap: capv };
+    };
+    const openIn = (x) => j('POST', '/api/agent/browser/resolve', { argv: ['open', 'https://bank.example/'], wrapper: true }, as(x));
+    /** a scene's sessions leave: their temporary browsers stopped, their leases released (the machine ceiling counts live records) */
+    const retire = async (...xs) => {
+      for (const x of xs) {
+        if (x && B.isBrowserKey(x._browserKey)) { try { await k2.stopEphemeralOf(x._browserKey); } catch { /* none */ } for (const l of k2.leasesOn(PB).filter((l2) => l2.browserKey === x._browserKey)) { try { k2.detach({ profileId: PB, browserKey: x._browserKey, by: 'user' }); } catch { /* released */ } } }
+        for (const [id, v] of active2) if (v === x) active2.delete(id);
+      }
+      try { await k2.stop(PB).catch(() => { }); } catch { /* none */ }
+    };
+    const admitted = (r, x, P) => (r.status === 200 && r.json.kind === 'attachment' && r.json.profile && r.json.profile.id === P) || (r.json && r.json.code === 'browser_busy') || k2.leasesOn(P).some((l) => l.browserKey === x._browserKey);
+    const verdict = (r, x, P) => (admitted(r, x, P) ? 'admitted' : r.status === 200 ? r.json.kind : (r.json && r.json.code) || ('http' + r.status));
+    /** The scene: "Bank" is the instance default; the USER keeps it to First chat at T1; a keyless session that STARTED
+     *  at T0 issues its first bare command at T2. */
+    R.setup(ctx2(mkEngine2(BK)));
+    clock = T0;
+    const made = await j('POST', '/api/browser/profiles', { label: 'Bank' });
+    const PB = made.json && made.json.profile && made.json.profile.id;
+    const PO = (await j('POST', '/api/browser/profiles', { label: 'Old' })).json.profile.id;
+    const before = late2('sess-lp-before', 'Started before', 'c0f7ab00-lpb0-4000-8000-00000000000a', T0, { witness: witness2() });
+    clock = T1;
+    k2.updateProfile(PB, { scope: 'one', conversation: 'bk-0000f1a1' });
+    clock = T2;
+    const r1 = await openIn(before);
+    const real = { P: PB, r1, pin1: k2.pinFor(before._browserKey), leased: k2.leasesOn(PB).map((l) => l.browserKey), key: before._browserKey };
+    real.refused = r1.status === 403 && r1.json.code === 'not_owner' && r1.json.pinned === true && real.leased.length === 0 && !!real.pin1 && real.pin1.at === T0 && real.pin1.by === 'user';
+    ok(real.refused && B.isBrowserKey(real.key) && !CMDLINE_RE.test(real.r1.json.error || ''), '③f a keyless session that STARTED before the user kept the instance-default profile to another conversation (its spawn witnessed Bank): its first command mints its key, its witnessed pin is dated at its START, and the profile stays closed to it — not_owner naming the button, nothing opened instead', { status: real.r1.status, json: real.r1.json, pin: real.pin1, leased: real.leased });
+    // …and one that started AFTER the narrowing WITH the witness is admitted by the same default (what the spawn gave its twin)
+    clock = T2 + 1000;
+    const after = late2('sess-lp-after', 'Started after', 'c0f7ab00-lpa0-4000-8000-00000000000b', T2 + 1000, { witness: witness2() });
+    const twinAfter = spawn2('sess-lp-after-spawn', 'Started after (spawned)', 'c0f7ab00-lpa1-4000-8000-00000000000e');
+    const r2 = await openIn(after), r2s = await openIn(twinAfter);
+    ok(verdict(r2, after, PB) === 'admitted' && verdict(r2s, twinAfter, PB) === 'admitted' && k2.pinFor(after._browserKey).at === T2 + 1000 && k2.pinFor(after._browserKey).origin === 'instance', '③f …a session that started AFTER the narrowing, its spawn having witnessed Bank, is admitted by that default exactly as its spawn-keyed twin is (the default in force at the start is the user\'s configured choice)', { late: verdict(r2, after, PB), spawn: verdict(r2s, twinAfter, PB), pin: k2.pinFor(after._browserKey) });
+    // a restored session whose record states its start: the record wins over the (later) restore instant on the live session
+    clock = T2 + 2000;
+    const restored = late2('sess-lp-restored', 'Restored', 'c0f7ab00-lpr0-4000-8000-00000000000c', T2 + 2000, { recorded: T0, witness: { profileId: PB, origin: 'instance', at: T0, by: 'user' } });
+    const r3 = await openIn(restored);
+    ok(r3.status === 403 && r3.json.code === 'not_owner' && k2.pinFor(restored._browserKey).at === T0, '③f …a restored session is dated by its RECORD\'s start (the older of the two), never its restore instant', { status: r3.status, pin: k2.pinFor(restored._browserKey) });
+    // the keeper only ever dates a pin EARLIER than its own clock
+    const kf = 'bk-0000f1c1';
+    k2.setPin(kf, real.P, { origin: 'instance', at: clock + 9_999_999 });
+    const future = k2.pinFor(kf).at;
+    k2.setPin(kf, real.P, { origin: 'instance', at: 'soon' });
+    const rp = k2.restorePin('bk-0000f1c2', { profileId: real.P, origin: 'instance', at: clock + 9_999_999, by: 'user' });
+    ok(future === clock && k2.pinFor(kf).at === clock && rp && rp.at === clock && k2.restorePin('bk-0000f1c3', { profileId: real.P, origin: 'harness', at: 1, by: 'user' }) === null && k2.restorePin('bk-0000f1c3', { profileId: 'bp-00000000', origin: 'instance', at: 1, by: 'user' }) === null,
+      '③f keeper.setPin / restorePin: an `at` in the future (or not a number) is the keeper\'s own clock — no caller mints a fresher authorization; restorePin takes only a pin witness naming a profile that exists', { future, clock, rp });
+    // ── (r2) THE FOUR REPRODUCED SCENES: a default set AFTER the start (instance / Task Group), the cap, the fork ──
+    // A1: instance default Old at the start; Bank (narrowed at T1) becomes the default at T3 > start; the mint at T4
+    // the order that reproduced: the user narrows Bank (T1), the sessions START on the default Old (T2), the user makes
+    // Bank the default (T3), the mint (T4) — r1's date alone admits here (the start is after the narrowing)
+    clock = T1 + 10; k2.updateProfile(PB, { scope: 'all' }); k2.updateProfile(PB, { scope: 'one', conversation: 'bk-0000f1a1' });
+    clock = T2 + 10; settings2['browser.defaultProfile'] = 'Old';
+    const keyedA1 = spawn2('sess-r2-a1-keyed', 'A1 keyed', 'c0f7ab00-r2a1-4000-8000-000000000001');
+    const lateA1 = late2('sess-r2-a1-late', 'A1 late (witnessed)', 'c0f7ab00-r2a1-4000-8000-000000000002', T2 + 10, { witness: witness2() });
+    const legacyA1 = late2('sess-r2-a1-legacy', 'A1 late (no witness)', 'c0f7ab00-r2a1-4000-8000-000000000003', T2 + 10);
+    clock = T3; settings2['browser.defaultProfile'] = 'Bank';
+    clock = T4;
+    const vK = verdict(await openIn(keyedA1), keyedA1, PB), vL = await openIn(lateA1), vG = await openIn(legacyA1);
+    ok(vK !== 'admitted' && k2.pinFor(keyedA1._browserKey).profileId === PO, 'CONTROL ③f (r2): the spawn-keyed twin landed on the default in force at ITS start (Old) — the later default never reached it');
+    ok(verdict(vL, lateA1, PB) !== 'admitted' && k2.pinFor(lateA1._browserKey).profileId === PO && k2.pinFor(lateA1._browserKey).at === T2 + 10, '③f (r2) A1: the late key of a session that STARTED on Old (its spawn\'s witness) is pinned to Old, never to the Bank the user made the default later', { v: verdict(vL, lateA1, PB), pin: k2.pinFor(lateA1._browserKey) });
+    ok(verdict(vG, legacyA1, PB) !== 'admitted' && vG.status === 403 && vG.json.code === 'not_owner' && vG.json.pinned === true && k2.pinFor(legacyA1._browserKey).profileId === PB && k2.pinFor(legacyA1._browserKey).at === 0, '③f (r2) A1: a record from before r2 (no witness) gets the current default as a LANDING dated 0 — the bare command names Bank and is refused not_owner by the button, never admitted, never a silent temporary browser', { v: verdict(vG, legacyA1, PB), json: vG.json && vG.json.code, pin: k2.pinFor(legacyA1._browserKey) });
+    await retire(before, after, twinAfter, restored, keyedA1, lateA1, legacyA1);
+    // A2 + A3: the Task Group's default / cap set after the start
+    clock = T2 + 20; settings2['browser.defaultProfile'] = '';
+    const keyedA2 = spawn2('sess-r2-a2-keyed', 'A2 keyed in T', 'c0f7ab00-r2a2-4000-8000-000000000001', { taskId: 'T-late' });
+    const lateA2 = late2('sess-r2-a2-late', 'A2 late in T (witnessed)', 'c0f7ab00-r2a2-4000-8000-000000000002', T2 + 20, { witness: witness2({ taskId: 'T-late' }), taskId: 'T-late' });
+    const legacyA2 = late2('sess-r2-a2-legacy', 'A2 late in T (no witness)', 'c0f7ab00-r2a2-4000-8000-000000000003', T2 + 20, { taskId: 'T-late' });
+    clock = T3 + 20; groups2[0].browserProfileId = PB; groups2[0].browserCap = 5;
+    clock = T4 + 20;
+    const a2K = await openIn(keyedA2), a2L = await openIn(lateA2), a2G = await openIn(legacyA2);
+    ok(a2K.status === 200 && a2K.json.kind === 'ephemeral' && k2.groupCapOf(keyedA2._browserKey) === null, 'CONTROL ③f (r2): the spawn-keyed twin in the group got NO default and NO group cap (none at its start) — its own temporary browser');
+    ok(a2L.status === 200 && a2L.json.kind === 'ephemeral' && !k2.pinFor(lateA2._browserKey) && k2.groupCapOf(lateA2._browserKey) === null, '③f (r2) A2/A3: the witnessed late key in the group pins nothing and stamps no group cap — the group\'s later default and cap never reach a conversation that started before them', { v: verdict(a2L, lateA2, PB), pin: k2.pinFor(lateA2._browserKey), cap: k2.groupCapOf(lateA2._browserKey) });
+    ok(verdict(a2G, legacyA2, PB) !== 'admitted' && a2G.json && a2G.json.code === 'not_owner' && k2.pinFor(legacyA2._browserKey).at === 0 && k2.groupCapOf(legacyA2._browserKey) === null, '③f (r2) A2/A3: a record without a witness lands on the group\'s default at 0 (refused by the button on a narrowed one) and stamps NO group cap (the group is never read live)', { v: verdict(a2G, legacyA2, PB), cap: k2.groupCapOf(legacyA2._browserKey) });
+    await retire(keyedA2, lateA2, legacyA2);
+    groups2[0].browserProfileId = null; groups2[0].browserCap = null;
+    // A4: an adopted FORK — the spawn copies the parent's pin verbatim (the parent's user pin is STALE: older than the narrowing)
+    clock = T0 + 30; settings2['browser.defaultProfile'] = 'Bank';
+    const parentA4 = spawn2('sess-r2-a4-parent', 'A4 parent', 'c0f7ab00-r2a4-4000-8000-000000000001');
+    k2.setPin(parentA4._browserKey, PB, { origin: 'chosen', by: 'user' });
+    clock = T4 + 30;
+    const forkK = spawn2('sess-r2-a4-fork-keyed', 'A4 fork keyed', 'c0f7ab00-r2a4-4000-8000-000000000002', { fork: true, forkedFromId: 'c0f7ab00-r2a4-4000-8000-000000000001' });
+    const forkL = late2('sess-r2-a4-fork-late', 'A4 fork late (witnessed)', 'c0f7ab00-r2a4-4000-8000-000000000003', T4 + 30, { witness: witness2({ forkParentKey: parentA4._browserKey }), meta: { forkSourceId: 'c0f7ab00-r2a4-4000-8000-000000000001', forkedFrom: ['c0f7ab00-r2a4-4000-8000-000000000001'], forkRequested: false } });
+    const a4K = await openIn(forkK), a4L = await openIn(forkL);
+    ok(a4K.status === 403 && a4K.json.code === 'not_owner' && k2.pinFor(forkK._browserKey).origin === 'conversation' && k2.pinFor(forkK._browserKey).at === T0 + 30, 'CONTROL ③f (r2): the spawn-keyed fork carries its parent\'s STALE user pin verbatim (origin conversation, the parent\'s date) ⇒ not_owner');
+    ok(a4L.status === 403 && a4L.json.code === 'not_owner' && k2.pinFor(forkL._browserKey).origin === 'conversation' && k2.pinFor(forkL._browserKey).at === T0 + 30 && k2.pinFor(forkL._browserKey).by === 'user', '③f (r2) A4: the witnessed late key of a fork restores the parent\'s row verbatim — the same stale pin, the same refusal (never the instance default dated at the fork\'s own start)', { v: verdict(a4L, forkL, PB), pin: k2.pinFor(forkL._browserKey) });
+    await retire(parentA4, forkK, forkL);
+    // an explicit pick at a keyless spawn (the New Session dialog's profile row is not gated on the switch) is the user's choice at the start: witnessed as `chosen`
+    clock = T4 + 40; settings2['browser.defaultProfile'] = '';
+    const chosen = late2('sess-r2-chosen', 'Chosen at a keyless spawn', 'c0f7ab00-r2ch-4000-8000-000000000001', T4 + 40, { witness: witness2({ explicit: PO }) });
+    const rc = await openIn(chosen);
+    ok(rc.status === 200 && rc.json.kind === 'attachment' && rc.json.profile.id === PO && k2.pinFor(chosen._browserKey).origin === 'chosen', '③f (r2) a profile the user picked in the New Session dialog while the switch was off is witnessed as `chosen` and restored — the pick is no longer lost', { v: verdict(rc, chosen, PO), pin: k2.pinFor(chosen._browserKey) });
+    try { await k2.stop(PO).catch(() => { }); } catch { /* none */ }
+    await retire(chosen);
+    // ── (r2) THE SPAWN ↔ LATE PARITY TABLE: scope × start-vs-narrowing × default-set-before-vs-after-the-start — with the
+    //    witness the two columns are identical; the spawn's own answers are pinned beside them ──
+    {
+      const rows = [];
+      let seq = 0;
+      const scene = async ({ scope, startBefore, defaultBefore }) => {
+        clock = T0 + 1000 + (++seq) * 100;
+        k2.updateProfile(PB, { scope: 'all' }); settings2['browser.defaultProfile'] = defaultBefore ? 'Bank' : '';
+        const narrowAt = clock + 50;
+        const startAt = startBefore ? clock : narrowAt + 10;
+        const narrow = () => { clock = narrowAt; if (scope === 'one:X') k2.updateProfile(PB, { scope: 'one', conversation: 'bk-0000f9f9' }); };
+        const start = () => { clock = startAt; const sp = spawn2(`sess-pt-${seq}-s`, `pt${seq} spawn`, `c0f7ab00-pt${String(seq).padStart(2, '0')}-4000-8000-000000000001`); const lt = late2(`sess-pt-${seq}-l`, `pt${seq} late`, `c0f7ab00-pt${String(seq).padStart(2, '0')}-4000-8000-000000000002`, startAt, { witness: witness2() }); return [sp, lt]; };
+        let pair;
+        if (startBefore) { pair = start(); narrow(); } else { narrow(); pair = start(); }
+        if (!defaultBefore) { clock = Math.max(clock, startAt) + 20; settings2['browser.defaultProfile'] = 'Bank'; }
+        clock = narrowAt + 1000;
+        const vs = verdict(await openIn(pair[0]), pair[0], PB), vl = verdict(await openIn(pair[1]), pair[1], PB);
+        rows.push({ scope, startBefore, defaultBefore, spawn: vs, late: vl });
+        await retire(pair[0], pair[1]);
+      };
+      for (const scope of ['all', 'one:X']) for (const startBefore of [true, false]) for (const defaultBefore of [true, false]) await scene({ scope, startBefore, defaultBefore });
+      const diff = rows.filter((r) => r.spawn !== r.late);
+      console.log('    ' + rows.map((r) => `${r.scope}/${r.startBefore ? 'started-before' : 'started-after'}/${r.defaultBefore ? 'default-before' : 'default-after'}: spawn ${r.spawn} · late ${r.late}`).join('\n    '));
+      // the spawn's own answers: the default in force at the start, dated at the start (r1); no default at the start ⇒ a temporary browser
+      const expected = (r) => (!r.defaultBefore ? 'ephemeral' : r.scope === 'all' ? 'admitted' : r.startBefore ? 'not_owner' : 'admitted');
+      const offRow = rows.filter((r) => r.spawn !== expected(r));
+      ok(!diff.length && !offRow.length, `③f (r2) THE PARITY TABLE (${rows.length} rows: scope all / one:X × started before / after the narrowing × default set before / after the start): the spawn-keyed session and the witnessed late-keyed one answer IDENTICALLY (never looser, never stricter), and the spawn's column is its own rule`, rows);
+    }
+    // CONTROL 1: the engine as it was before r2 (the ladder's pick at the MINT, dated at the start) — the same judge ADMITS
+    const AT2 = "late = B.lateDefaultPin({ witness, ladder: ladder.refused ? { profileId: '', origin: 'harness' } : ladder, startedAt });";
+    const asBefore = src.replace(AT2, "late = ladder.refused ? { profileId: '', origin: 'harness', at: null, by: null, source: 'none' } : { profileId: ladder.profileId || '', origin: ladder.origin, at: startedAt, by: 'user', source: ladder.origin === 'conversation' ? 'conversation' : 'witness' };");
+    if (ok(asBefore !== src && !asBefore.includes(AT2), 'CONTROL ③f (r2): the patched copy (the ladder read at the MINT, dated at the start — the r1 engine)')) {
+      const engU = mkEngine2(M.load('src/server/browser-key.js', asBefore, 'ladder-at-mint'));
+      R.setup(ctx2(engU));
+      clock = T1 + 50; k2.updateProfile(PB, { scope: 'all' }); k2.updateProfile(PB, { scope: 'one', conversation: 'bk-0000f1a1' });
+      clock = T2 + 50; settings2['browser.defaultProfile'] = 'Old';
+      const legacyU = late2('sess-r2-ctl-legacy', 'A1 control (no witness)', 'c0f7ab00-r2c1-4000-8000-000000000001', T2 + 50);
+      const witU = late2('sess-r2-ctl-wit', 'A1 control (witnessed Old)', 'c0f7ab00-r2c1-4000-8000-000000000002', T2 + 50, { witness: witness2() });
+      clock = T3 + 50; settings2['browser.defaultProfile'] = 'Bank';
+      clock = T4 + 50;
+      const ru1 = await openIn(legacyU), ru2 = await openIn(witU);
+      ok(verdict(ru1, legacyU, PB) === 'admitted' && k2.pinFor(legacyU._browserKey).profileId === PB && k2.pinFor(legacyU._browserKey).at === T2 + 50,
+        'CONTROL ③f (r2): that copy ADMITS the session to the profile the user kept to another conversation (the default it never started on, dated at its start) — the landing at 0 is what stops it', { v: verdict(ru1, legacyU, PB), pin: k2.pinFor(legacyU._browserKey) });
+      ok(verdict(ru2, witU, PB) === 'admitted' && k2.pinFor(witU._browserKey).profileId === PB, 'CONTROL ③f (r2): …and it ignores the witness too (the session that started on Old walks into Bank) — the witness is what the r2 engine restores', { v: verdict(ru2, witU, PB), pin: k2.pinFor(witU._browserKey) });
+      await retire(legacyU, witU);
+    }
+    // CONTROL 2: a copy that stamps the group cap from the group LIVE — the same judge sees the later cap
+    const CAP2 = "k.stampGroupCap(bk.key, groupFacts, { value: B.witnessCap(witness) });";
+    const liveCap = src.replace(CAP2, 'k.stampGroupCap(bk.key, groupFacts);');
+    if (ok(liveCap !== src && !liveCap.includes(CAP2), 'CONTROL ③f (r2): the patched copy (the group cap read LIVE at the mint)')) {
+      const engC = mkEngine2(M.load('src/server/browser-key.js', liveCap, 'live-cap'));
+      R.setup(ctx2(engC));
+      clock = T0 + 60; groups2[0].browserProfileId = null; groups2[0].browserCap = null; settings2['browser.defaultProfile'] = '';
+      const capL = late2('sess-r2-ctl-cap', 'A3 control', 'c0f7ab00-r2c2-4000-8000-000000000001', T0 + 60, { witness: witness2({ taskId: 'T-late' }), taskId: 'T-late' });
+      clock = T3 + 60; groups2[0].browserCap = 4;
+      clock = T4 + 60;
+      await j('GET', '/api/agent/browser/status', undefined, as(capL));
+      ok(k2.groupCapOf(capL._browserKey) === 4, 'CONTROL ③f (r2): that copy stamps the cap the group has NOW (4) on a conversation that started with none — the witness\'s value is what keeps it at none', { cap: k2.groupCapOf(capL._browserKey) });
+    }
+    // (r3) THE REAL KEEPER: the landing dated 0 on a narrowed profile that carries no scope date — the registry shape
+    //      constructed in place (the product never writes it: every narrowing stamps scopeAt), the legacy late key refused
+    R.setup(ctx2(mkEngine2(BK)));
+    clock = T4 + 70; k2.updateProfile(PB, { scope: 'all' }); k2.updateProfile(PB, { scope: 'one', conversation: 'bk-0000f1a1' });
+    const rec3 = k2.profile(PB); delete rec3.scopeAt; // a narrowed record with NO scope date (what a restored pre-ruling registry holds)
+    ok(B.scopeOf(k2.profile(PB)) === 'one' && k2.profile(PB).scopeAt === undefined, 'setup ③f (r3): Bank is narrowed and carries no scopeAt');
+    settings2['browser.defaultProfile'] = 'Bank';
+    const legacy3 = late2('sess-r3-legacy', 'r3 legacy (no witness)', 'c0f7ab00-r3l0-4000-8000-000000000001', T4 + 71);
+    const witness3 = late2('sess-r3-nostart', 'r3 witness, no start', 'c0f7ab00-r3l0-4000-8000-000000000002', 0, { recorded: null, witness: { profileId: PB, origin: 'instance', at: T4 + 999_999, by: 'user', cap: null } });
+    witness3.createdAt = 0;
+    clock = T4 + 72;
+    const r3a = await openIn(legacy3), r3b = await openIn(witness3);
+    ok(verdict(r3a, legacy3, PB) !== 'admitted' && r3a.status === 403 && r3a.json.code === 'not_owner' && k2.pinFor(legacy3._browserKey).at === 0, '③f (r3) the legacy landing (dated 0) on a narrowed profile WITHOUT a scope date is refused not_owner by the button — a landing is never an authorization', { v: verdict(r3a, legacy3, PB), pin: k2.pinFor(legacy3._browserKey) });
+    ok(verdict(r3b, witness3, PB) !== 'admitted' && r3b.status === 403 && r3b.json.code === 'not_owner' && k2.pinFor(witness3._browserKey).at === 0, '③f (r3) a witness on a record that states no start is restored dated 0 — refused on the narrowed profile, never dated by its own (future) claim', { v: verdict(r3b, witness3, PB), pin: k2.pinFor(witness3._browserKey) });
+    await retire(legacy3, witness3);
+    // CONTROL 3 (r3): the PURE verdicts as they were — `0 ≥ (scopeAt||0)` and a start-less witness dated by its own claim — answer the OTHER way on the same rows
+    const srcB = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
+    const R3A = '  if (!(at > 0)) return false;\n';
+    const R3N = "at: started ? Math.min(started, witness.at) : 0, by: witness.by, source: 'witness' };";
+    const asWas = srcB.replace(R3A, '').replace(R3N, "at: started ? Math.min(started, witness.at) : witness.at, by: witness.by, source: 'witness' };");
+    if (ok(asWas !== srcB && !asWas.includes(R3A) && !asWas.includes(R3N), 'CONTROL ③f (r3): the patched copy (the r2 verdicts: a landing at 0 passes `0 ≥ scopeAt`, a start-less witness keeps its own date)')) {
+      const B0 = M.load('src/browser-profiles.js', asWas, 'r2-verdicts');
+      const flippedA = rowsA.filter(([a, want]) => B0.userPinAuthorizes(a) !== want).map(([a]) => a);
+      const flippedN = rowsN.filter(([a, want]) => JSON.stringify(B0.lateDefaultPin(a)) !== JSON.stringify(want)).map(([a]) => a);
+      const wantFlipA = rowsA.filter(([a]) => !(Number(a.pin.at) > 0) && !(Number(a.profile.scopeAt) > 0)).length;
+      ok(wantFlipA >= 4 && flippedA.length === wantFlipA && flippedA.every((a) => !(Number(a.pin.at) > 0)) && flippedN.length === 3, `CONTROL ③f (r3): that copy ADMITS the landing dated 0 on every narrowed profile without a scope date (${flippedA.length} rows flip) and dates the start-less witness by its own claim (${flippedN.length} rows flip) — the r3 rules are what refuse them`, { flippedA: flippedA.length, flippedN: flippedN.length });
+    }
+    try { for (const p of k2.list().profiles) await k2.stop(p.id).catch(() => { }); } catch { /* none */ }
+    k2.shutdown();
+    clock = T0;
+  }
+  R.setup(ctxFor(k));
+  for (const id of ['sess-late', 'sess-ui', 'sess-back', 'sess-twin', 'sess-fork', 'sess-fork2', 'sess-remote', 'sess-noid', 'sess-off', 'sess-twice', 'sess-twice-real']) active.delete(id);
+}
+
 // ── the client's DOM-free helpers ──
 {
   const P = await import(path.join(REPO, 'src/lib/browser-profile-picker.js'));
@@ -433,7 +894,7 @@ try {
   const labels = items.map((x) => x.label || '').join('|');
   ok(/Work/.test(labels) && /✓ Bank \(only First chat\)/.test(labels) && /Team/.test(labels), 'the picker offers EVERY named profile — a separate-tabs (mediated) one too — and marks one kept to a conversation "(only <name>)"', labels);
 }
-for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 3 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 
 try { for (const p of k.list().profiles) await k.stop(p.id).catch(() => { }); } catch { /* none */ }
 k.shutdown();

@@ -65,7 +65,8 @@ function heldIdentity(rec, storedToken = null) {
  *  verify r8: the tail says what the record HOLDS at the refusal — a refused sign-in on a record that keeps a live
  *  token used to read "nothing was connected" under a card that said connected. */
 function cancelledSentence(vendor, why, held = false) {
-  return `the ${vendor} sign-in was ${why === 'superseded' ? 'replaced by a newer sign-in' : why === 'timeout' ? 'past its time limit' : why === 'shutdown' ? 'ended by a shutdown' : 'cancelled'} while it was being completed — ${held ? 'the account keeps its current sign-in' : 'nothing was connected'}`;
+  // client-from-mount verify r4: `over-limit` = the consent machine's cap ended it (32 sign-ins were open) — its own words, never "cancelled"
+  return `the ${vendor} sign-in was ${why === 'superseded' ? 'replaced by a newer sign-in' : why === 'timeout' ? 'past its time limit' : why === 'shutdown' ? 'ended by a shutdown' : why === 'over-limit' ? 'ended to make room for newer sign-ins' : 'cancelled'} while it was being completed — ${held ? 'the account keeps its current sign-in' : 'nothing was connected'}`;
 }
 /** verify r6: the sentence a consent that named NO account is refused with (the adapter's exchange throws it). */
 function namelessSentence(vendor, why) {

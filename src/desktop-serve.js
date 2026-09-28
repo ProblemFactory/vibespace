@@ -213,6 +213,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const M = require('./desktop-apps');
+const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
 const LIMITS = require('./keeper-limits');
 const displayFacts = require('./desktop-display');
 
@@ -256,6 +257,8 @@ const FIT_ACTIVE_MS = 30000;
 const FIT_SLOW_BELT_MS = 60000;
 // round 3 A2: the one window census at an app's exit (two X spawns, ~10 ms measured) never holds the teardown longer
 const EXIT_CENSUS_MS = 2000;
+/** §7.9: how long a stat of an opened document may take before it is refused / not recorded (a dead mount). */
+const FILE_STAT_MS = 4000;
 /** The env marker every process of a session inherits — its identity when
  *  the leader is gone (KEEPER_ENV in the PURE model reserves the name). */
 const SESSION_ENV = 'VIBESPACE_DESKTOP_APP';
@@ -359,7 +362,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   // ── facts + ladder ──
   async function facts({ fresh = false } = {}) {
     if (!fresh && factsCache && now() - factsCache.at < FACTS_TTL_MS) return factsCache.facts;
-    const f = await display.hostFacts({ hostId, env: env() });
+    const f = await display.hostFacts({ hostId, env: env(), fresh }); // §7.9: `fresh` re-asks a NO about LibreOffice (an install just ended)
     const s = await singletonLive();
     const out = { ...f, singletonRunning: !!(s && s.running) };
     factsCache = { at: now(), facts: out };
@@ -388,9 +391,54 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
     return registryRows.map((row) => {
       if (row.browser) return browserRegistryRow(row, binOf);
+      if (row.office) return { ...O.officeRowFor(row, officeFactsOf(hostFacts, binOf)), args: [...(row.args || [])] }; // §7.9: presence = the binary AND the module's library
       const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
     });
+  }
+  /** §7.9: the machine's LibreOffice facts — hostFacts carries them (desktop-display officeFacts); a facts object from an
+   *  older display module (a suite's stand-in) is read from its bins alone: the binary known, the modules not. */
+  function officeFactsOf(hostFacts, binOf) {
+    if (hostFacts && hostFacts.office && typeof hostFacts.office === 'object') return hostFacts.office;
+    for (const e of O.OFFICE_EXECS) { const p = binOf(e); if (p) return { exec: e, path: p, program: null, confinement: null, modules: null }; }
+    return { exec: null, path: null, program: null, confinement: null, modules: null };
+  }
+  /** §7.9: a stat that cannot hang the caller (a file on a dead mount): the libuv pool's answer or a named timeout. */
+  function statBounded(file, ms = FILE_STAT_MS) {
+    let timer = null;
+    return Promise.race([
+      fs.promises.stat(file),
+      new Promise((_, rj) => { timer = setTimeout(() => rj(namedError('file-stat-timeout', `no answer from the file system within ${ms} ms`)), ms); timer.unref?.(); }),
+    ]).finally(() => clearTimeout(timer));
+  }
+  /** §7.9 — THE AFTER-EDIT FACT, recorded on the machine that holds the file (every terminal path passes teardown, the
+   *  app's parts already gone): the file's mtime now vs at launch ⇒ `fileChanged`. The hub turns a changed one into ONE
+   *  `file-changed {host, path, mtime}` broadcast (src/server/desktop-app-keeper.js); a stat that fails is said
+   *  (`fileEndError`), never guessed. */
+  async function noteFileEnd(rec, { clean = false } = {}) {
+    if (!rec || !rec.file) return;
+    try {
+      const st = await statBounded(rec.file);
+      rec.fileMtimeAtEnd = st.mtimeMs;
+      rec.fileChanged = Number.isFinite(rec.fileMtimeAtLaunch) ? st.mtimeMs !== rec.fileMtimeAtLaunch : null;
+      delete rec.fileEndError;
+    } catch (e) { rec.fileEndError = String((e && e.message) || e).slice(0, 300); }
+    if (clean && rec.office && rec.profileDir && !rec.fileLockDone) await retireFileLock(rec);
+  }
+  /** §7.9 — the DOCUMENT'S LOCK: LibreOffice ended by a signal (Stop, a relaunch) leaves `.~lock.<name>#` beside the
+   *  document (measured) and the next open says "Document in use". After a VERIFIED-CLEAN teardown the machine removes
+   *  it only when it names THIS session's own profile (PURE staleLockVerdict — a witness, never a time); any other lock
+   *  is kept and said on the record (`fileLockKept`). Bounded reads; never throws. */
+  async function retireFileLock(rec) {
+    const lock = O.lockFileOf(rec.file);
+    if (!lock) return;
+    let txt = null;
+    try { txt = await Promise.race([fs.promises.readFile(lock, 'utf8'), new Promise((_, rj) => { const t = setTimeout(() => rj(namedError('file-stat-timeout', 'no answer')), FILE_STAT_MS); t.unref?.(); })]); }
+    catch (e) { if (e && e.code === 'ENOENT') { rec.fileLockDone = true; return; } rec.fileLockKept = `the lock ${lock} could not be read (${e.message})`; return; }
+    const v = O.staleLockVerdict(txt, rec.profileDir);
+    if (!v.remove) { rec.fileLockKept = v.why; rec.fileLockDone = true; log.log?.(`[desktop] ${rec.id}: kept ${lock}: ${v.why}`); return; }
+    try { await fs.promises.unlink(lock); rec.fileLockRemovedAt = now(); rec.fileLockDone = true; log.log?.(`[desktop] ${rec.id}: removed the stale LibreOffice lock ${lock} (${v.why})`); }
+    catch (e) { if (e && e.code === 'ENOENT') rec.fileLockDone = true; else rec.fileLockKept = `could not remove ${lock}: ${e.message}`; }
   }
   // ── B-bfe6: a BROWSER as a desktop app — the human's own window, its OWN profile (PURE verdicts in desktop-apps.js) ──
   /** $HOME as the apps see it (the sanitised base env), for the "never the user's real profiles" verdict. */
@@ -490,11 +538,24 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     const reg = registry(f);
     const v = M.validateLaunchRequest(body || {}, reg);
     if (!v.ok) throw namedError(v.code || 'bad-request', v.error);
-    const row = v.launch.row;
+    let row = v.launch.row;
+    // §7.9: a DOCUMENT opens in its own module's row — THE open-with verdict again, here, with THIS machine's catalog
+    // (the route ran the machine rule before asking; a request never skips a check by arriving another way)
+    let doc = null;
+    if (v.launch.file) {
+      const ov = O.openWithVerdict({ row, file: v.launch.file, machine: { hostId: 'local', fileHost: 'local', registry: reg } });
+      if (!ov.ok) { const e = namedError(ov.code, ov.error); if (ov.remedy) e.remedy = ov.remedy; throw e; }
+      row = reg.find((r) => r.id === ov.catalogId) || row;
+      let st;
+      try { st = await statBounded(ov.file); } catch (e) { throw namedError('file-missing', `${ov.file} cannot be opened on this machine (${e.code === 'ENOENT' ? 'no such file' : e.message})`); }
+      if (!st.isFile()) throw namedError('file-missing', `${ov.file} is not a regular file on this machine`);
+      doc = { file: ov.file, label: ov.label, mtime: st.mtimeMs };
+    }
     const cap = M.capVerdict(liveRecords().filter((r) => r.id !== opts.replacing), limits);
     if (cap) throw namedError(cap.code, cap.error);
     if (row.needsWayland) throw namedError('needs-wayland', `${row.label} needs a Wayland compositor and cannot run on a private X display`);
     if (row.browser && !row.path) throw namedError('browser-absent', row.reason || `${row.label} is not installed`); // the catalog's own verdict (browserRowFor), never a guessed binary
+    if (row.office && !row.available) { const e = namedError(row.reasonCode || 'app-absent', row.reason || `${row.label} is not installed`); if (row.remedy) e.remedy = row.remedy; throw e; } // §7.9: the catalog's own verdict (officeRowFor) — the binary AND the module
     const execPath = resolveExec(row.exec);
     const cwd = resolveCwd(row.cwd);
     const id = opts.id || newId(); // a relaunch mints the successor's id first (the old record names it before it stops)
@@ -508,6 +569,17 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       const av = M.browserArgv(row, { profileDir: pv.dir, url: v.launch.url });
       if (!av.ok) throw namedError(av.code, av.error);
       browser = { kind: row.browser, profileDir: pv.dir, argv: av.argv, url: av.url, env: av.env || {}, keepProfile: v.launch.keepProfile === true, confinement }; // lane E (D4): av.env = the accessibility switch (firefox)
+    }
+    // §7.9: a LibreOffice session gets its OWN profile (-env:UserInstallation — without it a second launch hands its
+    // document to the first LibreOffice over its pipe and exits) under its own dir, removed by the browser rule
+    // (M.profileRetireVerdict: a person's ending); its argv from the PURE model — the module switch, then the path LAST
+    let office = null;
+    if (row.office) {
+      const pv = M.profileDirVerdict(profileDirOf(id), { home: homeOf(), ownedRoot: logRoot, confinement: row.confinement || null, exec: row.exec });
+      if (!pv.ok) throw namedError(pv.code, pv.error);
+      const av = O.officeArgv(row, { file: doc ? doc.file : null, profileDir: pv.dir });
+      if (!av.ok) throw namedError(av.code, av.error);
+      office = { module: row.office, profileDir: pv.dir, argv: av.argv };
     }
     const resolved = resolve(f, row, serverSetting);
     if (!resolved.backend) throw namedError('no-backend', `no display backend on this machine (${resolved.fallbackWhy})`);
@@ -526,6 +598,10 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     // lane D (a): a fraction is a REAL scale (GDK_SCALE at the ceiling, the picture shown at s ÷ it) — a browser row keeps the
     // floor rule (it scales whole from the font dpi, measured); the record stores what it was rendered at (gdkScale, pictureScale)
     const knobs = backend.stream === 'xpra' ? M.scaleKnobs(pick.scale, { rule: M.scaleRuleOf(row) }) : M.scaleKnobs(1);
+    if (office) {
+      try { await fs.promises.mkdir(office.profileDir, { recursive: true, mode: 0o700 }); await fs.promises.chmod(office.profileDir, 0o700); }
+      catch (e) { throw namedError('profile-dir', `could not create the LibreOffice profile ${office.profileDir}: ${e.message}`); }
+    }
     if (browser) {
       // created 0700 (the profile holds the browser's cookies and saved secrets); firefox's first-run switch is its user.js
       try {
@@ -534,9 +610,11 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (browser.kind === 'firefox') await fs.promises.writeFile(path.join(browser.profileDir, 'user.js'), M.firefoxUserJs(), { mode: 0o600 });
       } catch (e) { throw namedError('profile-dir', `could not create the browser profile ${browser.profileDir}: ${e.message}`); }
     }
-    const rec = M.newRecord({ id, label: row.label, exec: execPath, args: browser ? browser.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: backend.stream === 'xpra' ? knobs.gdkScale : null, pictureScale: backend.stream === 'xpra' ? knobs.pictureScale : null, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
+    const rec = M.newRecord({ id, label: doc ? doc.label : row.label, exec: execPath, args: browser ? browser.argv : office ? office.argv : (row.args || []), cwd, env: browser && Object.keys(browser.env).length ? { ...(row.env || {}), ...browser.env } : row.env, source: v.launch.source, backend: resolved.backend, via: resolved.via, fallbackWhy: resolved.fallbackWhy, idleTimeoutMs: idleTimeoutMin(serverSetting) * 60000, now: now(), scale: knobs.scale, dpi: knobs.dpi, gdkScale: backend.stream === 'xpra' ? knobs.gdkScale : null, pictureScale: backend.stream === 'xpra' ? knobs.pictureScale : null, scaleOrigin: backend.stream === 'xpra' ? pick.origin : null, scaleFrom: backend.stream === 'xpra' ? pick.from : null });
     if (v.launch.source === 'registry') rec.appId = row.id;
     if (browser) { rec.browser = browser.kind; rec.profileDir = browser.profileDir; rec.keepProfile = browser.keepProfile; rec.url = browser.url; rec.confinement = browser.confinement; }
+    if (office) { rec.office = office.module; rec.profileDir = office.profileDir; } // §7.9
+    if (doc) { rec.file = doc.file; rec.fileMtimeAtLaunch = doc.mtime; } // §7.9: the after-edit fact's baseline
     rec.recipe = resolved.recipe;
     store.apps[id] = rec;
     pruneHistory();
@@ -573,9 +651,11 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (why) throw namedError(why.code, why.error);
     const lopts = { scaleChoice: rv.choice, replacing: id };
     if (settings) lopts.settings = settings;
-    if (rec.browser) {
+    // §7.9: a LibreOffice session relaunches the same way — its document is LOCKED by the running instance
+    // (.~lock.<name>#: a successor started beside it would open "Document in use"), and its profile goes with it
+    if (rec.browser || rec.office) {
       const nextId = newId();
-      const next = await launch({ ...M.relaunchBodyOf(rec), url: rec.url || undefined, keepProfile: rec.keepProfile === true, dpr: rv.dpr, uiScale: rv.uiScale }, { ...lopts, id: nextId, deferBringUp: true });
+      const next = await launch({ ...M.relaunchBodyOf(rec), ...(rec.browser ? { url: rec.url || undefined, keepProfile: rec.keepProfile === true } : {}), dpr: rv.dpr, uiScale: rv.uiScale }, { ...lopts, id: nextId, deferBringUp: true });
       const armSeat = typeof onSuccessor === 'function' ? onSuccessor(nextId) : null;
       rec.replacedBy = nextId;
       commit();
@@ -916,6 +996,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       if (!(await signalVerified(rec, 'session marker leftover', escaped, null))) clean = false;
     }
     children.delete(rec.id); sampledAt.delete(rec.id); samples.delete(rec.id); clearFit(rec.id);
+    if (rec.file) await noteFileEnd(rec, { clean }); // §7.9: every part is gone — the document's mtime now vs at launch (the hub's file-changed); its lock, when this session wrote it
     try { H.onTeardown?.(rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: teardown hook failed: ${e.message}`); } // the hub's guard + live rows go with the session
     if (rec.profileDir && !M.isLiveState(rec.state) && !stopping.has(rec.id)) await retireProfile(rec, { clean, why: rec.state }); // B-bfe6: a stop retires AFTER its verdict (below)
     return clean;

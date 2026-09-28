@@ -42,6 +42,11 @@
 //      share ONE body (_mergeDrop) and a drop onto an already-split chain says
 //      so with Undo; the merge-as-split toast's Unsplit keeps the drop slot;
 //      the restore's re-key carries activeWindowId.
+//   ⑥ THE ONE RETIREMENT (inc-mukeyzpt-lpou): a census — every window-ending delete runs wm._retireWindow
+//      first (the stage, every cached desktop record, the held close); the tab ✕ goes through requestClose;
+//      the remote apply never re-creates a held close and reads a record's chain without it (withoutMembers),
+//      re-sends the close once, every save releases it; a remote record for a hidden desktop goes through
+//      cacheRemoteState. The chrome half is scripts/test-split-close-resurrect.mjs.
 // Fast: no DOM, no ports, no chrome. The chrome half is test-window-binding.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -270,6 +275,46 @@ console.log('— ③ wiring pins');
   ok(/if \(chain\.layout === 'split'\) \{ this\._announceSplitJoin\(chain, \{ dragged: draggedWin, from, before \}\); return; \}/.test(aum) && /t\('Undo'\)/.test(fnBody('_announceSplitJoin')) && /this\._restoreChainLayout\(chain, b\)/.test(fnBody('undoSplit')), '⑤ ④ a merge onto a chain ALREADY split says so with Undo (the window back where it stood, the split back to its layout before the drop)');
   ok(/this\.unbindSplit\(chain, \{ order: Array\.isArray\(unsplitOrder\) && untouched\(\) \? unsplitOrder : null \}\)/.test(fnBody('bindSplit')), '⑤ ③ the merge-as-split toast\'s Unsplit returns the tabs to the drop slot (only while the strip is still the one the bind made)');
   ok(/if \(wm\.activeWindowId === oldId\) wm\.activeWindowId = winState\.winId;/.test(lj), '⑤ ⑦ the restore\'s re-key carries wm.activeWindowId (it named a window that no longer existed)');
+}
+
+console.log('— ⑥ THE ONE RETIREMENT + the held close (inc-mukeyzpt-lpou: a closed side-by-side viewer came back as a window after two desktop switches)');
+{
+  // THE CENSUS: every place a window's life ENDS (a `this.windows.delete(` / `wm.windows.delete(` that is not a re-key —
+  // a re-key sets the same window back under its new id within five lines) sits in a method that runs the ONE
+  // retirement BEFORE the delete. The pre-fix tab ✕ reached removeFromTabChain, whose delete had none: the closed
+  // window stayed in switchTo's cached desktop record and the next round trip replayed it.
+  const files = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f);
+  const census = (srcOf) => {
+    const sites = [], bad = [];
+    for (const f of files) {
+      const lines = srcOf(f).split('\n').map((x) => x.replace(/(^|\s)\/\/.*$/, '$1')); // code only: a call after a line comment is no call
+      lines.forEach((ln, i) => {
+        if (!/\b(?:this|wm)\.windows\.delete\(/.test(ln)) return;
+        if (lines.slice(i, i + 6).some((x) => /\.windows\.set\(/.test(x))) return; // a re-key: the window lives on under its new id
+        let h = i; while (h > 0 && !/^  (?:async )?[_a-zA-Z$][\w$]*\([^)]*\) \{/.test(lines[h])) h--;
+        sites.push(f + ':' + (i + 1));
+        if (!/this\._retireWindow\(/.test(lines.slice(h, i + 1).join('\n'))) bad.push(f + ':' + (i + 1) + ' in ' + (lines[h] || '').trim().slice(0, 60));
+      });
+    }
+    return { sites, bad };
+  };
+  const cs = census(read);
+  ok(cs.sites.length >= 2 && cs.bad.length === 0, `⑥ CENSUS: every window-ending delete (${cs.sites.length}: ${cs.sites.join(', ')}) runs this._retireWindow() before it in the same method`, J(cs.bad));
+  // CONTROL: the pre-fix removeFromTabChain (the retirement line gone — or only in a comment) reddens the census
+  const tgSrc = read('src/lib/tab-group.js'), RET = '    this._retireWindow(winId); // THE ONE RETIREMENT';
+  const ctlA = census((f) => (f === 'src/lib/tab-group.js' ? tgSrc.replace(RET, '    //') : read(f)));
+  const ctlB = census((f) => (f === 'src/lib/tab-group.js' ? tgSrc.replace(RET, '    // this._retireWindow(winId); THE ONE RETIREMENT') : read(f)));
+  ok(tgSrc.includes(RET) && ctlA.bad.some((b) => b.startsWith('src/lib/tab-group.js')) && ctlB.bad.some((b) => b.startsWith('src/lib/tab-group.js')), '⑥ CONTROL: the census reds on the pre-fix removeFromTabChain (the retirement removed, or left only in a comment)', J({ a: ctlA.bad, b: ctlB.bad }));
+  const wj6 = read('src/lib/window.js'), tg6 = read('src/lib/tab-group.js'), lj6 = read('src/lib/layout.js'), dm6 = read('src/lib/desktop-manager.js');
+  const rw = (() => { const i = wj6.indexOf('\n  _retireWindow('); return i < 0 ? '' : wj6.slice(i, wj6.indexOf('\n  }\n', i)); })();
+  ok(/this\._app\?\.stage\?\.onWindowClosed\(id\);/.test(rw) && /this\._app\?\.desktopManager\?\.purgeClosedWindow\(id\);/.test(rw) && /layoutManager\?\.noteClosed\?\.\(id,/.test(rw), '⑥ the retirement reaches every register: the stage, every cached desktop record (purgeClosedWindow), the layout manager\'s held close');
+  ok(/closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/.test(tg6) && !/this\.removeFromTabChain\(chain, tabWinId\)/.test(tg6), '⑥ the tab ✕ is a user close through the ONE door (requestClose → closeWindow), never removeFromTabChain directly');
+  ok(/if \(heldIds\.includes\(winId\)\) \{ heldClosed = true; continue; \}\n(?:\s*\/\/[^\n]*\n)*\s*this\._createRemoteWindow\(rw\);/.test(lj6), '⑥ the remote apply never re-creates a HELD close (checked before _createRemoteWindow)');
+  ok(/const tc = heldIds\.length \? withoutMembers\(rw\.tabChain, heldIds\) : rw\.tabChain;/.test(lj6) && /remoteChains\.set\(key, tc\);/.test(lj6), '⑥ …and reads a record\'s chain WITHOUT the held members (PURE withoutMembers — the local close\'s arithmetic), never a rebuild that flattens the split');
+  ok(/if \(heldClosed\) setTimeout\(\(\) => this\._resendHeldClose\(\), 1000\);/.test(lj6) && /this\._releaseHeldRatios\(\); this\._releaseHeldCloses\(desktopId\);/.test(lj6) && /this\.app\.layoutManager\?\._releaseHeldCloses\?\.\(desktopId\);/.test(dm6), '⑥ a refused re-creation re-sends the close ONCE; every save that leaves (the autosave, a switch\'s broadcast) releases the closes made on its desktop');
+  const rhc = (() => { const i = lj6.indexOf('\n  _resendHeldClose('); return i < 0 ? '' : lj6.slice(i, lj6.indexOf('\n  }\n', i)); })();
+  ok(/this\._lastUserInputAt = Math\.max\(this\._lastUserInputAt \|\| 0, at\);/.test(rhc) && !/_lastUserInputAt = Date\.now\(\)/.test(rhc), '⑥ the close re-send keeps §6b\'s expiry meaningful (the close\'s REAL time, never a fabricated now)');
+  ok(/dm\.cacheRemoteState\(msg\.desktopId, msg\.state\);/.test(lj6) && !/dm\._savedStates\.set\(msg\.desktopId/.test(lj6) && /base\.has\(String\(w\.id\)\) && !now\.has\(String\(w\.id\)\)/.test(dm6), '⑥ a remote record for a desktop not on show goes through cacheRemoteState: a hidden window the last record on the wire listed and this one drops is closed then (the parked second client)');
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

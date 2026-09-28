@@ -426,6 +426,9 @@ const ALLOW = [
   // desktop lane E (D3): the user's "Ask <agent> to take control" — FREE by default (the stash: the agent's next turn);
   // its "wake it now" is the ONE billed site, forwarded to the gated ladder under its own declared reason.
   { file: 'src/server/window-request.js', prim: 'deliver-ladder', why: "the window-control request FORWARDS its wake to the gated ladder (spendReason 'window-share-request'); the default is the free next-turn stash, a refused or undeliverable wake is stashed too, and a 30 s per-conversation floor is pacing, not money" },
+  // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the strip's "Hand over now" — the user's click —
+  // FORWARDS the whole stash as ONE message to the gated ladder under its own declared reason; a refusal leaves the stash as it was.
+  { file: 'src/server/stash-handover.js', prim: 'deliver-ladder', why: "the stash hand-over FORWARDS the waiting notices as ONE message to the gated ladder (spendReason 'stash-handover'); it drains only what was delivered, a refused or unreachable hand-over leaves the stash untouched and says why" },
   { file: 'src/server/groups-engine.js', prim: 'deliver-ladder', why: "the agent-groups engine's ONE wake site FORWARDS to the gated ladder (spendReason 'peer-message'); a refusal is journaled and the message rides the member's next-turn report — the engine never stashes and never opens a turn beside the ladder" },
 ];
 
@@ -1844,7 +1847,7 @@ console.log('\n§6 the Stop nudge: a persisted cooldown, an exit condition, and 
   guard = mkGuard();
   setupAgentRoutes({
     app, activeSessions: sessions, tasks: { list: () => [], forSession: () => [] },
-    sessionStatus: { snapshot: () => ({}), get: (k) => statuses.get(k) || null, consumeNotice: () => null, consumeNotices: () => [], rekey: () => { }, history: () => [] },
+    sessionStatus: { snapshot: () => ({}), get: (k) => statuses.get(k) || null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => { }, history: () => [] },
     SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' },
     userTodos: { rekey: () => { }, forSession: () => [] },
     sessionStatusKey: (s, id) => `claude:${id}`,

@@ -33,8 +33,9 @@ export function assignmentRefusalText(why) {
   switch (String(why || '')) {
     case 'filter-missing': return t('The filter is not saved yet — add its rules, then save again');
     case 'principal': return t('Pick an agent or a group to wake.');
-    case 'wake-cap': return t('Wakes per day must be a number of 0 or more');
-    case 'digest-cap-zero': return t('A digest is a paced wake — set “Wakes per day” to at least 1, or remove the notification');
+    // the field's own words (verify round 3: the toast named "Wakes per day", a label the dialog no longer has)
+    case 'wake-cap': return t('“At most … times a day” must be a number of 0 or more');
+    case 'digest-cap-zero': return t('A digest is a paced wake — set “At most … times a day” to at least 1, or remove the notification');
     case 'digest': return t('The digest window must be a number of minutes');
     case 'not-an-object': case 'mode': case 'notify': case 'authority': case 'scope': return staleValueText();
     default: return null;
@@ -80,12 +81,24 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'legacy-copy-failed': return t('This account\'s old client could not be moved onto the account — edit it and enter the client again');
     case 'custom-undecryptable': return t('This account\'s own client secret cannot be decrypted — edit the account and enter it again');
     case 'builtin': return t('The built-in source cannot be removed or duplicated');
+    // 2.369.195: an account borrowing a storage mount's own OAuth client (the server copies it)
+    case 'mount-gone': return t('That storage mount no longer exists — pick another client');
+    case 'mount-no-client': return t('That storage mount holds no custom OAuth client of its own — pick another client');
+    case 'mount-client-vendor': return t('That storage mount’s client belongs to another provider — pick another client');
+    case 'mount-client-unsupported': return t('This account type cannot use a storage mount’s client — pick a preset or enter your own client');
+    case 'mount-secret-undecryptable': return t('That storage mount’s client secret cannot be decrypted — edit the mount and enter it again');
+    case 'no-mounts': return t('Storage mounts are not available on this instance — pick a preset or enter your own client');
+    case 'ambiguous-client': return t('The request named two OAuth clients — pick one and try again');
+    case 'agent-forbidden': return t('Only you can do this, from the Channels panel — an agent may not');
     case 'unknown-option': return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
     case 'auth-expired': return t('The login expired — re-authorize the channel');
     case 'auth-failed': return raw ? t('The consent flow failed: {error}', { error: raw }) : t('The consent flow failed');
     case 'not-supported': return t('This channel does not support that');
     case 'send-not-available': return t('Sending is not available here: {why}', { why: chanCaps.sendWhyText(r.why || 'unknown', { t }) });
-    case 'bad-state': return t('This proposal can no longer be decided');
+    // 2026-09-27: the drafting agent took it back while the card was open
+    case 'bad-state': return r.state === 'withdrawn' ? t('The agent withdrew this proposal — there is nothing to decide') : t('This proposal can no longer be decided');
+    case 'not-yours': return t('Only the agent that proposed it can withdraw it');
+    case 'not-withdrawable': return t('This proposal can no longer be withdrawn');
     case 'reconcile-not-available': return t('This channel cannot be checked by the machine');
     case 'authority-capped': return t('Direct send is not offered here');
     // the account / pattern grains answer the validator's closed code (hotfix 2026-09-26); a route that does not keeps the sentence
@@ -153,6 +166,92 @@ export function watcherHowText(w) {
   if (!w) return '';
   const how = w.notify === 'digest' ? t('digest every {m} min', { m: w.digestMinutes }) : t('wake per batch');
   return w.mode === 'filtered' ? `${how} ${t('on a filter')}` : how;
+}
+/** The name a mention-only filter waits for (`{rules:[{kind:'mention', value}]}` — the Notify dialog's "Only
+ *  when … is mentioned"), else null. */
+export function mentionOnlyName(filter) {
+  const rules = filter && Array.isArray(filter.rules) ? filter.rules : [];
+  // EVERY leading @ (verify round 3): the validator strips one, so `@@x` typed was stored as `@x` and an unchanged
+  // save then wrote `x` — a filter that matched nothing began to wake on every @x. The validator strips them all now
+  // (`validateRule`); the same rule here keeps a stored value on its round trip
+  return rules.length === 1 && rules[0] && rules[0].kind === 'mention' && String(rules[0].value || '').trim() ? String(rules[0].value).trim().replace(/^@+/, '') : null;
+}
+/**
+ * THE NOTIFY DIALOG'S ANSWERS ⇄ THE WATCHER, ONE TO ONE (verify round 2, 2026-09-27). PURE — the dialog
+ * (channel-filter-editor.js `watcherRow`) opens on `notifyAnswers(stored)` and saves `watcherOfAnswers(answers)`,
+ * and test-channel-filter ⑫ walks the whole watcher space through both: every stored watcher comes back as
+ * itself, so nothing the wire can hold is out of the dialog's reach.
+ *
+ *   ② what: 'all' | 'rule' | 'mention' (+ `mention`, the name)      ↔ mode + filter
+ *   ③ how:  'now' | 'digest' (+ `digestMinutes`)                    ↔ notify + digestMinutes
+ *      cap: the daily cap — ITS OWN ANSWER, never a third `how`      ↔ dailyWakeCap
+ *
+ * The cap bounds a digest exactly as it bounds a wake (the engine reads `dailyWakeCap` for both). Drawn as a
+ * third exclusive answer beside "right away" and "a digest" it could not be set on a digest at all — the owner's
+ * own saved notification (a digest every 1440 minutes, at most 1000 a day) opened with its cap in a disabled field.
+ */
+export function notifyAnswers(w) {
+  const filtered = !!(w && w.mode === 'filtered');
+  const mention = filtered ? mentionOnlyName(w.filter) : null;
+  const num = (v, dflt) => (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : dflt);
+  return {
+    what: !filtered ? 'all' : mention ? 'mention' : 'rule',
+    mention: mention || '',
+    how: w && w.notify === 'digest' ? 'digest' : 'now',
+    digestMinutes: num(w && w.digestMinutes, F.DEFAULT_DIGEST_MINUTES),
+    cap: num(w && w.dailyWakeCap, F.DEFAULT_DAILY_WAKE_CAP),
+  };
+}
+/** The watcher (the wire's shape) the answers say. `principal` = who; `ruleFilter` = the rule editor's filter
+ *  (used when `what` is 'rule'); `stored` = the watcher the dialog opened on (what no question asks — the digest
+ *  window of a wake, `receiptWake` — rides through as stored). */
+export function watcherOfAnswers(a, { principal = null, ruleFilter = null, stored = null } = {}) {
+  const x = a || {};
+  const filter = x.what === 'rule' ? (ruleFilter || { match: 'any', rules: [] })
+    : x.what === 'mention' ? { match: 'any', rules: [{ kind: 'mention', value: String(x.mention || '').trim().replace(/^@+/, '') }] }
+      : null;
+  const digest = x.how === 'digest';
+  const num = (v, dflt) => (v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : dflt);
+  // WHAT NO QUESTION ASKS RIDES THROUGH FOR THE SAME PRINCIPAL ONLY (verify round 3): a row re-pointed from A to B
+  // carried A's `receiptWake: true` (an older UI's flag no control shows) onto B — billed receipt wakes B never
+  // opted into. A wake's stored digest window is the same kind of baggage.
+  const same = samePrincipal(principal, stored && stored.principal);
+  return {
+    principal,
+    mode: filter ? 'filtered' : 'all',
+    notify: digest ? 'digest' : 'wake',
+    digestMinutes: digest ? num(x.digestMinutes, F.DEFAULT_DIGEST_MINUTES) : num(same ? stored.digestMinutes : undefined, F.DEFAULT_DIGEST_MINUTES),
+    dailyWakeCap: num(x.cap, F.DEFAULT_DAILY_WAKE_CAP),
+    receiptWake: !!(same && stored.receiptWake),
+    ...(filter ? { filter } : {}),
+  };
+}
+/** The same principal = the same kind and id (a name is a label). */
+export function samePrincipal(a, b) {
+  return !!(a && b && a.kind === b.kind && String(a.id || '') !== '' && String(a.id || '') === String(b.id || ''));
+}
+/**
+ * THE NOTIFY DIALOG'S PREVIEW (channel-polish, 2026-09-27 — the owner: "那个通知配置项目本身就有点
+ * confusing"): ONE sentence that says back what a notification will do, rebuilt on every change —
+ * "工作 will be woken right away for every message in this account, at most 20 times a day." PURE over
+ * the watcher's own fields (the wire's shape) + `scope` (conversation | account | pattern); `tr` injected
+ * so a suite words it in every language from one process.
+ */
+export function notifySentence(w, tr = t, { scope = 'conversation' } = {}) {
+  if (!w || !w.principal || !(w.principal.id || w.principal.name)) return tr('Pick who gets woken.');
+  const who = w.principal.name || w.principal.id;
+  const mention = w.mode === 'filtered' ? mentionOnlyName(w.filter) : null;
+  const what = w.mode !== 'filtered' ? tr('every message') : mention ? tr('the messages mentioning {name}', { name: mention }) : tr('the messages matching its rule');
+  const where = scope === 'account' ? tr('in this account') : scope === 'pattern' ? tr('in the conversations matching the rule') : tr('in this conversation');
+  // THE CAP THE ENGINE READS (verify round 3): a digest stored with cap 0 by an older build is read as 1 by
+  // `F.digestCap` (it delivers once per window) — the preview said "will not be woken" while it billed
+  const cap = F.digestCap(w);
+  if (cap <= 0) return tr('{who} will not be woken here — at most 0 times a day.', { who });
+  if (w.notify === 'digest') {
+    const line = tr('{who} will get one digest every {n} minutes of {what} {where}, woken at most {cap} times a day.', { who, n: Number(w.digestMinutes) || F.DEFAULT_DIGEST_MINUTES, what, where, cap });
+    return Number(w.dailyWakeCap) === 0 ? line + ' ' + tr('(A digest cannot be capped at 0 — it is read as 1. Set at least 1 to save.)') : line;
+  }
+  return tr('{who} will be woken right away for {what} {where}, at most {cap} times a day.', { who, what, where, cap });
 }
 /** The two facts of a grain (or of a conversation, each principal once) on
  *  ONE line: "Access: A (may send), Group · 工作 (drafts) · Notify: A wake per

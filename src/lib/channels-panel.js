@@ -48,7 +48,7 @@ import { registerMenuItem, menuItems } from './contributions.js';
 import { registerWindowType } from './window-types.js';
 import { UI_ICONS } from './icons.js';
 // the shared chrome primitives (one SVG helper, one textContent element, one house button)
-import { icon, btn, noteLine, el as chanEl } from './channel-chrome.js';
+import { icon, btn, noteLine, el as chanEl, avatar, convAvatar } from './channel-chrome.js';
 // PURE, bundled directly (the task-color-seq / quota-model pattern). THE
 // SENTENCE IS COMPOSED HERE (r2): `freshnessClaim` used to build it server
 // side with no translator, so the chip this feature calls its honesty
@@ -406,9 +406,13 @@ function showOptionsDialog(app, a) {
  *  decision 20), the switch itself. Saving a claim is a RE-DECLARATION: it
  *  clears a demotion's counters and retries the lane once, so the claim is
  *  sent only when it changed or the lane is demoted. */
+/** WHAT PUSH IS (design §6.4) — the dialog's first line and the menu row's tooltip (ONE spelling, a t() literal the i18n scan sees). */
+const pushWhat = () => t('Push = the platform tells VibeSpace about a new message the moment it arrives (seconds); off = polling every few minutes. Gmail needs a Google Cloud Pub/Sub topic + this instance\'s own pull subscription (one re-authorize adds the Pub/Sub permission); Lark uses the app\'s long connection — no public address needed.');
 function showPushDialog(app, a) {
   const p = a.push || {};
   const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true });
+  // WHAT PUSH IS, first (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗") — both vendors' requirements, one line
+  body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat()));
   body.appendChild(chanLine('chan-flow-intro', chanCaps.pushLaneText(p, a.lane, { t, now: Date.now() })));
   if (p.demotedAt) body.appendChild(noteLine('chan-flow-note', t('The claim was withdrawn by measurement. Re-declaring it clears the counters and retries the lane once.'), { warn: true }));
   let enabledBox = null;
@@ -438,6 +442,7 @@ function showPushDialog(app, a) {
   const current = chanCaps.PUSH_CLAIMS.includes(p.claimedExclusive) ? p.claimedExclusive : 'unknown';
   sel.value = current;
   wrap.appendChild(sel);
+  wrap.appendChild(chanLine('chan-opt-help chan-push-exclusive-help', t('Exclusive = only this VibeSpace consumes that subscription; shared = another instance also reads it, so push here only advances the cursor and polling stays fast.')));
   wrap.appendChild(chanLine('chan-opt-help', t('The platform does not say how many clients share the app, so exclusivity is asserted here and MEASURED by the product: records the reconciliation poll sees before push do not happen on an exclusive lane. Past 2% over 20 records the lane demotes itself to cursor kicks and says so.')));
   body.appendChild(wrap);
   const actions = document.createElement('div');
@@ -568,7 +573,7 @@ export function registerChannelAdapterMenu() {
   registerMenuItem({ menu: M, group: '1_rows', order: 11, when: (c) => !A(c).builtin, label: () => t('Notify…'), run: (c) => showNotifyDialog(c.app, { kind: 'account', adapter: A(c) }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 12, when: (c) => !A(c).builtin, label: () => t('Conversations matching a rule…'), run: (c) => showGrantAccessDialog(c.app, { kind: 'pattern', adapter: A(c), id: null }) });
   registerMenuItem({ menu: M, group: '1_rows', order: 20, when: (c) => (A(c).optionsSchema || []).length > 0, label: () => t('Options'), run: (c) => showOptionsDialog(c.app, A(c)) });
-  registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), run: (c) => showPushDialog(c.app, A(c)) });
+  registerMenuItem({ menu: M, group: '1_rows', order: 30, when: (c) => !!A(c).push, label: () => t('Push…'), tooltip: () => pushWhat(), run: (c) => showPushDialog(c.app, A(c)) });
   // P4: THE SENDER HONESTY SWITCH (§9.5) — per channel, OFF by default, drawn
   // only where the capability row allows sending (the digest hands `null`
   // for a read-only adapter). The row's check glyph says the state; the
@@ -869,38 +874,49 @@ export function renderChannelsPanel(app, c) {
   function draw() {
     if (!c.isConnected) return;
     const scroller = scrollerOf();
-    const keep = scroller ? scroller.scrollTop : 0;
-    const frag = document.createDocumentFragment();
-    build(frag, digest || {});
-    root.replaceChildren(frag);
-    if (scroller && scroller.scrollTop !== keep) scroller.scrollTop = keep;
+    const keepTop = scroller ? scroller.scrollTop : 0;
+    // IN PLACE (verify round 4): the top-level nodes, the group list, every part, every account section and its
+    // rows box are KEPT across draws and reconciled — a node already where it belongs is never detached, so the
+    // 879-row lists are not re-laid out per broadcast and a click in flight on a row survives it
+    const top = build(digest || {});
+    pruneMemo();
+    reconcile(root, top);
+    if (scroller && scroller.scrollTop !== keepTop) scroller.scrollTop = keepTop;
   }
 
   /** A SECONDARY section (Accounts / Message watcher): a fold head + a body;
    *  the fold is the user's, persisted (`channelsPanelFolds`). */
   function part(key, label, countText, fill) {
-    const p = document.createElement('div');
+    const p = keep('part:' + key, () => {
+      const el = document.createElement('div');
+      el.dataset.part = key;
+      const h = document.createElement('div');
+      h.className = 'chan-part-head';
+      h.appendChild(icon('chevronDown', 10, 'chan-part-chev'));
+      const nm = document.createElement('span');
+      nm.className = 'chan-part-name';
+      h.appendChild(nm);
+      const b = document.createElement('div');
+      b.className = 'chan-part-body';
+      el.append(h, b);
+      return el;
+    });
     const folded = !!(FOLDS && FOLDS[key]);
     p.className = 'chan-part' + (folded ? ' chan-part-collapsed' : '');
-    p.dataset.part = key;
-    const h = document.createElement('div');
-    h.className = 'chan-part-head';
-    h.appendChild(icon('chevronDown', 10, 'chan-part-chev'));
-    const nm = document.createElement('span');
-    nm.className = 'chan-part-name';
-    nm.textContent = label;
-    h.appendChild(nm);
-    if (countText) { const n = document.createElement('span'); n.className = 'chan-part-count'; n.textContent = countText; h.appendChild(n); }
+    const h = p.firstChild, b = p.lastChild;
+    h.querySelector('.chan-part-name').textContent = label;
+    let n = h.querySelector('.chan-part-count');
+    if (countText) { if (!n) { n = document.createElement('span'); n.className = 'chan-part-count'; h.appendChild(n); } n.textContent = countText; } else if (n) n.remove();
     h.onclick = () => { const now = !p.classList.contains('chan-part-collapsed'); p.classList.toggle('chan-part-collapsed', now); setFold(key, now); };
-    p.appendChild(h);
-    const b = document.createElement('div');
-    b.className = 'chan-part-body';
-    fill(b);
-    p.appendChild(b);
+    const items = [];
+    fill({ appendChild: (x) => { items.push(x); return x; } });
+    reconcile(b, items);
     return p;
   }
 
-  function build(into, d) {
+  function build(d) {
+    const top = [];
+    const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
     const convs = (d && d.conversations) || [];
     const { rows, archived } = groupListRows({ groups: groups || [], conversations: convs, adapters });
@@ -933,10 +949,11 @@ export function renderChannelsPanel(app, c) {
       into.appendChild(noteLine('chan-quarantine-note', text, { warn: true }));
     }
 
-    // ── THE FIRST SCREEN: the group list ──
-    const list = document.createElement('div');
-    list.className = 'chan-groups';
-    list.dataset.view = fs.view;
+    // ── THE FIRST SCREEN: the group list (ONE element across draws, its rows reconciled) ──
+    const listEl = keep('groups', () => { const l = document.createElement('div'); l.className = 'chan-groups'; return l; });
+    listEl.dataset.view = fs.view;
+    const listKids = [];
+    const list = { appendChild: (x) => { listKids.push(x); return x; } };
     if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
     } else if (fs.view === 'focus' && !fs.focus) {
@@ -970,7 +987,8 @@ export function renderChannelsPanel(app, c) {
       list.appendChild(tog);
       if (ARCHIVED_OPEN) for (const r of archived) list.appendChild(groupRow(r));
     }
-    into.appendChild(list);
+    reconcile(listEl, listKids);
+    into.appendChild(listEl);
 
     // ── SECONDARY: the accounts (every non-built-in adapter + Connect) ──
     const accounts = adapters.filter((a) => !a.builtin);
@@ -1011,18 +1029,55 @@ export function renderChannelsPanel(app, c) {
         for (const a of watcher) b.appendChild(section(a, convs.filter((x) => x.adapterId === a.id), siblings, ordinal));
       }));
     }
+    return top;
   }
 
   /** ONE row of the first screen: an agent group or a conversation of a linked account. */
+  // KEYED ROWS, REUSED WHILE THEIR WORDS ARE THE SAME (verify round 4, 2026-09-27): `draw()` rebuilt every row
+  //  on every broadcast — with "Show all" open over 879 conversations a PARTIAL digest naming ONE row cost 90–115 ms
+  //  of main thread (measured: 37 % of the thread and a 108 ms p95 frame at four broadcasts a second; a 100 ms hitch
+  //  per pass during a first ingest). A row is memoised by its key and the SIGNATURE of everything it prints (the
+  //  For-you precedent, reconcileKeyed); the handlers read the entry's CURRENT record, never the one they were
+  //  built with. A row that left the digest leaves the memo at the next draw.
+  const rowMemo = new Map();   // key → { sig, el, r }
+  let memoSeen = new Set();
+  // A CONTAINER kept across draws by key (the group list, a part, an account section, its rows box) — its
+  //  children are reconciled, never replaced. A key not drawn this time leaves the memo.
+  const boxes = new Map();
+  let boxSeen = new Set();
+  function keep(key, make) { boxSeen.add(key); let n = boxes.get(key); if (!n) { n = make(); boxes.set(key, n); } return n; }
+  function memoRow(key, sig, r, build) {
+    memoSeen.add(key);
+    const ent = rowMemo.get(key);
+    if (ent && ent.sig === sig) { ent.r = r; return ent.el; }
+    const next = { sig, r, el: null };
+    rowMemo.set(key, next);
+    next.el = build(() => rowMemo.get(key) ? rowMemo.get(key).r : r);
+    return next.el;
+  }
+  function pruneMemo() {
+    for (const k of [...rowMemo.keys()]) if (!memoSeen.has(k)) rowMemo.delete(k);
+    for (const k of [...boxes.keys()]) if (!boxSeen.has(k)) boxes.delete(k);
+    memoSeen = new Set(); boxSeen = new Set();
+  }
+
   function groupRow(r, now = Date.now()) {
+    const st = r.kind === 'conv' ? statusTag(r, now) : null;
+    const tag = statusTagParts(st, { now });
+    const sig = JSON.stringify(['g', r.kind, r.id, r.adapterId, r.title, r.lastAt, r.unread, r.archived, r.pair, r.memberCount, r.sourceLabel, r.lastText, r.conv ? r.conv.kind : '', rowTime(r.lastAt), st && st.code, tag]);
+    return memoRow('g:' + r.key, sig, r, (cur) => groupRowBuild(r, now, cur, st, tag));
+  }
+  function groupRowBuild(r, now, cur, st, tag) {
     const el = document.createElement('div');
     el.className = 'chan-grow' + (r.unread ? ' chan-grow-unread-on' : '') + (r.archived ? ' chan-grow-archived' : '');
     el.dataset.grow = r.key;
     el.dataset.at = String(r.lastAt || 0);   // the activity instant the list is ordered by
     if (r.kind === 'group') el.dataset.group = r.id;
+    // THE LOOK (channel-polish): the conversation's avatar — the SAME circle its window's bar wears
+    // (an agent group the people glyph, a mail thread the mail glyph, a chat the title's initials)
+    el.appendChild(convAvatar({ key: r.key, title: r.title, kind: r.conv ? r.conv.kind : '', group: r.kind === 'group' }, null, 'chan-grow-av'));
     const line = document.createElement('div');
     line.className = 'chan-grow-line';
-    line.appendChild(icon(r.kind === 'group' ? 'users' : r.mail ? 'mail' : 'chat', 12, 'chan-grow-ic'));
     const title = document.createElement('span');
     title.className = 'chan-grow-title';
     title.textContent = r.title;
@@ -1039,8 +1094,6 @@ export function renderChannelsPanel(app, c) {
     const srcTitle = r.kind === 'group' ? (r.pair ? t('A direct conversation between two agents') : t('An agent group · {n} members', { n: r.memberCount })) : t('From your {label} account', { label: r.sourceLabel });
     // R3 (§23): ONE small TAG says why the row matters (statusTag's first match, worded by statusTagParts);
     // it takes the source chip's slot on line 2 — under the title on every width — and the source rides its title
-    const st = r.kind === 'conv' ? statusTag(r, now) : null;
-    const tag = statusTagParts(st, { now });
     if (tag) {
       const g = chanEl('span', `chan-grow-tag chan-tag-${tag.tone}`);
       g.dataset.tag = st.code;
@@ -1069,11 +1122,12 @@ export function renderChannelsPanel(app, c) {
       sub.appendChild(u);
     }
     el.appendChild(sub);
-    el.onclick = () => app.openChannel(r.adapterId, r.id);
+    el.onclick = () => { const x = cur(); app.openChannel(x.adapterId, x.id); };
     el.oncontextmenu = (ev) => {
       ev.preventDefault();
-      if (r.kind === 'group') showContextMenu(ev.clientX, ev.clientY, groupMenu(app, r.group));
-      else showContextMenu(ev.clientX, ev.clientY, menuItems('channel-row', rowMenuCtx(app, r.conv)));
+      const x = cur();
+      if (x.kind === 'group') showContextMenu(ev.clientX, ev.clientY, groupMenu(app, x.group));
+      else showContextMenu(ev.clientX, ev.clientY, menuItems('channel-row', rowMenuCtx(app, x.conv)));
     };
     return el;
   }
@@ -1087,57 +1141,63 @@ export function renderChannelsPanel(app, c) {
   function accountCard(a, mine, siblings, ordinal) {
     const kinds = (digest && digest.kinds) || [];
     const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
-    const sec = document.createElement('div');
-    sec.dataset.adapter = a.id;
+    const secEl = keep('sec:' + a.id, () => { const el = document.createElement('div'); el.dataset.adapter = a.id; return el; });
+    const secKids = [];
+    const sec = { appendChild: (x) => { secKids.push(x); return x; }, classList: secEl.classList };
     const folded = EXPANDED.has(a.id) ? false : COLLAPSED.has(a.id);
-    sec.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '');
-    const h = document.createElement('div');
-    h.className = 'chan-sec-head folder-header';
-    h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
-    h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
-    const nm = document.createElement('b');
-    nm.className = 'chan-sec-name';
+    secEl.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '');
+    // THE HEAD IS A KEPT NODE, PATCHED IN PLACE (verify round 6, 2026-09-27): round 5 kept a head rebuilt EQUAL, but
+    //  the count's title ("{n} conversations · {k} unread") changes on every message a broadcast brings, so on a busy
+    //  account a trusted 300 ms press on ⋯ across one such broadcast was still lost (3/3 reproduced; 10 % of presses at
+    //  a message every 3 s, 70 % under the ingest storm). The skeleton is built ONCE per account (`keep`) and every
+    //  draw patches its words — the name, the client chip, the dot, the count — on the same elements; the handlers
+    //  are re-assigned so they read the current records. A press in flight is never detached.
+    const h = keep('head:' + a.id, () => {
+      const el = document.createElement('div');
+      el.className = 'chan-sec-head folder-header';
+      el.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
+      el.appendChild(document.createElement('span'));   // [1] the kind tile (replaced only when the glyph / kind changes)
+      const nm0 = document.createElement('b'); nm0.className = 'chan-sec-name'; el.appendChild(nm0);
+      const cc0 = document.createElement('span'); cc0.className = 'chan-chip chan-cred-chip'; cc0.style.display = 'none'; el.appendChild(cc0);
+      const dot0 = document.createElement('span'); dot0.className = 'chan-dot'; el.appendChild(dot0);
+      const cnt0 = document.createElement('span'); cnt0.className = 'chan-sec-count'; el.appendChild(cnt0);
+      const edit0 = document.createElement('button'); edit0.type = 'button'; edit0.className = 'mounts-icon-btn chan-sec-edit';
+      edit0.appendChild(icon('pencil', 13));   // the library's own static SVG through the ONE icon helper (§17; no innerHTML here — the groups-ui XSS census)
+      el.appendChild(edit0);
+      const more0 = document.createElement('button'); more0.type = 'button'; more0.className = 'icon-btn chan-sec-more';
+      more0.appendChild(icon('more', 13));
+      el.appendChild(more0);
+      return el;
+    });
+    const [, tileSlot, nm, cc, dot, cnt, edit, more] = h.childNodes;
+    // THE LOOK (channel-polish): the account's kind as a small tile on its hue (paint — the name follows)
+    const tile = avatar({ name: a.label || a.kind || '', key: `kind/${a.kind || ''}`, glyph: kindGlyph(a, mine) }, null, 'chan-sec-kind');
+    if (!tileSlot.isEqualNode(tile)) tileSlot.replaceWith(tile);
     const name = accountName(a, siblings.get(a.kind) || 1, ordinal.get(a.id) || 1);
-    nm.textContent = name;
-    h.title = name;
-    h.appendChild(nm);
+    if (nm.textContent !== name) nm.textContent = name;
+    if (h.title !== name) h.title = name;
     // the CLIENT chip: the OAuth client this account signs in through (a preset by its label, or its own)
     const chipText = clientChipText(a);
-    if (chipText) {
-      const cc = document.createElement('span');
-      cc.className = 'chan-chip chan-cred-chip';
-      cc.textContent = chipText;
-      cc.title = t('The OAuth client this account signs in through — switching it means signing in again.');
-      h.appendChild(cc);
-    }
-    const dot = document.createElement('span');
+    cc.style.display = chipText ? '' : 'none';   // (an author `display` on .chan-chip would outrank the hidden attribute)
+    if (chipText) { if (cc.textContent !== chipText) cc.textContent = chipText; cc.title = t('The OAuth client this account signs in through — switching it means signing in again.'); }
     const dotState = accountDot(a);
-    dot.className = 'chan-dot chan-dot-' + dotState;
-    dot.dataset.state = dotState;
-    dot.title = dotTitle(a);
-    h.appendChild(dot);
-    const cnt = document.createElement('span');
-    cnt.className = 'chan-sec-count';
+    const dotClass = 'chan-dot chan-dot-' + dotState;
+    if (dot.className !== dotClass) dot.className = dotClass;
+    if (dot.dataset.state !== dotState) dot.dataset.state = dotState;
+    const dTitle = dotTitle(a);
+    if (dot.title !== dTitle) dot.title = dTitle;
     const unreadN = listed.reduce((n, x) => n + (Number(x.unread) || 0), 0);
-    cnt.textContent = String(listed.length);
-    cnt.title = unreadN ? t('{n} conversations · {k} unread', { n: listed.length, k: unreadN }) : t('{n} conversations', { n: listed.length });
-    h.appendChild(cnt);
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.className = 'mounts-icon-btn chan-sec-edit';
+    const cntText = String(listed.length);
+    if (cnt.textContent !== cntText) cnt.textContent = cntText;
+    const cntTitle = unreadN ? t('{n} conversations · {k} unread', { n: listed.length, k: unreadN }) : t('{n} conversations', { n: listed.length });
+    if (cnt.title !== cntTitle) cnt.title = cntTitle;
     edit.title = t('Edit the account (client, filters, push)');
     edit.setAttribute('aria-label', t('Edit'));
-    edit.appendChild(icon('pencil', 13));   // the library's own static SVG through the ONE icon helper (§17; no innerHTML here — the groups-ui XSS census)
     edit.onclick = (ev) => { ev.stopPropagation(); showEditAccountDialog(app, a, { kinds }); };
-    h.appendChild(edit);
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.className = 'icon-btn chan-sec-more';
     more.title = t('More actions');
-    more.appendChild(icon('more', 13));
     const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds }));
-    more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
-    h.appendChild(more);
+    // `ev.currentTarget`, never `more`: the handler is re-assigned onto the KEPT button every draw
+    more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.onclick = () => {
       const nowFolded = !sec.classList.contains('chan-collapsed');
       sec.classList.toggle('chan-collapsed', nowFolded);
@@ -1148,14 +1208,17 @@ export function renderChannelsPanel(app, c) {
     for (const n of accountLines(app, a, kinds)) sec.appendChild(n);
     // THE ACCOUNT AND PATTERN GRAINS (§7.3): one line each, the editor on click
     for (const n of grainLines(a)) sec.appendChild(n);
-    const rows = document.createElement('div');
-    rows.className = 'chan-rows';
+    const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
+    const rowKids = [];
+    const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
     const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
     for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv, { child: true }));
     if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
     if (!listed.length && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
-    sec.appendChild(rows);
-    return sec;
+    reconcile(rowsEl, rowKids);
+    sec.appendChild(rowsEl);
+    reconcile(secEl, secKids);
+    return secEl;
   }
   /** "Show all N" — a quiet text button under a capped list. */
   function moreToggle(label, onClick) {
@@ -1192,8 +1255,9 @@ export function renderChannelsPanel(app, c) {
    *  scan-only fixture — lists every conversation it discovered. */
   function section(a, mine, siblings, ordinal) {
     if (a.connectable) return accountCard(a, mine, siblings, ordinal);
-    const sec = document.createElement('div');
-    sec.dataset.adapter = a.id;
+    const secEl = keep('sec:' + a.id, () => { const el = document.createElement('div'); el.dataset.adapter = a.id; return el; });
+    const secKids = [];
+    const sec = { appendChild: (x) => { secKids.push(x); return x; }, classList: secEl.classList };
     // The built-in Agents adapter lists every live session on this instance —
     // a list the sidebar already shows. Until one of them is assigned it is
     // folded by default (owner 2026-09-21: "展示一堆agents意义不明"), and a
@@ -1201,11 +1265,12 @@ export function renderChannelsPanel(app, c) {
     const builtinAgents = !!a.builtin;
     const nothingAssigned = mine.length > 0 && !mine.some((x) => x.assignment);
     const folded = EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || (builtinAgents && nothingAssigned));
-    sec.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
+    secEl.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
     const h = document.createElement('div');
     h.className = 'chan-sec-head folder-header';
     h.appendChild(icon('chevronDown', 10, 'chan-sec-chev'));
-    h.appendChild(icon(kindGlyph(a, mine), 13, 'chan-sec-kind'));
+    // THE LOOK (channel-polish): the account's kind as a small tile on its hue (paint — the name follows)
+    h.appendChild(avatar({ name: a.label || a.kind || '', key: `kind/${a.kind || ''}`, glyph: kindGlyph(a, mine) }, null, 'chan-sec-kind'));
     const nm = document.createElement('b');
     nm.className = 'chan-sec-name';
     const kindCount = siblings.get(a.kind) || 1;
@@ -1229,7 +1294,8 @@ export function renderChannelsPanel(app, c) {
     more.title = t('More actions');
     more.appendChild(icon('more', 13));
     const openMenu = (x, y) => showContextMenu(x, y, menuItems('channel-adapter', { app, adapter: a, convs: mine, kinds: (digest && digest.kinds) || [] }));
-    more.onclick = (ev) => { ev.stopPropagation(); const r = more.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
+    // `ev.currentTarget`, never `more`: reconcile may adopt this handler onto the KEPT button (round 5) and `more` is then the fresh, detached one
+    more.onclick = (ev) => { ev.stopPropagation(); const r = ev.currentTarget.getBoundingClientRect(); openMenu(r.left, r.bottom + 2); };
     h.appendChild(more);
     h.onclick = () => {
       const nowFolded = !sec.classList.contains('chan-collapsed');
@@ -1250,8 +1316,9 @@ export function renderChannelsPanel(app, c) {
     for (const n of adapterNotes(app, a)) sec.appendChild(n);
     // a SOURCE that is not built in takes the account and pattern grains too (§7.3)
     if (!builtinAgents) for (const n of grainLines(a)) sec.appendChild(n);
-    const rows = document.createElement('div');
-    rows.className = 'chan-rows';
+    const rowsEl = keep('rows:' + a.id, () => { const el = document.createElement('div'); el.className = 'chan-rows'; return el; });
+    const rowKids = [];
+    const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
     const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
     if (!listed.length) {
       const e = document.createElement('div');
@@ -1262,11 +1329,22 @@ export function renderChannelsPanel(app, c) {
     const cap = ACCOUNT_ALL.has(a.id) ? listed.length : ACCOUNT_ROWS;
     for (const conv of listed.slice(0, cap)) rows.appendChild(row(conv));
     if (listed.length > cap) rows.appendChild(moreToggle(t('Show all {n} conversations', { n: listed.length }), () => { ACCOUNT_ALL.add(a.id); draw(); }));
-    sec.appendChild(rows);
-    return sec;
+    reconcile(rowsEl, rowKids);
+    sec.appendChild(rowsEl);
+    reconcile(secEl, secKids);
+    return secEl;
   }
 
   function row(conv, { child = false } = {}) {
+    // THE SIGNATURE NAMES EVERY FACT THE ROW PRINTS (verify round 5, 2026-09-27): line 3 is assignmentSummary(conv)
+    //  = the WHOLE `access` and `watchers` lists, while round 4 signed only `assignment` (the FIRST watcher / access
+    //  row) — a second principal granted access, or the second watcher's cadence, never reached the row until an
+    //  unrelated field moved (reproduced: "Access: Alpha" after "Access: [Alpha, Beta]" was saved). The fast census
+    //  (test-channels-groups-ui §3) reads every `conv.<field>` the builder and its helpers touch against this list.
+    const sig = JSON.stringify(['r', child, conv.adapterId, conv.id, conv.title, conv.unread, conv.freshness, conv.participants, conv.outbox && conv.outbox.awaiting, conv.assignment, conv.access, conv.watchers, conv.held]);
+    return memoRow(`${child ? 'c' : 'r'}:${conv.adapterId}/${conv.id}`, sig, conv, (cur) => rowBuild(conv, child, cur));
+  }
+  function rowBuild(conv, child, cur) {
     const el = document.createElement('div');
     el.className = 'chan-row session-item-card' + (child ? ' chan-row-child' : '') + (conv.unread ? ' chan-row-unread' : '');
     el.dataset.conv = `${conv.adapterId}/${conv.id}`;
@@ -1339,10 +1417,10 @@ export function renderChannelsPanel(app, c) {
       asg.title = held ? t('Last wake was held or stashed — open the conversation\'s Assign & filter for the reason') : assignmentSummary(conv);
       el.appendChild(asg);
     }
-    el.onclick = () => app.openChannel(conv.adapterId, conv.id);
+    el.onclick = () => { const x = cur(); app.openChannel(x.adapterId, x.id); };
     el.oncontextmenu = (ev) => {
       ev.preventDefault();
-      showContextMenu(ev.clientX, ev.clientY, menuItems('channel-row', rowMenuCtx(app, conv)));
+      showContextMenu(ev.clientX, ev.clientY, menuItems('channel-row', rowMenuCtx(app, cur())));
     };
     return el;
   }
@@ -1391,6 +1469,37 @@ export function renderChannelsPanel(app, c) {
   FOLD_LISTENERS.add(foldListener);
   refresh().catch(() => {});
   return () => { FOLD_LISTENERS.delete(foldListener); try { app.ws.offGlobal(onBroadcast); } catch {} try { app.ws.offStateChange?.(onState); } catch {} };
+}
+
+// RECONCILE a parent's children with `out` IN PLACE (verify round 4, 2026-09-27): a node not wanted leaves first,
+//  then every wanted node is put at its index — a node already there is NEVER touched (a detached row re-laid out
+//  879 rows per broadcast and lost the click in flight on it). Exported for the suite.
+//
+//  A NODE REBUILT THE SAME IS KEPT (verify round 5, 2026-09-27): the rows are memoised, but every other node —
+//  an account section's HEAD (the fold, ⋯, ✎, Re-authorize), its grain lines, "Show all", the archived toggle —
+//  is built fresh per draw, so a trusted click on ⋯ across a broadcast was lost exactly as round 4's row click
+//  (reproduced: the menu never opened, the fold never toggled). A fresh node structurally EQUAL to the one at its
+//  place (`isEqualNode`: tag, attributes, text, children) is the same thing said again: the old node stays and
+//  only its handler PROPERTIES are refreshed from the new one (the panel wires `onclick` / `oncontextmenu`, never
+//  addEventListener, on the nodes it rebuilds — test-channels-groups-ui §3 is the census), so the handlers read
+//  the current records. A node that changed is replaced as before.
+const HANDLER_PROPS = Object.freeze(['onclick', 'oncontextmenu']);
+function adoptHandlers(keptNode, freshNode) {
+  for (const k of HANDLER_PROPS) if (keptNode[k] !== freshNode[k]) keptNode[k] = freshNode[k];
+  const a = keptNode.childNodes, b = freshNode.childNodes;
+  for (let i = 0; i < a.length && i < b.length; i++) if (a[i].nodeType === 1 && b[i].nodeType === 1) adoptHandlers(a[i], b[i]);
+}
+export function reconcile(parent, out) {
+  const want = new Set(out);
+  const kids = parent.childNodes;
+  // a fresh node equal to the old one at its index is the old one (kept, handlers refreshed)
+  for (let i = 0; i < out.length && i < kids.length; i++) {
+    const old = kids[i], fresh = out[i];
+    if (old === fresh || want.has(old) || !fresh || fresh.isConnected || fresh.nodeType !== 1 || old.nodeType !== 1) continue;
+    if (old.isEqualNode(fresh)) { adoptHandlers(old, fresh); out[i] = old; want.add(old); want.delete(fresh); }
+  }
+  for (const k of [...kids]) if (!want.has(k)) k.remove();
+  for (let i = 0; i < out.length; i++) if (kids[i] !== out[i]) parent.insertBefore(out[i], kids[i] || null);
 }
 
 /** A PARTIAL broadcast (2026-09-26: an account of 873 conversations made the

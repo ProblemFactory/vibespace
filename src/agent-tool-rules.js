@@ -91,7 +91,7 @@ const AGENT_TOOL_RULES = Object.freeze([
   Object.freeze({ tool: 'vibespace-docs', verbs: null, why: 'reads a VibeSpace manual' }),
   Object.freeze({ tool: 'vibespace-msg', verbs: null, why: 'messages other agents — a wake is a billed turn under the spend ceiling' }),
   Object.freeze({ tool: 'vibespace-window', verbs: null, why: 'drives a desktop-app window under a lease the user can take over' }),
-  Object.freeze({ tool: 'vibespace-channels', verbs: null, why: 'reads channels; a reply is a PROPOSAL the outbox policy decides' }),
+  Object.freeze({ tool: 'vibespace-channels', verbs: null, why: 'reads channels; a reply is a PROPOSAL the outbox policy decides; withdraw only takes back the agent\'s own undecided proposal (never a send)' }),
   Object.freeze({
     tool: 'vibespace-page', verbs: PAGE_VERBS, why: 'lists the pages it published and prepares the design kit; publishing asks every time',
     held: Object.freeze({ publish: 'puts a page under the user\'s name on this instance (--public = a link anyone can open) — it asks every time (owner 2026-09-25)' }),
@@ -430,7 +430,7 @@ function toolStep(tool, args) {
     case 'vibespace-docs': return S(i18nKey('Read the VibeSpace manual'));
     case 'vibespace-msg': return verb === 'send' ? S(i18nKey('Message another agent')) : S(i18nKey('Read or manage agent messages'));
     case 'vibespace-window': return S(i18nKey('Use a desktop app window'));
-    case 'vibespace-channels': return S(i18nKey('Read a channel or propose a reply'));
+    case 'vibespace-channels': return verb === 'withdraw' ? S(i18nKey('Take back one of its proposed replies')) : S(i18nKey('Read a channel or propose a reply'));
     case 'vibespace-page':
       if (verb === 'list') return S(i18nKey('List the pages it published'));
       if (verb === 'kit') return S(i18nKey('Prepare the design kit'));

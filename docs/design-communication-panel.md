@@ -2023,8 +2023,36 @@ proposed ─(policy: review)──────────► awaiting-approval
 awaiting-approval ─(approve, maybe edited)─► sending ─► sent | failed | unknown
 awaiting-approval ─(reject)─────────► rejected
 awaiting-approval ─(TTL, default 24 h)─► expired
+proposed | awaiting-approval ─(agent)─► withdrawn        // 2026-09-27: its drafter takes it back
 unknown ─(reconcile)────────────────► sent | failed      // never auto-retried; §9.4
 ```
+
+**Withdrawal (2026-09-27, the owner: "agent 似乎没有撤回之前制作的 draft 的能力，必须要我手动
+reject 是吗？").** `withdrawn` is terminal and only `agent` may enter it, only from
+`proposed` / `awaiting-approval` — never from `sending` (the request may be
+leaving), never from a decided state, and never from `unknown` (a lost outcome is
+the user's to check on the platform, never the agent's to erase). The drafter is
+the conversation id the proposal recorded, so a Task-Group sibling gets
+`not-yours` by name (a caller that cannot see the conversation and shares no group
+gets the uniform not-found). Withdrawing retracts the conversation's For-you
+pointer through the same producer, audits one `withdraw` line and broadcasts once;
+the receipt is recorded, never handed back to the agent that did it. The card is a
+dim settled card "Withdrawn by <agent> · <why>" with no buttons.
+
+**Replace = withdraw + a new proposal, atomic:** the old one is checked first
+(yours, still withdrawable) and nothing is created on a refusal; the new one is
+proposed; the old one is withdrawn ONLY if the policy accepted the new one
+(`replaces` / `replacedBy` recorded). A refused new proposal leaves the old one
+standing. While a replace runs the old id is HELD: an Approve / Reject of it waits
+and then finds it withdrawn; the TTL sweep skips it — and asks the hold AGAIN
+inside the store's serialized write, at apply time (verify 2026-09-27: with the
+question asked only before the write, a sweep busy with an earlier proposal let a
+replace pass its check and make the new draft, then expired the old one between
+the check and the withdrawal — an "EXPIRED unapproved" receipt for a draft the
+agent had just replaced). A receipt stored before the stash carried a `ref` never
+gets a `drained` event: at boot the engine looks every stored-and-not-drained
+receipt up in its drafter's queue (by ref, or by the proposal id its text names)
+and reads a missing one as handed with an earlier message (no time recorded).
 
 `src/channel-policy.js` (PURE) owns the transition table plus:
 
@@ -2143,6 +2171,36 @@ charge. Reusing it is the difference between a free lane and an unbilled one.
 Receipts default to `noWake: true`: an approval typically happens minutes or
 hours later, and the agent's next turn is the natural place to learn about it
 (decision 8).
+
+**2026-09-27 — the delivery is chosen ON THE ACTION (owner ruling).** An agent's
+card decides with SPLIT buttons: the primary is this device's last choice, the ▾
+menu offers "Approve — tell the agent with your next message" (free: the stash)
+and "Approve and wake the agent now (starts a turn)" (a billed turn through the
+ONE door `billedWake`, spendReason `channel-receipt`, the spend ceiling inside the
+ladder), plus "Approve with edits…"; Reject the same. The routes take
+`{deliver: 'next-turn'|'wake-now'}` (anything else refused by name); a wake-now
+counts in the `expectWakes` echo and, sign-in off, is paced like every owner wake
+(a floored one is downgraded to the next message and says so). PURE
+`receiptDeliveryVerdict`: ONE wake per proposal (the row lives on the proposal,
+reserved atomically before the ladder), a session that is not live ⇒ the next
+message ("gone", the stash keeps it), a withdrawn proposal ⇒ none. The
+per-watcher `receiptWake` (decision 8's switch) is DEPRECATED — the engine no
+longer reads it; boot logs the watchers still carrying it.
+
+**Verify r3 (2026-09-27, over the real ladder + real spend guard + real routes):** 20 concurrent "approve and wake now" under a spend cap of 2 ⇒ exactly 2 billed turns (18 refused by name and stored); the primary button's WORDS ARE ITS PRESS — the delivery is read off the button's own `data-deliver`, and a menu pick re-words every primary on the page at once (before: "Reject … and wake now" picked on card A only opened its box, card B still read "…tell the agent with your next message" and posted wake-now — a billed turn the words said was free); a fork that has not announced its own conversation id (it still carries its parent's) can neither withdraw the parent's drafts nor draft as the parent (409 by name; an adopted codex fork drafts as itself); `withdrawn` joined the store's prune set (withdrawn records never left outbox.json, and the bound dropped the owner's decided ones first).
+**Verify r4 (2026-09-27, the fork rule enumerated + the press in Chrome + the prune + the seams):** a pending fork's `msg send --wake` minted the pair under the PARENT's id and the target's reply woke the parent; its reach `request` recorded the parent under the fork's name — the caller's OWN id is now decided in `msgCaller` (every msg verb) and the request route is guarded like the drafts (409 by name); the bound drops the undecided first (`OUTBOX_PRUNE_RANK`: withdrawn, expired, then the decided — one agent's 520 replaces had evicted another drafter's ten decided records); a stash write that fails makes the receipt `undelivered` by name (never "waiting" then "handed"); a wake the store could not record is named on the card. Sixteen fork shapes agree with the browser-key lane's rule; the button's words and fact never disagree at any instant; nothing billed twice on any press, re-entry or restart.
+**Verify r5 (2026-09-27, the caller identity from the other side, the store's read cost, the stash's one outcome, the card in Chrome, the merge preview):** a pending fork was still somebody's ADDRESS — both rosters listed it under its parent's id with its own name, so with the parent not live a third session's `send --wake "<fork>"` minted the pair under the PARENT and authorized a billed turn on it, and with the parent live the parent itself was `ambiguous`; and a JOB the fork made was owned by the parent (every notification a billed turn on it, for good). ONE predicate now — `addressableId` behind every roster and caller resolver (`_msgEndpoints`, `liveSessions`, `jobsCaller`, `pageAuth`; the window-share request refuses a pending fork by name). One record's read copied the whole outbox (836 ms per replace at the bound with 16 KB texts) — one copy per write now, deep-frozen. Every stash producer hears one named verdict for a failed write (`{stored:false}` + the sentence; the entry stays in memory; a 30 s retry). Four refusal codes worded. In Chrome: the phone's ▾ menu (40 px rows, Esc, outside press), an Outbox window + inline card on one broadcast, 200 drafts in 7 ms.
+**Verify r6 (2026-09-27, the predicate's last three readers, the adoption hand-off, the frozen memo, the durability verdict, the money re-run, the words):** the delivery ladder itself still found "the live session carrying this conversation" by the raw id (rung 0, the codex rpc rung, the charged identity) — a codex fork's wrapper advertises the peer lane before `thread/fork` answers, so a stopped parent's Background Work notification was written into the FORK's wrapper (a billed turn on the fork, charged to its slot), and with the fork restored first the parent's turn was charged to the fork's slot; `addressableId` is now the ladder's rule too (+ the peer card, the browser handback). "Share with agent…" on a pending fork granted the PARENT and the fork lost it at adoption — the window-targets engine keys a pending fork as `webui:<id>`, the dialog sends the live session, an ambiguous key is refused by name. A pending fork's prompt rendered the parent's group reports and moved its markers — `ownConversationIdOf` there too. `fork_pending` is its own code (the client's `no_conversation` words were the wrong advice). Refuted: the adoption hand-off, the frozen copy, the stash's verdict; every money attack green. Measured, the owner's: the 6.5 MB outbox broadcast per change at the 16 KB bound.
+
+
+**The receipt carries the DIFF** (PURE `receiptDiff(proposed, final)`: `-` you
+proposed / `+` the user sent, one line of context, ≤ 600 chars a line, ≤ 2000
+in all) and, after an edit or a reasoned rejection, ends "Use this as guidance
+for the next draft." **Its fate is on the card** (PURE `receiptFateOf` /
+`receiptFateText`): "Handed to <agent> at 14:02" / "Waiting for <agent>'s next
+message" / "<agent> is gone — receipt kept" — the ladder's stash now emits
+`stashed` / `drained` for an entry with a `ref`, and the engine stamps
+`receiptDrainedAt`. Cards are KEYED: a fate-only change patches the line in place.
 
 ### 9.4 Sending exactly once
 
@@ -3871,7 +3929,7 @@ they are here rather than in the code.
 | 5 | **Gmail OAuth client** | add `gmail.send` to the existing shared preset / register a client dedicated to channels | ~~Dedicated client for channels.~~ **Owner ruling 2026-09-13: REUSE the existing VibeSpace OAuth client (the `VIBESPACE_GDRIVE_CLIENTS` preset)** — it already carries Gmail permission. The cost re-derived: a client may request any scope, and scopes bind to a token at CONSENT time, so channels runs its OWN consent and stores its OWN refresh token (under `data/channels/`, apart from the mounts' token files), requesting `gmail.readonly` + `gmail.send`, while the mounts' token is untouched and needs no re-consent — the earlier "a shared preset re-consents everything" held only for adding a scope to the SAME token. What still holds is the client's VERIFICATION status: `gmail.send` is a restricted scope, which for an external (published-unverified) client means 7-day refresh tokens and review; a GCP Internal (Workspace) client is exempt — P1's connect wizard must READ that status and SAY it (§14's `setup.callbackNote`) rather than let the user find out on day 8. The delegating `gmail` row therefore needs no `channels` preset key; `prefer` points at the existing preset |
 | 6 | **What is tracked by default** | nothing until the user picks / all groups the user is in | **Nothing.** It is the privacy answer, the polling-cost answer, and it keeps the panel from becoming a mail client. The discover list makes opting in one click |
 | 7 | **Approval surface of record** | new outbox store + a pointer item in "For you" / "For you" items only | **New store + one pointer item per CONVERSATION** (§9.2). A proposal has structure (target, body, why, edit, receipts) the todo store cannot hold; and `UserTodoManager` has a closed parameter set, dedups on `(sessionKey, text)` across all statuses and caps at 20 open per session, so *per-proposal* pointers are not expressible without a schema change to a store several producers share. Per-proposal badges are available for the cost of that change (`proposalId` field + dedup keyed on it + `todoItemId` on the proposal) — say so if you want them |
-| 8 | **Do receipts wake the agent?** | never (stash for next turn) / always / per assignment | **Never by default, opt-in per assignment.** An approval lands minutes to hours later; waking for a receipt is a billed turn per approval |
+| 8 | **Do receipts wake the agent?** | never (stash for next turn) / always / per assignment | **Never by default, opt-in per assignment.** An approval lands minutes to hours later; waking for a receipt is a billed turn per approval **2026-09-27 owner re-ruling:** chosen ON the Approve / Reject action ("tell it with your next message", free, the default / "wake it now", one turn, at most once per proposal); the per-assignment opt-in is retired — §9.3 |
 | 9 | **Default policies + guardrails** | confirm the interaction record's defaults | **Confirm as recorded:** external = review, internal = direct; audit ON, links/attachments force review ON, off-hours OFF until a timezone is configured (then the window is a setting) |
 | 10 | **Spend ceiling shape** | share the existing per-identity caps / a separate channel budget | **Share.** One ceiling per credential slot is the whole point of the authorizer; add a per-assignment daily wake cap as *pacing* only |
 | 11 | **Agent CLI** | new `vibespace-channels` / extend `vibespace-msg` | **New CLI.** `send` delivers, `reply` proposes — one verb with two authorization semantics is the twin this codebase punishes |
@@ -4555,3 +4613,214 @@ prepares each watcher on its own, logs a failure by name and continues (it was a
 conversation by `track` — a throw never ends the pass). Re-attacked: restart-in-place (stop at +1 ms, a
 fresh boot at +2 ms) delivers every held hit exactly once; two accounts of one kind under one process are
 independent (one's stuck ladder never blocks the other's). Gates: test-channels-engine ⑪(j)(k)(l)(m)(n) + ⑫.
+
+## 25. The render layer: raw → blocks → DOM (2026-09-27, lane channel-render)
+
+The owner (with two screenshots): "可以优化下 channel 部分的界面。架构层面你可能需要设计一个不同 connector 的
+raw message to HTML 的接口，比如邮件展示的时候就需要自动折叠 quote 内容，lark 展示的时候需要自动把 markdown
+格式的一些链接之类的变成链接。这个当作 IM 用还是有必要把界面好好优化下至少保证人能看清楚必要的信息." — improve
+the channel UI; architecturally, an interface from each connector's raw message to what is shown: a mail folds
+its quoted history, Lark's markdown-style links become links; used as an IM, a person must at least be able to
+read the necessary information.
+
+What the screenshots showed: `[image]` as words above a Lark thumbnail; a message whose body is literally
+`[https://….ngrok.app](https://….ngrok.app/)` shown raw; a bare URL that is no link; a composer footer that is a
+whole sentence; a Gmail window titled `====== Please reply above this line ====== Hi Team, …`, its body the whole
+quoted history unfolded, its read-only footer a paragraph.
+
+### 25.1 The interface is a TYPED TREE, never HTML
+
+§10 rule 1 (every vendor string is hostile input; textContent throughout; no markdown parse in the browser)
+stands. What changes is WHO turns the vendor's shape into readable structure: the adapter produces
+`record.blocks` at ingest — a CLOSED block tree — and ONE client renderer (src/lib/channel-blocks-view.js) turns
+it into DOM with createElement/textContent. An adapter never produces HTML; the renderer never writes innerHTML
+(channel-chrome's `icon()` stays the feature's only one, and it writes the icon library's own static SVG).
+
+| Block (`k`) | Fields | Meaning |
+|---|---|---|
+| `p` | `runs` | a paragraph of inline runs (line breaks inside kept) |
+| `quote` | `attribution?`, `blocks`, `lines`, `forwarded?` | foldable — a mail's quoted history, `>` lines |
+| `sig` | `blocks`, `lines` | foldable signature |
+| `banner` | `text` | one system line from the sender's tool ("Please reply above this line") |
+| `code` | `text`, `lang?` | preformatted text |
+| `img` / `file` | `attachmentId` | an attachment by id — its bytes only through our route (§23) |
+| `card` | `title`, `lines` | a Lark message card |
+| `sys` | `text`, `what?` | a system record; `what` from a closed vocabulary (sticker / share-chat / share-user / forward / deleted / location / call / calendar / todo / card / system / unknown) the client words in the device's language, `text` the fallback |
+
+| Run (`k`) | Fields |
+|---|---|
+| `t` | `text` |
+| `a` | `href`, `text` — the href ONLY when it parses as `http(s):` (a host, no `user:pass@`) or `mailto:` (an address); anything else turns the whole run into text |
+| `at` | `id`, `name` (a mention chip) |
+| `code` | `text` |
+| `b` | `text` |
+
+**The schema lives in channel-record.js**, beside the record it belongs to (that module imports nothing; the
+record's shape is defined in one place): `validateBlocks(blocks)` enforces the closed sets and the bounds (≤ 400
+blocks, ≤ 64 KiB of visible text, nesting ≤ 6, ≤ 4000 runs, ≤ 60 card lines, each href ≤ 2048), runs
+`inertFrames` over EVERY string (link text, href, attribution, card title and lines, mention name, banner, system
+line, code and its language, attachment id — §4 rule 3 again), drops undeclared fields and demotes an unsafe href
+to text; a broken rule is refused BY NAME (`not-an-array` / `unknown-kind` / `unknown-run` / `bad-field` /
+`too-many-blocks` / `too-many-runs` / `too-deep` / `too-much-text`) and the record carries no `blocks` — it is
+drawn from `text` by the generic rung. `makeRecord` takes the optional `blocks` field (after `RECORD_FIELDS`,
+`OPTIONAL_FIELDS`). **`text` stays the agent-facing string**: the injection frames use `text`, and the agent read
+route (`readFor`) strips `blocks`.
+
+### 25.2 One rung per adapter (PURE src/channel-blocks.js)
+
+- **The generic rung `textToBlocks(text, opts)`** — every adapter gets it free: paragraphs; bare `http(s)://` /
+  `www.` / `mailto:` / e-mail linkify; markdown `[text](url)`; `<url>`; the sentence's punctuation (incl. CJK
+  `。，）`) outside the link, balanced parens kept; a label that is itself a URL on ANOTHER host
+  (`[https://bank](https://evil)`) shows the target; `>`/`>>` quotes (never `>_<`); a `-- ` signature (≤ 15
+  lines after it); ``` fences; `**bold**`; `` `code` ``; `@_user_N` against this message's mentions (nobody
+  behind it ⇒ verbatim, §4 rule 2); an attachment's DECLARED placeholder ("[image]") IS that picture (an `img`
+  block), in place and in order. It is also the fallback for a record stored before this layer and for an
+  adapter that declares nothing more.
+- **The mail rung `emailToBlocks(text, {subject, attachments})`** — the generic rung + the mail heuristics:
+
+  | Marker (tested per line in this order, lines ≤ 400 chars) | Attribution |
+  |---|---|
+  | `On … wrote:` (en-wrote; also Gmail's form broken over two lines at the address) | the line (the two joined) |
+  | `在 …，… 写道：` / `<name> <addr> 于<ts>写道：` / `<name> <ts> 写道：` (zh-wrote, wrapped too) | the line |
+  | `… 書きました：` (ja-wrote) | the line |
+  | `-----Original Message-----` / `原始邮件` / `元のメッセージ` (original) | the header block after it |
+  | `---------- Forwarded message ---------` / `Begin forwarded message:` / `转发的邮件` (forwarded, `forwarded: true`) | the header block after it |
+  | Outlook's header block: `From:`/`发件人:` + ≥ 2 of `Sent:`/`Date:`/`To:`/`Subject:`/`发送时间:`… (outlook; the `____` rule before it dropped) | `From: … · Sent: …` |
+
+  From the marker to the end is the quote (one `>` level stripped when every line carries one; the same rung
+  runs inside it, so the history nests as nested quotes). Above the marker: a ticket banner (`Please reply above
+  this line` / `do not write below this line` / `请在此行以上回复` …) becomes ONE `banner` block, its `======`
+  rules gone; bare rule lines (`====`, `----`, `____`) go; a `-- ` signature or a trailing mobile signature
+  (`Sent from my iPhone` / `Get Outlook for iOS` / `发自我的iPhone` …) becomes a `sig`. Under a `Fwd:` / `转发:`
+  subject a marker-less header-block quote is marked forwarded.
+- **`cleanSubject(subject)`** — a mail thread's TITLE (the window, the row, a search hit): the ticket banner and
+  `======` rules gone, a chain of `Re: RE: Fwd:` collapsed to its first (`回复：回复：` likewise), whitespace
+  folded; nothing left ⇒ the caller keeps the original. DECLARED by the adapter (`caps.titleForm: 'subject'`,
+  Gmail) and applied by the engine's `rowView` off the capability row — the index keeps the vendor's own string
+  (a filter matches it) and the record's `raw.subject` stays verbatim.
+- **The Lark rung `larkToBlocks(item, mentions, {names, text})`**, run at ingest over the VENDOR item (the only
+  place a post's links / mentions / pictures are still visible; `text` is flattened):
+
+  | Lark | Blocks |
+  |---|---|
+  | `text` | the generic rung + `@_user_N` / `<at user_id=…>…</at>` → `at` |
+  | `post` (top level or wrapped in `zh_cn`/`en_us`/`ja_jp`) | the title → a bold paragraph; each line → a line of the paragraph; `text` (style bold → `b`, else linkified again) / `md` / `a` (safe href → `a`, else "words (href)") / `at` → a chip / `img` → an `img` block in place / `media` → a `file` block / `emotion` → `[TYPE]` / `code_block` → `code` / `hr` → a paragraph break |
+  | `image` | an `img` block — NO "[image]" in the tree; `text` keeps it for agents |
+  | `file` / `folder` / `media` / `audio` | a `file` block (the attachment chip in place) |
+  | `interactive` | `card` {title, lines} — both the list answer's post-like `elements: [[…]]` and the card JSON's `elements: [{…}]` |
+  | `system` | `sys` — its template's `{from_user}` etc. FILLED with the names |
+  | `sticker` / `share_chat` / `share_user` / `merge_forward` / `location` / `video_chat` / `share_calendar_event` / `todo` / unknown | `sys` + `what` |
+  | `deleted` | `sys` (`what: 'deleted'`) |
+
+  The post body's ONE reader `larkPostBody` moved here from lark.js (text, attachments and blocks read it).
+- **Stored records, `blocksOf(record)`**: a record stored before this layer has no tree and the store is an
+  append-only ndjson — NO migration. An adapter declaring `caps.render: 'blocks'` MUST export `blocksOf` (the
+  registry enforces it; exporting one without the declaration is refused too), and the engine fills a missing
+  tree at READ time in `messages()` / `loadOlder()` (Lark: `larkStoredBlocks` — an old record's `[image]` /
+  `[video]` lines matched to its attachments by mime family, its resolved `@name`s chips again; Gmail: the mail
+  rung over `text`). An adapter declaring nothing (the fakes, Agents) is drawn by the client's generic rung.
+- **The one-line preview**: a row's `lastText` comes from the newest record's tree (`previewOf`: paragraphs,
+  cards, system lines — never a banner, a quote or a signature); a record without one keeps its text (the store
+  stays node-builtins-only).
+
+### 25.3 The renderer and the window
+
+- **The ONE body path**: `renderBlocks(blocksOfRecord(rec), ctx)` — the record's own tree, else the generic rung
+  over `text`. The renderer validates AGAIN and asks `safeHref` once more at the very `a.href` assignment (belt and
+  braces: a tree carrying a `javascript:` href past the ingest is drawn as words). A link opens in a new tab with
+  `rel="noopener noreferrer"`, its real target as its title. A mention is a chip. A picture the tree places is
+  drawn IN the body (our route, `img.src`, R3's refusal chip + Retry); attachments the tree does not place (a
+  mail's) stay in the strip under the message.
+- **The fold rule**: a `quote` / `sig` of ≥ 3 lines (`FOLD_MIN_LINES`) folds when the message has OTHER content,
+  behind "Show quoted text (N lines)" / "Show forwarded message (N lines)" / "Show signature (N lines)", its
+  attribution beside the toggle (who wrote it, when); a 1–2-line quote is shown (a one-line chat quote behind a
+  toggle reads worse); the ONLY content is never folded (a bare forward is its content). The state is per record
+  in the window's memory (`folds`), re-applied on every repaint; a toggle replaces its own block in place.
+- **Keyed rows patched in place**: a `channels-updated` broadcast naming the conversation repaints the bar, reads
+  the newest page and APPENDS only the records not yet drawn — a drawn row is never rebuilt, an opened quote stays
+  open, the reader is never yanked (it sticks to the bottom only when it was there); a record landing BETWEEN
+  drawn ones (a late vendor delivery) redraws the page, the scroll kept. The first render, a patch, a reconnect's
+  re-read and an upward page run through ONE queue (two interleaved renders both cleared the list and both
+  appended their page — every row twice: the open's own watch beat broadcasts while the first render loads; this
+  lane's first screenshot showed it).
+  The footer is keyed by what it SAYS: a repaint whose mode, reason, words and fix are unchanged leaves it alone
+  — a draft being typed survives every broadcast (the old window rebuilt the footer on each one, wiping it); a
+  change (a re-authorization, a disconnect) rebuilds it and carries the typed text into the new composer.
+- **Consecutive messages by one author within 5 minutes** share one author line (as before); each later one's
+  time shows on hover (`.chanmsg-at-hover`, the full instant in its title). Body text 13 px.
+- **The footer is ONE line**:
+  - sendable as you: Lark/IM "Sent at once, as you", mail (`sendForm: 'draft'` — the two-phase draft-then-send,
+    read off the capability row, never an adapter id) "Drafted and sent as you"; the policy sentence behind the ⓘ
+    beside it. A send that wakes an agent (`sendStartsTurn`) keeps its cost in the line (money is never hidden).
+    Bot identity only: "Proposed — sending as you is not offered here" + ⓘ.
+  - read-only because of `send-scope-not-granted` on a connectable account: "Read-only — this account needs a
+    re-authorization to reply" + a **Re-authorize** button (that account's own re-auth dialog, the storage
+    grammar). ONLY where the adapter DECLARES a console step (Lark's `sendGrant: {scopes, console: true}`) AND the
+    account lacks one of those scopes, one more line: "First enable {missing scopes} in the {vendor} app and
+    publish a version." — never on Gmail. Any other read-only reason keeps "Read-only here ({why})".
+- Phone (≤ 480 px): the fold toggle and the footer's buttons are ≥ 36 px.
+
+### 25.4 Gates
+
+- fast `test-channel-blocks` (in-process, ~2.4 s): the schema (closed sets, refusals by name, bounds, every string
+  inert, an unsafe href demoted, undeclared fields dropped); `safeHref` + the linkify table (21 rows incl.
+  `javascript:`/`data:`/`vbscript:`/`file:`/relative/credentialed, CJK punctuation, balanced parens, a phishing
+  label); the generic rung; the mail rung over 12 invented fixtures in the real shapes (the EN wrapped "On …
+  wrote:", three zh 写道 forms, Outlook's header block, Original Message, a forward, a bare forward, `>`-only, a
+  ticket banner, `-- ` and mobile signatures, no quote) → the expected trees; `cleanSubject`'s table; the REAL
+  `lark.toRecord` / `gmail.toRecord` → blocks (a picture is a picture, `text` unchanged) + the stored-record
+  rungs; the registry (render / titleForm / blocksOf / sendGrant); the REAL engine in-process (disabled Lark +
+  Gmail records, zero vendor calls: a stored record served WITH a tree, a subject title cleaned and a name title
+  not, sendForm / sendGrant, the preview); the renderer over a minimal DOM (validated links, chips, the fold rule +
+  memory, pictures in place, zero innerHTML); wiring pins; 8 patched-copy controls (no scheme check, no
+  inertFrames, no trimUrl, no wrapped marker, no Outlook rule, no render-time checks, no "only content" guard, a
+  picture drawn from its words).
+- heavy `test-channel-window-render` (a real worktree server + headless chrome, zh): the two screenshots' points
+  one by one; screenshots to `/tmp/vibespace-lanes/channel-render-shots/`.
+- Kept green: test-channel-record (④e: every string of the tree inert), test-channels-images (the pin now reads
+  "drawn in place"), test-channels-aggregate-ui ②b (the picture IN the body, no "[image]"), test-channels-e2e
+  (the one-line footer + ⓘ).
+
+### 25.5 A credential change re-judges every conversation's "may I send" (inc-muk9jj0j-rel3)
+
+The owner: "已经重新授权过 但还是有个邮件提示没有发送权限" — re-authorized, and a mail still said it had no send
+permission. `convCaps` is cached per conversation (with its `at`, a 6 h TTL) and the re-authorization wrote the
+new scopes while invalidating none of it — only the threads the next pass happened to visit got a fresh verdict.
+Now: the adapter declares the PURE `sendCapsOf(scopes)` (Gmail: `sendVerbsOf(scopes).reply`; Lark: both send
+scopes held) and its own `convCaps` uses it; the token door stamps `auth.scopesAt` when the scope set changes or a
+consent lands (a same-scope refresh does not); `effectiveConvCaps(rec, en)` is the ONE reader of a cached verdict
+— one older than the credential change has its send half recomputed from the held scopes (no pure rule, or a read
+never verified ⇒ marked stale, the next open re-asks the vendor); the consent hook, the switched-client rebind and
+the disconnect persist that for the whole account before their one whole digest, and boot does it once more (a
+consent that landed before this code — the owner's state). Open windows switch their footer in place on that
+digest. Gates: test-channels-engine ⑯, test-channel-window-render ⑦.
+
+**Alongside (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗"):** the Push… dialog's first line says
+what push is and what each vendor needs, the select says what exclusive / shared mean; the menu row's tooltip is
+the same sentence. Words only. Gate: test-channel-window-render ⑧.
+
+### 25.6 The verify round (2026-09-27, adversarial verify-and-fix)
+
+Three real defects, each reproduced then fixed with a pin and a patched-copy control: (1) **the rungs were quadratic and walked the raw body** — the e-mail linkifier's unbounded local part (a 64 KiB word: 2.3 s), `trimUrl`'s per-character bracket count (a URL + 60 000 `)`: 11 s), the `-- ` test's per-line count (16 K lines: 1 s), and the adapters hand the rung the vendor body before the record's own 64 KiB cut (a 1 MiB mail = minutes on the server's event loop); a Lark system template threw RangeError out of ingest and `history()` has no per-item catch. Fix: RFC-bounded quantifiers, one bracket census, a bounded signature test, `bounded()` at every rung's entry, `guarded()` — a rung never throws; the Lark template / emotion / `at`-chip bounds. All fifteen inputs ≤ 73 ms. (2) **a mailto link carried a compose form** (`?bcc=evil%40y` passed the one-@ regex; the mail client decodes hfields) — a mailto is one address (`MAILTO_RE`). (3) **a stored tree was served as written** — the read now judges it (refused ⇒ dropped, valid ⇒ cleaned). Also: a draft typed before a disconnect is held for the composer's return; test-channels-engine ⑯ pins the converse of 25.5 (a disconnect ⇒ read-only everywhere, a send refused by name). Gates: test-channel-blocks ⑬, test-channel-window-render ⑨ / ⑩ / ⑦, test-channels-engine ⑯. LOW, unchanged: an attacker's own "On … wrote:" line above text folds that text (as Gmail does); a `lines` count up to 1 000 000 on the fold button; a stale-marked unscoped verdict re-written at every boot.
+
+## 26. From the chat to the conversation: a passive witness (2026-09-27, backlog B-099e)
+
+The owner approved (2026-09-27): "那就按照这个做吧" ("let's do it that way").
+
+**The problem.** With hundreds of mails and Lark chats, FINDING the conversation an agent is working on is the slow part — and the agent already knows. Two plans: (A) passive — the server already handles every agent read / search / reply / compose (they all go through our own `/api/agent/channels/*` routes), so it RECORDS them and the chat draws clickable rows; (B) active — an agent tool or injected context that asks the agent to "report where it is". A was chosen: no new tool, no injected context, no tokens, and no reliance on the agent remembering to report (it forgets; the witness does not). The one change on the agent's side is one sentence in its manual: "Everything you read or draft here is shown to the user as a clickable card in the chat — you never need to tell them where."
+
+**The witness (ORCH `src/server/channel-touches.js`).** Every agent route handler records a touch AFTER the engine answered `ok` (a hidden conversation is the uniform not-found and leaves no trace — never an oracle): `read` (how many messages), `search` (one per conversation hit, the 20 with the most hits), `reply` (the drafted reply, with its proposal id), `compose` (a new message — not sent yet, so no conversation: keyed `<account>/~compose/<proposal>`), `refresh`, `request`, `status` (one draft looked at). `list` is exempt (it lists what the agent may see and reads none of it). Every touch carries the record's OWN names (the conversation title, the account label, a composed subject), made frame-inert on the server (`inertFrames`: `<system-reminder>` becomes `[system-reminder]`), drawn by textContent on every client. The ring lives on the SESSION (`session._channelTouches`, the newest 200; a repeat of the same op on the same conversation inside 2 s folds into one — an agent's read loop is one touch, not 200 that evict the rest), is written to the session meta (`channelTouches`, debounced, flushed at shutdown) and read back by all three boot-restore paths — the taskRecords rule: a live-only record a card depends on is persisted as it passes and replayed on every rebuild. ONE broadcast per call: `{type:'channel-touch', sessionId, touches, turnAt}`. test-architecture §63 is the census: every `/api/agent/channels/` handler calls `touchChannel`, or sits on the closed exemption list with its reason.
+
+**The binding (PURE `src/channel-touch.js` `bindToCall`).** A touch belongs to the tool call RUNNING at its instant. A call runs from its own instant until the next call outside its parallel batch starts (starts more than 1.5 s apart — a sequential agent issues the next call only after the previous returned) or until the next non-tool message. When several run (a parallel batch, a long sub-agent card), the one whose command NAMES the touch wins (the conversation key, `vibespace-channels search`, a compose on that account, the proposal id), else the latest to start. Nothing running ⇒ the latest card when the view shows the conversation's tail (the spec's "the session's latest tool card"), else unbound (its card is not rendered here; it binds when it is). A 1.5 s clock skew is allowed (the server's clock vs a transcript's timestamps).
+
+**The fold (`foldTouches` / `foldView`).** One row per conversation: a glyph (an envelope for Gmail, a robot for the Agents adapter, a chat bubble otherwise), `account › title`, the words ("drafted a reply · read 12 messages"), a time; a drafted / composed conversation first, then by the last touch (newest first); three shown, the rest behind "+N more", expanded in place. Rows are PATCHED IN PLACE by conversation key (a broadcast never re-creates a row — the live-card rule); a click goes through the ONE door `app.openChannel` (an open window is revealed), a message not sent yet opens the Outbox. A card with rows is NOT folded into a run (the image-member rule: what the owner means to click must not vanish into "3 Bash").
+
+**The status-bar chip (`channels`, keyed, patched in place).** "Channels · <latest title>" for THIS turn only (since the turn's start — the server's newest user message in the normalizer or the last keystroke, advanced on the client by a live user message); one conversation opens directly, several open a menu (drafted first); a new turn that touched nothing has no chip.
+
+**The reverse link (the conversation window's header).** "Drafted by <agent> · 3 min ago" / "Read by <agent> · just now" — one chip per live session that touched the conversation (the strongest op: a draft outranks a read); a click reveals that agent's chat window. It is ONE self-contained node (created once per window, re-appended by every repaint of the bar), so the change to `channel-window.js` is one call + one import.
+
+**The routes (cookie only; an agent's bearer is 403 `agent_forbidden`).** `GET /api/channel-touches?sessionId=` = the session's ring + the turn's start (the chat view's one read; a stopped or unknown session answers an empty ring, `live:false`); `GET /api/channels/:adapterId/:convId/touches` = every live session that touched the conversation (name, strongest op, newest instant), newest first.
+
+**Left out.** A resumed conversation's new webui session does not inherit the old session's ring (the ring is per webui session; the old meta is swept by age); a read-only history window (`view-…`) has no rows; a terminal-mode session has the reverse link only (no card, no chip).
+
+Gates: test-channel-touch (fast: the PURE tables, the witness, the two owner routes, eight patched-copy controls, wiring pins) · test-architecture §63 (the census + three controls) · test-session-schema (`_channelTouches`) · heavy: test-channel-jump (real chrome + a stub claude behind the real chat-wrapper running the shipped vibespace-channels: three rows, the drafted first, a click opens that window, the chip and its menu, "Drafted by …" and the reveal, a hostile subject as text + an innerHTML control, agent bearers 403, SIGKILL + restart + a fresh page ⇒ the rows replayed from the persisted meta).
